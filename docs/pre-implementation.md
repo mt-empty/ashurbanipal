@@ -20,26 +20,56 @@ to write code deliberately rather than rushing in.
       already uses the corrected path. `postCreateCommand` installs
       `postgresql-client` so `psql` is available for manual inspection.
 
-- [ ] **Repo/crate layout.** Decide: single crate vs. a workspace with the
-      library crate plus a small example/demo service that embeds it. A
-      demo binary doubles as an integration test harness and a living usage
-      example.
+- [x] **Repo/crate layout.** Decided: **single crate + `examples/demo.rs`**
+      (not a workspace). Options considered:
+      - *Single crate, lib only* — simplest, but no runnable way to click
+        through `dbviewer.html`, exercise the kill switch, or demo the
+        sibling health-poll UI without external plumbing.
+      - *Single crate + `examples/demo.rs`* (chosen) — idiomatic Rust
+        convention (`cargo run --example demo`). Demo-only deps
+        (`tracing-subscriber`, `dotenvy`, `tower-http` static serving) live
+        in `[dev-dependencies]`, invisible to anything embedding the
+        published lib. One `Cargo.toml`/`Cargo.lock`, no path-dependency
+        indirection. The example doubles as an integration-test harness
+        (`tests/` can spawn it) and a living usage example. Sibling
+        health-polling can still be demoed by running the example twice on
+        different ports/configs — no second crate needed for that.
+      - *Cargo workspace* (lib crate + separate demo crate) — fully isolates
+        the demo's dependency graph and leaves room for future crates (e.g.
+        a non-Postgres `DbSource` adapter), but that's premature structure
+        for a project that's still pre-code with only one crate's worth of
+        real logic in v1. Revisit if/when a second adapter crate actually
+        gets built.
 
-- [ ] **Filter DSL: grammar and test plan, written before code.** This is
-      the one piece where a bug is a security bug. Write the formal grammar
-      (EBNF-ish is fine) and a table of test cases — valid inputs, and
-      malicious inputs (`'; DROP TABLE`, stacked operators, unicode
-      tricks) — before implementing the parser.
+- [x] **Filter DSL: grammar and test plan, written before code.** Done —
+      see `filter-dsl.md`: EBNF grammar (flat `AND`/`OR` chain, AND binds
+      tighter, no parentheses/`NOT`; quoted values with `''` escaping),
+      semantics (parse → triples → allow-listed operators + bound params),
+      and a 38-case test table (valid / rejected / adversarial). Prior art
+      (RSQL/FIQL, `postgrest-parser`) reviewed and consciously not taken as
+      a dependency — hand-written parser, RSQL-inspired shape. `design.md`
+      §4.1 updated to match (OR is now in scope). **Implementation is
+      deliberately last in the server build order**; until then the filter
+      param is rejected wholesale by a stub.
 
-- [ ] **Acceptance criteria for "v1 done."** A short checklist derived from
-      `design.md` (all 4+1 routes working, kill switch enforced incl.
-      production rejection, filter DSL passes its test table, siblings
-      health-poll works, embedded HTML serves) so there's an unambiguous
-      stopping point.
+- [x] **Acceptance criteria for "v1 done."** Done — see
+      `acceptance-criteria.md`: seven sections (routes, kill switch, query
+      safety, filter DSL, siblings, frontend, packaging), every item
+      checkable by running something. Notable interpretations made there:
+      disabled routes return 404 (indistinguishable from "not mounted");
+      `enabled_for = ["any"]` expands to non-production only; CDN
+      unavailability degrades the UI (raw JSON instead of tree view) but
+      never breaks browsing.
 
-- [ ] **Pin dependency versions deliberately.** `axum`, `sqlx` (which
-      Postgres features/TLS), `serde`/`toml`, and whether `DbSource` uses
-      native async-fn-in-traits (MSRV-dependent) or `async-trait`.
+- [x] **Pin dependency versions deliberately.** Done — see
+      `dependencies.md`. Headlines: axum `0.8`, sqlx `0.9` with
+      rustls + `uuid`/`chrono`/`json` type features, `toml` `1` (now a 1.x
+      crate), reqwest `0.13` (rustls, health checks only). **No
+      `async-trait`** — native async-fn-in-trait with a generic router
+      (`router<S: DbSource>`), since v1 has one impl and no `dyn`;
+      `design.md` §5 updated. rustls everywhere (no OpenSSL host build
+      dep). Caret reqs in `Cargo.toml`, `Cargo.lock` committed,
+      MSRV 1.80 declared via `rust-version`.
 
 - [x] **CDN library research (frontend).** Done — see `cdn-research.md`.
       Picks: **`@alenaksu/json-viewer`** (Web Component) for the JSON tree

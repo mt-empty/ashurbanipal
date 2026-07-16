@@ -1,0 +1,179 @@
+<!doctype html>
+<!-- Ashurbanipal dbviewer — single-file frontend (design.md §3.1).
+     v1 scaffold: functional table browser, plain-text cells.
+     TODO before v1 done: @alenaksu/json-viewer for jsonb cells (CDN,
+     degraded fallback), Prism highlighting — see cdn-research.md. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ashurbanipal</title>
+<style>
+  :root { color-scheme: light dark; font-family: ui-monospace, monospace; }
+  body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
+  nav { border-right: 1px solid #8884; padding: .75rem; overflow-y: auto; }
+  main { padding: .75rem; overflow: auto; }
+  h1 { font-size: 1rem; margin: 0 0 .5rem; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li button { width: 100%; text-align: left; background: none; border: none;
+              padding: .3rem .4rem; cursor: pointer; font: inherit; color: inherit;
+              border-radius: 4px; display: flex; justify-content: space-between; }
+  li button:hover { background: #8882; }
+  li button.active { background: #08f2; }
+  .count { opacity: .6; }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { border: 1px solid #8884; padding: .25rem .5rem; text-align: left;
+           max-width: 28rem; overflow: hidden; text-overflow: ellipsis;
+           white-space: nowrap; }
+  th { cursor: pointer; user-select: none; }
+  th.sorted::after { content: " ▲"; } th.sorted.desc::after { content: " ▼"; }
+  #controls { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
+  #error { color: #d33; margin-top: .5rem; white-space: pre-wrap; }
+  #siblings { margin-top: 1rem; border-top: 1px solid #8884; padding-top: .5rem; }
+  .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
+         margin-right: .4em; background: #999; }
+  .dot.up { background: #2a2; } .dot.down { background: #d33; }
+  #pager { margin-top: .5rem; display: flex; gap: .5rem; align-items: center; }
+</style>
+</head>
+<body>
+<nav>
+  <h1>Ashurbanipal</h1>
+  <ul id="tables"></ul>
+  <div id="siblings"></div>
+</nav>
+<main>
+  <div id="controls">
+    <strong id="current">—</strong>
+    <input id="filter" placeholder="filter: column OP value AND …" >
+    <button id="apply">apply</button>
+  </div>
+  <div id="error"></div>
+  <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+  <div id="pager">
+    <button id="prev">‹ prev</button>
+    <span id="page"></span>
+    <button id="next">next ›</button>
+  </div>
+</main>
+<script>
+"use strict";
+const API = "/__ashurbanipal/api";
+const UI_KEY = "ashurbanipal_ui";
+
+// UI state persisted in localStorage (design.md §3.1): table names and view
+// prefs only — never filters (they can contain data values), never row data.
+let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0 };
+try {
+  const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+  for (const k of ["table", "sort", "order", "limit"])
+    if (saved[k] !== undefined) state[k] = saved[k];
+} catch { localStorage.removeItem(UI_KEY); }
+function persist() {
+  const { table, sort, order, limit } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ table, sort, order, limit }));
+}
+
+const $ = (id) => document.getElementById(id);
+
+async function api(path) {
+  const resp = await fetch(API + path);
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+async function loadTables() {
+  const [{ tables }, { counts }] = await Promise.all([
+    api("/tables"), api("/table-counts"),
+  ]);
+  const countMap = Object.fromEntries(counts.map(c => [c.table, c.approx_rows]));
+  const ul = $("tables");
+  ul.innerHTML = "";
+  for (const t of tables) {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.innerHTML = `<span></span><span class="count"></span>`;
+    btn.firstChild.textContent = t;
+    btn.lastChild.textContent = `~${countMap[t] ?? "?"}`;
+    btn.dataset.table = t;
+    btn.onclick = () => { state.table = t; state.offset = 0; state.sort = null; persist(); loadData(); };
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+  // Stale persisted state must never wedge the UI: fall back silently.
+  if (!tables.includes(state.table)) state.table = tables[0] ?? null;
+  if (state.table) loadData();
+}
+
+async function loadData() {
+  $("error").textContent = "";
+  document.querySelectorAll("#tables button").forEach(b =>
+    b.classList.toggle("active", b.dataset.table === state.table));
+  $("current").textContent = state.table ?? "—";
+  if (!state.table) return;
+  const params = new URLSearchParams({
+    table: state.table, limit: state.limit, offset: state.offset,
+  });
+  if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  const filter = $("filter").value.trim();
+  if (filter) params.set("filter", filter);
+  let data;
+  try { data = await api("/tables/data?" + params); }
+  catch (e) { $("error").textContent = e.message; return; }
+
+  const thead = $("thead"), tbody = $("tbody");
+  const tr = document.createElement("tr");
+  for (const col of data.columns) {
+    const th = document.createElement("th");
+    th.textContent = `${col.name} (${col.type})`;
+    if (col.name === state.sort) th.classList.add("sorted", ...(state.order === "desc" ? ["desc"] : []));
+    th.onclick = () => {
+      state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
+      state.sort = col.name; state.offset = 0; persist(); loadData();
+    };
+    tr.appendChild(th);
+  }
+  thead.replaceChildren(tr);
+  tbody.replaceChildren(...data.rows.map(row => {
+    const tr = document.createElement("tr");
+    for (const col of data.columns) {
+      const td = document.createElement("td");
+      td.textContent = row[col.name] ?? "∅";
+      td.title = td.textContent;
+      tr.appendChild(td);
+    }
+    return tr;
+  }));
+  const page = Math.floor(state.offset / state.limit) + 1;
+  $("page").textContent = `page ${page} · ~${data.total_approx} rows`;
+  $("prev").disabled = state.offset === 0;
+  $("next").disabled = data.rows.length < state.limit;
+}
+
+async function loadSiblings() {
+  let siblings = [];
+  try { ({ siblings } = await api("/siblings")); } catch { /* leave empty */ }
+  const div = $("siblings");
+  div.replaceChildren(...siblings.map(s => {
+    const p = document.createElement("div");
+    const dot = document.createElement("span");
+    dot.className = "dot " + (s.healthy ? "up" : "down");
+    const a = document.createElement("a");
+    a.href = s.dbviewer_url; a.textContent = s.name;
+    p.append(dot, a);
+    return p;
+  }));
+}
+
+$("apply").onclick = () => { state.offset = 0; loadData(); };
+$("filter").addEventListener("keydown", e => { if (e.key === "Enter") $("apply").click(); });
+$("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData(); };
+$("next").onclick = () => { state.offset += state.limit; loadData(); };
+
+loadTables().catch(e => { $("error").textContent = e.message; });
+loadSiblings();
+setInterval(loadSiblings, 10_000);
+</script>
+</body>
+</html>
