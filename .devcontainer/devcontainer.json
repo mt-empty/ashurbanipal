@@ -7,7 +7,8 @@
     "features": {
         "ghcr.io/mt-empty/devcontainer-features/my-cli-tools:1": {},
         "ghcr.io/mt-empty/devcontainer-features/dotfiles:2": {},
-        "ghcr.io/mt-empty/devcontainer-features/shell-history:1": {}
+        "ghcr.io/mt-empty/devcontainer-features/shell-history:1": {},
+        "ghcr.io/devcontainers-extra/features/mise:1": {}
     },
     "forwardPorts": [5432],
     "containerEnv": {
