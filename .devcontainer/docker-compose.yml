@@ -1,0 +1,26 @@
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/rust:2-1-bookworm
+    volumes:
+      - ..:/workspaces/ashurbanipal:cached
+      - claude-config:/home/vscode/.claude
+    command: sleep infinity
+    depends_on:
+      - db
+
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ashurbanipal
+      POSTGRES_PASSWORD: ashurbanipal
+      POSTGRES_DB: ashurbanipal
+    volumes:
+      - postgres-data-v2:/var/lib/postgresql
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres-data-v2:
+  claude-config:

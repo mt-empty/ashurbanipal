@@ -1,0 +1,17 @@
+{
+    "name": "ashurbanipal",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "app",
+    "workspaceFolder": "/workspaces/ashurbanipal",
+    "remoteUser": "vscode",
+    "features": {
+        "ghcr.io/mt-empty/devcontainer-features/my-cli-tools:1": {},
+        "ghcr.io/mt-empty/devcontainer-features/dotfiles:2": {},
+        "ghcr.io/mt-empty/devcontainer-features/shell-history:1": {}
+    },
+    "forwardPorts": [5432],
+    "containerEnv": {
+        "DATABASE_URL": "postgres://ashurbanipal:ashurbanipal@db:5432/ashurbanipal"
+    },
+    "postCreateCommand": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+}

@@ -1,0 +1,19 @@
+{
+  "features": {
+    "ghcr.io/mt-empty/devcontainer-features/dotfiles:2": {
+      "version": "2.1.1",
+      "resolved": "ghcr.io/mt-empty/devcontainer-features/dotfiles@sha256:3da1389788f48aec232c4dd90f6b8ddf2711c6b5ffc13a763dcc53a7782a2495",
+      "integrity": "sha256:3da1389788f48aec232c4dd90f6b8ddf2711c6b5ffc13a763dcc53a7782a2495"
+    },
+    "ghcr.io/mt-empty/devcontainer-features/my-cli-tools:1": {
+      "version": "1.0.3",
+      "resolved": "ghcr.io/mt-empty/devcontainer-features/my-cli-tools@sha256:fdd3fe1bf63dbbf77f1b1e5df44cfb2af1b77272bdf9a1150b8d8a5af729f8c8",
+      "integrity": "sha256:fdd3fe1bf63dbbf77f1b1e5df44cfb2af1b77272bdf9a1150b8d8a5af729f8c8"
+    },
+    "ghcr.io/mt-empty/devcontainer-features/shell-history:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/mt-empty/devcontainer-features/shell-history@sha256:d67ae0f625f7432e0d06fe7415155e5d8873ea57e9eea550b0c632ada0d1fc8c",
+      "integrity": "sha256:d67ae0f625f7432e0d06fe7415155e5d8873ea57e9eea550b0c632ada0d1fc8c"
+    }
+  }
+}
