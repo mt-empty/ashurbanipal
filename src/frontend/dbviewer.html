@@ -22,11 +22,18 @@
   li button.active { background: #08f2; }
   .count { opacity: .6; }
   table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
-  th, td { border: 1px solid #8884; padding: .25rem .5rem; text-align: left;
-           max-width: 28rem; overflow: hidden; text-overflow: ellipsis;
-           white-space: nowrap; }
+  th, td { border: 1px solid #8884; padding: .25rem .5rem; text-align: left; }
   th { cursor: pointer; user-select: none; }
   th.sorted::after { content: " ▲"; } th.sorted.desc::after { content: " ▼"; }
+  td { position: relative; padding-right: 1.6rem; }
+  .cell-text { display: block; max-width: 24rem; overflow: hidden;
+               text-overflow: ellipsis; white-space: nowrap; }
+  td.expandable .cell-text { cursor: zoom-in; }
+  .copy { position: absolute; right: .15rem; top: 50%; transform: translateY(-50%);
+          background: none; border: none; cursor: pointer; font: inherit;
+          color: inherit; opacity: 0; padding: 0 .15rem; border-radius: 3px; }
+  td:hover .copy, .copy:focus-visible { opacity: .7; }
+  .copy:hover { opacity: 1; background: #8882; }
   #controls { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
   #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
   #error { color: #d33; margin-top: .5rem; white-space: pre-wrap; }
@@ -35,6 +42,26 @@
          margin-right: .4em; background: #999; }
   .dot.up { background: #2a2; } .dot.down { background: #d33; }
   #pager { margin-top: .5rem; display: flex; gap: .5rem; align-items: center; }
+
+  /* Raw-payload viewer: native <dialog> — showModal() gives backdrop,
+     Esc-to-close, and focus trapping for free. */
+  dialog { border: 1px solid #8886; border-radius: 8px; padding: 0;
+           max-width: min(60rem, 92vw); max-height: 80vh; }
+  dialog::backdrop { background: #0006; }
+  .dialog-head { display: flex; justify-content: space-between; align-items: center;
+                 gap: 1rem; padding: .5rem .75rem; border-bottom: 1px solid #8884; }
+  .dialog-head button { background: none; border: none; cursor: pointer;
+                        font: inherit; color: inherit; }
+  dialog pre { margin: 0; padding: .75rem; overflow: auto;
+               max-height: calc(80vh - 3rem); }
+
+  /* Cell preview: native Popover API — non-modal, light-dismiss (click
+     anywhere outside closes it). Positioned near the clicked cell by JS. */
+  #cell-pop { position: fixed; inset: auto; margin: 0; border: 1px solid #8886;
+              border-radius: 8px; padding: 0; max-width: min(40rem, 90vw);
+              box-shadow: 0 4px 16px #0004; }
+  #cell-pop pre { margin: 0; padding: .6rem .75rem; overflow: auto;
+                  max-height: 50vh; white-space: pre-wrap; word-break: break-word; }
 </style>
 </head>
 <body>
@@ -48,6 +75,7 @@
     <strong id="current">—</strong>
     <input id="filter" placeholder="filter: column OP value AND …" >
     <button id="apply">apply</button>
+    <button id="payload" disabled title="raw JSON response for the current view">payload</button>
   </div>
   <div id="error"></div>
   <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
@@ -57,6 +85,16 @@
     <button id="next">next ›</button>
   </div>
 </main>
+
+<dialog id="payload-dialog">
+  <div class="dialog-head">
+    <strong>response payload</strong>
+    <button id="payload-close" aria-label="close">✕</button>
+  </div>
+  <pre id="payload-pre"></pre>
+</dialog>
+
+<div id="cell-pop" popover><pre id="cell-pre"></pre></div>
 <script>
 "use strict";
 const API = "/__ashurbanipal/api";
@@ -81,6 +119,51 @@ async function api(path) {
   const resp = await fetch(API + path);
   if (!resp.ok) throw new Error(await resp.text());
   return resp.json();
+}
+
+// ---- raw payload viewer (<dialog>) ----
+let lastPayload = null;
+$("payload").onclick = () => {
+  $("payload-pre").textContent = JSON.stringify(lastPayload, null, 2);
+  $("payload-dialog").showModal();
+};
+$("payload-close").onclick = () => $("payload-dialog").close();
+// click on the backdrop (outside the dialog box) closes too
+$("payload-dialog").addEventListener("click", (e) => {
+  if (e.target === $("payload-dialog")) $("payload-dialog").close();
+});
+
+// ---- per-cell copy (Clipboard API) ----
+async function copyText(text, btn) {
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // Clipboard API needs a secure context (https/localhost); fall back
+      // for plain-http internal hosts.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    btn.textContent = "✓";
+  } catch { btn.textContent = "✗"; }
+  setTimeout(() => { btn.textContent = "⧉"; }, 800);
+}
+
+// ---- cell preview (Popover API: light-dismiss, non-modal) ----
+function showCellPop(e, text) {
+  // jsonb (and any JSON-shaped value) pretty-prints; everything else raw.
+  let pretty = text;
+  try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON */ }
+  $("cell-pre").textContent = pretty;
+  const pop = $("cell-pop");
+  pop.showPopover();
+  const r = pop.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(e.clientX, innerWidth - r.width - 12)) + "px";
+  pop.style.top = Math.max(8, Math.min(e.clientY + 10, innerHeight - r.height - 12)) + "px";
 }
 
 async function loadTables() {
@@ -121,6 +204,8 @@ async function loadData() {
   let data;
   try { data = await api("/tables/data?" + params); }
   catch (e) { $("error").textContent = e.message; return; }
+  lastPayload = data;
+  $("payload").disabled = false;
 
   const thead = $("thead"), tbody = $("tbody");
   const tr = document.createElement("tr");
@@ -139,12 +224,39 @@ async function loadData() {
     const tr = document.createElement("tr");
     for (const col of data.columns) {
       const td = document.createElement("td");
-      td.textContent = row[col.name] ?? "∅";
-      td.title = td.textContent;
+      const raw = row[col.name];
+      const span = document.createElement("span");
+      span.className = "cell-text";
+      span.textContent = raw ?? "∅";
+      td.appendChild(span);
+      if (raw != null) {
+        const btn = document.createElement("button");
+        btn.className = "copy";
+        btn.title = "copy cell";
+        btn.textContent = "⧉";
+        btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
+        td.appendChild(btn);
+        // Expand on click for jsonb, or anything visually truncated.
+        // scrollWidth > clientWidth is only known after layout, so decide
+        // per click rather than per render.
+        td.onclick = (e) => {
+          if (col.type === "jsonb" || span.scrollWidth > span.clientWidth) {
+            showCellPop(e, raw);
+          }
+        };
+        if (col.type === "jsonb") td.classList.add("expandable");
+      }
       tr.appendChild(td);
     }
     return tr;
   }));
+  // Overflow is only measurable after layout: mark truncated cells so the
+  // cursor hints they're expandable (jsonb cells are marked at render).
+  requestAnimationFrame(() => {
+    for (const span of tbody.querySelectorAll(".cell-text")) {
+      if (span.scrollWidth > span.clientWidth) span.closest("td").classList.add("expandable");
+    }
+  });
   const page = Math.floor(state.offset / state.limit) + 1;
   $("page").textContent = `page ${page} · ~${data.total_approx} rows`;
   $("prev").disabled = state.offset === 0;
