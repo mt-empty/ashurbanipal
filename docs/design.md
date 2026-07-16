@@ -50,6 +50,22 @@ Two components, same as the original concept:
 - Served by the backend as a 5th route, gated by the same kill switch as the
   four API routes.
 - Talks to the backend exclusively through the REST endpoints in §4.
+- **UI state persistence**: `localStorage` remembers lightweight UI state
+  across visits — currently selected table, and (same mechanism, near-free)
+  sort column/direction and page size. Properties:
+  - One key, `ashurbanipal_ui`, value is a small JSON object. Nothing
+    sensitive ever goes in it — table names only, no row data, no filters
+    (filters can contain data values).
+  - Read and written entirely by the frontend JS; nothing is transmitted
+    to the backend, so it adds no server-side attack surface or parsing
+    obligation. (localStorage over a cookie precisely because the server
+    never needs it.)
+  - Scope caveat: localStorage is per-origin, not per-path — siblings on
+    different hosts each get their own state, but if two services were
+    ever served from one origin they'd share the key. Acceptable for v1.
+  - On load: if the stored state names a table that no longer exists in
+    `/tables`, fall back to the default view silently (stale state must
+    never wedge the UI). Malformed JSON in the key → discard and rewrite.
 
 ### 3.2 Backend — Rust crate
 
@@ -132,16 +148,23 @@ Server enforces:
 
 #### 4.1 Filter DSL
 
-`column OP value [AND column OP value ...]`
+`column OP value [AND|OR column OP value ...]`
 
 Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `IS NULL`, `IS NOT NULL`.
 
 - Operators are allow-listed, not interpolated as arbitrary SQL.
-- Values are always parameterized, never string-concatenated.
+- Values are always parameterized, never string-concatenated. Bare values
+  run to the next whitespace; values containing spaces/quotes/keywords are
+  single-quoted with SQL-style `''` escaping.
 - Columns are cast to `text` before comparison, so the same DSL works
   uniformly across `uuid`, `timestamptz`, `jsonb`, etc.
-- No `OR`, no parentheses, no cross-table conditions in v1 — matches the
+- Flat `AND`/`OR` chain; `AND` binds tighter than `OR` (SQL convention).
+  No parentheses, no `NOT`, no cross-table conditions in v1 — matches the
   single-table, no-join scope.
+
+Full grammar (EBNF), semantics, and the parser's test table live in
+`filter-dsl.md`. The parser is hand-written (RSQL-inspired shape, no
+parser dependency) and is scheduled **last** in the server build order.
 
 Example:
 
@@ -170,13 +193,17 @@ criteria if this gets expensive).
 ## 5. DB integration
 
 ```rust
-#[async_trait]
-pub trait DbSource {
+pub trait DbSource: Send + Sync {
     async fn list_tables(&self) -> Result<Vec<String>>;
     async fn table_counts(&self) -> Result<Vec<(String, i64)>>;
     async fn query_table(&self, table: &str, opts: QueryOpts) -> Result<TableData>;
 }
 ```
+
+Native async-fn-in-trait — no `async_trait` macro. The router is generic
+over `S: DbSource` (no `dyn`), which is all v1 needs with a single
+implementation; see `dependencies.md` for the reasoning and the upgrade
+path if runtime polymorphism is ever needed.
 
 - v1 ships exactly one implementation: `PgPoolSource(sqlx::PgPool)`.
 - The trait boundary exists so a `deadpool-postgres` or `tokio-postgres`
