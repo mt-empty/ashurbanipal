@@ -50,6 +50,17 @@ Two components, same as the original concept:
 - Served by the backend as a 5th route, gated by the same kill switch as the
   four API routes.
 - Talks to the backend exclusively through the REST endpoints in §4.
+- **Inspection affordances** (native elements, no library):
+  - *Raw payload viewer* — a "payload" button opens a native `<dialog>`
+    (`showModal()`: backdrop, Esc-to-close, focus trap for free) showing the
+    pretty-printed JSON response for the current table view.
+  - *Per-cell copy* — a small copy button on the right of every non-null
+    cell, revealed on hover; Clipboard API with an `execCommand` fallback
+    for plain-http internal hosts (Clipboard API needs a secure context).
+  - *Cell preview* — clicking a `jsonb` cell, or any cell truncated by the
+    max cell width (~24rem), opens a native Popover API popup
+    (`popover` attribute: non-modal, light-dismiss) near the cell with the
+    full content; JSON-shaped values pretty-print.
 - **UI state persistence**: `localStorage` remembers lightweight UI state
   across visits — currently selected table, and (same mechanism, near-free)
   sort column/direction and page size. Properties:
