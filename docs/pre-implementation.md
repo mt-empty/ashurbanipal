@@ -9,12 +9,20 @@ to write code deliberately rather than rushing in.
       `db` (`postgres:18-alpine`, persistent named volume) as sibling
       containers on the compose network. `DATABASE_URL` is set via
       `containerEnv` (`postgres://ashurbanipal:ashurbanipal@db:5432/ashurbanipal`).
-      Seed data (`users`/`orders`, covering uuid/jsonb/timestamptz/boolean)
-      loads automatically from `.devcontainer/db/init/01-seed.sql` on first
-      volume creation. Verified after rebuild: `db` resolves and accepts
-      connections, `psql` confirms `users`/`orders` seeded correctly, and
-      `pg_class.reltuples` reports real counts (5/15) thanks to the `ANALYZE`
-      in the seed script. Note: postgres 18's image expects the volume
+      Seed data (`users`/`orders`/`products`/`events`/`sessions` — uuid and
+      bigint-identity PKs, enums, numeric/real, arrays, inet, jsonb,
+      nullable columns throughout) loads automatically from
+      `.devcontainer/db/init/01-seed.sql` on first volume creation. The
+      file is generated, not hand-written — see `tools/seed-gen` (a
+      standalone crate using the `fake` crate; `cargo run` from that
+      directory, output redirected to the init file). Deterministic fixed
+      RNG seed, so regenerating without source changes reproduces an
+      identical file; regenerate after editing the generator to pick up
+      schema/data changes. Verified after rebuild: `db` resolves and
+      accepts connections, `psql` confirms all five tables seeded
+      correctly (50/201/80/400/120 rows), and `pg_class.reltuples` reports
+      real counts thanks to the `ANALYZE` at the end of the generated
+      script. Note: postgres 18's image expects the volume
       mounted at `/var/lib/postgresql` (not `.../data`) — mounting at the old
       path throws a `pg_ctlcluster`-layout error on start; the compose file
       already uses the corrected path. `postCreateCommand` installs
