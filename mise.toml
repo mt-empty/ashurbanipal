@@ -1,3 +1,6 @@
+[tools]
+watchexec = "latest"
+
 [tasks.build]
 description = "cargo build"
 run = "cargo build"
@@ -25,11 +28,17 @@ depends = ["fmt-check", "lint", "test"]
 [tasks.demo]
 description = "run the demo host app at http://localhost:4000/__ashurbanipal"
 run = "cargo run --example demo"
+sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml"]
 
 [tasks."demo-sibling"]
 description = "run a second demo instance on 4001, sibling-polling the one on 4000"
 run = "cargo run --example demo"
 env = { PORT = "4001", SIBLING_PORT = "4000" }
+sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml"]
+
+[tasks.dev]
+description = "run the demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"
+run = "mise watch demo --restart"
 
 [tasks."seed-gen"]
 description = "regenerate .devcontainer/db/init/01-seed.sql from tools/seed-gen"
