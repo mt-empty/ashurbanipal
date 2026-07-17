@@ -45,17 +45,19 @@
   th { cursor: pointer; user-select: none; }
   th[aria-sort="ascending"]::after { content: " ▲"; }
   th[aria-sort="descending"]::after { content: " ▼"; }
-  td { position: relative; padding-right: 1.6rem; }
+  td { position: relative; padding-right: 2.7rem; }
   .cell-text { display: block; max-width: 24rem; overflow: hidden;
                text-overflow: ellipsis; white-space: nowrap; }
   button.cell-text { background: none; border: none; padding: 0; margin: 0;
                      font: inherit; color: inherit; text-align: left; cursor: inherit; }
   td.expandable .cell-text { cursor: zoom-in; }
-  .copy { position: absolute; right: .15rem; top: 50%; transform: translateY(-50%);
+  .copy, .filter-eq { position: absolute; top: 50%; transform: translateY(-50%);
           background: none; border: none; cursor: pointer; font: inherit;
           color: inherit; opacity: 0; padding: 0 .15rem; border-radius: 3px; }
-  td:hover .copy, .copy:focus-visible { opacity: .7; }
-  .copy:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+  .copy { right: .15rem; }
+  .filter-eq { right: 1.45rem; }
+  td:hover .copy, td:hover .filter-eq, .copy:focus-visible, .filter-eq:focus-visible { opacity: .7; }
+  .copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
 
   /* ==== Controls / status ==== */
   #controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
@@ -122,7 +124,7 @@
   </search>
   <div id="error" role="alert"></div>
   <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
-  <template id="cell-template"><td><button class="cell-text"></button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
+  <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
   <div id="pager">
     <button id="prev">‹ prev</button>
     <output id="page"></output>
@@ -228,6 +230,22 @@ function showCellPop(e, text) {
   $("cell-pop").showPopover();
 }
 
+// ---- click-to-filter (compose "column op value" into #filter and apply;
+// reused by future features that also want to seed a filter clause) ----
+// Every cell value is fetched server-side with an explicit ::text cast
+// (db.rs), which is exactly what the filter DSL compares against, so the
+// raw cell value can be spliced straight into a clause without reshaping it.
+function quoteFilterValue(value) {
+  if (value !== "" && !/[\s']/.test(value) && !/^(AND|OR)$/i.test(value)) return value;
+  return "'" + value.replace(/'/g, "''") + "'";
+}
+
+function applyFilterClause(column, op, value) {
+  $("filter").value = `${column} ${op} ${quoteFilterValue(value)}`;
+  state.offset = 0;
+  loadData();
+}
+
 async function loadTables() {
   setStatus("loading tables…");
   const [{ tables }, { counts }] = await Promise.all([
@@ -315,6 +333,7 @@ function buildCell(col, raw) {
   const td = cellTemplate.content.cloneNode(true).firstElementChild;
   const cellText = td.querySelector(".cell-text");
   const btn = td.querySelector(".copy");
+  const filterBtn = td.querySelector(".filter-eq");
   if (col.type === "timestamp with time zone" || col.type === "date") {
     const time = document.createElement("time");
     time.dateTime = raw;
@@ -324,6 +343,7 @@ function buildCell(col, raw) {
     cellText.textContent = raw;
   }
   btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
+  filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
   // Expand on click for jsonb, or anything visually truncated. scrollWidth
   // > clientWidth is only known after layout, so decide per click rather
   // than per render.
@@ -381,7 +401,7 @@ function captureTbodyFocus() {
   return {
     rowIndex: [...tr.parentElement.children].indexOf(tr),
     colIndex: [...tr.children].indexOf(td),
-    isCopy: active.classList.contains("copy"),
+    className: active.className,
   };
 }
 
@@ -389,7 +409,7 @@ function restoreTbodyFocus(captured) {
   if (!captured) return;
   const tr = $("tbody").children[captured.rowIndex];
   const td = tr?.children[captured.colIndex];
-  const target = td?.querySelector(captured.isCopy ? ".copy" : ".cell-text");
+  const target = td?.querySelector(`.${captured.className}`);
   (target ?? document.querySelector("table")).focus();
 }
 
