@@ -82,13 +82,22 @@ produces — do Phase 0 first.
 
 Depends on Phase 0's custom-properties hoist.
 
-- [ ] **[defect, minor]** `dialog::backdrop` under-dims dark-mode pages —
+- [x] **[defect, minor]** `dialog::backdrop` under-dims dark-mode pages —
       fix via `light-dark(#0006, #0009)` on the custom property.
-- [ ] Same `light-dark()` treatment for the four opportunistic flat-color
+- [x] Same `light-dark()` treatment for the four opportunistic flat-color
       spots: `.dot.up`/`.dot.down`, `#error`, `li button.active`.
-- [ ] `color-mix()` for hover/active states currently hand-picked
+- [x] `color-mix()` for hover/active states currently hand-picked
       (`.copy:hover`, `li button.active`) — optional, only where it
-      actually replaces a literal.
+      actually replaces a literal. Applied to `.copy:hover`
+      (`color-mix(in srgb, currentColor 12%, transparent)` — a
+      value-neutral swap, since `#8882` was already a neutral gray-alpha
+      overlay). **Deliberately not applied to `li button.active`**: its
+      `#08f2` is a distinct blue "this table is selected" signal, not a
+      neutral hover tint — collapsing it to a `currentColor`-derived mix
+      would make it visually indistinguishable from `li button:hover`'s
+      neutral tint, losing real information. Kept on the `--active`
+      custom property with `light-dark()` (previous item) instead, which
+      preserves the color identity while still fixing dark-mode contrast.
 
 ## Phase 4 — state architecture
 

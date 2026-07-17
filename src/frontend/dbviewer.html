@@ -15,7 +15,10 @@
     --border: #8884;
     --border-strong: #8886;
     --hover: #8882;
-    --danger: #d33;
+    --danger: light-dark(#d33, #f66);
+    --success: light-dark(#2a2, #5c5);
+    --active: light-dark(#08f2, #08f5);
+    --backdrop: light-dark(#0006, #0009);
     --gap: .5rem;
     --gap-lg: .75rem;
   }
@@ -32,7 +35,7 @@
               padding: .3rem .4rem; cursor: pointer; font: inherit; color: inherit;
               border-radius: 4px; display: flex; justify-content: space-between; }
   li button:hover { background: var(--hover); }
-  li button.active { background: #08f2; }
+  li button.active { background: var(--active); }
   .count { opacity: .6; }
 
   /* ==== Data table ==== */
@@ -51,7 +54,7 @@
           background: none; border: none; cursor: pointer; font: inherit;
           color: inherit; opacity: 0; padding: 0 .15rem; border-radius: 3px; }
   td:hover .copy, .copy:focus-visible { opacity: .7; }
-  .copy:hover { opacity: 1; background: var(--hover); }
+  .copy:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
 
   /* ==== Controls / status ==== */
   #controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
@@ -67,7 +70,7 @@
   #siblings { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: var(--gap); }
   .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
          margin-right: .4em; background: #999; }
-  .dot.up { background: #2a2; } .dot.down { background: var(--danger); }
+  .dot.up { background: var(--success); } .dot.down { background: var(--danger); }
 
   /* ==== Pager ==== */
   #pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center; }
@@ -76,7 +79,7 @@
      Esc-to-close, and focus trapping for free. */
   dialog { border: 1px solid var(--border-strong); border-radius: 8px; padding: 0;
            max-width: min(60rem, 92vw); max-height: 80vh; }
-  dialog::backdrop { background: #0006; }
+  dialog::backdrop { background: var(--backdrop); }
   .dialog-head { display: flex; justify-content: space-between; align-items: center;
                  gap: 1rem; padding: var(--gap) var(--gap-lg); border-bottom: 1px solid var(--border); }
   .dialog-head button { background: none; border: none; cursor: pointer;
