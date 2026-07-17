@@ -35,13 +35,13 @@ Independent of each other and of most other phases; the common thread is
 each one deletes JS by using a browser feature already covered in style
 guide §4.
 
-- [ ] `<form method="dialog">` for the payload dialog's close button —
+- [x] `<form method="dialog">` for the payload dialog's close button —
       removes `$("payload-close").onclick`.
-- [ ] `closedBy="any"` on `#payload-dialog` — removes the manual
+- [x] `closedBy="any"` on `#payload-dialog` — removes the manual
       backdrop-click `addEventListener`.
-- [ ] Wrap `#filter` + `#apply` in a `<form>` — removes the manual
+- [x] Wrap `#filter` + `#apply` in a `<form>` — removes the manual
       `keydown`/Enter-key `addEventListener`.
-- [ ] CSS Anchor Positioning for `#cell-pop` (`anchor-name` set via JS per
+- [x] CSS Anchor Positioning for `#cell-pop` (`anchor-name` set via JS per
       click, `position-anchor` + `position-try-fallbacks: flip-block,
       flip-inline` in CSS) — removes the manual `getBoundingClientRect()`
       + `Math.max`/`Math.min` clamping in `showCellPop()`.

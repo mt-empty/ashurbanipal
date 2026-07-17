@@ -52,6 +52,9 @@
 
   /* ==== Controls / status ==== */
   #controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
+  /* display: contents keeps #filter/#apply flex items of #controls directly,
+     so wrapping them in a <form> (for native Enter-to-submit) doesn't change layout. */
+  #filter-form { display: contents; }
   #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
   #status { opacity: .6; }
   #error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap; }
@@ -79,8 +82,15 @@
                max-height: calc(80vh - 3rem); }
 
   /* Cell preview: native Popover API — non-modal, light-dismiss (click
-     anywhere outside closes it). Positioned near the clicked cell by JS. */
-  #cell-pop { position: fixed; inset: auto; margin: 0; border: 1px solid var(--border-strong);
+     anywhere outside closes it). Positioned via CSS Anchor Positioning:
+     the clicked cell gets anchor-name set in JS, and position-try-fallbacks
+     flips the popover away from the viewport edge with no clamping math.
+     Unsupported browsers just ignore these properties and fall back to the
+     popover's default position — degraded placement, not breakage. */
+  #cell-pop { position: fixed; position-anchor: --cell-anchor;
+              position-try-fallbacks: flip-block, flip-inline;
+              inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+              margin: 0; border: 1px solid var(--border-strong);
               border-radius: 8px; padding: 0; max-width: min(40rem, 90vw);
               box-shadow: 0 4px 16px #0004; }
   #cell-pop pre { margin: 0; padding: .6rem var(--gap-lg); overflow: auto;
@@ -97,8 +107,10 @@
   <div id="controls">
     <strong id="current">—</strong>
     <span id="status" aria-live="polite"></span>
-    <input id="filter" placeholder="filter: column OP value AND …" >
-    <button id="apply">apply</button>
+    <form id="filter-form">
+      <input id="filter" placeholder="filter: column OP value AND …" >
+      <button id="apply">apply</button>
+    </form>
     <button id="payload" disabled title="raw JSON response for the current view">payload</button>
   </div>
   <div id="error"></div>
@@ -110,10 +122,10 @@
   </div>
 </main>
 
-<dialog id="payload-dialog">
+<dialog id="payload-dialog" closedby="any">
   <div class="dialog-head">
     <strong>response payload</strong>
-    <button id="payload-close" aria-label="close">✕</button>
+    <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
   <pre id="payload-pre"></pre>
 </dialog>
@@ -152,11 +164,8 @@ $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(lastPayload, null, 2);
   $("payload-dialog").showModal();
 };
-$("payload-close").onclick = () => $("payload-dialog").close();
-// click on the backdrop (outside the dialog box) closes too
-$("payload-dialog").addEventListener("click", (e) => {
-  if (e.target === $("payload-dialog")) $("payload-dialog").close();
-});
+// Close button is a <form method="dialog"> submit; closedby="any" on the
+// <dialog> itself handles backdrop-click dismiss — no JS needed for either.
 
 // ---- per-cell copy (Clipboard API) ----
 async function copyText(text, btn) {
@@ -178,17 +187,18 @@ async function copyText(text, btn) {
   setTimeout(() => { btn.textContent = "⧉"; }, 800);
 }
 
-// ---- cell preview (Popover API: light-dismiss, non-modal) ----
+// ---- cell preview (Popover API: light-dismiss, non-modal; positioned via
+// CSS Anchor Positioning — see #cell-pop's position-anchor/position-try-fallbacks) ----
+let cellPopAnchor = null;
 function showCellPop(e, text) {
   // jsonb (and any JSON-shaped value) pretty-prints; everything else raw.
   let pretty = text;
   try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON */ }
   $("cell-pre").textContent = pretty;
-  const pop = $("cell-pop");
-  pop.showPopover();
-  const r = pop.getBoundingClientRect();
-  pop.style.left = Math.max(8, Math.min(e.clientX, innerWidth - r.width - 12)) + "px";
-  pop.style.top = Math.max(8, Math.min(e.clientY + 10, innerHeight - r.height - 12)) + "px";
+  if (cellPopAnchor) cellPopAnchor.style.anchorName = "";
+  cellPopAnchor = e.currentTarget;
+  cellPopAnchor.style.anchorName = "--cell-anchor";
+  $("cell-pop").showPopover();
 }
 
 async function loadTables() {
@@ -341,8 +351,7 @@ async function loadSiblings() {
   }));
 }
 
-$("apply").onclick = () => { state.offset = 0; loadData(); };
-$("filter").addEventListener("keydown", e => { if (e.key === "Enter") $("apply").click(); });
+$("filter-form").onsubmit = (e) => { e.preventDefault(); state.offset = 0; loadData(); };
 $("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData(); };
 $("next").onclick = () => { state.offset += state.limit; loadData(); };
 
