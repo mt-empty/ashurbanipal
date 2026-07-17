@@ -53,29 +53,29 @@ additions to code paths that already exist. `td.onclick` and the
 focus-loss fix both touch the row-rendering code Phase 0's split
 produces — do Phase 0 first.
 
-- [ ] **[defect]** Expandable-cell keyboard access: replace the bare
+- [x] **[defect]** Expandable-cell keyboard access: replace the bare
       `td.onclick` with a real `<button>` as the click target (mirrors
       what the copy button already does correctly).
-- [ ] **[defect]** Focus loss on re-render: capture focus before
+- [x] **[defect]** Focus loss on re-render: capture focus before
       `replaceChildren()` and restore it (or anchor to a stable element)
       after, instead of letting it fall through to `<body>`.
-- [ ] **[defect]** Sibling health dots: add a text alternative
+- [x] **[defect]** Sibling health dots: add a text alternative
       (`aria-label` or visually-hidden text — `"healthy"`/`"unhealthy"`)
       so status isn't color-only.
-- [ ] `role="alert"` on `#error` (currently `#status` gets
+- [x] `role="alert"` on `#error` (currently `#status` gets
       `aria-live="polite"` right; `#error` gets neither).
-- [ ] `aria-sort` on `<th>`, replacing the `.sorted`/`.sorted.desc` class
+- [x] `aria-sort` on `<th>`, replacing the `.sorted`/`.sorted.desc` class
       pair; update the CSS selectors to `th[aria-sort="ascending"]` /
       `th[aria-sort="descending"]` to match.
-- [ ] `aria-current="true"` on the active sidebar table button, alongside
+- [x] `aria-current="true"` on the active sidebar table button, alongside
       the existing `.active` class.
-- [ ] `aria-label="copy cell value"` on the per-cell copy button
+- [x] `aria-label="copy cell value"` on the per-cell copy button
       (matches the pattern `payload-close` already gets right).
-- [ ] `type="search"` + `enterkeyhint="search"` on `#filter`.
-- [ ] `<search>` landmark: `<div id="controls">` → `<search id="controls">`.
-- [ ] `<time datetime="...">` wrapping `timestamptz`/`date` cell values.
-- [ ] `field-sizing: content` on `#filter`.
-- [ ] `<script>` → `<script type="module">`; drop the now-redundant
+- [x] `type="search"` + `enterkeyhint="search"` on `#filter`.
+- [x] `<search>` landmark: `<div id="controls">` → `<search id="controls">`.
+- [x] `<time datetime="...">` wrapping `timestamptz`/`date` cell values.
+- [x] `field-sizing: content` on `#filter`.
+- [x] `<script>` → `<script type="module">`; drop the now-redundant
       `"use strict";`.
 
 ## Phase 3 — color and theming
