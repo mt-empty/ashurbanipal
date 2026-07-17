@@ -101,7 +101,7 @@ Depends on Phase 0's custom-properties hoist.
 
 ## Phase 4 — state architecture
 
-- [ ] Mirror `state.table` / `sort` / `order` / `limit` / `offset` into
+- [x] Mirror `state.table` / `sort` / `order` / `limit` / `offset` into
       the URL via `history.replaceState()` on every successful
       `loadData()`/`fetchTableData()` call, making views
       shareable/bookmarkable.
@@ -109,6 +109,11 @@ Depends on Phase 0's custom-properties hoist.
       existing `localStorage` boundary to the URL (a URL is *more*
       exposed than `localStorage`: browser history, access logs,
       `Referer` header), not a separate decision to make here.
+      Also reads these same params back out of the URL on initial load
+      (taking priority over `localStorage`), since a link is only
+      actually "shareable" if opening it reproduces the view — this is
+      implied by the style guide's own `?table=orders&sort=created_at&
+      order=desc` example, not a separate feature.
 
 ## Phase 5 — multi-instance polish
 
