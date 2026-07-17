@@ -39,10 +39,13 @@
   table { border-collapse: collapse; width: 100%; margin-top: var(--gap); }
   th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
   th { cursor: pointer; user-select: none; }
-  th.sorted::after { content: " ▲"; } th.sorted.desc::after { content: " ▼"; }
+  th[aria-sort="ascending"]::after { content: " ▲"; }
+  th[aria-sort="descending"]::after { content: " ▼"; }
   td { position: relative; padding-right: 1.6rem; }
   .cell-text { display: block; max-width: 24rem; overflow: hidden;
                text-overflow: ellipsis; white-space: nowrap; }
+  button.cell-text { background: none; border: none; padding: 0; margin: 0;
+                     font: inherit; color: inherit; text-align: left; cursor: inherit; }
   td.expandable .cell-text { cursor: zoom-in; }
   .copy { position: absolute; right: .15rem; top: 50%; transform: translateY(-50%);
           background: none; border: none; cursor: pointer; font: inherit;
@@ -55,7 +58,7 @@
   /* display: contents keeps #filter/#apply flex items of #controls directly,
      so wrapping them in a <form> (for native Enter-to-submit) doesn't change layout. */
   #filter-form { display: contents; }
-  #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
+  #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; field-sizing: content; }
   #status { opacity: .6; }
   #error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap; }
   .empty td { text-align: center; opacity: .6; padding: 1rem; }
@@ -104,17 +107,17 @@
   <div id="siblings"></div>
 </nav>
 <main>
-  <div id="controls">
+  <search id="controls">
     <strong id="current">—</strong>
     <span id="status" aria-live="polite"></span>
     <form id="filter-form">
-      <input id="filter" placeholder="filter: column OP value AND …" >
+      <input id="filter" type="search" enterkeyhint="search" placeholder="filter: column OP value AND …" >
       <button id="apply">apply</button>
     </form>
     <button id="payload" disabled title="raw JSON response for the current view">payload</button>
-  </div>
-  <div id="error"></div>
-  <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+  </search>
+  <div id="error" role="alert"></div>
+  <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
   <div id="pager">
     <button id="prev">‹ prev</button>
     <span id="page"></span>
@@ -131,8 +134,7 @@
 </dialog>
 
 <div id="cell-pop" popover><pre id="cell-pre"></pre></div>
-<script>
-"use strict";
+<script type="module">
 const API = "/__ashurbanipal/api";
 const UI_KEY = "ashurbanipal_ui";
 
@@ -248,7 +250,9 @@ function renderHeader(columns) {
   for (const col of columns) {
     const th = document.createElement("th");
     th.textContent = `${col.name} (${col.type})`;
-    if (col.name === state.sort) th.classList.add("sorted", ...(state.order === "desc" ? ["desc"] : []));
+    th.setAttribute("aria-sort", col.name === state.sort
+      ? (state.order === "desc" ? "descending" : "ascending")
+      : "none");
     th.onclick = () => {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
       state.sort = col.name; state.offset = 0; persist(); loadData();
@@ -279,22 +283,32 @@ function renderRows(data) {
     for (const col of data.columns) {
       const td = document.createElement("td");
       const raw = row[col.name];
-      const span = document.createElement("span");
-      span.className = "cell-text";
-      span.textContent = raw ?? "∅";
-      td.appendChild(span);
+      // A real <button> as the click target (not the <td> itself) so the
+      // expand action is keyboard-focusable and Enter/Space-activatable,
+      // matching the copy button one element over.
+      const cellText = document.createElement(raw != null ? "button" : "span");
+      cellText.className = "cell-text";
+      if (raw != null && (col.type === "timestamp with time zone" || col.type === "date")) {
+        const time = document.createElement("time");
+        time.dateTime = raw;
+        time.textContent = raw;
+        cellText.appendChild(time);
+      } else {
+        cellText.textContent = raw ?? "∅";
+      }
+      td.appendChild(cellText);
       if (raw != null) {
         const btn = document.createElement("button");
         btn.className = "copy";
-        btn.title = "copy cell";
+        btn.setAttribute("aria-label", "copy cell value");
         btn.textContent = "⧉";
         btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
         td.appendChild(btn);
         // Expand on click for jsonb, or anything visually truncated.
         // scrollWidth > clientWidth is only known after layout, so decide
         // per click rather than per render.
-        td.onclick = (e) => {
-          if (col.type === "jsonb" || span.scrollWidth > span.clientWidth) {
+        cellText.onclick = (e) => {
+          if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
             showCellPop(e, raw);
           }
         };
@@ -307,8 +321,8 @@ function renderRows(data) {
   // Overflow is only measurable after layout: mark truncated cells so the
   // cursor hints they're expandable (jsonb cells are marked at render).
   requestAnimationFrame(() => {
-    for (const span of tbody.querySelectorAll(".cell-text")) {
-      if (span.scrollWidth > span.clientWidth) span.closest("td").classList.add("expandable");
+    for (const el of tbody.querySelectorAll(".cell-text")) {
+      if (el.scrollWidth > el.clientWidth) el.closest("td").classList.add("expandable");
     }
   });
 }
@@ -320,10 +334,42 @@ function updatePager(data) {
   $("next").disabled = data.rows.length < state.limit;
 }
 
+// ---- focus preservation across tbody re-renders ----
+// replaceChildren() detaches whatever was focused inside it, and the browser
+// silently falls back to <body> — a real defect for keyboard users on every
+// sort/page/filter change. Capture the focused cell's position before the
+// replace and restore focus to the same slot afterward, falling back to the
+// table itself (tabindex="-1") if that slot no longer exists.
+function captureTbodyFocus() {
+  const active = document.activeElement;
+  const tbody = $("tbody");
+  if (!active || !tbody.contains(active)) return null;
+  const td = active.closest("td");
+  const tr = active.closest("tr");
+  if (!td || !tr) return null;
+  return {
+    rowIndex: [...tr.parentElement.children].indexOf(tr),
+    colIndex: [...tr.children].indexOf(td),
+    isCopy: active.classList.contains("copy"),
+  };
+}
+
+function restoreTbodyFocus(captured) {
+  if (!captured) return;
+  const tr = $("tbody").children[captured.rowIndex];
+  const td = tr?.children[captured.colIndex];
+  const target = td?.querySelector(captured.isCopy ? ".copy" : ".cell-text");
+  (target ?? document.querySelector("table")).focus();
+}
+
 async function loadData() {
   $("error").textContent = "";
-  document.querySelectorAll("#tables button").forEach(b =>
-    b.classList.toggle("active", b.dataset.table === state.table));
+  document.querySelectorAll("#tables button").forEach(b => {
+    const isActive = b.dataset.table === state.table;
+    b.classList.toggle("active", isActive);
+    if (isActive) b.setAttribute("aria-current", "true");
+    else b.removeAttribute("aria-current");
+  });
   $("current").textContent = state.table ?? "—";
   if (!state.table) { setStatus(""); return; }
   let data;
@@ -331,9 +377,11 @@ async function loadData() {
   catch (e) { $("error").textContent = e.message; return; }
   lastPayload = data;
   $("payload").disabled = false;
+  const focusCapture = captureTbodyFocus();
   renderHeader(data.columns);
   renderRows(data);
   updatePager(data);
+  restoreTbodyFocus(focusCapture);
 }
 
 async function loadSiblings() {
@@ -344,6 +392,8 @@ async function loadSiblings() {
     const p = document.createElement("div");
     const dot = document.createElement("span");
     dot.className = "dot " + (s.healthy ? "up" : "down");
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
     const a = document.createElement("a");
     a.href = s.dbviewer_url; a.textContent = s.name;
     p.append(dot, a);
