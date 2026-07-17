@@ -8,6 +8,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ashurbanipal</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23222'/><path d='M2 5h12M2 8h12M2 11h12M5 2v12M11 2v12' stroke='%23fff'/></svg>">
 <style>
   :root {
     color-scheme: light dark;
@@ -109,10 +110,10 @@
   <ul id="tables"></ul>
   <div id="siblings"></div>
 </nav>
-<main>
+<main id="main">
   <search id="controls">
     <strong id="current">—</strong>
-    <span id="status" aria-live="polite"></span>
+    <output id="status" aria-live="polite"></output>
     <form id="filter-form">
       <input id="filter" type="search" enterkeyhint="search" placeholder="filter: column OP value AND …" >
       <button id="apply">apply</button>
@@ -121,9 +122,10 @@
   </search>
   <div id="error" role="alert"></div>
   <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+  <template id="cell-template"><td><button class="cell-text"></button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
   <div id="pager">
     <button id="prev">‹ prev</button>
-    <span id="page"></span>
+    <output id="page"></output>
     <button id="next">next ›</button>
   </div>
 </main>
@@ -295,6 +297,45 @@ function renderEmptyState(columnCount) {
   $("tbody").replaceChildren(emptyRow);
 }
 
+const cellTemplate = $("cell-template");
+
+// A real <button> as the click target (not the <td> itself) so the expand
+// action is keyboard-focusable and Enter/Space-activatable, matching the
+// copy button one element over. Empty cells get neither button — nothing
+// to copy or expand.
+function buildCell(col, raw) {
+  if (raw == null) {
+    const td = document.createElement("td");
+    const span = document.createElement("span");
+    span.className = "cell-text";
+    span.textContent = "∅";
+    td.appendChild(span);
+    return td;
+  }
+  const td = cellTemplate.content.cloneNode(true).firstElementChild;
+  const cellText = td.querySelector(".cell-text");
+  const btn = td.querySelector(".copy");
+  if (col.type === "timestamp with time zone" || col.type === "date") {
+    const time = document.createElement("time");
+    time.dateTime = raw;
+    time.textContent = raw;
+    cellText.appendChild(time);
+  } else {
+    cellText.textContent = raw;
+  }
+  btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
+  // Expand on click for jsonb, or anything visually truncated. scrollWidth
+  // > clientWidth is only known after layout, so decide per click rather
+  // than per render.
+  cellText.onclick = (e) => {
+    if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
+      showCellPop(e, raw);
+    }
+  };
+  if (col.type === "jsonb") td.classList.add("expandable");
+  return td;
+}
+
 function renderRows(data) {
   if (data.rows.length === 0) {
     renderEmptyState(data.columns.length);
@@ -304,40 +345,7 @@ function renderRows(data) {
   tbody.replaceChildren(...data.rows.map(row => {
     const tr = document.createElement("tr");
     for (const col of data.columns) {
-      const td = document.createElement("td");
-      const raw = row[col.name];
-      // A real <button> as the click target (not the <td> itself) so the
-      // expand action is keyboard-focusable and Enter/Space-activatable,
-      // matching the copy button one element over.
-      const cellText = document.createElement(raw != null ? "button" : "span");
-      cellText.className = "cell-text";
-      if (raw != null && (col.type === "timestamp with time zone" || col.type === "date")) {
-        const time = document.createElement("time");
-        time.dateTime = raw;
-        time.textContent = raw;
-        cellText.appendChild(time);
-      } else {
-        cellText.textContent = raw ?? "∅";
-      }
-      td.appendChild(cellText);
-      if (raw != null) {
-        const btn = document.createElement("button");
-        btn.className = "copy";
-        btn.setAttribute("aria-label", "copy cell value");
-        btn.textContent = "⧉";
-        btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
-        td.appendChild(btn);
-        // Expand on click for jsonb, or anything visually truncated.
-        // scrollWidth > clientWidth is only known after layout, so decide
-        // per click rather than per render.
-        cellText.onclick = (e) => {
-          if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
-            showCellPop(e, raw);
-          }
-        };
-        if (col.type === "jsonb") td.classList.add("expandable");
-      }
-      tr.appendChild(td);
+      tr.appendChild(buildCell(col, row[col.name]));
     }
     return tr;
   }));
@@ -394,6 +402,7 @@ async function loadData() {
     else b.removeAttribute("aria-current");
   });
   $("current").textContent = state.table ?? "—";
+  document.title = state.table ? `${state.table} — Ashurbanipal` : "Ashurbanipal";
   if (!state.table) { setStatus(""); return; }
   let data;
   try { data = await fetchTableData(); }
@@ -401,11 +410,15 @@ async function loadData() {
   lastPayload = data;
   $("payload").disabled = false;
   syncUrl();
-  const focusCapture = captureTbodyFocus();
-  renderHeader(data.columns);
-  renderRows(data);
+  const renderTable = () => {
+    const focusCapture = captureTbodyFocus();
+    renderHeader(data.columns);
+    renderRows(data);
+    restoreTbodyFocus(focusCapture);
+  };
+  document.startViewTransition ? document.startViewTransition(renderTable) : renderTable();
   updatePager(data);
-  restoreTbodyFocus(focusCapture);
+  $("main").scrollTo({ top: 0, behavior: "smooth" });
 }
 
 async function loadSiblings() {
@@ -420,6 +433,7 @@ async function loadSiblings() {
     dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
     const a = document.createElement("a");
     a.href = s.dbviewer_url; a.textContent = s.name;
+    a.target = "_blank"; a.rel = "noopener";
     p.append(dot, a);
     return p;
   }));

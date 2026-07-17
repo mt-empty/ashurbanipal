@@ -1,6 +1,6 @@
 # `dbviewer.html` refactor plan
 
-Status: proposed, not yet applied
+Status: applied — all phases (0–7) complete
 Derived from: `frontend-style-guide.md` §4–§8 (the "what" and "why" live
 there — this doc is just the "in what order"). Two items also touch
 `ui-guidelines.md` R6 in how they're implemented, noted inline.
@@ -120,25 +120,25 @@ Depends on Phase 0's custom-properties hoist.
 All tied to `design.md`'s sibling-navigation goal; independent of each
 other.
 
-- [ ] `document.title` reflects the current table
+- [x] `document.title` reflects the current table
       (`` `${state.table} — Ashurbanipal` ``).
-- [ ] Inline `data:` URI SVG favicon (no external asset).
-- [ ] `main.scrollTo({ top: 0, behavior: "smooth" })` after a successful
+- [x] Inline `data:` URI SVG favicon (no external asset).
+- [x] `main.scrollTo({ top: 0, behavior: "smooth" })` after a successful
       paginate/sort render.
-- [ ] Sibling `<a>` links get `target="_blank" rel="noopener"`.
+- [x] Sibling `<a>` links get `target="_blank" rel="noopener"`.
 
 ## Phase 6 — bigger structural simplification
 
 Depends on Phase 0's split — cleanest once `renderRows()` exists as its
 own function.
 
-- [ ] Convert row/cell construction to a `<template>` + `content.cloneNode(true)`
+- [x] Convert row/cell construction to a `<template>` + `content.cloneNode(true)`
       per cell, replacing the nested `document.createElement()` calls.
-- [ ] `<output>` instead of `<span>` for `#status` and `#page`.
+- [x] `<output>` instead of `<span>` for `#status` and `#page`.
 
 ## Phase 7 — progressive enhancement (do last, on purpose)
 
-- [ ] Wrap the `thead`/`tbody` replacement in
+- [x] Wrap the `thead`/`tbody` replacement in
       `document.startViewTransition()` (feature-detected). Explicitly
       last: wrapping the render in a transition callback before Phase 0's
       split and Phase 2's focus-loss fix land would make both harder to
