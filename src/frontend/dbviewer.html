@@ -39,6 +39,12 @@
   li button.active { background: var(--active); }
   .count { opacity: .6; }
 
+  /* ==== Sidebar table search ==== */
+  #table-search { margin-bottom: var(--gap); }
+  #table-filter { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
+  #tables-empty { opacity: .6; margin: .3rem .4rem; }
+  ::highlight(table-match) { background: var(--active); }
+
   /* ==== Data table ==== */
   table { border-collapse: collapse; width: 100%; margin-top: var(--gap); }
   th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
@@ -119,7 +125,11 @@
 <body>
 <nav>
   <h1>Ashurbanipal</h1>
+  <search id="table-search">
+    <input id="table-filter" type="search" enterkeyhint="search" placeholder="filter tables…" aria-label="filter tables">
+  </search>
   <ul id="tables"></ul>
+  <p id="tables-empty" hidden>no matching tables</p>
   <div id="siblings"></div>
 </nav>
 <main id="main">
@@ -291,6 +301,32 @@ function openRecordView(columns, row) {
 // Close button is a <form method="dialog"> submit; closedby="any" on the
 // <dialog> itself handles backdrop-click and Esc dismiss — no JS needed.
 
+// ---- sidebar table search-as-you-type: transient, session-local UI state
+// (deliberately not part of `state`/localStorage — resets on reload) ----
+let tableEntries = []; // { name, li, textNode }
+const tableMatchHighlight = CSS.highlights ? new Highlight() : null;
+if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
+
+function filterTables() {
+  const q = $("table-filter").value.trim().toLowerCase();
+  tableMatchHighlight?.clear();
+  let visible = 0;
+  for (const { name, li, textNode } of tableEntries) {
+    const idx = q ? name.toLowerCase().indexOf(q) : -1;
+    const match = !q || idx !== -1;
+    li.hidden = !match;
+    if (match) visible++;
+    if (tableMatchHighlight && idx !== -1) {
+      const range = new Range();
+      range.setStart(textNode, idx);
+      range.setEnd(textNode, idx + q.length);
+      tableMatchHighlight.add(range);
+    }
+  }
+  $("tables-empty").hidden = visible > 0 || tableEntries.length === 0;
+}
+$("table-filter").oninput = filterTables;
+
 async function loadTables() {
   setStatus("loading tables…");
   const [{ tables }, { counts }] = await Promise.all([
@@ -299,6 +335,7 @@ async function loadTables() {
   const countMap = Object.fromEntries(counts.map(c => [c.table, c.approx_rows]));
   const ul = $("tables");
   ul.innerHTML = "";
+  tableEntries = [];
   for (const t of tables) {
     const li = document.createElement("li");
     const btn = document.createElement("button");
@@ -309,7 +346,9 @@ async function loadTables() {
     btn.onclick = () => { state.table = t; state.offset = 0; state.sort = null; persist(); loadData(); };
     li.appendChild(btn);
     ul.appendChild(li);
+    tableEntries.push({ name: t, li, textNode: btn.firstChild.firstChild });
   }
+  filterTables();
   // Stale persisted state must never wedge the UI: fall back silently.
   if (!tables.includes(state.table)) state.table = tables[0] ?? null;
   if (state.table) loadData();
