@@ -13,18 +13,22 @@ five routes under a fixed `/__ashurbanipal` prefix, including the UI itself.
 Two components:
 - **Frontend** — `src/frontend/dbviewer.html`, a single static HTML file
   (markup/CSS/JS together, framework-agnostic, no build step) embedded into
-  the binary via `include_str!` in `src/routes.rs`. CDN-loaded
-  `@alenaksu/json-viewer` (JSON tree view) and Prism.js are enhancements
-  only — the page must keep working if the CDN is unreachable.
+  the binary via `include_str!` in `src/routes.rs`. `@alenaksu/json-viewer`
+  (JSON tree view) and Prism.js are planned CDN-loaded enhancements (see
+  `docs/cdn-research.md`) — not yet wired in, but when they land they must
+  be enhancements only, i.e. the page keeps working if the CDN is
+  unreachable.
 - **Backend** — `src/config.rs` (kill switch + limits + siblings config),
   `src/db.rs` (the `DbSource` trait + its one impl, `PgPoolSource`),
   `src/routes.rs` (the Axum router and the four API handlers).
 
 Read `docs/design.md` first for anything non-obvious — it's the source of
-truth for intended behavior. `docs/acceptance-criteria.md` is the
-checkable definition of "v1 done." `docs/filter-dsl.md` has the filter
-grammar and its full test table (implement/verify against that table, not
-ad hoc cases).
+truth for intended behavior. `docs/filter-dsl.md` has the filter grammar
+and its full test table (implement/verify against that table, not ad hoc
+cases). `docs/ui-guidelines.md` and `docs/frontend-style-guide.md` are the
+standing behavioral/structural rules for `dbviewer.html` (the *why* and the
+*shape*, respectively) — read them before touching the frontend, not just
+`design.md`.
 
 ## Commands
 
@@ -44,6 +48,7 @@ mise run fmt-check
 mise run check                     # fmt-check + lint + test, i.e. what CI runs
 mise run demo                      # host demo app at http://localhost:4000/__ashurbanipal
 mise run demo-sibling              # second instance, to demo sibling health-poll
+mise run dev                       # demo app, auto-rebuild/restart on src/ or dbviewer.html changes (watchexec)
 mise run seed-gen                  # regenerate .devcontainer/db/init/01-seed.sql
 ```
 
