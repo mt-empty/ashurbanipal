@@ -141,17 +141,37 @@
 const API = "/__ashurbanipal/api";
 const UI_KEY = "ashurbanipal_ui";
 
-// UI state persisted in localStorage (design.md §3.1): table names and view
-// prefs only — never filters (they can contain data values), never row data.
+// UI state persisted in localStorage (design.md §3.1) and mirrored to the
+// URL (style guide §6): table/sort/order/limit/offset only — never filters
+// (they can contain data values, and a URL is even more exposed than
+// localStorage: browser history, access logs, Referer headers).
 let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0 };
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   for (const k of ["table", "sort", "order", "limit"])
     if (saved[k] !== undefined) state[k] = saved[k];
 } catch { localStorage.removeItem(UI_KEY); }
+// A URL's query params win over localStorage: opening a shared/bookmarked
+// link should reproduce that link's view, not the visitor's own saved prefs.
+const urlParams = new URLSearchParams(location.search);
+if (urlParams.has("table")) state.table = urlParams.get("table");
+if (urlParams.has("sort")) state.sort = urlParams.get("sort");
+if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "desc" : "asc";
+if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
+if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
 function persist() {
   const { table, sort, order, limit } = state;
   localStorage.setItem(UI_KEY, JSON.stringify({ table, sort, order, limit }));
+}
+// Mirrors current view state into the URL (replaceState: no new history
+// entries per action) so the address bar is always a shareable link for
+// the current table/sort/order/limit/offset. filter is never included.
+function syncUrl() {
+  const params = new URLSearchParams({
+    table: state.table, limit: state.limit, offset: state.offset,
+  });
+  if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  history.replaceState(null, "", "?" + params);
 }
 
 const $ = (id) => document.getElementById(id);
@@ -380,6 +400,7 @@ async function loadData() {
   catch (e) { $("error").textContent = e.message; return; }
   lastPayload = data;
   $("payload").disabled = false;
+  syncUrl();
   const focusCapture = captureTbodyFocus();
   renderHeader(data.columns);
   renderRows(data);
