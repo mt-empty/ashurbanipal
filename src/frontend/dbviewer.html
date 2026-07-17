@@ -45,6 +45,11 @@
   th { cursor: pointer; user-select: none; }
   th[aria-sort="ascending"]::after { content: " ▲"; }
   th[aria-sort="descending"]::after { content: " ▼"; }
+  th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
+  td.row-actions { padding-right: .25rem; }
+  .record-btn { background: none; border: none; cursor: pointer; font: inherit;
+                color: inherit; padding: 0 .15rem; border-radius: 3px; }
+  .record-btn:hover { background: var(--hover); }
   td { position: relative; padding-right: 2.7rem; }
   .cell-text { display: block; max-width: 24rem; overflow: hidden;
                text-overflow: ellipsis; white-space: nowrap; }
@@ -78,8 +83,9 @@
   /* ==== Pager ==== */
   #pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center; }
 
-  /* Raw-payload viewer: native <dialog> — showModal() gives backdrop,
-     Esc-to-close, and focus trapping for free. */
+  /* Raw-payload viewer and record/vertical-row viewer share one <dialog>
+     chrome: native <dialog> — showModal() gives backdrop, Esc-to-close, and
+     focus trapping for free. */
   dialog { border: 1px solid var(--border-strong); border-radius: 8px; padding: 0;
            max-width: min(60rem, 92vw); max-height: 80vh; }
   dialog::backdrop { background: var(--backdrop); }
@@ -87,8 +93,12 @@
                  gap: 1rem; padding: var(--gap) var(--gap-lg); border-bottom: 1px solid var(--border); }
   .dialog-head button { background: none; border: none; cursor: pointer;
                         font: inherit; color: inherit; }
-  dialog pre { margin: 0; padding: var(--gap-lg); overflow: auto;
-               max-height: calc(80vh - 3rem); }
+  dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
+                          max-height: calc(80vh - 3rem); }
+  dialog dl { display: grid; grid-template-columns: max-content 1fr;
+              gap: .3rem var(--gap-lg); }
+  dialog dl dt { font-weight: 600; }
+  dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
   /* Cell preview: native Popover API — non-modal, light-dismiss (click
      anywhere outside closes it). Positioned via CSS Anchor Positioning:
@@ -125,6 +135,7 @@
   <div id="error" role="alert"></div>
   <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
   <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
+  <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
   <div id="pager">
     <button id="prev">‹ prev</button>
     <output id="page"></output>
@@ -138,6 +149,14 @@
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
   <pre id="payload-pre"></pre>
+</dialog>
+
+<dialog id="record-dialog" closedby="any">
+  <div class="dialog-head">
+    <strong>record</strong>
+    <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
+  </div>
+  <dl id="record-dl"></dl>
 </dialog>
 
 <div id="cell-pop" popover><pre id="cell-pre"></pre></div>
@@ -180,6 +199,9 @@ function syncUrl() {
 
 const $ = (id) => document.getElementById(id);
 const setStatus = (text) => { $("status").textContent = text; };
+function prettyPrint(text) {
+  try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; }
+}
 
 async function api(path) {
   const resp = await fetch(API + path);
@@ -221,9 +243,7 @@ async function copyText(text, btn) {
 let cellPopAnchor = null;
 function showCellPop(e, text) {
   // jsonb (and any JSON-shaped value) pretty-prints; everything else raw.
-  let pretty = text;
-  try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON */ }
-  $("cell-pre").textContent = pretty;
+  $("cell-pre").textContent = prettyPrint(text);
   if (cellPopAnchor) cellPopAnchor.style.anchorName = "";
   cellPopAnchor = e.currentTarget;
   cellPopAnchor.style.anchorName = "--cell-anchor";
@@ -245,6 +265,31 @@ function applyFilterClause(column, op, value) {
   state.offset = 0;
   loadData();
 }
+
+// ---- record / vertical view (<dialog>): one already-fetched row as a
+// stacked column:value list, for tables too wide to scan across ----
+function buildRecordEntries(columns, row) {
+  const nodes = [];
+  for (const col of columns) {
+    const dt = document.createElement("dt");
+    dt.textContent = col.name;
+    const dd = document.createElement("dd");
+    const raw = row[col.name];
+    if (raw == null) dd.textContent = "∅";
+    else if (col.type === "jsonb") dd.textContent = prettyPrint(raw);
+    else dd.appendChild(formatCellValue(col, raw));
+    nodes.push(dt, dd);
+  }
+  return nodes;
+}
+
+function openRecordView(columns, row) {
+  $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
+  const open = () => $("record-dialog").showModal();
+  document.startViewTransition ? document.startViewTransition(open) : open();
+}
+// Close button is a <form method="dialog"> submit; closedby="any" on the
+// <dialog> itself handles backdrop-click and Esc dismiss — no JS needed.
 
 async function loadTables() {
   setStatus("loading tables…");
@@ -290,6 +335,9 @@ async function fetchTableData() {
 
 function renderHeader(columns) {
   const tr = document.createElement("tr");
+  const actionsTh = document.createElement("th");
+  actionsTh.className = "row-actions";
+  tr.appendChild(actionsTh);
   for (const col of columns) {
     const th = document.createElement("th");
     th.textContent = `${col.name} (${col.type})`;
@@ -316,6 +364,19 @@ function renderEmptyState(columnCount) {
 }
 
 const cellTemplate = $("cell-template");
+const rowActionTemplate = $("row-action-template");
+
+// Shared by the grid cell (buildCell) and the record view (buildRecordEntries)
+// so a column's "how do I render this one value" rule lives in one place.
+function formatCellValue(col, raw) {
+  if (col.type === "timestamp with time zone" || col.type === "date") {
+    const time = document.createElement("time");
+    time.dateTime = raw;
+    time.textContent = raw;
+    return time;
+  }
+  return document.createTextNode(raw);
+}
 
 // A real <button> as the click target (not the <td> itself) so the expand
 // action is keyboard-focusable and Enter/Space-activatable, matching the
@@ -334,14 +395,7 @@ function buildCell(col, raw) {
   const cellText = td.querySelector(".cell-text");
   const btn = td.querySelector(".copy");
   const filterBtn = td.querySelector(".filter-eq");
-  if (col.type === "timestamp with time zone" || col.type === "date") {
-    const time = document.createElement("time");
-    time.dateTime = raw;
-    time.textContent = raw;
-    cellText.appendChild(time);
-  } else {
-    cellText.textContent = raw;
-  }
+  cellText.appendChild(formatCellValue(col, raw));
   btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
   filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
   // Expand on click for jsonb, or anything visually truncated. scrollWidth
@@ -356,14 +410,21 @@ function buildCell(col, raw) {
   return td;
 }
 
+function buildRowActionCell(columns, row) {
+  const td = rowActionTemplate.content.cloneNode(true).firstElementChild;
+  td.querySelector(".record-btn").onclick = () => openRecordView(columns, row);
+  return td;
+}
+
 function renderRows(data) {
   if (data.rows.length === 0) {
-    renderEmptyState(data.columns.length);
+    renderEmptyState(data.columns.length + 1);
     return;
   }
   const tbody = $("tbody");
   tbody.replaceChildren(...data.rows.map(row => {
     const tr = document.createElement("tr");
+    tr.appendChild(buildRowActionCell(data.columns, row));
     for (const col of data.columns) {
       tr.appendChild(buildCell(col, row[col.name]));
     }
