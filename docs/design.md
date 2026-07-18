@@ -117,10 +117,17 @@ Paths below are shorthand for the full routes in §3.3 (e.g. `/tables` means
 
 Returns table names in the connected database's schema, validated against
 `information_schema` at request time (also doubles as the allow-list used by
-`/tables/data`).
+`/tables/data`). `comment` is each table's `COMMENT ON TABLE` text and is
+omitted when the table has none.
 
 ```json
-{ "tables": ["users", "sessions", "orders"] }
+{
+  "tables": [
+    { "name": "users", "comment": "Registered accounts." },
+    { "name": "sessions" },
+    { "name": "orders" }
+  ]
+}
 ```
 
 ### `GET /table-counts`
