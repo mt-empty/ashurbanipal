@@ -245,15 +245,22 @@ const UI_KEY = "ashurbanipal_ui";
 // URL (style guide §6): table/sort/order/limit/offset only — never filters
 // (they can contain data values, and a URL is even more exposed than
 // localStorage: browser history, access logs, Referer headers).
-let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: [] };
+let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {} };
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   for (const k of ["table", "sort", "order", "limit"])
     if (saved[k] !== undefined) state[k] = saved[k];
-  // A stray non-array value here (corrupted write, older format) must not
-  // wedge later .includes()/.filter() calls on it — reset silently instead.
-  if (Array.isArray(saved.hiddenColumns)) {
-    state.hiddenColumns = saved.hiddenColumns.filter(c => typeof c === "string");
+  // hiddenColumns is keyed by table name (Record<table, string[]>) so
+  // hiding a column on one table never hides a same-named column on
+  // another. A pre-migration flat array (or anything else malformed) is
+  // discarded rather than migrated — it's UI shape only (R6), cheap to
+  // lose, and there's no reliable way to guess which table it belonged to.
+  if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
+    for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
+      if (!Array.isArray(cols)) continue;
+      const clean = cols.filter(c => typeof c === "string");
+      if (clean.length) state.hiddenColumns[table] = clean;
+    }
   }
 } catch { localStorage.removeItem(UI_KEY); }
 // A URL's query params win over localStorage: opening a shared/bookmarked
@@ -277,6 +284,14 @@ function syncUrl() {
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
   history.replaceState(null, "", "?" + params);
+}
+
+// Hidden columns are scoped to the current table — a stale table key or a
+// column name absent from the current table's columns simply matches
+// nothing wherever it's consulted (renderHeader/buildCell/renderRows), so
+// no separate validation pass is needed here.
+function hiddenColumnsForTable() {
+  return state.hiddenColumns[state.table] ?? [];
 }
 
 const $ = (id) => document.getElementById(id);
@@ -420,24 +435,32 @@ async function showCommonValues(e, column) {
 // stale localStorage) simply matches nothing here — silent no-op, per
 // ui-guidelines.md R5. ----
 function setColumnVisibility(name, hidden) {
+  const current = hiddenColumnsForTable();
+  const next = hidden ? [...current, name] : current.filter(c => c !== name);
+  if (next.length) state.hiddenColumns[state.table] = next;
+  else delete state.hiddenColumns[state.table];
+  persist();
   document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)
     .forEach(el => el.classList.toggle("col-hidden", hidden));
+  updateColumnsButtonLabel();
+}
+
+// Reuses this file's existing idiom of surfacing counts directly in visible
+// button/output text (sidebar row counts, the pager's "page N · ~M rows")
+// rather than a separate badge/dot component (ui-guidelines.md #6).
+function updateColumnsButtonLabel() {
+  const n = hiddenColumnsForTable().length;
+  $("columns-btn").textContent = n > 0 ? `columns (${n} hidden)` : "columns";
 }
 
 function renderColumnMenu(columns) {
+  const hidden = hiddenColumnsForTable();
   $("columns-pop-list").replaceChildren(...columns.map(col => {
     const label = document.createElement("label");
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = !state.hiddenColumns.includes(col.name);
-    input.onchange = () => {
-      const hidden = !input.checked;
-      state.hiddenColumns = hidden
-        ? [...state.hiddenColumns, col.name]
-        : state.hiddenColumns.filter(c => c !== col.name);
-      persist();
-      setColumnVisibility(col.name, hidden);
-    };
+    input.checked = !hidden.includes(col.name);
+    input.onchange = () => setColumnVisibility(col.name, !input.checked);
     label.append(input, col.name);
     return label;
   }));
@@ -542,6 +565,7 @@ async function fetchTableData() {
 }
 
 function renderHeader(columns) {
+  const hidden = hiddenColumnsForTable();
   const tr = document.createElement("tr");
   const actionsTh = document.createElement("th");
   actionsTh.className = "row-actions";
@@ -549,7 +573,7 @@ function renderHeader(columns) {
   for (const col of columns) {
     const th = document.createElement("th");
     th.dataset.col = col.name;
-    if (state.hiddenColumns.includes(col.name)) th.classList.add("col-hidden");
+    if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
     if (col.key === "pk" || col.key === "fk") {
       const keyLabel = col.key === "pk"
@@ -620,7 +644,7 @@ function formatCellValue(col, raw) {
 // copy button one element over. Empty cells get neither button — nothing
 // to copy or expand.
 function buildCell(col, raw) {
-  const hidden = state.hiddenColumns.includes(col.name);
+  const hidden = hiddenColumnsForTable().includes(col.name);
   if (raw == null) {
     const td = document.createElement("td");
     td.dataset.col = col.name;
@@ -680,7 +704,8 @@ function renderRows(data) {
     // hidden columns drop out of the table's resolved column model entirely
     // (display:none cells aren't counted), so spanning the full fetched
     // count here would overshoot it.
-    const visible = data.columns.filter(c => !state.hiddenColumns.includes(c.name)).length;
+    const hidden = hiddenColumnsForTable();
+    const visible = data.columns.filter(c => !hidden.includes(c.name)).length;
     renderEmptyState(visible + 1);
     return;
   }
@@ -772,6 +797,7 @@ async function loadData() {
   lastPayload = data;
   $("payload").disabled = false;
   $("columns-btn").disabled = false;
+  updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
     const focusCapture = captureTableFocus();
