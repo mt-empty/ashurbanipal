@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use serde::Serialize;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
@@ -14,11 +16,37 @@ pub struct QueryOpts {
     pub timeout_secs: u32,
 }
 
+/// A column's role in the table's key structure, surfaced to the frontend
+/// purely as navigation metadata — see `references` for where an `Fk`
+/// points. Never used to build SQL; it's informational only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KeyKind {
+    Pk,
+    Fk,
+}
+
+/// What a foreign-key column points at. Both fields are schema identifiers
+/// pulled from `information_schema` (same catalog-lookup trust level as
+/// `allowed_tables`/`allowed_columns`), not user input.
+#[derive(Debug, Clone, Serialize)]
+pub struct ColumnRef {
+    pub table: String,
+    pub column: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ColumnInfo {
     pub name: String,
     #[serde(rename = "type")]
     pub type_name: String,
+    /// Additive metadata (`docs/client-enhancements.md` §6): omitted
+    /// entirely for columns with no key role, so existing consumers of the
+    /// `{name, type}` shape see no change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<KeyKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub references: Option<ColumnRef>,
 }
 
 #[derive(Debug, Serialize)]
@@ -105,6 +133,92 @@ impl PgPoolSource {
         .await?;
         Ok(rows)
     }
+
+    /// Schema-catalog lookup (not a data query, same family as
+    /// `allowed_tables`/`allowed_columns`) for which columns of `table` are a
+    /// primary key and which are a foreign key, and what the latter point
+    /// at. `table` is already schema-validated by the caller before this
+    /// runs, but it's bound as a parameter regardless.
+    ///
+    /// PK membership is exact even for a composite primary key (each member
+    /// column is reported individually). FK *targets* are a different
+    /// story: `information_schema.constraint_column_usage` carries no
+    /// ordinal position, so joining it against `key_column_usage` for a
+    /// composite FK (>1 referencing column) yields a cross product with no
+    /// reliable way to pair referencing column N with referenced column N —
+    /// see the grouping-by-`constraint_name` step below, which detects that
+    /// case and drops it rather than risk mislabeling which column
+    /// references what.
+    async fn key_metadata(
+        &self,
+        table: &str,
+    ) -> Result<(HashSet<String>, HashMap<String, ColumnRef>), DbError> {
+        let rows = sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>)>(
+            "select tc.constraint_name, tc.constraint_type, kcu.column_name, \
+                    ccu.table_name as ref_table, ccu.column_name as ref_column \
+             from information_schema.table_constraints tc \
+             join information_schema.key_column_usage kcu \
+               on kcu.constraint_name = tc.constraint_name \
+              and kcu.table_schema = tc.table_schema \
+             left join information_schema.constraint_column_usage ccu \
+               on ccu.constraint_name = tc.constraint_name \
+              and ccu.table_schema = tc.table_schema \
+              and tc.constraint_type = 'FOREIGN KEY' \
+             where tc.table_schema = 'public' \
+               and tc.table_name = $1 \
+               and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
+        )
+        .bind(table)
+        .fetch_all(&self.pool)
+        .await?;
+
+        // (referencing column, referenced table, referenced column) — the
+        // referenced table/column are `None` when the left join to
+        // `constraint_column_usage` didn't match (i.e. this isn't an FK row).
+        type FkCandidateRow = (String, Option<String>, Option<String>);
+
+        let mut pk_columns = HashSet::new();
+        // constraint_name -> its FkCandidateRow entries, collected so
+        // composite FKs (multiple distinct column_names under one
+        // constraint) can be detected and skipped below.
+        let mut fk_candidates: HashMap<String, Vec<FkCandidateRow>> = HashMap::new();
+        for (constraint_name, constraint_type, column_name, ref_table, ref_column) in rows {
+            match constraint_type.as_str() {
+                "PRIMARY KEY" => {
+                    pk_columns.insert(column_name);
+                }
+                "FOREIGN KEY" => {
+                    fk_candidates.entry(constraint_name).or_default().push((
+                        column_name,
+                        ref_table,
+                        ref_column,
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        let mut fk_columns = HashMap::new();
+        for members in fk_candidates.into_values() {
+            let distinct_columns: HashSet<&str> =
+                members.iter().map(|(name, _, _)| name.as_str()).collect();
+            if distinct_columns.len() != 1 {
+                continue; // composite FK — ambiguous pairing, see doc comment above.
+            }
+            if let Some((column_name, Some(ref_table), Some(ref_column))) =
+                members.into_iter().next()
+            {
+                fk_columns.insert(
+                    column_name,
+                    ColumnRef {
+                        table: ref_table,
+                        column: ref_column,
+                    },
+                );
+            }
+        }
+        Ok((pk_columns, fk_columns))
+    }
 }
 
 /// Render one Postgres value as JSON for the browser. Everything is fetched
@@ -171,9 +285,31 @@ impl DbSource for PgPoolSource {
         .bind(&table)
         .fetch_all(&self.pool)
         .await?;
+        // Schema metadata, not query results — fine to fetch alongside the
+        // column list above rather than as a separate route (`design.md`
+        // §2's no-joins non-goal is about query execution, not this).
+        let (pk_columns, fk_columns) = self.key_metadata(&table).await?;
         let columns: Vec<ColumnInfo> = column_types
             .into_iter()
-            .map(|(name, type_name)| ColumnInfo { name, type_name })
+            .map(|(name, type_name)| {
+                // A column that's both a PK and FK member (composite key
+                // doubling as a reference) reports as `pk` — the more
+                // identifying fact of the two, and the shape here only
+                // carries one `key` value per column.
+                let (key, references) = if pk_columns.contains(&name) {
+                    (Some(KeyKind::Pk), None)
+                } else if let Some(r) = fk_columns.get(&name) {
+                    (Some(KeyKind::Fk), Some(r.clone()))
+                } else {
+                    (None, None)
+                };
+                ColumnInfo {
+                    name,
+                    type_name,
+                    key,
+                    references,
+                }
+            })
             .collect();
 
         // Identifiers are quoted and were validated against the live schema

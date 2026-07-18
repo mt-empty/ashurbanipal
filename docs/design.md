@@ -25,7 +25,10 @@ v1 targets Rust services built on Axum, backed by Postgres.
 
 **Non-goals (v1)**
 
-- Cross-table joins or multi-table queries. One table at a time.
+- Cross-table joins or multi-table queries. One table at a time. (Surfacing
+  a foreign key as a clickable UI link that switches tables is not an
+  exception to this — it's two sequential single-table queries triggered by
+  a click, never a join, and no response ever mixes rows from two tables.)
 - Multi-column sort (single column only; multi-column is a future addition).
 - Writes of any kind.
 - Dynamic sibling discovery (service registry, k8s, etc.) — static config only.
