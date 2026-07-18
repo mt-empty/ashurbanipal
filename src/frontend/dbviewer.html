@@ -745,8 +745,13 @@ function restoreTableFocus(captured) {
   (target ?? document.querySelector("table")).focus();
 }
 
-async function loadData() {
-  $("error").textContent = "";
+// Sidebar highlight, #current, and document.title all advertise "this is
+// the table currently on screen" — so they must only ever move in lockstep
+// with a *successful* render, never ahead of it (see loadData: a failed
+// fetchTableData() must leave these exactly as they were, matching the
+// stale <table> body they're describing, not the table that was attempted
+// and failed).
+function updateActiveTableChrome() {
   document.querySelectorAll("#tables button").forEach(b => {
     const isActive = b.dataset.table === state.table;
     b.classList.toggle("active", isActive);
@@ -755,10 +760,15 @@ async function loadData() {
   });
   $("current").textContent = state.table ?? "—";
   document.title = state.table ? `${state.table} — Ashurbanipal` : "Ashurbanipal";
-  if (!state.table) { setStatus(""); return; }
+}
+
+async function loadData() {
+  $("error").textContent = "";
+  if (!state.table) { updateActiveTableChrome(); setStatus(""); return; }
   let data;
   try { data = await fetchTableData(); }
   catch (e) { $("error").textContent = e.message; return; }
+  updateActiveTableChrome();
   lastPayload = data;
   $("payload").disabled = false;
   $("columns-btn").disabled = false;
