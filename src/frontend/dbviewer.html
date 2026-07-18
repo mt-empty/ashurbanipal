@@ -364,17 +364,19 @@ async function loadTables() {
     const li = document.createElement("li");
     const btn = document.createElement("button");
     btn.innerHTML = `<span></span><span class="count"></span>`;
-    btn.firstChild.textContent = t;
-    btn.lastChild.textContent = `~${countMap[t] ?? "?"}`;
-    btn.dataset.table = t;
-    btn.onclick = () => { state.table = t; state.offset = 0; state.sort = null; persist(); loadData(); };
+    btn.firstChild.textContent = t.name;
+    btn.lastChild.textContent = `~${countMap[t.name] ?? "?"}`;
+    btn.dataset.table = t.name;
+    if (t.comment) btn.title = t.comment;
+    btn.onclick = () => { state.table = t.name; state.offset = 0; state.sort = null; persist(); loadData(); };
     li.appendChild(btn);
     ul.appendChild(li);
-    tableEntries.push({ name: t, li, textNode: btn.firstChild.firstChild });
+    tableEntries.push({ name: t.name, li, textNode: btn.firstChild.firstChild });
   }
   filterTables();
+  const tableNames = tables.map(t => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
-  if (!tables.includes(state.table)) state.table = tables[0] ?? null;
+  if (!tableNames.includes(state.table)) state.table = tableNames[0] ?? null;
   if (state.table) loadData();
   else setStatus("");
 }
@@ -414,10 +416,13 @@ function renderHeader(columns) {
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "🔑" : "→";
       th.append(icon, label);
-      th.setAttribute("aria-label", `${label}, ${keyLabel}`);
+      // Comment layers onto the accessible name rather than replacing the
+      // existing key description — the icon keeps its own `title` above.
+      th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
       th.textContent = label;
     }
+    if (col.comment) th.title = col.comment;
     th.setAttribute("aria-sort", col.name === state.sort
       ? (state.order === "desc" ? "descending" : "ascending")
       : "none");
