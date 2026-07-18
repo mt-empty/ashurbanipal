@@ -65,6 +65,16 @@
   thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
   th[aria-sort="ascending"]::after { content: " ▲"; }
   th[aria-sort="descending"]::after { content: " ▼"; }
+  /* PK/FK header icons: decorative (aria-hidden) — the th itself carries an
+     aria-label with the text equivalent, so the icon is never the only
+     signal. */
+  .key-icon { margin-right: .2rem; }
+  /* FK cells: a real <button> (see buildCell), styled distinctly from the
+     plain cell-text button so it doesn't read as a normal <a> hyperlink it
+     isn't — this is an in-app state change, not real navigation. */
+  .fk-cell { cursor: pointer; text-decoration: underline dotted;
+             text-underline-offset: .15em; }
+  .fk-cell:hover { text-decoration-style: solid; }
   th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
   td.row-actions { padding-right: .25rem; }
   .record-btn { background: none; border: none; cursor: pointer; font: inherit;
@@ -393,7 +403,21 @@ function renderHeader(columns) {
   tr.appendChild(actionsTh);
   for (const col of columns) {
     const th = document.createElement("th");
-    th.textContent = `${col.name} (${col.type})`;
+    const label = `${col.name} (${col.type})`;
+    if (col.key === "pk" || col.key === "fk") {
+      const keyLabel = col.key === "pk"
+        ? "primary key"
+        : `foreign key, references ${col.references.table}.${col.references.column}`;
+      const icon = document.createElement("span");
+      icon.className = "key-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.title = keyLabel;
+      icon.textContent = col.key === "pk" ? "🔑" : "→";
+      th.append(icon, label);
+      th.setAttribute("aria-label", `${label}, ${keyLabel}`);
+    } else {
+      th.textContent = label;
+    }
     th.setAttribute("aria-sort", col.name === state.sort
       ? (state.order === "desc" ? "descending" : "ascending")
       : "none");
@@ -451,15 +475,31 @@ function buildCell(col, raw) {
   cellText.appendChild(formatCellValue(col, raw));
   btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
   filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
-  // Expand on click for jsonb, or anything visually truncated. scrollWidth
-  // > clientWidth is only known after layout, so decide per click rather
-  // than per render.
-  cellText.onclick = (e) => {
-    if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
-      showCellPop(e, raw);
-    }
-  };
-  if (col.type === "jsonb") td.classList.add("expandable");
+  if (col.key === "fk" && col.references) {
+    // In-app navigation, not a page load: switch to the referenced table
+    // and seed a filter for the referenced row, reusing the same
+    // compose-clause helper §1's filter buttons use. Reset sort first —
+    // the current sort column belongs to this table and may not exist on
+    // the target one.
+    cellText.classList.add("fk-cell");
+    cellText.title = `go to ${col.references.table}.${col.references.column} = ${raw}`;
+    cellText.onclick = () => {
+      state.table = col.references.table;
+      state.sort = null;
+      persist();
+      applyFilterClause(col.references.column, "=", raw);
+    };
+  } else {
+    // Expand on click for jsonb, or anything visually truncated. scrollWidth
+    // > clientWidth is only known after layout, so decide per click rather
+    // than per render.
+    cellText.onclick = (e) => {
+      if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
+        showCellPop(e, raw);
+      }
+    };
+    if (col.type === "jsonb") td.classList.add("expandable");
+  }
   return td;
 }
 
@@ -485,8 +525,11 @@ function renderRows(data) {
   }));
   // Overflow is only measurable after layout: mark truncated cells so the
   // cursor hints they're expandable (jsonb cells are marked at render).
+  // fk-cell is excluded: its title attribute (set in buildCell) is already
+  // the escape hatch for a truncated value, and it must not pick up the
+  // "expandable" zoom-in cursor since a click navigates, not expands.
   requestAnimationFrame(() => {
-    for (const el of tbody.querySelectorAll(".cell-text")) {
+    for (const el of tbody.querySelectorAll(".cell-text:not(.fk-cell)")) {
       if (el.scrollWidth > el.clientWidth) el.closest("td").classList.add("expandable");
     }
   });
