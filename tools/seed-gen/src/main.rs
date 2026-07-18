@@ -143,6 +143,22 @@ fn write_schema(out: &mut String) {
          \x20   ended_at timestamptz\n\
          );\n\n",
     );
+    // A deliberately partial set of `comment on` statements — most
+    // tables/columns are left uncommented so the demo also exercises the
+    // no-comment (absent `title=`) path, not just the happy path.
+    out.push_str(
+        "comment on table users is 'Registered application users.';\n\
+         comment on column users.metadata is \
+         'Free-form per-user preferences and feature flags, stored as JSON.';\n\n\
+         comment on table orders is \
+         'Customer orders placed against the product catalog.';\n\
+         comment on column orders.user_id is \
+         'The user who placed this order.';\n\
+         comment on column orders.discount_pct is \
+         'Percentage discount applied at checkout, if any.';\n\n\
+         comment on table sessions is \
+         'Login sessions, one row per device/browser session.';\n\n",
+    );
 }
 
 struct GenUser {

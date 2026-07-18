@@ -9,7 +9,7 @@ use axum::Router;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
-use crate::db::{DbError, DbSource, QueryOpts};
+use crate::db::{DbError, DbSource, QueryOpts, TableInfo};
 
 const DBVIEWER_HTML: &str = include_str!("frontend/dbviewer.html");
 
@@ -64,7 +64,7 @@ async fn serve_html<S: DbSource>(State(_): State<Arc<AppState<S>>>) -> Html<&'st
 
 #[derive(Serialize)]
 struct TablesResponse {
-    tables: Vec<String>,
+    tables: Vec<TableInfo>,
 }
 
 async fn list_tables<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Response {
