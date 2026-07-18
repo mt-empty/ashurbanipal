@@ -4,9 +4,11 @@ use serde::Serialize;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
+use crate::filter::{CompareOp, Logic, ParsedFilter, Predicate};
+
 /// Options for a single-table query. Everything here is already validated
-/// by the route layer *except* `table` and `sort`, which this layer checks
-/// against the live schema before touching SQL.
+/// by the route layer *except* `table`, `sort`, and each `filter` column,
+/// which this layer checks against the live schema before touching SQL.
 #[derive(Debug, Clone)]
 pub struct QueryOpts {
     pub limit: u32,
@@ -14,6 +16,11 @@ pub struct QueryOpts {
     pub sort: Option<String>,
     pub descending: bool,
     pub timeout_secs: u32,
+    /// Already syntactically parsed (`crate::filter::parse`), not yet
+    /// schema-validated — `query_table` matches each condition's column
+    /// against the live `information_schema` allow-list before it's
+    /// spliced into SQL, the same way `sort` already is.
+    pub filter: Option<ParsedFilter>,
 }
 
 /// A column's role in the table's key structure, surfaced to the frontend
@@ -74,8 +81,12 @@ pub struct TableData {
 
 #[derive(Debug)]
 pub enum DbError {
-    /// Requested table (or sort column) is not in the schema allow-list.
+    /// Requested table (or sort/filter column) is not in the schema
+    /// allow-list.
     NotAllowed(String),
+    /// The `filter` param failed to parse (`filter-dsl.md` §4) — a plain-text
+    /// reason, always mapped to 400, never partially executed.
+    FilterParse(String),
     Sqlx(sqlx::Error),
 }
 
@@ -83,6 +94,7 @@ impl std::fmt::Display for DbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotAllowed(what) => write!(f, "not in schema allow-list: {what}"),
+            Self::FilterParse(reason) => write!(f, "invalid filter: {reason}"),
             Self::Sqlx(e) => write!(f, "database error: {e}"),
         }
     }
@@ -247,6 +259,94 @@ impl PgPoolSource {
     }
 }
 
+/// Maps a parsed comparison operator to its hardcoded SQL fragment —
+/// allow-list, never string-formatted from user input (`filter-dsl.md` §3
+/// point 2).
+fn compare_op_sql(op: CompareOp) -> &'static str {
+    match op {
+        CompareOp::Eq => "=",
+        CompareOp::Ne => "!=",
+        CompareOp::Gt => ">",
+        CompareOp::Ge => ">=",
+        CompareOp::Lt => "<",
+        CompareOp::Le => "<=",
+    }
+}
+
+/// Turns a syntactically-parsed [`ParsedFilter`] into a ` where ...` SQL
+/// clause (empty string if there are no conditions) plus the ordered list of
+/// values to bind for it, continuing the parameter numbering after `$1`
+/// (limit) and `$2` (offset) — i.e. the first filter value is `$3`.
+///
+/// Every column is matched against `allowed_columns` (the same live
+/// `information_schema` allow-list `sort` is checked against) before being
+/// spliced in — this is the check that makes A8/A10 (`pg_sleep`, an unknown
+/// column) fail with `DbError::NotAllowed` instead of ever reaching SQL
+/// text, and it runs regardless of whether the condition is negated (`NOT`
+/// never bypasses allow-listing).
+///
+/// Each condition's fragment is individually parenthesized and joined with
+/// the literal `AND`/`OR` text from the input; Postgres's own operator
+/// precedence (`AND` binds tighter than `OR`) then reproduces the grammar's
+/// documented precedence without this builder needing to construct a
+/// precedence-aware tree itself (`filter-dsl.md` §5 V6).
+fn build_where_clause(
+    filter: &ParsedFilter,
+    column_names: &[String],
+) -> Result<(String, Vec<String>), DbError> {
+    if filter.conditions.is_empty() {
+        return Ok((String::new(), Vec::new()));
+    }
+
+    let mut values = Vec::new();
+    let mut next_param = 3;
+    let mut fragments = Vec::with_capacity(filter.conditions.len());
+    for condition in &filter.conditions {
+        let column = column_names
+            .iter()
+            .find(|c| c.as_str() == condition.column)
+            .ok_or_else(|| DbError::NotAllowed(format!("column {:?}", condition.column)))?;
+
+        let inner = match &condition.predicate {
+            Predicate::Compare(op, value) => {
+                let frag = format!("\"{column}\"::text {} ${next_param}", compare_op_sql(*op));
+                values.push(value.clone());
+                next_param += 1;
+                frag
+            }
+            Predicate::Like(value) => {
+                let frag = format!("\"{column}\"::text LIKE ${next_param}");
+                values.push(value.clone());
+                next_param += 1;
+                frag
+            }
+            Predicate::Ilike(value) => {
+                let frag = format!("\"{column}\"::text ILIKE ${next_param}");
+                values.push(value.clone());
+                next_param += 1;
+                frag
+            }
+            Predicate::IsNull => format!("\"{column}\"::text IS NULL"),
+            Predicate::IsNotNull => format!("\"{column}\"::text IS NOT NULL"),
+        };
+        fragments.push(if condition.negated {
+            format!("(NOT ({inner}))")
+        } else {
+            format!("({inner})")
+        });
+    }
+
+    let mut clause = fragments[0].clone();
+    for (logic, frag) in filter.logic.iter().zip(fragments.iter().skip(1)) {
+        clause.push_str(match logic {
+            Logic::And => " AND ",
+            Logic::Or => " OR ",
+        });
+        clause.push_str(frag);
+    }
+    Ok((format!(" where {clause}"), values))
+}
+
 /// Render one Postgres value as JSON for the browser. Everything is fetched
 /// as text (`::text` casts in the query) except where sqlx decodes natively;
 /// unknown types degrade to their text form rather than erroring.
@@ -317,6 +417,16 @@ impl DbSource for PgPoolSource {
                     .clone(),
             ),
             None => None,
+        };
+
+        // Filter columns are checked against the same live allow-list as
+        // `sort` above — this is what makes splicing them into SQL text
+        // safe (`filter-dsl.md` §3 point 1, §5 A8/A10). Operators are never
+        // taken from user text: `compare_op_sql` is a hardcoded match over
+        // the closed `CompareOp` enum the parser already produced.
+        let (where_clause, filter_values) = match &opts.filter {
+            Some(filter) => build_where_clause(filter, &column_names)?,
+            None => (String::new(), Vec::new()),
         };
 
         let column_types = sqlx::query_as::<_, (String, String)>(
@@ -393,7 +503,9 @@ impl DbSource for PgPoolSource {
             ),
             None => String::new(),
         };
-        let sql = format!("select {select_list} from \"{table}\"{order_clause} limit $1 offset $2");
+        let sql = format!(
+            "select {select_list} from \"{table}\"{where_clause}{order_clause} limit $1 offset $2"
+        );
 
         let mut tx = self.pool.begin().await?;
         // Per-query timeout so a pathological query can't hold a host pool
@@ -402,19 +514,23 @@ impl DbSource for PgPoolSource {
         //
         // AssertSqlSafe audit: `timeout_secs` is a u32 from the host's own
         // config; `sql` interpolates only identifiers matched exactly against
-        // the live information_schema above — request strings never reach
-        // either string, and all values are bound.
+        // the live information_schema above, plus the filter's operator
+        // fragments built by `build_where_clause` (hardcoded per-operator SQL
+        // text, never user text) — request strings never reach either
+        // string, and all values (limit/offset/filter values) are bound.
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "set local statement_timeout = '{}s'",
             opts.timeout_secs
         )))
         .execute(&mut *tx)
         .await?;
-        let pg_rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(opts.limit as i64)
-            .bind(opts.offset as i64)
-            .fetch_all(&mut *tx)
-            .await?;
+            .bind(opts.offset as i64);
+        for value in filter_values {
+            query = query.bind(value);
+        }
+        let pg_rows = query.fetch_all(&mut *tx).await?;
         tx.commit().await?;
 
         let total_approx = sqlx::query_scalar::<_, i64>(

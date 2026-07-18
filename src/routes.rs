@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::db::{DbError, DbSource, QueryOpts, TableInfo};
+use crate::filter;
 
 const DBVIEWER_HTML: &str = include_str!("frontend/dbviewer.html");
 
@@ -53,6 +54,9 @@ fn error_response(err: DbError) -> Response {
     match err {
         DbError::NotAllowed(what) => {
             (StatusCode::BAD_REQUEST, format!("not allowed: {what}")).into_response()
+        }
+        DbError::FilterParse(reason) => {
+            (StatusCode::BAD_REQUEST, format!("invalid filter: {reason}")).into_response()
         }
         DbError::Sqlx(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -116,20 +120,16 @@ async fn table_data<S: DbSource>(
     State(state): State<Arc<AppState<S>>>,
     Query(params): Query<DataParams>,
 ) -> Response {
-    // Filter DSL is deliberately last in the build order (`filter-dsl.md`):
-    // until the parser lands, any non-empty filter is rejected outright —
-    // never silently ignored.
-    if params
-        .filter
-        .as_deref()
-        .is_some_and(|f| !f.trim().is_empty())
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            "the `filter` parameter is not implemented yet",
-        )
-            .into_response();
-    }
+    // An empty (or whitespace-only) filter means "no filter", not a parse
+    // target — a syntactic parse error only applies to a non-empty string
+    // that failed to parse (`filter-dsl.md` §4).
+    let parsed_filter = match params.filter.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => match filter::parse(raw) {
+            Ok(parsed) => Some(parsed),
+            Err(e) => return error_response(DbError::FilterParse(e.to_string())),
+        },
+        _ => None,
+    };
 
     let limits = &state.config.limits;
     let limit = params
@@ -154,6 +154,7 @@ async fn table_data<S: DbSource>(
         sort: params.sort,
         descending,
         timeout_secs: limits.query_timeout_secs,
+        filter: parsed_filter,
     };
     match state.source.query_table(&params.table, opts).await {
         Ok(data) => Json(data).into_response(),

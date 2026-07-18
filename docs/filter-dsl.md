@@ -1,10 +1,12 @@
 # Filter DSL — grammar and test plan
 
-Status: agreed, pre-implementation
+Status: implemented (`src/filter.rs`; query-builder integration in
+`src/db.rs`'s `query_table`)
 Implements: `filter` query param of `GET /tables/data` (`design.md` §4.1)
-Build order: **implemented last** among the server features — the grammar and
-test table below are fixed now so the rest of the API can be built against a
-stub that rejects all filters.
+Build order: implemented last among the server features, as planned — the
+grammar and test table below were fixed early so the rest of the API could be
+built against a stub that rejected all filters, then the real parser was
+built against this document and `tests/black_box/filter_dsl.rs` as the spec.
 
 Prior art considered: RSQL/FIQL (the established REST filter syntax) and the
 `postgrest-parser` crate. Neither is used directly — the existing Rust RSQL
