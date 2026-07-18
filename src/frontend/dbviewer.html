@@ -97,6 +97,9 @@
           color: inherit; opacity: 0; padding: 0 .15rem; border-radius: 3px; }
   .copy { right: .15rem; }
   .filter-eq { right: 1.45rem; }
+  /* Null cells have no copy button, so their lone filter button sits in
+     copy's slot instead of leaving that corner visibly empty. */
+  .filter-eq.only-action { right: .15rem; }
   td:hover .copy, td:hover .filter-eq, .copy:focus-visible, .filter-eq:focus-visible { opacity: .7; }
   .copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
 
@@ -112,6 +115,8 @@
 
   /* ==== Siblings ==== */
   #siblings { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: var(--gap); }
+  #siblings h2 { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+                 font-weight: 600; opacity: .6; margin: 0 0 var(--gap); }
   .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
          margin-right: .4em; background: #999; }
   .dot.up { background: var(--success); } .dot.down { background: var(--danger); }
@@ -194,7 +199,10 @@
   </search>
   <ul id="tables"></ul>
   <p id="tables-empty" hidden>no matching tables</p>
-  <div id="siblings"></div>
+  <div id="siblings">
+    <h2 id="siblings-heading" hidden>siblings</h2>
+    <div id="siblings-list"></div>
+  </div>
 </nav>
 <main id="main">
   <search id="controls">
@@ -245,7 +253,14 @@ const UI_KEY = "ashurbanipal_ui";
 // URL (style guide §6): table/sort/order/limit/offset only — never filters
 // (they can contain data values, and a URL is even more exposed than
 // localStorage: browser history, access logs, Referer headers).
-let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {} };
+// filter is intentionally never persisted (localStorage/URL) and never
+// initialized from either — same "can carry data" reasoning that already
+// keeps it out of persist()/syncUrl(). It's the *applied* filter, decoupled
+// from the live #filter input text (see fetchTableData/applyFilterClause):
+// only committing (submit, or a click-to-filter action) updates it, so an
+// unfinished edit in the box never gets silently resent by an unrelated
+// sort/page click.
+let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, filter: "" };
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   for (const k of ["table", "sort", "order", "limit"])
@@ -358,7 +373,11 @@ function quoteFilterValue(value) {
 }
 
 function applyFilterClause(column, op, value) {
-  $("filter").value = `${column} ${op} ${quoteFilterValue(value)}`;
+  // value is omitted for a valueless predicate (IS NULL) — see the null-cell
+  // filter button in buildCell.
+  const clause = value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
+  $("filter").value = clause;
+  state.filter = clause;
   state.offset = 0;
   loadData();
 }
@@ -534,7 +553,15 @@ async function loadTables() {
     btn.lastChild.textContent = `~${countMap[t.name] ?? "?"}`;
     btn.dataset.table = t.name;
     if (t.comment) btn.title = t.comment;
-    btn.onclick = () => { state.table = t.name; state.offset = 0; state.sort = null; persist(); loadData(); };
+    // A filter clause is written against this table's columns — it can't
+    // just carry over to a different table (wrong columns, possibly not
+    // even valid syntax if it was mid-edit), so it resets the same way sort
+    // already does rather than silently resending it and failing.
+    btn.onclick = () => {
+      state.table = t.name; state.offset = 0; state.sort = null; state.filter = "";
+      $("filter").value = "";
+      persist(); loadData();
+    };
     li.appendChild(btn);
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, textNode: btn.firstChild.firstChild });
@@ -552,8 +579,7 @@ async function fetchTableData() {
     table: state.table, limit: state.limit, offset: state.offset,
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
-  const filter = $("filter").value.trim();
-  if (filter) params.set("filter", filter);
+  if (state.filter) params.set("filter", state.filter);
   setStatus("loading…");
   document.querySelector("table").setAttribute("aria-busy", "true");
   try {
@@ -641,8 +667,8 @@ function formatCellValue(col, raw) {
 
 // A real <button> as the click target (not the <td> itself) so the expand
 // action is keyboard-focusable and Enter/Space-activatable, matching the
-// copy button one element over. Empty cells get neither button — nothing
-// to copy or expand.
+// copy button one element over. Null cells get only the filter button
+// (nothing to copy or expand) — see the raw == null branch below.
 function buildCell(col, raw) {
   const hidden = hiddenColumnsForTable().includes(col.name);
   if (raw == null) {
@@ -653,6 +679,15 @@ function buildCell(col, raw) {
     span.className = "cell-text";
     span.textContent = "∅";
     td.appendChild(span);
+    // Nothing to copy or expand for a null cell, but "filter by this value"
+    // is still meaningful (IS NULL) — the DSL supports it (filter-dsl.md
+    // V10), this was just never wired up to a click affordance.
+    const filterBtn = document.createElement("button");
+    filterBtn.className = "filter-eq only-action";
+    filterBtn.setAttribute("aria-label", "filter by null");
+    filterBtn.textContent = "=";
+    filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "IS NULL"); };
+    td.appendChild(filterBtn);
     return td;
   }
   const td = cellTemplate.content.cloneNode(true).firstElementChild;
@@ -814,7 +849,8 @@ async function loadData() {
 async function loadSiblings() {
   let siblings = [];
   try { ({ siblings } = await api("/siblings")); } catch { /* leave empty */ }
-  const div = $("siblings");
+  $("siblings-heading").hidden = siblings.length === 0;
+  const div = $("siblings-list");
   div.replaceChildren(...siblings.map(s => {
     const p = document.createElement("div");
     const dot = document.createElement("span");
@@ -829,7 +865,12 @@ async function loadSiblings() {
   }));
 }
 
-$("filter-form").onsubmit = (e) => { e.preventDefault(); state.offset = 0; loadData(); };
+$("filter-form").onsubmit = (e) => {
+  e.preventDefault();
+  state.filter = $("filter").value.trim();
+  state.offset = 0;
+  loadData();
+};
 $("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData(); };
 $("next").onclick = () => { state.offset += state.limit; loadData(); };
 
