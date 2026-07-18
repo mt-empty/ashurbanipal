@@ -112,6 +112,15 @@ pub trait DbSource: Send + Sync + 'static {
         table: &str,
         opts: QueryOpts,
     ) -> impl std::future::Future<Output = Result<TableData, DbError>> + Send;
+    /// Planner-statistics shortlist for a column (`docs/client-enhancements.md`
+    /// §8): value + its estimated frequency, sourced from `pg_stats`. Never a
+    /// `SELECT DISTINCT` scan — matches the "approximate over exact"
+    /// philosophy `table_counts` already uses via `pg_class.reltuples`.
+    fn common_values(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<(String, f32)>, DbError>> + Send;
 }
 
 /// `DbSource` backed by the host service's existing `sqlx::PgPool`.
@@ -423,5 +432,79 @@ impl DbSource for PgPoolSource {
             rows,
             total_approx,
         })
+    }
+
+    async fn common_values(
+        &self,
+        table: &str,
+        column: &str,
+    ) -> Result<Vec<(String, f32)>, DbError> {
+        let tables = self.allowed_tables().await?;
+        let table = tables
+            .iter()
+            .find(|t| t.as_str() == table)
+            .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
+            .clone();
+        let columns = self.allowed_columns(&table).await?;
+        let column = columns
+            .iter()
+            .find(|c| c.as_str() == column)
+            .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?
+            .clone();
+
+        // `most_common_vals` is `anyarray` (planner stats can be over any
+        // column type); `::text::text[]` is the standard idiom to read it
+        // uniformly — cast to the array's text representation, then
+        // reparse that as a `text[]` literal, rather than fighting
+        // Rust-side type inference for `anyarray`. `most_common_freqs` is
+        // already `real[]`, no cast needed. Both are NULL when `ANALYZE`
+        // has never populated stats for this column; `unnest(NULL)` is an
+        // empty set, so that case falls out as zero rows, not an error.
+        let rows = sqlx::query_as::<_, (String, f32)>(
+            "select t.val, t.freq \
+             from pg_stats, \
+                  lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq) \
+             where schemaname = 'public' and tablename = $1 and attname = $2 \
+             order by t.freq desc",
+        )
+        .bind(&table)
+        .bind(&column)
+        .fetch_all(&self.pool)
+        .await?;
+
+        // The `::text::text[]` idiom above reads an array's *literal* text
+        // form, which for `boolean` is Postgres's abbreviated array-input
+        // syntax (`t`/`f`) rather than the scalar `true`/`false` that
+        // `row_to_json` renders via a direct `col::text` cast elsewhere in
+        // this file. Left alone, a value picked from this list wouldn't
+        // match the same column's own grid rendering (and wouldn't match
+        // `column::text = $n` once the filter DSL lands, since that also
+        // casts the actual column, not an array literal). Verified this is
+        // the one type in practice where the two text forms diverge — enum,
+        // array, uuid, numeric, and timestamp columns all round-trip
+        // identically through both paths.
+        let data_type = sqlx::query_scalar::<_, String>(
+            "select data_type from information_schema.columns \
+             where table_schema = 'public' and table_name = $1 and column_name = $2",
+        )
+        .bind(&table)
+        .bind(&column)
+        .fetch_optional(&self.pool)
+        .await?;
+        let rows = if data_type.as_deref() == Some("boolean") {
+            rows.into_iter()
+                .map(|(val, freq)| {
+                    let val = match val.as_str() {
+                        "t" => "true".to_string(),
+                        "f" => "false".to_string(),
+                        _ => val,
+                    };
+                    (val, freq)
+                })
+                .collect()
+        } else {
+            rows
+        };
+        Ok(rows)
     }
 }
