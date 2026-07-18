@@ -1,6 +1,6 @@
 # Ashurbanipal
 
-<img src="docs/media/icon.svg" alt="" width="32" height="32" align="left"> 
+<img src="docs/media/icon.svg" alt="" width="66" height="66" align="right">
 
 A self-contained, embeddable database browser(read only). no separate DB client, no extra credentials, no build step.
 
