@@ -1,44 +1,51 @@
 # Ashurbanipal
 
-A self-contained, embeddable database browser for development and testing environments. It gives developers a web UI to browse their service's database tables without leaving the browser or configuring external tools.
+<img src="docs/media/icon.svg" alt="" width="32" height="32" align="left"> 
 
-### What it does
+A self-contained, embeddable database browser(read only). no separate DB client, no extra credentials, no build step.
 
-- Lists all tables in the database with approximate row counts.
-- Displays table data with pagination, sorting, and SQL-like filtering.
-- Auto-expands `jsonb` columns into readable nested objects.
-- Shows column types such as UUID, timestamp, jsonb, etc. as badges on every column.
-- Provides a Monaco Editor side-by-side diff view for comparing `jsonb` values between rows.
-- Links to sibling services so you can jump between databases in a multi-service architecture.
+## Why
 
-### Architecture
+Getting a row out of a database that isn't on your laptop currently means:
 
-Two components:
+- Did you request AWS access? Wait for approval.
+- Approved? Now add your username and SSH key to a separate repo nobody's heard of, and wait for *that* owner to approve you too.
+- Follow a Confluence page to wire up AWS + SSH + your pick of DBeaver/pgcli/psql/pgAdmin/TablePlus.
+    - ssh timeout out, oh too bad
+- Get your session killed by fucking Okta re-auth every few hours. Repeat.
+    - blindly accept the MFA prompt, or else your session dies and you have to start over
+- Right now the bastion host is being patched, so none of the above even
+  works.
+- You don't need to have db access, you just need to slice your stories thinly enough so you can test your code without needing db access
+- ram is expensive, I really can't afford another app running on my laptop
 
-1. **Frontend** — a static HTML file (`dbviewer.html`) containing the entire frontend in a single file, framework-agnostic. It talks to the backend via four REST endpoints and uses a CDN-loaded Monaco Editor and JSON tree viewer. This file is identical regardless of backend language.
+all I need is to just see a row in the db, so I can complete my story.
 
-2. **Backend** — a module implementing four endpoints using the service's existing database connection:
-   - `GET /api/tables` — list table names.
-   - `GET /api/table-counts` — approximate row counts via `pg_class.reltuples`.
-   - `GET /api/tables/data?table=x&filter=y&limit=50&offset=0&sort=created_at&order=desc` — paginated, filtered table data.
-   - `GET /api/siblings` — list of sibling service names, for cross-service navigation.
+Ashurbanipal lib skips the whole chain by not needing a new connection at all, 
+it runs inside the process that already has one. If your service can query
+its own database, you can look at a table from your browser.
 
-### Key properties
+## Showcase
 
-- **Embedded** — runs inside the service process, not a separate container or sidecar.
-- **No extra credentials** — reuses the service's own database connection.
-- **Read-only** — `SELECT` queries only; uses a read replica/data source where available.
-- **Single-file frontend** — no build step, no node_modules, no bundler.
-- **Guarded by a kill switch** — enabled only in dev/test environments via config.
-- **SQL-injection safe** — validates table names against the actual schema, allow-lists filter operators, and parameterizes all values.
+<!-- TODO: replace with the real capture. Suggested to record end-to-end
+     against `mise run demo` (seeded db, http://localhost:4000/__ashurbanipal):
+     pick a table -> sort/filter with the DSL -> click-to-filter on a cell ->
+     expand a jsonb cell -> open the record (vertical row) view -> jump via
+     a sibling link. ~15-20s, no narration needed. -->
+![Ashurbanipal demo](docs/media/demo.gif)
 
-### Filter syntax
+## What it does
 
-Users type a SQL-like expression in the search box, e.g.:
-
-```
-status = completed AND created_at > 2016-01-01
-session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd
-```
-
-Supported operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `IS NULL`, `IS NOT NULL`. Columns are cast to text for compatibility with UUID and timestamp types.
+- Lists tables with approximate row counts (and table/column comments, if
+  your schema has them).
+- Search-as-you-type sidebar to jump to a table.
+- Paginated table data with sort and a small SQL-like filter DSL.
+- Click a cell to filter by that exact value; a popover suggests common
+  values for a column, read straight from Postgres's planner statistics —
+  no `SELECT DISTINCT` scan.
+- `jsonb` cells pretty-print in a hover preview; a per-row "record" view lays
+  a wide row out as a vertical `column: value` list instead of scrolling.
+- Per-cell copy button, and a raw-JSON payload viewer for the current page.
+- Show/hide columns.
+- Links to sibling services with live health checks, so you can jump between
+  databases in a multi-service setup.
