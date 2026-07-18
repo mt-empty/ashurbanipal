@@ -338,7 +338,7 @@ function showCellPop(e, text) {
 // (db.rs), which is exactly what the filter DSL compares against, so the
 // raw cell value can be spliced straight into a clause without reshaping it.
 function quoteFilterValue(value) {
-  if (value !== "" && !/[\s']/.test(value) && !/^(AND|OR)$/i.test(value)) return value;
+  if (value !== "" && !/[\s']/.test(value) && !/^(AND|OR|NOT)$/i.test(value)) return value;
   return "'" + value.replace(/'/g, "''") + "'";
 }
 

@@ -169,9 +169,10 @@ Server enforces:
 
 #### 4.1 Filter DSL
 
-`column OP value [AND|OR column OP value ...]`
+`[NOT] column OP value [AND|OR [NOT] column OP value ...]`
 
-Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `IS NULL`, `IS NOT NULL`.
+Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `ILIKE`, `IS NULL`,
+`IS NOT NULL`.
 
 - Operators are allow-listed, not interpolated as arbitrary SQL.
 - Values are always parameterized, never string-concatenated. Bare values
@@ -180,8 +181,10 @@ Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `IS NULL`, `IS NOT NULL`.
 - Columns are cast to `text` before comparison, so the same DSL works
   uniformly across `uuid`, `timestamptz`, `jsonb`, etc.
 - Flat `AND`/`OR` chain; `AND` binds tighter than `OR` (SQL convention).
-  No parentheses, no `NOT`, no cross-table conditions in v1 — matches the
-  single-table, no-join scope.
+  `NOT` is a prefix on a single condition only (`NOT status = active`),
+  never a general boolean operator over a compound expression — so it
+  doesn't reopen parentheses/nesting, which stay out of scope, same as
+  cross-table conditions.
 
 Full grammar (EBNF), semantics, and the parser's test table live in
 `filter-dsl.md`. The parser is hand-written (RSQL-inspired shape, no
