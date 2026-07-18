@@ -30,6 +30,8 @@ reqwest = { version = "0.13", default-features = false, features = [
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = "0.3"
 dotenvy = "0.15"
+escargot = "0.5.15"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "json", "query"] }
 
 [[example]]
 name = "demo"
