@@ -21,8 +21,10 @@
 
 mod config;
 mod db;
+mod filter;
 mod routes;
 
 pub use config::{Config, ConfigError, Limits, Sibling};
 pub use db::{ColumnInfo, DbError, DbSource, PgPoolSource, QueryOpts, TableData, TableInfo};
+pub use filter::{CompareOp, Condition, FilterParseError, Logic, ParsedFilter, Predicate};
 pub use routes::router;

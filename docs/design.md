@@ -188,7 +188,8 @@ Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `ILIKE`, `IS NULL`,
 
 Full grammar (EBNF), semantics, and the parser's test table live in
 `filter-dsl.md`. The parser is hand-written (RSQL-inspired shape, no
-parser dependency) and is scheduled **last** in the server build order.
+parser dependency), implemented in `src/filter.rs`, and was built **last**
+in the server build order, as planned.
 
 Example:
 

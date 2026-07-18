@@ -96,16 +96,18 @@ an identical file.
 - **No unvalidated identifier ever reaches SQL text.** Table and column
   names are only ever spliced into a query after being matched exactly
   against a live `information_schema` lookup (see `allowed_tables` /
-  `allowed_columns` in `db.rs`); everything else is a bound parameter. When
-  the filter DSL parser lands (see below), the same rule applies to its
-  columns — validate against schema before building SQL, never trust the
-  parsed column name directly.
-- **The filter DSL is deliberately unimplemented in `routes.rs` right now.**
-  Any non-empty `filter` param returns 400 ("not implemented yet") rather
-  than being silently ignored. It's scheduled *last* in the build order
-  (`docs/design.md` §4.1, `docs/filter-dsl.md`) — grammar and a full
-  valid/rejected/adversarial test table already exist and are the spec to
-  implement against, not to redesign.
+  `allowed_columns` in `db.rs`); everything else is a bound parameter. The
+  filter DSL's columns follow the same rule (`db.rs`'s `build_where_clause`):
+  each condition's column is matched against `allowed_columns` before being
+  spliced in, exactly like `sort` — the parsed column name from
+  `src/filter.rs` is never trusted directly.
+- **The filter DSL is implemented.** `src/filter.rs` is a pure, dependency-free
+  parser (grammar in `docs/filter-dsl.md`) producing a `ParsedFilter`;
+  `db.rs`'s `query_table` validates each condition's column against the live
+  schema and maps each operator through a hardcoded SQL-fragment match
+  before binding its value as a parameter — see `docs/filter-dsl.md` for the
+  grammar and the full valid/rejected/adversarial test table it's verified
+  against (`tests/black_box/filter_dsl.rs`).
 - **Frontend has no build step.** `dbviewer.html` is hand-edited directly,
   not generated or bundled. Keep it a single self-contained file.
 - **rustls everywhere, no OpenSSL.** Both `sqlx` and `reqwest` are
