@@ -169,6 +169,21 @@
             cursor: pointer; border-radius: 4px; }
   #cv-pop button.cv-value:hover { background: var(--hover); }
   #cv-pop .cv-freq { opacity: .6; }
+
+  /* Column show/hide menu: same Popover API + CSS Anchor Positioning shape
+     as #cv-pop, but the anchor is a single static button rather than one
+     per header, so anchor-name is set once in CSS instead of per-click JS. */
+  #columns-btn { anchor-name: --columns-anchor; }
+  #columns-pop { position: fixed; position-anchor: --columns-anchor;
+            position-try-fallbacks: flip-block, flip-inline;
+            inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+            margin: 0; border: 1px solid var(--border-strong);
+            border-radius: 8px; padding: .3rem; max-width: min(20rem, 90vw);
+            max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
+  #columns-pop label { display: flex; align-items: center; gap: .4rem;
+            padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+  #columns-pop label:hover { background: var(--hover); }
+  .col-hidden { display: none; }
 </style>
 </head>
 <body>
@@ -189,6 +204,7 @@
       <input id="filter" type="search" enterkeyhint="search" placeholder="filter: column OP value AND …" >
       <button id="apply">apply</button>
     </form>
+    <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
     <button id="payload" disabled title="raw JSON response for the current view">payload</button>
   </search>
   <div id="error" role="alert"></div>
@@ -220,6 +236,7 @@
 
 <div id="cell-pop" popover><pre id="cell-pre"></pre></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
+<div id="columns-pop" popover><div id="columns-pop-list"></div></div>
 <script type="module">
 const API = "/__ashurbanipal/api";
 const UI_KEY = "ashurbanipal_ui";
@@ -228,11 +245,16 @@ const UI_KEY = "ashurbanipal_ui";
 // URL (style guide §6): table/sort/order/limit/offset only — never filters
 // (they can contain data values, and a URL is even more exposed than
 // localStorage: browser history, access logs, Referer headers).
-let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0 };
+let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: [] };
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   for (const k of ["table", "sort", "order", "limit"])
     if (saved[k] !== undefined) state[k] = saved[k];
+  // A stray non-array value here (corrupted write, older format) must not
+  // wedge later .includes()/.filter() calls on it — reset silently instead.
+  if (Array.isArray(saved.hiddenColumns)) {
+    state.hiddenColumns = saved.hiddenColumns.filter(c => typeof c === "string");
+  }
 } catch { localStorage.removeItem(UI_KEY); }
 // A URL's query params win over localStorage: opening a shared/bookmarked
 // link should reproduce that link's view, not the visitor's own saved prefs.
@@ -243,8 +265,8 @@ if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "d
 if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
 if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
 function persist() {
-  const { table, sort, order, limit } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ table, sort, order, limit }));
+  const { table, sort, order, limit, hiddenColumns } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ table, sort, order, limit, hiddenColumns }));
 }
 // Mirrors current view state into the URL (replaceState: no new history
 // entries per action) so the address bar is always a shareable link for
@@ -389,6 +411,38 @@ async function showCommonValues(e, column) {
   renderCommonValues(values, column);
 }
 
+// ---- column show/hide (client-enhancements.md §4a): a static-anchored
+// Popover-API checklist toggling a CSS class on the already-rendered
+// header/data cells — never a refetch, purely a display toggle. Matched by
+// column name (data-col), not position, so it can't fall out of sync with
+// header/cell alignment the way an index-based toggle could. A hidden
+// column name absent from the current table's columns (stale table switch,
+// stale localStorage) simply matches nothing here — silent no-op, per
+// ui-guidelines.md R5. ----
+function setColumnVisibility(name, hidden) {
+  document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)
+    .forEach(el => el.classList.toggle("col-hidden", hidden));
+}
+
+function renderColumnMenu(columns) {
+  $("columns-pop-list").replaceChildren(...columns.map(col => {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = !state.hiddenColumns.includes(col.name);
+    input.onchange = () => {
+      const hidden = !input.checked;
+      state.hiddenColumns = hidden
+        ? [...state.hiddenColumns, col.name]
+        : state.hiddenColumns.filter(c => c !== col.name);
+      persist();
+      setColumnVisibility(col.name, hidden);
+    };
+    label.append(input, col.name);
+    return label;
+  }));
+}
+
 // ---- record / vertical view (<dialog>): one already-fetched row as a
 // stacked column:value list, for tables too wide to scan across ----
 function buildRecordEntries(columns, row) {
@@ -494,6 +548,8 @@ function renderHeader(columns) {
   tr.appendChild(actionsTh);
   for (const col of columns) {
     const th = document.createElement("th");
+    th.dataset.col = col.name;
+    if (state.hiddenColumns.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
     if (col.key === "pk" || col.key === "fk") {
       const keyLabel = col.key === "pk"
@@ -564,8 +620,11 @@ function formatCellValue(col, raw) {
 // copy button one element over. Empty cells get neither button — nothing
 // to copy or expand.
 function buildCell(col, raw) {
+  const hidden = state.hiddenColumns.includes(col.name);
   if (raw == null) {
     const td = document.createElement("td");
+    td.dataset.col = col.name;
+    if (hidden) td.classList.add("col-hidden");
     const span = document.createElement("span");
     span.className = "cell-text";
     span.textContent = "∅";
@@ -573,6 +632,8 @@ function buildCell(col, raw) {
     return td;
   }
   const td = cellTemplate.content.cloneNode(true).firstElementChild;
+  td.dataset.col = col.name;
+  if (hidden) td.classList.add("col-hidden");
   const cellText = td.querySelector(".cell-text");
   const btn = td.querySelector(".copy");
   const filterBtn = td.querySelector(".filter-eq");
@@ -615,7 +676,12 @@ function buildRowActionCell(columns, row) {
 
 function renderRows(data) {
   if (data.rows.length === 0) {
-    renderEmptyState(data.columns.length + 1);
+    // colSpan must match the *visible* column count, not the fetched one —
+    // hidden columns drop out of the table's resolved column model entirely
+    // (display:none cells aren't counted), so spanning the full fetched
+    // count here would overshoot it.
+    const visible = data.columns.filter(c => !state.hiddenColumns.includes(c.name)).length;
+    renderEmptyState(visible + 1);
     return;
   }
   const tbody = $("tbody");
@@ -695,11 +761,13 @@ async function loadData() {
   catch (e) { $("error").textContent = e.message; return; }
   lastPayload = data;
   $("payload").disabled = false;
+  $("columns-btn").disabled = false;
   syncUrl();
   const renderTable = () => {
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
     renderRows(data);
+    renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
   document.startViewTransition ? document.startViewTransition(renderTable) : renderTable();
