@@ -41,6 +41,10 @@ pub fn router<S: DbSource>(config: Config, source: S) -> Router {
         .route("/__ashurbanipal/api/tables", get(list_tables::<S>))
         .route("/__ashurbanipal/api/table-counts", get(table_counts::<S>))
         .route("/__ashurbanipal/api/tables/data", get(table_data::<S>))
+        .route(
+            "/__ashurbanipal/api/tables/common-values",
+            get(common_values::<S>),
+        )
         .route("/__ashurbanipal/api/siblings", get(siblings::<S>))
         .with_state(state)
 }
@@ -153,6 +157,46 @@ async fn table_data<S: DbSource>(
     };
     match state.source.query_table(&params.table, opts).await {
         Ok(data) => Json(data).into_response(),
+        Err(e) => error_response(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct CommonValuesParams {
+    table: String,
+    column: String,
+}
+
+#[derive(Serialize)]
+struct CommonValueEntry {
+    value: String,
+    freq: f32,
+}
+
+#[derive(Serialize)]
+struct CommonValuesResponse {
+    values: Vec<CommonValueEntry>,
+}
+
+/// On-demand only (`docs/client-enhancements.md` §8) — deliberately not
+/// folded into `table_data`'s response, since it's only needed when a user
+/// actually opens the dropdown for one specific column.
+async fn common_values<S: DbSource>(
+    State(state): State<Arc<AppState<S>>>,
+    Query(params): Query<CommonValuesParams>,
+) -> Response {
+    match state
+        .source
+        .common_values(&params.table, &params.column)
+        .await
+    {
+        Ok(values) => Json(CommonValuesResponse {
+            values: values
+                .into_iter()
+                .map(|(value, freq)| CommonValueEntry { value, freq })
+                .collect(),
+        })
+        .into_response(),
         Err(e) => error_response(e),
     }
 }
