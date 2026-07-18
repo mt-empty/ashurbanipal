@@ -46,9 +46,23 @@
   ::highlight(table-match) { background: var(--active); }
 
   /* ==== Data table ==== */
-  table { border-collapse: collapse; width: 100%; margin-top: var(--gap); }
+  /* separate/0 instead of collapse: verified directly (not assumed) that
+     collapsed borders cause scrolled-under row content to bleed through a
+     sticky <th>'s background at the collapsed border seams in Chromium —
+     visually identical result at this border style, so no reason to keep
+     collapse once it's confirmed to be the actual cause. */
+  table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: var(--gap); }
   th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
   th { cursor: pointer; user-select: none; }
+  /* Sticky header: pinned within main's existing overflow:auto scroll
+     container. Explicit opaque background (the canvas system color, so it
+     tracks color-scheme: light dark automatically) keeps body rows from
+     visibly scrolling through the header. z-index is load-bearing, not
+     decorative: td already has position:relative (for the copy button),
+     and since tbody follows thead in DOM order, its positioned <td>s paint
+     over a sticky <th> with the default auto stacking order unless the
+     header is explicitly raised above them. */
+  thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
   th[aria-sort="ascending"]::after { content: " ▲"; }
   th[aria-sort="descending"]::after { content: " ▼"; }
   th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
