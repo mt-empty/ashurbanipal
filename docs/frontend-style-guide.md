@@ -127,8 +127,16 @@ a broken page.
   pieces; revisit only if that count grows enough that copy-paste
   duplication becomes an actual, measured problem.
 - **Client-side filter validation** — would duplicate the server-side
-  parser's job in a second place that can drift from it. The filter DSL is
-  deliberately server-side-only; see `filter-dsl.md`.
+  parser's job (accepting or rejecting arbitrary filter text) in a second
+  place that can drift from it. The filter DSL's parser is deliberately
+  server-side-only; see `filter-dsl.md`. This doesn't cover
+  `quoteFilterValue()`/`applyFilterClause()` (click-to-filter, FK cell
+  navigation, the common-values dropdown) — those *compose* a clause from a
+  column/value the server already gave us into valid syntax; they never
+  parse or judge arbitrary user-typed text, so there's no accept/reject
+  decision to drift. Their quoting output still has to agree with
+  `filter-dsl.md` §2, though — see that document's §6 for the specific
+  cases to check once the parser exists.
 - **`@scope`** — the file already gets rule-scoping for free from its
   ID-selector discipline; no cascade-leakage problem to solve.
 - **`requestIdleCallback` / `scheduler.postTask()`** — no measured
