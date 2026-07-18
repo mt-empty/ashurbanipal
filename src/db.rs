@@ -47,6 +47,22 @@ pub struct ColumnInfo {
     pub key: Option<KeyKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub references: Option<ColumnRef>,
+    /// `COMMENT ON COLUMN` text, if any (`docs/client-enhancements.md` §7).
+    /// Most columns in a typical schema won't have one — absent, not an
+    /// error case.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+}
+
+/// A table name plus its optional `COMMENT ON TABLE` text
+/// (`docs/client-enhancements.md` §7). Kept separate from `allowed_tables()`
+/// (plain `Vec<String>`), which stays the lean schema allow-list used for
+/// request validation — this is the richer shape only `/tables` needs.
+#[derive(Debug, Serialize)]
+pub struct TableInfo {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,8 +101,9 @@ impl From<sqlx::Error> for DbError {
 /// adapters can be added without touching handlers (`design.md` §5).
 /// Native async-fn-in-trait — the router is generic, no `dyn`.
 pub trait DbSource: Send + Sync + 'static {
-    fn list_tables(&self)
-        -> impl std::future::Future<Output = Result<Vec<String>, DbError>> + Send;
+    fn list_tables(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<TableInfo>, DbError>> + Send;
     fn table_counts(
         &self,
     ) -> impl std::future::Future<Output = Result<Vec<(String, i64)>, DbError>> + Send;
@@ -238,8 +255,24 @@ fn row_to_json(row: &PgRow, columns: &[ColumnInfo]) -> serde_json::Map<String, s
 }
 
 impl DbSource for PgPoolSource {
-    async fn list_tables(&self) -> Result<Vec<String>, DbError> {
-        self.allowed_tables().await
+    async fn list_tables(&self) -> Result<Vec<TableInfo>, DbError> {
+        // Catalog-only read (`obj_description` against `pg_description`),
+        // same cost class as the `pg_class.reltuples` count query below —
+        // no table scan. `allowed_tables()` stays the lean `Vec<String>`
+        // used for request validation; this is the richer `/tables` shape.
+        let rows = sqlx::query_as::<_, (String, Option<String>)>(
+            "select c.relname::text, obj_description(c.oid, 'pg_class') \
+             from pg_class c \
+             join pg_namespace n on n.oid = c.relnamespace \
+             where n.nspname = 'public' and c.relkind = 'r' \
+             order by c.relname",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(name, comment)| TableInfo { name, comment })
+            .collect())
     }
 
     async fn table_counts(&self) -> Result<Vec<(String, i64)>, DbError> {
@@ -289,6 +322,27 @@ impl DbSource for PgPoolSource {
         // column list above rather than as a separate route (`design.md`
         // §2's no-joins non-goal is about query execution, not this).
         let (pk_columns, fk_columns) = self.key_metadata(&table).await?;
+        // `col_description` keyed by `pg_attribute.attnum`, not
+        // `information_schema.ordinal_position` — the two can diverge once
+        // a table has ever had a column dropped, so this joins through
+        // `pg_attribute`/`pg_class` directly rather than trusting the
+        // position from the query above. Catalog-only, same cost class as
+        // `key_metadata` above.
+        let column_comments: HashMap<String, String> =
+            sqlx::query_as::<_, (String, Option<String>)>(
+                "select a.attname::text, col_description(a.attrelid, a.attnum::int) \
+             from pg_attribute a \
+             join pg_class c on c.oid = a.attrelid \
+             join pg_namespace n on n.oid = c.relnamespace \
+             where n.nspname = 'public' and c.relname = $1 \
+               and a.attnum > 0 and not a.attisdropped",
+            )
+            .bind(&table)
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .filter_map(|(name, comment)| comment.map(|c| (name, c)))
+            .collect();
         let columns: Vec<ColumnInfo> = column_types
             .into_iter()
             .map(|(name, type_name)| {
@@ -303,11 +357,13 @@ impl DbSource for PgPoolSource {
                 } else {
                     (None, None)
                 };
+                let comment = column_comments.get(&name).cloned();
                 ColumnInfo {
                     name,
                     type_name,
                     key,
                     references,
+                    comment,
                 }
             })
             .collect();

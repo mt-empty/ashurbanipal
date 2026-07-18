@@ -74,6 +74,15 @@ create table sessions (
     ended_at timestamptz
 );
 
+comment on table users is 'Registered application users.';
+comment on column users.metadata is 'Free-form per-user preferences and feature flags, stored as JSON.';
+
+comment on table orders is 'Customer orders placed against the product catalog.';
+comment on column orders.user_id is 'The user who placed this order.';
+comment on column orders.discount_pct is 'Percentage discount applied at checkout, if any.';
+
+comment on table sessions is 'Login sessions, one row per device/browser session.';
+
 insert into users (id, email, full_name, age, is_active, login_count, metadata, last_login_at, created_at) values
     ('8bc78ddc-e82d-49be-8bbf-83708e726b4b', 'may@example.net', 'Elmo Dach', 73, true, 105, '{"role": "admin", "prefs": {"theme": "light"}}'::jsonb, now() - interval '26476 minutes', now() - interval '224 days'),
     ('40feed8f-d730-4b43-8669-505def1a599a', 'autumn@example.com', 'Arne Klein', 40, false, 353, '{"role": "user", "beta_features": ["new_dashboard"]}'::jsonb, now() - interval '102033 minutes', now() - interval '11 days'),

@@ -24,5 +24,5 @@ mod db;
 mod routes;
 
 pub use config::{Config, ConfigError, Limits, Sibling};
-pub use db::{ColumnInfo, DbError, DbSource, PgPoolSource, QueryOpts, TableData};
+pub use db::{ColumnInfo, DbError, DbSource, PgPoolSource, QueryOpts, TableData, TableInfo};
 pub use routes::router;
