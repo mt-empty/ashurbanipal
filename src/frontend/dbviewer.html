@@ -69,6 +69,12 @@
      aria-label with the text equivalent, so the icon is never the only
      signal. */
   .key-icon { margin-right: .2rem; }
+  /* Common-values header affordance (docs/client-enhancements.md §8): a
+     plain icon button, not part of the sort click target — its own onclick
+     stops propagation so it doesn't also trigger th's sort handler. */
+  .common-values-btn { background: none; border: none; cursor: pointer; font: inherit;
+              color: inherit; margin-left: .3rem; padding: 0 .15rem; border-radius: 3px; }
+  .common-values-btn:hover { background: var(--hover); }
   /* FK cells: a real <button> (see buildCell), styled distinctly from the
      plain cell-text button so it doesn't read as a normal <a> hyperlink it
      isn't — this is an in-app state change, not real navigation. */
@@ -144,6 +150,25 @@
               box-shadow: 0 4px 16px #0004; }
   #cell-pop pre { margin: 0; padding: .6rem var(--gap-lg); overflow: auto;
                   max-height: 50vh; white-space: pre-wrap; word-break: break-word; }
+
+  /* Common-values popover: same CSS Anchor Positioning + Popover API shape
+     as #cell-pop above, anchored to the header's ▾ button instead of a
+     cell. Kept as a separate element/anchor-name (--cv-anchor) rather than
+     reusing --cell-anchor, since both popovers can be triggered from the
+     same render pass and each anchor-name resolves to one element. */
+  #cv-pop { position: fixed; position-anchor: --cv-anchor;
+            position-try-fallbacks: flip-block, flip-inline;
+            inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+            margin: 0; border: 1px solid var(--border-strong);
+            border-radius: 8px; padding: .3rem; max-width: min(20rem, 90vw);
+            max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
+  #cv-pop .cv-empty { opacity: .6; padding: .3rem .5rem; margin: 0; }
+  #cv-pop button.cv-value { display: flex; justify-content: space-between; gap: .75rem;
+            width: 100%; box-sizing: border-box; background: none; border: none;
+            font: inherit; color: inherit; text-align: left; padding: .3rem .5rem;
+            cursor: pointer; border-radius: 4px; }
+  #cv-pop button.cv-value:hover { background: var(--hover); }
+  #cv-pop .cv-freq { opacity: .6; }
 </style>
 </head>
 <body>
@@ -194,6 +219,7 @@
 </dialog>
 
 <div id="cell-pop" popover><pre id="cell-pre"></pre></div>
+<div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <script type="module">
 const API = "/__ashurbanipal/api";
 const UI_KEY = "ashurbanipal_ui";
@@ -298,6 +324,69 @@ function applyFilterClause(column, op, value) {
   $("filter").value = `${column} ${op} ${quoteFilterValue(value)}`;
   state.offset = 0;
   loadData();
+}
+
+// ---- common-values header dropdown (docs/client-enhancements.md §8): a
+// shortlist from Postgres planner statistics (pg_stats.most_common_vals),
+// never a full distinct-value scan — copy says "common values", not "all
+// values", so it doesn't imply completeness it doesn't have. Reuses the
+// CSS Anchor Positioning + Popover API pattern from #cell-pop (see #cv-pop)
+// and the applyFilterClause() helper from click-to-filter above. ----
+let cvAnchor = null;
+let cvRequestToken = 0;
+function renderCommonValues(values, column) {
+  const list = $("cv-pop-list");
+  if (values.length === 0) {
+    const p = document.createElement("p");
+    p.className = "cv-empty";
+    p.textContent = "no common values available";
+    list.replaceChildren(p);
+    return;
+  }
+  list.replaceChildren(...values.map(v => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cv-value";
+    const val = document.createElement("span");
+    val.textContent = v.value;
+    const freq = document.createElement("span");
+    freq.className = "cv-freq";
+    freq.textContent = `${Math.round(v.freq * 100)}%`;
+    btn.append(val, freq);
+    btn.onclick = () => { $("cv-pop").hidePopover(); applyFilterClause(column, "=", v.value); };
+    return btn;
+  }));
+}
+
+async function showCommonValues(e, column) {
+  const btn = e.currentTarget;
+  if (cvAnchor) cvAnchor.style.anchorName = "";
+  cvAnchor = btn;
+  cvAnchor.style.anchorName = "--cv-anchor";
+  const list = $("cv-pop-list");
+  const loading = document.createElement("p");
+  loading.className = "cv-empty";
+  loading.textContent = "loading…";
+  list.replaceChildren(loading);
+  $("cv-pop").showPopover();
+  // A second header's ▾ can be clicked before the first request resolves —
+  // both share one popover instance, so a token discards a stale response
+  // instead of letting it clobber whichever column is actually showing.
+  const token = ++cvRequestToken;
+  const params = new URLSearchParams({ table: state.table, column });
+  let values;
+  try {
+    ({ values } = await api("/tables/common-values?" + params));
+  } catch (err) {
+    if (token !== cvRequestToken) return;
+    const p = document.createElement("p");
+    p.className = "cv-empty";
+    p.textContent = err.message;
+    list.replaceChildren(p);
+    return;
+  }
+  if (token !== cvRequestToken) return;
+  renderCommonValues(values, column);
 }
 
 // ---- record / vertical view (<dialog>): one already-fetched row as a
@@ -420,7 +509,7 @@ function renderHeader(columns) {
       // existing key description — the icon keeps its own `title` above.
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
-      th.textContent = label;
+      th.append(label);
     }
     if (col.comment) th.title = col.comment;
     th.setAttribute("aria-sort", col.name === state.sort
@@ -430,6 +519,16 @@ function renderHeader(columns) {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
       state.sort = col.name; state.offset = 0; persist(); loadData();
     };
+    // Common-values dropdown affordance (§8): its own focusable control
+    // nested in the sortable th, same shape as the record-btn nested in a
+    // row-actions td — stopPropagation so opening it doesn't also toggle sort.
+    const cvBtn = document.createElement("button");
+    cvBtn.type = "button";
+    cvBtn.className = "common-values-btn";
+    cvBtn.setAttribute("aria-label", `common values for ${col.name}`);
+    cvBtn.textContent = "▾";
+    cvBtn.onclick = (e) => { e.stopPropagation(); showCommonValues(e, col.name); };
+    th.appendChild(cvBtn);
     tr.appendChild(th);
   }
   $("thead").replaceChildren(tr);
@@ -547,31 +646,36 @@ function updatePager(data) {
   $("next").disabled = data.rows.length < state.limit;
 }
 
-// ---- focus preservation across tbody re-renders ----
+// ---- focus preservation across thead/tbody re-renders ----
 // replaceChildren() detaches whatever was focused inside it, and the browser
 // silently falls back to <body> — a real defect for keyboard users on every
-// sort/page/filter change. Capture the focused cell's position before the
-// replace and restore focus to the same slot afterward, falling back to the
-// table itself (tabindex="-1") if that slot no longer exists.
-function captureTbodyFocus() {
+// sort/page/filter/table-switch change. Capture the focused cell's position
+// before the replace and restore focus to the same slot afterward, falling
+// back to the table itself (tabindex="-1") if that slot no longer exists.
+// Covers both tbody (cell buttons) and thead (the common-values ▾ button,
+// §8 — the first focusable control this file ever put in a header row;
+// verified against a real table switch that it does drop to <body> without
+// this covering thead too, not just a hypothetical).
+function captureTableFocus() {
   const active = document.activeElement;
-  const tbody = $("tbody");
-  if (!active || !tbody.contains(active)) return null;
-  const td = active.closest("td");
+  const table = document.querySelector("table");
+  if (!active || !table.contains(active)) return null;
+  const cell = active.closest("th, td");
   const tr = active.closest("tr");
-  if (!td || !tr) return null;
+  if (!cell || !tr) return null;
   return {
+    region: tr.parentElement.id, // "thead" | "tbody"
     rowIndex: [...tr.parentElement.children].indexOf(tr),
-    colIndex: [...tr.children].indexOf(td),
+    colIndex: [...tr.children].indexOf(cell),
     className: active.className,
   };
 }
 
-function restoreTbodyFocus(captured) {
+function restoreTableFocus(captured) {
   if (!captured) return;
-  const tr = $("tbody").children[captured.rowIndex];
-  const td = tr?.children[captured.colIndex];
-  const target = td?.querySelector(`.${captured.className}`);
+  const tr = $(captured.region)?.children[captured.rowIndex];
+  const cell = tr?.children[captured.colIndex];
+  const target = cell?.querySelector(`.${captured.className}`);
   (target ?? document.querySelector("table")).focus();
 }
 
@@ -593,10 +697,10 @@ async function loadData() {
   $("payload").disabled = false;
   syncUrl();
   const renderTable = () => {
-    const focusCapture = captureTbodyFocus();
+    const focusCapture = captureTableFocus();
     renderHeader(data.columns);
     renderRows(data);
-    restoreTbodyFocus(focusCapture);
+    restoreTableFocus(focusCapture);
   };
   document.startViewTransition ? document.startViewTransition(renderTable) : renderTable();
   updatePager(data);
