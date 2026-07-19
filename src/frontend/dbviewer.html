@@ -40,7 +40,24 @@
               border-radius: 4px; display: flex; justify-content: space-between; }
   li button:hover { background: var(--hover); }
   li button.active { background: var(--active); }
+  .row-right { display: flex; align-items: center; gap: .35rem; }
   .count { opacity: .6; }
+  /* Loading indicator for the sidebar row (replaces the old toolbar
+     #status text, which lived in #controls's flex row and visibly shoved
+     #filter sideways every time it appeared/disappeared — see git history
+     around 2026-07-19). Always in the DOM at a fixed size; only
+     visibility toggles (never display), so a row gaining/losing the spin
+     never reflows the button's own layout, let alone anything in #main.
+     Scoped to the sidebar row instead of the toolbar so this class of bug
+     structurally can't recur there again. */
+  .row-spinner { width: .7rem; height: .7rem; border-radius: 50%;
+                 border: 2px solid var(--border-strong); border-top-color: transparent;
+                 visibility: hidden; flex: none; }
+  li button.loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
+  }
 
   /* ==== Sidebar table search ==== */
   #table-search { margin-bottom: var(--gap); }
@@ -152,7 +169,14 @@
   #filter-highlight .kw { color: var(--keyword); }
   #filter-highlight .op { color: var(--operator); }
   #filter-highlight .str { color: var(--string); }
-  #status { opacity: .6; }
+  /* Visually hidden but still in the accessibility tree — keeps the
+     aria-live loading announcement (frontend-style-guide.md §5) without
+     the text ever occupying space in #controls's flex row, which is what
+     used to shove #filter sideways on every load. Standard clip-rect
+     sr-only technique. */
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
+             margin: -1px; overflow: hidden; clip-path: inset(50%);
+             white-space: nowrap; border: 0; }
   #error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap; }
   .empty td { text-align: center; opacity: .6; padding: 1rem; }
 
@@ -271,7 +295,7 @@
 <main id="main">
   <search id="controls">
     <strong id="current">—</strong>
-    <output id="status" aria-live="polite"></output>
+    <output id="status" aria-live="polite" class="sr-only"></output>
     <form id="filter-form">
       <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
       <button id="apply">apply</button>
@@ -773,7 +797,7 @@ function openRecordView(columns, row) {
 
 // ---- sidebar table search-as-you-type: transient, session-local UI state
 // (deliberately not part of `state`/localStorage — resets on reload) ----
-let tableEntries = []; // { name, li, textNode }
+let tableEntries = []; // { name, li, btn, textNode }
 const tableMatchHighlight = CSS.highlights ? new Highlight() : null;
 if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
 
@@ -809,9 +833,9 @@ async function loadTables() {
   for (const t of tables) {
     const li = document.createElement("li");
     const btn = document.createElement("button");
-    btn.innerHTML = `<span></span><span class="count"></span>`;
+    btn.innerHTML = `<span></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
     btn.firstChild.textContent = t.name;
-    btn.lastChild.textContent = `~${countMap[t.name] ?? "?"}`;
+    btn.querySelector(".count").textContent = `~${countMap[t.name] ?? "?"}`;
     btn.dataset.table = t.name;
     if (t.comment) btn.title = t.comment;
     // A filter clause is written against this table's columns — it can't
@@ -826,7 +850,7 @@ async function loadTables() {
     };
     li.appendChild(btn);
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, textNode: btn.firstChild.firstChild });
+    tableEntries.push({ name: t.name, li, btn, textNode: btn.firstChild.firstChild });
   }
   filterTables();
   const tableNames = tables.map(t => t.name);
@@ -834,6 +858,14 @@ async function loadTables() {
   if (!tableNames.includes(state.table)) state.table = tableNames[0] ?? null;
   if (state.table) loadData();
   else setStatus("");
+}
+
+// Toggles the fixed-size spinner on a sidebar row (see .row-spinner CSS) —
+// the visible loading affordance for table-data fetches, keyed by table
+// name rather than "whichever row is .active" so it's still correct if
+// tableEntries is ever rebuilt mid-fetch.
+function setRowLoading(name, loading) {
+  tableEntries.find(e => e.name === name)?.btn.classList.toggle("loading", loading);
 }
 
 async function fetchTableData() {
@@ -844,10 +876,12 @@ async function fetchTableData() {
   if (state.filter) params.set("filter", state.filter);
   setStatus("loading…");
   document.querySelector("table").setAttribute("aria-busy", "true");
+  setRowLoading(state.table, true);
   try {
     return await api("/tables/data?" + params);
   } finally {
     setStatus("");
+    setRowLoading(state.table, false);
     document.querySelector("table").removeAttribute("aria-busy");
   }
 }
