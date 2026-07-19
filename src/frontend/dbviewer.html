@@ -203,10 +203,23 @@
                         font: inherit; color: inherit; }
   dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
                           max-height: calc(80vh - 3rem); }
-  dialog dl { display: grid; grid-template-columns: max-content 1fr;
+  dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
               gap: .3rem var(--gap-lg); }
   dialog dl dt { font-weight: 600; }
   dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Record view's per-field copy button is a grid item, not absolutely
+     positioned over a td, so it needs `position: static` — but the
+     hover-to-reveal behavior otherwise matches the table's copy button
+     exactly (same opacity values), just keyed off dd:hover instead of
+     td:hover since dt/dd/button here are flat grid siblings, not wrapped
+     in a row container. */
+  dialog dl .copy { position: static; top: auto; transform: none; opacity: 0; align-self: start; }
+  dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
+  /* The whole-row copy button lives in the dialog header, so it stays
+     visible regardless of hover — it's a standalone action, not a
+     per-field affordance to declutter. */
+  .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
+  .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1; }
 
   /* Cell preview: native Popover API — non-modal, light-dismiss (click
      anywhere outside closes it). Positioned via CSS Anchor Positioning:
@@ -324,7 +337,7 @@
 
 <dialog id="record-dialog" closedby="any">
   <div class="dialog-head">
-    <strong>record</strong>
+    <span class="dialog-head-title"><strong>record</strong><button id="record-copy-row" class="copy" aria-label="copy row as JSON">⧉</button></span>
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
   <dl id="record-dl"></dl>
@@ -779,16 +792,43 @@ function buildRecordEntries(columns, row) {
     dt.textContent = col.name;
     const dd = document.createElement("dd");
     const raw = row[col.name];
+    // Null fields get an empty placeholder rather than no third grid item,
+    // same reasoning as the table's null cells (see buildCell): nothing to
+    // copy, but the grid's three-column alignment still needs a cell here.
+    let action = document.createElement("span");
     if (raw == null) dd.textContent = "∅";
-    else if (col.type === "jsonb") dd.textContent = prettyPrint(raw);
-    else dd.appendChild(formatCellValue(col, raw));
-    nodes.push(dt, dd);
+    else {
+      if (col.type === "jsonb") dd.textContent = prettyPrint(raw);
+      else dd.appendChild(formatCellValue(col, raw));
+      const btn = document.createElement("button");
+      btn.className = "copy";
+      btn.setAttribute("aria-label", "copy cell value");
+      btn.textContent = "⧉";
+      btn.onclick = () => copyText(raw, btn);
+      action = btn;
+    }
+    nodes.push(dt, dd, action);
   }
   return nodes;
 }
 
+// jsonb columns are re-nested (their raw value is the ::text-cast JSON
+// string, per buildRecordEntries) so the copied JSON has real nested
+// objects instead of an escaped string — everything else stays exactly the
+// raw text value already shown in the record view and copied per-field.
+function recordAsJson(columns, row) {
+  const obj = {};
+  for (const col of columns) {
+    const raw = row[col.name];
+    obj[col.name] = col.type === "jsonb" && raw != null ? JSON.parse(raw) : raw;
+  }
+  return JSON.stringify(obj, null, 2);
+}
+
 function openRecordView(columns, row) {
   $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
+  const copyRowBtn = $("record-copy-row");
+  copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
   const open = () => $("record-dialog").showModal();
   document.startViewTransition ? document.startViewTransition(open) : open();
 }
