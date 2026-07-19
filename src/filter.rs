@@ -316,7 +316,10 @@ fn parse_operator(input: &str, pos: &mut usize) -> Result<OpToken, FilterParseEr
             return Ok(OpToken::Compare(*op));
         }
     }
-    Err(err("expected operator", start))
+    Err(err(
+        "expected operator (one of = != >= <= > < LIKE ILIKE, or IS [NOT] NULL)",
+        start,
+    ))
 }
 
 /// `simple_condition = column, ows, operator, ows, value | column, ws, "IS",
@@ -643,6 +646,21 @@ mod tests {
     #[test]
     fn r4_unknown_operator() {
         assert!(parse("status == completed").is_err());
+    }
+
+    /// The "expected operator" error enumerates the valid operator set, since
+    /// it's the frontend's only in-context hint at what's supported (no
+    /// separate docs affordance — `ui-guidelines.md` heuristic #10).
+    #[test]
+    fn unknown_operator_error_lists_valid_operators() {
+        let e = parse("status CONTAINS completed").unwrap_err();
+        for op in ["!=", ">=", "<=", "LIKE", "ILIKE", "IS"] {
+            assert!(
+                e.message.contains(op),
+                "message {:?} missing {op}",
+                e.message
+            );
+        }
     }
 
     #[test]
