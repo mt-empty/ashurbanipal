@@ -1,6 +1,27 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:net";
 
 const REPO_ROOT = new URL("../../../..", import.meta.url).pathname;
+
+/** An OS-assigned free TCP port, same technique tests/black_box/common.rs
+ * uses on the Rust side — avoids hardcoding ports that might collide with
+ * another worker's spawned process. */
+export async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, () => {
+      const address = server.address();
+      if (address && typeof address === "object") {
+        const port = address.port;
+        server.close(() => resolve(port));
+      } else {
+        server.close(() => reject(new Error("could not determine a free port")));
+      }
+    });
+  });
+}
 
 export interface SpawnedDemo {
   baseUrl: string;
