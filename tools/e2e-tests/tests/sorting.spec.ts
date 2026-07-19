@@ -42,13 +42,10 @@ test("switching to a different column always starts ascending, and unsorts the o
 });
 
 test("ascending sort actually reorders rows by value", async ({ page }) => {
-  // Known bug, not yet fixed: db.rs's unqualified `order by` resolves to
-  // the ::text-cast output column instead of the real numeric column, so
-  // this sorts lexicographically ("107.92" < "11.18") instead of
-  // numerically. See docs/known-issues.md #1 for root cause + the fix.
-  // Pinned to correct behavior on purpose — once fixed, this test starts
-  // "unexpectedly passing," which is the signal to delete this line.
-  test.fail(true, "known bug: docs/known-issues.md #1 — sort is lexicographic, not numeric");
+  // Regression test for docs/known-issues.md #1 (fixed): db.rs's
+  // unqualified `order by` used to resolve to the ::text-cast output
+  // column instead of the real numeric column, sorting lexicographically
+  // ("107.92" < "11.18") instead of numerically.
   await gotoApp(page);
   await selectTable(page, "products");
   await page.locator('th[data-col="price"]').click();

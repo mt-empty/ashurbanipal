@@ -150,6 +150,47 @@ async fn sort_and_order_are_respected() {
     assert_eq!(emails, sorted, "rows should be in descending email order");
 }
 
+/// Regression test for a real bug (docs/known-issues.md #1): every column
+/// is selected as `"col"::text` for uniform decoding, and an unqualified
+/// `order by "col"` bound to that same-named *output* column instead of
+/// the source column, sorting numeric columns lexicographically
+/// ("107.92" < "11.18") instead of numerically. `email` above is a `text`
+/// column, so the bug was invisible there — text-cast-to-text is a no-op,
+/// meaning lexicographic and real order coincide for it. Needed a
+/// non-text column specifically to catch this.
+#[tokio::test]
+async fn sort_on_a_numeric_column_is_numeric_not_lexicographic() {
+    let srv = TestServer::spawn().await;
+    let body: serde_json::Value = srv
+        .client()
+        .get(srv.url("/__ashurbanipal/api/tables/data"))
+        .query(&[
+            ("table", "products"),
+            ("sort", "price"),
+            ("order", "asc"),
+            ("limit", "100"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let prices: Vec<f64> = body["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["price"].as_str().unwrap().parse().unwrap())
+        .collect();
+    let mut sorted = prices.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(
+        prices, sorted,
+        "rows should be in real numeric ascending order, not lexicographic string order"
+    );
+}
+
 #[tokio::test]
 async fn invalid_order_value_is_rejected() {
     let srv = TestServer::spawn().await;

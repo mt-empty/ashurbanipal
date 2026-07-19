@@ -41,7 +41,16 @@
               border-radius: 4px; display: flex; justify-content: space-between; }
   li button:hover { background: var(--hover); }
   li button.active { background: var(--active); }
-  .row-right { display: flex; align-items: center; gap: .35rem; }
+  /* A long table name would otherwise overflow the sidebar's fixed 220px
+     width and push .row-right (the spinner + row count) out with it, or
+     wrap awkwardly — min-width:0 overrides the flex-item default of
+     min-width:auto, which is what actually blocks shrinking below content
+     size, letting the ellipsis truncation below take effect at all. The
+     full name is always in `title` (see loadTables()) as the truncation's
+     escape hatch, per ui-guidelines.md R8. */
+  .row-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; }
+  .row-right { display: flex; align-items: center; gap: .35rem; flex: none; }
   .count { opacity: .6; }
   /* Loading indicator for the sidebar row (replaces the old toolbar
      #status text, which lived in #controls's flex row and visibly shoved
@@ -186,8 +195,16 @@
   #siblings h2 { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
                  font-weight: 600; opacity: .6; margin: 0 0 var(--gap); }
   .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
-         margin-right: .4em; background: #999; }
+         margin-right: .4em; background: #999; flex: none; }
   .dot.up { background: var(--success); } .dot.down { background: var(--danger); }
+  /* Same overflow shape as .row-name in the sidebar table list above: a
+     long sibling name would otherwise wrap awkwardly (plain inline flow
+     has no natural single-line clipping) rather than truncating cleanly.
+     Full name is always in `title` (see loadSiblings()) as the escape
+     hatch, per ui-guidelines.md R8. */
+  .sibling-row { display: flex; align-items: center; }
+  .sibling-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                  min-width: 0; }
 
   /* ==== Pager ==== */
   #pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center; }
@@ -874,11 +891,16 @@ async function loadTables() {
   for (const t of tables) {
     const li = document.createElement("li");
     const btn = document.createElement("button");
-    btn.innerHTML = `<span></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
+    btn.innerHTML = `<span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
     btn.firstChild.textContent = t.name;
     btn.querySelector(".count").textContent = `~${countMap[t.name] ?? "?"}`;
     btn.dataset.table = t.name;
-    if (t.comment) btn.title = t.comment;
+    // Always set, not just when commented: the name itself can overflow
+    // the fixed-width sidebar (long table names) and gets CSS-truncated
+    // (see .row-name), so the native title tooltip is this truncation's
+    // escape hatch (ui-guidelines.md R8), same as the cell-preview popover
+    // is for a truncated cell value elsewhere in this file.
+    btn.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
     // A filter clause is written against this table's columns — it can't
     // just carry over to a different table (wrong columns, possibly not
     // even valid syntax if it was mid-edit), so it resets the same way sort
@@ -909,21 +931,39 @@ function setRowLoading(name, loading) {
   tableEntries.find(e => e.name === name)?.btn.classList.toggle("loading", loading);
 }
 
+// Reference-counted rather than a plain boolean: fetchTableData() can be
+// in flight more than once at a time (a user can switch tables again
+// before the previous fetch resolves — nothing here cancels it). A plain
+// "set true / set false" pair would let the *first* fetch to finish clear
+// aria-busy/#status while the *other* one is still genuinely running.
+// Counting only clears them once every in-flight fetch has completed.
+let inFlightFetches = 0;
+
 async function fetchTableData() {
+  // Captured once, for this call only — never re-read state.table later.
+  // Without this, a slow-to-resolve fetch for table A would clear table
+  // B's row-loading flag (whatever state.table had become by the time A's
+  // `finally` runs) instead of its own, leaving A's own row's spinner
+  // stuck running forever (docs/known-issues.md #2).
+  const table = state.table;
   const params = new URLSearchParams({
-    table: state.table, limit: state.limit, offset: state.offset,
+    table, limit: state.limit, offset: state.offset,
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
   if (state.filter) params.set("filter", state.filter);
-  setStatus("loading…");
-  document.querySelector("table").setAttribute("aria-busy", "true");
-  setRowLoading(state.table, true);
+  if (inFlightFetches++ === 0) {
+    setStatus("loading…");
+    document.querySelector("table").setAttribute("aria-busy", "true");
+  }
+  setRowLoading(table, true);
   try {
     return await api("/tables/data?" + params);
   } finally {
-    setStatus("");
-    setRowLoading(state.table, false);
-    document.querySelector("table").removeAttribute("aria-busy");
+    setRowLoading(table, false);
+    if (--inFlightFetches === 0) {
+      setStatus("");
+      document.querySelector("table").removeAttribute("aria-busy");
+    }
   }
 }
 
@@ -1159,12 +1199,30 @@ function updateActiveTableChrome() {
   document.title = state.table ? `${state.table} — Ashurbanipal` : "Ashurbanipal";
 }
 
+// Guards against a real bug (docs/known-issues.md #2): loadData() has
+// multiple entry points (table switch, sort click, filter submit,
+// pager) and nothing previously stopped an older, slower request's
+// response from landing *after* a newer one and overwriting its
+// already-rendered result — #current could end up correctly labeled
+// while the grid actually showed a *different* table's columns/rows,
+// since updateActiveTableChrome() reads live state.table (already
+// correct) but renderHeader/renderRows use whichever `data` this
+// particular stale call happened to fetch. Same shape of fix as
+// showCommonValues's cvRequestToken, applied to the main load path.
+let loadDataToken = 0;
+
 async function loadData() {
   $("error").textContent = "";
   if (!state.table) { updateActiveTableChrome(); setStatus(""); return; }
+  const token = ++loadDataToken;
   let data;
   try { data = await fetchTableData(); }
-  catch (e) { $("error").textContent = e.message; return; }
+  catch (e) {
+    if (token !== loadDataToken) return; // superseded by a newer request
+    $("error").textContent = e.message;
+    return;
+  }
+  if (token !== loadDataToken) return; // superseded by a newer request
   updateActiveTableChrome();
   lastPayload = data;
   $("payload").disabled = false;
@@ -1183,9 +1241,18 @@ async function loadData() {
   $("main").scrollTo({ top: 0, behavior: "smooth" });
 }
 
+// Polled every 15s (see setInterval below) — a token guard against the
+// same class of bug as loadData()'s (docs/known-issues.md #2): without
+// it, a slow health-check round that started earlier but resolves after
+// a later poll would overwrite that later poll's already-rendered,
+// more-current result. Lower-odds here (health checks have their own 3s
+// timeout, routes.rs) but the same structural gap, so guarded the same way.
+let siblingsRequestToken = 0;
 async function loadSiblings() {
+  const token = ++siblingsRequestToken;
   let siblings = [];
   try { ({ siblings } = await api("/siblings")); } catch { /* leave empty */ }
+  if (token !== siblingsRequestToken) return; // superseded by a newer poll
   $("siblings-heading").hidden = siblings.length === 0;
   const div = $("siblings-list");
   div.replaceChildren(...siblings.map(s => {
@@ -1197,6 +1264,9 @@ async function loadSiblings() {
     const a = document.createElement("a");
     a.href = s.dbviewer_url; a.textContent = s.name;
     a.target = "_blank"; a.rel = "noopener";
+    a.title = s.name; // truncation escape hatch, see .sibling-row/.sibling-name CSS
+    p.className = "sibling-row";
+    a.className = "sibling-name";
     p.append(dot, a);
     return p;
   }));
