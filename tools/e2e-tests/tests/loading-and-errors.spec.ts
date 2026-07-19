@@ -4,8 +4,7 @@ import { gotoApp, selectTable } from "./support/helpers";
 test("the sidebar loading spinner appears without shifting row layout (screenshot)", async ({
   page,
 }) => {
-  await gotoApp(page);
-  await page.locator("#tables button.active").waitFor(); // initial load settled
+  await gotoApp(page); // initial load already settled (gotoApp's own wait)
 
   await page.route("**/api/tables/data*", async (route) => {
     await new Promise((r) => setTimeout(r, 800));
