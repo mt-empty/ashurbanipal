@@ -8,7 +8,7 @@ Ashurbanipal is a Rust/Axum crate that a host service embeds to get a
 read-only web UI for browsing its own Postgres tables (no separate DB
 client, no extra credentials, no build step). It ships as a single crate:
 the host does `app.merge(ashurbanipal::router(config, db_source))` and gets
-five routes under a fixed `/__ashurbanipal` prefix, including the UI itself.
+six routes under a fixed `/__ashurbanipal` prefix, including the UI itself.
 
 Two components:
 - **Frontend** — `src/frontend/dbviewer.html`, a single static HTML file
@@ -20,7 +20,7 @@ Two components:
   unreachable.
 - **Backend** — `src/config.rs` (kill switch + limits + siblings config),
   `src/db.rs` (the `DbSource` trait + its one impl, `PgPoolSource`),
-  `src/routes.rs` (the Axum router and the four API handlers).
+  `src/routes.rs` (the Axum router and the five API handlers).
 
 Read `docs/design.md` first for anything non-obvious — it's the source of
 truth for intended behavior. `docs/filter-dsl.md` has the filter grammar
@@ -84,7 +84,7 @@ an identical file.
   is generic (`router<S: DbSource>`) — no `dyn`. Don't add `async_trait` or
   `dyn DbSource` unless a second implementation actually shows up.
 - **Kill switch is fail-closed and checked once, at router construction.**
-  `Config::is_enabled()` gates all five routes identically — if disabled,
+  `Config::is_enabled()` gates all six routes identically — if disabled,
   `router()` returns an empty `Router::new()`, so the mounted app 404s
   exactly as if the crate weren't merged in at all. Never add a route that
   bypasses this, and never move the enabled-check to per-request.
