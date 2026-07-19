@@ -211,7 +211,7 @@ session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd
 
 The backend performs the health checks (parallel HTTP GET to each sibling's
 configured health path) synchronously when this endpoint is called. The
-frontend polls `/siblings` every ~10s and re-renders status dots; no
+frontend polls `/siblings` every ~15s and re-renders status dots; no
 server-side background polling or caching in v1 (see §9 for revisit
 criteria if this gets expensive).
 
@@ -311,5 +311,5 @@ health_path = "/health"
 - **Non-Postgres `DbSource` implementations.**
 - **Health check caching/background polling** — if per-request parallel
   health checks on `/siblings` turn out to be too chatty or slow with many
-  siblings, move to a background-polled cache with the same 10s cadence
+  siblings, move to a background-polled cache with the same 15s cadence
   instead of doing it inline per request.

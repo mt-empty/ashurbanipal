@@ -894,7 +894,7 @@ $("next").onclick = () => { state.offset += state.limit; loadData(); };
 
 loadTables().catch(e => { $("error").textContent = e.message; });
 loadSiblings();
-setInterval(loadSiblings, 10_000);
+setInterval(loadSiblings, 15_000);
 </script>
 </body>
 </html>
