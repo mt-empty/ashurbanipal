@@ -20,6 +20,9 @@
     --success: light-dark(#2a2, #5c5);
     --active: light-dark(#08f2, #08f5);
     --backdrop: light-dark(#0006, #0009);
+    --keyword: light-dark(#7c3aed, #c4b5fd);
+    --operator: light-dark(#0891b2, #67e8f9);
+    --string: light-dark(#b45309, #fbbf24);
     --gap: .5rem;
     --gap-lg: .75rem;
   }
@@ -117,7 +120,38 @@
   /* display: contents keeps #filter/#apply flex items of #controls directly,
      so wrapping them in a <form> (for native Enter-to-submit) doesn't change layout. */
   #filter-form { display: contents; }
-  #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; field-sizing: content; }
+  /* #filter keeps its exact original box (flex/min-width/field-sizing) — a
+     wrapper div sized to match would risk drifting out of sync with
+     field-sizing:content's own intrinsic width. Anchor positioning instead
+     tracks the input's real rendered box directly, whatever size it ends up.
+     The real input's text is made transparent — #filter-highlight (a
+     positioned element, so it paints above this in-flow one regardless of
+     DOM order) renders the visible colored text; only the caret stays the
+     input's own. ::selection needs its own override: browsers apply a
+     built-in default ::selection color that overrides a plain `color`
+     declaration for the selected range specifically, so without this the
+     "invisible" text becomes opaque exactly where selected, clashing with
+     the overlay's colored glyphs painted on top of it. Keeping color
+     transparent there too and only changing the background reproduces an
+     ordinary selection highlight behind the overlay's (still correctly
+     colored) text. Same graceful-degradation shape as #cell-pop et al:
+     unsupported browsers just don't get the overlay (@supports below),
+     input renders as plain text same as before. */
+  #filter { anchor-name: --filter-anchor; flex: 1; min-width: 12rem; font: inherit;
+            padding: .25rem; field-sizing: content; background: transparent;
+            color: transparent; caret-color: CanvasText; }
+  #filter::selection { color: transparent; background: Highlight; }
+  #filter-highlight { position: fixed; position-anchor: --filter-anchor;
+            inset: auto; top: anchor(top); left: anchor(left);
+            width: anchor-size(width); height: anchor-size(height);
+            box-sizing: border-box; padding: .25rem; font: inherit;
+            white-space: pre; overflow: hidden; pointer-events: none; }
+  @supports not (anchor-name: --x) {
+    #filter-highlight { display: none; }
+  }
+  #filter-highlight .kw { color: var(--keyword); }
+  #filter-highlight .op { color: var(--operator); }
+  #filter-highlight .str { color: var(--string); }
   #status { opacity: .6; }
   #error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap; }
   .empty td { text-align: center; opacity: .6; padding: 1rem; }
@@ -198,6 +232,27 @@
             padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
   #columns-pop label:hover { background: var(--hover); }
   .col-hidden { display: none; }
+
+  /* Filter column-name suggestion popup: anchored to the text caret inside
+     #filter, not the input's own box — a zero-size tracking element whose
+     left/top JS recomputes on every keystroke (mirror-div caret
+     measurement; there's no native way to anchor to a point inside plain
+     text). A manual popover, not auto: it must stay open while the user
+     keeps typing in #filter (which the browser's default light-dismiss
+     would treat as "outside"), and Escape/arrow keys/Enter/Tab need custom
+     handling instead of the browser's default dismiss/search-clear/submit
+     behavior — see the JS for the light-dismiss substitute. */
+  #filter-caret-anchor { position: fixed; width: 0; height: 0; anchor-name: --filter-caret; }
+  #filter-suggest { position: fixed; position-anchor: --filter-caret;
+            position-try-fallbacks: flip-block;
+            inset: auto; top: calc(anchor(bottom) + .15rem); left: anchor(left);
+            margin: 0; border: 1px solid var(--border-strong);
+            border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
+            overflow: auto; box-shadow: 0 4px 16px #0004; }
+  #filter-suggest button { display: block; width: 100%; box-sizing: border-box;
+            background: none; border: none; font: inherit; color: inherit;
+            text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
+  #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 </style>
 </head>
 <body>
@@ -218,7 +273,7 @@
     <strong id="current">—</strong>
     <output id="status" aria-live="polite"></output>
     <form id="filter-form">
-      <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" >
+      <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
       <button id="apply">apply</button>
     </form>
     <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
@@ -254,6 +309,9 @@
 <div id="cell-pop" popover><pre id="cell-pre"></pre></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
+<div id="filter-highlight" aria-hidden="true"></div>
+<span id="filter-caret-anchor"></span>
+<div id="filter-suggest" popover="manual"><div id="filter-suggest-list"></div></div>
 <script type="module">
 const API = "/__ashurbanipal/api";
 const UI_KEY = "ashurbanipal_ui";
@@ -386,10 +444,204 @@ function applyFilterClause(column, op, value) {
   // filter button in buildCell.
   const clause = value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
   $("filter").value = clause;
+  renderFilterHighlight();
   state.filter = clause;
   state.offset = 0;
   loadData();
 }
+
+// ---- filter syntax highlight: a transparent-text overlay (#filter-highlight,
+// anchored to #filter's own box via CSS Anchor Positioning — see the CSS for
+// why a wrapper div was rejected in favor of this) coloring keywords,
+// operators, and quoted strings as the DSL grammar defines them
+// (filter-dsl.md §2's `logic`/operator/`quoted` productions, same
+// longest-match order and the same whitespace-boundary requirement word
+// operators have). Bare tokens (column names, unquoted values) are left
+// uncolored — this only ever recognizes known lexical *shapes*, never
+// judges whether a column exists or a clause is well-formed, so it stays on
+// the composing/display side of frontend-style-guide §7 rather than
+// duplicating the parser's accept/reject job.
+//
+// Only AND/OR/NOT get unconditional keyword coloring, matching
+// filter-dsl.md's own carve-out ("AND/OR/NOT are always treated as
+// keywords wherever a bare token could occur") — IS/NULL/LIKE/ILIKE are
+// deliberately NOT colored, even though they're operator-position
+// keywords too, because unlike AND/OR/NOT they're only reserved in that
+// specific position: `src/filter.rs`'s parse_bare_value has no
+// always-keyword exception for them, so e.g. a column legitimately named
+// `is` or a bare value `like` (`reaction = like`) parses and executes
+// fine but isn't structurally distinguishable from the operator use
+// without tracking where in a condition the cursor is — exactly the
+// position-aware parsing this feature is scoped to avoid.
+//
+// Anything that sets #filter.value directly — applyFilterClause above,
+// acceptFilterSuggestion and the table-switch handler elsewhere — has to
+// call this too: unlike typing, a programmatic .value= doesn't fire an
+// "input" event. ----
+const FILTER_TOKEN_RE = /('(?:''|[^'])*')|(?<=^|\s)(AND|OR|NOT)(?=\s|$)|(>=|<=|!=|=|>|<)/gi;
+
+function renderFilterHighlight() {
+  const text = $("filter").value;
+  const frag = document.createDocumentFragment();
+  let last = 0;
+  for (const m of text.matchAll(FILTER_TOKEN_RE)) {
+    if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const span = document.createElement("span");
+    span.className = m[1] !== undefined ? "str" : m[2] !== undefined ? "kw" : "op";
+    span.textContent = m[0];
+    frag.appendChild(span);
+    last = m.index + m[0].length;
+  }
+  frag.appendChild(document.createTextNode(text.slice(last)));
+  $("filter-highlight").replaceChildren(frag);
+}
+$("filter").addEventListener("input", renderFilterHighlight);
+
+// ---- filter column autocomplete (docs/dbviewer-feedback-backlog.md #2): a
+// cursor-anchored popup (Popover API + CSS Anchor Positioning, same shape as
+// #cell-pop/#cv-pop/#columns-pop) suggesting a column name wherever the DSL
+// grammar allows a new condition to start (empty/whitespace-only, or right
+// after AND/OR/NOT with its required trailing whitespace — filter-dsl.md §2's
+// `logic`/`NOT` positions), prefix-filtered by whatever partial column name
+// is already typed. This only ever inspects the text immediately before the
+// cursor for those two boundary shapes plus a whitespace-run split for the
+// partial token — it never judges the filter as a whole, so it doesn't
+// duplicate the server-side parser's accept/reject job (frontend-style-guide
+// §7). Deliberately scoped to the cursor sitting at the end of the text —
+// mid-string edits get no suggestions.
+//
+// A *manual* popover, not auto: it must stay open while the user keeps
+// typing in #filter (which the browser's default light-dismiss would treat
+// as "outside"), and arrow keys/Enter/Tab/Escape are all intercepted here
+// instead of the browser's default scroll/submit/search-clear behavior — so
+// light-dismiss (click elsewhere) is hand-rolled too, via the pointerdown
+// listener at the bottom of this block. ----
+const FILTER_COND_FIRST = /^\s*(?:NOT\s+)?$/i;
+const FILTER_COND_AFTER_LOGIC = /(^|\s)(?:AND|OR)\s+(?:NOT\s+)?$/i;
+const CARET_MIRROR_PROPS = [
+  "boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+  // The border-*-style siblings matter too, not just width: a border's used
+  // width collapses to 0 when style is "none" (the mirror's unset default),
+  // regardless of what width value is copied — #filter relies entirely on
+  // the browser's UA-default input border (nothing here sets one
+  // explicitly), so without these the mirror silently omits it and the
+  // measured caret position is off by that border's real width.
+  "borderTopStyle", "borderRightStyle", "borderBottomStyle", "borderLeftStyle",
+  "fontStyle", "fontVariant", "fontWeight", "fontStretch", "fontSize", "fontFamily",
+  "lineHeight", "letterSpacing", "textTransform", "wordSpacing",
+];
+
+// Measures the on-screen pixel position of `input`'s caret by rendering an
+// invisible clone of the text up to the cursor with identical font metrics —
+// the standard technique for locating a caret in a plain <input>; the
+// platform has no native API for this.
+function measureCaretPosition(input) {
+  const mirror = document.createElement("div");
+  const computed = getComputedStyle(input);
+  Object.assign(mirror.style, { position: "absolute", visibility: "hidden", whiteSpace: "pre", top: "0", left: "-9999px" });
+  for (const prop of CARET_MIRROR_PROPS) mirror.style[prop] = computed[prop];
+  mirror.textContent = input.value.slice(0, input.selectionStart);
+  const marker = document.createElement("span");
+  marker.textContent = "​";
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+  try {
+    const inputRect = input.getBoundingClientRect();
+    const offsetX = marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left;
+    return { x: inputRect.left + offsetX - input.scrollLeft, y: inputRect.bottom };
+  } finally {
+    mirror.remove();
+  }
+}
+
+let filterSuggestMatches = []; // column names currently shown, in display order
+let filterSuggestIndex = -1;   // highlighted row, -1 = none
+let filterSuggestHead = "";    // input text up to (not including) the partial token being completed
+
+function closeFilterSuggest() {
+  filterSuggestMatches = [];
+  filterSuggestIndex = -1;
+  filterSuggestHead = "";
+  $("filter-suggest").hidePopover();
+}
+
+function renderFilterSuggest() {
+  $("filter-suggest-list").replaceChildren(...filterSuggestMatches.map((name, i) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = name;
+    btn.className = i === filterSuggestIndex ? "active" : "";
+    // preventDefault on mousedown keeps focus (and the text caret) in
+    // #filter — otherwise the button would steal focus on click, firing
+    // #filter's blur handler and closing this popup before its own click
+    // handler runs.
+    btn.onmousedown = (e) => e.preventDefault();
+    btn.onclick = () => acceptFilterSuggestion(i);
+    return btn;
+  }));
+  // Arrow-key moves change which item is .active without any mouse
+  // involvement, so the list has to scroll itself — "nearest" only moves
+  // it the minimum needed to bring the highlighted item into view.
+  $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
+}
+
+function acceptFilterSuggestion(i) {
+  const input = $("filter");
+  input.value = filterSuggestHead + filterSuggestMatches[i];
+  input.setSelectionRange(input.value.length, input.value.length);
+  renderFilterHighlight();
+  closeFilterSuggest();
+  input.focus();
+}
+
+function updateFilterSuggestions() {
+  const input = $("filter");
+  const pos = input.selectionStart;
+  if (pos !== input.value.length) return closeFilterSuggest();
+  const before = input.value.slice(0, pos);
+  const tokenStart = before.search(/\S*$/);
+  const head = before.slice(0, tokenStart);
+  const partial = before.slice(tokenStart);
+  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) return closeFilterSuggest();
+  const columns = (lastPayload?.columns ?? []).map(c => c.name);
+  filterSuggestMatches = columns.filter(name => name.toLowerCase().startsWith(partial.toLowerCase()));
+  if (filterSuggestMatches.length === 0) return closeFilterSuggest();
+  filterSuggestHead = head;
+  filterSuggestIndex = 0;
+  renderFilterSuggest();
+  const { x, y } = measureCaretPosition(input);
+  $("filter-caret-anchor").style.left = `${x}px`;
+  $("filter-caret-anchor").style.top = `${y}px`;
+  $("filter-suggest").showPopover();
+}
+
+$("filter").oninput = updateFilterSuggestions;
+$("filter").onfocus = updateFilterSuggestions;
+$("filter").onblur = closeFilterSuggest;
+$("filter").onkeydown = (e) => {
+  if (filterSuggestMatches.length === 0) return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    filterSuggestIndex = (filterSuggestIndex + 1) % filterSuggestMatches.length;
+    renderFilterSuggest();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    filterSuggestIndex = (filterSuggestIndex - 1 + filterSuggestMatches.length) % filterSuggestMatches.length;
+    renderFilterSuggest();
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault();
+    acceptFilterSuggestion(filterSuggestIndex);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeFilterSuggest();
+  }
+};
+document.addEventListener("pointerdown", (e) => {
+  if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target) && !$("filter-suggest").contains(e.target)) {
+    closeFilterSuggest();
+  }
+});
 
 // ---- common-values header dropdown (docs/client-enhancements.md §8): a
 // shortlist from Postgres planner statistics (pg_stats.most_common_vals),
@@ -569,6 +821,7 @@ async function loadTables() {
     btn.onclick = () => {
       state.table = t.name; state.offset = 0; state.sort = null; state.filter = "";
       $("filter").value = "";
+      renderFilterHighlight();
       persist(); loadData();
     };
     li.appendChild(btn);
