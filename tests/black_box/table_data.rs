@@ -205,7 +205,7 @@ async fn malicious_table_values_are_rejected_cleanly_and_do_no_damage() {
         .json()
         .await
         .unwrap();
-    assert_eq!(body["tables"].as_array().unwrap().len(), 5);
+    assert_eq!(body["tables"].as_array().unwrap().len(), 10);
 }
 
 #[tokio::test]

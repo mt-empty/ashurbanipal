@@ -1,9 +1,20 @@
 use crate::common::TestServer;
 
-const SEEDED_TABLES: [&str; 5] = ["events", "orders", "products", "sessions", "users"];
+const SEEDED_TABLES: [&str; 10] = [
+    "audit_log",
+    "events",
+    "orders",
+    "payments",
+    "products",
+    "reviews",
+    "saved_reports",
+    "sessions",
+    "support_tickets",
+    "users",
+];
 
 #[tokio::test]
-async fn lists_exactly_the_five_seeded_tables_in_alphabetical_order() {
+async fn lists_exactly_the_ten_seeded_tables_in_alphabetical_order() {
     let srv = TestServer::spawn().await;
     let body: serde_json::Value = srv
         .client()
@@ -46,13 +57,19 @@ async fn table_comments_are_present_only_where_seeded() {
             .unwrap()
     };
 
-    for commented in ["users", "orders", "sessions"] {
+    for commented in ["users", "orders", "sessions", "reviews", "support_tickets"] {
         assert!(
             by_name(commented)["comment"].is_string(),
             "{commented} should have a string comment"
         );
     }
-    for uncommented in ["products", "events"] {
+    for uncommented in [
+        "products",
+        "events",
+        "payments",
+        "audit_log",
+        "saved_reports",
+    ] {
         assert!(
             !by_name(uncommented)
                 .as_object()
@@ -77,7 +94,7 @@ async fn table_counts_cover_all_seeded_tables_with_approx_rows() {
         .unwrap();
 
     let counts = body["counts"].as_array().unwrap();
-    assert_eq!(counts.len(), 5);
+    assert_eq!(counts.len(), 10);
 
     let mut names: Vec<&str> = counts
         .iter()
