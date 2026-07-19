@@ -63,8 +63,17 @@
      over a sticky <th> with the default auto stacking order unless the
      header is explicitly raised above them. */
   thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
-  th[aria-sort="ascending"]::after { content: " ▲"; }
-  th[aria-sort="descending"]::after { content: " ▼"; }
+  /* Arrow is always rendered (dim when unsorted) rather than only appearing
+     on the active column, so a) every th's width is stable across sort
+     changes instead of shifting when a different column becomes active, and
+     b) sortability is visible before the user has ever clicked (recognition
+     rather than recall). Unsorted default of "↑" isn't arbitrary: clicking
+     an unsorted column always sorts ascending first (see th.onclick), so
+     the dim glyph previews the actual action rather than picking a direction
+     at random. */
+  th[aria-sort]::after { content: " ↑"; opacity: .35; }
+  th[aria-sort="ascending"]::after { content: " ↑"; opacity: 1; }
+  th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
   /* PK/FK header icons: decorative (aria-hidden) — the th itself carries an
      aria-label with the text equivalent, so the icon is never the only
      signal. */
@@ -870,6 +879,15 @@ $("filter-form").onsubmit = (e) => {
   state.filter = $("filter").value.trim();
   state.offset = 0;
   loadData();
+};
+// Clicking a search input's native clear button empties the value and
+// fires "search" (also fires on Enter, alongside the form's own submit —
+// harmless since loadData() with an unchanged filter is idempotent), but
+// it never submits the form. Without this, clearing via that button left
+// state.filter (and the displayed rows) stale until some other action
+// (e.g. switching tables) happened to reset it.
+$("filter").onsearch = () => {
+  if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
 };
 $("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData(); };
 $("next").onclick = () => { state.offset += state.limit; loadData(); };
