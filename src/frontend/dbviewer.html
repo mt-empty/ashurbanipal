@@ -30,7 +30,12 @@
   /* ==== Layout ==== */
   body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
   nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
-  main { padding: var(--gap-lg); overflow: auto; }
+  /* No padding here: #toolbar is sticky and must reach main's actual edges
+     to fully cover scrolled rows — a padded main would leave #toolbar's box
+     short by that padding on every side. Padding moved to #toolbar and
+     #content instead, so the visual inset is unchanged. */
+  main { overflow: auto; }
+  #content { padding: 0 var(--gap-lg) var(--gap-lg); }
   h1 { font-size: 1rem; margin: 0 0 var(--gap); }
   h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
   h1 a:hover { text-decoration-thickness: 2px; }
@@ -93,7 +98,10 @@
      and since tbody follows thead in DOM order, its positioned <td>s paint
      over a sticky <th> with the default auto stacking order unless the
      header is explicitly raised above them. */
-  thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+  /* top is #toolbar's live height (--toolbar-h, set via ResizeObserver in
+     the JS — flex-wrap/error text make it non-constant), not 0, so the
+     header sticks below the toolbar instead of colliding with it. */
+  thead th { position: sticky; top: var(--toolbar-h, 0px); z-index: 1; background: canvas; }
   /* Arrow is always rendered (dim when unsorted) rather than only appearing
      on the active column, so a) every th's width is stable across sort
      changes instead of shifting when a different column becomes active, and
@@ -144,6 +152,15 @@
   .copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
 
   /* ==== Controls / status ==== */
+  /* Pinned in both axes (unlike thead th below, top:0 only — header cells
+     must still scroll horizontally with their column). #error lives inside
+     so a rejection message stays paired with the filter, not scrolled away.
+     z-index above thead th's + opaque background stop rows/header from
+     showing through; thead th's `top` (below) reads this box's live height
+     off --toolbar-h so the two don't collide at the same offset. */
+  #toolbar { position: sticky; top: 0; left: 0; z-index: 2; background: canvas;
+             padding: var(--gap-lg) var(--gap-lg) var(--gap);
+             border-bottom: 1px solid var(--border); }
   #controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
   /* display: contents keeps #filter/#apply flex items of #controls directly,
      so wrapping them in a <form> (for native Enter-to-submit) doesn't change layout. */
@@ -339,24 +356,28 @@
   </div>
 </nav>
 <main id="main">
-  <search id="controls">
-    <strong id="current">—</strong>
-    <output id="status" aria-live="polite" class="sr-only"></output>
-    <form id="filter-form">
-      <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
-      <button id="apply">apply</button>
-    </form>
-    <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
-    <button id="payload" disabled title="raw JSON response for the current view">payload</button>
-  </search>
-  <div id="error" role="alert"></div>
-  <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
-  <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
-  <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
-  <div id="pager">
-    <button id="prev">‹ prev</button>
-    <output id="page"></output>
-    <button id="next">next ›</button>
+  <div id="toolbar">
+    <search id="controls">
+      <strong id="current">—</strong>
+      <output id="status" aria-live="polite" class="sr-only"></output>
+      <form id="filter-form">
+        <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+        <button id="apply">apply</button>
+      </form>
+      <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
+      <button id="payload" disabled title="raw JSON response for the current view">payload</button>
+    </search>
+    <div id="error" role="alert"></div>
+  </div>
+  <div id="content">
+    <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
+    <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
+    <div id="pager">
+      <button id="prev">‹ prev</button>
+      <output id="page"></output>
+      <button id="next">next ›</button>
+    </div>
   </div>
 </main>
 
@@ -1409,6 +1430,13 @@ $("filter").addEventListener("search", () => {
 });
 $("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData(); };
 $("next").onclick = () => { state.offset += state.limit; loadData(); };
+
+// Feeds --toolbar-h (thead th's sticky `top`, see CSS) — #toolbar's height
+// isn't static (flex-wrap, #error appearing/disappearing), so this can't be
+// a hardcoded value.
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
+}).observe($("toolbar"));
 
 loadTables().catch(e => { $("error").textContent = e.message; });
 loadSiblings();
