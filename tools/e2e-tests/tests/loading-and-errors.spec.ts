@@ -40,12 +40,20 @@ test("a slow, superseded response never overwrites a newer table's render", asyn
     await route.continue();
   });
 
+  // Registered before the triggering click: waitForResponse listens for the
+  // next matching response event, so it has to be armed before the request
+  // that fires it, not polled for after the fact.
+  const staleOrdersResponse = page.waitForResponse(
+    (r) => new URL(r.url()).searchParams.get("table") === "orders",
+  );
   await page.locator('#tables button[data-table="orders"]').click(); // slow, started first
   await page.locator('#tables button[data-table="users"]').click(); // fast, resolves first
   await page.locator("#current").getByText("users", { exact: true }).waitFor();
 
-  // Give the delayed "orders" response time to land too.
-  await page.waitForTimeout(1300);
+  // Wait for the delayed "orders" response to actually land before
+  // asserting nothing changed — otherwise this could pass without ever
+  // exercising the race it's a regression test for.
+  await staleOrdersResponse;
 
   await expect(page.locator("#current")).toHaveText("users");
   await expect(page.locator('#tables button[data-table="users"]')).toHaveClass(/active/);
