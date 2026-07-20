@@ -1,5 +1,7 @@
 [tools]
 watchexec = "latest"
+node = "26"
+pnpm = "latest"
 
 [tasks.build]
 description = "cargo build"
@@ -44,3 +46,13 @@ run = "mise watch demo --restart"
 description = "regenerate .devcontainer/db/init/01-seed.sql from tools/seed-gen"
 run = "cargo run > ../../.devcontainer/db/init/01-seed.sql"
 dir = "tools/seed-gen"
+
+[tasks."test-e2e-install"]
+description = "one-time Playwright browser install (Chromium, Firefox, WebKit) for the e2e suite"
+run = "pnpm install && pnpm exec playwright install --with-deps chromium firefox webkit"
+dir = "tools/e2e-tests"
+
+[tasks."test-e2e"]
+description = "run the Playwright e2e suite against dbviewer.html"
+run = "pnpm exec playwright test"
+dir = "tools/e2e-tests"
