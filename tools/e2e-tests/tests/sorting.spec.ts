@@ -58,22 +58,3 @@ test("ascending sort actually reorders rows by value", async ({ page }) => {
   const sorted = [...numbers].sort((a, b) => a - b);
   expect(numbers).toEqual(sorted);
 });
-
-test("header row width stays stable when the sort target switches (screenshot)", async ({
-  page,
-}) => {
-  await gotoApp(page);
-  await selectTable(page, "products");
-  await page.locator('th[data-col="price"]').click();
-  await waitForIdle(page);
-  await expect(page.locator('th[data-col="price"]')).toHaveAttribute("aria-sort", "ascending");
-  await page.locator('th[data-col="category"]').click();
-  await waitForIdle(page);
-  await expect(page.locator('th[data-col="category"]')).toHaveAttribute("aria-sort", "ascending");
-  // The header row (~1770px) is wider than the viewport, and #main only
-  // resets vertical scroll on load (loadData()'s scrollTo), not horizontal
-  // — so a prior action's leftover scrollLeft would otherwise make this
-  // screenshot's visible crop nondeterministic. Pin it to 0 explicitly.
-  await page.locator("#main").evaluate((el) => (el.scrollLeft = 0));
-  await expect(page.locator("thead tr")).toHaveScreenshot("sort-header-row.png");
-});

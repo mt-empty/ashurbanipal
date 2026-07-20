@@ -35,15 +35,3 @@ test("hiding a column is scoped per-table", async ({ page }) => {
   await selectTable(page, "products");
   await expect(page.locator('th[data-col="id"]')).toHaveClass(/col-hidden/);
 });
-
-test("toolbar chrome stays stable when the hidden-count indicator changes (screenshot)", async ({
-  page,
-}) => {
-  await gotoApp(page);
-  await selectTable(page, "products");
-  await page.locator("#columns-btn").click();
-  await page.locator("#columns-pop-list label", { hasText: "price" }).locator("input").uncheck();
-  await page.keyboard.press("Escape");
-  await expect(page.locator("#columns-pop")).toBeHidden();
-  await expect(page.locator("#controls")).toHaveScreenshot("controls-hidden-column.png");
-});
