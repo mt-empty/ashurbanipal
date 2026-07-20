@@ -1284,9 +1284,14 @@ $("filter-form").onsubmit = (e) => {
 // it never submits the form. Without this, clearing via that button left
 // state.filter (and the displayed rows) stale until some other action
 // (e.g. switching tables) happened to reset it.
-$("filter").onsearch = () => {
+//
+// addEventListener, not this file's usual `.onX =` style: "search" isn't a
+// standardized event — the onsearch IDL property only exists in Chromium
+// and legacy WebKit, so `.onsearch =` is silently a no-op in Firefox and in
+// Playwright's WebKit build. addEventListener works identically everywhere.
+$("filter").addEventListener("search", () => {
   if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
-};
+});
 $("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData(); };
 $("next").onclick = () => { state.offset += state.limit; loadData(); };
 
