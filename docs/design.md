@@ -71,6 +71,15 @@ Two components, same as the original concept:
   - *Record / vertical view* — a per-row button opens that row as a stacked
     `column: value` list, reusing the same `<dialog>` chrome as the payload
     viewer. Per-field copy buttons plus a whole-row-as-JSON copy button.
+  - *API reference for AI agents* — a fixed "?" button in the corner opens
+    a native `<dialog>` (same chrome as the payload viewer) showing a
+    static, hand-maintained JSON document describing every route in §4
+    (method, params, an example request/response) plus the filter DSL
+    grammar (including its 10-condition/1024-byte limits), with a copy
+    button. Deliberately not its own endpoint — the
+    doc doesn't vary per request, so it's meant for a human to copy and
+    paste into an agent's context, not to be machine-fetched. Lives in the
+    frontend JS and must be kept in sync with §4 by hand.
 - **Navigation and filtering affordances**:
   - *Click-to-filter* — a button on a cell (or a dedicated button for null
     cells) composes an exact-match `column = value` (or `IS NULL`) clause
