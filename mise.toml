@@ -48,8 +48,8 @@ run = "cargo run > ../../.devcontainer/db/init/01-seed.sql"
 dir = "tools/seed-gen"
 
 [tasks."test-e2e-install"]
-description = "one-time Playwright browser install (Chromium) for the e2e suite"
-run = "pnpm install && pnpm exec playwright install --with-deps chromium"
+description = "one-time Playwright browser install (Chromium, Firefox, WebKit) for the e2e suite"
+run = "pnpm install && pnpm exec playwright install --with-deps chromium firefox webkit"
 dir = "tools/e2e-tests"
 
 [tasks."test-e2e"]
