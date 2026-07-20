@@ -1,15 +1,30 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Design: docs/superpowers/specs/2026-07-19-playwright-e2e-testing-design.md
-//
-// One shared `demo` server for the whole run (§3): the app is read-only by
-// architecture invariant, so there's no cross-test mutation to isolate
-// against — a single instance avoids ~50 pointless process spawns.
-// `siblings.spec.ts` is the one exception and spawns its own second
-// instance directly (see tests/support/second-server.ts).
-const PORT = 4310;
-const BASE_URL = `http://localhost:${PORT}`;
+// The app is read-only by architecture invariant, so there's no cross-test
+// mutation to isolate against — one `demo` server per *browser project* is
+// enough (not per test/worker). Each project's tests all share their one
+// instance; three projects means three instances so a full three-browser
+// run doesn't triple the request load on a single server. `siblings.spec.ts`
+// is the one exception and spawns its own second instance directly on top
+// of whichever per-project server it's already using (see
+// tests/support/second-server.ts).
 const REPO_ROOT = "../..";
+const PORTS = { chromium: 4310, firefox: 4311, webkit: 4312 };
+
+function demoServer(port: number) {
+  return {
+    command: "cargo run --example demo",
+    cwd: REPO_ROOT,
+    url: `http://localhost:${port}/health`,
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+    env: {
+      ...process.env,
+      PORT: String(port),
+      SIBLING_PORT: "",
+    },
+  };
+}
 
 export default defineConfig({
   testDir: "./tests",
@@ -17,25 +32,25 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: "html",
   use: {
-    baseURL: BASE_URL,
     trace: "on-first-retry",
   },
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${PORTS.chromium}` },
+    },
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"], baseURL: `http://localhost:${PORTS.firefox}` },
+      // Playwright's clipboard-read/clipboard-write context permissions are
+      // Chromium-only — see inspection-affordances.spec.ts's test.use().
+      testIgnore: /inspection-affordances\.spec\.ts/,
+    },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"], baseURL: `http://localhost:${PORTS.webkit}` },
+      testIgnore: /inspection-affordances\.spec\.ts/,
     },
   ],
-  webServer: {
-    command: "cargo run --example demo",
-    cwd: REPO_ROOT,
-    url: `${BASE_URL}/health`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    env: {
-      ...process.env,
-      PORT: String(PORT),
-      SIBLING_PORT: "",
-    },
-  },
+  webServer: Object.values(PORTS).map(demoServer),
 });
