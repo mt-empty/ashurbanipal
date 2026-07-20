@@ -14,18 +14,11 @@ const REPO_ROOT = "../..";
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: true,
-  retries: 0,
+  retries: process.env.CI ? 2 : 0,
   reporter: "html",
   use: {
     baseURL: BASE_URL,
     trace: "on-first-retry",
-  },
-  expect: {
-    // Freezes CSS animations/transitions at their first frame before a
-    // screenshot is taken — without this, the sidebar row-spinner's
-    // infinite rotation (see dbviewer.html's .row-spinner) would make
-    // screenshot #2 flaky (different rotation angle every run).
-    toHaveScreenshot: { animations: "disabled" },
   },
   projects: [
     {

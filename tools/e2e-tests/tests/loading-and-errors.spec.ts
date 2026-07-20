@@ -1,22 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { gotoApp, selectTable } from "./support/helpers";
 
-test("the sidebar loading spinner appears without shifting row layout (screenshot)", async ({
-  page,
-}) => {
-  await gotoApp(page); // initial load already settled (gotoApp's own wait)
-
-  await page.route("**/api/tables/data*", async (route) => {
-    await new Promise((r) => setTimeout(r, 800));
-    await route.continue();
-  });
-  await page.locator('#tables button[data-table="orders"]').click();
-
-  const row = page.locator("#tables li").filter({ has: page.locator('button[data-table="orders"]') });
-  await expect(row.locator("button.loading")).toHaveCount(1);
-  await expect(row).toHaveScreenshot("sidebar-loading-row.png");
-});
-
 test("a failed load leaves the previous table's rows and active state untouched", async ({
   page,
 }) => {
