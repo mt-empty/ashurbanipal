@@ -1,0 +1,14 @@
+{
+  "name": "ashurbanipal-e2e-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Playwright E2E suite for src/frontend/dbviewer.html. Standalone dev-only tooling, not part of the published crate — see docs/superpowers/specs/2026-07-19-playwright-e2e-testing-design.md.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.0",
+    "@types/node": "^26.1.0"
+  }
+}

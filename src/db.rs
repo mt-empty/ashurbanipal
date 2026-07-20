@@ -495,9 +495,18 @@ impl DbSource for PgPoolSource {
             .map(|c| format!("\"{}\"::text", c.name))
             .collect::<Vec<_>>()
             .join(", ");
+        // Table-qualified so this binds to the source column, not the
+        // `::text`-cast output column of the same name in `select_list` —
+        // Postgres's `order by` resolution prefers a matching output-column
+        // alias over a same-named input column, so an unqualified `order by
+        // "col"` here would silently sort the text-cast representation
+        // (lexicographic) instead of the real typed value (e.g. "107.92" <
+        // "11.18" for numeric columns). `table` is already validated
+        // against the live schema above, same trust boundary as `col`.
         let order_clause = match &sort {
             Some(col) => format!(
-                " order by \"{}\" {}",
+                " order by \"{}\".\"{}\" {}",
+                table,
                 col,
                 if opts.descending { "desc" } else { "asc" }
             ),
