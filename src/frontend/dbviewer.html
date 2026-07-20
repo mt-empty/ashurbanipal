@@ -213,14 +213,18 @@
      chrome: native <dialog> — showModal() gives backdrop, Esc-to-close, and
      focus trapping for free. */
   dialog { border: 1px solid var(--border-strong); border-radius: 8px; padding: 0;
-           max-width: min(60rem, 92vw); max-height: 80vh; }
+           max-width: min(60rem, 92vw); max-height: 80vh; box-sizing: border-box; }
   dialog::backdrop { background: var(--backdrop); }
   .dialog-head { display: flex; justify-content: space-between; align-items: center;
                  gap: 1rem; padding: var(--gap) var(--gap-lg); border-bottom: 1px solid var(--border); }
   .dialog-head button { background: none; border: none; cursor: pointer;
                         font: inherit; color: inherit; }
+  /* border-box here (and on <dialog> above) so the padding below is inside
+     the max-height budget, not added on top of it — content-box padding is
+     what let long content (the API reference doc) overflow the dialog
+     itself and add a second scrollbar around the pre's own. */
   dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
-                          max-height: calc(80vh - 3rem); }
+                          max-height: calc(80vh - 3rem); box-sizing: border-box; }
   dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
               gap: .3rem var(--gap-lg); }
   dialog dl dt { font-weight: 600; }
@@ -238,6 +242,16 @@
      per-field affordance to declutter. */
   .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
   .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1; }
+
+  /* API-reference affordance: a fixed corner button, deliberately outside
+     the nav/main grid so it stays reachable regardless of which table/dialog
+     is showing. Opens the same <dialog> chrome as the payload/record
+     viewers above. */
+  #api-help-btn { position: fixed; left: var(--gap-lg); bottom: var(--gap-lg); z-index: 1;
+                  width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+                  border: 1px solid var(--border-strong); background: canvas;
+                  color: inherit; cursor: pointer; font: inherit; }
+  #api-help-btn:hover { background: var(--hover); }
 
   /* Cell preview: native Popover API — non-modal, light-dismiss (click
      anywhere outside closes it). Positioned via CSS Anchor Positioning:
@@ -367,6 +381,16 @@
 <div id="filter-highlight" aria-hidden="true"></div>
 <span id="filter-caret-anchor"></span>
 <div id="filter-suggest" popover="manual"><div id="filter-suggest-list"></div></div>
+
+<dialog id="api-help-dialog" closedby="any">
+  <div class="dialog-head">
+    <span class="dialog-head-title"><strong>API reference (for AI agents)</strong><button id="api-help-copy" class="copy" aria-label="copy API reference as JSON">⧉</button></span>
+    <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
+  </div>
+  <pre id="api-help-pre"></pre>
+</dialog>
+<button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
+
 <script type="module">
 const API = "/__ashurbanipal/api";
 const UI_KEY = "ashurbanipal_ui";
@@ -471,6 +495,96 @@ async function copyText(text, btn) {
   } catch { btn.textContent = "✗"; }
   setTimeout(() => { btn.textContent = "⧉"; }, 800);
 }
+
+// ---- API reference (<dialog>): a static, hand-maintained description of
+// every route below, for a human to copy and hand to an AI agent so it can
+// call this API without prior knowledge of it. Deliberately not its own
+// endpoint — the doc never changes per-request, so a route would just be a
+// 7th thing to keep in sync for no benefit over keeping this in sync.
+// Mirrors design.md §4 — update both together.
+function buildApiReference() {
+  const base = new URL(API, location.href).toString().replace(/\/$/, "");
+  const exampleFilter = encodeURIComponent("status = active");
+  return {
+    description: "Read-only REST API for browsing this service's Postgres tables. Every endpoint is GET and returns JSON. Table/column names are data-dependent — call GET /tables first to discover real names before calling anything else.",
+    base_url: base,
+    endpoints: [
+      {
+        method: "GET",
+        path: `${base}/tables`,
+        summary: "List table names in the connected schema — also the allow-list for every other endpoint's `table` param.",
+        params: [],
+        example_response: { tables: [{ name: "users", comment: "Registered accounts." }, { name: "sessions" }] },
+      },
+      {
+        method: "GET",
+        path: `${base}/table-counts`,
+        summary: "Approximate row count per table (pg_class.reltuples, not COUNT(*)).",
+        params: [],
+        example_response: { counts: [{ table: "users", approx_rows: 108234 }] },
+      },
+      {
+        method: "GET",
+        path: `${base}/tables/data`,
+        summary: "Paginated, filtered, sorted rows for one table.",
+        params: [
+          { name: "table", required: true, notes: "must be a name returned by GET /tables" },
+          { name: "filter", required: false, notes: "filter DSL — see the `filter` key below" },
+          { name: "limit", required: false, notes: "default 50, max 100" },
+          { name: "offset", required: false, notes: "default 0" },
+          { name: "sort", required: false, notes: "single column name" },
+          { name: "order", required: false, notes: '"asc" | "desc", default "asc"' },
+        ],
+        example_request: `${base}/tables/data?table=users&filter=${exampleFilter}&limit=20&sort=created_at&order=desc`,
+        example_response: {
+          columns: [{ name: "id", type: "uuid", key: "pk" }, { name: "status", type: "text" }],
+          rows: [{ id: "...", status: "active" }],
+          total_approx: 108234,
+        },
+      },
+      {
+        method: "GET",
+        path: `${base}/tables/common-values`,
+        summary: "Most frequent values for one column (pg_stats — approximate; empty if the column has no planner statistics yet).",
+        params: [
+          { name: "table", required: true },
+          { name: "column", required: true },
+        ],
+        example_response: { values: [{ value: "active", freq: 0.62 }] },
+      },
+      {
+        method: "GET",
+        path: `${base}/siblings`,
+        summary: "Other related services configured for this instance, with live health status.",
+        params: [],
+        example_response: { siblings: [{ name: "billing", dbviewer_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] },
+      },
+    ],
+    filter: {
+      grammar: "[NOT] column OP value [AND|OR [NOT] column OP value ...]",
+      operators: ["=", "!=", ">", ">=", "<", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"],
+      limits: { max_conditions: 10, max_length_bytes: 1024 },
+      notes: [
+        "AND binds tighter than OR (SQL convention).",
+        "NOT prefixes a single condition only — no parentheses or nesting.",
+        "bare values run to the next whitespace; values with spaces/quotes/keywords need single quotes.",
+        "columns are cast to text before comparison, so the same operators work across uuid/timestamptz/jsonb/etc.",
+        "at most 10 conditions and 1024 bytes per filter string — both rejected with a 400 if exceeded.",
+      ],
+      examples: [
+        "status = completed AND created_at > 2016-01-01",
+        "session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd",
+        "NOT status = archived OR priority >= 3",
+      ],
+    },
+  };
+}
+
+$("api-help-btn").onclick = () => {
+  $("api-help-pre").textContent = JSON.stringify(buildApiReference(), null, 2);
+  $("api-help-dialog").showModal();
+};
+$("api-help-copy").onclick = () => copyText($("api-help-pre").textContent, $("api-help-copy"));
 
 // ---- cell preview (Popover API: light-dismiss, non-modal; positioned via
 // CSS Anchor Positioning — see #cell-pop's position-anchor/position-try-fallbacks) ----
