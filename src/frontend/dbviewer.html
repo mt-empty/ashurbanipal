@@ -20,9 +20,6 @@
     --success: light-dark(#2a2, #5c5);
     --active: light-dark(#08f2, #08f5);
     --backdrop: light-dark(#0006, #0009);
-    --keyword: light-dark(#7c3aed, #c4b5fd);
-    --operator: light-dark(#0891b2, #67e8f9);
-    --string: light-dark(#b45309, #fbbf24);
     --gap: .5rem;
     --gap-lg: .75rem;
   }
@@ -165,38 +162,7 @@
   /* display: contents keeps #filter/#apply flex items of #controls directly,
      so wrapping them in a <form> (for native Enter-to-submit) doesn't change layout. */
   #filter-form { display: contents; }
-  /* #filter keeps its exact original box (flex/min-width/field-sizing) — a
-     wrapper div sized to match would risk drifting out of sync with
-     field-sizing:content's own intrinsic width. Anchor positioning instead
-     tracks the input's real rendered box directly, whatever size it ends up.
-     The real input's text is made transparent — #filter-highlight (a
-     positioned element, so it paints above this in-flow one regardless of
-     DOM order) renders the visible colored text; only the caret stays the
-     input's own. ::selection needs its own override: browsers apply a
-     built-in default ::selection color that overrides a plain `color`
-     declaration for the selected range specifically, so without this the
-     "invisible" text becomes opaque exactly where selected, clashing with
-     the overlay's colored glyphs painted on top of it. Keeping color
-     transparent there too and only changing the background reproduces an
-     ordinary selection highlight behind the overlay's (still correctly
-     colored) text. Same graceful-degradation shape as #cell-pop et al:
-     unsupported browsers just don't get the overlay (@supports below),
-     input renders as plain text same as before. */
-  #filter { anchor-name: --filter-anchor; flex: 1; min-width: 12rem; font: inherit;
-            padding: .25rem; field-sizing: content; background: transparent;
-            color: transparent; caret-color: CanvasText; }
-  #filter::selection { color: transparent; background: Highlight; }
-  #filter-highlight { position: fixed; position-anchor: --filter-anchor;
-            inset: auto; top: anchor(top); left: anchor(left);
-            width: anchor-size(width); height: anchor-size(height);
-            box-sizing: border-box; padding: .25rem; font: inherit;
-            white-space: pre; overflow: hidden; pointer-events: none; }
-  @supports not (anchor-name: --x) {
-    #filter-highlight { display: none; }
-  }
-  #filter-highlight .kw { color: var(--keyword); }
-  #filter-highlight .op { color: var(--operator); }
-  #filter-highlight .str { color: var(--string); }
+  #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
   /* Visually hidden but still in the accessibility tree — keeps the
      aria-live loading announcement (frontend-style-guide.md §5) without
      the text ever occupying space in #controls's flex row, which is what
@@ -400,7 +366,6 @@
 <div id="cell-pop" popover><pre id="cell-pre"></pre></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
-<div id="filter-highlight" aria-hidden="true"></div>
 <span id="filter-caret-anchor"></span>
 <div id="filter-suggest" popover="manual"><div id="filter-suggest-list"></div></div>
 
@@ -635,58 +600,10 @@ function applyFilterClause(column, op, value) {
   // filter button in buildCell.
   const clause = value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
   $("filter").value = clause;
-  renderFilterHighlight();
   state.filter = clause;
   state.offset = 0;
   loadData();
 }
-
-// ---- filter syntax highlight: a transparent-text overlay (#filter-highlight,
-// anchored to #filter's own box via CSS Anchor Positioning — see the CSS for
-// why a wrapper div was rejected in favor of this) coloring keywords,
-// operators, and quoted strings as the DSL grammar defines them
-// (filter-dsl.md §2's `logic`/operator/`quoted` productions, same
-// longest-match order and the same whitespace-boundary requirement word
-// operators have). Bare tokens (column names, unquoted values) are left
-// uncolored — this only ever recognizes known lexical *shapes*, never
-// judges whether a column exists or a clause is well-formed, so it stays on
-// the composing/display side of frontend-style-guide §7 rather than
-// duplicating the parser's accept/reject job.
-//
-// Only AND/OR/NOT get unconditional keyword coloring, matching
-// filter-dsl.md's own carve-out ("AND/OR/NOT are always treated as
-// keywords wherever a bare token could occur") — IS/NULL/LIKE/ILIKE are
-// deliberately NOT colored, even though they're operator-position
-// keywords too, because unlike AND/OR/NOT they're only reserved in that
-// specific position: `src/filter.rs`'s parse_bare_value has no
-// always-keyword exception for them, so e.g. a column legitimately named
-// `is` or a bare value `like` (`reaction = like`) parses and executes
-// fine but isn't structurally distinguishable from the operator use
-// without tracking where in a condition the cursor is — exactly the
-// position-aware parsing this feature is scoped to avoid.
-//
-// Anything that sets #filter.value directly — applyFilterClause above,
-// acceptFilterSuggestion and the table-switch handler elsewhere — has to
-// call this too: unlike typing, a programmatic .value= doesn't fire an
-// "input" event. ----
-const FILTER_TOKEN_RE = /('(?:''|[^'])*')|(?<=^|\s)(AND|OR|NOT)(?=\s|$)|(>=|<=|!=|=|>|<)/gi;
-
-function renderFilterHighlight() {
-  const text = $("filter").value;
-  const frag = document.createDocumentFragment();
-  let last = 0;
-  for (const m of text.matchAll(FILTER_TOKEN_RE)) {
-    if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-    const span = document.createElement("span");
-    span.className = m[1] !== undefined ? "str" : m[2] !== undefined ? "kw" : "op";
-    span.textContent = m[0];
-    frag.appendChild(span);
-    last = m.index + m[0].length;
-  }
-  frag.appendChild(document.createTextNode(text.slice(last)));
-  $("filter-highlight").replaceChildren(frag);
-}
-$("filter").addEventListener("input", renderFilterHighlight);
 
 // ---- filter column autocomplete (docs/dbviewer-feedback-backlog.md #2): a
 // cursor-anchored popup (Popover API + CSS Anchor Positioning, same shape as
@@ -781,7 +698,6 @@ function acceptFilterSuggestion(i) {
   const input = $("filter");
   input.value = filterSuggestHead + filterSuggestMatches[i];
   input.setSelectionRange(input.value.length, input.value.length);
-  renderFilterHighlight();
   closeFilterSuggest();
   input.focus();
 }
@@ -1044,7 +960,6 @@ async function loadTables() {
     btn.onclick = () => {
       state.table = t.name; state.offset = 0; state.sort = null; state.filter = "";
       $("filter").value = "";
-      renderFilterHighlight();
       persist(); loadData();
     };
     li.appendChild(btn);
