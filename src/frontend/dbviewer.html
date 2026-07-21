@@ -1,8 +1,5 @@
 <!doctype html>
-<!-- Ashurbanipal dbviewer — single-file frontend (design.md §3.1).
-     v1 scaffold: functional table browser, plain-text cells.
-     TODO before v1 done: @alenaksu/json-viewer for jsonb cells (CDN,
-     degraded fallback), Prism highlighting — see cdn-research.md. -->
+<!-- Ashurbanipal dbviewer — single-file frontend (design.md §3.1). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -20,19 +17,35 @@
     --success: light-dark(#2a2, #5c5);
     --active: light-dark(#08f2, #08f5);
     --backdrop: light-dark(#0006, #0009);
-    --keyword: light-dark(#7c3aed, #c4b5fd);
-    --operator: light-dark(#0891b2, #67e8f9);
-    --string: light-dark(#b45309, #fbbf24);
     --gap: .5rem;
     --gap-lg: .75rem;
+    /* Shared type-color palette: --type-* is what whole grid/record cells
+       use (formatCellValue), --json-* is what renderJsonTree's per-token
+       spans use. Bool/number/uuid point at the same values on purpose, so
+       a boolean (say) looks identical whether it's a top-level column or
+       three levels deep inside a jsonb blob. */
+    --json-string: light-dark(#a11, #e88);
+    --json-number: light-dark(#166, #6cc);
+    --json-bool: light-dark(#a60, #fb5);
+    --json-null: light-dark(#888, #999);
+    --type-uuid: light-dark(#639, #c9f);
+    --type-bool: var(--json-bool);
+    --type-number: var(--json-number);
+    --type-date: light-dark(#2a6, #6db);
   }
 
   /* ==== Layout ==== */
   body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
   nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
-  main { padding: var(--gap-lg); overflow: auto; }
+  /* No padding here: #toolbar is sticky and must reach main's actual edges
+     to fully cover scrolled rows — a padded main would leave #toolbar's box
+     short by that padding on every side. Padding moved to #toolbar and
+     #content instead, so the visual inset is unchanged. */
+  main { overflow: auto; }
+  #content { padding: 0 var(--gap-lg) var(--gap-lg); }
   h1 { font-size: 1rem; margin: 0 0 var(--gap); }
-  h1 a { color: inherit; text-decoration: none; }
+  h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
+  h1 a:hover { text-decoration-thickness: 2px; }
 
   /* ==== Sidebar table list ==== */
   ul { list-style: none; margin: 0; padding: 0; }
@@ -92,7 +105,10 @@
      and since tbody follows thead in DOM order, its positioned <td>s paint
      over a sticky <th> with the default auto stacking order unless the
      header is explicitly raised above them. */
-  thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+  /* top is #toolbar's live height (--toolbar-h, set via ResizeObserver in
+     the JS — flex-wrap/error text make it non-constant), not 0, so the
+     header sticks below the toolbar instead of colliding with it. */
+  thead th { position: sticky; top: var(--toolbar-h, 0px); z-index: 1; background: canvas; }
   /* Arrow is always rendered (dim when unsorted) rather than only appearing
      on the active column, so a) every th's width is stable across sort
      changes instead of shifting when a different column becomes active, and
@@ -143,42 +159,20 @@
   .copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
 
   /* ==== Controls / status ==== */
+  /* Pinned in both axes (unlike thead th below, top:0 only — header cells
+     must still scroll horizontally with their column). #error lives inside
+     so a rejection message stays paired with the filter, not scrolled away.
+     z-index above thead th's + opaque background stop rows/header from
+     showing through; thead th's `top` (below) reads this box's live height
+     off --toolbar-h so the two don't collide at the same offset. */
+  #toolbar { position: sticky; top: 0; left: 0; z-index: 2; background: canvas;
+             padding: var(--gap-lg) var(--gap-lg) var(--gap);
+             border-bottom: 1px solid var(--border); }
   #controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
   /* display: contents keeps #filter/#apply flex items of #controls directly,
      so wrapping them in a <form> (for native Enter-to-submit) doesn't change layout. */
   #filter-form { display: contents; }
-  /* #filter keeps its exact original box (flex/min-width/field-sizing) — a
-     wrapper div sized to match would risk drifting out of sync with
-     field-sizing:content's own intrinsic width. Anchor positioning instead
-     tracks the input's real rendered box directly, whatever size it ends up.
-     The real input's text is made transparent — #filter-highlight (a
-     positioned element, so it paints above this in-flow one regardless of
-     DOM order) renders the visible colored text; only the caret stays the
-     input's own. ::selection needs its own override: browsers apply a
-     built-in default ::selection color that overrides a plain `color`
-     declaration for the selected range specifically, so without this the
-     "invisible" text becomes opaque exactly where selected, clashing with
-     the overlay's colored glyphs painted on top of it. Keeping color
-     transparent there too and only changing the background reproduces an
-     ordinary selection highlight behind the overlay's (still correctly
-     colored) text. Same graceful-degradation shape as #cell-pop et al:
-     unsupported browsers just don't get the overlay (@supports below),
-     input renders as plain text same as before. */
-  #filter { anchor-name: --filter-anchor; flex: 1; min-width: 12rem; font: inherit;
-            padding: .25rem; field-sizing: content; background: transparent;
-            color: transparent; caret-color: CanvasText; }
-  #filter::selection { color: transparent; background: Highlight; }
-  #filter-highlight { position: fixed; position-anchor: --filter-anchor;
-            inset: auto; top: anchor(top); left: anchor(left);
-            width: anchor-size(width); height: anchor-size(height);
-            box-sizing: border-box; padding: .25rem; font: inherit;
-            white-space: pre; overflow: hidden; pointer-events: none; }
-  @supports not (anchor-name: --x) {
-    #filter-highlight { display: none; }
-  }
-  #filter-highlight .kw { color: var(--keyword); }
-  #filter-highlight .op { color: var(--operator); }
-  #filter-highlight .str { color: var(--string); }
+  #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
   /* Visually hidden but still in the accessibility tree — keeps the
      aria-live loading announcement (frontend-style-guide.md §5) without
      the text ever occupying space in #controls's flex row, which is what
@@ -213,14 +207,18 @@
      chrome: native <dialog> — showModal() gives backdrop, Esc-to-close, and
      focus trapping for free. */
   dialog { border: 1px solid var(--border-strong); border-radius: 8px; padding: 0;
-           max-width: min(60rem, 92vw); max-height: 80vh; }
+           max-width: min(60rem, 92vw); max-height: 80vh; box-sizing: border-box; }
   dialog::backdrop { background: var(--backdrop); }
   .dialog-head { display: flex; justify-content: space-between; align-items: center;
                  gap: 1rem; padding: var(--gap) var(--gap-lg); border-bottom: 1px solid var(--border); }
   .dialog-head button { background: none; border: none; cursor: pointer;
                         font: inherit; color: inherit; }
+  /* border-box here (and on <dialog> above) so the padding below is inside
+     the max-height budget, not added on top of it — content-box padding is
+     what let long content (the API reference doc) overflow the dialog
+     itself and add a second scrollbar around the pre's own. */
   dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
-                          max-height: calc(80vh - 3rem); }
+                          max-height: calc(80vh - 3rem); box-sizing: border-box; }
   dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
               gap: .3rem var(--gap-lg); }
   dialog dl dt { font-weight: 600; }
@@ -239,6 +237,49 @@
   .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
   .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1; }
 
+  /* jsonb tree rendering (renderJsonTree): used inside both #cell-pop (in
+     place of #cell-pre) and dialog dl dd. Both ancestors set
+     white-space: pre-wrap for their plain-text case, which would otherwise
+     be inherited into the tree's block-level markup — reset it back to
+     normal here. Deliberately not <details>/<summary>: that gave a native
+     disclosure-triangle/summary widget for free, but it replaced JSON's
+     actual {}/[]/,/: shape with a generic tree-widget look. This instead
+     renders real pretty-printed JSON text and folds one block at a time
+     to an inline "{…}", editor-gutter style (VS Code/Zed), so collapsed or
+     not it still reads as JSON. */
+  .json-tree { white-space: normal; }
+  .json-line { display: flex; }
+  .json-children { margin-left: 1.05rem; border-left: 1px solid var(--border); padding-left: .5rem; }
+  .json-fold { all: unset; cursor: pointer; flex: none; width: 1rem; text-align: center;
+               color: var(--border-strong); transform-origin: 45% 50%; }
+  .json-fold::before { content: "▾"; font-size: .65em; }
+  .json-node.collapsed > .json-line:first-child .json-fold { transform: rotate(-90deg); }
+  .json-node.collapsed > .json-children,
+  .json-node.collapsed > .json-line:last-child { display: none; }
+  .json-ellipsis { display: none; opacity: .7; }
+  .json-node.collapsed .json-ellipsis { display: inline; }
+  .json-punct { color: var(--border-strong); }
+  .json-key { font-weight: 600; }
+  .json-string { color: var(--json-string); }
+  .json-number { color: var(--json-number); }
+  .json-bool { color: var(--json-bool); }
+  .json-null { color: var(--json-null); }
+  .json-uuid { color: var(--type-uuid); }
+  .cell-type-uuid { color: var(--type-uuid); }
+  .cell-type-bool { color: var(--type-bool); }
+  .cell-type-number { color: var(--type-number); }
+  .cell-type-date { color: var(--type-date); }
+
+  /* API-reference affordance: a fixed corner button, deliberately outside
+     the nav/main grid so it stays reachable regardless of which table/dialog
+     is showing. Opens the same <dialog> chrome as the payload/record
+     viewers above. */
+  #api-help-btn { position: fixed; left: var(--gap-lg); bottom: var(--gap-lg); z-index: 1;
+                  width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+                  border: 1px solid var(--border-strong); background: canvas;
+                  color: inherit; cursor: pointer; font: inherit; }
+  #api-help-btn:hover { background: var(--hover); }
+
   /* Cell preview: native Popover API — non-modal, light-dismiss (click
      anywhere outside closes it). Positioned via CSS Anchor Positioning:
      the clicked cell gets anchor-name set in JS, and position-try-fallbacks
@@ -251,8 +292,9 @@
               margin: 0; border: 1px solid var(--border-strong);
               border-radius: 8px; padding: 0; max-width: min(40rem, 90vw);
               box-shadow: 0 4px 16px #0004; }
-  #cell-pop pre { margin: 0; padding: .6rem var(--gap-lg); overflow: auto;
-                  max-height: 50vh; white-space: pre-wrap; word-break: break-word; }
+  #cell-pop pre, #cell-pop .json-tree { margin: 0; padding: .6rem var(--gap-lg); overflow: auto;
+                  max-height: 50vh; word-break: break-word; }
+  #cell-pop pre { white-space: pre-wrap; }
 
   /* Common-values popover: same CSS Anchor Positioning + Popover API shape
      as #cell-pop above, anchored to the header's ▾ button instead of a
@@ -314,7 +356,7 @@
 <nav>
   <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
   <search id="table-search">
-    <input id="table-filter" type="search" enterkeyhint="search" placeholder="filter tables…" aria-label="filter tables">
+    <input id="table-filter" type="search" enterkeyhint="search" placeholder="filter tables…" aria-label="filter tables" autocomplete="off">
   </search>
   <ul id="tables"></ul>
   <p id="tables-empty" hidden>no matching tables</p>
@@ -324,24 +366,28 @@
   </div>
 </nav>
 <main id="main">
-  <search id="controls">
-    <strong id="current">—</strong>
-    <output id="status" aria-live="polite" class="sr-only"></output>
-    <form id="filter-form">
-      <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
-      <button id="apply">apply</button>
-    </form>
-    <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
-    <button id="payload" disabled title="raw JSON response for the current view">payload</button>
-  </search>
-  <div id="error" role="alert"></div>
-  <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
-  <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
-  <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
-  <div id="pager">
-    <button id="prev">‹ prev</button>
-    <output id="page"></output>
-    <button id="next">next ›</button>
+  <div id="toolbar">
+    <search id="controls">
+      <strong id="current">—</strong>
+      <output id="status" aria-live="polite" class="sr-only"></output>
+      <form id="filter-form">
+        <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+        <button id="apply">apply</button>
+      </form>
+      <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
+      <button id="payload" disabled title="raw JSON response for the current view">payload</button>
+    </search>
+    <div id="error" role="alert"></div>
+  </div>
+  <div id="content">
+    <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
+    <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
+    <div id="pager">
+      <button id="prev">‹ prev</button>
+      <output id="page"></output>
+      <button id="next">next ›</button>
+    </div>
   </div>
 </main>
 
@@ -361,12 +407,21 @@
   <dl id="record-dl"></dl>
 </dialog>
 
-<div id="cell-pop" popover><pre id="cell-pre"></pre></div>
+<div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
-<div id="filter-highlight" aria-hidden="true"></div>
 <span id="filter-caret-anchor"></span>
 <div id="filter-suggest" popover="manual"><div id="filter-suggest-list"></div></div>
+
+<dialog id="api-help-dialog" closedby="any">
+  <div class="dialog-head">
+    <span class="dialog-head-title"><strong>API reference (for AI agents)</strong><button id="api-help-copy" class="copy" aria-label="copy API reference as JSON">⧉</button></span>
+    <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
+  </div>
+  <pre id="api-help-pre"></pre>
+</dialog>
+<button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
+
 <script type="module">
 const API = "/__ashurbanipal/api";
 const UI_KEY = "ashurbanipal_ui";
@@ -437,6 +492,118 @@ function prettyPrint(text) {
   try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; }
 }
 
+// ---- jsonb tree rendering: a hand-rolled, dependency-free replacement for
+// what a CDN JSON-viewer library would give (see cdn-research.md). Renders
+// real pretty-printed JSON — actual {}/[]/,/: text, not a generic tree
+// widget — so it stays recognizable as JSON whether folded or not. Each
+// object/array gets one gutter fold toggle (▾, VS Code/Zed-style) that
+// collapses just that block to an inline "{…}"/"[…]"; per-value coloring
+// needs no tokenizer since JSON.parse already tells us each value's real
+// type. Every line is its own block-level div, so indentation (via
+// .json-children's margin, see CSS) is uniform per nesting depth
+// regardless of how long a preceding key is. ----
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function renderJsonTree(value) {
+  return jsonEntryValue(value, null, false);
+}
+
+// prefix: [keySpan, ": "] to render at the start of this value's first
+// line (object entries), or null (array entries / top level).
+function jsonEntryValue(value, prefix, comma) {
+  if (Array.isArray(value)) {
+    return jsonContainer(value.map((v) => ({ prefix: null, value: v })), "[", "]", prefix, comma);
+  }
+  if (value !== null && typeof value === "object") {
+    return jsonContainer(
+      Object.entries(value).map(([k, v]) => ({ prefix: jsonKeyPrefix(k), value: v })),
+      "{", "}", prefix, comma,
+    );
+  }
+  const line = document.createElement("div");
+  line.className = "json-line";
+  if (prefix) line.append(...prefix);
+  line.append(jsonScalar(value));
+  if (comma) line.append(",");
+  return line;
+}
+
+function jsonKeyPrefix(key) {
+  const span = document.createElement("span");
+  span.className = "json-key";
+  span.textContent = JSON.stringify(key);
+  return [span, ": "];
+}
+
+function jsonContainer(entries, openCh, closeCh, prefix, comma) {
+  if (entries.length === 0) {
+    const line = document.createElement("div");
+    line.className = "json-line";
+    if (prefix) line.append(...prefix);
+    const span = document.createElement("span");
+    span.className = "json-punct";
+    span.textContent = openCh + closeCh + (comma ? "," : "");
+    line.append(span);
+    return line;
+  }
+
+  const node = document.createElement("div");
+  node.className = "json-node";
+
+  const fold = document.createElement("button");
+  fold.type = "button";
+  fold.className = "json-fold";
+  fold.setAttribute("aria-expanded", "true");
+  fold.setAttribute("aria-label", "collapse");
+  fold.onclick = () => {
+    const collapsed = node.classList.toggle("collapsed");
+    fold.setAttribute("aria-expanded", String(!collapsed));
+    fold.setAttribute("aria-label", collapsed ? "expand" : "collapse");
+  };
+
+  const openLine = document.createElement("div");
+  openLine.className = "json-line";
+  const openBrace = document.createElement("span");
+  openBrace.className = "json-punct";
+  openBrace.textContent = openCh;
+  // Duplicates the close punctuation/comma already in closeLine below —
+  // only one of the two is ever visible at a time (see .json-node.collapsed
+  // CSS), so there's no state to keep in sync, just two static renderings.
+  const ellipsis = document.createElement("span");
+  ellipsis.className = "json-ellipsis";
+  ellipsis.textContent = `…${closeCh}${comma ? "," : ""}`;
+  if (prefix) openLine.append(...prefix);
+  openLine.append(fold, openBrace, ellipsis);
+
+  const children = document.createElement("div");
+  children.className = "json-children";
+  entries.forEach((entry, i) => {
+    children.append(jsonEntryValue(entry.value, entry.prefix, i < entries.length - 1));
+  });
+
+  const closeLine = document.createElement("div");
+  closeLine.className = "json-line";
+  const closeBrace = document.createElement("span");
+  closeBrace.className = "json-punct";
+  closeBrace.textContent = closeCh + (comma ? "," : "");
+  closeLine.append(closeBrace);
+
+  node.append(openLine, children, closeLine);
+  return node;
+}
+
+function jsonScalar(value) {
+  const span = document.createElement("span");
+  if (value === null) { span.className = "json-null"; span.textContent = "null"; }
+  else if (typeof value === "boolean") { span.className = "json-bool"; span.textContent = String(value); }
+  else if (typeof value === "number") { span.className = "json-number"; span.textContent = String(value); }
+  else {
+    span.className = UUID_RE.test(value) ? "json-string json-uuid" : "json-string";
+    span.textContent = JSON.stringify(value);
+  }
+  return span;
+}
+
 async function api(path) {
   const resp = await fetch(API + path);
   if (!resp.ok) throw new Error(await resp.text());
@@ -472,12 +639,108 @@ async function copyText(text, btn) {
   setTimeout(() => { btn.textContent = "⧉"; }, 800);
 }
 
+// ---- API reference (<dialog>): a static, hand-maintained description of
+// every route below, for a human to copy and hand to an AI agent so it can
+// call this API without prior knowledge of it. Deliberately not its own
+// endpoint — the doc never changes per-request, so a route would just be a
+// 7th thing to keep in sync for no benefit over keeping this in sync.
+// Mirrors design.md §4 — update both together.
+function buildApiReference() {
+  const base = new URL(API, location.href).toString().replace(/\/$/, "");
+  const exampleFilter = encodeURIComponent("status = active");
+  return {
+    description: "Read-only REST API for browsing this service's Postgres tables. Every endpoint is GET and returns JSON. Table/column names are data-dependent — call GET /tables first to discover real names before calling anything else.",
+    base_url: base,
+    endpoints: [
+      {
+        method: "GET",
+        path: `${base}/tables`,
+        summary: "List table names in the connected schema — also the allow-list for every other endpoint's `table` param.",
+        params: [],
+        example_response: { tables: [{ name: "users", comment: "Registered accounts." }, { name: "sessions" }] },
+      },
+      {
+        method: "GET",
+        path: `${base}/table-counts`,
+        summary: "Approximate row count per table (pg_class.reltuples, not COUNT(*)).",
+        params: [],
+        example_response: { counts: [{ table: "users", approx_rows: 108234 }] },
+      },
+      {
+        method: "GET",
+        path: `${base}/tables/data`,
+        summary: "Paginated, filtered, sorted rows for one table.",
+        params: [
+          { name: "table", required: true, notes: "must be a name returned by GET /tables" },
+          { name: "filter", required: false, notes: "filter DSL — see the `filter` key below" },
+          { name: "limit", required: false, notes: "default 50, max 100" },
+          { name: "offset", required: false, notes: "default 0" },
+          { name: "sort", required: false, notes: "single column name" },
+          { name: "order", required: false, notes: '"asc" | "desc", default "asc"' },
+        ],
+        example_request: `${base}/tables/data?table=users&filter=${exampleFilter}&limit=20&sort=created_at&order=desc`,
+        example_response: {
+          columns: [{ name: "id", type: "uuid", key: "pk" }, { name: "status", type: "text" }],
+          rows: [{ id: "...", status: "active" }],
+          total_approx: 108234,
+        },
+      },
+      {
+        method: "GET",
+        path: `${base}/tables/common-values`,
+        summary: "Most frequent values for one column (pg_stats — approximate; empty if the column has no planner statistics yet).",
+        params: [
+          { name: "table", required: true },
+          { name: "column", required: true },
+        ],
+        example_response: { values: [{ value: "active", freq: 0.62 }] },
+      },
+      {
+        method: "GET",
+        path: `${base}/siblings`,
+        summary: "Other related services configured for this instance, with live health status.",
+        params: [],
+        example_response: { siblings: [{ name: "billing", dbviewer_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] },
+      },
+    ],
+    filter: {
+      grammar: "[NOT] column OP value [AND|OR [NOT] column OP value ...]",
+      operators: ["=", "!=", ">", ">=", "<", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"],
+      limits: { max_conditions: 10, max_length_bytes: 1024 },
+      notes: [
+        "AND binds tighter than OR (SQL convention).",
+        "NOT prefixes a single condition only — no parentheses or nesting.",
+        "bare values run to the next whitespace; values with spaces/quotes/keywords need single quotes.",
+        "columns are cast to text before comparison, so the same operators work across uuid/timestamptz/jsonb/etc.",
+        "at most 10 conditions and 1024 bytes per filter string — both rejected with a 400 if exceeded.",
+      ],
+      examples: [
+        "status = completed AND created_at > 2016-01-01",
+        "session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd",
+        "NOT status = archived OR priority >= 3",
+      ],
+    },
+  };
+}
+
+$("api-help-btn").onclick = () => {
+  $("api-help-pre").textContent = JSON.stringify(buildApiReference(), null, 2);
+  $("api-help-dialog").showModal();
+};
+$("api-help-copy").onclick = () => copyText($("api-help-pre").textContent, $("api-help-copy"));
+
 // ---- cell preview (Popover API: light-dismiss, non-modal; positioned via
 // CSS Anchor Positioning — see #cell-pop's position-anchor/position-try-fallbacks) ----
 let cellPopAnchor = null;
 function showCellPop(e, text) {
-  // jsonb (and any JSON-shaped value) pretty-prints; everything else raw.
-  $("cell-pre").textContent = prettyPrint(text);
+  // jsonb (and any JSON-shaped value) renders as a colored, collapsible
+  // tree; everything else falls back to the plain <pre>.
+  let parsed, isJson = true;
+  try { parsed = JSON.parse(text); } catch { isJson = false; }
+  $("cell-pre").hidden = isJson;
+  $("cell-json").hidden = !isJson;
+  if (isJson) $("cell-json").replaceChildren(renderJsonTree(parsed));
+  else $("cell-pre").textContent = text;
   if (cellPopAnchor) cellPopAnchor.style.anchorName = "";
   cellPopAnchor = e.currentTarget;
   cellPopAnchor.style.anchorName = "--cell-anchor";
@@ -499,58 +762,10 @@ function applyFilterClause(column, op, value) {
   // filter button in buildCell.
   const clause = value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
   $("filter").value = clause;
-  renderFilterHighlight();
   state.filter = clause;
   state.offset = 0;
   loadData();
 }
-
-// ---- filter syntax highlight: a transparent-text overlay (#filter-highlight,
-// anchored to #filter's own box via CSS Anchor Positioning — see the CSS for
-// why a wrapper div was rejected in favor of this) coloring keywords,
-// operators, and quoted strings as the DSL grammar defines them
-// (filter-dsl.md §2's `logic`/operator/`quoted` productions, same
-// longest-match order and the same whitespace-boundary requirement word
-// operators have). Bare tokens (column names, unquoted values) are left
-// uncolored — this only ever recognizes known lexical *shapes*, never
-// judges whether a column exists or a clause is well-formed, so it stays on
-// the composing/display side of frontend-style-guide §7 rather than
-// duplicating the parser's accept/reject job.
-//
-// Only AND/OR/NOT get unconditional keyword coloring, matching
-// filter-dsl.md's own carve-out ("AND/OR/NOT are always treated as
-// keywords wherever a bare token could occur") — IS/NULL/LIKE/ILIKE are
-// deliberately NOT colored, even though they're operator-position
-// keywords too, because unlike AND/OR/NOT they're only reserved in that
-// specific position: `src/filter.rs`'s parse_bare_value has no
-// always-keyword exception for them, so e.g. a column legitimately named
-// `is` or a bare value `like` (`reaction = like`) parses and executes
-// fine but isn't structurally distinguishable from the operator use
-// without tracking where in a condition the cursor is — exactly the
-// position-aware parsing this feature is scoped to avoid.
-//
-// Anything that sets #filter.value directly — applyFilterClause above,
-// acceptFilterSuggestion and the table-switch handler elsewhere — has to
-// call this too: unlike typing, a programmatic .value= doesn't fire an
-// "input" event. ----
-const FILTER_TOKEN_RE = /('(?:''|[^'])*')|(?<=^|\s)(AND|OR|NOT)(?=\s|$)|(>=|<=|!=|=|>|<)/gi;
-
-function renderFilterHighlight() {
-  const text = $("filter").value;
-  const frag = document.createDocumentFragment();
-  let last = 0;
-  for (const m of text.matchAll(FILTER_TOKEN_RE)) {
-    if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-    const span = document.createElement("span");
-    span.className = m[1] !== undefined ? "str" : m[2] !== undefined ? "kw" : "op";
-    span.textContent = m[0];
-    frag.appendChild(span);
-    last = m.index + m[0].length;
-  }
-  frag.appendChild(document.createTextNode(text.slice(last)));
-  $("filter-highlight").replaceChildren(frag);
-}
-$("filter").addEventListener("input", renderFilterHighlight);
 
 // ---- filter column autocomplete (docs/dbviewer-feedback-backlog.md #2): a
 // cursor-anchored popup (Popover API + CSS Anchor Positioning, same shape as
@@ -645,7 +860,6 @@ function acceptFilterSuggestion(i) {
   const input = $("filter");
   input.value = filterSuggestHead + filterSuggestMatches[i];
   input.setSelectionRange(input.value.length, input.value.length);
-  renderFilterHighlight();
   closeFilterSuggest();
   input.focus();
 }
@@ -816,8 +1030,12 @@ function buildRecordEntries(columns, row) {
     let action = document.createElement("span");
     if (raw == null) dd.textContent = "∅";
     else {
-      if (col.type === "jsonb") dd.textContent = prettyPrint(raw);
-      else dd.appendChild(formatCellValue(col, raw));
+      if (col.type === "jsonb") {
+        try {
+          dd.classList.add("json-tree");
+          dd.appendChild(renderJsonTree(JSON.parse(raw)));
+        } catch { dd.textContent = raw; }
+      } else dd.appendChild(formatCellValue(col, raw));
       const btn = document.createElement("button");
       btn.className = "copy";
       btn.setAttribute("aria-label", "copy cell value");
@@ -908,7 +1126,6 @@ async function loadTables() {
     btn.onclick = () => {
       state.table = t.name; state.offset = 0; state.sort = null; state.filter = "";
       $("filter").value = "";
-      renderFilterHighlight();
       persist(); loadData();
     };
     li.appendChild(btn);
@@ -1030,6 +1247,20 @@ function renderEmptyState(columnCount) {
 const cellTemplate = $("cell-template");
 const rowActionTemplate = $("row-action-template");
 
+// Postgres information_schema data_type strings (db.rs) bucketed into the
+// --type-* palette (see :root) — ground truth from the schema, so unlike
+// renderJsonTree's scalars this is a straight lookup, no parsing needed.
+const CELL_TYPE_CLASSES = {
+  boolean: "cell-type-bool",
+  uuid: "cell-type-uuid",
+  smallint: "cell-type-number",
+  integer: "cell-type-number",
+  bigint: "cell-type-number",
+  numeric: "cell-type-number",
+  real: "cell-type-number",
+  "double precision": "cell-type-number",
+};
+
 // Shared by the grid cell (buildCell) and the record view (buildRecordEntries)
 // so a column's "how do I render this one value" rule lives in one place.
 function formatCellValue(col, raw) {
@@ -1037,7 +1268,15 @@ function formatCellValue(col, raw) {
     const time = document.createElement("time");
     time.dateTime = raw;
     time.textContent = raw;
+    time.className = "cell-type-date";
     return time;
+  }
+  const cls = CELL_TYPE_CLASSES[col.type];
+  if (cls) {
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = raw;
+    return span;
   }
   return document.createTextNode(raw);
 }
@@ -1294,6 +1533,13 @@ $("filter").addEventListener("search", () => {
 });
 $("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData(); };
 $("next").onclick = () => { state.offset += state.limit; loadData(); };
+
+// Feeds --toolbar-h (thead th's sticky `top`, see CSS) — #toolbar's height
+// isn't static (flex-wrap, #error appearing/disappearing), so this can't be
+// a hardcoded value.
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
+}).observe($("toolbar"));
 
 loadTables().catch(e => { $("error").textContent = e.message; });
 loadSiblings();
