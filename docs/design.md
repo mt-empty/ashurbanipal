@@ -45,12 +45,13 @@ Two components, same as the original concept:
 ### 3.1 Frontend — `dbviewer.html`
 
 - Single static HTML file: markup, CSS, and JS in one file, framework-agnostic.
-- No CDN dependency is wired in yet. `@alenaksu/json-viewer` (JSON tree
-  view) and Prism.js (syntax highlighting for formatted cell values) are
-  researched and planned enhancements for jsonb cell display (see
-  `cdn-research.md`) — not yet implemented. When they land they must be
-  enhancements only: the page keeps working if the CDN is unreachable.
-  Monaco's diff editor is a separate, further-out deferral (see §9).
+- No CDN dependency is wired in. `jsonb` tree rendering (collapsible via
+  native `<details>`/`<summary>`) and per-type coloring (JSON scalars, plus
+  `uuid`/`boolean`/numeric/date columns) are hand-rolled directly in
+  `dbviewer.html` rather than pulled from a CDN — see `cdn-research.md` §1-2
+  for why the original `@alenaksu/json-viewer`/Prism.js plan was superseded.
+  Monaco's diff editor is a separate, further-out deferral (see §9) and is
+  the one place a CDN dependency is still under consideration.
 - Embedded into the Rust binary at compile time via `include_str!`, so the
   crate ships as one artifact — no separate static file to build, deploy, or
   whitelist per environment.
@@ -71,6 +72,15 @@ Two components, same as the original concept:
   - *Record / vertical view* — a per-row button opens that row as a stacked
     `column: value` list, reusing the same `<dialog>` chrome as the payload
     viewer. Per-field copy buttons plus a whole-row-as-JSON copy button.
+  - *API reference for AI agents* — a fixed "?" button in the corner opens
+    a native `<dialog>` (same chrome as the payload viewer) showing a
+    static, hand-maintained JSON document describing every route in §4
+    (method, params, an example request/response) plus the filter DSL
+    grammar (including its 10-condition/1024-byte limits), with a copy
+    button. Deliberately not its own endpoint — the
+    doc doesn't vary per request, so it's meant for a human to copy and
+    paste into an agent's context, not to be machine-fetched. Lives in the
+    frontend JS and must be kept in sync with §4 by hand.
 - **Navigation and filtering affordances**:
   - *Click-to-filter* — a button on a cell (or a dedicated button for null
     cells) composes an exact-match `column = value` (or `IS NULL`) clause
@@ -89,11 +99,13 @@ Two components, same as the original concept:
     a join.
   - *Filter autocomplete* — the filter input suggests column names via a
     native `<datalist>` at condition-start boundaries (empty input, or
-    right after `AND `/`OR `/`NOT `), plus a live overlay that highlights
-    the typed clause's tokens. No value- or operator-level autocomplete,
-    and no parsing of the filter text client-side (see `filter-dsl.md`
-    and `frontend-style-guide.md` §7) — both would require understanding
-    where the cursor sits in the grammar.
+    right after `AND `/`OR `/`NOT `). No value- or operator-level
+    autocomplete, and no parsing of the filter text client-side (see
+    `filter-dsl.md` and `frontend-style-guide.md` §7) — both would require
+    understanding where the cursor sits in the grammar. (An earlier
+    version of this also highlighted the typed clause's tokens via a
+    transparent-input-plus-overlay; removed for being too bug-prone to
+    maintain — see `dbviewer-feedback-backlog.md` #14.)
   - *Table/column comments* — `COMMENT ON TABLE`/`COMMENT ON COLUMN` text
     (§4) is surfaced as native `title` tooltips on the sidebar table
     buttons and column headers.
@@ -398,11 +410,13 @@ health_path = "/health"
 ## 9. Deferred / explicitly out of scope for v1
 
 - **Diff viewer**: Monaco's diff editor, as originally scoped, for comparing
-  `jsonb` values between rows. `@pierre/diffs` was evaluated and ruled out —
-  it declares `react`/`react-dom` as peer dependencies, so it can't be used
-  without pulling React into an otherwise framework-agnostic single-file
-  frontend (see `cdn-research.md` §3). Revisit implementation once the core
-  browser is in use.
+  `jsonb` values between rows. `@pierre/diffs` was initially evaluated and
+  ruled out for declaring `react`/`react-dom` as peer dependencies, but that
+  finding is now stale — the package has since split into a vanilla-JS core
+  (Web Components, no React) plus optional React bindings, so it's back in
+  play as a candidate (see `cdn-research.md` §3). Do the Monaco vs.
+  `@pierre/diffs` bake-off when implementation is actually revisited, once
+  the core browser is in use.
 - **Multi-column sort.**
 - **Dynamic sibling discovery.**
 - **Non-Postgres `DbSource` implementations.**
