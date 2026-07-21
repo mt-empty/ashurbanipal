@@ -56,3 +56,8 @@ dir = "tools/e2e-tests"
 description = "run the Playwright e2e suite against dbviewer.html"
 run = "pnpm exec playwright test"
 dir = "tools/e2e-tests"
+
+[tasks."showcase"]
+description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to a Bayer-dithered tools/e2e-tests/showcase.gif"
+run = "./generate-showcase-gif.sh"
+dir = "tools/e2e-tests"

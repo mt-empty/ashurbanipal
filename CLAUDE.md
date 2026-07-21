@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working style
+
+Be terse, not verbose — short responses, no restating what was just asked
+or narrating obvious next steps. Don't add comments to explain code that's
+already clear from names/structure; a comment only earns its place by
+stating a non-obvious *why* (see the `src/*.rs` comment-discipline rule
+below, which applies project-wide, not just to Rust).
+
 ## What this is
 
 Ashurbanipal is a Rust/Axum crate that a host service embeds to get a

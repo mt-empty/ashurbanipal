@@ -24,12 +24,7 @@ Ashurbanipal lib skips the whole chain by not needing a new connection, it runs 
 
 ## Showcase
 
-<!-- TODO: replace with the real capture. Suggested to record end-to-end
-     against `mise run demo` (seeded db, http://localhost:4000/__ashurbanipal):
-     pick a table -> sort/filter with the DSL -> click-to-filter on a cell ->
-     expand a jsonb cell -> open the record (vertical row) view -> jump via
-     a sibling link. ~15-20s, no narration needed. -->
-![Ashurbanipal demo](docs/media/demo.gif)
+![Ashurbanipal demo](tools/e2e-tests/showcase.gif)
 
 ## What it does
 
