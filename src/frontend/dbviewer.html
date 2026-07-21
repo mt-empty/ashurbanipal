@@ -1,5 +1,4 @@
 <!doctype html>
-<!-- Ashurbanipal dbviewer — single-file frontend (design.md §3.1). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -19,11 +18,9 @@
     --backdrop: light-dark(#0006, #0009);
     --gap: .5rem;
     --gap-lg: .75rem;
-    /* Shared type-color palette: --type-* is what whole grid/record cells
-       use (formatCellValue), --json-* is what renderJsonTree's per-token
-       spans use. Bool/number/uuid point at the same values on purpose, so
-       a boolean (say) looks identical whether it's a top-level column or
-       three levels deep inside a jsonb blob. */
+    /* --type-* (grid/record cells) and --json-* (json tree tokens) share
+       values for bool/number/uuid, so a value looks identical whether it's
+       a top-level column or nested inside a jsonb blob. */
     --json-string: light-dark(#a11, #e88);
     --json-number: light-dark(#166, #6cc);
     --json-bool: light-dark(#a60, #fb5);
@@ -37,10 +34,8 @@
   /* ==== Layout ==== */
   body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
   nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
-  /* No padding here: #toolbar is sticky and must reach main's actual edges
-     to fully cover scrolled rows — a padded main would leave #toolbar's box
-     short by that padding on every side. Padding moved to #toolbar and
-     #content instead, so the visual inset is unchanged. */
+  /* No padding here: #toolbar is sticky and must reach main's actual
+     edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
   main { overflow: auto; }
   #content { padding: 0 var(--gap-lg) var(--gap-lg); }
   h1 { font-size: 1rem; margin: 0 0 var(--gap); }
@@ -54,25 +49,18 @@
               border-radius: 4px; display: flex; justify-content: space-between; }
   li button:hover { background: var(--hover); }
   li button.active { background: var(--active); }
-  /* A long table name would otherwise overflow the sidebar's fixed 220px
-     width and push .row-right (the spinner + row count) out with it, or
-     wrap awkwardly — min-width:0 overrides the flex-item default of
-     min-width:auto, which is what actually blocks shrinking below content
-     size, letting the ellipsis truncation below take effect at all. The
-     full name is always in `title` (see loadTables()) as the truncation's
-     escape hatch, per ui-guidelines.md R8. */
+  /* min-width:0 overrides the flex-item default of min-width:auto, which
+     otherwise blocks shrinking below content size and prevents the
+     ellipsis truncation below from ever kicking in. Full name is in
+     `title` (see loadTables()) as the escape hatch. */
   .row-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
               text-overflow: ellipsis; white-space: nowrap; }
   .row-right { display: flex; align-items: center; gap: .35rem; flex: none; }
   .count { opacity: .6; }
-  /* Loading indicator for the sidebar row (replaces the old toolbar
-     #status text, which lived in #controls's flex row and visibly shoved
-     #filter sideways every time it appeared/disappeared — see git history
-     around 2026-07-19). Always in the DOM at a fixed size; only
-     visibility toggles (never display), so a row gaining/losing the spin
-     never reflows the button's own layout, let alone anything in #main.
-     Scoped to the sidebar row instead of the toolbar so this class of bug
-     structurally can't recur there again. */
+  /* Always in the DOM at a fixed size; only visibility toggles (never
+     display), so gaining/losing the spinner never reflows layout — this
+     replaced an old #status text in #controls that shoved #filter sideways
+     every time it appeared/disappeared. */
   .row-spinner { width: .7rem; height: .7rem; border-radius: 50%;
                  border: 2px solid var(--border-strong); border-top-color: transparent;
                  visibility: hidden; flex: none; }
@@ -89,50 +77,35 @@
   ::highlight(table-match) { background: var(--active); }
 
   /* ==== Data table ==== */
-  /* separate/0 instead of collapse: verified directly (not assumed) that
-     collapsed borders cause scrolled-under row content to bleed through a
-     sticky <th>'s background at the collapsed border seams in Chromium —
-     visually identical result at this border style, so no reason to keep
-     collapse once it's confirmed to be the actual cause. */
+  /* separate/0, not collapse: verified that collapsed borders let
+     scrolled-under row content bleed through a sticky <th>'s background at
+     the collapsed border seams in Chromium. */
   table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: var(--gap); }
   th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
   th { cursor: pointer; user-select: none; }
-  /* Sticky header: pinned within main's existing overflow:auto scroll
-     container. Explicit opaque background (the canvas system color, so it
-     tracks color-scheme: light dark automatically) keeps body rows from
-     visibly scrolling through the header. z-index is load-bearing, not
-     decorative: td already has position:relative (for the copy button),
-     and since tbody follows thead in DOM order, its positioned <td>s paint
-     over a sticky <th> with the default auto stacking order unless the
-     header is explicitly raised above them. */
-  /* top is #toolbar's live height (--toolbar-h, set via ResizeObserver in
-     the JS — flex-wrap/error text make it non-constant), not 0, so the
-     header sticks below the toolbar instead of colliding with it. */
+  /* z-index is load-bearing: td has position:relative (for the copy
+     button), and since tbody follows thead in DOM order, its positioned
+     <td>s paint over a sticky <th> with the default stacking order unless
+     the header is explicitly raised. top tracks #toolbar's live height
+     (--toolbar-h, set via ResizeObserver) since it isn't constant. */
   thead th { position: sticky; top: var(--toolbar-h, 0px); z-index: 1; background: canvas; }
-  /* Arrow is always rendered (dim when unsorted) rather than only appearing
-     on the active column, so a) every th's width is stable across sort
-     changes instead of shifting when a different column becomes active, and
-     b) sortability is visible before the user has ever clicked (recognition
-     rather than recall). Unsorted default of "↑" isn't arbitrary: clicking
-     an unsorted column always sorts ascending first (see th.onclick), so
-     the dim glyph previews the actual action rather than picking a direction
-     at random. */
+  /* Arrow always rendered (dim when unsorted), not just on the active
+     column: keeps every th's width stable across sort changes and shows
+     sortability before the first click. "↑" default previews the real
+     first-click behavior (ascending — see th.onclick). */
   th[aria-sort]::after { content: " ↑"; opacity: .35; }
   th[aria-sort="ascending"]::after { content: " ↑"; opacity: 1; }
   th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
-  /* PK/FK header icons: decorative (aria-hidden) — the th itself carries an
-     aria-label with the text equivalent, so the icon is never the only
-     signal. */
+  /* Decorative (aria-hidden) — the th carries an aria-label with the text
+     equivalent. */
   .key-icon { margin-right: .2rem; }
-  /* Common-values header affordance (docs/client-enhancements.md §8): a
-     plain icon button, not part of the sort click target — its own onclick
-     stops propagation so it doesn't also trigger th's sort handler. */
+  /* Not part of the sort click target — its onclick stops propagation so
+     it doesn't also trigger th's sort handler. */
   .common-values-btn { background: none; border: none; cursor: pointer; font: inherit;
               color: inherit; margin-left: .3rem; padding: 0 .15rem; border-radius: 3px; }
   .common-values-btn:hover { background: var(--hover); }
-  /* FK cells: a real <button> (see buildCell), styled distinctly from the
-     plain cell-text button so it doesn't read as a normal <a> hyperlink it
-     isn't — this is an in-app state change, not real navigation. */
+  /* Styled distinctly from the plain cell-text button so it doesn't read
+     as an <a> hyperlink — it's an in-app state change, not navigation. */
   .fk-cell { cursor: pointer; text-decoration: underline dotted;
              text-underline-offset: .15em; }
   .fk-cell:hover { text-decoration-style: solid; }
@@ -159,25 +132,21 @@
   .copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
 
   /* ==== Controls / status ==== */
-  /* Pinned in both axes (unlike thead th below, top:0 only — header cells
-     must still scroll horizontally with their column). #error lives inside
-     so a rejection message stays paired with the filter, not scrolled away.
-     z-index above thead th's + opaque background stop rows/header from
-     showing through; thead th's `top` (below) reads this box's live height
-     off --toolbar-h so the two don't collide at the same offset. */
+  /* Pinned in both axes (unlike thead th, top:0 only — header cells must
+     still scroll horizontally). #error lives inside so a rejection message
+     stays paired with the filter. z-index above thead th's + opaque
+     background stop rows from showing through. */
   #toolbar { position: sticky; top: 0; left: 0; z-index: 2; background: canvas;
              padding: var(--gap-lg) var(--gap-lg) var(--gap);
              border-bottom: 1px solid var(--border); }
   #controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
-  /* display: contents keeps #filter/#apply flex items of #controls directly,
-     so wrapping them in a <form> (for native Enter-to-submit) doesn't change layout. */
+  /* display: contents keeps #filter/#apply direct flex items of #controls,
+     so wrapping them in a <form> doesn't change layout. */
   #filter-form { display: contents; }
   #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
-  /* Visually hidden but still in the accessibility tree — keeps the
-     aria-live loading announcement (frontend-style-guide.md §5) without
-     the text ever occupying space in #controls's flex row, which is what
-     used to shove #filter sideways on every load. Standard clip-rect
-     sr-only technique. */
+  /* Visually hidden but still in the accessibility tree — the aria-live
+     loading text never occupies space in #controls's flex row, which used
+     to shove #filter sideways on every load. */
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
              margin: -1px; overflow: hidden; clip-path: inset(50%);
              white-space: nowrap; border: 0; }
@@ -191,11 +160,8 @@
   .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
          margin-right: .4em; background: #999; flex: none; }
   .dot.up { background: var(--success); } .dot.down { background: var(--danger); }
-  /* Same overflow shape as .row-name in the sidebar table list above: a
-     long sibling name would otherwise wrap awkwardly (plain inline flow
-     has no natural single-line clipping) rather than truncating cleanly.
-     Full name is always in `title` (see loadSiblings()) as the escape
-     hatch, per ui-guidelines.md R8. */
+  /* Same truncation shape as .row-name above. Full name is in `title`
+     (see loadSiblings()) as the escape hatch. */
   .sibling-row { display: flex; align-items: center; }
   .sibling-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                   min-width: 0; }
@@ -203,9 +169,8 @@
   /* ==== Pager ==== */
   #pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center; }
 
-  /* Raw-payload viewer and record/vertical-row viewer share one <dialog>
-     chrome: native <dialog> — showModal() gives backdrop, Esc-to-close, and
-     focus trapping for free. */
+  /* Native <dialog>: showModal() gives backdrop, Esc-to-close, and focus
+     trapping for free. */
   dialog { border: 1px solid var(--border-strong); border-radius: 8px; padding: 0;
            max-width: min(60rem, 92vw); max-height: 80vh; box-sizing: border-box; }
   dialog::backdrop { background: var(--backdrop); }
@@ -213,40 +178,31 @@
                  gap: 1rem; padding: var(--gap) var(--gap-lg); border-bottom: 1px solid var(--border); }
   .dialog-head button { background: none; border: none; cursor: pointer;
                         font: inherit; color: inherit; }
-  /* border-box here (and on <dialog> above) so the padding below is inside
-     the max-height budget, not added on top of it — content-box padding is
-     what let long content (the API reference doc) overflow the dialog
-     itself and add a second scrollbar around the pre's own. */
+  /* border-box (here and on <dialog> above) keeps padding inside the
+     max-height budget — content-box padding let long content overflow the
+     dialog and add a second scrollbar around the pre's own. */
   dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
                           max-height: calc(80vh - 3rem); box-sizing: border-box; }
   dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
               gap: .3rem var(--gap-lg); }
   dialog dl dt { font-weight: 600; }
   dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-  /* Record view's per-field copy button is a grid item, not absolutely
-     positioned over a td, so it needs `position: static` — but the
-     hover-to-reveal behavior otherwise matches the table's copy button
-     exactly (same opacity values), just keyed off dd:hover instead of
-     td:hover since dt/dd/button here are flat grid siblings, not wrapped
-     in a row container. */
+  /* A grid item, not absolutely positioned over a td, so it needs
+     `position: static`; hover-to-reveal otherwise matches the table's
+     copy button, keyed off dd:hover since dt/dd/button are flat grid
+     siblings here. */
   dialog dl .copy { position: static; top: auto; transform: none; opacity: 0; align-self: start; }
   dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
-  /* The whole-row copy button lives in the dialog header, so it stays
-     visible regardless of hover — it's a standalone action, not a
-     per-field affordance to declutter. */
+  /* Lives in the dialog header, so it stays visible regardless of hover —
+     a standalone action, not a per-field affordance. */
   .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
   .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1; }
 
-  /* jsonb tree rendering (renderJsonTree): used inside both #cell-pop (in
-     place of #cell-pre) and dialog dl dd. Both ancestors set
-     white-space: pre-wrap for their plain-text case, which would otherwise
-     be inherited into the tree's block-level markup — reset it back to
-     normal here. Deliberately not <details>/<summary>: that gave a native
-     disclosure-triangle/summary widget for free, but it replaced JSON's
-     actual {}/[]/,/: shape with a generic tree-widget look. This instead
-     renders real pretty-printed JSON text and folds one block at a time
-     to an inline "{…}", editor-gutter style (VS Code/Zed), so collapsed or
-     not it still reads as JSON. */
+  /* white-space: normal resets the pre-wrap inherited from ancestors
+     (#cell-pop / dialog dl dd's plain-text case). Not <details>/<summary>:
+     that replaced JSON's actual {}/[]/,/: shape with a generic tree-widget
+     look, so this renders real pretty-printed JSON instead and folds one
+     block at a time to an inline "{…}", editor-gutter style. */
   .json-tree { white-space: normal; }
   .json-line { display: flex; }
   .json-children { margin-left: 1.05rem; border-left: 1px solid var(--border); padding-left: .5rem; }
@@ -270,22 +226,19 @@
   .cell-type-number { color: var(--type-number); }
   .cell-type-date { color: var(--type-date); }
 
-  /* API-reference affordance: a fixed corner button, deliberately outside
-     the nav/main grid so it stays reachable regardless of which table/dialog
-     is showing. Opens the same <dialog> chrome as the payload/record
-     viewers above. */
+  /* Deliberately outside the nav/main grid so it stays reachable
+     regardless of which table/dialog is showing. */
   #api-help-btn { position: fixed; left: var(--gap-lg); bottom: var(--gap-lg); z-index: 1;
                   width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
                   border: 1px solid var(--border-strong); background: canvas;
                   color: inherit; cursor: pointer; font: inherit; }
   #api-help-btn:hover { background: var(--hover); }
 
-  /* Cell preview: native Popover API — non-modal, light-dismiss (click
-     anywhere outside closes it). Positioned via CSS Anchor Positioning:
-     the clicked cell gets anchor-name set in JS, and position-try-fallbacks
-     flips the popover away from the viewport edge with no clamping math.
-     Unsupported browsers just ignore these properties and fall back to the
-     popover's default position — degraded placement, not breakage. */
+  /* Popover API: non-modal, light-dismiss. Positioned via CSS Anchor
+     Positioning — the clicked cell gets anchor-name set in JS, and
+     position-try-fallbacks flips it away from the viewport edge with no
+     clamping math. Unsupported browsers fall back to default placement,
+     not breakage. */
   #cell-pop { position: fixed; position-anchor: --cell-anchor;
               position-try-fallbacks: flip-block, flip-inline;
               inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
@@ -296,11 +249,9 @@
                   max-height: 50vh; word-break: break-word; }
   #cell-pop pre { white-space: pre-wrap; }
 
-  /* Common-values popover: same CSS Anchor Positioning + Popover API shape
-     as #cell-pop above, anchored to the header's ▾ button instead of a
-     cell. Kept as a separate element/anchor-name (--cv-anchor) rather than
-     reusing --cell-anchor, since both popovers can be triggered from the
-     same render pass and each anchor-name resolves to one element. */
+  /* Same shape as #cell-pop, anchored to the header's ▾ button. Separate
+     anchor-name (--cv-anchor): both popovers can be open from the same
+     render pass and each anchor-name resolves to one element. */
   #cv-pop { position: fixed; position-anchor: --cv-anchor;
             position-try-fallbacks: flip-block, flip-inline;
             inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
@@ -315,9 +266,8 @@
   #cv-pop button.cv-value:hover { background: var(--hover); }
   #cv-pop .cv-freq { opacity: .6; }
 
-  /* Column show/hide menu: same Popover API + CSS Anchor Positioning shape
-     as #cv-pop, but the anchor is a single static button rather than one
-     per header, so anchor-name is set once in CSS instead of per-click JS. */
+  /* Same shape as #cv-pop, but the anchor is a single static button
+     rather than one per header, so anchor-name is set once in CSS. */
   #columns-btn { anchor-name: --columns-anchor; }
   #columns-pop { position: fixed; position-anchor: --columns-anchor;
             position-try-fallbacks: flip-block, flip-inline;
@@ -330,15 +280,12 @@
   #columns-pop label:hover { background: var(--hover); }
   .col-hidden { display: none; }
 
-  /* Filter column-name suggestion popup: anchored to the text caret inside
-     #filter, not the input's own box — a zero-size tracking element whose
-     left/top JS recomputes on every keystroke (mirror-div caret
-     measurement; there's no native way to anchor to a point inside plain
-     text). A manual popover, not auto: it must stay open while the user
-     keeps typing in #filter (which the browser's default light-dismiss
-     would treat as "outside"), and Escape/arrow keys/Enter/Tab need custom
-     handling instead of the browser's default dismiss/search-clear/submit
-     behavior — see the JS for the light-dismiss substitute. */
+  /* Anchored to the text caret inside #filter, not the input's box — a
+     zero-size tracking element whose left/top JS recomputes on every
+     keystroke via mirror-div caret measurement (no native way to anchor to
+     a point inside plain text). Manual popover, not auto: it must stay
+     open while typing, which the browser's default light-dismiss would
+     treat as "outside" — see the JS for the light-dismiss substitute. */
   #filter-caret-anchor { position: fixed; width: 0; height: 0; anchor-name: --filter-caret; }
   #filter-suggest { position: fixed; position-anchor: --filter-caret;
             position-try-fallbacks: flip-block;
@@ -426,27 +373,22 @@
 const API = "/__ashurbanipal/api";
 const UI_KEY = "ashurbanipal_ui";
 
-// UI state persisted in localStorage (design.md §3.1) and mirrored to the
-// URL (style guide §6): table/sort/order/limit/offset only — never filters
-// (they can contain data values, and a URL is even more exposed than
-// localStorage: browser history, access logs, Referer headers).
-// filter is intentionally never persisted (localStorage/URL) and never
-// initialized from either — same "can carry data" reasoning that already
-// keeps it out of persist()/syncUrl(). It's the *applied* filter, decoupled
-// from the live #filter input text (see fetchTableData/applyFilterClause):
-// only committing (submit, or a click-to-filter action) updates it, so an
-// unfinished edit in the box never gets silently resent by an unrelated
-// sort/page click.
+// Persisted to localStorage and mirrored to the URL: table/sort/order/
+// limit/offset only — never filter. A filter can contain data values, and
+// a URL is even more exposed than localStorage (history, access logs,
+// Referer headers). state.filter is the *applied* filter, decoupled from
+// the live #filter input text — only committing (submit, or a
+// click-to-filter action) updates it, so an unfinished edit never gets
+// silently resent by an unrelated sort/page click.
 let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, filter: "" };
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   for (const k of ["table", "sort", "order", "limit"])
     if (saved[k] !== undefined) state[k] = saved[k];
-  // hiddenColumns is keyed by table name (Record<table, string[]>) so
-  // hiding a column on one table never hides a same-named column on
-  // another. A pre-migration flat array (or anything else malformed) is
-  // discarded rather than migrated — it's UI shape only (R6), cheap to
-  // lose, and there's no reliable way to guess which table it belonged to.
+  // Keyed by table name so hiding a column on one table never hides a
+  // same-named column on another. A malformed value is discarded rather
+  // than migrated — it's cheap to lose and there's no reliable way to
+  // guess which table it belonged to.
   if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
     for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
       if (!Array.isArray(cols)) continue;
@@ -455,8 +397,8 @@ try {
     }
   }
 } catch { localStorage.removeItem(UI_KEY); }
-// A URL's query params win over localStorage: opening a shared/bookmarked
-// link should reproduce that link's view, not the visitor's own saved prefs.
+// URL query params win over localStorage: opening a shared/bookmarked link
+// should reproduce that link's view, not the visitor's own saved prefs.
 const urlParams = new URLSearchParams(location.search);
 if (urlParams.has("table")) state.table = urlParams.get("table");
 if (urlParams.has("sort")) state.sort = urlParams.get("sort");
@@ -467,9 +409,7 @@ function persist() {
   const { table, sort, order, limit, hiddenColumns } = state;
   localStorage.setItem(UI_KEY, JSON.stringify({ table, sort, order, limit, hiddenColumns }));
 }
-// Mirrors current view state into the URL (replaceState: no new history
-// entries per action) so the address bar is always a shareable link for
-// the current table/sort/order/limit/offset. filter is never included.
+// replaceState: no new history entries per action. filter is never included.
 function syncUrl() {
   const params = new URLSearchParams({
     table: state.table, limit: state.limit, offset: state.offset,
@@ -478,10 +418,9 @@ function syncUrl() {
   history.replaceState(null, "", "?" + params);
 }
 
-// Hidden columns are scoped to the current table — a stale table key or a
-// column name absent from the current table's columns simply matches
-// nothing wherever it's consulted (renderHeader/buildCell/renderRows), so
-// no separate validation pass is needed here.
+// A stale table key or column name absent from the current table's
+// columns simply matches nothing wherever it's consulted, so no separate
+// validation pass is needed here.
 function hiddenColumnsForTable() {
   return state.hiddenColumns[state.table] ?? [];
 }
@@ -492,24 +431,19 @@ function prettyPrint(text) {
   try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; }
 }
 
-// ---- jsonb tree rendering: a hand-rolled, dependency-free replacement for
-// what a CDN JSON-viewer library would give (see cdn-research.md). Renders
-// real pretty-printed JSON — actual {}/[]/,/: text, not a generic tree
-// widget — so it stays recognizable as JSON whether folded or not. Each
+// ---- jsonb tree rendering: hand-rolled, dependency-free. Each
 // object/array gets one gutter fold toggle (▾, VS Code/Zed-style) that
 // collapses just that block to an inline "{…}"/"[…]"; per-value coloring
 // needs no tokenizer since JSON.parse already tells us each value's real
-// type. Every line is its own block-level div, so indentation (via
-// .json-children's margin, see CSS) is uniform per nesting depth
-// regardless of how long a preceding key is. ----
+// type. Every line is its own block-level div, so indentation is uniform
+// per nesting depth regardless of preceding key length. ----
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function renderJsonTree(value) {
   return jsonEntryValue(value, null, false);
 }
 
-// prefix: [keySpan, ": "] to render at the start of this value's first
-// line (object entries), or null (array entries / top level).
+// prefix: [keySpan, ": "] for object entries, or null for array/top level.
 function jsonEntryValue(value, prefix, comma) {
   if (Array.isArray(value)) {
     return jsonContainer(value.map((v) => ({ prefix: null, value: v })), "[", "]", prefix, comma);
@@ -566,9 +500,8 @@ function jsonContainer(entries, openCh, closeCh, prefix, comma) {
   const openBrace = document.createElement("span");
   openBrace.className = "json-punct";
   openBrace.textContent = openCh;
-  // Duplicates the close punctuation/comma already in closeLine below —
-  // only one of the two is ever visible at a time (see .json-node.collapsed
-  // CSS), so there's no state to keep in sync, just two static renderings.
+  // Duplicates closeLine's punctuation/comma; only one is ever visible
+  // (see .json-node.collapsed CSS), so no state to keep in sync.
   const ellipsis = document.createElement("span");
   ellipsis.className = "json-ellipsis";
   ellipsis.textContent = `…${closeCh}${comma ? "," : ""}`;
@@ -610,15 +543,12 @@ async function api(path) {
   return resp.json();
 }
 
-// ---- raw payload viewer (<dialog>) ----
+// ---- raw payload viewer ----
 let lastPayload = null;
 $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(lastPayload, null, 2);
   $("payload-dialog").showModal();
 };
-// Close button is a <form method="dialog"> submit; closedby="any" on the
-// <dialog> itself handles backdrop-click dismiss — no JS needed for either.
-
 // ---- per-cell copy (Clipboard API) ----
 async function copyText(text, btn) {
   try {
@@ -626,7 +556,7 @@ async function copyText(text, btn) {
       await navigator.clipboard.writeText(text);
     } else {
       // Clipboard API needs a secure context (https/localhost); fall back
-      // for plain-http internal hosts.
+      // for plain-http.
       const ta = document.createElement("textarea");
       ta.value = text;
       document.body.appendChild(ta);
@@ -639,12 +569,10 @@ async function copyText(text, btn) {
   setTimeout(() => { btn.textContent = "⧉"; }, 800);
 }
 
-// ---- API reference (<dialog>): a static, hand-maintained description of
-// every route below, for a human to copy and hand to an AI agent so it can
-// call this API without prior knowledge of it. Deliberately not its own
-// endpoint — the doc never changes per-request, so a route would just be a
-// 7th thing to keep in sync for no benefit over keeping this in sync.
-// Mirrors design.md §4 — update both together.
+// ---- API reference: static, hand-maintained description of every route,
+// for copy-pasting to an AI agent. Not its own endpoint — the doc never
+// changes per-request, so a route would just be a 7th thing to keep in
+// sync for no benefit. ----
 function buildApiReference() {
   const base = new URL(API, location.href).toString().replace(/\/$/, "");
   const exampleFilter = encodeURIComponent("status = active");
@@ -729,11 +657,10 @@ $("api-help-btn").onclick = () => {
 };
 $("api-help-copy").onclick = () => copyText($("api-help-pre").textContent, $("api-help-copy"));
 
-// ---- cell preview (Popover API: light-dismiss, non-modal; positioned via
-// CSS Anchor Positioning — see #cell-pop's position-anchor/position-try-fallbacks) ----
+// ---- cell preview ----
 let cellPopAnchor = null;
 function showCellPop(e, text) {
-  // jsonb (and any JSON-shaped value) renders as a colored, collapsible
+  // jsonb (or any JSON-shaped value) renders as a colored, collapsible
   // tree; everything else falls back to the plain <pre>.
   let parsed, isJson = true;
   try { parsed = JSON.parse(text); } catch { isJson = false; }
@@ -747,19 +674,17 @@ function showCellPop(e, text) {
   $("cell-pop").showPopover();
 }
 
-// ---- click-to-filter (compose "column op value" into #filter and apply;
-// reused by future features that also want to seed a filter clause) ----
-// Every cell value is fetched server-side with an explicit ::text cast
-// (db.rs), which is exactly what the filter DSL compares against, so the
-// raw cell value can be spliced straight into a clause without reshaping it.
+// ---- click-to-filter: compose "column op value" into #filter and apply ----
+// Every cell value is fetched with an explicit ::text cast, which is
+// exactly what the filter DSL compares against, so it can be spliced
+// straight into a clause without reshaping.
 function quoteFilterValue(value) {
   if (value !== "" && !/[\s']/.test(value) && !/^(AND|OR|NOT)$/i.test(value)) return value;
   return "'" + value.replace(/'/g, "''") + "'";
 }
 
 function applyFilterClause(column, op, value) {
-  // value is omitted for a valueless predicate (IS NULL) — see the null-cell
-  // filter button in buildCell.
+  // value is omitted for a valueless predicate (IS NULL).
   const clause = value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
   $("filter").value = clause;
   state.filter = clause;
@@ -767,45 +692,35 @@ function applyFilterClause(column, op, value) {
   loadData();
 }
 
-// ---- filter column autocomplete (docs/dbviewer-feedback-backlog.md #2): a
-// cursor-anchored popup (Popover API + CSS Anchor Positioning, same shape as
-// #cell-pop/#cv-pop/#columns-pop) suggesting a column name wherever the DSL
-// grammar allows a new condition to start (empty/whitespace-only, or right
-// after AND/OR/NOT with its required trailing whitespace — filter-dsl.md §2's
-// `logic`/`NOT` positions), prefix-filtered by whatever partial column name
-// is already typed. This only ever inspects the text immediately before the
-// cursor for those two boundary shapes plus a whitespace-run split for the
-// partial token — it never judges the filter as a whole, so it doesn't
-// duplicate the server-side parser's accept/reject job (frontend-style-guide
-// §7). Deliberately scoped to the cursor sitting at the end of the text —
-// mid-string edits get no suggestions.
+// ---- filter column autocomplete: a cursor-anchored popup suggesting a
+// column name wherever the DSL grammar allows a new condition to start
+// (empty, or right after AND/OR/NOT), prefix-filtered by the partial
+// column name already typed. Only inspects text immediately before the
+// cursor — never judges the filter as a whole, so it doesn't duplicate the
+// server-side parser's accept/reject job. Scoped to the cursor sitting at
+// the end of the text — mid-string edits get no suggestions.
 //
-// A *manual* popover, not auto: it must stay open while the user keeps
-// typing in #filter (which the browser's default light-dismiss would treat
-// as "outside"), and arrow keys/Enter/Tab/Escape are all intercepted here
-// instead of the browser's default scroll/submit/search-clear behavior — so
-// light-dismiss (click elsewhere) is hand-rolled too, via the pointerdown
-// listener at the bottom of this block. ----
+// Manual popover, not auto: it must stay open while typing (default
+// light-dismiss would treat that as "outside"), and arrow keys/Enter/Tab/
+// Escape are intercepted here instead of the browser's default behavior —
+// light-dismiss is hand-rolled too, via the pointerdown listener below. ----
 const FILTER_COND_FIRST = /^\s*(?:NOT\s+)?$/i;
 const FILTER_COND_AFTER_LOGIC = /(^|\s)(?:AND|OR)\s+(?:NOT\s+)?$/i;
 const CARET_MIRROR_PROPS = [
   "boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
   "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
-  // The border-*-style siblings matter too, not just width: a border's used
-  // width collapses to 0 when style is "none" (the mirror's unset default),
-  // regardless of what width value is copied — #filter relies entirely on
-  // the browser's UA-default input border (nothing here sets one
-  // explicitly), so without these the mirror silently omits it and the
-  // measured caret position is off by that border's real width.
+  // border-*-style matters too, not just width: a border's used width
+  // collapses to 0 when style is "none" (the mirror's default), so without
+  // these the mirror omits #filter's UA-default border and the measured
+  // caret position is off by that width.
   "borderTopStyle", "borderRightStyle", "borderBottomStyle", "borderLeftStyle",
   "fontStyle", "fontVariant", "fontWeight", "fontStretch", "fontSize", "fontFamily",
   "lineHeight", "letterSpacing", "textTransform", "wordSpacing",
 ];
 
-// Measures the on-screen pixel position of `input`'s caret by rendering an
-// invisible clone of the text up to the cursor with identical font metrics —
-// the standard technique for locating a caret in a plain <input>; the
-// platform has no native API for this.
+// Renders an invisible clone of the text up to the cursor with identical
+// font metrics — the standard technique for locating a caret position in a
+// plain <input>, which has no native API for this.
 function measureCaretPosition(input) {
   const mirror = document.createElement("div");
   const computed = getComputedStyle(input);
@@ -842,17 +757,15 @@ function renderFilterSuggest() {
     btn.type = "button";
     btn.textContent = name;
     btn.className = i === filterSuggestIndex ? "active" : "";
-    // preventDefault on mousedown keeps focus (and the text caret) in
-    // #filter — otherwise the button would steal focus on click, firing
-    // #filter's blur handler and closing this popup before its own click
-    // handler runs.
+    // Keeps focus (and the caret) in #filter — otherwise the button
+    // would steal focus, firing #filter's blur handler and closing this
+    // popup before its own click handler runs.
     btn.onmousedown = (e) => e.preventDefault();
     btn.onclick = () => acceptFilterSuggestion(i);
     return btn;
   }));
-  // Arrow-key moves change which item is .active without any mouse
-  // involvement, so the list has to scroll itself — "nearest" only moves
-  // it the minimum needed to bring the highlighted item into view.
+  // Arrow-key moves change .active without mouse involvement, so the
+  // list has to scroll itself.
   $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
 }
 
@@ -912,12 +825,10 @@ document.addEventListener("pointerdown", (e) => {
   }
 });
 
-// ---- common-values header dropdown (docs/client-enhancements.md §8): a
-// shortlist from Postgres planner statistics (pg_stats.most_common_vals),
-// never a full distinct-value scan — copy says "common values", not "all
-// values", so it doesn't imply completeness it doesn't have. Reuses the
-// CSS Anchor Positioning + Popover API pattern from #cell-pop (see #cv-pop)
-// and the applyFilterClause() helper from click-to-filter above. ----
+// ---- common-values header dropdown: a shortlist from Postgres planner
+// statistics, never a full distinct-value scan — copy says "common
+// values", not "all values", so it doesn't imply completeness it doesn't
+// have. ----
 let cvAnchor = null;
 let cvRequestToken = 0;
 function renderCommonValues(values, column) {
@@ -955,9 +866,9 @@ async function showCommonValues(e, column) {
   loading.textContent = "loading…";
   list.replaceChildren(loading);
   $("cv-pop").showPopover();
-  // A second header's ▾ can be clicked before the first request resolves —
-  // both share one popover instance, so a token discards a stale response
-  // instead of letting it clobber whichever column is actually showing.
+  // A second header's ▾ can be clicked before the first request resolves;
+  // the token discards a stale response instead of clobbering the column
+  // actually showing.
   const token = ++cvRequestToken;
   const params = new URLSearchParams({ table: state.table, column });
   let values;
@@ -975,14 +886,10 @@ async function showCommonValues(e, column) {
   renderCommonValues(values, column);
 }
 
-// ---- column show/hide (client-enhancements.md §4a): a static-anchored
-// Popover-API checklist toggling a CSS class on the already-rendered
-// header/data cells — never a refetch, purely a display toggle. Matched by
-// column name (data-col), not position, so it can't fall out of sync with
-// header/cell alignment the way an index-based toggle could. A hidden
-// column name absent from the current table's columns (stale table switch,
-// stale localStorage) simply matches nothing here — silent no-op, per
-// ui-guidelines.md R5. ----
+// ---- column show/hide: toggles a CSS class on already-rendered
+// header/data cells, never a refetch. Matched by column name (data-col),
+// not position, so it can't fall out of sync with header/cell alignment.
+// A stale column name simply matches nothing — silent no-op. ----
 function setColumnVisibility(name, hidden) {
   const current = hiddenColumnsForTable();
   const next = hidden ? [...current, name] : current.filter(c => c !== name);
@@ -994,9 +901,6 @@ function setColumnVisibility(name, hidden) {
   updateColumnsButtonLabel();
 }
 
-// Reuses this file's existing idiom of surfacing counts directly in visible
-// button/output text (sidebar row counts, the pager's "page N · ~M rows")
-// rather than a separate badge/dot component (ui-guidelines.md #6).
 function updateColumnsButtonLabel() {
   const n = hiddenColumnsForTable().length;
   $("columns-btn").textContent = n > 0 ? `columns (${n} hidden)` : "columns";
@@ -1015,8 +919,8 @@ function renderColumnMenu(columns) {
   }));
 }
 
-// ---- record / vertical view (<dialog>): one already-fetched row as a
-// stacked column:value list, for tables too wide to scan across ----
+// ---- record / vertical view: one already-fetched row as a stacked
+// column:value list, for tables too wide to scan across ----
 function buildRecordEntries(columns, row) {
   const nodes = [];
   for (const col of columns) {
@@ -1024,9 +928,8 @@ function buildRecordEntries(columns, row) {
     dt.textContent = col.name;
     const dd = document.createElement("dd");
     const raw = row[col.name];
-    // Null fields get an empty placeholder rather than no third grid item,
-    // same reasoning as the table's null cells (see buildCell): nothing to
-    // copy, but the grid's three-column alignment still needs a cell here.
+    // Nothing to copy for a null field, but the grid's three-column
+    // alignment still needs a cell here.
     let action = document.createElement("span");
     if (raw == null) dd.textContent = "∅";
     else {
@@ -1048,10 +951,8 @@ function buildRecordEntries(columns, row) {
   return nodes;
 }
 
-// jsonb columns are re-nested (their raw value is the ::text-cast JSON
-// string, per buildRecordEntries) so the copied JSON has real nested
-// objects instead of an escaped string — everything else stays exactly the
-// raw text value already shown in the record view and copied per-field.
+// jsonb columns are re-nested (raw value is the ::text-cast JSON string)
+// so the copied JSON has real nested objects instead of an escaped string.
 function recordAsJson(columns, row) {
   const obj = {};
   for (const col of columns) {
@@ -1068,11 +969,8 @@ function openRecordView(columns, row) {
   const open = () => $("record-dialog").showModal();
   document.startViewTransition ? document.startViewTransition(open) : open();
 }
-// Close button is a <form method="dialog"> submit; closedby="any" on the
-// <dialog> itself handles backdrop-click and Esc dismiss — no JS needed.
-
-// ---- sidebar table search-as-you-type: transient, session-local UI state
-// (deliberately not part of `state`/localStorage — resets on reload) ----
+// ---- sidebar table search-as-you-type: transient, session-local state,
+// not part of `state`/localStorage — resets on reload ----
 let tableEntries = []; // { name, li, btn, textNode }
 const tableMatchHighlight = CSS.highlights ? new Highlight() : null;
 if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
@@ -1113,16 +1011,11 @@ async function loadTables() {
     btn.firstChild.textContent = t.name;
     btn.querySelector(".count").textContent = `~${countMap[t.name] ?? "?"}`;
     btn.dataset.table = t.name;
-    // Always set, not just when commented: the name itself can overflow
-    // the fixed-width sidebar (long table names) and gets CSS-truncated
-    // (see .row-name), so the native title tooltip is this truncation's
-    // escape hatch (ui-guidelines.md R8), same as the cell-preview popover
-    // is for a truncated cell value elsewhere in this file.
+    // Always set, not just when commented: long names get CSS-truncated
+    // (see .row-name), so the title tooltip is the escape hatch.
     btn.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
-    // A filter clause is written against this table's columns — it can't
-    // just carry over to a different table (wrong columns, possibly not
-    // even valid syntax if it was mid-edit), so it resets the same way sort
-    // already does rather than silently resending it and failing.
+    // A filter clause is written against this table's columns, so it
+    // resets on table switch the same way sort already does.
     btn.onclick = () => {
       state.table = t.name; state.offset = 0; state.sort = null; state.filter = "";
       $("filter").value = "";
@@ -1140,28 +1033,22 @@ async function loadTables() {
   else setStatus("");
 }
 
-// Toggles the fixed-size spinner on a sidebar row (see .row-spinner CSS) —
-// the visible loading affordance for table-data fetches, keyed by table
-// name rather than "whichever row is .active" so it's still correct if
-// tableEntries is ever rebuilt mid-fetch.
+// Keyed by table name rather than "whichever row is .active" so it's
+// still correct if tableEntries is ever rebuilt mid-fetch.
 function setRowLoading(name, loading) {
   tableEntries.find(e => e.name === name)?.btn.classList.toggle("loading", loading);
 }
 
-// Reference-counted rather than a plain boolean: fetchTableData() can be
-// in flight more than once at a time (a user can switch tables again
-// before the previous fetch resolves — nothing here cancels it). A plain
-// "set true / set false" pair would let the *first* fetch to finish clear
-// aria-busy/#status while the *other* one is still genuinely running.
-// Counting only clears them once every in-flight fetch has completed.
+// Reference-counted, not a plain boolean: fetchTableData() can be in
+// flight more than once (switching tables again before the previous fetch
+// resolves), and a plain true/false pair would let the first fetch to
+// finish clear aria-busy/#status while another is still running.
 let inFlightFetches = 0;
 
 async function fetchTableData() {
-  // Captured once, for this call only — never re-read state.table later.
-  // Without this, a slow-to-resolve fetch for table A would clear table
-  // B's row-loading flag (whatever state.table had become by the time A's
-  // `finally` runs) instead of its own, leaving A's own row's spinner
-  // stuck running forever (docs/known-issues.md #2).
+  // Captured once, never re-read later: without this, a slow fetch for
+  // table A would clear table B's row-loading flag (whatever state.table
+  // had become by the time A's `finally` runs) instead of its own.
   const table = state.table;
   const params = new URLSearchParams({
     table, limit: state.limit, offset: state.offset,
@@ -1205,8 +1092,8 @@ function renderHeader(columns) {
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "🔑" : "→";
       th.append(icon, label);
-      // Comment layers onto the accessible name rather than replacing the
-      // existing key description — the icon keeps its own `title` above.
+      // Layers onto the accessible name rather than replacing the key
+      // description — the icon keeps its own `title` above.
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
       th.append(label);
@@ -1219,9 +1106,8 @@ function renderHeader(columns) {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
       state.sort = col.name; state.offset = 0; persist(); loadData();
     };
-    // Common-values dropdown affordance (§8): its own focusable control
-    // nested in the sortable th, same shape as the record-btn nested in a
-    // row-actions td — stopPropagation so opening it doesn't also toggle sort.
+    // A focusable control nested in the sortable th — stopPropagation so
+    // opening it doesn't also toggle sort.
     const cvBtn = document.createElement("button");
     cvBtn.type = "button";
     cvBtn.className = "common-values-btn";
@@ -1247,9 +1133,9 @@ function renderEmptyState(columnCount) {
 const cellTemplate = $("cell-template");
 const rowActionTemplate = $("row-action-template");
 
-// Postgres information_schema data_type strings (db.rs) bucketed into the
-// --type-* palette (see :root) — ground truth from the schema, so unlike
-// renderJsonTree's scalars this is a straight lookup, no parsing needed.
+// Postgres data_type strings bucketed into the --type-* palette — ground
+// truth from the schema, so unlike renderJsonTree's scalars this is a
+// straight lookup, no parsing needed.
 const CELL_TYPE_CLASSES = {
   boolean: "cell-type-bool",
   uuid: "cell-type-uuid",
@@ -1261,8 +1147,8 @@ const CELL_TYPE_CLASSES = {
   "double precision": "cell-type-number",
 };
 
-// Shared by the grid cell (buildCell) and the record view (buildRecordEntries)
-// so a column's "how do I render this one value" rule lives in one place.
+// Shared by buildCell and buildRecordEntries so a column's rendering rule
+// lives in one place.
 function formatCellValue(col, raw) {
   if (col.type === "timestamp with time zone" || col.type === "date") {
     const time = document.createElement("time");
@@ -1281,10 +1167,8 @@ function formatCellValue(col, raw) {
   return document.createTextNode(raw);
 }
 
-// A real <button> as the click target (not the <td> itself) so the expand
-// action is keyboard-focusable and Enter/Space-activatable, matching the
-// copy button one element over. Null cells get only the filter button
-// (nothing to copy or expand) — see the raw == null branch below.
+// A real <button> as the click target so it's keyboard-focusable and
+// Enter/Space-activatable, matching the copy button one element over.
 function buildCell(col, raw) {
   const hidden = hiddenColumnsForTable().includes(col.name);
   if (raw == null) {
@@ -1295,9 +1179,8 @@ function buildCell(col, raw) {
     span.className = "cell-text";
     span.textContent = "∅";
     td.appendChild(span);
-    // Nothing to copy or expand for a null cell, but "filter by this value"
-    // is still meaningful (IS NULL) — the DSL supports it (filter-dsl.md
-    // V10), this was just never wired up to a click affordance.
+    // Nothing to copy or expand for a null cell, but "filter by this
+    // value" is still meaningful (IS NULL).
     const filterBtn = document.createElement("button");
     filterBtn.className = "filter-eq only-action";
     filterBtn.setAttribute("aria-label", "filter by null");
@@ -1316,11 +1199,9 @@ function buildCell(col, raw) {
   btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
   filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
   if (col.key === "fk" && col.references) {
-    // In-app navigation, not a page load: switch to the referenced table
-    // and seed a filter for the referenced row, reusing the same
-    // compose-clause helper §1's filter buttons use. Reset sort first —
-    // the current sort column belongs to this table and may not exist on
-    // the target one.
+    // In-app navigation: switch to the referenced table and seed a filter
+    // for the referenced row. Reset sort first — the current sort column
+    // belongs to this table and may not exist on the target one.
     cellText.classList.add("fk-cell");
     cellText.title = `go to ${col.references.table}.${col.references.column} = ${raw}`;
     cellText.onclick = () => {
@@ -1330,9 +1211,8 @@ function buildCell(col, raw) {
       applyFilterClause(col.references.column, "=", raw);
     };
   } else {
-    // Expand on click for jsonb, or anything visually truncated. scrollWidth
-    // > clientWidth is only known after layout, so decide per click rather
-    // than per render.
+    // scrollWidth > clientWidth is only known after layout, so decide
+    // per click rather than per render.
     cellText.onclick = (e) => {
       if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
         showCellPop(e, raw);
@@ -1352,9 +1232,7 @@ function buildRowActionCell(columns, row) {
 function renderRows(data) {
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
-    // hidden columns drop out of the table's resolved column model entirely
-    // (display:none cells aren't counted), so spanning the full fetched
-    // count here would overshoot it.
+    // hidden columns (display:none) aren't counted.
     const hidden = hiddenColumnsForTable();
     const visible = data.columns.filter(c => !hidden.includes(c.name)).length;
     renderEmptyState(visible + 1);
@@ -1369,11 +1247,9 @@ function renderRows(data) {
     }
     return tr;
   }));
-  // Overflow is only measurable after layout: mark truncated cells so the
-  // cursor hints they're expandable (jsonb cells are marked at render).
-  // fk-cell is excluded: its title attribute (set in buildCell) is already
-  // the escape hatch for a truncated value, and it must not pick up the
-  // "expandable" zoom-in cursor since a click navigates, not expands.
+  // Overflow is only measurable after layout (jsonb cells are marked at
+  // render instead). fk-cell is excluded: its title is already the escape
+  // hatch, and a click navigates rather than expands.
   requestAnimationFrame(() => {
     for (const el of tbody.querySelectorAll(".cell-text:not(.fk-cell)")) {
       if (el.scrollWidth > el.clientWidth) el.closest("td").classList.add("expandable");
@@ -1389,15 +1265,12 @@ function updatePager(data) {
 }
 
 // ---- focus preservation across thead/tbody re-renders ----
-// replaceChildren() detaches whatever was focused inside it, and the browser
-// silently falls back to <body> — a real defect for keyboard users on every
-// sort/page/filter/table-switch change. Capture the focused cell's position
-// before the replace and restore focus to the same slot afterward, falling
-// back to the table itself (tabindex="-1") if that slot no longer exists.
-// Covers both tbody (cell buttons) and thead (the common-values ▾ button,
-// §8 — the first focusable control this file ever put in a header row;
-// verified against a real table switch that it does drop to <body> without
-// this covering thead too, not just a hypothetical).
+// replaceChildren() detaches whatever was focused inside it, and the
+// browser falls back to <body> — a real defect for keyboard users on every
+// sort/page/filter/table-switch change. Capture the focused cell's
+// position before the replace and restore it afterward, falling back to
+// the table itself (tabindex="-1") if that slot no longer exists. Covers
+// both tbody and thead (the common-values ▾ button).
 function captureTableFocus() {
   const active = document.activeElement;
   const table = document.querySelector("table");
@@ -1421,12 +1294,9 @@ function restoreTableFocus(captured) {
   (target ?? document.querySelector("table")).focus();
 }
 
-// Sidebar highlight, #current, and document.title all advertise "this is
-// the table currently on screen" — so they must only ever move in lockstep
-// with a *successful* render, never ahead of it (see loadData: a failed
-// fetchTableData() must leave these exactly as they were, matching the
-// stale <table> body they're describing, not the table that was attempted
-// and failed).
+// Must only ever move in lockstep with a *successful* render, never ahead
+// of it — a failed fetchTableData() (see loadData) must leave these
+// exactly as they were, matching the stale <table> body they describe.
 function updateActiveTableChrome() {
   document.querySelectorAll("#tables button").forEach(b => {
     const isActive = b.dataset.table === state.table;
@@ -1438,16 +1308,11 @@ function updateActiveTableChrome() {
   document.title = state.table ? `${state.table} — Ashurbanipal` : "Ashurbanipal";
 }
 
-// Guards against a real bug (docs/known-issues.md #2): loadData() has
-// multiple entry points (table switch, sort click, filter submit,
-// pager) and nothing previously stopped an older, slower request's
-// response from landing *after* a newer one and overwriting its
-// already-rendered result — #current could end up correctly labeled
-// while the grid actually showed a *different* table's columns/rows,
-// since updateActiveTableChrome() reads live state.table (already
-// correct) but renderHeader/renderRows use whichever `data` this
-// particular stale call happened to fetch. Same shape of fix as
-// showCommonValues's cvRequestToken, applied to the main load path.
+// loadData() has multiple entry points (table switch, sort click, filter
+// submit, pager); without this, an older slower request's response could
+// land after a newer one and overwrite its already-rendered result — the
+// grid would show a different table's columns/rows than #current claims.
+// Same shape of fix as showCommonValues's cvRequestToken.
 let loadDataToken = 0;
 
 async function loadData() {
@@ -1480,12 +1345,9 @@ async function loadData() {
   $("main").scrollTo({ top: 0, behavior: "smooth" });
 }
 
-// Polled every 15s (see setInterval below) — a token guard against the
-// same class of bug as loadData()'s (docs/known-issues.md #2): without
-// it, a slow health-check round that started earlier but resolves after
-// a later poll would overwrite that later poll's already-rendered,
-// more-current result. Lower-odds here (health checks have their own 3s
-// timeout, routes.rs) but the same structural gap, so guarded the same way.
+// Same class of bug as loadDataToken: a slow health-check round that
+// resolves after a later poll would otherwise overwrite the more-current
+// result.
 let siblingsRequestToken = 0;
 async function loadSiblings() {
   const token = ++siblingsRequestToken;
@@ -1503,7 +1365,7 @@ async function loadSiblings() {
     const a = document.createElement("a");
     a.href = s.dbviewer_url; a.textContent = s.name;
     a.target = "_blank"; a.rel = "noopener";
-    a.title = s.name; // truncation escape hatch, see .sibling-row/.sibling-name CSS
+    a.title = s.name; // truncation escape hatch
     p.className = "sibling-row";
     a.className = "sibling-name";
     p.append(dot, a);
@@ -1517,26 +1379,19 @@ $("filter-form").onsubmit = (e) => {
   state.offset = 0;
   loadData();
 };
-// Clicking a search input's native clear button empties the value and
-// fires "search" (also fires on Enter, alongside the form's own submit —
-// harmless since loadData() with an unchanged filter is idempotent), but
-// it never submits the form. Without this, clearing via that button left
-// state.filter (and the displayed rows) stale until some other action
-// (e.g. switching tables) happened to reset it.
-//
-// addEventListener, not this file's usual `.onX =` style: "search" isn't a
-// standardized event — the onsearch IDL property only exists in Chromium
-// and legacy WebKit, so `.onsearch =` is silently a no-op in Firefox and in
-// Playwright's WebKit build. addEventListener works identically everywhere.
+// The native clear button on a search input fires "search" but never
+// submits the form, so clearing it left state.filter stale until some
+// other action reset it. addEventListener, not `.onsearch =`: the
+// onsearch IDL property only exists in Chromium/legacy WebKit and is a
+// silent no-op in Firefox.
 $("filter").addEventListener("search", () => {
   if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
 });
 $("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData(); };
 $("next").onclick = () => { state.offset += state.limit; loadData(); };
 
-// Feeds --toolbar-h (thead th's sticky `top`, see CSS) — #toolbar's height
-// isn't static (flex-wrap, #error appearing/disappearing), so this can't be
-// a hardcoded value.
+// Feeds --toolbar-h (thead th's sticky `top`) — #toolbar's height isn't
+// static (flex-wrap, #error appearing/disappearing).
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
 }).observe($("toolbar"));

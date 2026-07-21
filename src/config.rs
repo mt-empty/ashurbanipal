@@ -1,19 +1,16 @@
 use serde::Deserialize;
 
-/// Environments the kill switch recognizes. `production` is deliberately
-/// not representable: config naming it fails at parse time (see `design.md` §6).
+/// `production` is deliberately not representable: config naming it fails
+/// at parse time.
 const ALLOWED_ENVIRONMENTS: &[&str] = &["dev", "integration", "staging", "any"];
 
-/// Values in `enabled_for` (or `environment`) that mean "production".
-/// Matched case-insensitively.
 const PRODUCTION_ALIASES: &[&str] = &["production", "prod", "prd", "live"];
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    /// The environment this host process is currently running in.
     pub environment: String,
-    /// (app, environment) kill switch: which environments the browser is
-    /// enabled for. Empty means disabled everywhere.
+    /// Which environments the browser is enabled for. Empty means disabled
+    /// everywhere.
     #[serde(default)]
     pub enabled_for: Vec<String>,
     #[serde(default)]
@@ -49,10 +46,7 @@ pub struct Sibling {
 
 #[derive(Debug)]
 pub enum ConfigError {
-    /// `enabled_for` (or `environment` while listed as enabled) names a
-    /// production-like environment — rejected at startup, never at request time.
     ProductionEnabled(String),
-    /// An `enabled_for` entry is not one of the recognized environments.
     UnknownEnvironment(String),
     Toml(toml::de::Error),
 }
@@ -82,15 +76,14 @@ fn is_production_like(value: &str) -> bool {
 }
 
 impl Config {
-    /// Parse from TOML (the `[ashurbanipal]` table's contents) and validate.
     pub fn from_toml(toml_str: &str) -> Result<Self, ConfigError> {
         let config: Config = toml::from_str(toml_str).map_err(ConfigError::Toml)?;
         config.validate()?;
         Ok(config)
     }
 
-    /// Enforced invariants, also run by `from_toml`. Constructing a `Config`
-    /// directly (e.g. in host code) should call this before `router()`.
+    /// Constructing a `Config` directly (e.g. in host code) should call
+    /// this before `router()`.
     pub fn validate(&self) -> Result<(), ConfigError> {
         for value in &self.enabled_for {
             if is_production_like(value) {
@@ -106,7 +99,6 @@ impl Config {
         Ok(())
     }
 
-    /// The kill switch: is the browser enabled in the current environment?
     /// `any` matches every environment except production-like ones.
     pub fn is_enabled(&self) -> bool {
         if is_production_like(&self.environment) {
@@ -190,8 +182,6 @@ mod tests {
     fn any_excludes_production_like_environments() {
         assert!(base("dev", &["any"]).is_enabled());
         assert!(base("staging", &["any"]).is_enabled());
-        // Even if the running environment claims production, `any` must not
-        // light up — belt and braces on top of parse-time rejection.
         assert!(!base("production", &["any"]).is_enabled());
         assert!(!base("PROD", &["any"]).is_enabled());
     }
