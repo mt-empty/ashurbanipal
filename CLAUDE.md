@@ -13,11 +13,14 @@ six routes under a fixed `/__ashurbanipal` prefix, including the UI itself.
 Two components:
 - **Frontend** — `src/frontend/dbviewer.html`, a single static HTML file
   (markup/CSS/JS together, framework-agnostic, no build step) embedded into
-  the binary via `include_str!` in `src/routes.rs`. `@alenaksu/json-viewer`
-  (JSON tree view) and Prism.js are planned CDN-loaded enhancements (see
-  `docs/cdn-research.md`) — not yet wired in, but when they land they must
-  be enhancements only, i.e. the page keeps working if the CDN is
-  unreachable.
+  the binary via `include_str!` in `src/routes.rs`. `jsonb` tree rendering
+  and per-type cell/JSON coloring are hand-rolled directly in the file
+  (`renderJsonTree`, `formatCellValue`) rather than pulled from a CDN — the
+  original `@alenaksu/json-viewer`/Prism.js plan was superseded. A
+  Monaco-based diff viewer remains a
+  further-out deferral and the one place a CDN dependency is still under
+  consideration; if it lands, it must be an enhancement only, i.e. the page
+  keeps working if the CDN is unreachable.
 - **Backend** — `src/config.rs` (kill switch + limits + siblings config),
   `src/db.rs` (the `DbSource` trait + its one impl, `PgPoolSource`),
   `src/routes.rs` (the Axum router and the five API handlers).
