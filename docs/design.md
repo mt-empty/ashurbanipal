@@ -48,8 +48,10 @@ Two components, same as the original concept:
 - No CDN dependency is wired in. `jsonb` tree rendering (collapsible via
   native `<details>`/`<summary>`) and per-type coloring (JSON scalars, plus
   `uuid`/`boolean`/numeric/date columns) are hand-rolled directly in
-  `dbviewer.html` rather than pulled from a CDN — see `cdn-research.md` §1-2
-  for why the original `@alenaksu/json-viewer`/Prism.js plan was superseded.
+  `dbviewer.html` rather than pulled from a CDN — the original
+  `@alenaksu/json-viewer`/Prism.js plan was superseded once building a
+  working plain-text fallback (required anyway by `ui-guidelines.md` R3)
+  turned out to be most of the implementation work either way.
   Monaco's diff editor is a separate, further-out deferral (see §9) and is
   the one place a CDN dependency is still under consideration.
 - Embedded into the Rust binary at compile time via `include_str!`, so the
@@ -86,8 +88,8 @@ Two components, same as the original concept:
     cells) composes an exact-match `column = value` (or `IS NULL`) clause
     into the filter box and submits it. Always **replaces** the current
     filter for now — composing with an already-applied filter is a known
-    open design question, not yet built (`docs/dbviewer-feedback-backlog.md`
-    §1, `docs/click-to-filter-design-options.md`).
+    open design question, not yet built
+    (`docs/feature-backlog/01-click-to-filter-compose-vs-replace.md`).
   - *Common-values dropdown* — a header affordance lists a column's most
     frequent values, fetched on demand from `/tables/common-values` (§4),
     as one-click filter shortcuts; empty when the column has no planner
@@ -104,8 +106,10 @@ Two components, same as the original concept:
     `filter-dsl.md` and `frontend-style-guide.md` §7) — both would require
     understanding where the cursor sits in the grammar. (An earlier
     version of this also highlighted the typed clause's tokens via a
-    transparent-input-plus-overlay; removed for being too bug-prone to
-    maintain — see `dbviewer-feedback-backlog.md` #14.)
+    transparent-input-plus-overlay; removed after three rounds of
+    increasingly subtle scroll/stacking bugs made it too bug-prone to
+    maintain — if revisited, do it as a `contenteditable`-based rewrite,
+    not a transparent-input-plus-overlay.)
   - *Table/column comments* — `COMMENT ON TABLE`/`COMMENT ON COLUMN` text
     (§4) is surfaced as native `title` tooltips on the sidebar table
     buttons and column headers.
@@ -116,7 +120,7 @@ Two components, same as the original concept:
     scoped per table (hiding a column on one table never hides a
     same-named column on another); a hidden-count indicator shows in the
     toolbar. Column reorder/resize are researched but not built
-    (`docs/client-enhancements.md` §4b/§4c).
+    (`docs/feature-backlog/09-column-reorder-and-resize.md`).
   - *Sticky table header* — the header row stays pinned while scrolling a
     long result set vertically.
   - *Sidebar table search* — a search box above the table list filters it
@@ -410,11 +414,14 @@ health_path = "/health"
 ## 9. Deferred / explicitly out of scope for v1
 
 - **Diff viewer**: Monaco's diff editor, as originally scoped, for comparing
-  `jsonb` values between rows. `@pierre/diffs` was initially evaluated and
-  ruled out for declaring `react`/`react-dom` as peer dependencies, but that
-  finding is now stale — the package has since split into a vanilla-JS core
-  (Web Components, no React) plus optional React bindings, so it's back in
-  play as a candidate (see `cdn-research.md` §3). Do the Monaco vs.
+  two whole rows against each other, column by column — `jsonb` columns are
+  the main reason a real diff tool is needed at all, since a `jsonb` value
+  only becomes comparable once pretty-printed. `@pierre/diffs` was initially
+  evaluated and ruled out for declaring `react`/`react-dom` as peer
+  dependencies, but that finding is now stale — the package has since split
+  into a vanilla-JS core (Web Components, no React) plus optional React
+  bindings, so it's back in play as a candidate (see
+  `docs/feature-backlog/04-diff-viewer-for-rows.md`). Do the Monaco vs.
   `@pierre/diffs` bake-off when implementation is actually revisited, once
   the core browser is in use.
 - **Multi-column sort.**
@@ -426,10 +433,10 @@ health_path = "/health"
   instead of doing it inline per request.
 - **Column reorder/resize** — the remaining two items from the grid-
   customization family (show/hide is built, §3.1); lowest priority of the
-  bunch (`client-enhancements.md` §4b/§4c).
+  bunch (`docs/feature-backlog/09-column-reorder-and-resize.md`).
 
 Finer-grained, still-undecided frontend ideas (click-to-filter compose
-semantics, per-table filter history, cross-environment jump links, jsonb
-cell size handling, etc.) are tracked as they come up in
-`docs/dbviewer-feedback-backlog.md`, not duplicated here — this section
-stays the stable, agreed-scope list.
+semantics, per-table filter history, cross-environment jump links, etc.)
+are tracked as they come up, one file per idea, under
+`docs/feature-backlog/`, not duplicated here — this section stays the
+stable, agreed-scope list.
