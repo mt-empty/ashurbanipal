@@ -20,10 +20,9 @@ pub(crate) struct AppState<S> {
     pub http: reqwest::Client,
 }
 
-/// The crate's public entry point: a self-prefixed `Router` the host merges
-/// into its own app. If the kill switch is off for the current environment,
-/// every route (including the HTML one) 404s — indistinguishable from the
-/// crate not being mounted at all.
+/// If the kill switch is off for the current environment, every route
+/// (including the HTML one) 404s — indistinguishable from the crate not
+/// being mounted at all.
 pub fn router<S: DbSource>(config: Config, source: S) -> Router {
     if !config.is_enabled() {
         return Router::new();
@@ -120,9 +119,7 @@ async fn table_data<S: DbSource>(
     State(state): State<Arc<AppState<S>>>,
     Query(params): Query<DataParams>,
 ) -> Response {
-    // An empty (or whitespace-only) filter means "no filter", not a parse
-    // target — a syntactic parse error only applies to a non-empty string
-    // that failed to parse (`filter-dsl.md` §4).
+    // An empty (or whitespace-only) filter means "no filter", not a parse target.
     let parsed_filter = match params.filter.as_deref() {
         Some(raw) if !raw.trim().is_empty() => match filter::parse(raw) {
             Ok(parsed) => Some(parsed),
@@ -179,9 +176,6 @@ struct CommonValuesResponse {
     values: Vec<CommonValueEntry>,
 }
 
-/// On-demand only (`docs/client-enhancements.md` §8) — deliberately not
-/// folded into `table_data`'s response, since it's only needed when a user
-/// actually opens the dropdown for one specific column.
 async fn common_values<S: DbSource>(
     State(state): State<Arc<AppState<S>>>,
     Query(params): Query<CommonValuesParams>,
@@ -215,9 +209,6 @@ struct SiblingsResponse {
 }
 
 async fn siblings<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Response {
-    // Parallel checks, per request — no background polling or caching in v1
-    // (`design.md` §4). One dead sibling must not delay the others: each
-    // check has the client's own timeout and failures map to healthy=false.
     let checks = state.config.siblings.iter().cloned().map(|sibling| {
         let http = state.http.clone();
         async move {
@@ -240,8 +231,7 @@ async fn siblings<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Respons
     Json(SiblingsResponse { siblings }).into_response()
 }
 
-/// `health_path` resolves against the sibling's origin, not the dbviewer
-/// path (`design.md` §7).
+/// Resolves against the sibling's origin, not the dbviewer path.
 fn health_url(dbviewer_url: &str, health_path: &str) -> Option<String> {
     let scheme_end = dbviewer_url.find("://")? + 3;
     let host_end = dbviewer_url[scheme_end..]
@@ -251,7 +241,6 @@ fn health_url(dbviewer_url: &str, health_path: &str) -> Option<String> {
     Some(format!("{}{}", &dbviewer_url[..host_end], health_path))
 }
 
-/// Minimal join_all so we don't pull in the `futures` crate for one call site.
 async fn futures_join_all<F, T>(futures: impl IntoIterator<Item = F>) -> Vec<T>
 where
     F: std::future::Future<Output = T> + Send + 'static,
@@ -260,8 +249,6 @@ where
     let handles: Vec<_> = futures.into_iter().map(tokio::spawn).collect();
     let mut results = Vec::with_capacity(handles.len());
     for handle in handles {
-        // Health-check futures don't panic; if one somehow does, surfacing it
-        // is better than fabricating a status.
         results.push(handle.await.expect("sibling check task panicked"));
     }
     results

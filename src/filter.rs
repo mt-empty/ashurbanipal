@@ -1,27 +1,13 @@
-//! Pure syntactic parser for the filter DSL (`docs/filter-dsl.md`).
+//! Pure syntactic parser for the filter DSL (`docs/filter-dsl.md`). Never
+//! produces SQL text and never validates a column against the schema —
+//! that's `db.rs`'s job.
 //!
-//! No `sqlx` dependency, no DB access — this module only turns a raw filter
-//! string into a structured [`ParsedFilter`] (or a [`FilterParseError`]). It
-//! never produces SQL text and never validates a column against the schema;
-//! that's the query builder's job (`db.rs`'s `query_table`), per
-//! `filter-dsl.md` §3 point 1 — "no unvalidated identifier ever reaches SQL
-//! text" is enforced one layer up from here.
-//!
-//! The parser is iterative (a single `loop` over a flat `condition
-//! (AND|OR condition)*` chain, per the grammar in `filter-dsl.md` §2) rather
-//! than recursive-descent, so a pathological input can't cause unbounded
-//! stack growth (`filter-dsl.md` §5 A9). The two cheap guardrails from §3 —
-//! filter string ≤ 1 KiB, ≤ 10 conditions — are enforced here too.
+//! Iterative, not recursive-descent, so a pathological input can't cause
+//! unbounded stack growth.
 
-/// Whole filter string length cap, bytes (`filter-dsl.md` §3).
 const MAX_FILTER_BYTES: usize = 1024;
-/// Condition count cap (`filter-dsl.md` §3).
 const MAX_CONDITIONS: usize = 10;
 
-/// One comparison operator from the grammar's symbolic set. `LIKE`/`ILIKE`
-/// aren't part of this enum — they're common enough operators to warrant
-/// their own `Predicate` variants instead of being shoehorned in here (see
-/// `Predicate`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompareOp {
     Eq,
@@ -32,17 +18,12 @@ pub enum CompareOp {
     Le,
 }
 
-/// The logic token joining two adjacent conditions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Logic {
     And,
     Or,
 }
 
-/// What kind of predicate a `simple_condition` parsed to, and its value (if
-/// any). Values are always the *decoded* value (quote-doubling already
-/// resolved) — they're bound as SQL parameters later, never spliced into
-/// query text, so decoding here is safe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Predicate {
     Compare(CompareOp, String),
@@ -52,10 +33,9 @@ pub enum Predicate {
     IsNotNull,
 }
 
-/// One `[NOT] column OP value` (or `column IS [NOT] NULL`) term. `column` is
-/// exactly as written in the request — the query builder is responsible for
-/// matching it against the live schema allow-list before it ever reaches SQL
-/// text.
+/// `column` is exactly as written in the request — the query builder
+/// matches it against the live schema allow-list before it ever reaches
+/// SQL text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Condition {
     pub negated: bool,
@@ -63,20 +43,13 @@ pub struct Condition {
     pub predicate: Predicate,
 }
 
-/// The full parsed filter: a flat chain of conditions plus the logic tokens
-/// joining them (`logic.len() == conditions.len() - 1`). `AND` binds tighter
-/// than `OR`; the query builder reproduces that by individually
-/// parenthesizing each condition's SQL fragment and joining with the literal
-/// `AND`/`OR` text, relying on Postgres's own operator precedence
-/// (`filter-dsl.md` §5 V6) rather than building a precedence-aware tree here.
+/// `logic.len() == conditions.len() - 1`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedFilter {
     pub conditions: Vec<Condition>,
     pub logic: Vec<Logic>,
 }
 
-/// A parse failure: a plain-text reason plus the byte offset it was detected
-/// at (`filter-dsl.md` §4 — `"unexpected token at position 17"`-shaped).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterParseError {
     pub message: String,
@@ -98,7 +71,6 @@ fn err(message: impl Into<String>, position: usize) -> FilterParseError {
     }
 }
 
-/// Parse a complete filter string per `filter-dsl.md` §2's grammar.
 pub fn parse(input: &str) -> Result<ParsedFilter, FilterParseError> {
     if input.len() > MAX_FILTER_BYTES {
         return Err(err(
@@ -129,7 +101,6 @@ pub fn parse(input: &str) -> Result<ParsedFilter, FilterParseError> {
         }
         skip_ws_required(input, &mut pos)?;
         if pos >= input.len() {
-            // Trailing whitespace after the last condition — valid end.
             break;
         }
         let token = parse_logic(input, &mut pos)?;
@@ -154,7 +125,6 @@ fn skip_ws_optional(input: &str, pos: &mut usize) {
     }
 }
 
-/// Consumes one-or-more whitespace chars, or errors without moving `pos`.
 fn skip_ws_required(input: &str, pos: &mut usize) -> Result<(), FilterParseError> {
     let start = *pos;
     skip_ws_optional(input, pos);
@@ -164,13 +134,8 @@ fn skip_ws_required(input: &str, pos: &mut usize) -> Result<(), FilterParseError
     Ok(())
 }
 
-/// Case-insensitive keyword match at `pos`, requiring a word boundary right
-/// after it (the next char, if any, isn't alphanumeric/underscore) so e.g.
-/// `LIKELY` doesn't get misread as the `LIKE` keyword. ASCII-only by
-/// construction: keyword chars are always ASCII, and `char::to_ascii_lowercase`
-/// leaves non-ASCII input chars unchanged, so a non-ASCII input char can
-/// never spuriously match — this is what makes fullwidth/confusable
-/// characters (`filter-dsl.md` §5 A6) fail to match any keyword.
+/// Case-insensitive, with a word-boundary check so e.g. `LIKELY` isn't
+/// misread as `LIKE`. ASCII-only, so fullwidth/confusable chars never match.
 fn match_keyword_ci(input: &str, pos: usize, keyword: &str) -> bool {
     let mut chars = input[pos..].chars();
     for kw_c in keyword.chars() {
@@ -182,9 +147,6 @@ fn match_keyword_ci(input: &str, pos: usize, keyword: &str) -> bool {
     !matches!(chars.next(), Some(c) if c.is_alphanumeric() || c == '_')
 }
 
-/// Consumes `keyword` at `pos` if it matches (see `match_keyword_ci`).
-/// Advancing by `keyword.len()` bytes is safe because a match guarantees
-/// every matched input char is single-byte ASCII (see `match_keyword_ci`).
 fn consume_keyword_ci(input: &str, pos: &mut usize, keyword: &str) -> bool {
     if match_keyword_ci(input, *pos, keyword) {
         *pos += keyword.len();
@@ -194,9 +156,6 @@ fn consume_keyword_ci(input: &str, pos: &mut usize, keyword: &str) -> bool {
     }
 }
 
-/// `column = ( letter | "_" ) , { letter | digit | "_" }` — ASCII only, so a
-/// leading digit (R9) or any non-ASCII char (A6 fullwidth, A7 NUL) fails
-/// immediately.
 fn parse_column(input: &str, pos: &mut usize) -> Result<String, FilterParseError> {
     let start = *pos;
     match peek_char(input, *pos) {
@@ -213,10 +172,7 @@ fn parse_column(input: &str, pos: &mut usize) -> Result<String, FilterParseError
     Ok(input[start..*pos].to_string())
 }
 
-/// `quoted = "'" , { any-char-except-quote | "''" } , "'"` — a doubled `''`
-/// inside decodes to a single literal `'` (V9); the decoded value still only
-/// ever reaches SQL as a bind parameter, never as spliced text, so decoding
-/// it here is safe.
+/// A doubled `''` decodes to a single literal `'`.
 fn parse_quoted_value(input: &str, pos: &mut usize) -> Result<String, FilterParseError> {
     let start = *pos;
     debug_assert_eq!(peek_char(input, *pos), Some('\''));
@@ -243,10 +199,8 @@ fn parse_quoted_value(input: &str, pos: &mut usize) -> Result<String, FilterPars
     Ok(value)
 }
 
-/// `bare = { any-char-except-ws-and-quote }-` (non-empty). `AND`/`OR`/`NOT`
-/// are always keywords wherever a bare token could occur (`filter-dsl.md`
-/// §2), so a bare value that's exactly one of those (case-insensitively) is
-/// rejected — quoting it (V12/V21) is the only way to use it as a literal.
+/// `AND`/`OR`/`NOT` are always keywords, never bare values — quote them to
+/// use as a literal.
 fn parse_bare_value(input: &str, pos: &mut usize) -> Result<String, FilterParseError> {
     let start = *pos;
     let mut value = String::new();
@@ -280,19 +234,14 @@ fn parse_value(input: &str, pos: &mut usize) -> Result<String, FilterParseError>
     }
 }
 
-/// An operator token before it's paired with its column/value into a
-/// `Predicate` — kept separate so `parse_operator` doesn't need to know
-/// about `String` values yet.
 enum OpToken {
     Compare(CompareOp),
     Like,
     Ilike,
 }
 
-/// `operator = "=" | "!=" | ">=" | "<=" | ">" | "<" | "LIKE" | "ILIKE"`.
-/// Word operators are tried first (they're multi-char keywords, not just a
-/// prefix of the symbolic set), then symbolic operators longest-match first
-/// so `>=`/`<=` aren't misread as `>`/`<` followed by a bare `=...` value.
+/// Symbolic operators are matched longest-first so `>=`/`<=` aren't misread
+/// as `>`/`<` followed by a bare `=...` value.
 fn parse_operator(input: &str, pos: &mut usize) -> Result<OpToken, FilterParseError> {
     let start = *pos;
     if consume_keyword_ci(input, pos, "ILIKE") {
@@ -322,12 +271,9 @@ fn parse_operator(input: &str, pos: &mut usize) -> Result<OpToken, FilterParseEr
     ))
 }
 
-/// `simple_condition = column, ows, operator, ows, value | column, ws, "IS",
-/// ws, ["NOT", ws], "NULL"`. The two alternatives share the `column` prefix
-/// and only diverge once we're past it, so this speculatively tries the `IS`
-/// branch (which requires mandatory `ws`, not `ows`, per the grammar) and
-/// rewinds to right after `column` if it doesn't apply, falling through to
-/// the operator branch.
+/// Speculatively tries the `IS [NOT] NULL` branch and rewinds to right
+/// after `column` if it doesn't apply, falling through to the operator
+/// branch.
 fn parse_simple_condition(
     input: &str,
     pos: &mut usize,
@@ -355,9 +301,6 @@ fn parse_simple_condition(
         *pos = after_column;
     }
 
-    // `ows` before the operator: optional, unlike the mandatory `ws` the IS
-    // branch above needs — a symbolic operator can immediately follow the
-    // column with no space at all (`status=completed`, V2).
     skip_ws_optional(input, pos);
     let op = parse_operator(input, pos)?;
     skip_ws_optional(input, pos);
@@ -370,12 +313,6 @@ fn parse_simple_condition(
     Ok((column, predicate))
 }
 
-/// `condition = ["NOT", ws], simple_condition`. `NOT` is zero-or-one, not
-/// recursive — a second `NOT` here just gets parsed as (an invalid) start of
-/// `simple_condition`, which fails naturally (`NOT NOT status = completed`,
-/// R15: the inner `NOT` is lexically a valid column name, but there's no
-/// operator following it, so it fails at the operator-parsing step, not
-/// because of any explicit "no double NOT" check).
 fn parse_condition(input: &str, pos: &mut usize) -> Result<Condition, FilterParseError> {
     let mut negated = false;
     if match_keyword_ci(input, *pos, "NOT") {
@@ -414,7 +351,6 @@ mod tests {
         }
     }
 
-    /// V1: `status = completed` -> `(status, =, "completed")`.
     #[test]
     fn v1_basic_equality() {
         let parsed = parse("status = completed").unwrap();
@@ -429,7 +365,6 @@ mod tests {
         assert!(parsed.logic.is_empty());
     }
 
-    /// V2: `status=completed` — no whitespace around the symbolic operator.
     #[test]
     fn v2_no_space_symbolic_operator() {
         let parsed = parse("status=completed").unwrap();
@@ -443,7 +378,6 @@ mod tests {
         );
     }
 
-    /// V5: two ANDed conditions.
     #[test]
     fn v5_two_conditions_and() {
         let parsed = parse("a >= 1 AND b <= 2").unwrap();
@@ -465,9 +399,6 @@ mod tests {
         assert_eq!(parsed.logic, vec![Logic::And]);
     }
 
-    /// V6: `A AND B OR C` -> flat conditions plus logic tokens
-    /// `[And, Or]`; grouping is left to SQL's own operator precedence at the
-    /// query-builder stage, not represented as a tree here.
     #[test]
     fn v6_and_or_precedence_flat_shape() {
         let parsed =
@@ -476,7 +407,6 @@ mod tests {
         assert_eq!(parsed.logic, vec![Logic::And, Logic::Or]);
     }
 
-    /// V7: `%` preserved in a bare `LIKE` value.
     #[test]
     fn v7_like_bare_value() {
         let parsed = parse("name LIKE %smith%").unwrap();
@@ -486,7 +416,6 @@ mod tests {
         );
     }
 
-    /// V8: quoted value containing a space.
     #[test]
     fn v8_like_quoted_value_with_space() {
         let parsed = parse("name LIKE '% smith%'").unwrap();
@@ -496,7 +425,6 @@ mod tests {
         );
     }
 
-    /// V9: doubled-quote escape decodes to `it's fine`.
     #[test]
     fn v9_doubled_quote_escape() {
         let parsed = parse("note = 'it''s fine'").unwrap();
@@ -510,7 +438,6 @@ mod tests {
         );
     }
 
-    /// V10/V11: valueless `IS [NOT] NULL`.
     #[test]
     fn v10_v11_is_null_variants() {
         assert_eq!(
@@ -523,7 +450,6 @@ mod tests {
         );
     }
 
-    /// V12/V21: quoted keywords as literal values.
     #[test]
     fn v12_v21_quoted_keyword_as_value() {
         assert_eq!(
@@ -544,7 +470,6 @@ mod tests {
         );
     }
 
-    /// V13/V20: lowercase keywords.
     #[test]
     fn v13_v20_lowercase_keywords() {
         let parsed = parse("a = 1 and b = 2 or c = 3").unwrap();
@@ -553,8 +478,6 @@ mod tests {
         assert!(parsed.conditions[0].negated);
     }
 
-    /// V14: jsonb-ish quoted value round-trips untouched (no internal quotes
-    /// to unescape).
     #[test]
     fn v14_jsonb_quoted_value() {
         let parsed = parse(r#"payload = '{"a": 1}'"#).unwrap();
@@ -568,7 +491,6 @@ mod tests {
         );
     }
 
-    /// V15: empty quoted value is legal and decodes to `""`.
     #[test]
     fn v15_empty_quoted_value() {
         let parsed = parse("email = ''").unwrap();
@@ -582,7 +504,6 @@ mod tests {
         );
     }
 
-    /// V16: `ILIKE` parses distinctly from `LIKE`.
     #[test]
     fn v16_ilike() {
         let parsed = parse("name ILIKE '%SMITH%'").unwrap();
@@ -592,7 +513,6 @@ mod tests {
         );
     }
 
-    /// V17-V19: `NOT` prefix negation on comparison, `ILIKE`, and `IS NULL`.
     #[test]
     fn v17_v18_v19_not_prefix() {
         let parsed = parse("NOT status = completed").unwrap();
@@ -610,8 +530,6 @@ mod tests {
         assert_eq!(parsed.conditions[0].predicate, Predicate::IsNull);
     }
 
-    /// A1: SQL-injection-shaped quoted value parses as one decoded string —
-    /// still just data, never SQL text.
     #[test]
     fn a1_injection_value_decodes_as_plain_string() {
         let parsed = parse("status = '''; DROP TABLE users; --'").unwrap();
@@ -621,7 +539,6 @@ mod tests {
         );
     }
 
-    /// A5: unicode confusables parse as an ordinary bare value.
     #[test]
     fn a5_unicode_confusable_value_parses() {
         let parsed = parse("status = \u{1D554}\u{1D560}\u{1D62C}").unwrap();
@@ -648,9 +565,6 @@ mod tests {
         assert!(parse("status == completed").is_err());
     }
 
-    /// The "expected operator" error enumerates the valid operator set, since
-    /// it's the frontend's only in-context hint at what's supported (no
-    /// separate docs affordance — `ui-guidelines.md` heuristic #10).
     #[test]
     fn unknown_operator_error_lists_valid_operators() {
         let e = parse("status CONTAINS completed").unwrap_err();
@@ -773,9 +687,6 @@ mod tests {
 
     #[test]
     fn empty_filter_is_a_parse_error() {
-        // Not reachable via the route layer (empty filter is treated as "no
-        // filter" upstream), but the parser itself should still reject it
-        // coherently rather than panic or return an empty-conditions filter.
         assert!(parse("").is_err());
     }
 }
