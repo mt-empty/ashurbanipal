@@ -1,8 +1,5 @@
 <!doctype html>
-<!-- Ashurbanipal dbviewer — single-file frontend (design.md §3.1).
-     v1 scaffold: functional table browser, plain-text cells.
-     TODO before v1 done: @alenaksu/json-viewer for jsonb cells (CDN,
-     degraded fallback), Prism highlighting — see cdn-research.md. -->
+<!-- Ashurbanipal dbviewer — single-file frontend (design.md §3.1). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -22,6 +19,19 @@
     --backdrop: light-dark(#0006, #0009);
     --gap: .5rem;
     --gap-lg: .75rem;
+    /* Shared type-color palette: --type-* is what whole grid/record cells
+       use (formatCellValue), --json-* is what renderJsonTree's per-token
+       spans use. Bool/number/uuid point at the same values on purpose, so
+       a boolean (say) looks identical whether it's a top-level column or
+       three levels deep inside a jsonb blob. */
+    --json-string: light-dark(#a11, #e88);
+    --json-number: light-dark(#166, #6cc);
+    --json-bool: light-dark(#a60, #fb5);
+    --json-null: light-dark(#888, #999);
+    --type-uuid: light-dark(#639, #c9f);
+    --type-bool: var(--json-bool);
+    --type-number: var(--json-number);
+    --type-date: light-dark(#2a6, #6db);
   }
 
   /* ==== Layout ==== */
@@ -227,6 +237,39 @@
   .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
   .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1; }
 
+  /* jsonb tree rendering (renderJsonTree): used inside both #cell-pop (in
+     place of #cell-pre) and dialog dl dd. Both ancestors set
+     white-space: pre-wrap for their plain-text case, which would otherwise
+     be inherited into the tree's block-level markup — reset it back to
+     normal here. Deliberately not <details>/<summary>: that gave a native
+     disclosure-triangle/summary widget for free, but it replaced JSON's
+     actual {}/[]/,/: shape with a generic tree-widget look. This instead
+     renders real pretty-printed JSON text and folds one block at a time
+     to an inline "{…}", editor-gutter style (VS Code/Zed), so collapsed or
+     not it still reads as JSON. */
+  .json-tree { white-space: normal; }
+  .json-line { display: flex; }
+  .json-children { margin-left: 1.05rem; border-left: 1px solid var(--border); padding-left: .5rem; }
+  .json-fold { all: unset; cursor: pointer; flex: none; width: 1rem; text-align: center;
+               color: var(--border-strong); transform-origin: 45% 50%; }
+  .json-fold::before { content: "▾"; font-size: .65em; }
+  .json-node.collapsed > .json-line:first-child .json-fold { transform: rotate(-90deg); }
+  .json-node.collapsed > .json-children,
+  .json-node.collapsed > .json-line:last-child { display: none; }
+  .json-ellipsis { display: none; opacity: .7; }
+  .json-node.collapsed .json-ellipsis { display: inline; }
+  .json-punct { color: var(--border-strong); }
+  .json-key { font-weight: 600; }
+  .json-string { color: var(--json-string); }
+  .json-number { color: var(--json-number); }
+  .json-bool { color: var(--json-bool); }
+  .json-null { color: var(--json-null); }
+  .json-uuid { color: var(--type-uuid); }
+  .cell-type-uuid { color: var(--type-uuid); }
+  .cell-type-bool { color: var(--type-bool); }
+  .cell-type-number { color: var(--type-number); }
+  .cell-type-date { color: var(--type-date); }
+
   /* API-reference affordance: a fixed corner button, deliberately outside
      the nav/main grid so it stays reachable regardless of which table/dialog
      is showing. Opens the same <dialog> chrome as the payload/record
@@ -249,8 +292,9 @@
               margin: 0; border: 1px solid var(--border-strong);
               border-radius: 8px; padding: 0; max-width: min(40rem, 90vw);
               box-shadow: 0 4px 16px #0004; }
-  #cell-pop pre { margin: 0; padding: .6rem var(--gap-lg); overflow: auto;
-                  max-height: 50vh; white-space: pre-wrap; word-break: break-word; }
+  #cell-pop pre, #cell-pop .json-tree { margin: 0; padding: .6rem var(--gap-lg); overflow: auto;
+                  max-height: 50vh; word-break: break-word; }
+  #cell-pop pre { white-space: pre-wrap; }
 
   /* Common-values popover: same CSS Anchor Positioning + Popover API shape
      as #cell-pop above, anchored to the header's ▾ button instead of a
@@ -363,7 +407,7 @@
   <dl id="record-dl"></dl>
 </dialog>
 
-<div id="cell-pop" popover><pre id="cell-pre"></pre></div>
+<div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
 <span id="filter-caret-anchor"></span>
@@ -446,6 +490,118 @@ const $ = (id) => document.getElementById(id);
 const setStatus = (text) => { $("status").textContent = text; };
 function prettyPrint(text) {
   try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; }
+}
+
+// ---- jsonb tree rendering: a hand-rolled, dependency-free replacement for
+// what a CDN JSON-viewer library would give (see cdn-research.md). Renders
+// real pretty-printed JSON — actual {}/[]/,/: text, not a generic tree
+// widget — so it stays recognizable as JSON whether folded or not. Each
+// object/array gets one gutter fold toggle (▾, VS Code/Zed-style) that
+// collapses just that block to an inline "{…}"/"[…]"; per-value coloring
+// needs no tokenizer since JSON.parse already tells us each value's real
+// type. Every line is its own block-level div, so indentation (via
+// .json-children's margin, see CSS) is uniform per nesting depth
+// regardless of how long a preceding key is. ----
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function renderJsonTree(value) {
+  return jsonEntryValue(value, null, false);
+}
+
+// prefix: [keySpan, ": "] to render at the start of this value's first
+// line (object entries), or null (array entries / top level).
+function jsonEntryValue(value, prefix, comma) {
+  if (Array.isArray(value)) {
+    return jsonContainer(value.map((v) => ({ prefix: null, value: v })), "[", "]", prefix, comma);
+  }
+  if (value !== null && typeof value === "object") {
+    return jsonContainer(
+      Object.entries(value).map(([k, v]) => ({ prefix: jsonKeyPrefix(k), value: v })),
+      "{", "}", prefix, comma,
+    );
+  }
+  const line = document.createElement("div");
+  line.className = "json-line";
+  if (prefix) line.append(...prefix);
+  line.append(jsonScalar(value));
+  if (comma) line.append(",");
+  return line;
+}
+
+function jsonKeyPrefix(key) {
+  const span = document.createElement("span");
+  span.className = "json-key";
+  span.textContent = JSON.stringify(key);
+  return [span, ": "];
+}
+
+function jsonContainer(entries, openCh, closeCh, prefix, comma) {
+  if (entries.length === 0) {
+    const line = document.createElement("div");
+    line.className = "json-line";
+    if (prefix) line.append(...prefix);
+    const span = document.createElement("span");
+    span.className = "json-punct";
+    span.textContent = openCh + closeCh + (comma ? "," : "");
+    line.append(span);
+    return line;
+  }
+
+  const node = document.createElement("div");
+  node.className = "json-node";
+
+  const fold = document.createElement("button");
+  fold.type = "button";
+  fold.className = "json-fold";
+  fold.setAttribute("aria-expanded", "true");
+  fold.setAttribute("aria-label", "collapse");
+  fold.onclick = () => {
+    const collapsed = node.classList.toggle("collapsed");
+    fold.setAttribute("aria-expanded", String(!collapsed));
+    fold.setAttribute("aria-label", collapsed ? "expand" : "collapse");
+  };
+
+  const openLine = document.createElement("div");
+  openLine.className = "json-line";
+  const openBrace = document.createElement("span");
+  openBrace.className = "json-punct";
+  openBrace.textContent = openCh;
+  // Duplicates the close punctuation/comma already in closeLine below —
+  // only one of the two is ever visible at a time (see .json-node.collapsed
+  // CSS), so there's no state to keep in sync, just two static renderings.
+  const ellipsis = document.createElement("span");
+  ellipsis.className = "json-ellipsis";
+  ellipsis.textContent = `…${closeCh}${comma ? "," : ""}`;
+  if (prefix) openLine.append(...prefix);
+  openLine.append(fold, openBrace, ellipsis);
+
+  const children = document.createElement("div");
+  children.className = "json-children";
+  entries.forEach((entry, i) => {
+    children.append(jsonEntryValue(entry.value, entry.prefix, i < entries.length - 1));
+  });
+
+  const closeLine = document.createElement("div");
+  closeLine.className = "json-line";
+  const closeBrace = document.createElement("span");
+  closeBrace.className = "json-punct";
+  closeBrace.textContent = closeCh + (comma ? "," : "");
+  closeLine.append(closeBrace);
+
+  node.append(openLine, children, closeLine);
+  return node;
+}
+
+function jsonScalar(value) {
+  const span = document.createElement("span");
+  if (value === null) { span.className = "json-null"; span.textContent = "null"; }
+  else if (typeof value === "boolean") { span.className = "json-bool"; span.textContent = String(value); }
+  else if (typeof value === "number") { span.className = "json-number"; span.textContent = String(value); }
+  else {
+    span.className = UUID_RE.test(value) ? "json-string json-uuid" : "json-string";
+    span.textContent = JSON.stringify(value);
+  }
+  return span;
 }
 
 async function api(path) {
@@ -577,8 +733,14 @@ $("api-help-copy").onclick = () => copyText($("api-help-pre").textContent, $("ap
 // CSS Anchor Positioning — see #cell-pop's position-anchor/position-try-fallbacks) ----
 let cellPopAnchor = null;
 function showCellPop(e, text) {
-  // jsonb (and any JSON-shaped value) pretty-prints; everything else raw.
-  $("cell-pre").textContent = prettyPrint(text);
+  // jsonb (and any JSON-shaped value) renders as a colored, collapsible
+  // tree; everything else falls back to the plain <pre>.
+  let parsed, isJson = true;
+  try { parsed = JSON.parse(text); } catch { isJson = false; }
+  $("cell-pre").hidden = isJson;
+  $("cell-json").hidden = !isJson;
+  if (isJson) $("cell-json").replaceChildren(renderJsonTree(parsed));
+  else $("cell-pre").textContent = text;
   if (cellPopAnchor) cellPopAnchor.style.anchorName = "";
   cellPopAnchor = e.currentTarget;
   cellPopAnchor.style.anchorName = "--cell-anchor";
@@ -868,8 +1030,12 @@ function buildRecordEntries(columns, row) {
     let action = document.createElement("span");
     if (raw == null) dd.textContent = "∅";
     else {
-      if (col.type === "jsonb") dd.textContent = prettyPrint(raw);
-      else dd.appendChild(formatCellValue(col, raw));
+      if (col.type === "jsonb") {
+        try {
+          dd.classList.add("json-tree");
+          dd.appendChild(renderJsonTree(JSON.parse(raw)));
+        } catch { dd.textContent = raw; }
+      } else dd.appendChild(formatCellValue(col, raw));
       const btn = document.createElement("button");
       btn.className = "copy";
       btn.setAttribute("aria-label", "copy cell value");
@@ -1081,6 +1247,20 @@ function renderEmptyState(columnCount) {
 const cellTemplate = $("cell-template");
 const rowActionTemplate = $("row-action-template");
 
+// Postgres information_schema data_type strings (db.rs) bucketed into the
+// --type-* palette (see :root) — ground truth from the schema, so unlike
+// renderJsonTree's scalars this is a straight lookup, no parsing needed.
+const CELL_TYPE_CLASSES = {
+  boolean: "cell-type-bool",
+  uuid: "cell-type-uuid",
+  smallint: "cell-type-number",
+  integer: "cell-type-number",
+  bigint: "cell-type-number",
+  numeric: "cell-type-number",
+  real: "cell-type-number",
+  "double precision": "cell-type-number",
+};
+
 // Shared by the grid cell (buildCell) and the record view (buildRecordEntries)
 // so a column's "how do I render this one value" rule lives in one place.
 function formatCellValue(col, raw) {
@@ -1088,7 +1268,15 @@ function formatCellValue(col, raw) {
     const time = document.createElement("time");
     time.dateTime = raw;
     time.textContent = raw;
+    time.className = "cell-type-date";
     return time;
+  }
+  const cls = CELL_TYPE_CLASSES[col.type];
+  if (cls) {
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = raw;
+    return span;
   }
   return document.createTextNode(raw);
 }
