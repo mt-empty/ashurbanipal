@@ -1315,7 +1315,7 @@ function updateActiveTableChrome() {
 // Same shape of fix as showCommonValues's cvRequestToken.
 let loadDataToken = 0;
 
-async function loadData() {
+async function loadData({ resetScroll = true } = {}) {
   $("error").textContent = "";
   if (!state.table) { updateActiveTableChrome(); setStatus(""); return; }
   const token = ++loadDataToken;
@@ -1342,7 +1342,11 @@ async function loadData() {
   };
   document.startViewTransition ? document.startViewTransition(renderTable) : renderTable();
   updatePager(data);
-  $("main").scrollTo({ top: 0, behavior: "smooth" });
+  // Table switch/sort/filter jump to a new row 0, so snapping to the top
+  // orients the user; prev/next paginate in place and pass resetScroll:
+  // false so the pager buttons stay put instead of leaping away underneath
+  // the click that just landed on them.
+  if (resetScroll) $("main").scrollTo({ top: 0, behavior: "smooth" });
 }
 
 // Same class of bug as loadDataToken: a slow health-check round that
@@ -1387,8 +1391,8 @@ $("filter-form").onsubmit = (e) => {
 $("filter").addEventListener("search", () => {
   if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
 });
-$("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData(); };
-$("next").onclick = () => { state.offset += state.limit; loadData(); };
+$("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData({ resetScroll: false }); };
+$("next").onclick = () => { state.offset += state.limit; loadData({ resetScroll: false }); };
 
 // Feeds --toolbar-h (thead th's sticky `top`) — #toolbar's height isn't
 // static (flex-wrap, #error appearing/disappearing).
