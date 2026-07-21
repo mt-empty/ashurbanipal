@@ -1409,7 +1409,20 @@ async function loadData({ resetScroll = true } = {}) {
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
-  document.startViewTransition ? document.startViewTransition(renderTable) : renderTable();
+  // startViewTransition's callback isn't guaranteed to run synchronously —
+  // it waits for a rendering opportunity to snapshot the old frame first.
+  // Under contention that gap can outlast a poll for "no animations yet",
+  // which reads as settled before the DOM (and thus row content) actually
+  // updated. Holding aria-busy across the callback closes that window;
+  // waitForIdle's own animation-poll only proves a transition isn't
+  // *currently* running, not that one has already happened.
+  if (document.startViewTransition) {
+    document.querySelector("table").setAttribute("aria-busy", "true");
+    await document.startViewTransition(renderTable).updateCallbackDone;
+    document.querySelector("table").removeAttribute("aria-busy");
+  } else {
+    renderTable();
+  }
   updatePager(data);
   // Table switch/sort/filter jump to a new row 0, so snapping to the top
   // orients the user; prev/next paginate in place and pass resetScroll:

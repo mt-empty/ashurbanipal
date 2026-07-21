@@ -38,11 +38,12 @@ test("cell preview popover pretty-prints a large nested jsonb value and light-di
   await cell.click();
 
   await expect(page.locator("#cell-pop")).toBeVisible();
-  const popText = await page.locator("#cell-pre").textContent();
-  const parsed = JSON.parse(popText!);
-  expect(parsed).toHaveProperty("gateway");
-  expect(parsed).toHaveProperty("risk");
-  expect(popText).toContain("\n"); // pretty-printed, not a flat one-liner
+  await expect(page.locator("#cell-pre")).toBeHidden();
+  const cellJson = page.locator("#cell-json");
+  await expect(cellJson).toBeVisible();
+  const keys = await cellJson.locator(".json-key").allTextContents();
+  expect(keys).toContain('"gateway"');
+  expect(keys).toContain('"risk"');
 
   await page.locator("#current").click();
   await expect(page.locator("#cell-pop")).toBeHidden();
