@@ -5,10 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ashurbanipal</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='1' y='1' width='14' height='14' rx='2' fill='%23e7e0cc'/><path d='M2 8h12' stroke='%238a7f66' stroke-width='.7'/><path d='M3 3.4l3 1.1-3 1.1zM7 3.4l3 1.1-3 1.1zM11 3.4l3 1.1-3 1.1zM3 10.4l3 1.1-3 1.1zM7 10.4l3 1.1-3 1.1z' fill='%23554b39'/></svg>">
+<script>
+  // Runs synchronously, before the stylesheet below is applied, so a
+  // saved light/dark override takes effect on first paint instead of
+  // flashing the system-default theme and then swapping.
+  try {
+    var ashurbanipalTheme = localStorage.getItem("ashurbanipal_theme");
+    if (ashurbanipalTheme === "light" || ashurbanipalTheme === "dark")
+      document.documentElement.dataset.theme = ashurbanipalTheme;
+  } catch {}
+</script>
 <style>
   :root {
     color-scheme: light dark;
     font-family: ui-monospace, monospace;
+  }
+  /* Overrides the system-default `light dark` above — light-dark() reads
+     the *used* color-scheme value, so pinning it here is enough to force
+     every light-dark() token in the file without touching each one. */
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
+  :root {
     --border: #8884;
     --border-strong: #8886;
     --hover: #8882;
@@ -234,6 +251,24 @@
                   color: inherit; cursor: pointer; font: inherit; }
   #api-help-btn:hover { background: var(--hover); }
 
+  /* Sits directly beside #api-help-btn in the same fixed corner, rather
+     than a separate corner of its own. */
+  #theme-toggle { position: fixed; left: calc(var(--gap-lg) * 2 + 1.75rem); bottom: var(--gap-lg); z-index: 1;
+                  width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+                  border: 1px solid var(--border-strong); background: canvas;
+                  color: inherit; cursor: pointer; font: inherit; line-height: 1; }
+  #theme-toggle:hover { background: var(--hover); }
+  /* Icon is pure CSS, no JS: it's driven by the same cascade the
+     color-scheme rules above use (system prefers-color-scheme by default,
+     overridden by an explicit :root[data-theme]), so it always reflects
+     the theme actually in effect without a matchMedia listener. */
+  #theme-toggle::before { content: "☀️"; }
+  @media (prefers-color-scheme: dark) {
+    #theme-toggle::before { content: "🌙"; }
+  }
+  :root[data-theme="light"] #theme-toggle::before { content: "☀️"; }
+  :root[data-theme="dark"] #theme-toggle::before { content: "🌙"; }
+
   /* Popover API: non-modal, light-dismiss. Positioned via CSS Anchor
      Positioning — the clicked cell gets anchor-name set in JS, and
      position-try-fallbacks flips it away from the viewport edge with no
@@ -368,10 +403,12 @@
   <pre id="api-help-pre"></pre>
 </dialog>
 <button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
+<button id="theme-toggle" type="button" aria-label="toggle light/dark theme" title="toggle light/dark theme"></button>
 
 <script type="module">
 const API = "/__ashurbanipal/api";
 const UI_KEY = "ashurbanipal_ui";
+const THEME_KEY = "ashurbanipal_theme";
 
 // Persisted to localStorage and mirrored to the URL: table/sort/order/
 // limit/offset only — never filter. A filter can contain data values, and
@@ -656,6 +693,27 @@ $("api-help-btn").onclick = () => {
   $("api-help-dialog").showModal();
 };
 $("api-help-copy").onclick = () => copyText($("api-help-pre").textContent, $("api-help-copy"));
+
+// ==== Theme ====
+// A device display preference, not view state — deliberately kept out of
+// `state`/UI_KEY (which mirror to the URL) and given its own localStorage
+// key. Which icon shows and which color-scheme applies are both pure CSS
+// (system prefers-color-scheme by default, overridden by :root[data-theme]
+// — see the rules above) and need no JS at all. This is the one thing CSS
+// can't do: write the explicit choice to localStorage so a click survives
+// a reload. The inline <script> in <head> applies any saved override
+// before first paint, so there's no flash on load either.
+function currentTheme() {
+  return document.documentElement.dataset.theme
+    || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+$("theme-toggle").setAttribute("aria-pressed", currentTheme() === "dark");
+$("theme-toggle").onclick = () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  $("theme-toggle").setAttribute("aria-pressed", next === "dark");
+  try { localStorage.setItem(THEME_KEY, next); } catch { /* best-effort */ }
+};
 
 // ---- cell preview ----
 let cellPopAnchor = null;
