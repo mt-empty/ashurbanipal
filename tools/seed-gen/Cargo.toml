@@ -5,5 +5,5 @@ edition = "2021"
 publish = false
 
 [dependencies]
-fake = "4"
+fake = "5"
 uuid = { version = "1", features = ["v4"] }
