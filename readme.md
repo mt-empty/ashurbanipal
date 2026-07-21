@@ -6,24 +6,21 @@ A self-contained, embeddable database browser(read only). no separate DB client,
 
 ## Why
 
-Getting a row out of a database that isn't on your laptop currently means:
+90% of engineers just want to browse their database. Having such functionality in a corporate environment currently means:
 
 - Did you request AWS access? Wait for approval.
 - Approved? Now add your username and SSH key to a separate repo nobody's heard of, and wait for *that* owner to approve you too.
 - Follow a Confluence page to wire up AWS + SSH + your pick of DBeaver/pgcli/psql/pgAdmin/TablePlus.
-    - ssh timeout out, oh too bad
+    - ssh timeout out, oh too bad, yuou should use mosh
 - Get your session killed by fucking Okta re-auth every few hours. Repeat.
     - blindly accept the MFA prompt, or else your session dies and you have to start over
-- Right now the bastion host is being patched, so none of the above even
-  works.
+- The bastion host is being patched, so none of the above even works.
 - You don't need to have db access, you just need to slice your stories thinly enough so you can test your code without needing db access
-- ram is expensive, I really can't afford another app running on my laptop
+- Ram is expensive, I really can't afford another app running on my laptop
 
 all I need is to just see a row in the db, so I can complete my story.
 
-Ashurbanipal lib skips the whole chain by not needing a new connection at all, 
-it runs inside the process that already has one. If your service can query
-its own database, you can look at a table from your browser.
+Ashurbanipal lib skips the whole chain by not needing a new connection, it runs inside the process that already has one. If your service can query its own database, you can look at a table from your browser.
 
 ## Showcase
 

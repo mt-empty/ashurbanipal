@@ -12,13 +12,13 @@ export const APP_PATH = "/__ashurbanipal";
  * real signal, not a guessed timeout. Skipping this under heavy parallel
  * load is what caused sporadic "element is not stable"/misfired clicks.
  *
- * Deliberately excludes .row-spinner animations: docs/known-issues.md #2
- * is a real bug where a sidebar row's spinner can get stuck running
- * forever (fetchTableData's finally block clears the wrong row's loading
- * flag if state.table changed mid-flight). Counting it here would make
- * this helper hang on an unrelated stuck spinner from an earlier action,
- * for a bug this suite already tracks separately — not something every
- * other test should have to work around too. */
+ * Deliberately excludes .row-spinner animations: a sidebar row's spinner
+ * used to be able to get stuck running forever (fetchTableData's finally
+ * block cleared the wrong row's loading flag if state.table changed
+ * mid-flight — fixed by capturing `table` into a local const, see
+ * loadDataToken in dbviewer.html). Counting it here would make this
+ * helper hang on an unrelated stuck spinner from an earlier action rather
+ * than the settle condition this helper actually exists to check. */
 export async function waitForIdle(page: Page) {
   await expect(page.locator("table")).not.toHaveAttribute("aria-busy", "true");
   await expect
@@ -39,14 +39,15 @@ export async function waitForIdle(page: Page) {
  * by default, so localStorage/URL state is already isolated per-test
  * without any manual clearing.
  *
- * The settle-wait matters because of docs/known-issues.md #2: loadData()
- * has no per-request staleness guard, so if a test clicks a different
- * table (selectTable) before this page's own loadTables()-triggered
- * default-table fetch resolves, whichever request's response lands last
- * wins the render — #current can end up correctly labeled while the
- * actual rendered rows/columns are the OTHER table's. Waiting here closes
- * that race for every test, once, instead of each test having to remember
- * to guard against its own first click. */
+ * The settle-wait matters because loadData() used to have no per-request
+ * staleness guard (now fixed via loadDataToken, see dbviewer.html), so if
+ * a test clicks a different table (selectTable) before this page's own
+ * loadTables()-triggered default-table fetch resolves, whichever
+ * request's response landed last would win the render — #current could
+ * end up correctly labeled while the actual rendered rows/columns were
+ * the OTHER table's. Waiting here closes that race for every test, once,
+ * instead of each test having to remember to guard against its own first
+ * click. */
 export async function gotoApp(page: Page, query = "") {
   await page.goto(APP_PATH + query);
   // Bounded/tolerant: a deliberately-erroring initial load (e.g.

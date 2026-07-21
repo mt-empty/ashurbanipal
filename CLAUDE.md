@@ -28,7 +28,10 @@ and its full test table (implement/verify against that table, not ad hoc
 cases). `docs/ui-guidelines.md` and `docs/frontend-style-guide.md` are the
 standing behavioral/structural rules for `dbviewer.html` (the *why* and the
 *shape*, respectively) — read them before touching the frontend, not just
-`design.md`.
+`design.md`. `docs/browser-quirks.md` is a living record of cross-browser
+inconsistencies that were deliberately left as-is — check it before
+"fixing" one, so a change doesn't relitigate a settled call or misread an
+intentional gap as an oversight.
 
 ## Commands
 
@@ -50,7 +53,22 @@ mise run demo                      # host demo app at http://localhost:4000/__as
 mise run demo-sibling              # second instance, to demo sibling health-poll
 mise run dev                       # demo app, auto-rebuild/restart on src/ or dbviewer.html changes (watchexec)
 mise run seed-gen                  # regenerate .devcontainer/db/init/01-seed.sql
+mise run test-e2e-install          # one-time Playwright browser install (Chromium/Firefox/WebKit)
+mise run test-e2e                  # Playwright E2E suite against dbviewer.html (tools/e2e-tests)
 ```
+
+`test-e2e` is a separate, standalone-dev-only suite (pnpm/Playwright,
+`tools/e2e-tests/`) — it is **not** part of `mise run check` and doesn't
+run in the Rust `cargo test` suite; run it explicitly for any change that
+touches `dbviewer.html` beyond a trivial edit. Lessons already paid for
+once, don't relearn them: assert on DOM state/attributes/text, not
+screenshots (screenshot diffs were dropped project-wide for flakiness —
+see git history around `157fc12`); wait on the actual signal that matters
+(`waitForResponse`, `getAnimations()`), never `waitForTimeout` with a
+guessed duration; and run the full suite under its default full
+parallelism before calling a frontend change done — the worst races here
+(stale-response overwrites, stuck spinners) only ever surfaced under real
+concurrency, never in a single serial pass.
 
 Equivalent raw `cargo` invocations, if mise isn't available:
 
@@ -116,3 +134,11 @@ an identical file.
   `native-tls`/OpenSSL.
 - **Demo-only deps stay in `[dev-dependencies]`.** `tracing-subscriber`,
   `dotenvy` etc. must never leak into the published crate's dependency list.
+- **Comments in `src/*.rs` follow the same discipline `frontend-style-guide.md`
+  §3 already enforces for `dbviewer.html`.** A comment earns its place only
+  by stating a non-obvious *why* — a security invariant, a Postgres quirk, a
+  bug it guards against — in one or two sentences, never a *what* the
+  type/function name already says, and never a citation-heavy restatement
+  of a design doc. This drifted once already (verbose doc-section citations
+  accumulated across `db.rs`/`filter.rs` over several feature PRs and needed
+  a dedicated cleanup pass); don't let it recur.

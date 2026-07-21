@@ -53,10 +53,28 @@ the pagination banner instead of reading the whole file top to bottom.
 
 ## 3. JavaScript
 
-- **One consistent event-binding style: `.onX =`.** Nothing in this file
-  ever needs a second listener on the same element/event — the one
-  legitimate reason to prefer `addEventListener` — so don't reintroduce it
-  without that reason.
+- **One consistent event-binding style: `.onX =`.** Two legitimate reasons
+  to reach for `addEventListener` instead, neither of which applies to most
+  wiring in this file: needing a second listener on the same element/event,
+  or a non-standardized event whose IDL property doesn't exist on every
+  engine (e.g. `onsearch` — Chromium and legacy WebKit expose it, Firefox
+  never implemented it, so `.onsearch =` silently no-ops there instead of
+  erroring; `$("filter").addEventListener("search", ...)` is the fix and
+  works identically everywhere). Don't reach for `addEventListener` without
+  one of these two reasons, and note which one inline when you do.
+- **Any function that fetches and then mutates shared state must guard
+  against out-of-order responses with a per-call token.** Capture a
+  monotonic counter at the start of the call (`const token = ++xRequestToken`)
+  and check `token !== xRequestToken` before acting on the result, bailing
+  out silently if a newer call has since superseded it. This is not
+  optional for a new fetch site that touches anything more than one local
+  variable — a slower earlier request resolving after a faster later one
+  is a real, observed failure mode here (stuck loading spinners, and a
+  table's chrome/label disagreeing with the rows actually rendered), not a
+  hypothetical. `cvRequestToken` (`showCommonValues`), `loadDataToken`
+  (`loadData`), and `siblingsRequestToken` (`loadSiblings`) are the three
+  existing instances of this pattern — copy their shape for the next one
+  rather than reinventing it.
 - **Functions do one thing.** Don't let a function fetch, re-render
   multiple DOM regions, *and* update pager state in one body — split
   fetch/render-header/render-body/update-pager into separate functions even
