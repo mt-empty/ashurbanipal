@@ -25,7 +25,7 @@ test("a failed load leaves the previous table's rows and active state untouched"
 });
 
 test("a slow, superseded response never overwrites a newer table's render", async ({ page }) => {
-  // Regression test for docs/known-issues.md #2 (fixed): forces the exact
+  // Regression test for a real bug (fixed): forces the exact
   // out-of-order race — an older request for "orders" is delayed so it
   // resolves *after* a newer request for "users" has already rendered.
   // loadData()'s token guard should discard the late "orders" response

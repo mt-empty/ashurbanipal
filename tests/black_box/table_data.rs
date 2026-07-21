@@ -150,7 +150,8 @@ async fn sort_and_order_are_respected() {
     assert_eq!(emails, sorted, "rows should be in descending email order");
 }
 
-/// Regression test for a real bug (docs/known-issues.md #1): every column
+/// Regression test for a real bug found while building the Playwright E2E
+/// suite (2026-07-19, now fixed): every column
 /// is selected as `"col"::text` for uniform decoding, and an unqualified
 /// `order by "col"` bound to that same-named *output* column instead of
 /// the source column, sorting numeric columns lexicographically

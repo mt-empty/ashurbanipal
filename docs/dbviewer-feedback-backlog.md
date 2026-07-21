@@ -435,12 +435,49 @@ for completeness, not because they carry any user-visible impact:
 
 ---
 
-## 14. Sticky toolbar (`#toolbar`) vs. the filter syntax-highlight overlay (`#filter-highlight`) — two connected bugs, only one currently fixed
+## 14. Sticky toolbar (`#toolbar`) vs. the filter syntax-highlight overlay (`#filter-highlight`) — resolved by removing syntax highlighting entirely
 
-**Status:** in progress. `#toolbar` sticky-pinning (below) is shipped and
-confirmed working. The overlay's z-index is currently *not* raised (reverted
-on request, to be picked up separately) — so bug B below is back, on
-purpose, until this is revisited.
+**Status:** resolved. `#filter` is a plain `<input>` again — no
+`color: transparent`, no `#filter-highlight` overlay, no
+`#filter-wrap`/anchor-positioning machinery, no `--keyword`/`--operator`/
+`--string` colors. Filter column autocomplete (`#filter-suggest`) is
+unaffected: it was always positioned independently, off a measured caret
+coordinate (`measureCaretPosition`), never off the highlight overlay.
+
+The path here went through two attempted fixes before landing on removal,
+kept below for history:
+
+1. The overlay originally tracked `#filter` via CSS Anchor Positioning
+   (`position: fixed; position-anchor`), which caused the two bugs
+   described below. The fix was to drop `field-sizing: content` from
+   `#filter` (the only reason a co-located wrapper div couldn't be used —
+   see the git history for the full reasoning) and instead give `#filter`
+   and `#filter-highlight` one shared `#filter-wrap` box, with the overlay
+   `position: absolute; inset: 0` over the in-flow input. That structurally
+   fixed both bugs (overlay became an ordinary descendant that scrolls with
+   `#toolbar` and paints above `#filter` by DOM order, no z-index fight
+   needed) and dropped the Chromium-only anchor-positioning dependency.
+2. That surfaced a *third*, more fundamental problem: `#filter`'s real text
+   still scrolls internally (native `<input>` behavior, keeping the caret
+   in view once text overflows the box), but `#filter-highlight` is just a
+   `white-space: pre; overflow: hidden` div with no way to know that
+   internal scroll offset — so once the filter text got long, the visible
+   overlay text stayed clipped at character 0 instead of scrolling with the
+   caret the way an ordinary input (e.g. the sidebar table-filter input)
+   does. Fixing *that* would mean mirroring `#filter`'s `scrollLeft` onto
+   the overlay on every event that can move it (`input`, `keyup`, `click`,
+   `select`) — another layer of state-syncing on top of the two already
+   fixed.
+
+Given syntax highlighting had already needed three rounds of increasingly
+subtle fixes for what is a cosmetic enhancement, it was removed instead of
+patched a third time. If it's revisited, do it as a `contenteditable`-based
+rewrite rather than a transparent-input-plus-overlay — see the discussion
+in this session for why the overlay approach is inherently prone to this
+class of bug (anything that isn't literally the same DOM box as the real
+input has to be kept in sync with it by hand).
+
+**Original bugs and the considered (not applied) fixes, kept for history:**
 
 **Background:** `#filter`'s real text is `color: transparent` (only the
 caret shows); the actual colored, readable text is drawn by a separate
@@ -484,8 +521,8 @@ now-hidden overlay's.
   Doing only the second without the first would leave bug A's stale-anchor
   glitch in place.
 
-**Fix for bug B, already proven and ready to reapply:** add
-`z-index: 3` to `#filter-highlight`'s rule in `dbviewer.html` (one line,
-already implemented and verified once earlier in this backlog's history,
-then reverted specifically to decouple it from `#toolbar`'s CSS for
-separate reconsideration — not because it didn't work).
+**Fix for bug B considered at the time:** add `z-index: 3` to
+`#filter-highlight`'s rule (one line, previously verified working). Not
+applied — superseded first by the co-located-wrapper fix (item 1 above,
+which needs no z-index at all), then made moot entirely once syntax
+highlighting was removed.

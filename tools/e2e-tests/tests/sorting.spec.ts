@@ -42,7 +42,7 @@ test("switching to a different column always starts ascending, and unsorts the o
 });
 
 test("ascending sort actually reorders rows by value", async ({ page }) => {
-  // Regression test for docs/known-issues.md #1 (fixed): db.rs's
+  // Regression test for a real bug (fixed): db.rs's
   // unqualified `order by` used to resolve to the ::text-cast output
   // column instead of the real numeric column, sorting lexicographically
   // ("107.92" < "11.18") instead of numerically.
