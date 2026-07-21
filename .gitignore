@@ -3,6 +3,7 @@ target
 test.sh
 tools/e2e-tests/node_modules/
 tools/e2e-tests/test-results/
+tools/e2e-tests/showcase-results/
 tools/e2e-tests/playwright-report/
 tools/e2e-tests/playwright/.cache/
 .pnpm-store/
