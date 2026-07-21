@@ -54,7 +54,13 @@
   /* No padding here: #toolbar is sticky and must reach main's actual
      edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
   main { overflow: auto; }
-  #content { padding: 0 var(--gap-lg) var(--gap-lg); }
+  /* width: max-content (floored at 100%) makes #content's own box grow to
+     match a wide table's overflow instead of staying clipped to main's
+     visible width. Without this, #pager/#toolbar's sticky `left` has no
+     room to travel — their containing block (#content) is only as wide as
+     the viewport, so once scrolled past that they run out of stickiness
+     and get dragged along horizontally. */
+  #content { padding: 0 var(--gap-lg) var(--gap-lg); width: max-content; min-width: 100%; }
   h1 { font-size: 1rem; margin: 0 0 var(--gap); }
   h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
   h1 a:hover { text-decoration-thickness: 2px; }
@@ -184,7 +190,12 @@
                   min-width: 0; }
 
   /* ==== Pager ==== */
-  #pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center; }
+  /* Sticky left, same reasoning as #toolbar above: #content (and #pager's
+     own position in normal flow) is only as wide as the table, so once a
+     wide table pushes main's horizontal scrollbar out, an unpinned pager
+     scrolls away with it instead of staying reachable. */
+  #pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center;
+           position: sticky; left: var(--gap-lg); width: fit-content; }
 
   /* Native <dialog>: showModal() gives backdrop, Esc-to-close, and focus
      trapping for free. */
