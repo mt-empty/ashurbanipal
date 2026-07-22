@@ -32,6 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sibling_port: Option<u16> = std::env::var("SIBLING_PORT")
         .ok()
         .and_then(|p| p.parse().ok());
+    let mount_prefix: Option<String> = std::env::var("MOUNT_PREFIX").ok().filter(|p| !p.is_empty());
 
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
@@ -58,20 +59,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "#
     ))?;
 
+    let ashurbanipal = ashurbanipal::router(config, PgPoolSource::new(pool));
+    // MOUNT_PREFIX (e.g. "/svc") simulates a reverse proxy that serves the
+    // host under a path prefix, to exercise the frontend's mount-point
+    // agnosticism; unset means the plain one-line merge as before.
+    let ashurbanipal = match &mount_prefix {
+        Some(prefix) => Router::new().nest(prefix, ashurbanipal),
+        None => ashurbanipal,
+    };
+    let ui_path = format!("{}/__ashurbanipal", mount_prefix.as_deref().unwrap_or(""));
+
     // The host app: its own routes, plus the one-line Ashurbanipal merge.
     // The root redirect is demo-only convenience; a real host has its own "/".
+    let redirect_to = ui_path.clone();
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route(
             "/",
-            get(|| async { axum::response::Redirect::temporary("/__ashurbanipal") }),
+            get(move || async move { axum::response::Redirect::temporary(&redirect_to) }),
         )
-        .merge(ashurbanipal::router(config, PgPoolSource::new(pool)));
+        .merge(ashurbanipal);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
-    println!(
-        "demo host on http://localhost:{port} — browser at http://localhost:{port}/__ashurbanipal"
-    );
+    println!("demo host on http://localhost:{port} — browser at http://localhost:{port}{ui_path}");
     axum::serve(listener, app).await?;
     Ok(())
 }

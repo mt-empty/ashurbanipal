@@ -63,7 +63,7 @@ let app = Router::new()
     .merge(ashurbanipal::router(config, PgPoolSource::new(pool.clone())));
 ```
 
-That mounts five routes under `/__ashurbanipal` (the UI plus four read-only
+That mounts six routes under `/__ashurbanipal` (the UI plus five read-only
 API endpoints). The kill switch is fail-closed: `environment` must be listed
 in `enabled_for` (or `enabled_for` must contain `"any"`), and anything
 production-like (`production`, `prod`, `prd`, `live`, any casing) is rejected

@@ -28,13 +28,15 @@ export interface SpawnedDemo {
   stop: () => Promise<void>;
 }
 
-/** Spawns a second `demo` example process, mirroring `mise run demo-sibling`
- * (PORT/SIBLING_PORT env vars) — only siblings.spec.ts needs this; every
- * other spec shares the one server Playwright's webServer config starts
- * (see playwright.config.ts and the design doc §3 for why). */
+/** Spawns another `demo` example process, mirroring `mise run demo-sibling`
+ * (PORT/SIBLING_PORT env vars) — only siblings.spec.ts and
+ * mount-prefix.spec.ts need this (a second instance / a MOUNT_PREFIX one);
+ * every other spec shares the one server Playwright's webServer config
+ * starts (see playwright.config.ts and the design doc §3 for why). */
 export async function spawnDemo(opts: {
   port: number;
   siblingPort?: number;
+  mountPrefix?: string;
 }): Promise<SpawnedDemo> {
   const baseUrl = `http://localhost:${opts.port}`;
   const child: ChildProcess = spawn("cargo", ["run", "--example", "demo"], {
@@ -43,6 +45,7 @@ export async function spawnDemo(opts: {
       ...process.env,
       PORT: String(opts.port),
       SIBLING_PORT: opts.siblingPort ? String(opts.siblingPort) : "",
+      MOUNT_PREFIX: opts.mountPrefix ?? "",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
