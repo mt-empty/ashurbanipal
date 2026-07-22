@@ -4,43 +4,40 @@
 
 A self-contained, embeddable database browser(read only). no separate DB client, no extra credentials, no build step.
 
+![Ashurbanipal demo](tools/e2e-tests/showcase.gif)
+
 ## Why
 
 90% of engineers just want to browse their database. Having such functionality in a corporate environment currently means:
 
 - Did you request AWS access? Wait for approval.
-- Approved? Now add your username and SSH key to a separate repo nobody's heard of, and wait for *that* owner to approve you too.
+- Approved? Now add your username and SSH key to a repo nobody's heard of, and wait for *that* owner to approve you too.
 - Follow a Confluence page to wire up AWS + SSH + your pick of DBeaver/pgcli/psql/pgAdmin/TablePlus.
     - ssh timeout out, oh too bad, yuou should use mosh
 - Get your session killed by fucking Okta re-auth every few hours. Repeat.
     - blindly accept the MFA prompt, or else your session dies and you have to start over
 - The bastion host is being patched, so none of the above even works.
-- You don't need to have db access, you just need to slice your stories thinly enough so you can test your code without needing db access
-- Ram is expensive, I really can't afford another app running on my laptop
+- "You don't need to have db access, you just need to slice your stories thinly enough so you can test your code without needing db access"
+- can't deploy a sidecar container to run a db client, because the security team says no
 
 all I need is to just see a row in the db, so I can complete my story.
 
-Ashurbanipal lib skips the whole chain by not needing a new connection, it runs inside the process that already has one. If your service can query its own database, you can look at a table from your browser.
+Ashurbanipal lib skips the whole chain by not needing a new connection, it runs inside the process that already has one. If your service can query its own database, then you can look at a table from your browser.
 
-## Showcase
-
-![Ashurbanipal demo](tools/e2e-tests/showcase.gif)
 
 ## What it does
 
-- Lists tables with approximate row counts (and table/column comments, if
-  your schema has them).
-- Search-as-you-type sidebar to jump to a table.
-- Paginated table data with sort and a small SQL-like filter DSL.
-- Click a cell to filter by that exact value; a popover suggests common
-  values for a column, read straight from Postgres's planner statistics —
-  no `SELECT DISTINCT` scan.
-- `jsonb` cells pretty-print in a hover preview; a per-row "record" view lays
-  a wide row out as a vertical `column: value` list instead of scrolling.
-- Per-cell copy button, and a raw-JSON payload viewer for the current page.
-- Show/hide columns.
-- Links to sibling services with live health checks, so you can jump between
-  databases in a multi-service setup.
+- Lists tables and filter table rows with a subset of SQL `WHERE` syntax (no joins, no subqueries, no CTEs, no DML).
+
+## What it doesn't do
+
+- No write access, no migrations, no schema changes, no SQL execution.
+- Not a replacement for a full-featured DB client like DBeaver, pgcli etc
+
+## where it should be used
+
+- In a corporate environment, where engineers have to jump through hoops to get access to the database.
+
 
 ## Usage
 
