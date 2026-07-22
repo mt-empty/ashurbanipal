@@ -26,6 +26,7 @@ function demoServer(port: number) {
       ...process.env,
       PORT: String(port),
       SIBLING_PORT: "",
+      MOUNT_PREFIX: "",
     },
   };
 }

@@ -28,6 +28,26 @@ async fn root_serves_the_embedded_dbviewer_html() {
 }
 
 #[tokio::test]
+async fn dbviewer_html_does_not_hardcode_the_api_base() {
+    let srv = TestServer::spawn().await;
+    let body = srv
+        .client()
+        .get(srv.url("/__ashurbanipal"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    // The frontend must derive its API base from location.pathname so the UI
+    // works behind any reverse-proxy prefix; a literal base would break that.
+    assert!(
+        !body.contains("\"/__ashurbanipal/api\""),
+        "dbviewer.html hardcodes the API base again"
+    );
+}
+
+#[tokio::test]
 async fn siblings_endpoint_returns_empty_list_by_default() {
     let srv = TestServer::spawn().await;
     let body: serde_json::Value = srv

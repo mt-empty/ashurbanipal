@@ -417,7 +417,9 @@
 <button id="theme-toggle" type="button" aria-label="toggle light/dark theme" title="toggle light/dark theme"></button>
 
 <script type="module">
-const API = "/__ashurbanipal/api";
+// Derived from the page's own URL, not hardcoded, so the UI works behind
+// any reverse-proxy prefix; trailing slashes stripped so /x/ and /x agree.
+const API = location.pathname.replace(/\/+$/, "") + "/api";
 const UI_KEY = "ashurbanipal_ui";
 const THEME_KEY = "ashurbanipal_theme";
 
