@@ -102,9 +102,11 @@ Two components, same as the original concept:
   - *Filter autocomplete* — the filter input suggests column names via a
     native `<datalist>` at condition-start boundaries (empty input, or
     right after `AND `/`OR `/`NOT `). No value- or operator-level
-    autocomplete, and no parsing of the filter text client-side (see
-    `filter-dsl.md` and `frontend-style-guide.md` §7) — both would require
-    understanding where the cursor sits in the grammar. (An earlier
+    autocomplete, and no *as-you-type* parsing of the filter text — both
+    would require understanding where the cursor sits in the grammar.
+    (The submit-time client-side parser — `spec/filter-dsl.md`,
+    `frontend-style-guide.md` §7 — is separate: it runs on the full text
+    once, cursor-free.) (An earlier
     version of this also highlighted the typed clause's tokens via a
     transparent-input-plus-overlay; removed after three rounds of
     increasingly subtle scroll/stacking bugs made it too bug-prone to
@@ -183,6 +185,11 @@ its full path space and the host doesn't need to pick a mount point.
 | GET    | `/__ashurbanipal/api/siblings`     | Sibling services with live health status.              |
 
 ## 4. API contract
+
+> **Now normative elsewhere:** the endpoint contract lives in
+> `spec/protocol.md` (with `spec/openapi.yaml` for machine-readable
+> shapes). Where this section and the spec disagree, the spec wins; this
+> section stays as rationale and background.
 
 Paths below are shorthand for the full routes in §3.3 (e.g. `/tables` means
 `/__ashurbanipal/api/tables`).
@@ -275,9 +282,12 @@ Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `ILIKE`, `IS NULL`,
   cross-table conditions.
 
 Full grammar (EBNF), semantics, and the parser's test table live in
-`filter-dsl.md`. The parser is hand-written (RSQL-inspired shape, no
-parser dependency), implemented in `src/filter.rs`, and was built **last**
-in the server build order, as planned.
+`spec/filter-dsl.md`. The parser is hand-written (RSQL-inspired shape, no
+parser dependency) and is a **frontend** concern: `dbviewer.html` parses
+the DSL text client-side and submits the resulting JSON AST as the
+`filter` param; the server contract is defined purely in terms of that
+AST (`spec/protocol.md` §5.4.2). (Historically the parser was built
+server-side, in `src/filter.rs`, last in the server build order.)
 
 Example:
 

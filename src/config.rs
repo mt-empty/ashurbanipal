@@ -1,9 +1,9 @@
 use serde::Deserialize;
 
 /// `production` is deliberately not representable: config naming it fails
-/// at parse time.
-const ALLOWED_ENVIRONMENTS: &[&str] = &["dev", "integration", "staging", "any"];
-
+/// at parse time. Any other token is a valid environment name — the
+/// vocabulary is open so `uat`/`sit`/`int`-style org naming isn't forced
+/// to lie.
 const PRODUCTION_ALIASES: &[&str] = &["production", "prod", "prd", "live"];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -47,7 +47,6 @@ pub struct Sibling {
 #[derive(Debug)]
 pub enum ConfigError {
     ProductionEnabled(String),
-    UnknownEnvironment(String),
     Toml(toml::de::Error),
 }
 
@@ -57,10 +56,6 @@ impl std::fmt::Display for ConfigError {
             Self::ProductionEnabled(v) => write!(
                 f,
                 "ashurbanipal must never be enabled in production: `enabled_for` contains {v:?}"
-            ),
-            Self::UnknownEnvironment(v) => write!(
-                f,
-                "unknown environment {v:?} in `enabled_for` (expected one of {ALLOWED_ENVIRONMENTS:?})"
             ),
             Self::Toml(e) => write!(f, "invalid ashurbanipal config: {e}"),
         }
@@ -88,12 +83,6 @@ impl Config {
         for value in &self.enabled_for {
             if is_production_like(value) {
                 return Err(ConfigError::ProductionEnabled(value.clone()));
-            }
-            if !ALLOWED_ENVIRONMENTS
-                .iter()
-                .any(|env| value.eq_ignore_ascii_case(env))
-            {
-                return Err(ConfigError::UnknownEnvironment(value.clone()));
             }
         }
         Ok(())
@@ -136,10 +125,12 @@ mod tests {
     }
 
     #[test]
-    fn unknown_environment_rejected() {
-        let err =
-            Config::from_toml("environment = \"dev\"\nenabled_for = [\"stagin\"]").unwrap_err();
-        assert!(matches!(err, ConfigError::UnknownEnvironment(_)));
+    fn any_non_production_token_accepted() {
+        for env in ["uat", "sit", "int", "stagin", "qa-eu-1"] {
+            let toml_str = format!("environment = \"{env}\"\nenabled_for = [\"{env}\"]");
+            let config = Config::from_toml(&toml_str).unwrap();
+            assert!(config.is_enabled(), "{env} should enable when it matches");
+        }
     }
 
     #[test]

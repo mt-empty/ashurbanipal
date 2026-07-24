@@ -4,7 +4,7 @@ use serde::Serialize;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
-use crate::filter::{CompareOp, Logic, ParsedFilter, Predicate};
+use crate::filter::{Condition, FilterOp, Logic};
 
 #[derive(Debug, Clone)]
 pub struct QueryOpts {
@@ -13,7 +13,7 @@ pub struct QueryOpts {
     pub sort: Option<String>,
     pub descending: bool,
     pub timeout_secs: u32,
-    pub filter: Option<ParsedFilter>,
+    pub filter: Option<Vec<Condition>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -100,6 +100,10 @@ pub trait DbSource: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = Result<Vec<(String, f32)>, DbError>> + Send;
 }
 
+/// Catalog/metadata queries have no per-request timeout knob, but must
+/// still be bounded — same value as `Limits::query_timeout_secs`'s default.
+const CATALOG_TIMEOUT_SECS: u32 = 5;
+
 #[derive(Clone)]
 pub struct PgPoolSource {
     pool: PgPool,
@@ -110,26 +114,47 @@ impl PgPoolSource {
         Self { pool }
     }
 
+    /// Every query runs through one of these so nothing can hold a
+    /// connection unbounded: `SET LOCAL statement_timeout` only lasts for
+    /// the enclosing transaction.
+    async fn bounded_tx(
+        &self,
+        timeout_secs: u32,
+    ) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, DbError> {
+        let mut tx = self.pool.begin().await?;
+        // AssertSqlSafe: interpolates only a u32.
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "set local statement_timeout = '{timeout_secs}s'"
+        )))
+        .execute(&mut *tx)
+        .await?;
+        Ok(tx)
+    }
+
     async fn allowed_tables(&self) -> Result<Vec<String>, DbError> {
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let rows = sqlx::query_scalar::<_, String>(
             "select table_name from information_schema.tables \
-             where table_schema = 'public' and table_type = 'BASE TABLE' \
+             where table_schema = current_schema() and table_type = 'BASE TABLE' \
              order by table_name",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(rows)
     }
 
     async fn allowed_columns(&self, table: &str) -> Result<Vec<String>, DbError> {
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let rows = sqlx::query_scalar::<_, String>(
             "select column_name from information_schema.columns \
-             where table_schema = 'public' and table_name = $1 \
+             where table_schema = current_schema() and table_name = $1 \
              order by ordinal_position",
         )
         .bind(table)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(rows)
     }
 
@@ -139,6 +164,7 @@ impl PgPoolSource {
         &self,
         table: &str,
     ) -> Result<(HashSet<String>, HashMap<String, ColumnRef>), DbError> {
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let rows = sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>)>(
             "select tc.constraint_name, tc.constraint_type, kcu.column_name, \
                     ccu.table_name as ref_table, ccu.column_name as ref_column \
@@ -150,13 +176,14 @@ impl PgPoolSource {
                on ccu.constraint_name = tc.constraint_name \
               and ccu.table_schema = tc.table_schema \
               and tc.constraint_type = 'FOREIGN KEY' \
-             where tc.table_schema = 'public' \
+             where tc.table_schema = current_schema() \
                and tc.table_name = $1 \
                and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
         )
         .bind(table)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         type FkCandidateRow = (String, Option<String>, Option<String>);
 
@@ -201,73 +228,75 @@ impl PgPoolSource {
     }
 }
 
-fn compare_op_sql(op: CompareOp) -> &'static str {
+/// The hardcoded operator→SQL-fragment table (`spec/protocol.md` §5.4.2) —
+/// wire text never becomes an operator except through this match.
+fn op_sql(op: FilterOp) -> &'static str {
     match op {
-        CompareOp::Eq => "=",
-        CompareOp::Ne => "!=",
-        CompareOp::Gt => ">",
-        CompareOp::Ge => ">=",
-        CompareOp::Lt => "<",
-        CompareOp::Le => "<=",
+        FilterOp::Eq => "=",
+        FilterOp::Ne => "!=",
+        FilterOp::Gt => ">",
+        FilterOp::Ge => ">=",
+        FilterOp::Lt => "<",
+        FilterOp::Le => "<=",
+        FilterOp::Like => "LIKE",
+        FilterOp::Ilike => "ILIKE",
+        FilterOp::IsNull => "IS NULL",
+        FilterOp::IsNotNull => "IS NOT NULL",
     }
 }
 
 /// Parameter numbering continues after `$1` (limit) and `$2` (offset), so
 /// the first filter value is `$3`. Every column is matched against
-/// `allowed_columns` before being spliced in.
+/// `allowed_columns` before being spliced in. Conditions are joined with
+/// their own `logic` tokens, relying on SQL's native AND-tighter-than-OR
+/// precedence — no grouping exists in the AST.
 fn build_where_clause(
-    filter: &ParsedFilter,
+    conditions: &[Condition],
     column_names: &[String],
 ) -> Result<(String, Vec<String>), DbError> {
-    if filter.conditions.is_empty() {
+    if conditions.is_empty() {
         return Ok((String::new(), Vec::new()));
     }
 
     let mut values = Vec::new();
     let mut next_param = 3;
-    let mut fragments = Vec::with_capacity(filter.conditions.len());
-    for condition in &filter.conditions {
+    let mut clause = String::new();
+    for (i, condition) in conditions.iter().enumerate() {
         let column = column_names
             .iter()
             .find(|c| c.as_str() == condition.column)
             .ok_or_else(|| DbError::NotAllowed(format!("column {:?}", condition.column)))?;
 
-        let inner = match &condition.predicate {
-            Predicate::Compare(op, value) => {
-                let frag = format!("\"{column}\"::text {} ${next_param}", compare_op_sql(*op));
-                values.push(value.clone());
-                next_param += 1;
-                frag
-            }
-            Predicate::Like(value) => {
-                let frag = format!("\"{column}\"::text LIKE ${next_param}");
-                values.push(value.clone());
-                next_param += 1;
-                frag
-            }
-            Predicate::Ilike(value) => {
-                let frag = format!("\"{column}\"::text ILIKE ${next_param}");
-                values.push(value.clone());
-                next_param += 1;
-                frag
-            }
-            Predicate::IsNull => format!("\"{column}\"::text IS NULL"),
-            Predicate::IsNotNull => format!("\"{column}\"::text IS NOT NULL"),
+        // filter::parse already enforced these structurally; re-checking
+        // here keeps build_where_clause safe on any input path (tests,
+        // future callers) instead of trusting its caller.
+        let inner = if condition.op.takes_value() {
+            let value = condition.value.clone().ok_or_else(|| {
+                DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
+            })?;
+            let frag = format!("\"{column}\"::text {} ${next_param}", op_sql(condition.op));
+            values.push(value);
+            next_param += 1;
+            frag
+        } else {
+            format!("\"{column}\"::text {}", op_sql(condition.op))
         };
-        fragments.push(if condition.negated {
+        let wrapped = if condition.not {
             format!("(NOT ({inner}))")
         } else {
             format!("({inner})")
-        });
-    }
+        };
 
-    let mut clause = fragments[0].clone();
-    for (logic, frag) in filter.logic.iter().zip(fragments.iter().skip(1)) {
-        clause.push_str(match logic {
-            Logic::And => " AND ",
-            Logic::Or => " OR ",
-        });
-        clause.push_str(frag);
+        if i > 0 {
+            let logic = condition
+                .logic
+                .ok_or_else(|| DbError::FilterParse(format!("condition {i} is missing logic")))?;
+            clause.push_str(match logic {
+                Logic::And => " AND ",
+                Logic::Or => " OR ",
+            });
+        }
+        clause.push_str(&wrapped);
     }
     Ok((format!(" where {clause}"), values))
 }
@@ -287,15 +316,17 @@ fn row_to_json(row: &PgRow, columns: &[ColumnInfo]) -> serde_json::Map<String, s
 
 impl DbSource for PgPoolSource {
     async fn list_tables(&self) -> Result<Vec<TableInfo>, DbError> {
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let rows = sqlx::query_as::<_, (String, Option<String>)>(
             "select c.relname::text, obj_description(c.oid, 'pg_class') \
              from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = 'public' and c.relkind = 'r' \
+             where n.nspname = current_schema() and c.relkind = 'r' \
              order by c.relname",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(rows
             .into_iter()
             .map(|(name, comment)| TableInfo { name, comment })
@@ -303,15 +334,17 @@ impl DbSource for PgPoolSource {
     }
 
     async fn table_counts(&self) -> Result<Vec<(String, i64)>, DbError> {
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let rows = sqlx::query_as::<_, (String, i64)>(
             "select c.relname::text, c.reltuples::bigint \
              from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = 'public' and c.relkind = 'r' \
+             where n.nspname = current_schema() and c.relkind = 'r' \
              order by c.relname",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(rows)
     }
 
@@ -340,15 +373,15 @@ impl DbSource for PgPoolSource {
             None => (String::new(), Vec::new()),
         };
 
+        let mut meta_tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let column_types = sqlx::query_as::<_, (String, String)>(
             "select column_name, data_type from information_schema.columns \
-             where table_schema = 'public' and table_name = $1 \
+             where table_schema = current_schema() and table_name = $1 \
              order by ordinal_position",
         )
         .bind(&table)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *meta_tx)
         .await?;
-        let (pk_columns, fk_columns) = self.key_metadata(&table).await?;
         // Joins through pg_attribute/pg_class directly: col_description is
         // keyed by attnum, which can diverge from ordinal_position once a
         // column has been dropped.
@@ -358,15 +391,17 @@ impl DbSource for PgPoolSource {
              from pg_attribute a \
              join pg_class c on c.oid = a.attrelid \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = 'public' and c.relname = $1 \
+             where n.nspname = current_schema() and c.relname = $1 \
                and a.attnum > 0 and not a.attisdropped",
             )
             .bind(&table)
-            .fetch_all(&self.pool)
+            .fetch_all(&mut *meta_tx)
             .await?
             .into_iter()
             .filter_map(|(name, comment)| comment.map(|c| (name, c)))
             .collect();
+        meta_tx.commit().await?;
+        let (pk_columns, fk_columns) = self.key_metadata(&table).await?;
         let columns: Vec<ColumnInfo> = column_types
             .into_iter()
             .map(|(name, type_name)| {
@@ -409,15 +444,9 @@ impl DbSource for PgPoolSource {
             "select {select_list} from \"{table}\"{where_clause}{order_clause} limit $1 offset $2"
         );
 
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         // AssertSqlSafe: sql interpolates only schema-validated identifiers
         // and hardcoded operator fragments; all values are bound.
-        sqlx::query(sqlx::AssertSqlSafe(format!(
-            "set local statement_timeout = '{}s'",
-            opts.timeout_secs
-        )))
-        .execute(&mut *tx)
-        .await?;
         let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(opts.limit as i64)
             .bind(opts.offset as i64);
@@ -425,16 +454,15 @@ impl DbSource for PgPoolSource {
             query = query.bind(value);
         }
         let pg_rows = query.fetch_all(&mut *tx).await?;
-        tx.commit().await?;
-
         let total_approx = sqlx::query_scalar::<_, i64>(
             "select reltuples::bigint from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = 'public' and c.relname = $1",
+             where n.nspname = current_schema() and c.relname = $1",
         )
         .bind(&table)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         let rows = pg_rows.iter().map(|r| row_to_json(r, &columns)).collect();
         Ok(TableData {
@@ -462,6 +490,7 @@ impl DbSource for PgPoolSource {
             .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?
             .clone();
 
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         // most_common_vals is anyarray; ::text::text[] reads it uniformly
         // without fighting Rust-side type inference. NULL (no ANALYZE stats
         // yet) unnests to zero rows, not an error.
@@ -469,22 +498,23 @@ impl DbSource for PgPoolSource {
             "select t.val, t.freq \
              from pg_stats, \
                   lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq) \
-             where schemaname = 'public' and tablename = $1 and attname = $2 \
+             where schemaname = current_schema() and tablename = $1 and attname = $2 \
              order by t.freq desc",
         )
         .bind(&table)
         .bind(&column)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
 
         let data_type = sqlx::query_scalar::<_, String>(
             "select data_type from information_schema.columns \
-             where table_schema = 'public' and table_name = $1 and column_name = $2",
+             where table_schema = current_schema() and table_name = $1 and column_name = $2",
         )
         .bind(&table)
         .bind(&column)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?;
+        tx.commit().await?;
         // boolean's array-literal text form is "t"/"f", not "true"/"false" —
         // normalize to match row_to_json's rendering.
         let rows = if data_type.as_deref() == Some("boolean") {
@@ -502,5 +532,151 @@ impl DbSource for PgPoolSource {
             rows
         };
         Ok(rows)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filter;
+
+    /// Shared fixture runner over `spec/fixtures/filter-builder-tests.json`
+    /// (schema: `spec/fixtures/README.md`) — the same file every port's
+    /// runner and the black-box HTTP suite consume, so validation/building
+    /// behavior can't drift between them.
+    const FIXTURES: &str = include_str!("../spec/fixtures/filter-builder-tests.json");
+
+    #[derive(serde::Deserialize)]
+    struct FixtureFile {
+        cases: Vec<FixtureCase>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct FixtureCase {
+        name: String,
+        table: String,
+        conditions: Option<serde_json::Value>,
+        raw: Option<String>,
+        expect: Option<ExpectedWhere>,
+        expect_error: Option<String>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ExpectedWhere {
+        #[serde(rename = "where")]
+        where_clause: String,
+        values: Vec<String>,
+    }
+
+    /// Static mirror of the seed schema's columns for the tables the
+    /// fixture references (README: unit runners substitute this for the
+    /// live `information_schema` lookup).
+    fn seed_columns(table: &str) -> Vec<String> {
+        let cols: &[&str] = match table {
+            "users" => &[
+                "id",
+                "email",
+                "full_name",
+                "age",
+                "is_active",
+                "login_count",
+                "metadata",
+                "last_login_at",
+                "created_at",
+            ],
+            "orders" => &[
+                "id",
+                "user_id",
+                "status",
+                "total_cents",
+                "discount_pct",
+                "tags",
+                "line_items",
+                "created_at",
+            ],
+            "products" => &[
+                "id",
+                "sku",
+                "name",
+                "category",
+                "price",
+                "weight_kg",
+                "in_stock",
+                "description",
+                "created_on",
+            ],
+            other => panic!("fixture references unmapped table {other:?}"),
+        };
+        cols.iter().map(|c| c.to_string()).collect()
+    }
+
+    /// Fixture placeholders are numbered from `$1`; the reference binds
+    /// limit/offset first, so its real clause starts at `$3`.
+    fn shift_placeholders(fragment: &str, by: u32) -> String {
+        let mut out = String::with_capacity(fragment.len());
+        let mut chars = fragment.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '$' {
+                out.push(c);
+                continue;
+            }
+            let mut digits = String::new();
+            while let Some(d) = chars.peek().filter(|d| d.is_ascii_digit()) {
+                digits.push(*d);
+                chars.next();
+            }
+            out.push('$');
+            out.push_str(&(digits.parse::<u32>().unwrap() + by).to_string());
+        }
+        out
+    }
+
+    #[test]
+    fn filter_builder_fixtures() {
+        let file: FixtureFile = serde_json::from_str(FIXTURES).unwrap();
+        assert!(!file.cases.is_empty());
+        for case in &file.cases {
+            let name = &case.name;
+            let raw = match (&case.raw, &case.conditions) {
+                (Some(raw), _) => raw.clone(),
+                (None, Some(conditions)) => serde_json::to_string(conditions).unwrap(),
+                (None, None) => panic!("case {name}: neither raw nor conditions"),
+            };
+            let parsed = filter::parse(&raw);
+            match (&case.expect, &case.expect_error) {
+                (Some(expected), None) => {
+                    let conditions =
+                        parsed.unwrap_or_else(|e| panic!("case {name}: parse failed: {e}"));
+                    let (where_clause, values) =
+                        build_where_clause(&conditions, &seed_columns(&case.table))
+                            .unwrap_or_else(|e| panic!("case {name}: build failed: {e}"));
+                    let expected_clause = if expected.where_clause.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" where {}", shift_placeholders(&expected.where_clause, 2))
+                    };
+                    assert_eq!(where_clause, expected_clause, "case {name}: WHERE mismatch");
+                    assert_eq!(values, expected.values, "case {name}: bind values mismatch");
+                }
+                (None, Some(kind)) if kind == "unknown_column" => {
+                    let conditions = parsed.unwrap_or_else(|e| {
+                        panic!("case {name}: should parse (rejection is builder-stage): {e}")
+                    });
+                    match build_where_clause(&conditions, &seed_columns(&case.table)) {
+                        Err(DbError::NotAllowed(_)) => {}
+                        other => panic!(
+                            "case {name}: expected NotAllowed from the builder, got {other:?}"
+                        ),
+                    }
+                }
+                (None, Some(kind)) => {
+                    assert!(
+                        parsed.is_err(),
+                        "case {name}: expected structural rejection ({kind}), but it parsed"
+                    );
+                }
+                _ => panic!("case {name}: exactly one of expect/expect_error required"),
+            }
+        }
     }
 }

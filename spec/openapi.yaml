@@ -1,0 +1,377 @@
+# Machine-readable companion to spec/protocol.md (which is normative where
+# they disagree). Shapes derived from the reference implementation's
+# serialization (src/routes.rs, src/db.rs).
+openapi: 3.1.0
+info:
+  title: Ashurbanipal Protocol
+  version: "1"
+  description: >
+    Read-only Postgres table-browsing API. Paths are relative to
+    {mount}/api, where {mount} is the implementation-defined mount point
+    (reference default: /__ashurbanipal). The UI itself is served at
+    {mount} as text/html and is not described here.
+
+servers:
+  - url: "{mount}/api"
+    variables:
+      mount:
+        default: /__ashurbanipal
+        description: Implementation-defined mount point.
+
+paths:
+  /tables:
+    get:
+      operationId: listTables
+      summary: List base tables of the connected schema.
+      responses:
+        "200":
+          description: Table list (also the allow-list for `table` params).
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tables]
+                properties:
+                  tables:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TableInfo"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /table-counts:
+    get:
+      operationId: tableCounts
+      summary: Approximate row counts from pg_class.reltuples.
+      responses:
+        "200":
+          description: Approximate counts for every table.
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CountsResponse"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /tables/data:
+    get:
+      operationId: tableData
+      summary: Paginated, filtered, sorted rows for a single table.
+      parameters:
+        - name: table
+          in: query
+          required: true
+          description: >
+            Must exactly match (case-sensitive) a table name from /tables;
+            otherwise 400.
+          schema:
+            type: string
+        - name: filter
+          in: query
+          required: false
+          description: >
+            URL-encoded JSON array of condition objects (the filter AST —
+            never DSL text; DSL parsing is frontend-only, see
+            spec/filter-dsl.md). `logic` is absent on the first element and
+            required on every subsequent one; `value` is present iff `op`
+            is not IS NULL / IS NOT NULL; at most 10 conditions; the
+            encoded size is bounded (see spec/protocol.md §5.4.2). An
+            empty array means no filter. Structural violations and unknown
+            columns yield 400.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 10
+                items:
+                  $ref: "#/components/schemas/FilterCondition"
+        - name: limit
+          in: query
+          required: false
+          description: >
+            Clamped to [1, max_page_size] (reference default max 100),
+            never an error. Default is default_page_size (reference 50).
+          schema:
+            type: integer
+            minimum: 0
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: sort
+          in: query
+          required: false
+          description: >
+            Single column name, validated against the table's real
+            columns; unknown column yields 400. Ordering uses the
+            column's native type ordering.
+          schema:
+            type: string
+        - name: order
+          in: query
+          required: false
+          description: Any value other than asc/desc yields 400.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+      responses:
+        "200":
+          description: One page of rows plus column metadata.
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableDataResponse"
+        "400":
+          $ref: "#/components/responses/ClientError"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /tables/common-values:
+    get:
+      operationId: commonValues
+      summary: Most-common values for one column, from pg_stats.
+      parameters:
+        - name: table
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: column
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: >
+            Most-common values, most frequent first. Empty when the column
+            has no planner statistics (never an error).
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommonValuesResponse"
+        "400":
+          $ref: "#/components/responses/ClientError"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /siblings:
+    get:
+      operationId: siblings
+      summary: Configured sibling services with live health status.
+      responses:
+        "200":
+          description: >
+            One entry per configured sibling; health checked per request.
+            Empty configuration yields an empty list.
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SiblingsResponse"
+
+components:
+  headers:
+    ProtocolVersion:
+      description: Protocol version; "1" for this document.
+      required: true
+      schema:
+        type: string
+        const: "1"
+
+  responses:
+    ClientError:
+      description: >
+        Client error — unknown table/column, invalid filter, invalid
+        order. Plain-text reason; wording is implementation-defined and
+        must not be parsed.
+      headers:
+        x-ashurbanipal-protocol:
+          $ref: "#/components/headers/ProtocolVersion"
+      content:
+        text/plain:
+          schema:
+            type: string
+    ServerError:
+      description: Database failure. Plain-text reason.
+      headers:
+        x-ashurbanipal-protocol:
+          $ref: "#/components/headers/ProtocolVersion"
+      content:
+        text/plain:
+          schema:
+            type: string
+
+  schemas:
+    TableInfo:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        comment:
+          type: string
+          description: COMMENT ON TABLE text; omitted (never null) when absent.
+
+    ColumnInfo:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          description: Postgres data type name (information_schema.columns.data_type).
+        key:
+          type: string
+          enum: [pk, fk]
+          description: >
+            Omitted for non-key columns and for members of composite
+            foreign keys (composite FKs are omitted entirely).
+        references:
+          type: object
+          description: Present only when key is "fk".
+          required: [table, column]
+          properties:
+            table:
+              type: string
+            column:
+              type: string
+        comment:
+          type: string
+          description: COMMENT ON COLUMN text; omitted when absent.
+
+    TableDataResponse:
+      type: object
+      required: [columns, rows, total_approx]
+      properties:
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/ColumnInfo"
+        rows:
+          type: array
+          description: >
+            One object per row, keyed by column name. Every value is a
+            JSON string (the Postgres text rendering — uuids, numbers,
+            timestamps, jsonb all serialize as strings) or null for SQL
+            NULL; an undecodable value is the sentinel string
+            "<undecodable>". Native JSON numbers/booleans are
+            non-conformant.
+          items:
+            type: object
+            additionalProperties:
+              type: ["string", "null"]
+        total_approx:
+          type: integer
+          format: int64
+          description: >
+            Whole-table pg_class.reltuples estimate; unaffected by
+            filter; may be stale or -1 before first ANALYZE.
+
+    CountsResponse:
+      type: object
+      required: [counts]
+      properties:
+        counts:
+          type: array
+          items:
+            type: object
+            required: [table, approx_rows]
+            properties:
+              table:
+                type: string
+              approx_rows:
+                type: integer
+                format: int64
+                description: May be stale or -1 before first ANALYZE.
+
+    CommonValuesResponse:
+      type: object
+      required: [values]
+      properties:
+        values:
+          type: array
+          description: Most frequent first; empty when no planner statistics.
+          items:
+            type: object
+            required: [value, freq]
+            properties:
+              value:
+                type: string
+                description: >
+                  Rendered consistently with row serialization (e.g.
+                  booleans as "true"/"false").
+              freq:
+                type: number
+                format: float
+                description: Fraction of rows, in (0, 1].
+
+    SiblingsResponse:
+      type: object
+      required: [siblings]
+      properties:
+        siblings:
+          type: array
+          items:
+            type: object
+            required: [name, dbviewer_url, healthy]
+            properties:
+              name:
+                type: string
+              dbviewer_url:
+                type: string
+              healthy:
+                type: boolean
+                description: >
+                  True iff a GET to the sibling's health path (resolved
+                  against its origin) returned 2xx within the timeout.
+
+    FilterCondition:
+      type: object
+      required: [column, op]
+      properties:
+        logic:
+          type: string
+          enum: [AND, OR]
+          description: >
+            Absent on the first condition, required on every subsequent
+            one. AND binds tighter than OR (SQL precedence); no
+            grouping/nesting exists.
+        not:
+          type: boolean
+          default: false
+          description: Wraps the condition's SQL fragment in NOT (...).
+        column:
+          type: string
+          description: >
+            Validated server-side against the table's real columns
+            (case-sensitive) before reaching SQL; unknown column yields
+            400.
+        op:
+          type: string
+          enum: ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]
+        value:
+          type: string
+          description: >
+            Required for every op except IS NULL / IS NOT NULL, for which
+            it must be absent. Always bound as a query parameter;
+            comparison applies to the column cast to text.

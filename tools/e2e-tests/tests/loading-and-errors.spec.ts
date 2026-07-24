@@ -61,6 +61,29 @@ test("a slow, superseded response never overwrites a newer table's render", asyn
   await expect(page.locator('#tbody td[data-col="status"]')).toHaveCount(0); // orders' column
 });
 
+test("a missing protocol header warns non-blockingly and is dismissible", async ({ page }) => {
+  // Simulates a version-skewed backend by stripping the header the real
+  // server always sends — a missing header counts as a mismatch too.
+  await page.route("**/api/tables", async (route) => {
+    const response = await route.fetch();
+    const headers = { ...response.headers() };
+    delete headers["x-ashurbanipal-protocol"];
+    await route.fulfill({ response, headers });
+  });
+  await gotoApp(page);
+  await expect(page.locator("#protocol-warning")).toBeVisible();
+  await expect(page.locator("#protocol-warning-text")).toContainText("mismatch");
+  // Non-blocking: browsing still works underneath the warning.
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
+  await page.locator("#protocol-warning-dismiss").click();
+  await expect(page.locator("#protocol-warning")).toBeHidden();
+});
+
+test("no protocol warning appears against a matching backend", async ({ page }) => {
+  await gotoApp(page);
+  await expect(page.locator("#protocol-warning")).toBeHidden();
+});
+
 test("errors are surfaced as a visible role=alert region, not just logged", async ({ page }) => {
   // This table never finishes loading (invalid sort column -> 400 before
   // updateActiveTableChrome() ever runs), so wait on #error, not #current.

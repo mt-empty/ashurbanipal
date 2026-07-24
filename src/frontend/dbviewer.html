@@ -30,6 +30,7 @@
     --border-strong: #8886;
     --hover: #8882;
     --danger: light-dark(#d33, #f66);
+    --warning: light-dark(#a60, #fb5);
     --success: light-dark(#2a2, #5c5);
     --active: light-dark(#08f2, #08f5);
     --backdrop: light-dark(#0006, #0009);
@@ -174,6 +175,14 @@
              margin: -1px; overflow: hidden; clip-path: inset(50%);
              white-space: nowrap; border: 0; }
   #error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap; }
+  #protocol-warning { display: flex; gap: var(--gap); align-items: baseline;
+                      color: var(--warning); margin-bottom: var(--gap); }
+  /* display:flex above would silently defeat the hidden attribute's
+     UA-level display:none — restate it at author-level specificity. */
+  #protocol-warning[hidden] { display: none; }
+  #protocol-warning button { background: none; border: none; cursor: pointer; font: inherit;
+                             color: inherit; padding: 0 .15rem; border-radius: 3px; }
+  #protocol-warning button:hover { background: var(--hover); }
   .empty td { text-align: center; opacity: .6; padding: 1rem; }
 
   /* ==== Siblings ==== */
@@ -360,6 +369,10 @@
 </nav>
 <main id="main">
   <div id="toolbar">
+    <div id="protocol-warning" role="status" hidden>
+      <span id="protocol-warning-text"></span>
+      <button id="protocol-warning-dismiss" type="button" aria-label="dismiss warning">✕</button>
+    </div>
     <search id="controls">
       <strong id="current">—</strong>
       <output id="status" aria-live="polite" class="sr-only"></output>
@@ -589,9 +602,31 @@ function jsonScalar(value) {
 
 async function api(path) {
   const resp = await fetch(API + path);
+  if (path === "/tables") checkProtocolVersion(resp);
   if (!resp.ok) throw new Error(await resp.text());
   return resp.json();
 }
+
+// ==== Protocol version skew warning ====
+// The frontend artifact ships separately from backends (ports vendor this
+// file), so the first /tables response's x-ashurbanipal-protocol header is
+// compared against the version this file speaks. A mismatch — or a missing
+// header — warns but never blocks: a skewed pairing usually still mostly
+// works, and refusing to render would be strictly worse than degraded
+// browsing.
+const PROTOCOL_VERSION = "1";
+let protocolChecked = false;
+function checkProtocolVersion(resp) {
+  if (protocolChecked) return;
+  protocolChecked = true;
+  const got = resp.headers.get("x-ashurbanipal-protocol");
+  if (got === PROTOCOL_VERSION) return;
+  $("protocol-warning-text").textContent =
+    `protocol version mismatch: this UI speaks v${PROTOCOL_VERSION}, ` +
+    `the server reports ${got ? `v${got}` : "no version"} — some features may misbehave`;
+  $("protocol-warning").hidden = false;
+}
+$("protocol-warning-dismiss").onclick = () => { $("protocol-warning").hidden = true; };
 
 // ---- raw payload viewer ----
 let lastPayload = null;
@@ -625,7 +660,7 @@ async function copyText(text, btn) {
 // sync for no benefit. ----
 function buildApiReference() {
   const base = new URL(API, location.href).toString().replace(/\/$/, "");
-  const exampleFilter = encodeURIComponent("status = active");
+  const exampleFilter = encodeURIComponent(JSON.stringify([{ column: "status", op: "=", value: "active" }]));
   return {
     description: "Read-only REST API for browsing this service's Postgres tables. Every endpoint is GET and returns JSON. Table/column names are data-dependent — call GET /tables first to discover real names before calling anything else.",
     base_url: base,
@@ -650,7 +685,7 @@ function buildApiReference() {
         summary: "Paginated, filtered, sorted rows for one table.",
         params: [
           { name: "table", required: true, notes: "must be a name returned by GET /tables" },
-          { name: "filter", required: false, notes: "filter DSL — see the `filter` key below" },
+          { name: "filter", required: false, notes: "URL-encoded JSON array of condition objects — see the `filter` key below" },
           { name: "limit", required: false, notes: "default 50, max 100" },
           { name: "offset", required: false, notes: "default 0" },
           { name: "sort", required: false, notes: "single column name" },
@@ -682,20 +717,21 @@ function buildApiReference() {
       },
     ],
     filter: {
-      grammar: "[NOT] column OP value [AND|OR [NOT] column OP value ...]",
+      wire_format: "URL-encoded JSON array of condition objects: [{logic?, not?, column, op, value?}, ...]",
       operators: ["=", "!=", ">", ">=", "<", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"],
-      limits: { max_conditions: 10, max_length_bytes: 1024 },
+      limits: { max_conditions: 10, max_json_bytes: 8192 },
       notes: [
-        "AND binds tighter than OR (SQL convention).",
-        "NOT prefixes a single condition only — no parentheses or nesting.",
-        "bare values run to the next whitespace; values with spaces/quotes/keywords need single quotes.",
+        "`logic` (\"AND\" | \"OR\") must be absent on the first condition and present on every later one; AND binds tighter than OR (SQL precedence — no parentheses/nesting exist).",
+        "`not: true` negates its single condition; optional, defaults to false.",
+        "`value` is always a JSON string, required except for IS NULL / IS NOT NULL, which take none.",
         "columns are cast to text before comparison, so the same operators work across uuid/timestamptz/jsonb/etc.",
-        "at most 10 conditions and 1024 bytes per filter string — both rejected with a 400 if exceeded.",
+        "at most 10 conditions and 8192 bytes of URL-decoded JSON — exceeding either is a 400.",
+        "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text and compiles it to this AST client-side — DSL text sent as the `filter` param is a 400.",
       ],
-      examples: [
-        "status = completed AND created_at > 2016-01-01",
-        "session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd",
-        "NOT status = archived OR priority >= 3",
+      example: [
+        { column: "status", op: "=", value: "completed" },
+        { logic: "AND", not: true, column: "created_at", op: ">", value: "2016-01-01" },
+        { logic: "OR", column: "deleted_at", op: "IS NULL" },
       ],
     },
   };
@@ -745,6 +781,181 @@ function showCellPop(e, text) {
   $("cell-pop").showPopover();
 }
 
+// ==== Filter DSL parser (box text → wire AST) ====
+// The single canonical implementation of spec/filter-dsl.md — no backend
+// (reference or port) parses DSL text; they all consume the AST this
+// emits (spec/protocol.md §5.4.2). Iterative — one flat condition loop,
+// no recursive descent — so pathological input can't grow the call stack
+// (filter-dsl.md A9). Error positions are UTF-8 byte offsets into the
+// input, same convention the DSL-era backend parser reported.
+const FILTER_MAX_DSL_BYTES = 1024;
+const FILTER_MAX_CONDITIONS = 10;
+
+function parseFilterDsl(input) {
+  const err = (message, index) => {
+    const position = new TextEncoder().encode(input.slice(0, index)).length;
+    const e = new Error(`${message} at position ${position}`);
+    e.position = position;
+    return e;
+  };
+  if (new TextEncoder().encode(input).length > FILTER_MAX_DSL_BYTES)
+    throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
+
+  let pos = 0;
+  // Peeks return the full code point (length 2 for astral chars) so
+  // surrogate pairs are never split mid-character while advancing.
+  const peekAt = (i) => (i < input.length ? String.fromCodePoint(input.codePointAt(i)) : null);
+  const peek = () => peekAt(pos);
+  const isWs = (c) => /\s/.test(c);
+  const skipWsOptional = () => {
+    let c;
+    while ((c = peek()) !== null && isWs(c)) pos += c.length;
+  };
+  const skipWsRequired = () => {
+    const start = pos;
+    skipWsOptional();
+    if (pos === start) throw err("expected whitespace", start);
+  };
+  // Case-insensitive with a word-boundary check so LIKELY isn't misread
+  // as LIKE; ASCII-only folding so fullwidth/confusable chars never match.
+  const matchKeyword = (keyword) => {
+    for (let i = 0; i < keyword.length; i++) {
+      const c = input[pos + i];
+      if (c === undefined) return false;
+      const folded = c >= "a" && c <= "z" ? String.fromCharCode(c.charCodeAt(0) - 32) : c;
+      if (folded !== keyword[i]) return false;
+    }
+    const next = peekAt(pos + keyword.length);
+    return !(next !== null && (next === "_" || /[\p{L}\p{N}]/u.test(next)));
+  };
+  const consumeKeyword = (keyword) => {
+    if (!matchKeyword(keyword)) return false;
+    pos += keyword.length;
+    return true;
+  };
+  const parseColumn = () => {
+    const start = pos;
+    const first = peek();
+    if (first === null || !/^[a-zA-Z_]$/.test(first)) throw err("expected column name", start);
+    pos += 1;
+    let c;
+    while ((c = peek()) !== null && /^[a-zA-Z0-9_]$/.test(c)) pos += 1;
+    return input.slice(start, pos);
+  };
+  // A doubled '' decodes to a single literal '.
+  const parseQuotedValue = () => {
+    const start = pos;
+    pos += 1; // opening quote
+    let value = "";
+    for (;;) {
+      const c = peek();
+      if (c === null) throw err("unterminated quoted value", start);
+      if (c === "'") {
+        pos += 1;
+        if (peek() === "'") { value += "'"; pos += 1; }
+        else break;
+      } else { value += c; pos += c.length; }
+    }
+    return value;
+  };
+  // AND/OR/NOT are always keywords, never bare values — quote them to use
+  // as a literal.
+  const parseBareValue = () => {
+    const start = pos;
+    let value = "";
+    let c;
+    while ((c = peek()) !== null && !isWs(c) && c !== "'") { value += c; pos += c.length; }
+    if (value === "") throw err("expected value", start);
+    if (/^(AND|OR|NOT)$/i.test(value))
+      throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
+    return value;
+  };
+  // Symbolic operators longest-first so >=/<= aren't misread as >/< plus
+  // a bare =... value.
+  const parseOperator = () => {
+    const start = pos;
+    if (consumeKeyword("ILIKE")) return "ILIKE";
+    if (consumeKeyword("LIKE")) return "LIKE";
+    for (const sym of [">=", "<=", "!=", ">", "<", "="]) {
+      if (input.startsWith(sym, pos)) { pos += sym.length; return sym; }
+    }
+    throw err("expected operator (one of = != >= <= > < LIKE ILIKE, or IS [NOT] NULL)", start);
+  };
+  // Speculatively tries the IS [NOT] NULL branch and rewinds to right
+  // after the column if it doesn't apply.
+  const parseSimpleCondition = () => {
+    const column = parseColumn();
+    const afterColumn = pos;
+    const wsChar = peek();
+    if (wsChar !== null && isWs(wsChar)) {
+      skipWsOptional();
+      if (consumeKeyword("IS")) {
+        skipWsRequired();
+        const isNot = consumeKeyword("NOT");
+        if (isNot) skipWsRequired();
+        if (!consumeKeyword("NULL")) throw err("expected NULL", pos);
+        return { column, op: isNot ? "IS NOT NULL" : "IS NULL" };
+      }
+      pos = afterColumn;
+    }
+    skipWsOptional();
+    const op = parseOperator();
+    skipWsOptional();
+    const value = peek() === "'" ? parseQuotedValue() : parseBareValue();
+    return { column, op, value };
+  };
+
+  const conditions = [];
+  let pendingLogic = null;
+  for (;;) {
+    let not = false;
+    if (matchKeyword("NOT")) { pos += 3; skipWsRequired(); not = true; }
+    const simple = parseSimpleCondition();
+    // Optional wire fields are omitted, never null/false-filled (§5.4.2).
+    const condition = {};
+    if (pendingLogic) condition.logic = pendingLogic;
+    if (not) condition.not = true;
+    condition.column = simple.column;
+    condition.op = simple.op;
+    if (simple.value !== undefined) condition.value = simple.value;
+    conditions.push(condition);
+    if (conditions.length > FILTER_MAX_CONDITIONS)
+      throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
+    if (pos >= input.length) break;
+    skipWsRequired();
+    if (pos >= input.length) break;
+    const logicStart = pos;
+    if (consumeKeyword("AND")) pendingLogic = "AND";
+    else if (consumeKeyword("OR")) pendingLogic = "OR";
+    else throw err("expected AND or OR", logicStart);
+    skipWsRequired();
+  }
+  return conditions;
+}
+
+// Test hook: tools/e2e-tests/tests/filter-parser.spec.ts drives the parser
+// fixture table (and the quoteFilterValue→parser round-trip) via
+// page.evaluate — module scope is otherwise unreachable from outside, and
+// this one namespaced global is the entire exposed surface.
+window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };
+
+// state.filter stays the applied *text*; the AST that actually goes on the
+// wire is derived from it once, at commit time, so unparseable box text
+// never produces a request at all (spec/filter-dsl.md §4).
+let appliedFilterAst = [];
+
+function submitFilter(text) {
+  let ast = [];
+  if (text) {
+    try { ast = parseFilterDsl(text); }
+    catch (e) { $("error").textContent = e.message; return; }
+  }
+  state.filter = text;
+  appliedFilterAst = ast;
+  state.offset = 0;
+  loadData();
+}
+
 // ---- click-to-filter: compose "column op value" into #filter and apply ----
 // Every cell value is fetched with an explicit ::text cast, which is
 // exactly what the filter DSL compares against, so it can be spliced
@@ -755,20 +966,20 @@ function quoteFilterValue(value) {
 }
 
 function applyFilterClause(column, op, value) {
-  // value is omitted for a valueless predicate (IS NULL).
+  // value is omitted for a valueless predicate (IS NULL). The composed
+  // text round-trips through parseFilterDsl like a hand-typed clause —
+  // quoteFilterValue guarantees it parses.
   const clause = value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
   $("filter").value = clause;
-  state.filter = clause;
-  state.offset = 0;
-  loadData();
+  submitFilter(clause);
 }
 
 // ---- filter column autocomplete: a cursor-anchored popup suggesting a
 // column name wherever the DSL grammar allows a new condition to start
 // (empty, or right after AND/OR/NOT), prefix-filtered by the partial
 // column name already typed. Only inspects text immediately before the
-// cursor — never judges the filter as a whole, so it doesn't duplicate the
-// server-side parser's accept/reject job. Scoped to the cursor sitting at
+// cursor — never judges the filter as a whole, so it doesn't duplicate
+// parseFilterDsl's accept/reject job. Scoped to the cursor sitting at
 // the end of the text — mid-string edits get no suggestions.
 //
 // Manual popover, not auto: it must stay open while typing (default
@@ -1088,7 +1299,8 @@ async function loadTables() {
     // A filter clause is written against this table's columns, so it
     // resets on table switch the same way sort already does.
     btn.onclick = () => {
-      state.table = t.name; state.offset = 0; state.sort = null; state.filter = "";
+      state.table = t.name; state.offset = 0; state.sort = null;
+      state.filter = ""; appliedFilterAst = [];
       $("filter").value = "";
       persist(); loadData();
     };
@@ -1125,7 +1337,9 @@ async function fetchTableData() {
     table, limit: state.limit, offset: state.offset,
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
-  if (state.filter) params.set("filter", state.filter);
+  // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
+  // box's DSL text — URLSearchParams handles the URL-encoding.
+  if (state.filter) params.set("filter", JSON.stringify(appliedFilterAst));
   if (inFlightFetches++ === 0) {
     setStatus("loading…");
     document.querySelector("table").setAttribute("aria-busy", "true");
@@ -1463,9 +1677,7 @@ async function loadSiblings() {
 
 $("filter-form").onsubmit = (e) => {
   e.preventDefault();
-  state.filter = $("filter").value.trim();
-  state.offset = 0;
-  loadData();
+  submitFilter($("filter").value.trim());
 };
 // The native clear button on a search input fires "search" but never
 // submits the form, so clearing it left state.filter stale until some

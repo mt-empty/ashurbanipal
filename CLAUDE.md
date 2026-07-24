@@ -34,9 +34,11 @@ Two components:
   `src/routes.rs` (the Axum router and the five API handlers).
 
 Read `docs/design.md` first for anything non-obvious — it's the source of
-truth for intended behavior. `docs/filter-dsl.md` has the filter grammar
-and its full test table (implement/verify against that table, not ad hoc
-cases). `docs/ui-guidelines.md` and `docs/frontend-style-guide.md` are the
+truth for intended behavior. `spec/protocol.md` is the normative endpoint
+contract (design.md §4 stays as rationale). `spec/filter-dsl.md` has the
+filter grammar and its full test table (implement/verify against that
+table, not ad hoc cases) — it specs the *frontend's* DSL parser; the
+backend's filter contract is the JSON AST in `spec/protocol.md`. `docs/ui-guidelines.md` and `docs/frontend-style-guide.md` are the
 standing behavioral/structural rules for `dbviewer.html` (the *why* and the
 *shape*, respectively) — read them before touching the frontend, not just
 `design.md`. `docs/browser-quirks.md` is a living record of cross-browser
@@ -131,12 +133,16 @@ an identical file.
   spliced in, exactly like `sort` — the parsed column name from
   `src/filter.rs` is never trusted directly.
 - **The filter DSL is implemented.** `src/filter.rs` is a pure, dependency-free
-  parser (grammar in `docs/filter-dsl.md`) producing a `ParsedFilter`;
+  parser (grammar in `spec/filter-dsl.md`) producing a `ParsedFilter`;
   `db.rs`'s `query_table` validates each condition's column against the live
   schema and maps each operator through a hardcoded SQL-fragment match
-  before binding its value as a parameter — see `docs/filter-dsl.md` for the
+  before binding its value as a parameter — see `spec/filter-dsl.md` for the
   grammar and the full valid/rejected/adversarial test table it's verified
-  against (`tests/black_box/filter_dsl.rs`).
+  against (`tests/black_box/filter_dsl.rs`). Per `spec/protocol.md`, DSL
+  *text* parsing is becoming frontend-only and the wire contract is the
+  JSON filter AST — the grammar doc specs the frontend parser, and the
+  server-side steps (column allow-listing, operator mapping, value
+  binding) are spec'd in `spec/protocol.md`.
 - **Frontend has no build step.** `dbviewer.html` is hand-edited directly,
   not generated or bundled. Keep it a single self-contained file.
 - **rustls everywhere, no OpenSSL.** Both `sqlx` and `reqwest` are

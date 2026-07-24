@@ -26,5 +26,5 @@ mod routes;
 
 pub use config::{Config, ConfigError, Limits, Sibling};
 pub use db::{ColumnInfo, DbError, DbSource, PgPoolSource, QueryOpts, TableData, TableInfo};
-pub use filter::{CompareOp, Condition, FilterParseError, Logic, ParsedFilter, Predicate};
+pub use filter::{Condition, FilterError, FilterOp, Logic};
 pub use routes::router;

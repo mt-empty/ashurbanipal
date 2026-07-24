@@ -86,6 +86,15 @@ the pagination banner instead of reading the whole file top to bottom.
 - **Size discipline.** If this file crosses roughly 500 lines, that's the
   signal to question scope before reaching for more structure, not to add
   more of it.
+- **The filter grammar parser (DSL text → AST) is canonical here** — the
+  one implementation every deployment shares, not something ports
+  reimplement (see `spec/filter-dsl.md`, `spec/protocol.md`'s filter
+  representation section). This is a deliberate reversal of an earlier
+  rule; see the struck-through entry in §7 for why. It stays a distinct
+  concern from `quoteFilterValue()`/`applyFilterClause()` (click-to-filter,
+  FK navigation, the common-values dropdown): those *compose* a clause from
+  a column/value the server already gave us, never parsing or judging
+  arbitrary user-typed text — keep that boundary when extending either.
 
 ## 4. Prefer the platform over hand-written JS
 
@@ -144,17 +153,15 @@ a broken page.
   button) — too much API surface for roughly five distinct interactive
   pieces; revisit only if that count grows enough that copy-paste
   duplication becomes an actual, measured problem.
-- **Client-side filter validation** — would duplicate the server-side
-  parser's job (accepting or rejecting arbitrary filter text) in a second
-  place that can drift from it. The filter DSL's parser is deliberately
-  server-side-only; see `filter-dsl.md`. This doesn't cover
-  `quoteFilterValue()`/`applyFilterClause()` (click-to-filter, FK cell
-  navigation, the common-values dropdown) — those *compose* a clause from a
-  column/value the server already gave us into valid syntax; they never
-  parse or judge arbitrary user-typed text, so there's no accept/reject
-  decision to drift. Their quoting output still has to agree with
-  `filter-dsl.md` §2, though — see that document's §6 for the specific
-  cases to check once the parser exists.
+- ~~Client-side filter validation~~ — **reversed**, not a current rule. The
+  grammar parser (DSL text → AST) now lives here, as the single canonical
+  implementation shared by every deployment — see §3 and
+  `spec/filter-dsl.md`.
+  It was forbidden here originally to avoid two parser copies (frontend +
+  backend) silently drifting apart; that risk is gone now that there's
+  exactly one copy, so the rule no longer applies. Left as a struck-through
+  entry rather than deleted so this doesn't read as an oversight next time
+  someone re-derives "should parsing be client-side?" from first principles.
 - **`@scope`** — the file already gets rule-scoping for free from its
   ID-selector discipline; no cascade-leakage problem to solve.
 - **`requestIdleCallback` / `scheduler.postTask()`** — no measured
