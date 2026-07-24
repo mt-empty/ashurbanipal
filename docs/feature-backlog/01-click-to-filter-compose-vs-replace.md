@@ -30,13 +30,15 @@ discussion into a concrete semantic:
 
 ## 2. Constraints that apply to every approach
 
-- **No client-side filter parsing** (`frontend-style-guide.md` §7).
+- **Composition doesn't re-parse the box** (`frontend-style-guide.md` §3/§7).
   Composing a fresh clause from a *known* column/value (what
-  `applyFilterClause()` does today) is fine. Reading back and understanding
-  *arbitrary existing* filter text is what the rule bans — any approach that
-  needs to know "what's already in the box" has to get that answer without
-  re-parsing the box's text.
-- **No parentheses/nesting in the DSL** (`filter-dsl.md` §1), and `AND`
+  `applyFilterClause()` does today) is fine. (The old blanket "no
+  client-side parsing" rule was reversed — the submit-time grammar parser
+  now lives in the frontend, `spec/filter-dsl.md` — but composition
+  affordances still shouldn't need to read back and understand *arbitrary
+  existing* filter text; any approach that needs to know "what's already
+  in the box" should get that answer without depending on re-parsing.)
+- **No parentheses/nesting in the DSL** (`spec/filter-dsl.md` §1), and `AND`
   binds tighter than `OR` (SQL convention). This is the source of every
   correctness hazard below.
 - **Precedence asymmetry (the key fact that constrains every approach):**

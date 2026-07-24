@@ -1,0 +1,597 @@
+{
+  "$schema_note": "See spec/fixtures/README.md. Source of truth: spec/protocol.md §5.4.2.",
+  "cases": [
+    {
+      "name": "eq-single",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "completed"
+        }
+      ],
+      "expect": {
+        "where": "(\"status\"::text = $1)",
+        "values": [
+          "completed"
+        ]
+      }
+    },
+    {
+      "name": "and-pair",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "total_cents",
+          "op": ">=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "discount_pct",
+          "op": "<=",
+          "value": "100"
+        }
+      ],
+      "expect": {
+        "where": "(\"total_cents\"::text >= $1) AND (\"discount_pct\"::text <= $2)",
+        "values": [
+          "1",
+          "100"
+        ]
+      }
+    },
+    {
+      "name": "or-pair",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "completed"
+        },
+        {
+          "logic": "OR",
+          "column": "status",
+          "op": "=",
+          "value": "pending"
+        }
+      ],
+      "expect": {
+        "where": "(\"status\"::text = $1) OR (\"status\"::text = $2)",
+        "values": [
+          "completed",
+          "pending"
+        ]
+      }
+    },
+    {
+      "name": "precedence-and-or",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "category",
+          "op": "=",
+          "value": "electronics"
+        },
+        {
+          "logic": "AND",
+          "column": "created_on",
+          "op": ">",
+          "value": "2016-01-01"
+        },
+        {
+          "logic": "OR",
+          "column": "in_stock",
+          "op": "=",
+          "value": "true"
+        }
+      ],
+      "expect": {
+        "where": "(\"category\"::text = $1) AND (\"created_on\"::text > $2) OR (\"in_stock\"::text = $3)",
+        "values": [
+          "electronics",
+          "2016-01-01",
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "not-wraps-fragment",
+      "table": "orders",
+      "conditions": [
+        {
+          "not": true,
+          "column": "status",
+          "op": "=",
+          "value": "completed"
+        }
+      ],
+      "expect": {
+        "where": "(NOT (\"status\"::text = $1))",
+        "values": [
+          "completed"
+        ]
+      }
+    },
+    {
+      "name": "is-null",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "last_login_at",
+          "op": "IS NULL"
+        }
+      ],
+      "expect": {
+        "where": "(\"last_login_at\"::text IS NULL)",
+        "values": []
+      }
+    },
+    {
+      "name": "is-not-null",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "last_login_at",
+          "op": "IS NOT NULL"
+        }
+      ],
+      "expect": {
+        "where": "(\"last_login_at\"::text IS NOT NULL)",
+        "values": []
+      }
+    },
+    {
+      "name": "not-is-null",
+      "table": "users",
+      "conditions": [
+        {
+          "not": true,
+          "column": "last_login_at",
+          "op": "IS NULL"
+        }
+      ],
+      "expect": {
+        "where": "(NOT (\"last_login_at\"::text IS NULL))",
+        "values": []
+      }
+    },
+    {
+      "name": "like",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "full_name",
+          "op": "LIKE",
+          "value": "%Dach%"
+        }
+      ],
+      "expect": {
+        "where": "(\"full_name\"::text LIKE $1)",
+        "values": [
+          "%Dach%"
+        ]
+      }
+    },
+    {
+      "name": "ilike",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "full_name",
+          "op": "ILIKE",
+          "value": "%dach%"
+        }
+      ],
+      "expect": {
+        "where": "(\"full_name\"::text ILIKE $1)",
+        "values": [
+          "%dach%"
+        ]
+      }
+    },
+    {
+      "name": "remaining-comparison-ops",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "total_cents",
+          "op": "!=",
+          "value": "0"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": ">",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "<",
+          "value": "999999"
+        }
+      ],
+      "expect": {
+        "where": "(\"total_cents\"::text != $1) AND (\"total_cents\"::text > $2) AND (\"total_cents\"::text < $3)",
+        "values": [
+          "0",
+          "1",
+          "999999"
+        ]
+      }
+    },
+    {
+      "name": "injection-value-is-bound",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "'; DROP TABLE users; --"
+        }
+      ],
+      "expect": {
+        "where": "(\"status\"::text = $1)",
+        "values": [
+          "'; DROP TABLE users; --"
+        ]
+      }
+    },
+    {
+      "name": "empty-string-value",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "email",
+          "op": "=",
+          "value": ""
+        }
+      ],
+      "expect": {
+        "where": "(\"email\"::text = $1)",
+        "values": [
+          ""
+        ]
+      }
+    },
+    {
+      "name": "empty-array-is-no-filter",
+      "table": "users",
+      "conditions": [],
+      "expect": {
+        "where": "",
+        "values": []
+      }
+    },
+    {
+      "name": "ten-conditions-at-limit",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        }
+      ],
+      "expect": {
+        "where": "(\"total_cents\"::text = $1) AND (\"total_cents\"::text = $2) AND (\"total_cents\"::text = $3) AND (\"total_cents\"::text = $4) AND (\"total_cents\"::text = $5) AND (\"total_cents\"::text = $6) AND (\"total_cents\"::text = $7) AND (\"total_cents\"::text = $8) AND (\"total_cents\"::text = $9) AND (\"total_cents\"::text = $10)",
+        "values": [
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1",
+          "1"
+        ]
+      }
+    },
+    {
+      "name": "unknown-column",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "pg_sleep",
+          "op": "=",
+          "value": "1"
+        }
+      ],
+      "expect_error": "unknown_column"
+    },
+    {
+      "name": "not-does-not-bypass-allow-list",
+      "table": "users",
+      "conditions": [
+        {
+          "not": true,
+          "column": "pg_sleep",
+          "op": "=",
+          "value": "1"
+        }
+      ],
+      "expect_error": "unknown_column"
+    },
+    {
+      "name": "known-column-wrong-table",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        }
+      ],
+      "expect_error": "unknown_column"
+    },
+    {
+      "name": "bad-op",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "email",
+          "op": ";DROP",
+          "value": "x"
+        }
+      ],
+      "expect_error": "bad_op"
+    },
+    {
+      "name": "bad-op-case-sensitive",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "email",
+          "op": "like",
+          "value": "x"
+        }
+      ],
+      "expect_error": "bad_op"
+    },
+    {
+      "name": "bad-logic",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "email",
+          "op": "=",
+          "value": "a"
+        },
+        {
+          "logic": "XOR",
+          "column": "email",
+          "op": "=",
+          "value": "b"
+        }
+      ],
+      "expect_error": "bad_logic"
+    },
+    {
+      "name": "missing-value",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "email",
+          "op": "="
+        }
+      ],
+      "expect_error": "missing_value"
+    },
+    {
+      "name": "unexpected-value",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "last_login_at",
+          "op": "IS NULL",
+          "value": "x"
+        }
+      ],
+      "expect_error": "unexpected_value"
+    },
+    {
+      "name": "missing-logic",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "email",
+          "op": "=",
+          "value": "a"
+        },
+        {
+          "column": "email",
+          "op": "=",
+          "value": "b"
+        }
+      ],
+      "expect_error": "missing_logic"
+    },
+    {
+      "name": "unexpected-logic-on-first",
+      "table": "users",
+      "conditions": [
+        {
+          "logic": "AND",
+          "column": "email",
+          "op": "=",
+          "value": "a"
+        }
+      ],
+      "expect_error": "unexpected_logic"
+    },
+    {
+      "name": "eleven-conditions",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "total_cents",
+          "op": "=",
+          "value": "1"
+        }
+      ],
+      "expect_error": "too_many_conditions"
+    },
+    {
+      "name": "oversize",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "email",
+          "op": "=",
+          "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      ],
+      "expect_error": "oversize"
+    },
+    {
+      "name": "unknown-field",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "email",
+          "op": "=",
+          "value": "a",
+          "extra": "x"
+        }
+      ],
+      "expect_error": "malformed"
+    },
+    {
+      "name": "dsl-text-not-json",
+      "table": "users",
+      "raw": "status = completed",
+      "expect_error": "malformed"
+    },
+    {
+      "name": "json-object-not-array",
+      "table": "users",
+      "raw": "{\"column\":\"email\",\"op\":\"=\",\"value\":\"a\"}",
+      "expect_error": "malformed"
+    },
+    {
+      "name": "truncated-json",
+      "table": "users",
+      "raw": "[{\"column\":\"email\",",
+      "expect_error": "malformed"
+    }
+  ]
+}

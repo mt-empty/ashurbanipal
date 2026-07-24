@@ -2,7 +2,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
+use axum::middleware::map_response;
 use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::get;
 use axum::Router;
@@ -13,6 +14,11 @@ use crate::db::{DbError, DbSource, QueryOpts, TableInfo};
 use crate::filter;
 
 const DBVIEWER_HTML: &str = include_str!("frontend/dbviewer.html");
+
+const PROTOCOL_HEADER: &str = "x-ashurbanipal-protocol";
+/// Bumped only for non-additive wire changes; additive optional fields
+/// keep the same version.
+const PROTOCOL_VERSION: &str = "1";
 
 pub(crate) struct AppState<S> {
     pub config: Config,
@@ -36,8 +42,9 @@ pub fn router<S: DbSource>(config: Config, source: S) -> Router {
         source,
         http,
     });
-    Router::new()
-        .route("/__ashurbanipal", get(serve_html::<S>))
+    // The version header goes on every API response (errors included) but
+    // not the HTML route, hence the separate layered sub-router.
+    let api = Router::new()
         .route("/__ashurbanipal/api/tables", get(list_tables::<S>))
         .route("/__ashurbanipal/api/table-counts", get(table_counts::<S>))
         .route("/__ashurbanipal/api/tables/data", get(table_data::<S>))
@@ -46,7 +53,18 @@ pub fn router<S: DbSource>(config: Config, source: S) -> Router {
             get(common_values::<S>),
         )
         .route("/__ashurbanipal/api/siblings", get(siblings::<S>))
+        .layer(map_response(stamp_protocol_version));
+    Router::new()
+        .route("/__ashurbanipal", get(serve_html::<S>))
+        .merge(api)
         .with_state(state)
+}
+
+async fn stamp_protocol_version(mut response: Response) -> Response {
+    response
+        .headers_mut()
+        .insert(PROTOCOL_HEADER, HeaderValue::from_static(PROTOCOL_VERSION));
+    response
 }
 
 fn error_response(err: DbError) -> Response {
@@ -119,10 +137,13 @@ async fn table_data<S: DbSource>(
     State(state): State<Arc<AppState<S>>>,
     Query(params): Query<DataParams>,
 ) -> Response {
-    // An empty (or whitespace-only) filter means "no filter", not a parse target.
+    // An empty (or whitespace-only) filter param means "no filter", not a
+    // deserialization target; a valid-but-empty JSON array means the same
+    // (spec/protocol.md §5.4.2).
     let parsed_filter = match params.filter.as_deref() {
         Some(raw) if !raw.trim().is_empty() => match filter::parse(raw) {
-            Ok(parsed) => Some(parsed),
+            Ok(conditions) if conditions.is_empty() => None,
+            Ok(conditions) => Some(conditions),
             Err(e) => return error_response(DbError::FilterParse(e.to_string())),
         },
         _ => None,

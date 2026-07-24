@@ -1,12 +1,16 @@
 # Filter DSL — grammar and test plan
 
-Status: implemented (`src/filter.rs`; query-builder integration in
-`src/db.rs`'s `query_table`)
-Implements: `filter` query param of `GET /tables/data` (`design.md` §4.1)
-Build order: implemented last among the server features, as planned — the
-grammar and test table below were fixed early so the rest of the API could be
-built against a stub that rejected all filters, then the real parser was
-built against this document and `tests/black_box/filter_dsl.rs` as the spec.
+Status: normative, for the **frontend's** parser
+Scope: this document specs the grammar the `dbviewer.html` JS parser must
+satisfy when converting the `#filter` box's text into the JSON filter AST
+(`spec/protocol.md` §5.4.2). Parsing is client-side only: no backend —
+reference or port — parses DSL text; the backend contract is the AST, and
+everything a server must do with it (column allow-listing, operator
+mapping, value binding, limits) lives in `spec/protocol.md`.
+History: the grammar was originally implemented server-side
+(`src/filter.rs`) against this same document and its test table; the
+parsing obligation moved to the frontend when the wire format became the
+AST.
 
 Prior art considered: RSQL/FIQL (the established REST filter syntax) and the
 `postgrest-parser` crate. Neither is used directly — the existing Rust RSQL
@@ -90,27 +94,25 @@ Notes:
 
 ## 3. Semantics
 
-- Parser output is a list of `(column, operator, value?)` triples joined by
-  the logic tokens — it never produces SQL text itself.
-- The query builder then:
-  1. validates each `column` against the live `information_schema`
-     allow-list for the requested table (identifiers can't be
-     parameterized, so this check is what makes splicing them safe);
-  2. maps each `operator` to a hardcoded SQL fragment (allow-list — user
-     text is never used as an operator);
-  3. binds every `value` as a `$n` parameter, cast per §4.1:
-     `column::text OP $n`.
+- Parser output is the wire AST (`spec/protocol.md` §5.4.2): an array of
+  `{logic?, not?, column, op, value?}` condition objects — the parser
+  never produces SQL text, and never validates a column against the
+  schema. `logic` is absent on the first condition and carries the
+  joining `AND`/`OR` on every subsequent one; `not` reflects the prefix
+  `NOT`; `value` is absent exactly for `IS NULL`/`IS NOT NULL`.
+- What the server then does with the AST — validating each `column`
+  against the live schema allow-list, mapping each `op` through a
+  hardcoded SQL-fragment table, binding every `value` as a parameter
+  against the text-cast column — is the server's contract, specified in
+  `spec/protocol.md` §5.4.2 (evaluation rules) and §6, not here.
 - `LIKE`/`ILIKE` pass `%`/`_` through to Postgres untranslated — the user
   writes Postgres patterns directly. `ILIKE` is Postgres's own
   case-insensitive `LIKE`; same passthrough, case-insensitive at the
   database level.
-- `NOT` negates at the SQL-fragment level, not by inverting each operator
-  individually: the query builder wraps whatever the operator already
-  mapped to in `NOT (...)` — `NOT (column::text = $n)`,
-  `NOT (column::text ILIKE $n)`, `NOT (column::text IS NULL)`. The
-  operator-to-fragment mapping in point 2 above stays the single hardcoded
-  allow-list regardless of whether `NOT` is present; `NOT` never gets its
-  own allow-list entry to keep in sync with it.
+- `NOT` doesn't invert the operator: the parser emits the same `op` with
+  `not: true`, and the server negates at the SQL-fragment level
+  (`NOT (column::text = $n)` — `spec/protocol.md` §5.4.2), so `NOT` never
+  needs its own operator mapping to keep in sync.
 - Known v1 limitation (deliberate): the uniform `::text` cast makes
   `>`/`<`/`>=`/`<=` **lexicographic**. Correct for ISO-8601 timestamps and
   equal-length strings; wrong for numerics (`"10" < "9"`). Documented in the
@@ -118,20 +120,32 @@ Notes:
 - Duplicate/contradictory conditions (`status = 'a' AND status = 'b'`) are
   legal and simply return zero rows — the parser doesn't do satisfiability
   analysis.
-- Limits (server-enforced): whole filter string ≤ 1 KiB, ≤ 10 conditions.
-  Cheap guardrails against pathological input; both return a parse error,
-  never a truncated query.
+- Limits: ≤ 10 conditions — the parser rejects an 11th rather than emit
+  an AST the server would refuse. The server independently enforces the
+  same condition cap plus a byte bound on the JSON-encoded `filter`
+  param (`spec/protocol.md` §5.4.2); cheap guardrails against
+  pathological input, always a rejection, never a truncated query.
 
 ## 4. Error behavior
 
-Any parse failure → HTTP 400 with a plain-text reason and the byte offset
-(`unexpected token at position 17`). The server never "best-effort"
-executes a partially-parsed filter.
+Any parse failure → an inline, client-side error with the byte offset
+(`unexpected token at position 17`), surfaced before any request is sent.
+The parser never "best-effort" submits a partially-parsed filter. (Server
+rejections — unknown column, structural AST violations — are separate,
+arrive as HTTP 400s per `spec/protocol.md` §2, and can still occur on a
+filter that parsed cleanly.)
 
 ## 5. Test table
 
-The parser must pass all of these before the feature is considered done.
-`✓` = parses, with expected triple output; `✗` = rejected with 400.
+This table specs the **frontend parser**. It must pass all of these
+before a change to the parser is considered done. `✓` = parses, with the
+expected conditions in the emitted AST; `✗` = rejected client-side with a
+parse error (§4). Machine-readable fixtures
+(`spec/fixtures/parser-tests.json`) are generated from this table — it
+remains the human-readable source of truth. (Server-side rejections in
+the A-cases below — the schema allow-list — are backend conformance
+territory, `spec/protocol.md` §5.4.2, exercised through AST-level
+fixtures, not this table.)
 
 ### Valid
 
@@ -196,13 +210,16 @@ The parser must pass all of these before the feature is considered done.
 | A10 | `NOT pg_sleep = 1` | parses (lexically legal) but fails the schema allow-list check on column `pg_sleep`, same as A8 — `NOT` doesn't bypass allow-listing |
 
 Test A8 is the reminder that the grammar is only half the defense: the
-column allow-list check in §3 must have its own tests in the query-builder
-suite (valid column, unknown column, known column on the *wrong* table).
+server-side column allow-list check (`spec/protocol.md` §5.4.2/§6) must
+have its own tests in every backend's suite (valid column, unknown
+column, known column on the *wrong* table) — an AST-level check the
+parser can neither perform nor bypass.
 
-## 6. Frontend consumers (already shipped, parser isn't)
+## 6. Frontend consumers (composition, not parsing)
 
 Three `dbviewer.html` features already generate clauses against this exact
-grammar, ahead of the parser that will read them: click-to-filter (a
+grammar, ahead of the client-side parser that will read them:
+click-to-filter (a
 per-cell button), FK cell navigation, and the common-values header dropdown
 (all in `docs/client-enhancements.md`). All three funnel through one
 function, `quoteFilterValue()`/`applyFilterClause()`, which implements §2's
