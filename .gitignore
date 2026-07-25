@@ -11,3 +11,8 @@ tools/e2e-tests/playwright/.cache/
 /.venv-schemathesis/
 /.hypothesis/
 /.schemathesis/
+
+# Gradle (implementations/spring-boot-starter)
+implementations/spring-boot-starter/**/build/
+implementations/spring-boot-starter/.gradle/
+implementations/spring-boot-starter/**/out/

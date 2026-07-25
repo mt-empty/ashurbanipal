@@ -121,3 +121,18 @@ host_config.ashurbanipal.validate()?;
 See `docs/design.md` for the full API contract, filter DSL, and config
 reference. `mise run demo` runs a working example host app against the
 seeded devcontainer database.
+
+## Implementations
+
+Every implementation below implements the same `spec/protocol.md` +
+`spec/openapi.yaml` contract and vendors the same `frontend/dbviewer.html`
+(`PORTING.md`); none is structurally privileged over another
+(`docs/design.md` §4.2, `roadmap.md` §2). "Conformant" means both
+conformance layers — the golden-fixture behavior runner and the
+schemathesis/equivalent shape check (`PORTING.md`) — pass in that
+implementation's own CI.
+
+| Implementation | Language / framework | Protocol version | Conformance CI |
+|----------------|-----------------------|-------------------|-----------------|
+| `implementations/rust` | Rust / Axum | 1 | `.github/workflows/conformance.yml` |
+| `implementations/spring-boot-starter` | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |

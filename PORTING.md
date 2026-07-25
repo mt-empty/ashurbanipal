@@ -51,3 +51,36 @@ too, not just future ports:
 Both checks passing is a listing prerequisite, the same bar the Rust
 implementation itself has to clear — a green behavior-conformance run
 alone does not prove response shape is right, and vice versa.
+
+## CSP and inline scripts
+
+`frontend/dbviewer.html` ships its logic as an inline `<script
+type="module">` — there is no separate `.js` asset a port could point a
+`<script src>` at instead, by design (`docs/design.md` §3.1: single
+self-contained file, no build step). This is not framework-specific; every
+port that serves the HTML route hits it identically:
+
+- A host with a `Content-Security-Policy` that forbids inline scripts
+  (no `unsafe-inline`, no matching `nonce-*`/`sha256-*` source) will serve
+  the page but the browser will refuse to execute it — the UI renders as
+  static markup with no data ever loading, silently. This is exactly the
+  kind of security-conscious deployment this crate targets, so it is a
+  likely failure mode in practice, not a hypothetical one.
+- Ashurbanipal does not, and MUST NOT, weaken a host's CSP on its own
+  behalf — that would be a global side effect of mounting one router.
+- A port has two honest options, and must document which one it takes:
+  1. **Carve out an exception** for the mount's own response only (e.g. a
+     per-response CSP header override, or a nonce the port injects into
+     the served HTML and into its own response header) — scoped to the
+     `{mount}` route, not applied host-wide.
+  2. **Document the requirement** and leave it to the operator: the host's
+     own CSP configuration needs `script-src` to permit the vendored
+     inline script at `{mount}` (e.g. via a nonce/hash the host adds to its
+     policy for that route, or an explicit CSP exception for the mount
+     path) before the UI will run under a strict CSP.
+- The Spring Boot starter (`implementations/spring-boot-starter`) takes
+  option 2: it sets no CSP header of its own and injects no nonce, so a
+  host running under a strict CSP must extend it for `${ashurbanipal.base-path}`
+  itself before the UI will execute client-side. This matches the Rust
+  reference's behavior (also no CSP handling) — consistent across ports,
+  not a Spring-specific gap.
