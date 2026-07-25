@@ -1646,7 +1646,7 @@ async function loadData({ resetScroll = true } = {}) {
   // orients the user; prev/next paginate in place and pass resetScroll:
   // false so the pager buttons stay put instead of leaping away underneath
   // the click that just landed on them.
-  if (resetScroll) $("main").scrollTo({ top: 0, behavior: "smooth" });
+  if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
 
 // Same class of bug as loadDataToken: a slow health-check round that
