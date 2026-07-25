@@ -254,6 +254,17 @@ A port that returns JSON numbers for numeric columns is **non-conformant**
 — the frontend's type-aware rendering keys off column *type metadata*
 (§5.4.1), not JSON value types.
 
+The `::text` cast MUST happen in the query text itself, not by decoding a
+column into a native type and then formatting it in application code.
+Postgres's own cast is locale- and timezone-independent; a driver-level
+decode-then-restringify step can silently diverge from it (e.g. a JVM
+default locale using `,` as a decimal separator, or a timestamp formatted
+without Postgres's `+00` suffix) while still technically satisfying
+"every value is a JSON string" — the shape is right but the *content*
+drifts from what every other implementation renders for the same row.
+This applies to every column-value read (`/tables/data`'s rows,
+`/tables/common-values`'s `value` field), not just numerics.
+
 #### 5.4.4 `total_approx`
 
 - MUST be the whole-table estimate from `pg_class.reltuples`.
