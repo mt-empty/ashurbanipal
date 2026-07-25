@@ -62,35 +62,43 @@ This is a devcontainer project; a Postgres instance (`db`, seeded via
 `.devcontainer/db/init/01-seed.sql`) is expected to be reachable at
 `DATABASE_URL` (set automatically by the devcontainer).
 
-There's a `mise.toml` with tasks wrapping all of the below — `mise tasks`
-lists them, `mise run <task>` runs one:
+There's a `mise.toml` with tasks wrapping all of the below, organized in
+layers — `mise tasks` lists them, `mise run <task>` runs one. Each
+implementation/area has its own umbrella task that fans out to namespaced
+`<layer>:*` subtasks, and top-level `check` runs everything:
 
 ```sh
-mise run build
-mise run test                      # unit tests live inline (#[cfg(test)] mod tests in config.rs, routes.rs)
-mise run test config::tests::name  # run a single test (extra args pass through)
-mise run lint                      # cargo clippy -- -D warnings
-mise run fmt-check
-mise run check                     # fmt-check + lint + test, i.e. what CI runs
-mise run demo                      # host demo app at http://localhost:4000/__ashurbanipal
-mise run demo-sibling              # second instance, to demo sibling health-poll
-mise run dev                       # demo app, auto-rebuild/restart on implementations/rust/src/ or frontend/dbviewer.html changes (watchexec)
-mise run seed-gen                  # regenerate .devcontainer/db/init/01-seed.sql
-mise run test-e2e-install          # one-time Playwright browser install (Chromium/Firefox/WebKit)
-mise run test-e2e                  # Playwright E2E suite against frontend/dbviewer.html (tools/e2e-tests)
+mise run check                       # everything CI would run, across every implementation
+mise run rust                        # rust:fmt-check + rust:lint + rust:test
+mise run spring                      # spring gradle build + test
+mise run frontend                    # frontend Playwright e2e suite
+mise run conformance                 # conformance:test + conformance:schema-test
+
+mise run rust:build
+mise run rust:test                       # unit tests live inline (#[cfg(test)] mod tests in config.rs, routes.rs)
+mise run rust:test config::tests::name   # run a single test (extra args pass through)
+mise run rust:lint                       # cargo clippy -- -D warnings
+mise run rust:fmt-check
+mise run rust:demo                       # host demo app at http://localhost:4000/__ashurbanipal
+mise run rust:demo-sibling               # second instance, to demo sibling health-poll
+mise run rust:dev                        # demo app, auto-rebuild/restart on implementations/rust/src/ or frontend/dbviewer.html changes (watchexec)
+
+mise run conformance:seed-gen            # regenerate .devcontainer/db/init/01-seed.sql
+mise run frontend:test-e2e-install       # one-time Playwright browser install (Chromium/Firefox/WebKit)
+mise run frontend:test-e2e               # Playwright E2E suite against frontend/dbviewer.html (tools/e2e-tests)
 ```
 
-The `build`/`test`/`lint`/`fmt`/`fmt-check`/`demo`/`demo-sibling`/
-`test-conformance` tasks `cd` into `implementations/rust` via mise's `dir`
-field — you don't need to `cd` there yourself when using `mise run`.
+The `rust:*` tasks `cd` into `implementations/rust` via mise's `dir` field —
+you don't need to `cd` there yourself when using `mise run`.
 
-`test-e2e` is a separate, standalone-dev-only suite (pnpm/Playwright,
-`tools/e2e-tests/`) — it is **not** part of `mise run check` and doesn't
-run in the Rust `cargo test` suite; run it explicitly for any change that
-touches `dbviewer.html` beyond a trivial edit. Lessons already paid for
-once, don't relearn them: assert on DOM state/attributes/text, not
-screenshots (screenshot diffs were dropped project-wide for flakiness —
-see git history around `157fc12`); wait on the actual signal that matters
+`frontend:test-e2e` is a separate, standalone-dev-only suite (pnpm/Playwright,
+`tools/e2e-tests/`) that doesn't run in the Rust `cargo test` suite; run it
+explicitly for any change that touches `dbviewer.html` beyond a trivial
+edit — it is part of `mise run check` (via the `frontend` umbrella task),
+but only that layer, not `rust`. Lessons already paid for once, don't
+relearn them: assert on DOM state/attributes/text, not screenshots
+(screenshot diffs were dropped project-wide for flakiness — see git history
+around `157fc12`); wait on the actual signal that matters
 (`waitForResponse`, `getAnimations()`), never `waitForTimeout` with a
 guessed duration; and run the full suite under its default full
 parallelism before calling a frontend change done — the worst races here
@@ -112,7 +120,7 @@ from the repo root):
 (cd tools/seed-gen && cargo run > ../../.devcontainer/db/init/01-seed.sql)
 ```
 
-`mise run demo` (or `cd implementations/rust && cargo run --example demo`)
+`mise run rust:demo` (or `cd implementations/rust && cargo run --example demo`)
 against the devcontainer's `DATABASE_URL` is the only command needed for a
 working browser on the seed db — this is an acceptance criterion, not just
 a convenience.
