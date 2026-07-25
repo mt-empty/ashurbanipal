@@ -187,9 +187,15 @@ its full path space and the host doesn't need to pick a mount point.
 ## 4. API contract
 
 > **Now normative elsewhere:** the endpoint contract lives in
-> `spec/protocol.md` (with `spec/openapi.yaml` for machine-readable
-> shapes). Where this section and the spec disagree, the spec wins; this
-> section stays as rationale and background.
+> `spec/protocol.md`. `spec/openapi.yaml` is **generated** from the Rust
+> reference's own route/type annotations (`utoipa` or equivalent), not
+> hand-maintained prose transcribed from the code — so the reference
+> cannot silently drift from its own published schema; the schema is
+> compiled from the same types the handlers actually return. Ports
+> consume `spec/openapi.yaml` as a fixed target; they don't generate it.
+> Where this section and the spec disagree, the spec wins; this section
+> stays as rationale and background. See §4.2 for how the schema is kept
+> binding on every implementation, not just the reference.
 
 Paths below are shorthand for the full routes in §3.3 (e.g. `/tables` means
 `/__ashurbanipal/api/tables`).
@@ -295,6 +301,81 @@ Example:
 status = completed AND created_at > 2016-01-01
 session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd
 ```
+
+### 4.2 Guaranteeing the contract across implementations
+
+Three independent layers exist so "the spec says X" reliably means every
+implementation does X, not just the reference. Each catches a drift
+failure mode the others structurally can't:
+
+1. **Schema, generated from the reference, not hand-written.**
+   `spec/openapi.yaml` is compiled from the Rust reference's own
+   route/type annotations, so it cannot describe a response shape the
+   reference doesn't actually produce — the reference-drifts-from-its-
+   own-spec failure mode is closed by construction, not by review
+   discipline. (Cost: the generator's annotations become a real,
+   non-dev-only dependency of the reference crate, since they live inline
+   on the router/handler code that's part of the published artifact —
+   unlike the demo-only tooling `CLAUDE.md` keeps out of
+   `[dependencies]`.) Ports do not generate this file; they implement
+   against the published `spec/openapi.yaml` as a fixed target, same as
+   they implement against `spec/protocol.md`'s prose.
+2. **Shape conformance — schema fuzzing, every implementation, every CI
+   run.** Property-based schema testing (schemathesis or an equivalent
+   for the port's language) runs in CI against every implementation,
+   reference included, firing requests generated from
+   `spec/openapi.yaml` and asserting every response actually matches its
+   documented type, nullability, and status code. This is what makes the
+   schema *binding* on ports rather than merely descriptive: returning a
+   JSON number for a numeric column (violating §4's all-values-as-strings
+   rule, §5.4.3 of `spec/protocol.md`) or omitting a required field fails
+   CI automatically — the fuzzer explores the schema's cases, not
+   whatever a human thought to hand-write.
+3. **Behavior conformance — golden fixtures over seeded data.** Schema
+   fuzzing only proves a response has the right *shape*; it can't catch
+   wrong *logic* — AND/OR precedence inverted, `total_approx` reacting to
+   `filter` when §4's contract says it must not, off-by-one pagination.
+   For that, the conformance kit (`conformance/`, `spec/fixtures/`)
+   replays fixed request → expected-response pairs against seeded known
+   data, comparing *decoded values*, per field, against a rule chosen for
+   what that field actually promises — never raw response bytes. Byte
+   equality isn't just impractical, it's incompatible with the spec:
+   JSON key order isn't guaranteed to match across serializers (Rust's
+   `serde_json` vs Jackson), HTTP framing differs by server stack, and
+   §2 already makes error body text implementation-defined ("MUST NOT
+   parse it"). Instead:
+   - **exact match** — row data, column metadata, pagination, filter
+     evaluation results: everything the spec makes deterministic against
+     fixed fixture data. This is what actually catches wrong logic.
+   - **type/range only** — `total_approx` (non-negative integer or `-1`,
+     never a specific number — §5.4.4 already allows staleness),
+     `common-values` frequencies (a float in `[0,1]`, not an exact value
+     — `pg_stats` sampling isn't reproducible run to run).
+   - **status code only** — error responses: assert 400 vs 500, never
+     assert the body text.
+   - **not checked** — HTTP-layer framing beyond headers the spec
+     actually requires (e.g. `Date`, `Server`).
+
+   `spec/fixtures/parser-tests.json` and `filter-builder-tests.json` are
+   the first instance of this pattern, scoped to the filter DSL; the
+   conformance kit generalizes it to every route.
+
+Even all three together don't cover everything a port must get right —
+notably, none of them can prove the *absence* of a SQL-injection vector a
+fixture doesn't happen to exercise, or observe config-time kill-switch
+rejection at all (it's process-startup behavior, not an HTTP response).
+`implementation.md` §5.5 tracks these and other non-automatable
+requirements (cast-in-SQL discipline, fail-closed-by-default, vendoring
+integrity, CSP/inline-script) as an explicit reviewer checklist, separate
+from the three CI-automatable layers above — conflating "green CI" with
+"conformant" would quietly drop exactly the properties that matter most.
+
+No layer is sufficient alone: (1) without (2) still lets a port drift
+from the schema unnoticed; (2) without (3) lets a port satisfy every type
+and status code while getting the actual query logic wrong; (3) without
+(1)/(2) only covers whatever cases someone thought to write down by hand.
+A "conformant" listing in `PORTING.md` requires a green run of all three,
+not just the behavioral suite Phase 2 already plans.
 
 ### `GET /tables/common-values`
 

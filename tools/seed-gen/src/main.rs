@@ -38,6 +38,18 @@ const REVIEWS_PER_PRODUCT_MIN: u32 = 130;
 const REVIEWS_PER_PRODUCT_MAX: u32 = 220;
 const SUPPORT_TICKET_COUNT: usize = 350;
 const AUDIT_LOG_COUNT: usize = 30_000;
+// `feature_flags` is the deliberately-never-`analyze`d table (conformance
+// fixture: empty common-values list, `-1` approx_rows before first
+// ANALYZE/VACUUM) — see the `analyze` block in `main()`.
+const FEATURE_FLAG_COUNT: usize = 6;
+const INVENTORY_COUNT_ROWS: usize = 40;
+
+/// Schema/content version stamped into `_conformance_meta` — the sentinel
+/// `conformance/runner` checks for when it isn't asked to apply the seed
+/// itself. Single source of truth shared with the runner via
+/// `conformance/seed/VERSION`; bump that file (not this constant) when the
+/// seed's shape changes in a way conformance tests depend on.
+const CONFORMANCE_VERSION: &str = include_str!("../../../conformance/seed/VERSION");
 
 /// Fixed anchor instant/date. Every generated timestamp/date is rendered as
 /// this literal minus/offset by a (seeded-random, so still deterministic)
@@ -117,6 +129,32 @@ fn int_sql(o: Option<i64>) -> String {
     o.map(|v| v.to_string()).unwrap_or_else(|| "NULL".into())
 }
 
+/// `bytea` hex-format literal (`'\x...'::bytea`), or `NULL`.
+fn bytea_sql(bytes: Option<&[u8]>) -> String {
+    match bytes {
+        Some(b) => {
+            let hex: String = b.iter().map(|byte| format!("{byte:02x}")).collect();
+            format!("'\\x{hex}'::bytea")
+        }
+        None => "NULL".into(),
+    }
+}
+
+/// FNV-1a 64-bit — informational only (`_conformance_meta.checksum`); the
+/// runner's staleness check is the `seed_version` column, not this hash, so
+/// there's no need to pull in a real hashing crate for a value nothing
+/// re-derives.
+fn fnv1a64(data: &str) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+    let mut hash = OFFSET_BASIS;
+    for byte in data.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
+}
+
 fn main() {
     let mut rng = StdRng::seed_from_u64(SEED);
     let mut out = String::new();
@@ -156,6 +194,11 @@ fn main() {
     // insert statement at all, just the `analyze` below so its
     // `pg_class.reltuples` reads back as 0 rather than -1.
 
+    let locations = write_inventory_locations(&mut out, &mut rng);
+    write_inventory_counts(&mut out, &mut rng, &locations);
+    write_feature_flags(&mut out, &mut rng);
+    // feature_flags is deliberately excluded from analyze below.
+
     out.push_str(
         "\n-- pg_class.reltuples is only populated by ANALYZE/autovacuum; without this,\n\
          -- a freshly seeded dev db shows -1 via /table-counts until autovacuum runs. This\n\
@@ -171,8 +214,12 @@ fn main() {
          analyze support_tickets;\n\
          analyze payments;\n\
          analyze audit_log;\n\
-         analyze saved_reports;\n",
+         analyze saved_reports;\n\
+         analyze inventory_locations;\n\
+         analyze inventory_counts;\n",
     );
+
+    write_conformance_meta(&mut out);
 
     print!("{out}");
 }
@@ -188,8 +235,25 @@ fn write_header(out: &mut String) {
          -- deliberately empty table. Idempotent (drops first) so it can be re-run against\n\
          -- a live dev db.\n\n\
          create extension if not exists pgcrypto;\n\n\
+         -- A second schema with its own table, same name pattern as nothing else here —\n\
+         -- the conformance fixture proving every catalog/data query is scoped to\n\
+         -- current_schema() (spec/protocol.md §6) rather than enumerating every schema\n\
+         -- on the connection: `decoy_items` must never appear in `/api/tables` (the\n\
+         -- connection's `current_schema()` is `public`), and must be rejected as an\n\
+         -- unknown table if requested directly.\n\
+         drop schema if exists other_schema cascade;\n\
+         create schema other_schema;\n\
+         create table other_schema.decoy_items (\n\
+         \x20   id bigint generated always as identity primary key,\n\
+         \x20   label text not null\n\
+         );\n\
+         insert into other_schema.decoy_items (label) values ('decoy-1'), ('decoy-2');\n\n\
          -- New tables are dropped before the originals they reference — `cascade` handles\n\
          -- dependent constraints/views either way, but this keeps the drop order honest.\n\
+         drop table if exists _conformance_meta cascade;\n\
+         drop table if exists feature_flags cascade;\n\
+         drop table if exists inventory_counts cascade;\n\
+         drop table if exists inventory_locations cascade;\n\
          drop table if exists audit_log cascade;\n\
          drop table if exists payments cascade;\n\
          drop table if exists support_tickets cascade;\n\
@@ -312,6 +376,45 @@ fn write_schema(out: &mut String) {
          \x20   name text not null,\n\
          \x20   is_public boolean not null default false,\n\
          \x20   created_at timestamptz not null default now()\n\
+         );\n\n\
+         -- Composite primary key: inventory_counts' (warehouse_code, bin_code) FK\n\
+         -- below references this pair together, never either column alone — the\n\
+         -- conformance fixture for \"composite FKs omit key/references metadata\n\
+         -- entirely\" (spec/protocol.md §5.4.1).\n\
+         create table inventory_locations (\n\
+         \x20   warehouse_code varchar(10) not null,\n\
+         \x20   bin_code varchar(10) not null,\n\
+         \x20   label text,\n\
+         \x20   capacity integer not null default 100,\n\
+         \x20   primary key (warehouse_code, bin_code)\n\
+         );\n\n\
+         -- product_id is an ordinary single-column FK (contrast with the composite\n\
+         -- one below); photo is the bytea fixture.\n\
+         create table inventory_counts (\n\
+         \x20   id bigint generated always as identity primary key,\n\
+         \x20   warehouse_code varchar(10) not null,\n\
+         \x20   bin_code varchar(10) not null,\n\
+         \x20   product_id bigint references products(id),\n\
+         \x20   quantity integer not null,\n\
+         \x20   photo bytea,\n\
+         \x20   counted_at timestamptz not null default now(),\n\
+         \x20   foreign key (warehouse_code, bin_code) references inventory_locations(warehouse_code, bin_code)\n\
+         );\n\n\
+         -- Deliberately never ANALYZEd (see main()) — the empty-common-values and\n\
+         -- -1-approx_rows conformance fixture.\n\
+         create table feature_flags (\n\
+         \x20   id bigint generated always as identity primary key,\n\
+         \x20   key text not null unique,\n\
+         \x20   enabled boolean not null default true,\n\
+         \x20   rollout_pct smallint,\n\
+         \x20   created_at timestamptz not null default now()\n\
+         );\n\n\
+         -- Conformance sentinel (conformance/runner reads this when it isn't asked\n\
+         -- to apply the seed itself) — see write_conformance_meta().\n\
+         create table _conformance_meta (\n\
+         \x20   seed_version text not null,\n\
+         \x20   checksum text not null,\n\
+         \x20   generated_at timestamptz not null default now()\n\
          );\n\n",
     );
     // A deliberately partial set of `comment on` statements — most
@@ -336,7 +439,9 @@ fn write_schema(out: &mut String) {
          comment on table support_tickets is \
          'Customer support tickets, optionally assigned to a staff user.';\n\
          comment on column support_tickets.description is \
-         'Full ticket body as submitted by the customer.';\n\n",
+         'Full ticket body as submitted by the customer.';\n\n\
+         comment on table _conformance_meta is \
+         'Conformance-suite sentinel row; not part of the application schema.';\n\n",
     );
 }
 
@@ -1055,4 +1160,118 @@ fn write_audit_log(out: &mut String, rng: &mut StdRng, users: &[GenUser], sessio
         )
         .unwrap();
     }
+}
+
+/// `inventory_locations` — the composite-primary-key half of the composite-FK
+/// fixture. Two warehouses of four bins each; returns the generated
+/// `(warehouse_code, bin_code)` pairs so `write_inventory_counts` can pick
+/// real ones.
+fn write_inventory_locations(out: &mut String, rng: &mut StdRng) -> Vec<(String, String)> {
+    let warehouses = ["WH1", "WH2"];
+    let mut pairs = Vec::new();
+    for wh in warehouses {
+        for bin_n in 1..=4 {
+            pairs.push((wh.to_string(), format!("A{bin_n:02}")));
+        }
+    }
+
+    out.push_str("insert into inventory_locations (warehouse_code, bin_code, label, capacity) values\n");
+    let n = pairs.len();
+    for (i, (wh, bin)) in pairs.iter().enumerate() {
+        let label = if rng.random_bool(0.7) {
+            q(&format!("Aisle {bin} — {wh}"))
+        } else {
+            "NULL".into()
+        };
+        let capacity = rng.random_range(20..500);
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(out, "    ({}, {}, {label}, {capacity}){sep}", q(wh), q(bin)).unwrap();
+    }
+    pairs
+}
+
+/// `inventory_counts` — the composite-FK-*referencing* half: `(warehouse_code,
+/// bin_code)` together reference `inventory_locations`, so the conformance
+/// suite can assert those two columns carry no `key`/`references` metadata
+/// (`spec/protocol.md` §5.4.1), while `product_id` (an ordinary single-column
+/// FK on the same table) does. `photo` is the `bytea` fixture — populated on
+/// roughly a third of rows, a few bytes of RNG output each.
+fn write_inventory_counts(out: &mut String, rng: &mut StdRng, locations: &[(String, String)]) {
+    out.push_str(
+        "insert into inventory_counts \
+         (warehouse_code, bin_code, product_id, quantity, photo, counted_at) values\n",
+    );
+    for i in 0..INVENTORY_COUNT_ROWS {
+        let (wh, bin) = locations.choose(rng).unwrap();
+        let product_id = rng.random_range(1..=(PRODUCT_COUNT as i64));
+        let quantity = rng.random_range(0..2000);
+        let photo = if rng.random_bool(0.3) {
+            let len = rng.random_range(4..12);
+            let mut bytes = vec![0u8; len];
+            rng.fill(bytes.as_mut_slice());
+            Some(bytes)
+        } else {
+            None
+        };
+        let counted_offset_days = rng.random_range(0..200);
+        let sep = if i + 1 == INVENTORY_COUNT_ROWS { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ({}, {}, {product_id}, {quantity}, {}, {}){sep}",
+            q(wh),
+            q(bin),
+            bytea_sql(photo.as_deref()),
+            ts_minus_days(counted_offset_days),
+        )
+        .unwrap();
+    }
+}
+
+/// `feature_flags` — deliberately excluded from the `analyze` block in
+/// `main()`: the conformance fixture for a table with no planner statistics
+/// (`common-values` must yield an empty list, not an error; `table-counts`
+/// may read back `-1`).
+fn write_feature_flags(out: &mut String, rng: &mut StdRng) {
+    let keys = [
+        "new_dashboard",
+        "beta_checkout",
+        "dark_mode_default",
+        "export_v2",
+        "inline_editing",
+        "sibling_health_badges",
+    ];
+    out.push_str("insert into feature_flags (key, enabled, rollout_pct, created_at) values\n");
+    let n = keys.len().min(FEATURE_FLAG_COUNT);
+    for (i, key) in keys.iter().take(n).enumerate() {
+        let enabled = rng.random_bool(0.6);
+        let rollout = if enabled {
+            format!("{}", rng.random_range(0..=100))
+        } else {
+            "NULL".into()
+        };
+        let created_days_ago = rng.random_range(1..300);
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ({}, {enabled}, {rollout}, {}){sep}",
+            q(key),
+            date_minus_days(created_days_ago),
+        )
+        .unwrap();
+    }
+}
+
+/// Appends the `_conformance_meta` sentinel row. `checksum` hashes
+/// everything generated *before* this point — informational only, see
+/// `fnv1a64` — so it must stay the very last thing written.
+fn write_conformance_meta(out: &mut String) {
+    let checksum = format!("{:016x}", fnv1a64(out));
+    let version = CONFORMANCE_VERSION.trim();
+    writeln!(
+        out,
+        "insert into _conformance_meta (seed_version, checksum) values ({}, {});",
+        q(version),
+        q(&checksum),
+    )
+    .unwrap();
 }
