@@ -22,6 +22,14 @@
 # positional, which JSON Schema's `items` (applied uniformly per element)
 # can't encode either. Every other check stays on.
 #
+# Expect an occasional (seed-dependent, non-failing) "mostly rejected
+# generated data" warning on GET /tables/common-values specifically: its
+# `table`/`column` params are independently fuzzed strings, and nothing
+# stops the fuzzer from pairing a real table with another table's column
+# name — same runtime-vs-static-schema limitation as the exclusion above,
+# just surfacing as a warning instead of a check result. Not a regression
+# if it appears; don't chase it.
+#
 # Usage: conformance/runner/schema-check.sh [extra schemathesis args]
 set -euo pipefail
 
