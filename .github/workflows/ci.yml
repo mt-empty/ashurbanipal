@@ -46,6 +46,8 @@ jobs:
         with:
           workspaces: "implementations/rust -> target"
 
+      - run: mise run conformance:schema-install
+
       - run: mise run check
 
   e2e:
