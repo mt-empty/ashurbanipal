@@ -164,6 +164,14 @@ mod tests {
     }
 
     #[test]
+    fn disabled_when_enabled_for_absent_from_config() {
+        // Malformed/incomplete config (no `enabled_for` key at all) must
+        // fail closed, not silently enable via some other default.
+        let config = Config::from_toml("environment = \"dev\"").unwrap();
+        assert!(!config.is_enabled());
+    }
+
+    #[test]
     fn enabled_case_insensitively() {
         assert!(base("DEV", &["dev"]).is_enabled());
         assert!(base("staging", &["STAGING"]).is_enabled());
