@@ -136,3 +136,4 @@ implementation's own CI.
 |----------------|-----------------------|-------------------|-----------------|
 | `implementations/rust` | Rust / Axum | 1 | `.github/workflows/conformance-rust.yml` |
 | `implementations/spring-boot-starter` | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |
+| `implementations/go-nethttp` | Go / `net/http` (framework-agnostic library) | 1 | not yet wired — both layers verified manually against a live demo (40/40 behavior, 346/346 schema); see phase report |

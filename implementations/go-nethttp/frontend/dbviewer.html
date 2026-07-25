@@ -1,0 +1,1706 @@
+<!doctype html>
+<!-- Ashurbanipal frontend; protocol 1. Single self-contained file, vendored
+     by every implementation — see spec/protocol.md and PORTING.md. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ashurbanipal</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='1' y='1' width='14' height='14' rx='2' fill='%23e7e0cc'/><path d='M2 8h12' stroke='%238a7f66' stroke-width='.7'/><path d='M3 3.4l3 1.1-3 1.1zM7 3.4l3 1.1-3 1.1zM11 3.4l3 1.1-3 1.1zM3 10.4l3 1.1-3 1.1zM7 10.4l3 1.1-3 1.1z' fill='%23554b39'/></svg>">
+<script>
+  // Runs synchronously, before the stylesheet below is applied, so a
+  // saved light/dark override takes effect on first paint instead of
+  // flashing the system-default theme and then swapping.
+  try {
+    var ashurbanipalTheme = localStorage.getItem("ashurbanipal_theme");
+    if (ashurbanipalTheme === "light" || ashurbanipalTheme === "dark")
+      document.documentElement.dataset.theme = ashurbanipalTheme;
+  } catch {}
+</script>
+<style>
+  :root {
+    color-scheme: light dark;
+    font-family: ui-monospace, monospace;
+  }
+  /* Overrides the system-default `light dark` above — light-dark() reads
+     the *used* color-scheme value, so pinning it here is enough to force
+     every light-dark() token in the file without touching each one. */
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
+  :root {
+    --border: #8884;
+    --border-strong: #8886;
+    --hover: #8882;
+    --danger: light-dark(#d33, #f66);
+    --warning: light-dark(#a60, #fb5);
+    --success: light-dark(#2a2, #5c5);
+    --active: light-dark(#08f2, #08f5);
+    --backdrop: light-dark(#0006, #0009);
+    --gap: .5rem;
+    --gap-lg: .75rem;
+    /* --type-* (grid/record cells) and --json-* (json tree tokens) share
+       values for bool/number/uuid, so a value looks identical whether it's
+       a top-level column or nested inside a jsonb blob. */
+    --json-string: light-dark(#a11, #e88);
+    --json-number: light-dark(#166, #6cc);
+    --json-bool: light-dark(#a60, #fb5);
+    --json-null: light-dark(#888, #999);
+    --type-uuid: light-dark(#639, #c9f);
+    --type-bool: var(--json-bool);
+    --type-number: var(--json-number);
+    --type-date: light-dark(#2a6, #6db);
+  }
+
+  /* ==== Layout ==== */
+  body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
+  nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
+  /* No padding here: #toolbar is sticky and must reach main's actual
+     edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
+  main { overflow: auto; }
+  /* width: max-content (floored at 100%) makes #content's own box grow to
+     match a wide table's overflow instead of staying clipped to main's
+     visible width. Without this, #pager/#toolbar's sticky `left` has no
+     room to travel — their containing block (#content) is only as wide as
+     the viewport, so once scrolled past that they run out of stickiness
+     and get dragged along horizontally. */
+  #content { padding: 0 var(--gap-lg) var(--gap-lg); width: max-content; min-width: 100%; }
+  h1 { font-size: 1rem; margin: 0 0 var(--gap); }
+  h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
+  h1 a:hover { text-decoration-thickness: 2px; }
+
+  /* ==== Sidebar table list ==== */
+  ul { list-style: none; margin: 0; padding: 0; }
+  li button { width: 100%; text-align: left; background: none; border: none;
+              padding: .3rem .4rem; cursor: pointer; font: inherit; color: inherit;
+              border-radius: 4px; display: flex; justify-content: space-between; }
+  li button:hover { background: var(--hover); }
+  li button.active { background: var(--active); }
+  /* min-width:0 overrides the flex-item default of min-width:auto, which
+     otherwise blocks shrinking below content size and prevents the
+     ellipsis truncation below from ever kicking in. Full name is in
+     `title` (see loadTables()) as the escape hatch. */
+  .row-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; }
+  .row-right { display: flex; align-items: center; gap: .35rem; flex: none; }
+  .count { opacity: .6; }
+  /* Always in the DOM at a fixed size; only visibility toggles (never
+     display), so gaining/losing the spinner never reflows layout — this
+     replaced an old #status text in #controls that shoved #filter sideways
+     every time it appeared/disappeared. */
+  .row-spinner { width: .7rem; height: .7rem; border-radius: 50%;
+                 border: 2px solid var(--border-strong); border-top-color: transparent;
+                 visibility: hidden; flex: none; }
+  li button.loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
+  }
+
+  /* ==== Sidebar table search ==== */
+  #table-search { margin-bottom: var(--gap); }
+  #table-filter { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
+  #tables-empty { opacity: .6; margin: .3rem .4rem; }
+  ::highlight(table-match) { background: var(--active); }
+
+  /* ==== Data table ==== */
+  /* separate/0, not collapse: verified that collapsed borders let
+     scrolled-under row content bleed through a sticky <th>'s background at
+     the collapsed border seams in Chromium. */
+  table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: var(--gap); }
+  th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
+  th { cursor: pointer; user-select: none; }
+  /* z-index is load-bearing: td has position:relative (for the copy
+     button), and since tbody follows thead in DOM order, its positioned
+     <td>s paint over a sticky <th> with the default stacking order unless
+     the header is explicitly raised. top tracks #toolbar's live height
+     (--toolbar-h, set via ResizeObserver) since it isn't constant. */
+  thead th { position: sticky; top: var(--toolbar-h, 0px); z-index: 1; background: canvas; }
+  /* Arrow always rendered (dim when unsorted), not just on the active
+     column: keeps every th's width stable across sort changes and shows
+     sortability before the first click. "↑" default previews the real
+     first-click behavior (ascending — see th.onclick). */
+  th[aria-sort]::after { content: " ↑"; opacity: .35; }
+  th[aria-sort="ascending"]::after { content: " ↑"; opacity: 1; }
+  th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
+  /* Decorative (aria-hidden) — the th carries an aria-label with the text
+     equivalent. */
+  .key-icon { margin-right: .2rem; }
+  /* Not part of the sort click target — its onclick stops propagation so
+     it doesn't also trigger th's sort handler. */
+  .common-values-btn { background: none; border: none; cursor: pointer; font: inherit;
+              color: inherit; margin-left: .3rem; padding: 0 .15rem; border-radius: 3px; }
+  .common-values-btn:hover { background: var(--hover); }
+  /* Styled distinctly from the plain cell-text button so it doesn't read
+     as an <a> hyperlink — it's an in-app state change, not navigation. */
+  .fk-cell { cursor: pointer; text-decoration: underline dotted;
+             text-underline-offset: .15em; }
+  .fk-cell:hover { text-decoration-style: solid; }
+  th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
+  td.row-actions { padding-right: .25rem; }
+  .record-btn { background: none; border: none; cursor: pointer; font: inherit;
+                color: inherit; padding: 0 .15rem; border-radius: 3px; }
+  .record-btn:hover { background: var(--hover); }
+  td { position: relative; padding-right: 2.7rem; }
+  .cell-text { display: block; max-width: 24rem; overflow: hidden;
+               text-overflow: ellipsis; white-space: nowrap; }
+  button.cell-text { background: none; border: none; padding: 0; margin: 0;
+                     font: inherit; color: inherit; text-align: left; cursor: inherit; }
+  td.expandable .cell-text { cursor: zoom-in; }
+  .copy, .filter-eq { position: absolute; top: 50%; transform: translateY(-50%);
+          background: none; border: none; cursor: pointer; font: inherit;
+          color: inherit; opacity: 0; padding: 0 .15rem; border-radius: 3px; }
+  .copy { right: .15rem; }
+  .filter-eq { right: 1.45rem; }
+  /* Null cells have no copy button, so their lone filter button sits in
+     copy's slot instead of leaving that corner visibly empty. */
+  .filter-eq.only-action { right: .15rem; }
+  td:hover .copy, td:hover .filter-eq, .copy:focus-visible, .filter-eq:focus-visible { opacity: .7; }
+  .copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+
+  /* ==== Controls / status ==== */
+  /* Pinned in both axes (unlike thead th, top:0 only — header cells must
+     still scroll horizontally). #error lives inside so a rejection message
+     stays paired with the filter. z-index above thead th's + opaque
+     background stop rows from showing through. */
+  #toolbar { position: sticky; top: 0; left: 0; z-index: 2; background: canvas;
+             padding: var(--gap-lg) var(--gap-lg) var(--gap);
+             border-bottom: 1px solid var(--border); }
+  #controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
+  /* display: contents keeps #filter/#apply direct flex items of #controls,
+     so wrapping them in a <form> doesn't change layout. */
+  #filter-form { display: contents; }
+  #filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
+  /* Visually hidden but still in the accessibility tree — the aria-live
+     loading text never occupies space in #controls's flex row, which used
+     to shove #filter sideways on every load. */
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
+             margin: -1px; overflow: hidden; clip-path: inset(50%);
+             white-space: nowrap; border: 0; }
+  #error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap; }
+  #protocol-warning { display: flex; gap: var(--gap); align-items: baseline;
+                      color: var(--warning); margin-bottom: var(--gap); }
+  /* display:flex above would silently defeat the hidden attribute's
+     UA-level display:none — restate it at author-level specificity. */
+  #protocol-warning[hidden] { display: none; }
+  #protocol-warning button { background: none; border: none; cursor: pointer; font: inherit;
+                             color: inherit; padding: 0 .15rem; border-radius: 3px; }
+  #protocol-warning button:hover { background: var(--hover); }
+  .empty td { text-align: center; opacity: .6; padding: 1rem; }
+
+  /* ==== Siblings ==== */
+  #siblings { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: var(--gap); }
+  #siblings h2 { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+                 font-weight: 600; opacity: .6; margin: 0 0 var(--gap); }
+  .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
+         margin-right: .4em; background: #999; flex: none; }
+  .dot.up { background: var(--success); } .dot.down { background: var(--danger); }
+  /* Same truncation shape as .row-name above. Full name is in `title`
+     (see loadSiblings()) as the escape hatch. */
+  .sibling-row { display: flex; align-items: center; }
+  .sibling-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                  min-width: 0; }
+
+  /* ==== Pager ==== */
+  /* Sticky left, same reasoning as #toolbar above: #content (and #pager's
+     own position in normal flow) is only as wide as the table, so once a
+     wide table pushes main's horizontal scrollbar out, an unpinned pager
+     scrolls away with it instead of staying reachable. */
+  #pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center;
+           position: sticky; left: var(--gap-lg); width: fit-content; }
+
+  /* Native <dialog>: showModal() gives backdrop, Esc-to-close, and focus
+     trapping for free. */
+  dialog { border: 1px solid var(--border-strong); border-radius: 8px; padding: 0;
+           max-width: min(60rem, 92vw); max-height: 80vh; box-sizing: border-box; }
+  dialog::backdrop { background: var(--backdrop); }
+  .dialog-head { display: flex; justify-content: space-between; align-items: center;
+                 gap: 1rem; padding: var(--gap) var(--gap-lg); border-bottom: 1px solid var(--border); }
+  .dialog-head button { background: none; border: none; cursor: pointer;
+                        font: inherit; color: inherit; }
+  /* border-box (here and on <dialog> above) keeps padding inside the
+     max-height budget — content-box padding let long content overflow the
+     dialog and add a second scrollbar around the pre's own. */
+  dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
+                          max-height: calc(80vh - 3rem); box-sizing: border-box; }
+  dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
+              gap: .3rem var(--gap-lg); }
+  dialog dl dt { font-weight: 600; }
+  dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* A grid item, not absolutely positioned over a td, so it needs
+     `position: static`; hover-to-reveal otherwise matches the table's
+     copy button, keyed off dd:hover since dt/dd/button are flat grid
+     siblings here. */
+  dialog dl .copy { position: static; top: auto; transform: none; opacity: 0; align-self: start; }
+  dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
+  /* Lives in the dialog header, so it stays visible regardless of hover —
+     a standalone action, not a per-field affordance. */
+  .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
+  .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1; }
+
+  /* white-space: normal resets the pre-wrap inherited from ancestors
+     (#cell-pop / dialog dl dd's plain-text case). Not <details>/<summary>:
+     that replaced JSON's actual {}/[]/,/: shape with a generic tree-widget
+     look, so this renders real pretty-printed JSON instead and folds one
+     block at a time to an inline "{…}", editor-gutter style. */
+  .json-tree { white-space: normal; }
+  .json-line { display: flex; }
+  .json-children { margin-left: 1.05rem; border-left: 1px solid var(--border); padding-left: .5rem; }
+  .json-fold { all: unset; cursor: pointer; flex: none; width: 1rem; text-align: center;
+               color: var(--border-strong); transform-origin: 45% 50%; }
+  .json-fold::before { content: "▾"; font-size: .65em; }
+  .json-node.collapsed > .json-line:first-child .json-fold { transform: rotate(-90deg); }
+  .json-node.collapsed > .json-children,
+  .json-node.collapsed > .json-line:last-child { display: none; }
+  .json-ellipsis { display: none; opacity: .7; }
+  .json-node.collapsed .json-ellipsis { display: inline; }
+  .json-punct { color: var(--border-strong); }
+  .json-key { font-weight: 600; }
+  .json-string { color: var(--json-string); }
+  .json-number { color: var(--json-number); }
+  .json-bool { color: var(--json-bool); }
+  .json-null { color: var(--json-null); }
+  .json-uuid { color: var(--type-uuid); }
+  .cell-type-uuid { color: var(--type-uuid); }
+  .cell-type-bool { color: var(--type-bool); }
+  .cell-type-number { color: var(--type-number); }
+  .cell-type-date { color: var(--type-date); }
+
+  /* Deliberately outside the nav/main grid so it stays reachable
+     regardless of which table/dialog is showing. */
+  #api-help-btn { position: fixed; left: var(--gap-lg); bottom: var(--gap-lg); z-index: 1;
+                  width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+                  border: 1px solid var(--border-strong); background: canvas;
+                  color: inherit; cursor: pointer; font: inherit; }
+  #api-help-btn:hover { background: var(--hover); }
+
+  /* Sits directly beside #api-help-btn in the same fixed corner, rather
+     than a separate corner of its own. */
+  #theme-toggle { position: fixed; left: calc(var(--gap-lg) * 2 + 1.75rem); bottom: var(--gap-lg); z-index: 1;
+                  width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+                  border: 1px solid var(--border-strong); background: canvas;
+                  color: inherit; cursor: pointer; font: inherit; line-height: 1; }
+  #theme-toggle:hover { background: var(--hover); }
+  /* Icon is pure CSS, no JS: it's driven by the same cascade the
+     color-scheme rules above use (system prefers-color-scheme by default,
+     overridden by an explicit :root[data-theme]), so it always reflects
+     the theme actually in effect without a matchMedia listener. */
+  #theme-toggle::before { content: "☀️"; }
+  @media (prefers-color-scheme: dark) {
+    #theme-toggle::before { content: "🌙"; }
+  }
+  :root[data-theme="light"] #theme-toggle::before { content: "☀️"; }
+  :root[data-theme="dark"] #theme-toggle::before { content: "🌙"; }
+
+  /* Popover API: non-modal, light-dismiss. Positioned via CSS Anchor
+     Positioning — the clicked cell gets anchor-name set in JS, and
+     position-try-fallbacks flips it away from the viewport edge with no
+     clamping math. Unsupported browsers fall back to default placement,
+     not breakage. */
+  #cell-pop { position: fixed; position-anchor: --cell-anchor;
+              position-try-fallbacks: flip-block, flip-inline;
+              inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+              margin: 0; border: 1px solid var(--border-strong);
+              border-radius: 8px; padding: 0; max-width: min(40rem, 90vw);
+              box-shadow: 0 4px 16px #0004; }
+  #cell-pop pre, #cell-pop .json-tree { margin: 0; padding: .6rem var(--gap-lg); overflow: auto;
+                  max-height: 50vh; word-break: break-word; }
+  #cell-pop pre { white-space: pre-wrap; }
+
+  /* Same shape as #cell-pop, anchored to the header's ▾ button. Separate
+     anchor-name (--cv-anchor): both popovers can be open from the same
+     render pass and each anchor-name resolves to one element. */
+  #cv-pop { position: fixed; position-anchor: --cv-anchor;
+            position-try-fallbacks: flip-block, flip-inline;
+            inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+            margin: 0; border: 1px solid var(--border-strong);
+            border-radius: 8px; padding: .3rem; max-width: min(20rem, 90vw);
+            max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
+  #cv-pop .cv-empty { opacity: .6; padding: .3rem .5rem; margin: 0; }
+  #cv-pop button.cv-value { display: flex; justify-content: space-between; gap: .75rem;
+            width: 100%; box-sizing: border-box; background: none; border: none;
+            font: inherit; color: inherit; text-align: left; padding: .3rem .5rem;
+            cursor: pointer; border-radius: 4px; }
+  #cv-pop button.cv-value:hover { background: var(--hover); }
+  #cv-pop .cv-freq { opacity: .6; }
+
+  /* Same shape as #cv-pop, but the anchor is a single static button
+     rather than one per header, so anchor-name is set once in CSS. */
+  #columns-btn { anchor-name: --columns-anchor; }
+  #columns-pop { position: fixed; position-anchor: --columns-anchor;
+            position-try-fallbacks: flip-block, flip-inline;
+            inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+            margin: 0; border: 1px solid var(--border-strong);
+            border-radius: 8px; padding: .3rem; max-width: min(20rem, 90vw);
+            max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
+  #columns-pop label { display: flex; align-items: center; gap: .4rem;
+            padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+  #columns-pop label:hover { background: var(--hover); }
+  .col-hidden { display: none; }
+
+  /* Anchored to the text caret inside #filter, not the input's box — a
+     zero-size tracking element whose left/top JS recomputes on every
+     keystroke via mirror-div caret measurement (no native way to anchor to
+     a point inside plain text). Manual popover, not auto: it must stay
+     open while typing, which the browser's default light-dismiss would
+     treat as "outside" — see the JS for the light-dismiss substitute. */
+  #filter-caret-anchor { position: fixed; width: 0; height: 0; anchor-name: --filter-caret; }
+  #filter-suggest { position: fixed; position-anchor: --filter-caret;
+            position-try-fallbacks: flip-block;
+            inset: auto; top: calc(anchor(bottom) + .15rem); left: anchor(left);
+            margin: 0; border: 1px solid var(--border-strong);
+            border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
+            overflow: auto; box-shadow: 0 4px 16px #0004; }
+  #filter-suggest button { display: block; width: 100%; box-sizing: border-box;
+            background: none; border: none; font: inherit; color: inherit;
+            text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
+  #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
+</style>
+</head>
+<body>
+<nav>
+  <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
+  <search id="table-search">
+    <input id="table-filter" type="search" enterkeyhint="search" placeholder="filter tables…" aria-label="filter tables" autocomplete="off">
+  </search>
+  <ul id="tables"></ul>
+  <p id="tables-empty" hidden>no matching tables</p>
+  <div id="siblings">
+    <h2 id="siblings-heading" hidden>siblings</h2>
+    <div id="siblings-list"></div>
+  </div>
+</nav>
+<main id="main">
+  <div id="toolbar">
+    <div id="protocol-warning" role="status" hidden>
+      <span id="protocol-warning-text"></span>
+      <button id="protocol-warning-dismiss" type="button" aria-label="dismiss warning">✕</button>
+    </div>
+    <search id="controls">
+      <strong id="current">—</strong>
+      <output id="status" aria-live="polite" class="sr-only"></output>
+      <form id="filter-form">
+        <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+        <button id="apply">apply</button>
+      </form>
+      <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
+      <button id="payload" disabled title="raw JSON response for the current view">payload</button>
+    </search>
+    <div id="error" role="alert"></div>
+  </div>
+  <div id="content">
+    <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
+    <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
+    <div id="pager">
+      <button id="prev">‹ prev</button>
+      <output id="page"></output>
+      <button id="next">next ›</button>
+    </div>
+  </div>
+</main>
+
+<dialog id="payload-dialog" closedby="any">
+  <div class="dialog-head">
+    <strong>response payload</strong>
+    <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
+  </div>
+  <pre id="payload-pre"></pre>
+</dialog>
+
+<dialog id="record-dialog" closedby="any">
+  <div class="dialog-head">
+    <span class="dialog-head-title"><strong>record</strong><button id="record-copy-row" class="copy" aria-label="copy row as JSON">⧉</button></span>
+    <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
+  </div>
+  <dl id="record-dl"></dl>
+</dialog>
+
+<div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
+<div id="cv-pop" popover><div id="cv-pop-list"></div></div>
+<div id="columns-pop" popover><div id="columns-pop-list"></div></div>
+<span id="filter-caret-anchor"></span>
+<div id="filter-suggest" popover="manual"><div id="filter-suggest-list"></div></div>
+
+<dialog id="api-help-dialog" closedby="any">
+  <div class="dialog-head">
+    <span class="dialog-head-title"><strong>API reference (for AI agents)</strong><button id="api-help-copy" class="copy" aria-label="copy API reference as JSON">⧉</button></span>
+    <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
+  </div>
+  <pre id="api-help-pre"></pre>
+</dialog>
+<button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
+<button id="theme-toggle" type="button" aria-label="toggle light/dark theme" title="toggle light/dark theme"></button>
+
+<script type="module">
+// Derived from the page's own URL, not hardcoded, so the UI works behind
+// any reverse-proxy prefix; trailing slashes stripped so /x/ and /x agree.
+const API = location.pathname.replace(/\/+$/, "") + "/api";
+const UI_KEY = "ashurbanipal_ui";
+const THEME_KEY = "ashurbanipal_theme";
+
+// Persisted to localStorage and mirrored to the URL: table/sort/order/
+// limit/offset only — never filter. A filter can contain data values, and
+// a URL is even more exposed than localStorage (history, access logs,
+// Referer headers). state.filter is the *applied* filter, decoupled from
+// the live #filter input text — only committing (submit, or a
+// click-to-filter action) updates it, so an unfinished edit never gets
+// silently resent by an unrelated sort/page click.
+let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, filter: "" };
+try {
+  const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+  for (const k of ["table", "sort", "order", "limit"])
+    if (saved[k] !== undefined) state[k] = saved[k];
+  // Keyed by table name so hiding a column on one table never hides a
+  // same-named column on another. A malformed value is discarded rather
+  // than migrated — it's cheap to lose and there's no reliable way to
+  // guess which table it belonged to.
+  if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
+    for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
+      if (!Array.isArray(cols)) continue;
+      const clean = cols.filter(c => typeof c === "string");
+      if (clean.length) state.hiddenColumns[table] = clean;
+    }
+  }
+} catch { localStorage.removeItem(UI_KEY); }
+// URL query params win over localStorage: opening a shared/bookmarked link
+// should reproduce that link's view, not the visitor's own saved prefs.
+const urlParams = new URLSearchParams(location.search);
+if (urlParams.has("table")) state.table = urlParams.get("table");
+if (urlParams.has("sort")) state.sort = urlParams.get("sort");
+if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "desc" : "asc";
+if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
+if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
+function persist() {
+  const { table, sort, order, limit, hiddenColumns } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ table, sort, order, limit, hiddenColumns }));
+}
+// replaceState: no new history entries per action. filter is never included.
+function syncUrl() {
+  const params = new URLSearchParams({
+    table: state.table, limit: state.limit, offset: state.offset,
+  });
+  if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  history.replaceState(null, "", "?" + params);
+}
+
+// A stale table key or column name absent from the current table's
+// columns simply matches nothing wherever it's consulted, so no separate
+// validation pass is needed here.
+function hiddenColumnsForTable() {
+  return state.hiddenColumns[state.table] ?? [];
+}
+
+const $ = (id) => document.getElementById(id);
+const setStatus = (text) => { $("status").textContent = text; };
+function prettyPrint(text) {
+  try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; }
+}
+
+// ---- jsonb tree rendering: hand-rolled, dependency-free. Each
+// object/array gets one gutter fold toggle (▾, VS Code/Zed-style) that
+// collapses just that block to an inline "{…}"/"[…]"; per-value coloring
+// needs no tokenizer since JSON.parse already tells us each value's real
+// type. Every line is its own block-level div, so indentation is uniform
+// per nesting depth regardless of preceding key length. ----
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function renderJsonTree(value) {
+  return jsonEntryValue(value, null, false);
+}
+
+// prefix: [keySpan, ": "] for object entries, or null for array/top level.
+function jsonEntryValue(value, prefix, comma) {
+  if (Array.isArray(value)) {
+    return jsonContainer(value.map((v) => ({ prefix: null, value: v })), "[", "]", prefix, comma);
+  }
+  if (value !== null && typeof value === "object") {
+    return jsonContainer(
+      Object.entries(value).map(([k, v]) => ({ prefix: jsonKeyPrefix(k), value: v })),
+      "{", "}", prefix, comma,
+    );
+  }
+  const line = document.createElement("div");
+  line.className = "json-line";
+  if (prefix) line.append(...prefix);
+  line.append(jsonScalar(value));
+  if (comma) line.append(",");
+  return line;
+}
+
+function jsonKeyPrefix(key) {
+  const span = document.createElement("span");
+  span.className = "json-key";
+  span.textContent = JSON.stringify(key);
+  return [span, ": "];
+}
+
+function jsonContainer(entries, openCh, closeCh, prefix, comma) {
+  if (entries.length === 0) {
+    const line = document.createElement("div");
+    line.className = "json-line";
+    if (prefix) line.append(...prefix);
+    const span = document.createElement("span");
+    span.className = "json-punct";
+    span.textContent = openCh + closeCh + (comma ? "," : "");
+    line.append(span);
+    return line;
+  }
+
+  const node = document.createElement("div");
+  node.className = "json-node";
+
+  const fold = document.createElement("button");
+  fold.type = "button";
+  fold.className = "json-fold";
+  fold.setAttribute("aria-expanded", "true");
+  fold.setAttribute("aria-label", "collapse");
+  fold.onclick = () => {
+    const collapsed = node.classList.toggle("collapsed");
+    fold.setAttribute("aria-expanded", String(!collapsed));
+    fold.setAttribute("aria-label", collapsed ? "expand" : "collapse");
+  };
+
+  const openLine = document.createElement("div");
+  openLine.className = "json-line";
+  const openBrace = document.createElement("span");
+  openBrace.className = "json-punct";
+  openBrace.textContent = openCh;
+  // Duplicates closeLine's punctuation/comma; only one is ever visible
+  // (see .json-node.collapsed CSS), so no state to keep in sync.
+  const ellipsis = document.createElement("span");
+  ellipsis.className = "json-ellipsis";
+  ellipsis.textContent = `…${closeCh}${comma ? "," : ""}`;
+  if (prefix) openLine.append(...prefix);
+  openLine.append(fold, openBrace, ellipsis);
+
+  const children = document.createElement("div");
+  children.className = "json-children";
+  entries.forEach((entry, i) => {
+    children.append(jsonEntryValue(entry.value, entry.prefix, i < entries.length - 1));
+  });
+
+  const closeLine = document.createElement("div");
+  closeLine.className = "json-line";
+  const closeBrace = document.createElement("span");
+  closeBrace.className = "json-punct";
+  closeBrace.textContent = closeCh + (comma ? "," : "");
+  closeLine.append(closeBrace);
+
+  node.append(openLine, children, closeLine);
+  return node;
+}
+
+function jsonScalar(value) {
+  const span = document.createElement("span");
+  if (value === null) { span.className = "json-null"; span.textContent = "null"; }
+  else if (typeof value === "boolean") { span.className = "json-bool"; span.textContent = String(value); }
+  else if (typeof value === "number") { span.className = "json-number"; span.textContent = String(value); }
+  else {
+    span.className = UUID_RE.test(value) ? "json-string json-uuid" : "json-string";
+    span.textContent = JSON.stringify(value);
+  }
+  return span;
+}
+
+async function api(path) {
+  const resp = await fetch(API + path);
+  if (path === "/tables") checkProtocolVersion(resp);
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
+// ==== Protocol version skew warning ====
+// The frontend artifact ships separately from backends (ports vendor this
+// file), so the first /tables response's x-ashurbanipal-protocol header is
+// compared against the version this file speaks. A mismatch — or a missing
+// header — warns but never blocks: a skewed pairing usually still mostly
+// works, and refusing to render would be strictly worse than degraded
+// browsing.
+const PROTOCOL_VERSION = "1";
+let protocolChecked = false;
+function checkProtocolVersion(resp) {
+  if (protocolChecked) return;
+  protocolChecked = true;
+  const got = resp.headers.get("x-ashurbanipal-protocol");
+  if (got === PROTOCOL_VERSION) return;
+  $("protocol-warning-text").textContent =
+    `protocol version mismatch: this UI speaks v${PROTOCOL_VERSION}, ` +
+    `the server reports ${got ? `v${got}` : "no version"} — some features may misbehave`;
+  $("protocol-warning").hidden = false;
+}
+$("protocol-warning-dismiss").onclick = () => { $("protocol-warning").hidden = true; };
+
+// ---- raw payload viewer ----
+let lastPayload = null;
+$("payload").onclick = () => {
+  $("payload-pre").textContent = JSON.stringify(lastPayload, null, 2);
+  $("payload-dialog").showModal();
+};
+// ---- per-cell copy (Clipboard API) ----
+async function copyText(text, btn) {
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // Clipboard API needs a secure context (https/localhost); fall back
+      // for plain-http.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    btn.textContent = "✓";
+  } catch { btn.textContent = "✗"; }
+  setTimeout(() => { btn.textContent = "⧉"; }, 800);
+}
+
+// ---- API reference: static, hand-maintained description of every route,
+// for copy-pasting to an AI agent. Not its own endpoint — the doc never
+// changes per-request, so a route would just be a 7th thing to keep in
+// sync for no benefit. ----
+function buildApiReference() {
+  const base = new URL(API, location.href).toString().replace(/\/$/, "");
+  const exampleFilter = encodeURIComponent(JSON.stringify([{ column: "status", op: "=", value: "active" }]));
+  return {
+    description: "Read-only REST API for browsing this service's Postgres tables. Every endpoint is GET and returns JSON. Table/column names are data-dependent — call GET /tables first to discover real names before calling anything else.",
+    base_url: base,
+    endpoints: [
+      {
+        method: "GET",
+        path: `${base}/tables`,
+        summary: "List table names in the connected schema — also the allow-list for every other endpoint's `table` param.",
+        params: [],
+        example_response: { tables: [{ name: "users", comment: "Registered accounts." }, { name: "sessions" }] },
+      },
+      {
+        method: "GET",
+        path: `${base}/table-counts`,
+        summary: "Approximate row count per table (pg_class.reltuples, not COUNT(*)).",
+        params: [],
+        example_response: { counts: [{ table: "users", approx_rows: 108234 }] },
+      },
+      {
+        method: "GET",
+        path: `${base}/tables/data`,
+        summary: "Paginated, filtered, sorted rows for one table.",
+        params: [
+          { name: "table", required: true, notes: "must be a name returned by GET /tables" },
+          { name: "filter", required: false, notes: "URL-encoded JSON array of condition objects — see the `filter` key below" },
+          { name: "limit", required: false, notes: "default 50, max 100" },
+          { name: "offset", required: false, notes: "default 0" },
+          { name: "sort", required: false, notes: "single column name" },
+          { name: "order", required: false, notes: '"asc" | "desc", default "asc"' },
+        ],
+        example_request: `${base}/tables/data?table=users&filter=${exampleFilter}&limit=20&sort=created_at&order=desc`,
+        example_response: {
+          columns: [{ name: "id", type: "uuid", key: "pk" }, { name: "status", type: "text" }],
+          rows: [{ id: "...", status: "active" }],
+          total_approx: 108234,
+        },
+      },
+      {
+        method: "GET",
+        path: `${base}/tables/common-values`,
+        summary: "Most frequent values for one column (pg_stats — approximate; empty if the column has no planner statistics yet).",
+        params: [
+          { name: "table", required: true },
+          { name: "column", required: true },
+        ],
+        example_response: { values: [{ value: "active", freq: 0.62 }] },
+      },
+      {
+        method: "GET",
+        path: `${base}/siblings`,
+        summary: "Other related services configured for this instance, with live health status.",
+        params: [],
+        example_response: { siblings: [{ name: "billing", dbviewer_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] },
+      },
+    ],
+    filter: {
+      wire_format: "URL-encoded JSON array of condition objects: [{logic?, not?, column, op, value?}, ...]",
+      operators: ["=", "!=", ">", ">=", "<", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"],
+      limits: { max_conditions: 10, max_json_bytes: 8192 },
+      notes: [
+        "`logic` (\"AND\" | \"OR\") must be absent on the first condition and present on every later one; AND binds tighter than OR (SQL precedence — no parentheses/nesting exist).",
+        "`not: true` negates its single condition; optional, defaults to false.",
+        "`value` is always a JSON string, required except for IS NULL / IS NOT NULL, which take none.",
+        "columns are cast to text before comparison, so the same operators work across uuid/timestamptz/jsonb/etc.",
+        "at most 10 conditions and 8192 bytes of URL-decoded JSON — exceeding either is a 400.",
+        "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text and compiles it to this AST client-side — DSL text sent as the `filter` param is a 400.",
+      ],
+      example: [
+        { column: "status", op: "=", value: "completed" },
+        { logic: "AND", not: true, column: "created_at", op: ">", value: "2016-01-01" },
+        { logic: "OR", column: "deleted_at", op: "IS NULL" },
+      ],
+    },
+  };
+}
+
+$("api-help-btn").onclick = () => {
+  $("api-help-pre").textContent = JSON.stringify(buildApiReference(), null, 2);
+  $("api-help-dialog").showModal();
+};
+$("api-help-copy").onclick = () => copyText($("api-help-pre").textContent, $("api-help-copy"));
+
+// ==== Theme ====
+// A device display preference, not view state — deliberately kept out of
+// `state`/UI_KEY (which mirror to the URL) and given its own localStorage
+// key. Which icon shows and which color-scheme applies are both pure CSS
+// (system prefers-color-scheme by default, overridden by :root[data-theme]
+// — see the rules above) and need no JS at all. This is the one thing CSS
+// can't do: write the explicit choice to localStorage so a click survives
+// a reload. The inline <script> in <head> applies any saved override
+// before first paint, so there's no flash on load either.
+function currentTheme() {
+  return document.documentElement.dataset.theme
+    || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+$("theme-toggle").setAttribute("aria-pressed", currentTheme() === "dark");
+$("theme-toggle").onclick = () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  $("theme-toggle").setAttribute("aria-pressed", next === "dark");
+  try { localStorage.setItem(THEME_KEY, next); } catch { /* best-effort */ }
+};
+
+// ---- cell preview ----
+let cellPopAnchor = null;
+function showCellPop(e, text) {
+  // jsonb (or any JSON-shaped value) renders as a colored, collapsible
+  // tree; everything else falls back to the plain <pre>.
+  let parsed, isJson = true;
+  try { parsed = JSON.parse(text); } catch { isJson = false; }
+  $("cell-pre").hidden = isJson;
+  $("cell-json").hidden = !isJson;
+  if (isJson) $("cell-json").replaceChildren(renderJsonTree(parsed));
+  else $("cell-pre").textContent = text;
+  if (cellPopAnchor) cellPopAnchor.style.anchorName = "";
+  cellPopAnchor = e.currentTarget;
+  cellPopAnchor.style.anchorName = "--cell-anchor";
+  $("cell-pop").showPopover();
+}
+
+// ==== Filter DSL parser (box text → wire AST) ====
+// The single canonical implementation of spec/filter-dsl.md — no backend
+// (reference or port) parses DSL text; they all consume the AST this
+// emits (spec/protocol.md §5.4.2). Iterative — one flat condition loop,
+// no recursive descent — so pathological input can't grow the call stack
+// (filter-dsl.md A9). Error positions are UTF-8 byte offsets into the
+// input, same convention the DSL-era backend parser reported.
+const FILTER_MAX_DSL_BYTES = 1024;
+const FILTER_MAX_CONDITIONS = 10;
+
+function parseFilterDsl(input) {
+  const err = (message, index) => {
+    const position = new TextEncoder().encode(input.slice(0, index)).length;
+    const e = new Error(`${message} at position ${position}`);
+    e.position = position;
+    return e;
+  };
+  if (new TextEncoder().encode(input).length > FILTER_MAX_DSL_BYTES)
+    throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
+
+  let pos = 0;
+  // Peeks return the full code point (length 2 for astral chars) so
+  // surrogate pairs are never split mid-character while advancing.
+  const peekAt = (i) => (i < input.length ? String.fromCodePoint(input.codePointAt(i)) : null);
+  const peek = () => peekAt(pos);
+  const isWs = (c) => /\s/.test(c);
+  const skipWsOptional = () => {
+    let c;
+    while ((c = peek()) !== null && isWs(c)) pos += c.length;
+  };
+  const skipWsRequired = () => {
+    const start = pos;
+    skipWsOptional();
+    if (pos === start) throw err("expected whitespace", start);
+  };
+  // Case-insensitive with a word-boundary check so LIKELY isn't misread
+  // as LIKE; ASCII-only folding so fullwidth/confusable chars never match.
+  const matchKeyword = (keyword) => {
+    for (let i = 0; i < keyword.length; i++) {
+      const c = input[pos + i];
+      if (c === undefined) return false;
+      const folded = c >= "a" && c <= "z" ? String.fromCharCode(c.charCodeAt(0) - 32) : c;
+      if (folded !== keyword[i]) return false;
+    }
+    const next = peekAt(pos + keyword.length);
+    return !(next !== null && (next === "_" || /[\p{L}\p{N}]/u.test(next)));
+  };
+  const consumeKeyword = (keyword) => {
+    if (!matchKeyword(keyword)) return false;
+    pos += keyword.length;
+    return true;
+  };
+  const parseColumn = () => {
+    const start = pos;
+    const first = peek();
+    if (first === null || !/^[a-zA-Z_]$/.test(first)) throw err("expected column name", start);
+    pos += 1;
+    let c;
+    while ((c = peek()) !== null && /^[a-zA-Z0-9_]$/.test(c)) pos += 1;
+    return input.slice(start, pos);
+  };
+  // A doubled '' decodes to a single literal '.
+  const parseQuotedValue = () => {
+    const start = pos;
+    pos += 1; // opening quote
+    let value = "";
+    for (;;) {
+      const c = peek();
+      if (c === null) throw err("unterminated quoted value", start);
+      if (c === "'") {
+        pos += 1;
+        if (peek() === "'") { value += "'"; pos += 1; }
+        else break;
+      } else { value += c; pos += c.length; }
+    }
+    return value;
+  };
+  // AND/OR/NOT are always keywords, never bare values — quote them to use
+  // as a literal.
+  const parseBareValue = () => {
+    const start = pos;
+    let value = "";
+    let c;
+    while ((c = peek()) !== null && !isWs(c) && c !== "'") { value += c; pos += c.length; }
+    if (value === "") throw err("expected value", start);
+    if (/^(AND|OR|NOT)$/i.test(value))
+      throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
+    return value;
+  };
+  // Symbolic operators longest-first so >=/<= aren't misread as >/< plus
+  // a bare =... value.
+  const parseOperator = () => {
+    const start = pos;
+    if (consumeKeyword("ILIKE")) return "ILIKE";
+    if (consumeKeyword("LIKE")) return "LIKE";
+    for (const sym of [">=", "<=", "!=", ">", "<", "="]) {
+      if (input.startsWith(sym, pos)) { pos += sym.length; return sym; }
+    }
+    throw err("expected operator (one of = != >= <= > < LIKE ILIKE, or IS [NOT] NULL)", start);
+  };
+  // Speculatively tries the IS [NOT] NULL branch and rewinds to right
+  // after the column if it doesn't apply.
+  const parseSimpleCondition = () => {
+    const column = parseColumn();
+    const afterColumn = pos;
+    const wsChar = peek();
+    if (wsChar !== null && isWs(wsChar)) {
+      skipWsOptional();
+      if (consumeKeyword("IS")) {
+        skipWsRequired();
+        const isNot = consumeKeyword("NOT");
+        if (isNot) skipWsRequired();
+        if (!consumeKeyword("NULL")) throw err("expected NULL", pos);
+        return { column, op: isNot ? "IS NOT NULL" : "IS NULL" };
+      }
+      pos = afterColumn;
+    }
+    skipWsOptional();
+    const op = parseOperator();
+    skipWsOptional();
+    const value = peek() === "'" ? parseQuotedValue() : parseBareValue();
+    return { column, op, value };
+  };
+
+  const conditions = [];
+  let pendingLogic = null;
+  for (;;) {
+    let not = false;
+    if (matchKeyword("NOT")) { pos += 3; skipWsRequired(); not = true; }
+    const simple = parseSimpleCondition();
+    // Optional wire fields are omitted, never null/false-filled (§5.4.2).
+    const condition = {};
+    if (pendingLogic) condition.logic = pendingLogic;
+    if (not) condition.not = true;
+    condition.column = simple.column;
+    condition.op = simple.op;
+    if (simple.value !== undefined) condition.value = simple.value;
+    conditions.push(condition);
+    if (conditions.length > FILTER_MAX_CONDITIONS)
+      throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
+    if (pos >= input.length) break;
+    skipWsRequired();
+    if (pos >= input.length) break;
+    const logicStart = pos;
+    if (consumeKeyword("AND")) pendingLogic = "AND";
+    else if (consumeKeyword("OR")) pendingLogic = "OR";
+    else throw err("expected AND or OR", logicStart);
+    skipWsRequired();
+  }
+  return conditions;
+}
+
+// Test hook: tools/e2e-tests/tests/filter-parser.spec.ts drives the parser
+// fixture table (and the quoteFilterValue→parser round-trip) via
+// page.evaluate — module scope is otherwise unreachable from outside, and
+// this one namespaced global is the entire exposed surface.
+window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };
+
+// state.filter stays the applied *text*; the AST that actually goes on the
+// wire is derived from it once, at commit time, so unparseable box text
+// never produces a request at all (spec/filter-dsl.md §4).
+let appliedFilterAst = [];
+
+function submitFilter(text) {
+  let ast = [];
+  if (text) {
+    try { ast = parseFilterDsl(text); }
+    catch (e) { $("error").textContent = e.message; return; }
+  }
+  state.filter = text;
+  appliedFilterAst = ast;
+  state.offset = 0;
+  loadData();
+}
+
+// ---- click-to-filter: compose "column op value" into #filter and apply ----
+// Every cell value is fetched with an explicit ::text cast, which is
+// exactly what the filter DSL compares against, so it can be spliced
+// straight into a clause without reshaping.
+function quoteFilterValue(value) {
+  if (value !== "" && !/[\s']/.test(value) && !/^(AND|OR|NOT)$/i.test(value)) return value;
+  return "'" + value.replace(/'/g, "''") + "'";
+}
+
+function applyFilterClause(column, op, value) {
+  // value is omitted for a valueless predicate (IS NULL). The composed
+  // text round-trips through parseFilterDsl like a hand-typed clause —
+  // quoteFilterValue guarantees it parses.
+  const clause = value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
+  $("filter").value = clause;
+  submitFilter(clause);
+}
+
+// ---- filter column autocomplete: a cursor-anchored popup suggesting a
+// column name wherever the DSL grammar allows a new condition to start
+// (empty, or right after AND/OR/NOT), prefix-filtered by the partial
+// column name already typed. Only inspects text immediately before the
+// cursor — never judges the filter as a whole, so it doesn't duplicate
+// parseFilterDsl's accept/reject job. Scoped to the cursor sitting at
+// the end of the text — mid-string edits get no suggestions.
+//
+// Manual popover, not auto: it must stay open while typing (default
+// light-dismiss would treat that as "outside"), and arrow keys/Enter/Tab/
+// Escape are intercepted here instead of the browser's default behavior —
+// light-dismiss is hand-rolled too, via the pointerdown listener below. ----
+const FILTER_COND_FIRST = /^\s*(?:NOT\s+)?$/i;
+const FILTER_COND_AFTER_LOGIC = /(^|\s)(?:AND|OR)\s+(?:NOT\s+)?$/i;
+const CARET_MIRROR_PROPS = [
+  "boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+  // border-*-style matters too, not just width: a border's used width
+  // collapses to 0 when style is "none" (the mirror's default), so without
+  // these the mirror omits #filter's UA-default border and the measured
+  // caret position is off by that width.
+  "borderTopStyle", "borderRightStyle", "borderBottomStyle", "borderLeftStyle",
+  "fontStyle", "fontVariant", "fontWeight", "fontStretch", "fontSize", "fontFamily",
+  "lineHeight", "letterSpacing", "textTransform", "wordSpacing",
+];
+
+// Renders an invisible clone of the text up to the cursor with identical
+// font metrics — the standard technique for locating a caret position in a
+// plain <input>, which has no native API for this.
+function measureCaretPosition(input) {
+  const mirror = document.createElement("div");
+  const computed = getComputedStyle(input);
+  Object.assign(mirror.style, { position: "absolute", visibility: "hidden", whiteSpace: "pre", top: "0", left: "-9999px" });
+  for (const prop of CARET_MIRROR_PROPS) mirror.style[prop] = computed[prop];
+  mirror.textContent = input.value.slice(0, input.selectionStart);
+  const marker = document.createElement("span");
+  marker.textContent = "​";
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+  try {
+    const inputRect = input.getBoundingClientRect();
+    const offsetX = marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left;
+    return { x: inputRect.left + offsetX - input.scrollLeft, y: inputRect.bottom };
+  } finally {
+    mirror.remove();
+  }
+}
+
+let filterSuggestMatches = []; // column names currently shown, in display order
+let filterSuggestIndex = -1;   // highlighted row, -1 = none
+let filterSuggestHead = "";    // input text up to (not including) the partial token being completed
+
+function closeFilterSuggest() {
+  filterSuggestMatches = [];
+  filterSuggestIndex = -1;
+  filterSuggestHead = "";
+  $("filter-suggest").hidePopover();
+}
+
+function renderFilterSuggest() {
+  $("filter-suggest-list").replaceChildren(...filterSuggestMatches.map((name, i) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = name;
+    btn.className = i === filterSuggestIndex ? "active" : "";
+    // Keeps focus (and the caret) in #filter — otherwise the button
+    // would steal focus, firing #filter's blur handler and closing this
+    // popup before its own click handler runs.
+    btn.onmousedown = (e) => e.preventDefault();
+    btn.onclick = () => acceptFilterSuggestion(i);
+    return btn;
+  }));
+  // Arrow-key moves change .active without mouse involvement, so the
+  // list has to scroll itself.
+  $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
+}
+
+function acceptFilterSuggestion(i) {
+  const input = $("filter");
+  input.value = filterSuggestHead + filterSuggestMatches[i];
+  input.setSelectionRange(input.value.length, input.value.length);
+  closeFilterSuggest();
+  input.focus();
+}
+
+function updateFilterSuggestions() {
+  const input = $("filter");
+  const pos = input.selectionStart;
+  if (pos !== input.value.length) return closeFilterSuggest();
+  const before = input.value.slice(0, pos);
+  const tokenStart = before.search(/\S*$/);
+  const head = before.slice(0, tokenStart);
+  const partial = before.slice(tokenStart);
+  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) return closeFilterSuggest();
+  const columns = (lastPayload?.columns ?? []).map(c => c.name);
+  filterSuggestMatches = columns.filter(name => name.toLowerCase().startsWith(partial.toLowerCase()));
+  if (filterSuggestMatches.length === 0) return closeFilterSuggest();
+  filterSuggestHead = head;
+  filterSuggestIndex = 0;
+  renderFilterSuggest();
+  const { x, y } = measureCaretPosition(input);
+  $("filter-caret-anchor").style.left = `${x}px`;
+  $("filter-caret-anchor").style.top = `${y}px`;
+  $("filter-suggest").showPopover();
+}
+
+$("filter").oninput = updateFilterSuggestions;
+$("filter").onfocus = updateFilterSuggestions;
+$("filter").onblur = closeFilterSuggest;
+$("filter").onkeydown = (e) => {
+  if (filterSuggestMatches.length === 0) return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    filterSuggestIndex = (filterSuggestIndex + 1) % filterSuggestMatches.length;
+    renderFilterSuggest();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    filterSuggestIndex = (filterSuggestIndex - 1 + filterSuggestMatches.length) % filterSuggestMatches.length;
+    renderFilterSuggest();
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault();
+    acceptFilterSuggestion(filterSuggestIndex);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeFilterSuggest();
+  }
+};
+document.addEventListener("pointerdown", (e) => {
+  if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target) && !$("filter-suggest").contains(e.target)) {
+    closeFilterSuggest();
+  }
+});
+
+// ---- common-values header dropdown: a shortlist from Postgres planner
+// statistics, never a full distinct-value scan — copy says "common
+// values", not "all values", so it doesn't imply completeness it doesn't
+// have. ----
+let cvAnchor = null;
+let cvRequestToken = 0;
+function renderCommonValues(values, column) {
+  const list = $("cv-pop-list");
+  if (values.length === 0) {
+    const p = document.createElement("p");
+    p.className = "cv-empty";
+    p.textContent = "no common values available";
+    list.replaceChildren(p);
+    return;
+  }
+  list.replaceChildren(...values.map(v => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cv-value";
+    const val = document.createElement("span");
+    val.textContent = v.value;
+    const freq = document.createElement("span");
+    freq.className = "cv-freq";
+    freq.textContent = `${Math.round(v.freq * 100)}%`;
+    btn.append(val, freq);
+    btn.onclick = () => { $("cv-pop").hidePopover(); applyFilterClause(column, "=", v.value); };
+    return btn;
+  }));
+}
+
+async function showCommonValues(e, column) {
+  const btn = e.currentTarget;
+  if (cvAnchor) cvAnchor.style.anchorName = "";
+  cvAnchor = btn;
+  cvAnchor.style.anchorName = "--cv-anchor";
+  const list = $("cv-pop-list");
+  const loading = document.createElement("p");
+  loading.className = "cv-empty";
+  loading.textContent = "loading…";
+  list.replaceChildren(loading);
+  $("cv-pop").showPopover();
+  // A second header's ▾ can be clicked before the first request resolves;
+  // the token discards a stale response instead of clobbering the column
+  // actually showing.
+  const token = ++cvRequestToken;
+  const params = new URLSearchParams({ table: state.table, column });
+  let values;
+  try {
+    ({ values } = await api("/tables/common-values?" + params));
+  } catch (err) {
+    if (token !== cvRequestToken) return;
+    const p = document.createElement("p");
+    p.className = "cv-empty";
+    p.textContent = err.message;
+    list.replaceChildren(p);
+    return;
+  }
+  if (token !== cvRequestToken) return;
+  renderCommonValues(values, column);
+}
+
+// ---- column show/hide: toggles a CSS class on already-rendered
+// header/data cells, never a refetch. Matched by column name (data-col),
+// not position, so it can't fall out of sync with header/cell alignment.
+// A stale column name simply matches nothing — silent no-op. ----
+function setColumnVisibility(name, hidden) {
+  const current = hiddenColumnsForTable();
+  const next = hidden ? [...current, name] : current.filter(c => c !== name);
+  if (next.length) state.hiddenColumns[state.table] = next;
+  else delete state.hiddenColumns[state.table];
+  persist();
+  document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)
+    .forEach(el => el.classList.toggle("col-hidden", hidden));
+  updateColumnsButtonLabel();
+}
+
+function updateColumnsButtonLabel() {
+  const n = hiddenColumnsForTable().length;
+  $("columns-btn").textContent = n > 0 ? `columns (${n} hidden)` : "columns";
+}
+
+function renderColumnMenu(columns) {
+  const hidden = hiddenColumnsForTable();
+  $("columns-pop-list").replaceChildren(...columns.map(col => {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = !hidden.includes(col.name);
+    input.onchange = () => setColumnVisibility(col.name, !input.checked);
+    label.append(input, col.name);
+    return label;
+  }));
+}
+
+// ---- record / vertical view: one already-fetched row as a stacked
+// column:value list, for tables too wide to scan across ----
+function buildRecordEntries(columns, row) {
+  const nodes = [];
+  for (const col of columns) {
+    const dt = document.createElement("dt");
+    dt.textContent = col.name;
+    const dd = document.createElement("dd");
+    const raw = row[col.name];
+    // Nothing to copy for a null field, but the grid's three-column
+    // alignment still needs a cell here.
+    let action = document.createElement("span");
+    if (raw == null) dd.textContent = "∅";
+    else {
+      if (col.type === "jsonb") {
+        try {
+          dd.classList.add("json-tree");
+          dd.appendChild(renderJsonTree(JSON.parse(raw)));
+        } catch { dd.textContent = raw; }
+      } else dd.appendChild(formatCellValue(col, raw));
+      const btn = document.createElement("button");
+      btn.className = "copy";
+      btn.setAttribute("aria-label", "copy cell value");
+      btn.textContent = "⧉";
+      btn.onclick = () => copyText(raw, btn);
+      action = btn;
+    }
+    nodes.push(dt, dd, action);
+  }
+  return nodes;
+}
+
+// jsonb columns are re-nested (raw value is the ::text-cast JSON string)
+// so the copied JSON has real nested objects instead of an escaped string.
+function recordAsJson(columns, row) {
+  const obj = {};
+  for (const col of columns) {
+    const raw = row[col.name];
+    obj[col.name] = col.type === "jsonb" && raw != null ? JSON.parse(raw) : raw;
+  }
+  return JSON.stringify(obj, null, 2);
+}
+
+function openRecordView(columns, row) {
+  $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
+  const copyRowBtn = $("record-copy-row");
+  copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
+  const open = () => $("record-dialog").showModal();
+  document.startViewTransition ? document.startViewTransition(open) : open();
+}
+// ---- sidebar table search-as-you-type: transient, session-local state,
+// not part of `state`/localStorage — resets on reload ----
+let tableEntries = []; // { name, li, btn, textNode }
+const tableMatchHighlight = CSS.highlights ? new Highlight() : null;
+if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
+
+function filterTables() {
+  const q = $("table-filter").value.trim().toLowerCase();
+  tableMatchHighlight?.clear();
+  let visible = 0;
+  for (const { name, li, textNode } of tableEntries) {
+    const idx = q ? name.toLowerCase().indexOf(q) : -1;
+    const match = !q || idx !== -1;
+    li.hidden = !match;
+    if (match) visible++;
+    if (tableMatchHighlight && idx !== -1) {
+      const range = new Range();
+      range.setStart(textNode, idx);
+      range.setEnd(textNode, idx + q.length);
+      tableMatchHighlight.add(range);
+    }
+  }
+  $("tables-empty").hidden = visible > 0 || tableEntries.length === 0;
+}
+$("table-filter").oninput = filterTables;
+
+async function loadTables() {
+  setStatus("loading tables…");
+  const [{ tables }, { counts }] = await Promise.all([
+    api("/tables"), api("/table-counts"),
+  ]);
+  const countMap = Object.fromEntries(counts.map(c => [c.table, c.approx_rows]));
+  const ul = $("tables");
+  ul.innerHTML = "";
+  tableEntries = [];
+  for (const t of tables) {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.innerHTML = `<span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
+    btn.firstChild.textContent = t.name;
+    btn.querySelector(".count").textContent = `~${countMap[t.name] ?? "?"}`;
+    btn.dataset.table = t.name;
+    // Always set, not just when commented: long names get CSS-truncated
+    // (see .row-name), so the title tooltip is the escape hatch.
+    btn.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
+    // A filter clause is written against this table's columns, so it
+    // resets on table switch the same way sort already does.
+    btn.onclick = () => {
+      state.table = t.name; state.offset = 0; state.sort = null;
+      state.filter = ""; appliedFilterAst = [];
+      $("filter").value = "";
+      persist(); loadData();
+    };
+    li.appendChild(btn);
+    ul.appendChild(li);
+    tableEntries.push({ name: t.name, li, btn, textNode: btn.firstChild.firstChild });
+  }
+  filterTables();
+  const tableNames = tables.map(t => t.name);
+  // Stale persisted state must never wedge the UI: fall back silently.
+  if (!tableNames.includes(state.table)) state.table = tableNames[0] ?? null;
+  if (state.table) loadData();
+  else setStatus("");
+}
+
+// Keyed by table name rather than "whichever row is .active" so it's
+// still correct if tableEntries is ever rebuilt mid-fetch.
+function setRowLoading(name, loading) {
+  tableEntries.find(e => e.name === name)?.btn.classList.toggle("loading", loading);
+}
+
+// Reference-counted, not a plain boolean: fetchTableData() can be in
+// flight more than once (switching tables again before the previous fetch
+// resolves), and a plain true/false pair would let the first fetch to
+// finish clear aria-busy/#status while another is still running.
+let inFlightFetches = 0;
+
+async function fetchTableData() {
+  // Captured once, never re-read later: without this, a slow fetch for
+  // table A would clear table B's row-loading flag (whatever state.table
+  // had become by the time A's `finally` runs) instead of its own.
+  const table = state.table;
+  const params = new URLSearchParams({
+    table, limit: state.limit, offset: state.offset,
+  });
+  if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
+  // box's DSL text — URLSearchParams handles the URL-encoding.
+  if (state.filter) params.set("filter", JSON.stringify(appliedFilterAst));
+  if (inFlightFetches++ === 0) {
+    setStatus("loading…");
+    document.querySelector("table").setAttribute("aria-busy", "true");
+  }
+  setRowLoading(table, true);
+  try {
+    return await api("/tables/data?" + params);
+  } finally {
+    setRowLoading(table, false);
+    if (--inFlightFetches === 0) {
+      setStatus("");
+      document.querySelector("table").removeAttribute("aria-busy");
+    }
+  }
+}
+
+function renderHeader(columns) {
+  const hidden = hiddenColumnsForTable();
+  const tr = document.createElement("tr");
+  const actionsTh = document.createElement("th");
+  actionsTh.className = "row-actions";
+  tr.appendChild(actionsTh);
+  for (const col of columns) {
+    const th = document.createElement("th");
+    th.dataset.col = col.name;
+    if (hidden.includes(col.name)) th.classList.add("col-hidden");
+    const label = `${col.name} (${col.type})`;
+    if (col.key === "pk" || col.key === "fk") {
+      const keyLabel = col.key === "pk"
+        ? "primary key"
+        : `foreign key, references ${col.references.table}.${col.references.column}`;
+      const icon = document.createElement("span");
+      icon.className = "key-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.title = keyLabel;
+      icon.textContent = col.key === "pk" ? "🔑" : "→";
+      th.append(icon, label);
+      // Layers onto the accessible name rather than replacing the key
+      // description — the icon keeps its own `title` above.
+      th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
+    } else {
+      th.append(label);
+    }
+    if (col.comment) th.title = col.comment;
+    th.setAttribute("aria-sort", col.name === state.sort
+      ? (state.order === "desc" ? "descending" : "ascending")
+      : "none");
+    th.onclick = () => {
+      state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
+      state.sort = col.name; state.offset = 0; persist(); loadData();
+    };
+    // A focusable control nested in the sortable th — stopPropagation so
+    // opening it doesn't also toggle sort.
+    const cvBtn = document.createElement("button");
+    cvBtn.type = "button";
+    cvBtn.className = "common-values-btn";
+    cvBtn.setAttribute("aria-label", `common values for ${col.name}`);
+    cvBtn.textContent = "▾";
+    cvBtn.onclick = (e) => { e.stopPropagation(); showCommonValues(e, col.name); };
+    th.appendChild(cvBtn);
+    tr.appendChild(th);
+  }
+  $("thead").replaceChildren(tr);
+}
+
+function renderEmptyState(columnCount) {
+  const emptyRow = document.createElement("tr");
+  emptyRow.className = "empty";
+  const td = document.createElement("td");
+  td.colSpan = columnCount;
+  td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
+  emptyRow.appendChild(td);
+  $("tbody").replaceChildren(emptyRow);
+}
+
+const cellTemplate = $("cell-template");
+const rowActionTemplate = $("row-action-template");
+
+// Postgres data_type strings bucketed into the --type-* palette — ground
+// truth from the schema, so unlike renderJsonTree's scalars this is a
+// straight lookup, no parsing needed.
+const CELL_TYPE_CLASSES = {
+  boolean: "cell-type-bool",
+  uuid: "cell-type-uuid",
+  smallint: "cell-type-number",
+  integer: "cell-type-number",
+  bigint: "cell-type-number",
+  numeric: "cell-type-number",
+  real: "cell-type-number",
+  "double precision": "cell-type-number",
+};
+
+// Shared by buildCell and buildRecordEntries so a column's rendering rule
+// lives in one place.
+function formatCellValue(col, raw) {
+  if (col.type === "timestamp with time zone" || col.type === "date") {
+    const time = document.createElement("time");
+    time.dateTime = raw;
+    time.textContent = raw;
+    time.className = "cell-type-date";
+    return time;
+  }
+  const cls = CELL_TYPE_CLASSES[col.type];
+  if (cls) {
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = raw;
+    return span;
+  }
+  return document.createTextNode(raw);
+}
+
+// A real <button> as the click target so it's keyboard-focusable and
+// Enter/Space-activatable, matching the copy button one element over.
+function buildCell(col, raw) {
+  const hidden = hiddenColumnsForTable().includes(col.name);
+  if (raw == null) {
+    const td = document.createElement("td");
+    td.dataset.col = col.name;
+    if (hidden) td.classList.add("col-hidden");
+    const span = document.createElement("span");
+    span.className = "cell-text";
+    span.textContent = "∅";
+    td.appendChild(span);
+    // Nothing to copy or expand for a null cell, but "filter by this
+    // value" is still meaningful (IS NULL).
+    const filterBtn = document.createElement("button");
+    filterBtn.className = "filter-eq only-action";
+    filterBtn.setAttribute("aria-label", "filter by null");
+    filterBtn.textContent = "=";
+    filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "IS NULL"); };
+    td.appendChild(filterBtn);
+    return td;
+  }
+  const td = cellTemplate.content.cloneNode(true).firstElementChild;
+  td.dataset.col = col.name;
+  if (hidden) td.classList.add("col-hidden");
+  const cellText = td.querySelector(".cell-text");
+  const btn = td.querySelector(".copy");
+  const filterBtn = td.querySelector(".filter-eq");
+  cellText.appendChild(formatCellValue(col, raw));
+  btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
+  filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
+  if (col.key === "fk" && col.references) {
+    // In-app navigation: switch to the referenced table and seed a filter
+    // for the referenced row. Reset sort first — the current sort column
+    // belongs to this table and may not exist on the target one.
+    cellText.classList.add("fk-cell");
+    cellText.title = `go to ${col.references.table}.${col.references.column} = ${raw}`;
+    cellText.onclick = () => {
+      state.table = col.references.table;
+      state.sort = null;
+      persist();
+      applyFilterClause(col.references.column, "=", raw);
+    };
+  } else {
+    // scrollWidth > clientWidth is only known after layout, so decide
+    // per click rather than per render.
+    cellText.onclick = (e) => {
+      if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
+        showCellPop(e, raw);
+      }
+    };
+    if (col.type === "jsonb") td.classList.add("expandable");
+  }
+  return td;
+}
+
+function buildRowActionCell(columns, row) {
+  const td = rowActionTemplate.content.cloneNode(true).firstElementChild;
+  td.querySelector(".record-btn").onclick = () => openRecordView(columns, row);
+  return td;
+}
+
+function renderRows(data) {
+  if (data.rows.length === 0) {
+    // colSpan must match the *visible* column count, not the fetched one —
+    // hidden columns (display:none) aren't counted.
+    const hidden = hiddenColumnsForTable();
+    const visible = data.columns.filter(c => !hidden.includes(c.name)).length;
+    renderEmptyState(visible + 1);
+    return;
+  }
+  const tbody = $("tbody");
+  tbody.replaceChildren(...data.rows.map(row => {
+    const tr = document.createElement("tr");
+    tr.appendChild(buildRowActionCell(data.columns, row));
+    for (const col of data.columns) {
+      tr.appendChild(buildCell(col, row[col.name]));
+    }
+    return tr;
+  }));
+  // Overflow is only measurable after layout (jsonb cells are marked at
+  // render instead). fk-cell is excluded: its title is already the escape
+  // hatch, and a click navigates rather than expands.
+  requestAnimationFrame(() => {
+    for (const el of tbody.querySelectorAll(".cell-text:not(.fk-cell)")) {
+      if (el.scrollWidth > el.clientWidth) el.closest("td").classList.add("expandable");
+    }
+  });
+}
+
+function updatePager(data) {
+  const page = Math.floor(state.offset / state.limit) + 1;
+  $("page").textContent = `page ${page} · ~${data.total_approx} rows`;
+  $("prev").disabled = state.offset === 0;
+  $("next").disabled = data.rows.length < state.limit;
+}
+
+// ---- focus preservation across thead/tbody re-renders ----
+// replaceChildren() detaches whatever was focused inside it, and the
+// browser falls back to <body> — a real defect for keyboard users on every
+// sort/page/filter/table-switch change. Capture the focused cell's
+// position before the replace and restore it afterward, falling back to
+// the table itself (tabindex="-1") if that slot no longer exists. Covers
+// both tbody and thead (the common-values ▾ button).
+function captureTableFocus() {
+  const active = document.activeElement;
+  const table = document.querySelector("table");
+  if (!active || !table.contains(active)) return null;
+  const cell = active.closest("th, td");
+  const tr = active.closest("tr");
+  if (!cell || !tr) return null;
+  return {
+    region: tr.parentElement.id, // "thead" | "tbody"
+    rowIndex: [...tr.parentElement.children].indexOf(tr),
+    colIndex: [...tr.children].indexOf(cell),
+    className: active.className,
+  };
+}
+
+function restoreTableFocus(captured) {
+  if (!captured) return;
+  const tr = $(captured.region)?.children[captured.rowIndex];
+  const cell = tr?.children[captured.colIndex];
+  const target = cell?.querySelector(`.${captured.className}`);
+  (target ?? document.querySelector("table")).focus();
+}
+
+// Must only ever move in lockstep with a *successful* render, never ahead
+// of it — a failed fetchTableData() (see loadData) must leave these
+// exactly as they were, matching the stale <table> body they describe.
+function updateActiveTableChrome() {
+  document.querySelectorAll("#tables button").forEach(b => {
+    const isActive = b.dataset.table === state.table;
+    b.classList.toggle("active", isActive);
+    if (isActive) b.setAttribute("aria-current", "true");
+    else b.removeAttribute("aria-current");
+  });
+  $("current").textContent = state.table ?? "—";
+  document.title = state.table ? `${state.table} — Ashurbanipal` : "Ashurbanipal";
+}
+
+// loadData() has multiple entry points (table switch, sort click, filter
+// submit, pager); without this, an older slower request's response could
+// land after a newer one and overwrite its already-rendered result — the
+// grid would show a different table's columns/rows than #current claims.
+// Same shape of fix as showCommonValues's cvRequestToken.
+let loadDataToken = 0;
+
+async function loadData({ resetScroll = true } = {}) {
+  $("error").textContent = "";
+  if (!state.table) { updateActiveTableChrome(); setStatus(""); return; }
+  const token = ++loadDataToken;
+  let data;
+  try { data = await fetchTableData(); }
+  catch (e) {
+    if (token !== loadDataToken) return; // superseded by a newer request
+    $("error").textContent = e.message;
+    return;
+  }
+  if (token !== loadDataToken) return; // superseded by a newer request
+  updateActiveTableChrome();
+  lastPayload = data;
+  $("payload").disabled = false;
+  $("columns-btn").disabled = false;
+  updateColumnsButtonLabel();
+  syncUrl();
+  const renderTable = () => {
+    const focusCapture = captureTableFocus();
+    renderHeader(data.columns);
+    renderRows(data);
+    renderColumnMenu(data.columns);
+    restoreTableFocus(focusCapture);
+  };
+  // startViewTransition's callback isn't guaranteed to run synchronously —
+  // it waits for a rendering opportunity to snapshot the old frame first.
+  // Under contention that gap can outlast a poll for "no animations yet",
+  // which reads as settled before the DOM (and thus row content) actually
+  // updated. Holding aria-busy across the callback closes that window;
+  // waitForIdle's own animation-poll only proves a transition isn't
+  // *currently* running, not that one has already happened.
+  if (document.startViewTransition) {
+    document.querySelector("table").setAttribute("aria-busy", "true");
+    await document.startViewTransition(renderTable).updateCallbackDone;
+    document.querySelector("table").removeAttribute("aria-busy");
+  } else {
+    renderTable();
+  }
+  updatePager(data);
+  // Table switch/sort/filter jump to a new row 0, so snapping to the top
+  // orients the user; prev/next paginate in place and pass resetScroll:
+  // false so the pager buttons stay put instead of leaping away underneath
+  // the click that just landed on them.
+  if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
+}
+
+// Same class of bug as loadDataToken: a slow health-check round that
+// resolves after a later poll would otherwise overwrite the more-current
+// result.
+let siblingsRequestToken = 0;
+async function loadSiblings() {
+  const token = ++siblingsRequestToken;
+  let siblings = [];
+  try { ({ siblings } = await api("/siblings")); } catch { /* leave empty */ }
+  if (token !== siblingsRequestToken) return; // superseded by a newer poll
+  $("siblings-heading").hidden = siblings.length === 0;
+  const div = $("siblings-list");
+  div.replaceChildren(...siblings.map(s => {
+    const p = document.createElement("div");
+    const dot = document.createElement("span");
+    dot.className = "dot " + (s.healthy ? "up" : "down");
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
+    const a = document.createElement("a");
+    a.href = s.dbviewer_url; a.textContent = s.name;
+    a.target = "_blank"; a.rel = "noopener";
+    a.title = s.name; // truncation escape hatch
+    p.className = "sibling-row";
+    a.className = "sibling-name";
+    p.append(dot, a);
+    return p;
+  }));
+}
+
+$("filter-form").onsubmit = (e) => {
+  e.preventDefault();
+  submitFilter($("filter").value.trim());
+};
+// The native clear button on a search input fires "search" but never
+// submits the form, so clearing it left state.filter stale until some
+// other action reset it. addEventListener, not `.onsearch =`: the
+// onsearch IDL property only exists in Chromium/legacy WebKit and is a
+// silent no-op in Firefox.
+$("filter").addEventListener("search", () => {
+  if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
+});
+$("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData({ resetScroll: false }); };
+$("next").onclick = () => { state.offset += state.limit; loadData({ resetScroll: false }); };
+
+// Feeds --toolbar-h (thead th's sticky `top`) — #toolbar's height isn't
+// static (flex-wrap, #error appearing/disappearing).
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
+}).observe($("toolbar"));
+
+loadTables().catch(e => { $("error").textContent = e.message; });
+loadSiblings();
+setInterval(loadSiblings, 15_000);
+</script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+name: go-nethttp conformance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "implementations/go-nethttp/**"
+      - "spec/**"
+      - "conformance/**"
+      - "frontend/dbviewer.html"
+      - ".github/workflows/go-conformance.yml"
+  pull_request:
+    paths:
+      - "implementations/go-nethttp/**"
+      - "spec/**"
+      - "conformance/**"
+      - "frontend/dbviewer.html"
+      - ".github/workflows/go-conformance.yml"
+
+env:
+  DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
+
+jobs:
+  build-and-test:
+    name: go build/vet/fmt + fixture/kill-switch/integration tests
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ashurbanipal
+          POSTGRES_PASSWORD: ashurbanipal
+          POSTGRES_DB: ashurbanipal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply the conformance seed
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql "$DATABASE_URL" -f conformance/seed/seed.sql
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: implementations/go-nethttp/go.mod
+
+      - name: Build
+        working-directory: implementations/go-nethttp
+        run: go build ./...
+
+      - name: gofmt check
+        working-directory: implementations/go-nethttp
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would reformat:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: implementations/go-nethttp
+        run: go vet ./...
+
+      # Fixture tests (filter_fixture_test.go) and kill-switch tests always
+      # run; integration_test.go needs DATABASE_URL (set above) and the
+      # conformance seed applied to actually hit Postgres.
+      - name: Test
+        working-directory: implementations/go-nethttp
+        run: go test -race ./...
+
+  conformance:
+    name: Go — conformance kit (external-URL path)
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: go
+      go-version-file: implementations/go-nethttp/go.mod
+      start-command: "cd implementations/go-nethttp && go run ./cmd/demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: go-nethttp-conformance-report
+
+  schema-conformance:
+    name: Go — schema conformance
+    uses: ./.github/workflows/_conformance-schema.yml
+    with:
+      toolchain: go
+      go-version-file: implementations/go-nethttp/go.mod
+      start-command: "cd implementations/go-nethttp && go run ./cmd/demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
