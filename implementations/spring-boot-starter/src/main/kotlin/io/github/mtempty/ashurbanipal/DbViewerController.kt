@@ -172,6 +172,15 @@ class DbViewerController(
     fun handleDatabaseError(e: DataAccessException): ResponseEntity<String> =
         errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database error: ${e.message}")
 
+    // A query string the servlet container itself can't parse (e.g. a stray
+    // `=value` with no parameter name) surfaces here as an IllegalStateException
+    // thrown while Spring resolves @RequestParam, before any handler method
+    // body runs — a malformed request from the client, not a server fault, so
+    // it must not fall through to the 500 catch-all below.
+    @ExceptionHandler(IllegalStateException::class)
+    fun handleMalformedQueryString(e: IllegalStateException): ResponseEntity<String> =
+        errorResponse(HttpStatus.BAD_REQUEST, "malformed query string")
+
     @ExceptionHandler(Exception::class)
     fun handleUnexpectedError(e: Exception): ResponseEntity<String> =
         errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, e.message ?: "internal error")
