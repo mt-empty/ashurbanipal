@@ -6,10 +6,12 @@ pnpm = "latest"
 [tasks.build]
 description = "cargo build"
 run = "cargo build"
+dir = "implementations/rust"
 
 [tasks.test]
 description = "cargo test (pass a path to run one test, e.g. `mise run test config::tests::name`)"
 run = "cargo test"
+dir = "implementations/rust"
 # The conformance suite (conformance/runner) spawns one `demo` OS process per
 # test, each opening its own 5-connection pool against DATABASE_URL — on a
 # high-core-count machine, default (num-CPUs) test-thread parallelism can
@@ -23,14 +25,17 @@ env = { RUST_TEST_THREADS = "8" }
 [tasks.lint]
 description = "cargo clippy, denying warnings"
 run = "cargo clippy -- -D warnings"
+dir = "implementations/rust"
 
 [tasks.fmt]
 description = "cargo fmt"
 run = "cargo fmt"
+dir = "implementations/rust"
 
 [tasks."fmt-check"]
 description = "cargo fmt --check"
 run = "cargo fmt --check"
+dir = "implementations/rust"
 
 [tasks.check]
 description = "everything CI would run: fmt-check, lint, test"
@@ -39,13 +44,15 @@ depends = ["fmt-check", "lint", "test"]
 [tasks.demo]
 description = "run the demo host app at http://localhost:4000/__ashurbanipal"
 run = "cargo run --example demo"
-sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml"]
+dir = "implementations/rust"
+sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "../../frontend/dbviewer.html"]
 
 [tasks."demo-sibling"]
 description = "run a second demo instance on 4001, sibling-polling the one on 4000"
 run = "cargo run --example demo"
 env = { PORT = "4001", SIBLING_PORT = "4000" }
-sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml"]
+dir = "implementations/rust"
+sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "../../frontend/dbviewer.html"]
 
 [tasks.dev]
 description = "run the demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"
@@ -57,8 +64,9 @@ run = "cargo run > ../../.devcontainer/db/init/01-seed.sql && cp ../../.devconta
 dir = "tools/seed-gen"
 
 [tasks."test-conformance"]
-description = "run the conformance kit (spawns the reference by default; set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead)"
+description = "run the conformance kit (spawns the Rust implementation by default; set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead)"
 run = "cargo test --test conformance"
+dir = "implementations/rust"
 # See [tasks.test]'s comment on RUST_TEST_THREADS — only load-bearing in
 # spawned mode (one demo process + DB pool per test); harmless, and unused,
 # against an external target.

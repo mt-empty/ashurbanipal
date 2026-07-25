@@ -45,11 +45,11 @@ Each entry in `cases`:
   a literal pre-URL-encoding `filter` param value, for cases that aren't
   a valid conditions array at all (malformed JSON, DSL text).
 - `expect` — the case is valid; the resulting WHERE clause must match:
-  - `where` — the fragment in the reference's normalized shape:
+  - `where` — the fragment in the Rust implementation's normalized shape:
     double-quoted column identifiers, `::text` casts, `$n` placeholders
     numbered **from `$1` in condition order**. Runners with a different
-    placeholder scheme (`?`, offset numbering — the reference itself
-    binds limit/offset first, so it checks against `$n+2`) normalize
+    placeholder scheme (`?`, offset numbering — the Rust implementation
+    itself binds limit/offset first, so it checks against `$n+2`) normalize
     before comparing; the operator spellings and parenthesization are
     normative.
   - `values` — the bind values, in placeholder order.

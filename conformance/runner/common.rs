@@ -126,8 +126,9 @@ impl TestServer {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
-        // The reference's own mount point; a port under the external path
-        // supplies its own root directly via ASHURBANIPAL_CONFORMANCE_URL.
+        // The Rust implementation's own mount point; an implementation under
+        // the external path supplies its own root directly via
+        // ASHURBANIPAL_CONFORMANCE_URL.
         Target::Spawned {
             child,
             mount_root: format!("{base_url}/__ashurbanipal"),

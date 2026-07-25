@@ -4,7 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 // Separate from playwright.config.ts so the main suite's video setting
 // (none — see git history around 157fc12 on screenshot-diff flakiness)
 // isn't touched just to support this.
-const REPO_ROOT = "../..";
+const CRATE_ROOT = "../../implementations/rust";
 const PORT = 4320;
 
 export default defineConfig({
@@ -21,7 +21,7 @@ export default defineConfig({
   },
   webServer: {
     command: "cargo run --example demo",
-    cwd: REPO_ROOT,
+    cwd: CRATE_ROOT,
     url: `http://localhost:${PORT}/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

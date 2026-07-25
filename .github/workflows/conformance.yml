@@ -41,13 +41,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "implementations/rust -> target"
 
-      # Same reference the spawned test path builds — started here by hand,
+      # Same Rust demo the spawned test path builds — started here by hand,
       # not by the runner, so the runner's ASHURBANIPAL_CONFORMANCE_URL run
-      # below takes the exact external-URL path a port's own CI would use.
-      - name: Start the reference demo
+      # below takes the exact external-URL path any other implementation's
+      # own CI would use.
+      - name: Start the Rust demo
         run: |
-          cargo run --example demo &
+          cargo run --manifest-path implementations/rust/Cargo.toml --example demo &
           echo $! > demo.pid
           for _ in $(seq 1 60); do
             curl -sf http://localhost:4000/health >/dev/null && exit 0
@@ -61,7 +64,7 @@ jobs:
           ASHURBANIPAL_CONFORMANCE_URL: http://localhost:4000/__ashurbanipal
         run: bash conformance/runner/report.sh
 
-      - name: Stop the reference demo
+      - name: Stop the Rust demo
         if: always()
         run: kill "$(cat demo.pid)" 2>/dev/null || true
 

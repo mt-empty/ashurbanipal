@@ -28,9 +28,9 @@ async fn every_api_response_carries_the_protocol_version_header() {
             &format!("{PROTOCOL_HEADER} on {path}"),
         );
         // spec/protocol.md §6: statelessness — no server-side session is
-        // required, and the reference never sets one; a Set-Cookie here
-        // would signal a stateful implementation the protocol doesn't ask
-        // for and clients aren't obliged to carry.
+        // required, and the Rust implementation never sets one; a
+        // Set-Cookie here would signal a stateful implementation the
+        // protocol doesn't ask for and clients aren't obliged to carry.
         assert!(
             !resp.headers().contains_key("set-cookie"),
             "{path}: unexpected Set-Cookie (spec/protocol.md §6 statelessness)"

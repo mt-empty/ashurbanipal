@@ -544,7 +544,7 @@ mod tests {
     /// (schema: `spec/fixtures/README.md`) — the same file every port's
     /// runner and the black-box HTTP suite consume, so validation/building
     /// behavior can't drift between them.
-    const FIXTURES: &str = include_str!("../spec/fixtures/filter-builder-tests.json");
+    const FIXTURES: &str = include_str!("../../../spec/fixtures/filter-builder-tests.json");
 
     #[derive(serde::Deserialize)]
     struct FixtureFile {
@@ -610,7 +610,7 @@ mod tests {
         cols.iter().map(|c| c.to_string()).collect()
     }
 
-    /// Fixture placeholders are numbered from `$1`; the reference binds
+    /// Fixture placeholders are numbered from `$1`; this implementation binds
     /// limit/offset first, so its real clause starts at `$3`.
     fn shift_placeholders(fragment: &str, by: u32) -> String {
         let mut out = String::with_capacity(fragment.len());
