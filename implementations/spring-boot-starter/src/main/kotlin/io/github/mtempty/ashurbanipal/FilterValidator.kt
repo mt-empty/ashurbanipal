@@ -1,9 +1,9 @@
 package io.github.mtempty.ashurbanipal
 
-import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
+import tools.jackson.databind.DeserializationFeature
+import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.jacksonMapperBuilder
+import tools.jackson.module.kotlin.readValue
 
 /**
  * `spec/protocol.md` §5.4.2's byte bound on the URL-decoded `filter` JSON
@@ -39,12 +39,9 @@ data class WhereClause(val sql: String, val values: List<String>)
  * only ever sees the JSON AST.
  */
 class FilterValidator {
-    // deny-unknown-fields (Jackson's default) mirrors Rust's
-    // `#[serde(deny_unknown_fields)]` on Condition; jackson-module-kotlin
-    // honors Kotlin constructor defaults (`not`, `logic`, `value`) and
-    // fails on a missing non-nullable field (`column`, `op`) the same way
-    // serde's required fields do.
-    private val mapper: ObjectMapper = jacksonObjectMapper()
+    private val mapper: ObjectMapper = jacksonMapperBuilder()
+        .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+        .build()
 
     /** An empty array is legal and means "no filter" (§5.4.2) — callers get back an empty list. */
     fun parse(raw: String): List<Condition> {

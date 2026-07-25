@@ -143,7 +143,7 @@ class DbViewerController(
 
     // ==================== plumbing ====================
 
-    private fun <T> apiOk(body: T): ResponseEntity<T> =
+    private fun <T : Any> apiOk(body: T): ResponseEntity<T> =
         ResponseEntity.ok().header(PROTOCOL_HEADER, PROTOCOL_VERSION).body(body)
 
     private fun errorResponse(status: HttpStatus, message: String): ResponseEntity<String> =

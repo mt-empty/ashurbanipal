@@ -1,6 +1,7 @@
 package io.github.mtempty.ashurbanipal
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -68,7 +69,7 @@ class FilterValidatorFixtureTest {
                     val expectedWhere = if (expectedWhereRaw.isEmpty()) "" else " where ${normalizePlaceholders(expectedWhereRaw)}"
                     assertEquals(expectedWhere, whereClause.sql, "case $name: WHERE mismatch")
 
-                    val expectedValues = expect["values"].map { it.asText() }
+                    val expectedValues = (expect["values"] as Iterable<JsonNode>).map { it.asText() }
                     assertEquals(expectedValues, whereClause.values, "case $name: bind values mismatch")
                 }
                 expectError == "unknown_column" -> {
