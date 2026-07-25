@@ -42,7 +42,7 @@ function demoServer(port: number) {
 export default defineConfig({
   testDir: "./tests",
   // Not a correctness test — a scripted walkthrough recorded to video for
-  // a showcase clip. Run via `mise run showcase` (playwright.showcase.config.ts),
+  // a showcase clip. Run via `mise run frontend:showcase` (playwright.showcase.config.ts),
   // never as part of this suite.
   testIgnore: SHOWCASE_IGNORE,
   fullyParallel: true,

@@ -119,7 +119,7 @@ host_config.ashurbanipal.validate()?;
 ```
 
 See `docs/design.md` for the full API contract, filter DSL, and config
-reference. `mise run demo` runs a working example host app against the
+reference. `mise run rust:demo` runs a working example host app against the
 seeded devcontainer database.
 
 ## Implementations

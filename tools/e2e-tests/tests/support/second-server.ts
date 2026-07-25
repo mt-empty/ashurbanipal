@@ -28,7 +28,7 @@ export interface SpawnedDemo {
   stop: () => Promise<void>;
 }
 
-/** Spawns another `demo` example process, mirroring `mise run demo-sibling`
+/** Spawns another `demo` example process, mirroring `mise run rust:demo-sibling`
  * (PORT/SIBLING_PORT env vars) — only siblings.spec.ts and
  * mount-prefix.spec.ts need this (a second instance / a MOUNT_PREFIX one);
  * every other spec shares the one server Playwright's webServer config

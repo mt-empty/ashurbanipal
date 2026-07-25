@@ -2,14 +2,44 @@
 watchexec = "latest"
 node = "26"
 pnpm = "latest"
+go = "1.25.3"
+java = "temurin-21"
 
-[tasks.build]
+# ---- top-level umbrella tasks -----------------------------------------
+# `mise run check` is everything CI runs, across every implementation.
+# `mise run rust` / `spring` / `frontend` / `conformance` are the same
+# thing scoped to one layer; each fans out to its own namespaced
+# `<layer>:*` subtasks below.
+
+[tasks.check]
+description = "everything CI would run, across every implementation: rust, spring, frontend, conformance"
+depends = ["rust", "spring", "frontend", "conformance"]
+
+[tasks.rust]
+description = "rust implementation checks: fmt-check, lint, test"
+depends = ["rust:fmt-check", "rust:lint", "rust:test"]
+
+[tasks.spring]
+description = "spring-boot-starter implementation checks: build, test"
+depends = ["spring:check"]
+
+[tasks.frontend]
+description = "frontend checks: Playwright e2e suite against dbviewer.html"
+depends = ["frontend:test-e2e"]
+
+[tasks.conformance]
+description = "conformance suite: black-box conformance + schema fuzzing"
+depends = ["conformance:test", "conformance:schema-test"]
+
+# ---- rust:* -------------------------------------------------------------
+
+[tasks."rust:build"]
 description = "cargo build"
 run = "cargo build"
 dir = "implementations/rust"
 
-[tasks.test]
-description = "cargo test (pass a path to run one test, e.g. `mise run test config::tests::name`)"
+[tasks."rust:test"]
+description = "cargo test (pass a path to run one test, e.g. `mise run rust:test config::tests::name`)"
 run = "cargo test"
 dir = "implementations/rust"
 # The conformance suite (conformance/runner) spawns one `demo` OS process per
@@ -22,79 +52,95 @@ dir = "implementations/rust"
 # minutes.
 env = { RUST_TEST_THREADS = "8" }
 
-[tasks.lint]
+[tasks."rust:lint"]
 description = "cargo clippy, denying warnings"
 run = "cargo clippy -- -D warnings"
 dir = "implementations/rust"
 
-[tasks.fmt]
+[tasks."rust:fmt"]
 description = "cargo fmt"
 run = "cargo fmt"
 dir = "implementations/rust"
 
-[tasks."fmt-check"]
+[tasks."rust:fmt-check"]
 description = "cargo fmt --check"
 run = "cargo fmt --check"
 dir = "implementations/rust"
 
-[tasks.check]
-description = "everything CI would run: fmt-check, lint, test"
-depends = ["fmt-check", "lint", "test"]
-
-[tasks.demo]
+[tasks."rust:demo"]
 description = "run the demo host app at http://localhost:4000/__ashurbanipal"
 run = "cargo run --example demo"
 dir = "implementations/rust"
 sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "../../frontend/dbviewer.html"]
 
-[tasks."demo-sibling"]
+[tasks."rust:demo-sibling"]
 description = "run a second demo instance on 4001, sibling-polling the one on 4000"
 run = "cargo run --example demo"
 env = { PORT = "4001", SIBLING_PORT = "4000" }
 dir = "implementations/rust"
 sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "../../frontend/dbviewer.html"]
 
-[tasks.dev]
+[tasks."rust:dev"]
 description = "run the demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"
-run = "mise watch demo --restart"
+run = "mise watch rust:demo --restart"
 
-[tasks."seed-gen"]
-description = "regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql from tools/seed-gen (same generator, kept identical)"
-run = "cargo run > ../../.devcontainer/db/init/01-seed.sql && cp ../../.devcontainer/db/init/01-seed.sql ../../conformance/seed/seed.sql"
-dir = "tools/seed-gen"
+# ---- spring:* -----------------------------------------------------------
 
-[tasks."test-conformance"]
-description = "run the conformance kit (spawns the Rust implementation by default; set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead)"
-run = "cargo test --test conformance"
-dir = "implementations/rust"
-# See [tasks.test]'s comment on RUST_TEST_THREADS — only load-bearing in
-# spawned mode (one demo process + DB pool per test); harmless, and unused,
-# against an external target.
-env = { RUST_TEST_THREADS = "8" }
+[tasks."spring:build"]
+description = "gradle build (compile + assemble)"
+run = "./gradlew build"
+dir = "implementations/spring-boot-starter"
 
-[tasks."conformance-report"]
-description = "run the conformance kit and write conformance-report.json (suite version, target, pass/fail per requirement ID)"
-run = "bash conformance/runner/report.sh"
+[tasks."spring:test"]
+description = "gradle test"
+run = "./gradlew test"
+dir = "implementations/spring-boot-starter"
 
-[tasks."schema-conformance-install"]
-description = "one-time install of schemathesis (layer 2 shape-conformance fuzzer, docs/design.md §4.2) into a local venv"
-run = "python3 -m venv .venv-schemathesis && .venv-schemathesis/bin/pip install --upgrade pip schemathesis"
+[tasks."spring:check"]
+description = "gradle build + test"
+depends = ["spring:build", "spring:test"]
 
-[tasks."test-schema-conformance"]
-description = "fire schemathesis at spec/openapi.yaml (layer 2 shape conformance, docs/design.md §4.2) — spawns the Rust demo by default, or set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead; run schema-conformance-install first"
-run = "bash conformance/runner/schema-check.sh"
+# ---- frontend:* ---------------------------------------------------------
 
-[tasks."test-e2e-install"]
+[tasks."frontend:test-e2e-install"]
 description = "one-time Playwright browser install (Chromium, Firefox, WebKit) for the e2e suite"
 run = "pnpm install && pnpm exec playwright install --with-deps chromium firefox webkit"
 dir = "tools/e2e-tests"
 
-[tasks."test-e2e"]
+[tasks."frontend:test-e2e"]
 description = "run the Playwright e2e suite against dbviewer.html"
 run = "pnpm exec playwright test"
 dir = "tools/e2e-tests"
 
-[tasks."showcase"]
+[tasks."frontend:showcase"]
 description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to a Bayer-dithered tools/e2e-tests/showcase.gif"
 run = "./generate-showcase-gif.sh"
 dir = "tools/e2e-tests"
+
+# ---- conformance:* --------------------------------------------------------
+
+[tasks."conformance:seed-gen"]
+description = "regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql from tools/seed-gen (same generator, kept identical)"
+run = "cargo run > ../../.devcontainer/db/init/01-seed.sql && cp ../../.devcontainer/db/init/01-seed.sql ../../conformance/seed/seed.sql"
+dir = "tools/seed-gen"
+
+[tasks."conformance:test"]
+description = "run the conformance kit (spawns the Rust implementation by default; set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead)"
+run = "cargo test --test conformance"
+dir = "implementations/rust"
+# See [tasks."rust:test"]'s comment on RUST_TEST_THREADS — only load-bearing in
+# spawned mode (one demo process + DB pool per test); harmless, and unused,
+# against an external target.
+env = { RUST_TEST_THREADS = "8" }
+
+[tasks."conformance:report"]
+description = "run the conformance kit and write conformance-report.json (suite version, target, pass/fail per requirement ID)"
+run = "bash conformance/runner/report.sh"
+
+[tasks."conformance:schema-install"]
+description = "one-time install of schemathesis (layer 2 shape-conformance fuzzer, docs/design.md §4.2) into a local venv"
+run = "python3 -m venv .venv-schemathesis && .venv-schemathesis/bin/pip install --upgrade pip schemathesis"
+
+[tasks."conformance:schema-test"]
+description = "fire schemathesis at spec/openapi.yaml (layer 2 shape conformance, docs/design.md §4.2) — spawns the Rust demo by default, or set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead; run conformance:schema-install first"
+run = "bash conformance/runner/schema-check.sh"

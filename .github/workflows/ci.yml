@@ -81,9 +81,9 @@ jobs:
         with:
           workspaces: "implementations/rust -> target"
 
-      - run: mise run test-e2e-install
+      - run: mise run frontend:test-e2e-install
 
-      - run: mise run test-e2e
+      - run: mise run frontend:test-e2e
 
       - uses: actions/upload-artifact@v7
         if: failure()

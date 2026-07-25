@@ -38,7 +38,7 @@ VENV="$ROOT/.venv-schemathesis"
 SCHEMA="$ROOT/spec/openapi.yaml"
 
 if [ ! -x "$VENV/bin/schemathesis" ]; then
-    echo "schemathesis not installed — run \`mise run schema-conformance-install\` first" >&2
+    echo "schemathesis not installed — run \`mise run conformance:schema-install\` first" >&2
     exit 1
 fi
 

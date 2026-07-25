@@ -180,7 +180,7 @@ to trigger deterministically):
   individually-bounded timeout requirement, both need a second live
   instance (or a deliberately slow/black-hole one) as a fixture —
   `tools/e2e-tests`' `siblings.spec.ts` already exercises the
-  paired-instance case at the UI level (`mise run demo-sibling`'s
+  paired-instance case at the UI level (`mise run rust:demo-sibling`'s
   pattern); this runner only proves the protocol-shape default (empty
   config ⇒ empty list).
 - **§6 query timeout bound (`P6-QUERY-TIMEOUT-BOUNDED`).** There's no
