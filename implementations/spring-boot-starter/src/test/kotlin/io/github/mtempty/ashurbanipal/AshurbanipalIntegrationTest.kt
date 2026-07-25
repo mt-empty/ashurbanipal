@@ -1,7 +1,7 @@
 package io.github.mtempty.ashurbanipal
 
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -90,7 +90,7 @@ class AshurbanipalIntegrationTest {
     @Test
     fun `lists exactly the seeded tables in alphabetical order`() {
         val body = getJson("/api/tables")
-        val names = body["tables"].map { it["name"].asText() }
+        val names = (body["tables"] as Iterable<JsonNode>).map { it["name"].asText() }
         val expected = listOf(
             "_conformance_meta", "audit_log", "events", "feature_flags", "inventory_counts",
             "inventory_locations", "orders", "payments", "products", "reviews", "saved_reports",
@@ -166,7 +166,7 @@ class AshurbanipalIntegrationTest {
     @Test
     fun `sort on a numeric column is numeric not lexicographic`() {
         val body = getJson("/api/tables/data?table=products&sort=price&order=asc&limit=100")
-        val prices = body["rows"].map { it["price"].asText().toDouble() }
+        val prices = (body["rows"] as Iterable<JsonNode>).map { it["price"].asText().toDouble() }
         assertEquals(prices.sorted(), prices)
     }
 
@@ -207,7 +207,7 @@ class AshurbanipalIntegrationTest {
     @Test
     fun `common-values renders booleans as true false not pg array literals`() {
         val body = getJson("/api/tables/common-values?table=users&column=is_active")
-        val values = body["values"].map { it["value"].asText() }
+        val values = (body["values"] as Iterable<JsonNode>).map { it["value"].asText() }
         assertTrue(values.contains("true") || values.contains("false"))
         assertFalse(values.any { it == "t" || it == "f" })
     }
@@ -234,7 +234,7 @@ class AshurbanipalIntegrationTest {
     @Test
     fun `schema scoping excludes other schemas`() {
         val body = getJson("/api/tables")
-        val names = body["tables"].map { it["name"].asText() }
+        val names = (body["tables"] as Iterable<JsonNode>).map { it["name"].asText() }
         assertFalse(names.contains("decoy_items"))
     }
 }

@@ -1,9 +1,8 @@
 import java.security.MessageDigest
 
 plugins {
-    kotlin("jvm") version "2.1.20"
-    kotlin("plugin.spring") version "2.1.20"
-    id("io.spring.dependency-management") version "1.1.7"
+    kotlin("jvm") version "2.2.20"
+    kotlin("plugin.spring") version "2.2.20"
     `maven-publish`
 }
 
@@ -28,13 +27,11 @@ repositories {
     mavenCentral()
 }
 
-dependencyManagement {
-    imports {
-        mavenBom("org.springframework.boot:spring-boot-dependencies:3.5.16")
-    }
-}
-
 dependencies {
+    val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.0.7")
+    implementation(springBootBom)
+    compileOnly(springBootBom)
+
     // Starter-lean per implementation.md §5.1: only what every Spring Boot
     // host already has on its classpath. No JDBC driver, no HTTP client
     // dependency (siblings health checks use java.net.http). spring-webmvc
@@ -45,8 +42,7 @@ dependencies {
     // the full servlet stack for hosts that provide their own.
     implementation("org.springframework.boot:spring-boot-autoconfigure")
     implementation("org.springframework:spring-jdbc")
-    implementation("com.fasterxml.jackson.core:jackson-databind")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     compileOnly("org.springframework:spring-webmvc")
     compileOnly("jakarta.servlet:jakarta.servlet-api")
@@ -91,7 +87,7 @@ val repoRoot = rootDir.parentFile.parentFile
 val frontendSource = repoRoot.resolve("frontend/dbviewer.html")
 val pinnedFrontendSha256 = "57c0a2aa5487e66533950e170c63d4c1bf57609f557a8b47b213823f208a0991"
 
-val vendorFrontend by tasks.registering {
+val vendorFrontend = tasks.register("vendorFrontend") {
     description = "Copies frontend/dbviewer.html into generated resources, re-verifying its sha256."
     // Resource root added to the main source set below is
     // "generated-resources" (no "/ashurbanipal" suffix) — the classpath
