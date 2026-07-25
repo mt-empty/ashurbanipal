@@ -130,9 +130,14 @@ paths:
         - name: offset
           in: query
           required: false
+          description: >
+            Clamped to a minimum of 0, never an error — including negative
+            or out-of-range values, same treatment as `limit`. No
+            `minimum` on the schema below for the same reason as `limit`:
+            it's a JSON Schema rejection constraint, and this field is
+            never rejected for being out of range.
           schema:
             type: integer
-            minimum: 0
             default: 0
         - name: sort
           in: query

@@ -129,24 +129,31 @@ struct DataParams {
     filter: Option<String>,
     #[serde(default, deserialize_with = "deserialize_saturating_u32")]
     limit: Option<u32>,
+    #[serde(default, deserialize_with = "deserialize_saturating_u32")]
     offset: Option<u32>,
     sort: Option<String>,
     order: Option<String>,
 }
 
-/// `spec/protocol.md` §5.4 requires `limit` to be clamped, never rejected,
-/// for any out-of-range value — a plain `Option<u32>` field violates that
-/// for any numerically valid value outside `u32`'s range, positive
-/// (overflow) or negative, which serde/axum's `Query` extractor would
-/// otherwise reject with 400 before the handler's own `.clamp(1,
-/// max_page_size)` runs. Saturating here is safe either direction: an
-/// overflow saturates to `u32::MAX` and a negative value saturates to `0`,
-/// and `.clamp()` immediately pulls both back into range. `i128` comfortably
-/// covers any realistic out-of-range test input; a digit string too long
-/// even for that falls through to the same 400 as non-numeric input,
-/// which is a reasonable practical bound on "out-of-range" vs. "not a
-/// number at all". Non-numeric input (`"abc"`, `"1.5"`, `""`) is the
-/// latter and still 400s.
+/// `spec/protocol.md` §5.4 requires both `limit` and `offset` to be
+/// clamped, never rejected, for any out-of-range value — a plain
+/// `Option<u32>` field violates that for any numerically valid value
+/// outside `u32`'s range, positive (overflow) or negative, which
+/// serde/axum's `Query` extractor would otherwise reject with 400 before
+/// either field's own downstream handling runs (`limit`'s
+/// `.clamp(1, max_page_size)`; `offset`'s direct bind into SQL's `OFFSET`,
+/// which already returns zero rows gracefully for any in-range value
+/// larger than the table — see `offset_is_unclamped_and_beyond_table_size_returns_empty_rows`).
+/// Saturating here is safe either direction for both fields: an overflow
+/// saturates to `u32::MAX` (harmless — `limit` clamps it down, `offset`
+/// just yields an empty result set like any oversized offset already
+/// does) and a negative value saturates to `0` (harmless — `limit` clamps
+/// it up to 1, `offset` treats it as "from the start", the same as
+/// omitting it). `i128` comfortably covers any realistic out-of-range
+/// test input; a digit string too long even for that falls through to
+/// the same 400 as non-numeric input, which is a reasonable practical
+/// bound on "out-of-range" vs. "not a number at all". Non-numeric input
+/// (`"abc"`, `"1.5"`, `""`) is the latter and still 400s.
 fn deserialize_saturating_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
 where
     D: serde::Deserializer<'de>,

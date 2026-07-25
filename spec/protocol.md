@@ -130,7 +130,7 @@ Paginated, filtered, sorted rows for a single table.
 | `table`  | yes      | MUST match a table from §5.2 exactly (case-sensitive); otherwise 400. |
 | `filter` | no       | URL-encoded JSON AST, see §5.4.2.                             |
 | `limit`  | no       | Clamped, never an error — see below.                          |
-| `offset` | no       | Non-negative integer, default 0.                              |
+| `offset` | no       | Clamped, never an error — see below.                          |
 | `sort`   | no       | Single column name; MUST be validated against the table's real columns; unknown column → 400. |
 | `order`  | no       | `asc` \| `desc`, default `asc`; any other value → 400.        |
 
@@ -139,6 +139,12 @@ Paginated, filtered, sorted rows for a single table.
   default 100; default when the param is absent is `default_page_size`,
   reference default 50). Out-of-range values MUST be clamped, never
   rejected.
+- **`offset` clamping**: the effective offset is the requested value
+  clamped to a minimum of 0 (no upper bound — an offset beyond the
+  table's row count is valid and simply yields zero rows, not an error or
+  a second clamp point). Out-of-range values (negative, or larger than
+  the implementation's integer type can represent) MUST be clamped, never
+  rejected, same as `limit`.
 - **Sort semantics**: ordering MUST use the column's native type ordering
   (e.g. numeric columns sort numerically), not the text rendering of the
   serialized values.
