@@ -44,8 +44,8 @@ interpreted as described in RFC 2119.
 
 - The UI is served at `{mount}`; the five API routes live at
   `{mount}/api/...`.
-- `{mount}` is implementation-defined. `/__ashurbanipal` is the reference
-  default, not a requirement.
+- `{mount}` is implementation-defined. `/__ashurbanipal` is the Rust
+  implementation's default, not a requirement.
 - The frontend derives its API base from its own URL
   (`location.pathname + "/api"`), so an implementation MAY serve the
   unmodified frontend artifact at any mount, including behind a
@@ -103,8 +103,8 @@ Response:
 - `name` — the table name.
 - `comment` — the table's `COMMENT ON TABLE` text; MUST be omitted when
   the table has none.
-- Tables SHOULD be returned in a stable order (the reference sorts by
-  name).
+- Tables SHOULD be returned in a stable order (the Rust implementation
+  sorts by name).
 
 ### 5.3 `GET {mount}/api/table-counts`
 
@@ -205,7 +205,7 @@ Structural rules (violations → 400):
 - At most **10** conditions; more → 400.
 - Implementations MUST bound the byte length of the JSON-encoded filter
   parameter and reject oversize filters with 400, never a truncated
-  query. The reference bound is 8192 bytes on the URL-decoded JSON text —
+  query. The Rust implementation's bound is 8192 bytes on the URL-decoded JSON text —
   derived by measuring the JSON-over-DSL inflation of every valid case in
   `spec/fixtures/parser-tests.json` (worst case 5.67x, so the DSL era's
   1024 bytes of expressiveness needs ~5803 JSON bytes; 8192 is the
@@ -277,7 +277,7 @@ Response:
   MUST yield an empty `values` list, not an error.
 - `freq` is the fraction of rows (0–1], most frequent first.
 - `value` strings SHOULD match the §5.4.3 rendering of the same data
-  (the reference normalizes boolean `t`/`f` from the stats array's text
+  (the Rust implementation normalizes boolean `t`/`f` from the stats array's text
   form to `true`/`false` for this reason), so a value can round-trip
   into an equality filter.
 

@@ -38,4 +38,4 @@ name = "demo"
 
 [[test]]
 name = "conformance"
-path = "conformance/runner/main.rs"
+path = "../../conformance/runner/main.rs"

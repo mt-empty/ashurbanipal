@@ -187,15 +187,14 @@ its full path space and the host doesn't need to pick a mount point.
 ## 4. API contract
 
 > **Now normative elsewhere:** the endpoint contract lives in
-> `spec/protocol.md`. `spec/openapi.yaml` is **generated** from the Rust
-> reference's own route/type annotations (`utoipa` or equivalent), not
-> hand-maintained prose transcribed from the code — so the reference
-> cannot silently drift from its own published schema; the schema is
-> compiled from the same types the handlers actually return. Ports
-> consume `spec/openapi.yaml` as a fixed target; they don't generate it.
+> `spec/protocol.md`. `spec/openapi.yaml` is hand-maintained prose, same
+> as `spec/protocol.md` — not generated from any implementation's own
+> route/type annotations. Every implementation, Rust included, implements
+> against both as a fixed target; none of them generates either file.
 > Where this section and the spec disagree, the spec wins; this section
 > stays as rationale and background. See §4.2 for how the schema is kept
-> binding on every implementation, not just the reference.
+> binding on every implementation, and for the tradeoff hand-maintaining
+> it (rather than generating it) reintroduces.
 
 Paths below are shorthand for the full routes in §3.3 (e.g. `/tables` means
 `/__ashurbanipal/api/tables`).
@@ -305,32 +304,39 @@ session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd
 ### 4.2 Guaranteeing the contract across implementations
 
 Three independent layers exist so "the spec says X" reliably means every
-implementation does X, not just the reference. Each catches a drift
-failure mode the others structurally can't:
+implementation does X — no implementation, Rust included, gets special
+treatment. Each catches a drift failure mode the others structurally
+can't:
 
-1. **Schema, generated from the reference, not hand-written.**
-   `spec/openapi.yaml` is compiled from the Rust reference's own
-   route/type annotations, so it cannot describe a response shape the
-   reference doesn't actually produce — the reference-drifts-from-its-
-   own-spec failure mode is closed by construction, not by review
-   discipline. (Cost: the generator's annotations become a real,
-   non-dev-only dependency of the reference crate, since they live inline
-   on the router/handler code that's part of the published artifact —
-   unlike the demo-only tooling `CLAUDE.md` keeps out of
-   `[dependencies]`.) Ports do not generate this file; they implement
+1. **Schema, hand-maintained, governed rather than generated.**
+   `spec/openapi.yaml` is hand-maintained prose, same as
+   `spec/protocol.md` — not compiled from any implementation's own
+   route/type annotations. This makes the drifts-from-its-own-spec
+   failure mode a governance property, not a structural one: a spec
+   change is one PR touching `spec/protocol.md` + `spec/openapi.yaml` +
+   fixtures together, the same one-PR rule `implementation.md` §6.3
+   already applies to an implementation + its fixtures + the conformance
+   runner, generalized here rather than reinvented. Honest tradeoff this
+   reintroduces: without generation, drift between the hand-written
+   schema and actual behavior is no longer *prevented by construction* —
+   it's *caught after the fact*, by layer 2 below, whenever some
+   implementation's CI run first exercises the diverged case. No
+   implementation generates this file; every implementation implements
    against the published `spec/openapi.yaml` as a fixed target, same as
-   they implement against `spec/protocol.md`'s prose.
+   it implements against `spec/protocol.md`'s prose.
 2. **Shape conformance — schema fuzzing, every implementation, every CI
-   run.** Property-based schema testing (schemathesis or an equivalent
-   for the port's language) runs in CI against every implementation,
-   reference included, firing requests generated from
+   run, no exemptions.** Property-based schema testing (schemathesis or
+   an equivalent for the implementation's language) runs in CI against
+   every implementation's own build — the Rust implementation runs this
+   in its own CI exactly like any other implementation would, with no
+   structural exemption — firing requests generated from
    `spec/openapi.yaml` and asserting every response actually matches its
    documented type, nullability, and status code. This is what makes the
-   schema *binding* on ports rather than merely descriptive: returning a
-   JSON number for a numeric column (violating §4's all-values-as-strings
-   rule, §5.4.3 of `spec/protocol.md`) or omitting a required field fails
-   CI automatically — the fuzzer explores the schema's cases, not
-   whatever a human thought to hand-write.
+   schema *binding* on an implementation rather than merely descriptive:
+   returning a JSON number for a numeric column (violating §4's
+   all-values-as-strings rule, §5.4.3 of `spec/protocol.md`) or omitting
+   a required field fails CI automatically — the fuzzer explores the
+   schema's cases, not whatever a human thought to hand-write.
 3. **Behavior conformance — golden fixtures over seeded data.** Schema
    fuzzing only proves a response has the right *shape*; it can't catch
    wrong *logic* — AND/OR precedence inverted, `total_approx` reacting to

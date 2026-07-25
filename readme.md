@@ -48,6 +48,11 @@ Not published to crates.io yet — depend on it by path or git:
 ashurbanipal = { git = "https://github.com/you/ashurbanipal" }
 ```
 
+(The Rust crate lives at `implementations/rust/` in this repo — one of
+several planned language implementations of the same protocol, see
+`spec/protocol.md`. A path dependency from within a clone of this repo
+needs that subdirectory, e.g. `{ path = "implementations/rust" }`.)
+
 Merge its router into your existing Axum app, passing it a config and a
 `DbSource` wrapping your service's own `sqlx::PgPool` — no new DB connection,
 no new credentials:

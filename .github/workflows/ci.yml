@@ -43,6 +43,8 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "implementations/rust -> target"
 
       - run: mise run check
 
@@ -76,6 +78,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "implementations/rust -> target"
 
       - run: mise run test-e2e-install
 

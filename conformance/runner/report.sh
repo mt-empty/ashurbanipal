@@ -27,7 +27,7 @@ trap 'rm -f "$TEST_LOG" "$RESULTS_TSV" "$COVERAGE_TSV"' EXIT
 
 # Human output is unchanged (tee), suite's own exit code decides ours.
 set +e
-(cd "$ROOT" && cargo test --test conformance -- "$@") 2>&1 | tee "$TEST_LOG"
+(cd "$ROOT/implementations/rust" && cargo test --test conformance -- "$@") 2>&1 | tee "$TEST_LOG"
 SUITE_STATUS="${PIPESTATUS[0]}"
 set -e
 

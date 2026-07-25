@@ -8,7 +8,7 @@ import { defineConfig, devices } from "@playwright/test";
 // is the one exception and spawns its own second instance directly on top
 // of whichever per-project server it's already using (see
 // tests/support/second-server.ts).
-const REPO_ROOT = "../..";
+const CRATE_ROOT = "../../implementations/rust";
 const PORTS = { chromium: 4310, firefox: 4311, webkit: 4312 };
 // Playwright's per-project `testIgnore` replaces the root one rather than
 // merging with it, so every project-level `testIgnore` below must include
@@ -26,7 +26,7 @@ const EXTERNAL_BASE_URL = process.env.PLAYWRIGHT_BASE_URL;
 function demoServer(port: number) {
   return {
     command: "cargo run --example demo",
-    cwd: REPO_ROOT,
+    cwd: CRATE_ROOT,
     url: `http://localhost:${port}/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
