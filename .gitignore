@@ -8,3 +8,6 @@ tools/e2e-tests/playwright-report/
 tools/e2e-tests/playwright/.cache/
 .pnpm-store/
 /conformance-report.json
+/.venv-schemathesis/
+/.hypothesis/
+/.schemathesis/
