@@ -67,80 +67,22 @@ jobs:
           retention-days: 14
 
   conformance:
-    name: conformance kit + schema conformance (external-URL path, against the Kotlin demo)
-    runs-on: ubuntu-latest
-    services:
-      db:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: ashurbanipal
-          POSTGRES_PASSWORD: ashurbanipal
-          POSTGRES_DB: ashurbanipal
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v7
+    name: Spring Boot — conformance kit (external-URL path, against the Kotlin demo)
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: java
+      start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
+      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENVIRONMENT=dev ASHURBANIPAL_ENABLED_FOR=dev"
+      health-url: "http://localhost:4100/__ashurbanipal/api/tables"
+      conformance-url: "http://localhost:4100/__ashurbanipal"
+      report-name: spring-boot-conformance-report
 
-      - name: Apply the conformance seed
-        run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql "$DATABASE_URL" -f conformance/seed/seed.sql
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - uses: dtolnay/rust-toolchain@stable
-        # The conformance runner (layer 3) itself is Rust — every port's CI
-        # runs the same unmodified suite pointed at its own server via
-        # ASHURBANIPAL_CONFORMANCE_URL, per PORTING.md; it is never
-        # reimplemented per-port.
-
-      - name: Start the Spring Boot demo
-        working-directory: implementations/spring-boot-starter
-        env:
-          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/ashurbanipal
-          SPRING_DATASOURCE_USERNAME: ashurbanipal
-          SPRING_DATASOURCE_PASSWORD: ashurbanipal
-          PORT: "4100"
-          ASHURBANIPAL_ENVIRONMENT: dev
-          ASHURBANIPAL_ENABLED_FOR: dev
-        run: |
-          ./gradlew :demo:bootRun &
-          echo $! > /tmp/demo.pid
-          for _ in $(seq 1 60); do
-            curl -sf http://localhost:4100/__ashurbanipal/api/tables >/dev/null && exit 0
-            sleep 2
-          done
-          echo "Spring Boot demo did not become healthy in time" >&2
-          exit 1
-
-      - name: Run the conformance kit against it (layer 3, behavior)
-        env:
-          ASHURBANIPAL_CONFORMANCE_URL: http://localhost:4100/__ashurbanipal
-        run: bash conformance/runner/report.sh
-
-      - name: Install schemathesis
-        run: python3 -m venv .venv-schemathesis && .venv-schemathesis/bin/pip install --upgrade pip schemathesis
-
-      - name: Run schemathesis against it (layer 2, shape)
-        env:
-          ASHURBANIPAL_CONFORMANCE_URL: http://localhost:4100/__ashurbanipal
-        run: bash conformance/runner/schema-check.sh
-
-      - name: Stop the Spring Boot demo
-        if: always()
-        run: kill "$(cat /tmp/demo.pid)" 2>/dev/null || true
-
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: spring-boot-conformance-report
-          path: conformance-report.json
-          retention-days: 14
+  schema-conformance:
+    name: Spring Boot — schema conformance
+    uses: ./.github/workflows/_conformance-schema.yml
+    with:
+      toolchain: java
+      start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
+      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENVIRONMENT=dev ASHURBANIPAL_ENABLED_FOR=dev"
+      health-url: "http://localhost:4100/__ashurbanipal/api/tables"
+      conformance-url: "http://localhost:4100/__ashurbanipal"
