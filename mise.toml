@@ -10,6 +10,15 @@ run = "cargo build"
 [tasks.test]
 description = "cargo test (pass a path to run one test, e.g. `mise run test config::tests::name`)"
 run = "cargo test"
+# The conformance suite (conformance/runner) spawns one `demo` OS process per
+# test, each opening its own 5-connection pool against DATABASE_URL — on a
+# high-core-count machine, default (num-CPUs) test-thread parallelism can
+# multiply past Postgres's default max_connections (100) and surface as
+# spurious connection-reset failures, not a logic bug. Capping test threads
+# keeps peak concurrent connections well under that regardless of host CPU
+# count; the suite is fast enough that this costs a couple of seconds, not
+# minutes.
+env = { RUST_TEST_THREADS = "8" }
 
 [tasks.lint]
 description = "cargo clippy, denying warnings"
@@ -43,9 +52,21 @@ description = "run the demo host app, auto-rebuilding and restarting on src/ or 
 run = "mise watch demo --restart"
 
 [tasks."seed-gen"]
-description = "regenerate .devcontainer/db/init/01-seed.sql from tools/seed-gen"
-run = "cargo run > ../../.devcontainer/db/init/01-seed.sql"
+description = "regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql from tools/seed-gen (same generator, kept identical)"
+run = "cargo run > ../../.devcontainer/db/init/01-seed.sql && cp ../../.devcontainer/db/init/01-seed.sql ../../conformance/seed/seed.sql"
 dir = "tools/seed-gen"
+
+[tasks."test-conformance"]
+description = "run the conformance kit (spawns the reference by default; set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead)"
+run = "cargo test --test conformance"
+# See [tasks.test]'s comment on RUST_TEST_THREADS — only load-bearing in
+# spawned mode (one demo process + DB pool per test); harmless, and unused,
+# against an external target.
+env = { RUST_TEST_THREADS = "8" }
+
+[tasks."conformance-report"]
+description = "run the conformance kit and write conformance-report.json (suite version, target, pass/fail per requirement ID)"
+run = "bash conformance/runner/report.sh"
 
 [tasks."test-e2e-install"]
 description = "one-time Playwright browser install (Chromium, Firefox, WebKit) for the e2e suite"

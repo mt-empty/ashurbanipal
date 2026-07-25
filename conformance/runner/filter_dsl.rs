@@ -18,6 +18,7 @@
 //! that matter: equality narrowing, AND-tighter-than-OR precedence, NOT
 //! negation, IS NULL, and injection values staying inert bind params.
 
+use crate::assert::{assert_exact, assert_row_estimate, assert_status};
 use crate::common::TestServer;
 
 const BUILDER_FIXTURES: &str = include_str!("../../spec/fixtures/filter-builder-tests.json");
@@ -25,7 +26,7 @@ const BUILDER_FIXTURES: &str = include_str!("../../spec/fixtures/filter-builder-
 /// GETs `/tables/data?table=...&filter=...` and returns the raw response.
 async fn fetch(srv: &TestServer, table: &str, filter: &str) -> reqwest::Response {
     srv.client()
-        .get(srv.url("/__ashurbanipal/api/tables/data"))
+        .get(srv.url("/api/tables/data"))
         .query(&[("table", table), ("filter", filter)])
         .send()
         .await
@@ -71,20 +72,11 @@ async fn builder_fixture_cases_over_http() {
             None => serde_json::to_string(&case["conditions"]).unwrap(),
         };
         let resp = fetch(&srv, table, &filter).await;
-        let status = resp.status();
         if case.get("expect").is_some() {
-            assert_eq!(
-                status,
-                200,
-                "case {name}: valid AST should be accepted, got {status}: {}",
-                resp.text().await.unwrap()
-            );
+            assert_status(&resp, 200, &format!("case {name}: valid AST"));
         } else {
             let kind = case["expect_error"].as_str().unwrap();
-            assert_eq!(
-                status, 400,
-                "case {name}: should be rejected with 400 ({kind}), got {status}"
-            );
+            assert_status(&resp, 400, &format!("case {name}: {kind}"));
         }
     }
 }
@@ -97,10 +89,10 @@ async fn builder_fixture_cases_over_http() {
 async fn dsl_text_in_filter_param_is_rejected() {
     let srv = TestServer::spawn().await;
     let resp = fetch(&srv, "orders", "status = completed").await;
-    assert_eq!(
-        resp.status(),
+    assert_status(
+        &resp,
         400,
-        "DSL text must no longer be understood by the server"
+        "DSL text must no longer be understood by the server",
     );
 }
 
@@ -110,16 +102,16 @@ async fn empty_param_and_empty_array_mean_no_filter() {
     let srv = TestServer::spawn().await;
     for filter in ["", "[]"] {
         let resp = fetch(&srv, "users", filter).await;
-        assert_eq!(
-            resp.status(),
+        assert_status(
+            &resp,
             200,
-            "filter {filter:?} should be treated as no filter"
+            &format!("filter {filter:?} treated as no filter"),
         );
         let body: serde_json::Value = resp.json().await.unwrap();
-        assert_eq!(
+        assert_exact(
             body["rows"].as_array().unwrap().len(),
             50,
-            "filter {filter:?} should return an unfiltered default-size page"
+            &format!("filter {filter:?} unfiltered default-size page"),
         );
     }
 }
@@ -136,7 +128,11 @@ async fn equality_filter_narrows_rows() {
     let rows = body["rows"].as_array().unwrap();
     assert!(!rows.is_empty());
     for row in rows {
-        assert_eq!(row["status"], "completed");
+        assert_exact(
+            row["status"].clone(),
+            serde_json::json!("completed"),
+            "orders.status",
+        );
     }
 }
 
@@ -169,10 +165,10 @@ async fn not_negates_a_condition() {
         serde_json::json!([{"not": true, "column": "status", "op": "=", "value": "completed"}]);
     let body = assert_ast_accepted(&srv, "not", "orders", ast).await;
     let rows = body["rows"].as_array().unwrap();
-    assert_eq!(
+    assert_exact(
         rows.len(),
         50,
-        "a full default page of non-completed orders"
+        "a full default page of non-completed orders",
     );
     for row in rows {
         assert_ne!(row["status"], "completed");
@@ -187,14 +183,70 @@ async fn is_null_and_is_not_null_partition_rows() {
     let ast = serde_json::json!([{"column": "last_login_at", "op": "IS NULL"}]);
     let body = assert_ast_accepted(&srv, "is-null", "users", ast).await;
     let rows = body["rows"].as_array().unwrap();
-    assert_eq!(rows.len(), 6);
+    assert_exact(rows.len(), 6, "IS NULL row count");
     for row in rows {
         assert!(row["last_login_at"].is_null());
     }
 
     let ast = serde_json::json!([{"column": "last_login_at", "op": "IS NOT NULL"}]);
     let body = assert_ast_accepted(&srv, "is-not-null", "users", ast).await;
-    assert_eq!(body["rows"].as_array().unwrap().len(), 44);
+    assert_exact(
+        body["rows"].as_array().unwrap().len(),
+        44,
+        "IS NOT NULL row count",
+    );
+}
+
+/// Contradictory conditions are legal (spec/protocol.md §5.4.2) and simply
+/// return zero rows, not an error.
+#[tokio::test]
+async fn contradictory_conditions_return_zero_rows_not_error() {
+    let srv = TestServer::spawn().await;
+    let ast = serde_json::json!([
+        {"column": "status", "op": "=", "value": "completed"},
+        {"logic": "AND", "column": "status", "op": "=", "value": "pending"},
+    ]);
+    let body = assert_ast_accepted(&srv, "contradictory", "orders", ast).await;
+    assert_exact(
+        body["rows"].as_array().unwrap().len(),
+        0,
+        "contradictory AND should be zero rows, not an error",
+    );
+}
+
+/// spec/protocol.md §5.4.4: `total_approx` MUST NOT be affected by
+/// `filter` — it's the whole-table catalog estimate, not a filtered count.
+#[tokio::test]
+async fn total_approx_is_unaffected_by_filter() {
+    let srv = TestServer::spawn().await;
+    // `pending` orders are a small minority of the 208 seeded orders (31),
+    // well under the default 50-row page — so the filtered response's row
+    // count is a real narrowing, not just a smaller slice of a page cap
+    // both requests would otherwise hit identically.
+    let unfiltered = fetch(&srv, "orders", "")
+        .await
+        .json::<serde_json::Value>()
+        .await
+        .unwrap();
+    let ast = serde_json::json!([{"column": "status", "op": "=", "value": "pending"}]);
+    let filtered = assert_ast_accepted(&srv, "total_approx-unaffected", "orders", ast).await;
+
+    assert_row_estimate(
+        &unfiltered["total_approx"],
+        "orders total_approx (unfiltered)",
+    );
+    assert_row_estimate(&filtered["total_approx"], "orders total_approx (filtered)");
+    assert_exact(
+        filtered["total_approx"].clone(),
+        unfiltered["total_approx"].clone(),
+        "total_approx must be identical filtered vs unfiltered",
+    );
+    // The filter itself did narrow the rows returned — otherwise this test
+    // wouldn't distinguish "correctly unaffected" from "filter silently
+    // ignored".
+    assert!(
+        filtered["rows"].as_array().unwrap().len() < unfiltered["rows"].as_array().unwrap().len()
+    );
 }
 
 /// An injection-shaped value stays an inert bind param: the request
@@ -207,26 +259,26 @@ async fn injection_value_stays_a_bind_param() {
     let body = assert_ast_accepted(&srv, "injection", "orders", ast).await;
     assert!(body["rows"].as_array().unwrap().is_empty());
     let users_still_exist = fetch(&srv, "users", "").await;
-    assert_eq!(
-        users_still_exist.status(),
+    assert_status(
+        &users_still_exist,
         200,
-        "`users` should still exist and be queryable — the value must never reach SQL text"
+        "`users` should still exist and be queryable — the value must never reach SQL text",
     );
 }
 
 /// A8/A10 equivalents live in the fixture sweep (`unknown-column`,
-/// `not-does-not-bypass-allow-list`, `known-column-wrong-table`); this
-/// pins the response *shape* for one of them: plain-text 400 naming the
-/// column, no protocol change from the DSL era's allow-list rejection.
+/// `not-does-not-bypass-allow-list`, `known-column-wrong-table`); this pins
+/// the status for one of them directly. Per the status-only error tier
+/// (docs/design.md §4.2), the body's exact wording is not asserted —
+/// spec/protocol.md §2 makes it implementation-defined.
 #[tokio::test]
-async fn unknown_column_rejection_names_the_column() {
+async fn unknown_column_rejection_is_a_400() {
     let srv = TestServer::spawn().await;
     let ast = serde_json::json!([{"column": "pg_sleep", "op": "=", "value": "1"}]);
     let resp = fetch(&srv, "users", &serde_json::to_string(&ast).unwrap()).await;
-    assert_eq!(resp.status(), 400);
-    let body = resp.text().await.unwrap();
-    assert!(
-        body.contains("pg_sleep"),
-        "400 body should name the rejected column, got: {body}"
+    assert_status(
+        &resp,
+        400,
+        "filter column=pg_sleep (not a real users column)",
     );
 }
