@@ -134,5 +134,5 @@ implementation's own CI.
 
 | Implementation | Language / framework | Protocol version | Conformance CI |
 |----------------|-----------------------|-------------------|-----------------|
-| `implementations/rust` | Rust / Axum | 1 | `.github/workflows/conformance.yml` |
+| `implementations/rust` | Rust / Axum | 1 | `.github/workflows/conformance-rust.yml` |
 | `implementations/spring-boot-starter` | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |

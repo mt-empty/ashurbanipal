@@ -1,0 +1,109 @@
+name: _conformance-behavior
+
+# Reusable (workflow_call only — no push/pull_request triggers, never runs
+# on its own) layer-3 behavior-conformance job: start an implementation's
+# demo, point the conformance kit at it over HTTP, upload the report. Kept
+# as its own job (not merged with schema conformance) so a shape failure
+# and a behavior failure never interleave in one log — see COVERAGE.md.
+
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: "Language toolchain the demo needs to start: rust | java"
+        required: true
+        type: string
+      start-command:
+        description: "Foreground command that starts the demo (backgrounded by this workflow)"
+        required: true
+        type: string
+      start-env:
+        description: "Optional space-separated KEY=VALUE pairs exported before start-command runs"
+        required: false
+        type: string
+        default: ""
+      health-url:
+        description: "URL polled until it responds 2xx, signaling the demo is ready"
+        required: true
+        type: string
+      conformance-url:
+        description: "ASHURBANIPAL_CONFORMANCE_URL the kit runs against"
+        required: true
+        type: string
+      report-name:
+        description: "Artifact name for the uploaded conformance-report.json"
+        required: true
+        type: string
+
+env:
+  DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
+
+jobs:
+  conformance:
+    name: conformance kit (layer 3, behavior — external-URL path)
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ashurbanipal
+          POSTGRES_PASSWORD: ashurbanipal
+          POSTGRES_DB: ashurbanipal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply the conformance seed
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql "$DATABASE_URL" -f conformance/seed/seed.sql
+
+      - name: Set up Java toolchain
+        if: inputs.toolchain == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # The conformance runner itself (layer 3) is Rust regardless of which
+      # implementation is under test — report.sh always runs `cargo test`
+      # inside implementations/rust, per PORTING.md.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "implementations/rust -> target"
+
+      - name: Start the demo
+        run: |
+          ${{ inputs.start-env && format('export {0}', inputs.start-env) || 'true' }}
+          ${{ inputs.start-command }} &
+          echo $! > /tmp/demo.pid
+          for _ in $(seq 1 60); do
+            curl -sf "${{ inputs.health-url }}" >/dev/null && exit 0
+            sleep 2
+          done
+          echo "demo did not become healthy in time" >&2
+          exit 1
+
+      - name: Run the conformance kit against it (layer 3, behavior)
+        env:
+          ASHURBANIPAL_CONFORMANCE_URL: ${{ inputs.conformance-url }}
+        run: bash conformance/runner/report.sh
+
+      - name: Stop the demo
+        if: always()
+        run: kill "$(cat /tmp/demo.pid)" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ${{ inputs.report-name }}
+          path: conformance-report.json
+          retention-days: 14

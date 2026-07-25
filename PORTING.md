@@ -42,7 +42,7 @@ too, not just future ports:
    `spec/openapi.yaml`'s declared types, nullability, and status codes.
    The Rust implementation's instance is schemathesis
    (`conformance/runner/schema-check.sh`, wired into
-   `.github/workflows/conformance.yml`'s `schema-conformance` job); a port
+   `.github/workflows/conformance-rust.yml`'s `schema-conformance` job); a port
    in a non-Python stack wires an equivalent tool for its own language
    (e.g. a JVM OpenAPI-validation library for a Spring Boot port) rather
    than shelling out to schemathesis. Either way it fires against
