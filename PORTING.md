@@ -27,3 +27,27 @@ Since the frontend is the single canonical implementation of the filter
 grammar parser (`spec/filter-dsl.md`), vendoring it pins filter *syntax*
 compatibility, not just UI/UX — treat a version bump here with the same
 care as a `spec/protocol.md` version bump.
+
+## Conformance is two layers, both required
+
+A listed port needs its own CI running two independent checks against
+`spec/openapi.yaml` and `spec/protocol.md` (`docs/design.md` §4.2) — no
+port is exempt from either, and this applies to the Rust implementation
+too, not just future ports:
+
+1. **Behavior conformance** — the golden-fixture runner in
+   `conformance/runner`, pointed at the port via `ASHURBANIPAL_CONFORMANCE_URL`.
+2. **Shape conformance** — a property-based OpenAPI check fired at the
+   port's own running instance, asserting every response matches
+   `spec/openapi.yaml`'s declared types, nullability, and status codes.
+   The Rust implementation's instance is schemathesis
+   (`conformance/runner/schema-check.sh`, wired into
+   `.github/workflows/conformance.yml`'s `schema-conformance` job); a port
+   in a non-Python stack wires an equivalent tool for its own language
+   (e.g. a JVM OpenAPI-validation library for a Spring Boot port) rather
+   than shelling out to schemathesis. Either way it fires against
+   `spec/openapi.yaml` as published — no port owns or forks that file.
+
+Both checks passing is a listing prerequisite, the same bar the Rust
+implementation itself has to clear — a green behavior-conformance run
+alone does not prove response shape is right, and vice versa.

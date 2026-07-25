@@ -76,6 +76,14 @@ env = { RUST_TEST_THREADS = "8" }
 description = "run the conformance kit and write conformance-report.json (suite version, target, pass/fail per requirement ID)"
 run = "bash conformance/runner/report.sh"
 
+[tasks."schema-conformance-install"]
+description = "one-time install of schemathesis (layer 2 shape-conformance fuzzer, docs/design.md §4.2) into a local venv"
+run = "python3 -m venv .venv-schemathesis && .venv-schemathesis/bin/pip install --upgrade pip schemathesis"
+
+[tasks."test-schema-conformance"]
+description = "fire schemathesis at spec/openapi.yaml (layer 2 shape conformance, docs/design.md §4.2) — spawns the Rust demo by default, or set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead; run schema-conformance-install first"
+run = "bash conformance/runner/schema-check.sh"
+
 [tasks."test-e2e-install"]
 description = "one-time Playwright browser install (Chromium, Firefox, WebKit) for the e2e suite"
 run = "pnpm install && pnpm exec playwright install --with-deps chromium firefox webkit"

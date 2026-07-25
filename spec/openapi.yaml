@@ -72,6 +72,19 @@ paths:
             otherwise 400.
           schema:
             type: string
+          examples:
+            # Three named cases, sourced from conformance/seed/seed.sql, so
+            # the Examples phase actually exercises distinct 200-response
+            # shapes rather than only ever hitting `orders`: a plain table,
+            # one with a composite PK/FK pair (composite-key omission from
+            # column metadata, spec/protocol.md §5.4.1), and one deliberately
+            # left un-ANALYZEd (total_approx == -1, spec/protocol.md §5.4.4).
+            orders:
+              value: orders
+            inventory_counts:
+              value: inventory_counts
+            feature_flags:
+              value: feature_flags
         - name: filter
           in: query
           required: false
@@ -91,15 +104,29 @@ paths:
                 maxItems: 10
                 items:
                   $ref: "#/components/schemas/FilterCondition"
+              examples:
+                # Keyed to match the `orders` case above so a combined
+                # example request stays internally consistent (a real
+                # column of that table).
+                orders:
+                  value:
+                    - column: status
+                      op: "="
+                      value: completed
         - name: limit
           in: query
           required: false
           description: >
             Clamped to [1, max_page_size] (reference default max 100),
-            never an error. Default is default_page_size (reference 50).
+            never an error — including negative or out-of-range values.
+            Default is default_page_size (reference 50). Deliberately no
+            `minimum`/`maximum` on the schema below: those are JSON Schema
+            *rejection* constraints, and this field is never rejected for
+            being out of range, only clamped — declaring bounds here would
+            claim behavior the API doesn't have.
           schema:
             type: integer
-            minimum: 0
+          example: 10
         - name: offset
           in: query
           required: false
@@ -116,6 +143,9 @@ paths:
             column's native type ordering.
           schema:
             type: string
+          examples:
+            orders:
+              value: created_at
         - name: order
           in: query
           required: false
@@ -149,11 +179,25 @@ paths:
           required: true
           schema:
             type: string
+          examples:
+            # `feature_flags` is deliberately excluded from the seed's
+            # ANALYZE pass (conformance/seed/README.md), so this pair
+            # exercises the empty-values-not-an-error path
+            # (spec/protocol.md §5.5) alongside the ordinary populated one.
+            orders:
+              value: orders
+            feature_flags:
+              value: feature_flags
         - name: column
           in: query
           required: true
           schema:
             type: string
+          examples:
+            orders:
+              value: status
+            feature_flags:
+              value: enabled
       responses:
         "200":
           description: >
