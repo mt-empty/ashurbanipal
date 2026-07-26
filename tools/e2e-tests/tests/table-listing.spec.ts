@@ -2,8 +2,12 @@ import { test, expect } from "@playwright/test";
 import { gotoApp, selectTable } from "./support/helpers";
 
 const SEEDED_TABLES = [
+  "_conformance_meta",
   "audit_log",
   "events",
+  "feature_flags",
+  "inventory_counts",
+  "inventory_locations",
   "orders",
   "payments",
   "products",
@@ -18,8 +22,11 @@ test("sidebar lists all seeded tables alphabetically with approx row counts", as
   await gotoApp(page);
   const buttons = page.locator("#tables button");
   await expect(buttons).toHaveCount(SEEDED_TABLES.length);
+  // approx_rows is -1 for a never-ANALYZEd table (spec/protocol.md
+  // §5.4.4's staleness allowance) — _conformance_meta and feature_flags
+  // are seeded that way deliberately, so the count isn't always \d+.
   await expect(buttons).toHaveText(
-    SEEDED_TABLES.map((name) => new RegExp(`^${name}~\\d+$`)),
+    SEEDED_TABLES.map((name) => new RegExp(`^${name}~(-1|\\d+)$`)),
   );
 });
 

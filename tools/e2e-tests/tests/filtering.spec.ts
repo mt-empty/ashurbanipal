@@ -51,6 +51,32 @@ test("an invalid filter surfaces the backend's rejection text verbatim", async (
   await expect(page.locator("#error")).toHaveText(/not allowed.*nonexistent_column/i);
 });
 
+test("a grammar-invalid filter errors client-side and sends no request", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const dataRequests: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/tables/data")) dataRequests.push(r.url());
+  });
+  await applyFilter(page, "status == completed"); // R4: unknown operator
+  await expect(page.locator("#error")).toHaveText(/at position \d+/);
+  expect(dataRequests).toEqual([]);
+});
+
+test("the filter crosses the wire as a JSON AST, not DSL text", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const requestPromise = page.waitForRequest(
+    (r) => r.url().includes("/tables/data") && r.url().includes("filter="),
+  );
+  const filter = page.locator("#filter");
+  await filter.fill("status = completed");
+  await filter.press("Enter");
+  const request = await requestPromise;
+  const filterParam = new URL(request.url()).searchParams.get("filter")!;
+  expect(JSON.parse(filterParam)).toEqual([{ column: "status", op: "=", value: "completed" }]);
+});
+
 test("IS NULL filters to only null-valued rows", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "users");

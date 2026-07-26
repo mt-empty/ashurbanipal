@@ -2,62 +2,149 @@
 watchexec = "latest"
 node = "26"
 pnpm = "latest"
+go = "1.25.3"
+java = "temurin-21"
 
-[tasks.build]
-description = "cargo build"
-run = "cargo build"
-
-[tasks.test]
-description = "cargo test (pass a path to run one test, e.g. `mise run test config::tests::name`)"
-run = "cargo test"
-
-[tasks.lint]
-description = "cargo clippy, denying warnings"
-run = "cargo clippy -- -D warnings"
-
-[tasks.fmt]
-description = "cargo fmt"
-run = "cargo fmt"
-
-[tasks."fmt-check"]
-description = "cargo fmt --check"
-run = "cargo fmt --check"
+# ---- top-level umbrella tasks -----------------------------------------
+# `mise run check` is everything CI runs, across every implementation.
+# `mise run rust` / `spring` / `frontend` / `conformance` are the same
+# thing scoped to one layer; each fans out to its own namespaced
+# `<layer>:*` subtasks below.
 
 [tasks.check]
-description = "everything CI would run: fmt-check, lint, test"
-depends = ["fmt-check", "lint", "test"]
+description = "everything CI would run, across every implementation: rust, spring, frontend, conformance"
+depends = ["rust", "spring", "frontend", "conformance"]
 
-[tasks.demo]
+[tasks.rust]
+description = "rust implementation checks: fmt-check, lint, test"
+depends = ["rust:fmt-check", "rust:lint", "rust:test"]
+
+[tasks.spring]
+description = "spring-boot-starter implementation checks: build, test"
+depends = ["spring:check"]
+
+[tasks.frontend]
+description = "frontend checks: Playwright e2e suite against dbviewer.html"
+depends = ["frontend:test-e2e"]
+
+[tasks.conformance]
+description = "conformance suite: black-box conformance + schema fuzzing"
+depends = ["conformance:test", "conformance:schema-test"]
+
+# ---- rust:* -------------------------------------------------------------
+
+[tasks."rust:build"]
+description = "cargo build"
+run = "cargo build"
+dir = "implementations/rust"
+
+[tasks."rust:test"]
+description = "cargo test --lib: the crate's own inline unit tests (pass a path to run one test, e.g. `mise run rust:test config::tests::name`)"
+# --lib excludes the `[[test]] name = "conformance"` integration target
+# (Cargo.toml) — plain `cargo test` picks that up too, which would run the
+# same spawn-heavy conformance suite conformance:test already owns, a second
+# time, concurrently with it (check's rust and conformance deps run in
+# parallel). Doubling up that suite doubles concurrent spawned `demo`
+# processes and DB connections and has surfaced as spurious
+# connection-reset/incomplete-response failures under CI resource pressure,
+# not a logic bug.
+run = "cargo test --lib"
+dir = "implementations/rust"
+
+[tasks."rust:lint"]
+description = "cargo clippy, denying warnings"
+run = "cargo clippy -- -D warnings"
+dir = "implementations/rust"
+
+[tasks."rust:fmt"]
+description = "cargo fmt"
+run = "cargo fmt"
+dir = "implementations/rust"
+
+[tasks."rust:fmt-check"]
+description = "cargo fmt --check"
+run = "cargo fmt --check"
+dir = "implementations/rust"
+
+[tasks."rust:demo"]
 description = "run the demo host app at http://localhost:4000/__ashurbanipal"
 run = "cargo run --example demo"
-sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml"]
+dir = "implementations/rust"
+sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "../../frontend/dbviewer.html"]
 
-[tasks."demo-sibling"]
+[tasks."rust:demo-sibling"]
 description = "run a second demo instance on 4001, sibling-polling the one on 4000"
 run = "cargo run --example demo"
 env = { PORT = "4001", SIBLING_PORT = "4000" }
-sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml"]
+dir = "implementations/rust"
+sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "../../frontend/dbviewer.html"]
 
-[tasks.dev]
+[tasks."rust:dev"]
 description = "run the demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"
-run = "mise watch demo --restart"
+run = "mise watch rust:demo --restart"
 
-[tasks."seed-gen"]
-description = "regenerate .devcontainer/db/init/01-seed.sql from tools/seed-gen"
-run = "cargo run > ../../.devcontainer/db/init/01-seed.sql"
-dir = "tools/seed-gen"
+# ---- spring:* -----------------------------------------------------------
 
-[tasks."test-e2e-install"]
+[tasks."spring:build"]
+description = "gradle build (compile + assemble)"
+run = "./gradlew build"
+dir = "implementations/spring-boot-starter"
+
+[tasks."spring:test"]
+description = "gradle test"
+run = "./gradlew test"
+dir = "implementations/spring-boot-starter"
+
+[tasks."spring:check"]
+description = "gradle build + test"
+depends = ["spring:build", "spring:test"]
+
+# ---- frontend:* ---------------------------------------------------------
+
+[tasks."frontend:test-e2e-install"]
 description = "one-time Playwright browser install (Chromium, Firefox, WebKit) for the e2e suite"
 run = "pnpm install && pnpm exec playwright install --with-deps chromium firefox webkit"
 dir = "tools/e2e-tests"
 
-[tasks."test-e2e"]
+[tasks."frontend:test-e2e"]
 description = "run the Playwright e2e suite against dbviewer.html"
 run = "pnpm exec playwright test"
 dir = "tools/e2e-tests"
 
-[tasks."showcase"]
+[tasks."frontend:showcase"]
 description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to a Bayer-dithered tools/e2e-tests/showcase.gif"
 run = "./generate-showcase-gif.sh"
 dir = "tools/e2e-tests"
+
+# ---- conformance:* --------------------------------------------------------
+
+[tasks."conformance:seed-gen"]
+description = "regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql from tools/seed-gen (same generator, kept identical)"
+run = "cargo run > ../../.devcontainer/db/init/01-seed.sql && cp ../../.devcontainer/db/init/01-seed.sql ../../conformance/seed/seed.sql"
+dir = "tools/seed-gen"
+
+[tasks."conformance:test"]
+description = "run the conformance kit (spawns the Rust implementation by default; set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead)"
+run = "cargo test --test conformance"
+dir = "implementations/rust"
+# Spawned mode opens one `demo` OS process per test, each with its own
+# 5-connection pool against DATABASE_URL — on a high-core-count machine,
+# default (num-CPUs) test-thread parallelism can multiply past Postgres's
+# default max_connections (100) and surface as spurious connection-reset
+# failures, not a logic bug. Capping test threads keeps peak concurrent
+# connections well under that regardless of host CPU count; the suite is
+# fast enough that this costs a couple of seconds, not minutes. Harmless,
+# and unused, against an external target.
+env = { RUST_TEST_THREADS = "8" }
+
+[tasks."conformance:report"]
+description = "run the conformance kit and write conformance-report.json (suite version, target, pass/fail per requirement ID)"
+run = "bash conformance/runner/report.sh"
+
+[tasks."conformance:schema-install"]
+description = "one-time install of schemathesis (layer 2 shape-conformance fuzzer, docs/design.md §4.2) into a local venv"
+run = "python3 -m venv .venv-schemathesis && .venv-schemathesis/bin/pip install --upgrade pip schemathesis"
+
+[tasks."conformance:schema-test"]
+description = "fire schemathesis at spec/openapi.yaml (layer 2 shape conformance, docs/design.md §4.2) — spawns the Rust demo by default, or set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead; run conformance:schema-install first"
+run = "bash conformance/runner/schema-check.sh"

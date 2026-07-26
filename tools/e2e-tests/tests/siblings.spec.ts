@@ -3,7 +3,7 @@ import { spawnDemo, freePort } from "./support/second-server";
 
 // The one spec that doesn't share the config's default webServer — sibling
 // health-polling needs a second live instance, so this spawns its own pair
-// directly (mirroring `mise run demo-sibling`'s PORT/SIBLING_PORT), per the
+// directly (mirroring `mise run rust:demo-sibling`'s PORT/SIBLING_PORT), per the
 // design doc §3.
 
 test("shows a healthy sibling with its name, status dot, and link", async ({ page }) => {

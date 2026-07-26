@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directory: "/"
+    directory: "/implementations/rust"
     schedule:
       interval: weekly
     groups:

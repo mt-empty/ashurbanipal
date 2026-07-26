@@ -7,3 +7,12 @@ tools/e2e-tests/showcase-results/
 tools/e2e-tests/playwright-report/
 tools/e2e-tests/playwright/.cache/
 .pnpm-store/
+/conformance-report.json
+/.venv-schemathesis/
+/.hypothesis/
+/.schemathesis/
+
+# Gradle (implementations/spring-boot-starter)
+implementations/spring-boot-starter/**/build/
+implementations/spring-boot-starter/.gradle/
+implementations/spring-boot-starter/**/out/

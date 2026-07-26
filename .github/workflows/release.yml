@@ -1,0 +1,31 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: attach frontend artifact to the GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Checksum the frontend artifact
+        run: sha256sum frontend/dbviewer.html | awk '{print $1}' > dbviewer.html.sha256
+
+      # crates.io publishing is intentionally not wired up here yet — see
+      # readme.md's "Not published to crates.io yet" note. Publishing is a
+      # one-way action (no clean unpublish) that needs a registry token;
+      # add it as its own explicit step when that's actually decided, not
+      # bundled into this workflow by default.
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            frontend/dbviewer.html
+            LICENSE
+            dbviewer.html.sha256

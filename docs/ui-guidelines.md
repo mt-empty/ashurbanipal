@@ -40,10 +40,13 @@ these on purpose rather than by neglect:
 4. **Consistency and standards** — prefer platform conventions over
    inventing new ones. This is *why* native `<dialog>`/Popover/Clipboard
    were chosen over bespoke widgets — see R2.
-5. **Error prevention** — stop bad input before it does anything, not after
-   (schema allow-lists, DSL parse-or-400). Mostly a backend concern already;
-   the frontend's job is to not contradict it (never offer an action the
-   backend will reject).
+5. **Error prevention** — stop bad input before it does anything, not after.
+   Split ownership: DSL grammar errors are now caught client-side at parse
+   time, before any request goes out (`frontend-style-guide.md` §3);
+   schema allow-listing (does this column exist on this table) stays
+   backend-only, since it needs live schema knowledge the frontend doesn't
+   have. For that half, the frontend's job is still to not contradict it —
+   never offer an action the backend would reject.
 6. **Recognition rather than recall** — surface state instead of making the
    user remember it (row counts always visible, active sort shown via
    ▲/▼, remembered table/sort via `localStorage`). Full weight.
