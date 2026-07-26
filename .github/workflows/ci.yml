@@ -10,7 +10,7 @@ env:
 
 jobs:
   check:
-    name: fmt, clippy, cargo test
+    name: rust (fmt, clippy, test) + frontend e2e
     runs-on: ubuntu-latest
     services:
       db:
@@ -46,46 +46,11 @@ jobs:
         with:
           workspaces: "implementations/rust -> target"
 
-      - run: mise run conformance:schema-install
-
-      - run: mise run check
-
-  e2e:
-    name: playwright e2e
-    runs-on: ubuntu-latest
-    services:
-      db:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: ashurbanipal
-          POSTGRES_PASSWORD: ashurbanipal
-          POSTGRES_DB: ashurbanipal
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Seed database
-        run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql "$DATABASE_URL" -f .devcontainer/db/init/01-seed.sql
-
-      - uses: jdx/mise-action@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "implementations/rust -> target"
+      - run: mise run rust
 
       - run: mise run frontend:test-e2e-install
 
-      - run: mise run frontend:test-e2e
+      - run: mise run frontend
 
       - uses: actions/upload-artifact@v7
         if: failure()
