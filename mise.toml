@@ -39,18 +39,17 @@ run = "cargo build"
 dir = "implementations/rust"
 
 [tasks."rust:test"]
-description = "cargo test (pass a path to run one test, e.g. `mise run rust:test config::tests::name`)"
-run = "cargo test"
+description = "cargo test --lib: the crate's own inline unit tests (pass a path to run one test, e.g. `mise run rust:test config::tests::name`)"
+# --lib excludes the `[[test]] name = "conformance"` integration target
+# (Cargo.toml) — plain `cargo test` picks that up too, which would run the
+# same spawn-heavy conformance suite conformance:test already owns, a second
+# time, concurrently with it (check's rust and conformance deps run in
+# parallel). Doubling up that suite doubles concurrent spawned `demo`
+# processes and DB connections and has surfaced as spurious
+# connection-reset/incomplete-response failures under CI resource pressure,
+# not a logic bug.
+run = "cargo test --lib"
 dir = "implementations/rust"
-# The conformance suite (conformance/runner) spawns one `demo` OS process per
-# test, each opening its own 5-connection pool against DATABASE_URL — on a
-# high-core-count machine, default (num-CPUs) test-thread parallelism can
-# multiply past Postgres's default max_connections (100) and surface as
-# spurious connection-reset failures, not a logic bug. Capping test threads
-# keeps peak concurrent connections well under that regardless of host CPU
-# count; the suite is fast enough that this costs a couple of seconds, not
-# minutes.
-env = { RUST_TEST_THREADS = "8" }
 
 [tasks."rust:lint"]
 description = "cargo clippy, denying warnings"
@@ -128,9 +127,14 @@ dir = "tools/seed-gen"
 description = "run the conformance kit (spawns the Rust implementation by default; set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead)"
 run = "cargo test --test conformance"
 dir = "implementations/rust"
-# See [tasks."rust:test"]'s comment on RUST_TEST_THREADS — only load-bearing in
-# spawned mode (one demo process + DB pool per test); harmless, and unused,
-# against an external target.
+# Spawned mode opens one `demo` OS process per test, each with its own
+# 5-connection pool against DATABASE_URL — on a high-core-count machine,
+# default (num-CPUs) test-thread parallelism can multiply past Postgres's
+# default max_connections (100) and surface as spurious connection-reset
+# failures, not a logic bug. Capping test threads keeps peak concurrent
+# connections well under that regardless of host CPU count; the suite is
+# fast enough that this costs a couple of seconds, not minutes. Harmless,
+# and unused, against an external target.
 env = { RUST_TEST_THREADS = "8" }
 
 [tasks."conformance:report"]
