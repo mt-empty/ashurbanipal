@@ -102,9 +102,11 @@ Two components, same as the original concept:
   - *Filter autocomplete* — the filter input suggests column names via a
     native `<datalist>` at condition-start boundaries (empty input, or
     right after `AND `/`OR `/`NOT `). No value- or operator-level
-    autocomplete, and no parsing of the filter text client-side (see
-    `filter-dsl.md` and `frontend-style-guide.md` §7) — both would require
-    understanding where the cursor sits in the grammar. (An earlier
+    autocomplete, and no *as-you-type* parsing of the filter text — both
+    would require understanding where the cursor sits in the grammar.
+    (The submit-time client-side parser — `spec/filter-dsl.md`,
+    `frontend-style-guide.md` §7 — is separate: it runs on the full text
+    once, cursor-free.) (An earlier
     version of this also highlighted the typed clause's tokens via a
     transparent-input-plus-overlay; removed after three rounds of
     increasingly subtle scroll/stacking bugs made it too bug-prone to
@@ -183,6 +185,16 @@ its full path space and the host doesn't need to pick a mount point.
 | GET    | `/__ashurbanipal/api/siblings`     | Sibling services with live health status.              |
 
 ## 4. API contract
+
+> **Now normative elsewhere:** the endpoint contract lives in
+> `spec/protocol.md`. `spec/openapi.yaml` is hand-maintained prose, same
+> as `spec/protocol.md` — not generated from any implementation's own
+> route/type annotations. Every implementation, Rust included, implements
+> against both as a fixed target; none of them generates either file.
+> Where this section and the spec disagree, the spec wins; this section
+> stays as rationale and background. See §4.2 for how the schema is kept
+> binding on every implementation, and for the tradeoff hand-maintaining
+> it (rather than generating it) reintroduces.
 
 Paths below are shorthand for the full routes in §3.3 (e.g. `/tables` means
 `/__ashurbanipal/api/tables`).
@@ -275,9 +287,12 @@ Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `ILIKE`, `IS NULL`,
   cross-table conditions.
 
 Full grammar (EBNF), semantics, and the parser's test table live in
-`filter-dsl.md`. The parser is hand-written (RSQL-inspired shape, no
-parser dependency), implemented in `src/filter.rs`, and was built **last**
-in the server build order, as planned.
+`spec/filter-dsl.md`. The parser is hand-written (RSQL-inspired shape, no
+parser dependency) and is a **frontend** concern: `dbviewer.html` parses
+the DSL text client-side and submits the resulting JSON AST as the
+`filter` param; the server contract is defined purely in terms of that
+AST (`spec/protocol.md` §5.4.2). (Historically the parser was built
+server-side, in `src/filter.rs`, last in the server build order.)
 
 Example:
 
@@ -285,6 +300,88 @@ Example:
 status = completed AND created_at > 2016-01-01
 session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd
 ```
+
+### 4.2 Guaranteeing the contract across implementations
+
+Three independent layers exist so "the spec says X" reliably means every
+implementation does X — no implementation, Rust included, gets special
+treatment. Each catches a drift failure mode the others structurally
+can't:
+
+1. **Schema, hand-maintained, governed rather than generated.**
+   `spec/openapi.yaml` is hand-maintained prose, same as
+   `spec/protocol.md` — not compiled from any implementation's own
+   route/type annotations. This makes the drifts-from-its-own-spec
+   failure mode a governance property, not a structural one: a spec
+   change is one PR touching `spec/protocol.md` + `spec/openapi.yaml` +
+   fixtures together, the same one-PR rule `implementation.md` §6.3
+   already applies to an implementation + its fixtures + the conformance
+   runner, generalized here rather than reinvented. Honest tradeoff this
+   reintroduces: without generation, drift between the hand-written
+   schema and actual behavior is no longer *prevented by construction* —
+   it's *caught after the fact*, by layer 2 below, whenever some
+   implementation's CI run first exercises the diverged case. No
+   implementation generates this file; every implementation implements
+   against the published `spec/openapi.yaml` as a fixed target, same as
+   it implements against `spec/protocol.md`'s prose.
+2. **Shape conformance — schema fuzzing, every implementation, every CI
+   run, no exemptions.** Property-based schema testing (schemathesis or
+   an equivalent for the implementation's language) runs in CI against
+   every implementation's own build — the Rust implementation runs this
+   in its own CI exactly like any other implementation would, with no
+   structural exemption — firing requests generated from
+   `spec/openapi.yaml` and asserting every response actually matches its
+   documented type, nullability, and status code. This is what makes the
+   schema *binding* on an implementation rather than merely descriptive:
+   returning a JSON number for a numeric column (violating §4's
+   all-values-as-strings rule, §5.4.3 of `spec/protocol.md`) or omitting
+   a required field fails CI automatically — the fuzzer explores the
+   schema's cases, not whatever a human thought to hand-write.
+3. **Behavior conformance — golden fixtures over seeded data.** Schema
+   fuzzing only proves a response has the right *shape*; it can't catch
+   wrong *logic* — AND/OR precedence inverted, `total_approx` reacting to
+   `filter` when §4's contract says it must not, off-by-one pagination.
+   For that, the conformance kit (`conformance/`, `spec/fixtures/`)
+   replays fixed request → expected-response pairs against seeded known
+   data, comparing *decoded values*, per field, against a rule chosen for
+   what that field actually promises — never raw response bytes. Byte
+   equality isn't just impractical, it's incompatible with the spec:
+   JSON key order isn't guaranteed to match across serializers (Rust's
+   `serde_json` vs Jackson), HTTP framing differs by server stack, and
+   §2 already makes error body text implementation-defined ("MUST NOT
+   parse it"). Instead:
+   - **exact match** — row data, column metadata, pagination, filter
+     evaluation results: everything the spec makes deterministic against
+     fixed fixture data. This is what actually catches wrong logic.
+   - **type/range only** — `total_approx` (non-negative integer or `-1`,
+     never a specific number — §5.4.4 already allows staleness),
+     `common-values` frequencies (a float in `[0,1]`, not an exact value
+     — `pg_stats` sampling isn't reproducible run to run).
+   - **status code only** — error responses: assert 400 vs 500, never
+     assert the body text.
+   - **not checked** — HTTP-layer framing beyond headers the spec
+     actually requires (e.g. `Date`, `Server`).
+
+   `spec/fixtures/parser-tests.json` and `filter-builder-tests.json` are
+   the first instance of this pattern, scoped to the filter DSL; the
+   conformance kit generalizes it to every route.
+
+Even all three together don't cover everything a port must get right —
+notably, none of them can prove the *absence* of a SQL-injection vector a
+fixture doesn't happen to exercise, or observe config-time kill-switch
+rejection at all (it's process-startup behavior, not an HTTP response).
+`implementation.md` §5.5 tracks these and other non-automatable
+requirements (cast-in-SQL discipline, fail-closed-by-default, vendoring
+integrity, CSP/inline-script) as an explicit reviewer checklist, separate
+from the three CI-automatable layers above — conflating "green CI" with
+"conformant" would quietly drop exactly the properties that matter most.
+
+No layer is sufficient alone: (1) without (2) still lets a port drift
+from the schema unnoticed; (2) without (3) lets a port satisfy every type
+and status code while getting the actual query logic wrong; (3) without
+(1)/(2) only covers whatever cases someone thought to write down by hand.
+A "conformant" listing in `PORTING.md` requires a green run of all three,
+not just the behavioral suite Phase 2 already plans.
 
 ### `GET /tables/common-values`
 

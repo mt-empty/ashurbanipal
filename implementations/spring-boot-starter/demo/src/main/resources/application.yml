@@ -1,0 +1,14 @@
+server:
+  port: ${PORT:4100}
+
+spring:
+  application:
+    name: ashurbanipal-spring-boot-demo
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+
+ashurbanipal:
+  environment: ${ASHURBANIPAL_ENVIRONMENT:dev}
+  enabled-for: ${ASHURBANIPAL_ENABLED_FOR:dev}

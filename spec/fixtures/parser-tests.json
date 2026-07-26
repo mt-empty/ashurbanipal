@@ -1,0 +1,509 @@
+{
+  "$schema_note": "See spec/fixtures/README.md. Source of truth: spec/filter-dsl.md §5.",
+  "cases": [
+    {
+      "name": "V1",
+      "input": "status = completed",
+      "expect": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "completed"
+        }
+      ]
+    },
+    {
+      "name": "V2",
+      "input": "status=completed",
+      "expect": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "completed"
+        }
+      ]
+    },
+    {
+      "name": "V3",
+      "input": "session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd",
+      "expect": [
+        {
+          "column": "session_id",
+          "op": "=",
+          "value": "18d852af-77ae-4a95-9f7d-e37a77fda2fd"
+        }
+      ]
+    },
+    {
+      "name": "V4",
+      "input": "created_at > 2016-01-01",
+      "expect": [
+        {
+          "column": "created_at",
+          "op": ">",
+          "value": "2016-01-01"
+        }
+      ]
+    },
+    {
+      "name": "V5",
+      "input": "a >= 1 AND b <= 2",
+      "expect": [
+        {
+          "column": "a",
+          "op": ">=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "b",
+          "op": "<=",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "name": "V6",
+      "input": "status = completed AND created_at > 2016-01-01 OR is_active = true",
+      "expect": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "completed"
+        },
+        {
+          "logic": "AND",
+          "column": "created_at",
+          "op": ">",
+          "value": "2016-01-01"
+        },
+        {
+          "logic": "OR",
+          "column": "is_active",
+          "op": "=",
+          "value": "true"
+        }
+      ]
+    },
+    {
+      "name": "V7",
+      "input": "name LIKE %smith%",
+      "expect": [
+        {
+          "column": "name",
+          "op": "LIKE",
+          "value": "%smith%"
+        }
+      ]
+    },
+    {
+      "name": "V8",
+      "input": "name LIKE '% smith%'",
+      "expect": [
+        {
+          "column": "name",
+          "op": "LIKE",
+          "value": "% smith%"
+        }
+      ]
+    },
+    {
+      "name": "V9",
+      "input": "note = 'it''s fine'",
+      "expect": [
+        {
+          "column": "note",
+          "op": "=",
+          "value": "it's fine"
+        }
+      ]
+    },
+    {
+      "name": "V10",
+      "input": "deleted_at IS NULL",
+      "expect": [
+        {
+          "column": "deleted_at",
+          "op": "IS NULL"
+        }
+      ]
+    },
+    {
+      "name": "V11",
+      "input": "deleted_at IS NOT NULL",
+      "expect": [
+        {
+          "column": "deleted_at",
+          "op": "IS NOT NULL"
+        }
+      ]
+    },
+    {
+      "name": "V12",
+      "input": "status = 'AND'",
+      "expect": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "AND"
+        }
+      ]
+    },
+    {
+      "name": "V13",
+      "input": "a = 1 and b = 2 or c = 3",
+      "expect": [
+        {
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "b",
+          "op": "=",
+          "value": "2"
+        },
+        {
+          "logic": "OR",
+          "column": "c",
+          "op": "=",
+          "value": "3"
+        }
+      ]
+    },
+    {
+      "name": "V14",
+      "input": "payload = '{\"a\": 1}'",
+      "expect": [
+        {
+          "column": "payload",
+          "op": "=",
+          "value": "{\"a\": 1}"
+        }
+      ]
+    },
+    {
+      "name": "V15",
+      "input": "email = ''",
+      "expect": [
+        {
+          "column": "email",
+          "op": "=",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "name": "V16",
+      "input": "name ILIKE '%SMITH%'",
+      "expect": [
+        {
+          "column": "name",
+          "op": "ILIKE",
+          "value": "%SMITH%"
+        }
+      ]
+    },
+    {
+      "name": "V17",
+      "input": "NOT status = completed",
+      "expect": [
+        {
+          "not": true,
+          "column": "status",
+          "op": "=",
+          "value": "completed"
+        }
+      ]
+    },
+    {
+      "name": "V18",
+      "input": "NOT email ILIKE '%test%'",
+      "expect": [
+        {
+          "not": true,
+          "column": "email",
+          "op": "ILIKE",
+          "value": "%test%"
+        }
+      ]
+    },
+    {
+      "name": "V19",
+      "input": "NOT deleted_at IS NULL",
+      "expect": [
+        {
+          "not": true,
+          "column": "deleted_at",
+          "op": "IS NULL"
+        }
+      ]
+    },
+    {
+      "name": "V20",
+      "input": "not status = completed",
+      "expect": [
+        {
+          "not": true,
+          "column": "status",
+          "op": "=",
+          "value": "completed"
+        }
+      ]
+    },
+    {
+      "name": "V21",
+      "input": "status = 'NOT'",
+      "expect": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "NOT"
+        }
+      ]
+    },
+    {
+      "name": "R1",
+      "input": "",
+      "expect_error": {
+        "position": 0
+      }
+    },
+    {
+      "name": "R2",
+      "input": "status =",
+      "expect_error": {
+        "position": 8
+      }
+    },
+    {
+      "name": "R3",
+      "input": "= completed",
+      "expect_error": {
+        "position": 0
+      }
+    },
+    {
+      "name": "R4",
+      "input": "status == completed",
+      "expect_error": {}
+    },
+    {
+      "name": "R5",
+      "input": "status = a AND",
+      "expect_error": {}
+    },
+    {
+      "name": "R6",
+      "input": "(status = a)",
+      "expect_error": {
+        "position": 0
+      }
+    },
+    {
+      "name": "R7",
+      "input": "status = a; DROP TABLE users",
+      "expect_error": {}
+    },
+    {
+      "name": "R8",
+      "input": "status = 'unterminated",
+      "expect_error": {
+        "position": 9
+      }
+    },
+    {
+      "name": "R9",
+      "input": "1abc = x",
+      "expect_error": {
+        "position": 0
+      }
+    },
+    {
+      "name": "R10",
+      "input": "status LIKE",
+      "expect_error": {}
+    },
+    {
+      "name": "R11",
+      "input": "a = 1 OR OR b = 2",
+      "expect_error": {}
+    },
+    {
+      "name": "R12",
+      "input": "status NOT = completed",
+      "expect_error": {}
+    },
+    {
+      "name": "R13",
+      "input": "a = xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expect_error": {}
+    },
+    {
+      "name": "R14",
+      "input": "a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1",
+      "expect_error": {}
+    },
+    {
+      "name": "R15",
+      "input": "NOT NOT status = completed",
+      "expect_error": {}
+    },
+    {
+      "name": "R16",
+      "input": "status = NOT",
+      "expect_error": {
+        "position": 9
+      }
+    },
+    {
+      "name": "A1",
+      "input": "status = '''; DROP TABLE users; --'",
+      "expect": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "'; DROP TABLE users; --"
+        }
+      ]
+    },
+    {
+      "name": "A2",
+      "input": "id = 1 OR 1=1",
+      "expect_error": {}
+    },
+    {
+      "name": "A3",
+      "input": "col\"name = x",
+      "expect_error": {}
+    },
+    {
+      "name": "A4",
+      "input": "name LIKE '%'' OR ''1''=''1'",
+      "expect": [
+        {
+          "column": "name",
+          "op": "LIKE",
+          "value": "%' OR '1'='1"
+        }
+      ]
+    },
+    {
+      "name": "A5",
+      "input": "status = 𝕔𝕠𝘬𝘩𝗵𝗲𝘩𝗲𝗱",
+      "expect": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "𝕔𝕠𝘬𝘩𝗵𝗲𝘩𝗲𝗱"
+        }
+      ]
+    },
+    {
+      "name": "A6",
+      "input": "ｓｔａｔｕｓ = x",
+      "expect_error": {
+        "position": 0
+      }
+    },
+    {
+      "name": "A7",
+      "input": "statu\u0000s = x",
+      "expect_error": {}
+    },
+    {
+      "name": "A8",
+      "input": "pg_sleep = 1",
+      "expect": [
+        {
+          "column": "pg_sleep",
+          "op": "=",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "name": "A9-at-limit",
+      "input": "a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1",
+      "expect": [
+        {
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        },
+        {
+          "logic": "AND",
+          "column": "a",
+          "op": "=",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "name": "A9-over-limit",
+      "input": "a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1 AND a = 1",
+      "expect_error": {}
+    },
+    {
+      "name": "A10",
+      "input": "NOT pg_sleep = 1",
+      "expect": [
+        {
+          "not": true,
+          "column": "pg_sleep",
+          "op": "=",
+          "value": "1"
+        }
+      ]
+    }
+  ]
+}

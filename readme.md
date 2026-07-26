@@ -48,6 +48,11 @@ Not published to crates.io yet — depend on it by path or git:
 ashurbanipal = { git = "https://github.com/you/ashurbanipal" }
 ```
 
+(The Rust crate lives at `implementations/rust/` in this repo — one of
+several planned language implementations of the same protocol, see
+`spec/protocol.md`. A path dependency from within a clone of this repo
+needs that subdirectory, e.g. `{ path = "implementations/rust" }`.)
+
 Merge its router into your existing Axum app, passing it a config and a
 `DbSource` wrapping your service's own `sqlx::PgPool` — no new DB connection,
 no new credentials:
@@ -63,7 +68,7 @@ let app = Router::new()
     .merge(ashurbanipal::router(config, PgPoolSource::new(pool.clone())));
 ```
 
-That mounts five routes under `/__ashurbanipal` (the UI plus four read-only
+That mounts six routes under `/__ashurbanipal` (the UI plus five read-only
 API endpoints). The kill switch is fail-closed: `environment` must be listed
 in `enabled_for` (or `enabled_for` must contain `"any"`), and anything
 production-like (`production`, `prod`, `prd`, `live`, any casing) is rejected
@@ -114,5 +119,21 @@ host_config.ashurbanipal.validate()?;
 ```
 
 See `docs/design.md` for the full API contract, filter DSL, and config
-reference. `mise run demo` runs a working example host app against the
+reference. `mise run rust:demo` runs a working example host app against the
 seeded devcontainer database.
+
+## Implementations
+
+Every implementation below implements the same `spec/protocol.md` +
+`spec/openapi.yaml` contract and vendors the same `frontend/dbviewer.html`
+(`PORTING.md`); none is structurally privileged over another
+(`docs/design.md` §4.2, `roadmap.md` §2). "Conformant" means both
+conformance layers — the golden-fixture behavior runner and the
+schemathesis/equivalent shape check (`PORTING.md`) — pass in that
+implementation's own CI.
+
+| Implementation | Language / framework | Protocol version | Conformance CI |
+|----------------|-----------------------|-------------------|-----------------|
+| `implementations/rust` | Rust / Axum | 1 | `.github/workflows/conformance-rust.yml` |
+| `implementations/spring-boot-starter` | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |
+| `implementations/go-nethttp` | Go / `net/http` (framework-agnostic library) | 1 | not yet wired — both layers verified manually against a live demo (40/40 behavior, 346/346 schema); see phase report |
