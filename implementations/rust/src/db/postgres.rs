@@ -1,108 +1,74 @@
 use std::collections::{HashMap, HashSet};
 
-use serde::Serialize;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
-use crate::filter::{Condition, FilterOp, Logic};
-
-#[derive(Debug, Clone)]
-pub struct QueryOpts {
-    pub limit: u32,
-    pub offset: u32,
-    pub sort: Option<String>,
-    pub descending: bool,
-    pub timeout_secs: u32,
-    pub filter: Option<Vec<Condition>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum KeyKind {
-    Pk,
-    Fk,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ColumnRef {
-    pub table: String,
-    pub column: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ColumnInfo {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub type_name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key: Option<KeyKind>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub references: Option<ColumnRef>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub comment: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TableInfo {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub comment: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TableData {
-    pub columns: Vec<ColumnInfo>,
-    pub rows: Vec<serde_json::Map<String, serde_json::Value>>,
-    pub total_approx: i64,
-}
-
-#[derive(Debug)]
-pub enum DbError {
-    NotAllowed(String),
-    FilterParse(String),
-    Sqlx(sqlx::Error),
-}
-
-impl std::fmt::Display for DbError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotAllowed(what) => write!(f, "not in schema allow-list: {what}"),
-            Self::FilterParse(reason) => write!(f, "invalid filter: {reason}"),
-            Self::Sqlx(e) => write!(f, "database error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for DbError {}
-
-impl From<sqlx::Error> for DbError {
-    fn from(e: sqlx::Error) -> Self {
-        Self::Sqlx(e)
-    }
-}
-
-pub trait DbSource: Send + Sync + 'static {
-    fn list_tables(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<TableInfo>, DbError>> + Send;
-    fn table_counts(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<(String, i64)>, DbError>> + Send;
-    fn query_table(
-        &self,
-        table: &str,
-        opts: QueryOpts,
-    ) -> impl std::future::Future<Output = Result<TableData, DbError>> + Send;
-    fn common_values(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> impl std::future::Future<Output = Result<Vec<(String, f32)>, DbError>> + Send;
-}
+use super::{
+    op_sql, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData, TableInfo,
+};
+use crate::filter::{Condition, Logic};
 
 /// Catalog/metadata queries have no per-request timeout knob, but must
 /// still be bounded — same value as `Limits::query_timeout_secs`'s default.
 const CATALOG_TIMEOUT_SECS: u32 = 5;
+
+/// Parameter numbering continues after `$1` (limit) and `$2` (offset), so
+/// the first filter value is `$3`. Every column is matched against
+/// `allowed_columns` before being spliced in. Conditions are joined with
+/// their own `logic` tokens, relying on SQL's native AND-tighter-than-OR
+/// precedence — no grouping exists in the AST. Postgres-specific:
+/// `::text` cast syntax and `$N` placeholders are not portable to other
+/// backends — see `sqlite::build_where_clause` for the SQLite equivalent.
+fn build_where_clause(
+    conditions: &[Condition],
+    column_names: &[String],
+) -> Result<(String, Vec<String>), DbError> {
+    if conditions.is_empty() {
+        return Ok((String::new(), Vec::new()));
+    }
+
+    let mut values = Vec::new();
+    let mut next_param = 3;
+    let mut clause = String::new();
+    for (i, condition) in conditions.iter().enumerate() {
+        let column = column_names
+            .iter()
+            .find(|c| c.as_str() == condition.column)
+            .ok_or_else(|| DbError::NotAllowed(format!("column {:?}", condition.column)))?;
+
+        // filter::parse already enforced these structurally; re-checking
+        // here keeps build_where_clause safe on any input path (tests,
+        // future callers) instead of trusting its caller.
+        let inner = if condition.op.takes_value() {
+            let value = condition.value.clone().ok_or_else(|| {
+                DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
+            })?;
+            let frag = format!("\"{column}\"::text {} ${next_param}", op_sql(condition.op));
+            values.push(value);
+            next_param += 1;
+            frag
+        } else {
+            format!("\"{column}\"::text {}", op_sql(condition.op))
+        };
+        let wrapped = if condition.not {
+            format!("(NOT ({inner}))")
+        } else {
+            format!("({inner})")
+        };
+
+        if i > 0 {
+            let logic = condition
+                .logic
+                .ok_or_else(|| DbError::FilterParse(format!("condition {i} is missing logic")))?;
+            clause.push_str(match logic {
+                Logic::And => " AND ",
+                Logic::Or => " OR ",
+            });
+        }
+        clause.push_str(&wrapped);
+    }
+    Ok((format!(" where {clause}"), values))
+}
 
 #[derive(Clone)]
 pub struct PgPoolSource {
@@ -226,79 +192,6 @@ impl PgPoolSource {
         }
         Ok((pk_columns, fk_columns))
     }
-}
-
-/// The hardcoded operator→SQL-fragment table (`spec/protocol.md` §5.4.2) —
-/// wire text never becomes an operator except through this match.
-fn op_sql(op: FilterOp) -> &'static str {
-    match op {
-        FilterOp::Eq => "=",
-        FilterOp::Ne => "!=",
-        FilterOp::Gt => ">",
-        FilterOp::Ge => ">=",
-        FilterOp::Lt => "<",
-        FilterOp::Le => "<=",
-        FilterOp::Like => "LIKE",
-        FilterOp::Ilike => "ILIKE",
-        FilterOp::IsNull => "IS NULL",
-        FilterOp::IsNotNull => "IS NOT NULL",
-    }
-}
-
-/// Parameter numbering continues after `$1` (limit) and `$2` (offset), so
-/// the first filter value is `$3`. Every column is matched against
-/// `allowed_columns` before being spliced in. Conditions are joined with
-/// their own `logic` tokens, relying on SQL's native AND-tighter-than-OR
-/// precedence — no grouping exists in the AST.
-fn build_where_clause(
-    conditions: &[Condition],
-    column_names: &[String],
-) -> Result<(String, Vec<String>), DbError> {
-    if conditions.is_empty() {
-        return Ok((String::new(), Vec::new()));
-    }
-
-    let mut values = Vec::new();
-    let mut next_param = 3;
-    let mut clause = String::new();
-    for (i, condition) in conditions.iter().enumerate() {
-        let column = column_names
-            .iter()
-            .find(|c| c.as_str() == condition.column)
-            .ok_or_else(|| DbError::NotAllowed(format!("column {:?}", condition.column)))?;
-
-        // filter::parse already enforced these structurally; re-checking
-        // here keeps build_where_clause safe on any input path (tests,
-        // future callers) instead of trusting its caller.
-        let inner = if condition.op.takes_value() {
-            let value = condition.value.clone().ok_or_else(|| {
-                DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
-            })?;
-            let frag = format!("\"{column}\"::text {} ${next_param}", op_sql(condition.op));
-            values.push(value);
-            next_param += 1;
-            frag
-        } else {
-            format!("\"{column}\"::text {}", op_sql(condition.op))
-        };
-        let wrapped = if condition.not {
-            format!("(NOT ({inner}))")
-        } else {
-            format!("({inner})")
-        };
-
-        if i > 0 {
-            let logic = condition
-                .logic
-                .ok_or_else(|| DbError::FilterParse(format!("condition {i} is missing logic")))?;
-            clause.push_str(match logic {
-                Logic::And => " AND ",
-                Logic::Or => " OR ",
-            });
-        }
-        clause.push_str(&wrapped);
-    }
-    Ok((format!(" where {clause}"), values))
 }
 
 fn row_to_json(row: &PgRow, columns: &[ColumnInfo]) -> serde_json::Map<String, serde_json::Value> {
@@ -544,7 +437,7 @@ mod tests {
     /// (schema: `spec/fixtures/README.md`) — the same file every port's
     /// runner and the black-box HTTP suite consume, so validation/building
     /// behavior can't drift between them.
-    const FIXTURES: &str = include_str!("../../../spec/fixtures/filter-builder-tests.json");
+    const FIXTURES: &str = include_str!("../../../../spec/fixtures/filter-builder-tests.json");
 
     #[derive(serde::Deserialize)]
     struct FixtureFile {
