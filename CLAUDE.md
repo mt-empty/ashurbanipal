@@ -157,8 +157,9 @@ RNG seed, so regenerating without source edits produces an identical file.
   each condition's column is matched against `allowed_columns` before being
   spliced in, exactly like `sort` — the parsed column name from
   `implementations/rust/src/filter.rs` is never trusted directly.
-- **The filter DSL is implemented.** `implementations/rust/src/filter.rs` is a pure, dependency-free
-  parser (grammar in `spec/filter-dsl.md`) producing a `ParsedFilter`;
+- **The filter DSL is implemented.** `implementations/rust/src/filter.rs` deserializes and
+  structurally validates the JSON filter AST wire format (`spec/protocol.md` §5.4.2) — it never
+  parses DSL text, that's frontend-only (`spec/filter-dsl.md`);
   `db.rs`'s `query_table` validates each condition's column against the live
   schema and maps each operator through a hardcoded SQL-fragment match
   before binding its value as a parameter — see `spec/filter-dsl.md` for the

@@ -26,6 +26,12 @@ reqwest = { version = "0.13", default-features = false, features = [
     "json",
 ] }
 
+[features]
+# Spike-only, off by default: SQLite isn't a listed/conformant backend
+# yet (docs/design.md §2 non-goal) — this feature exists to prototype
+# SqliteSource without adding sqlx's sqlite feature to the default build.
+sqlite = ["sqlx/sqlite"]
+
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = "0.3"

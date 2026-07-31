@@ -1,0 +1,11 @@
+{
+  "enabledMcpjsonServers": [
+    "chrome-devtools"
+  ],
+  "enableAllProjectMcpServers": true,
+  "permissions": {
+    "deny": [
+      "mcp__chrome-devtools__take_screenshot"
+    ]
+  }
+}
