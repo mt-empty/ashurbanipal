@@ -1,0 +1,79 @@
+name: node-express conformance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "implementations/node-express/**"
+      - "spec/**"
+      - "conformance/**"
+      - "frontend/dbviewer.html"
+      - ".github/workflows/node-conformance.yml"
+      - ".github/workflows/_conformance-behavior.yml"
+      - ".github/workflows/_conformance-schema.yml"
+  pull_request:
+    paths:
+      - "implementations/node-express/**"
+      - "spec/**"
+      - "conformance/**"
+      - "frontend/dbviewer.html"
+      - ".github/workflows/node-conformance.yml"
+      - ".github/workflows/_conformance-behavior.yml"
+      - ".github/workflows/_conformance-schema.yml"
+
+env:
+  DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
+  NODE_VERSION: "22"
+
+jobs:
+  build-and-test:
+    name: npm build/typecheck + fixture/kill-switch tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: implementations/node-express/package-lock.json
+
+      - name: Install
+        working-directory: implementations/node-express
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: implementations/node-express
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: implementations/node-express
+        run: npm run build
+
+      # Fixture tests (test/filter-fixture.test.ts) and kill-switch tests
+      # (test/killswitch.test.ts) need no database — they never construct
+      # a real Pool.
+      - name: Test
+        working-directory: implementations/node-express
+        run: npm test
+
+  conformance:
+    name: Node/Express — conformance kit (external-URL path)
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: node
+      node-version: "22"
+      start-command: "cd implementations/node-express && npm ci && npm run demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: node-express-conformance-report
+
+  schema-conformance:
+    name: Node/Express — schema conformance
+    uses: ./.github/workflows/_conformance-schema.yml
+    with:
+      toolchain: node
+      node-version: "22"
+      start-command: "cd implementations/node-express && npm ci && npm run demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
