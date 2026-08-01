@@ -24,11 +24,15 @@ interpreted as described in RFC 2119.
   UI and API (see §3).
 - **Connected schema** — the namespace of tables the implementation
   browses, for engines that have one (on Postgres: the result of
-  `current_schema()` on the connection in use). All table listing,
-  validation, metadata, and data queries MUST be scoped to the connected
-  schema, never hardcoded to a default such as `public`. Engines with no
-  schema concept above a single database (e.g. SQLite) satisfy this
-  trivially — see `docs/adapter-decisions.md`.
+  `current_schema()` resolved at the start of an operation). All table
+  listing, validation, metadata, and data queries MUST be scoped to that
+  resolved schema, never hardcoded to a default such as `public`. An
+  operation that performs multiple queries to produce one response (such
+  as `/tables/data` or `/tables/common-values`) MUST use the same resolved
+  schema for every query, even when its connection pool uses sessions with
+  different `search_path` settings. Engines with no schema concept above a
+  single database (e.g. SQLite) satisfy this trivially — see
+  `docs/adapter-decisions.md`.
 
 ## 2. Transport
 
@@ -366,9 +370,11 @@ These hold across all routes:
   reference default 5 s) — catalog and metadata queries included, not
   just row fetches — so a pathological query can't hold a host-pool
   connection indefinitely. A timed-out query is a 500.
-- **Single table per query, no joins ever.** FK navigation in the UI is
-  two sequential single-table queries; no response mixes rows from two
-  tables.
+- **Single-table data queries.** A data response MUST retrieve rows from
+  exactly one browsed table and MUST NOT combine user rows from multiple
+  tables. FK navigation in the UI is two sequential single-table queries.
+  Catalog and metadata queries MAY join system catalogs when needed to
+  satisfy this protocol.
 - **Schema scoping.** Every catalog and data query MUST be scoped to the
   connected schema (§1), not a hardcoded default such as `'public'`. On
   engines with no schema concept this is trivially satisfied — see

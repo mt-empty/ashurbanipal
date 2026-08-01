@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use super::{
     op_sql, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData, TableInfo,
@@ -97,40 +97,43 @@ impl PgPoolSource {
         Ok(tx)
     }
 
-    async fn allowed_tables(&self) -> Result<Vec<String>, DbError> {
-        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
+    async fn allowed_tables_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+    ) -> Result<Vec<String>, DbError> {
         let rows = sqlx::query_scalar::<_, String>(
             "select table_name from information_schema.tables \
              where table_schema = current_schema() and table_type = 'BASE TABLE' \
              order by table_name",
         )
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?;
-        tx.commit().await?;
         Ok(rows)
     }
 
-    async fn allowed_columns(&self, table: &str) -> Result<Vec<String>, DbError> {
-        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
+    async fn allowed_columns_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        table: &str,
+    ) -> Result<Vec<String>, DbError> {
         let rows = sqlx::query_scalar::<_, String>(
             "select column_name from information_schema.columns \
              where table_schema = current_schema() and table_name = $1 \
              order by ordinal_position",
         )
         .bind(table)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?;
-        tx.commit().await?;
         Ok(rows)
     }
 
     /// Composite FKs are dropped rather than risk mislabeling which
     /// referencing column pairs with which referenced column.
-    async fn key_metadata(
+    async fn key_metadata_in_tx(
         &self,
+        tx: &mut Transaction<'_, Postgres>,
         table: &str,
     ) -> Result<(HashSet<String>, HashMap<String, ColumnRef>), DbError> {
-        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let rows = sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>)>(
             "select tc.constraint_name, tc.constraint_type, kcu.column_name, \
                     ccu.table_name as ref_table, ccu.column_name as ref_column \
@@ -147,9 +150,8 @@ impl PgPoolSource {
                and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
         )
         .bind(table)
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?;
-        tx.commit().await?;
 
         type FkCandidateRow = (String, Option<String>, Option<String>);
 
@@ -242,14 +244,15 @@ impl DbSource for PgPoolSource {
     }
 
     async fn query_table(&self, table: &str, opts: QueryOpts) -> Result<TableData, DbError> {
-        let tables = self.allowed_tables().await?;
+        let mut tx = self.bounded_tx(opts.timeout_secs).await?;
+        let tables = self.allowed_tables_in_tx(&mut tx).await?;
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
             .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
             .clone();
 
-        let column_names = self.allowed_columns(&table).await?;
+        let column_names = self.allowed_columns_in_tx(&mut tx, &table).await?;
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
@@ -266,14 +269,13 @@ impl DbSource for PgPoolSource {
             None => (String::new(), Vec::new()),
         };
 
-        let mut meta_tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let column_types = sqlx::query_as::<_, (String, String)>(
             "select column_name, data_type from information_schema.columns \
              where table_schema = current_schema() and table_name = $1 \
              order by ordinal_position",
         )
         .bind(&table)
-        .fetch_all(&mut *meta_tx)
+        .fetch_all(&mut *tx)
         .await?;
         // Joins through pg_attribute/pg_class directly: col_description is
         // keyed by attnum, which can diverge from ordinal_position once a
@@ -288,13 +290,12 @@ impl DbSource for PgPoolSource {
                and a.attnum > 0 and not a.attisdropped",
             )
             .bind(&table)
-            .fetch_all(&mut *meta_tx)
+            .fetch_all(&mut *tx)
             .await?
             .into_iter()
             .filter_map(|(name, comment)| comment.map(|c| (name, c)))
             .collect();
-        meta_tx.commit().await?;
-        let (pk_columns, fk_columns) = self.key_metadata(&table).await?;
+        let (pk_columns, fk_columns) = self.key_metadata_in_tx(&mut tx, &table).await?;
         let columns: Vec<ColumnInfo> = column_types
             .into_iter()
             .map(|(name, type_name)| {
@@ -337,7 +338,6 @@ impl DbSource for PgPoolSource {
             "select {select_list} from \"{table}\"{where_clause}{order_clause} limit $1 offset $2"
         );
 
-        let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         // AssertSqlSafe: sql interpolates only schema-validated identifiers
         // and hardcoded operator fragments; all values are bound.
         let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
@@ -370,20 +370,20 @@ impl DbSource for PgPoolSource {
         table: &str,
         column: &str,
     ) -> Result<Vec<(String, f32)>, DbError> {
-        let tables = self.allowed_tables().await?;
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
+        let tables = self.allowed_tables_in_tx(&mut tx).await?;
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
             .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
             .clone();
-        let columns = self.allowed_columns(&table).await?;
+        let columns = self.allowed_columns_in_tx(&mut tx, &table).await?;
         let column = columns
             .iter()
             .find(|c| c.as_str() == column)
             .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?
             .clone();
 
-        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         // most_common_vals is anyarray; ::text::text[] reads it uniformly
         // without fighting Rust-side type inference. NULL (no ANALYZE stats
         // yet) unnests to zero rows, not an error.

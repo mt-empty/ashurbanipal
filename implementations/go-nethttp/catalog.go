@@ -84,6 +84,11 @@ type Catalog struct {
 	timeout time.Duration
 }
 
+type queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func newCatalog(db *sql.DB, queryTimeoutSecs int) *Catalog {
 	return &Catalog{db: db, timeout: time.Duration(queryTimeoutSecs) * time.Second}
 }
@@ -135,10 +140,10 @@ func (c *cellValue) asJSON() *string {
 	return &s
 }
 
-func (c *Catalog) allowedTables(ctx context.Context) ([]string, error) {
+func (c *Catalog) allowedTables(ctx context.Context, db queryer) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	rows, err := c.db.QueryContext(ctx,
+	rows, err := db.QueryContext(ctx,
 		`select table_name from information_schema.tables
 		 where table_schema = current_schema() and table_type = 'BASE TABLE'
 		 order by table_name`)
@@ -157,10 +162,10 @@ func (c *Catalog) allowedTables(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
-func (c *Catalog) allowedColumns(ctx context.Context, table string) ([]string, error) {
+func (c *Catalog) allowedColumns(ctx context.Context, db queryer, table string) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	rows, err := c.db.QueryContext(ctx,
+	rows, err := db.QueryContext(ctx,
 		`select column_name from information_schema.columns
 		 where table_schema = current_schema() and table_name = $1
 		 order by ordinal_position`, table)
@@ -191,10 +196,10 @@ type fkCandidate struct {
 // with which referenced column (spec/protocol.md §5.4.1). Composite
 // *primary* keys are NOT dropped this way — every PK column still gets
 // key="pk" regardless of how many columns are in the PK.
-func (c *Catalog) keyMetadata(ctx context.Context, table string) (map[string]bool, map[string]ColumnRef, error) {
+func (c *Catalog) keyMetadata(ctx context.Context, db queryer, table string) (map[string]bool, map[string]ColumnRef, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	rows, err := c.db.QueryContext(ctx,
+	rows, err := db.QueryContext(ctx,
 		`select tc.constraint_name, tc.constraint_type, kcu.column_name,
 		        ccu.table_name as ref_table, ccu.column_name as ref_column
 		 from information_schema.table_constraints tc
@@ -315,7 +320,13 @@ func (c *Catalog) TableCounts(ctx context.Context) ([]CountEntry, error) {
 // QueryTable serves GET /api/tables/data: validates table/sort/filter
 // columns against the live schema, then runs one parameterized SELECT.
 func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) (TableData, error) {
-	tables, err := c.allowedTables(ctx)
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return TableData{}, err
+	}
+	defer tx.Rollback()
+
+	tables, err := c.allowedTables(ctx, tx)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -324,7 +335,7 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 		return TableData{}, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
 	}
 
-	columnNames, err := c.allowedColumns(ctx, realTable)
+	columnNames, err := c.allowedColumns(ctx, tx, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -348,7 +359,7 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 	}
 
 	metaCtx, metaCancel := c.bounded(ctx)
-	columnTypeRows, err := c.db.QueryContext(metaCtx,
+	columnTypeRows, err := tx.QueryContext(metaCtx,
 		`select column_name, data_type from information_schema.columns
 		 where table_schema = current_schema() and table_name = $1
 		 order by ordinal_position`, realTable)
@@ -377,7 +388,7 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 	// Joins through pg_attribute/pg_class directly: col_description is
 	// keyed by attnum, which can diverge from ordinal_position once a
 	// column has been dropped.
-	commentRows, err := c.db.QueryContext(metaCtx,
+	commentRows, err := tx.QueryContext(metaCtx,
 		`select a.attname::text, col_description(a.attrelid, a.attnum::int)
 		 from pg_attribute a
 		 join pg_class c on c.oid = a.attrelid
@@ -409,7 +420,7 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 	commentRows.Close()
 	metaCancel()
 
-	pkColumns, fkColumns, err := c.keyMetadata(ctx, realTable)
+	pkColumns, fkColumns, err := c.keyMetadata(ctx, tx, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -464,7 +475,7 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 
 	queryCtx, queryCancel := c.bounded(ctx)
 	defer queryCancel()
-	rows, err := c.db.QueryContext(queryCtx, query, args...)
+	rows, err := tx.QueryContext(queryCtx, query, args...)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -494,7 +505,7 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 	}
 
 	var totalApprox int64
-	err = c.db.QueryRowContext(queryCtx,
+	err = tx.QueryRowContext(queryCtx,
 		`select reltuples::bigint from pg_class c
 		 join pg_namespace n on n.oid = c.relnamespace
 		 where n.nspname = current_schema() and c.relname = $1`, realTable).Scan(&totalApprox)
@@ -502,12 +513,21 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 		return TableData{}, err
 	}
 
+	if err := tx.Commit(); err != nil {
+		return TableData{}, err
+	}
 	return TableData{Columns: columns, Rows: out, TotalApprox: totalApprox}, nil
 }
 
 // CommonValues serves GET /api/tables/common-values.
 func (c *Catalog) CommonValues(ctx context.Context, table, column string) ([]CommonValueEntry, error) {
-	tables, err := c.allowedTables(ctx)
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	tables, err := c.allowedTables(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +535,7 @@ func (c *Catalog) CommonValues(ctx context.Context, table, column string) ([]Com
 	if !ok {
 		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
 	}
-	columnNames, err := c.allowedColumns(ctx, realTable)
+	columnNames, err := c.allowedColumns(ctx, tx, realTable)
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +549,7 @@ func (c *Catalog) CommonValues(ctx context.Context, table, column string) ([]Com
 
 	// most_common_vals is anyarray; ::text::text[] reads it uniformly.
 	// NULL (no ANALYZE stats yet) unnests to zero rows, not an error.
-	rows, err := c.db.QueryContext(ctx,
+	rows, err := tx.QueryContext(ctx,
 		`select t.val, t.freq
 		 from pg_stats,
 		      lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq)
@@ -554,7 +574,7 @@ func (c *Catalog) CommonValues(ctx context.Context, table, column string) ([]Com
 	rows.Close()
 
 	var dataType sql.NullString
-	err = c.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`select data_type from information_schema.columns
 		 where table_schema = current_schema() and table_name = $1 and column_name = $2`,
 		realTable, realColumn).Scan(&dataType)
@@ -576,6 +596,9 @@ func (c *Catalog) CommonValues(ctx context.Context, table, column string) ([]Com
 	}
 	if entries == nil {
 		entries = []CommonValueEntry{}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return entries, nil
 }
