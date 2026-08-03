@@ -32,30 +32,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: implementations/node-express/package-lock.json
+          cache: pnpm
+          cache-dependency-path: implementations/node-express/pnpm-lock.yaml
 
       - name: Install
         working-directory: implementations/node-express
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Typecheck
         working-directory: implementations/node-express
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Build
         working-directory: implementations/node-express
-        run: npm run build
+        run: pnpm run build
 
       # Fixture tests (test/filter-fixture.test.ts) and kill-switch tests
       # (test/killswitch.test.ts) need no database — they never construct
       # a real Pool.
       - name: Test
         working-directory: implementations/node-express
-        run: npm test
+        run: pnpm test
 
   conformance:
     name: Node/Express — conformance kit (external-URL path)
@@ -63,7 +67,7 @@ jobs:
     with:
       toolchain: node
       node-version: "22"
-      start-command: "cd implementations/node-express && npm ci && npm run demo"
+      start-command: "cd implementations/node-express && pnpm install --frozen-lockfile && pnpm run demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: node-express-conformance-report
@@ -74,6 +78,6 @@ jobs:
     with:
       toolchain: node
       node-version: "22"
-      start-command: "cd implementations/node-express && npm ci && npm run demo"
+      start-command: "cd implementations/node-express && pnpm install --frozen-lockfile && pnpm run demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
