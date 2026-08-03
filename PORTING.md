@@ -59,6 +59,10 @@ grammar parser (`spec/filter-dsl.md`), vendoring it pins filter *syntax*
 compatibility, not just UI/UX — treat a version bump here with the same
 care as a `spec/protocol.md` version bump.
 
+Within this repository, `mise run frontend:sync-go` copies the canonical
+frontend into the Go port and updates the Go and Spring checksum pins;
+`mise run frontend:check-go-sync` verifies those artifacts in CI.
+
 ## What you implement
 
 Keyed to `spec/protocol.md` section numbers — this is the actual surface
@@ -77,7 +81,10 @@ by reusing the frontend and fixtures above:
    `spec/openapi.yaml` declares.
 3. **Catalog queries** — table/column introspection, PK/FK metadata with
    composite FKs omitted (§5.4.1), `current_schema()` scoping throughout,
-   `pg_class.reltuples` counts, `pg_stats`-based common values. **The
+   `pg_class.reltuples` counts, `pg_stats`-based common values. An endpoint
+   that performs multiple schema-sensitive queries to form one response MUST
+   pin them to one database connection or transaction, so a pooled session's
+   `search_path` cannot change the connected schema mid-response. **The
    text-cast serialization trap** (§5.4.3): every selected column MUST be
    cast to text *in the SQL itself*; decoding into a native type and
    reformatting in application code is non-conformant even if the end
