@@ -39,7 +39,7 @@ defaults.
 - `src/routes.ts` — `createRouter(config, pool)` and the six HTTP handlers.
 - `src/embed.ts` — the vendored `frontend/dbviewer.html`, sha256-reverified
   on every process start (see `PORTING.md`'s vendoring contract).
-- `demo/main.ts` — the runnable example host, `npm run demo`.
+- `demo/main.ts` — the runnable example host, `pnpm run demo`.
 
 ## Vendoring
 
@@ -53,9 +53,9 @@ at vendoring time, so a build step that mangles the file fails loudly.
 ## Tests
 
 ```sh
-npm install
-npm test              # fixture + kill-switch tests, no database needed
-npm run typecheck
+pnpm install
+pnpm test              # fixture + kill-switch tests, no database needed
+pnpm run typecheck
 ```
 
 `test/filter-fixture.test.ts` consumes
@@ -67,21 +67,21 @@ case, and production-alias rejection at construction.
 ## Running the demo
 
 ```sh
-npm install
-npm run demo   # DATABASE_URL must point at a seeded Postgres instance
+pnpm install
+pnpm run demo   # DATABASE_URL must point at a seeded Postgres instance
 # then open http://localhost:4000/__ashurbanipal
 ```
 
 To demo sibling health-polling, run a second instance:
 
 ```sh
-PORT=4001 SIBLING_PORT=4000 npm run demo
+PORT=4001 SIBLING_PORT=4000 pnpm run demo
 ```
 
 ## Conformance
 
 ```sh
-npm run demo &
+pnpm run demo &
 ASHURBANIPAL_CONFORMANCE_URL=http://localhost:4000/__ashurbanipal bash ../../conformance/runner/report.sh
 ASHURBANIPAL_CONFORMANCE_URL=http://localhost:4000/__ashurbanipal bash ../../conformance/runner/schema-check.sh
 ```
