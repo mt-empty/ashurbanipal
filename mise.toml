@@ -25,7 +25,15 @@ depends = ["spring:check"]
 
 [tasks.frontend]
 description = "frontend checks: Playwright e2e suite against dbviewer.html"
-depends = ["frontend:test-e2e"]
+depends = ["frontend:check-go-sync", "frontend:test-e2e"]
+
+[tasks."frontend:sync-go"]
+description = "sync the canonical frontend and re-pin its Go and Spring consumers"
+run = "tools/sync-go-frontend.sh"
+
+[tasks."frontend:check-go-sync"]
+description = "verify vendored frontend copies and pins match frontend/dbviewer.html"
+run = "tools/sync-go-frontend.sh --check"
 
 [tasks.conformance]
 description = "conformance suite: black-box conformance + schema fuzzing"
