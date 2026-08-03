@@ -22,7 +22,7 @@ use fake::faker::lorem::en::{Paragraph, Paragraphs};
 use fake::faker::name::en::Name;
 use fake::rand::rngs::StdRng;
 use fake::rand::seq::IndexedRandom;
-use fake::rand::{Rng, SeedableRng};
+use fake::rand::{RngExt, SeedableRng};
 use fake::Fake;
 use uuid::Uuid;
 
@@ -556,7 +556,7 @@ fn gen_orders(rng: &mut StdRng, users: &[GenUser]) -> Vec<GenOrder> {
             };
             let tags = if rng.random_bool(0.3) {
                 let n = rng.random_range(1..=2);
-                Some(ORDER_TAG_POOL.choose_multiple(rng, n).copied().collect())
+                Some(ORDER_TAG_POOL.sample(rng, n).copied().collect())
             } else {
                 None
             };

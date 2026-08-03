@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.sql.ResultSet
 import javax.sql.DataSource
 
@@ -48,6 +50,13 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
     private val jdbcTemplate = JdbcTemplate(dataSource).apply {
         queryTimeout = queryTimeoutSecs
     }
+    private val transactionTemplate = TransactionTemplate(DataSourceTransactionManager(dataSource)).apply {
+        isReadOnly = true
+    }
+
+    private fun <T> inReadOnlyTransaction(action: () -> T): T =
+        transactionTemplate.execute { action() }
+            ?: throw IllegalStateException("read-only transaction did not produce a result")
 
     fun listTables(): List<TableInfo> {
         return jdbcTemplate.query(
@@ -152,7 +161,10 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
         return pkColumns to fkColumns
     }
 
-    fun queryTable(table: String, opts: QueryOpts): TableData {
+    fun queryTable(table: String, opts: QueryOpts): TableData =
+        inReadOnlyTransaction { queryTableInTransaction(table, opts) }
+
+    private fun queryTableInTransaction(table: String, opts: QueryOpts): TableData {
         val realTable = requireTable(table)
         val columnNames = allowedColumns(realTable)
 
@@ -245,7 +257,10 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
         return map
     }
 
-    fun commonValues(table: String, column: String): List<CommonValueEntry> {
+    fun commonValues(table: String, column: String): List<CommonValueEntry> =
+        inReadOnlyTransaction { commonValuesInTransaction(table, column) }
+
+    private fun commonValuesInTransaction(table: String, column: String): List<CommonValueEntry> {
         val realTable = requireTable(table)
         val realColumn = allowedColumns(realTable).find { it == column }
             ?: throw NotAllowedException("not allowed: column $column")

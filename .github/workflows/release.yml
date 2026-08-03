@@ -23,7 +23,7 @@ jobs:
       # add it as its own explicit step when that's actually decided, not
       # bundled into this workflow by default.
       - name: Create the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             frontend/dbviewer.html
