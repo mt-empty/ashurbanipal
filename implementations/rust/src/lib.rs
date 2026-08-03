@@ -25,6 +25,8 @@ mod filter;
 mod routes;
 
 pub use config::{Config, ConfigError, Limits, Sibling};
+#[cfg(feature = "sqlite")]
+pub use db::SqliteSource;
 pub use db::{ColumnInfo, DbError, DbSource, PgPoolSource, QueryOpts, TableData, TableInfo};
 pub use filter::{Condition, FilterError, FilterOp, Logic};
 pub use routes::router;

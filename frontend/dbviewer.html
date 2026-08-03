@@ -1103,11 +1103,11 @@ $("filter").onkeydown = (e) => {
     closeFilterSuggest();
   }
 };
-document.addEventListener("pointerdown", (e) => {
+document.onpointerdown = (e) => {
   if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target) && !$("filter-suggest").contains(e.target)) {
     closeFilterSuggest();
   }
-});
+};
 
 // ---- common-values header dropdown: a shortlist from Postgres planner
 // statistics, never a full distinct-value scan — copy says "common

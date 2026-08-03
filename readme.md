@@ -2,7 +2,7 @@
 
 <img src="docs/media/icon.svg" alt="" width="66" height="66" align="right">
 
-A self-contained, embeddable database browser(read only). no separate DB client, no extra credentials, no build step.
+No-bullshit db browser for schemaful databases — self-contained, embeddable, read-only. No separate DB client, no extra credentials, no build step.
 
 ![Ashurbanipal demo](tools/e2e-tests/showcase.gif)
 
@@ -13,14 +13,14 @@ A self-contained, embeddable database browser(read only). no separate DB client,
 - Did you request AWS access? Wait for approval.
 - Approved? Now add your username and SSH key to a repo nobody's heard of, and wait for *that* owner to approve you too.
 - Follow a Confluence page to wire up AWS + SSH + your pick of DBeaver/pgcli/psql/pgAdmin/TablePlus.
-    - ssh timeout out, oh too bad, yuou should use mosh
-- Get your session killed by fucking Okta re-auth every few hours. Repeat.
+    - ssh timeout out, oh too bad, you should use `mosh` instead
+- Get your session killed by fucking Okta re-auth every 4 hours. Repeat.
     - blindly accept the MFA prompt, or else your session dies and you have to start over
 - The bastion host is being patched, so none of the above even works.
-- "You don't need to have db access, you just need to slice your stories thinly enough so you can test your code without needing db access"
+- "You don't need to have db access, you just need to slice your stories thinly enough so you can test your code without needing db access" a wise engineer in an unwise org.
 - can't deploy a sidecar container to run a db client, because the security team says no
 
-all I need is to just see a row in the db, so I can complete my story.
+all I need is to just see a row in the db, so I can complete my jira story.
 
 Ashurbanipal lib skips the whole chain by not needing a new connection, it runs inside the process that already has one. If your service can query its own database, then you can look at a table from your browser.
 
@@ -31,98 +31,49 @@ Ashurbanipal lib skips the whole chain by not needing a new connection, it runs 
 
 ## What it doesn't do
 
-- No write access, no migrations, no schema changes, no SQL execution.
+- No write access, no migrations, no schema changes.
 - Not a replacement for a full-featured DB client like DBeaver, pgcli etc
 
 ## where it should be used
 
-- In a corporate environment, where engineers have to jump through hoops to get access to the database.
+- In a corporate vpn environment, where engineers have to jump through hoops to get access to the database.
 
+if you have the freedom to run a sidecar container, you can use `pgweb` instead, which is a full-featured DB client.
 
 ## Usage
 
-Not published to crates.io yet — depend on it by path or git:
-
-```toml
-[dependencies]
-ashurbanipal = { git = "https://github.com/you/ashurbanipal" }
-```
-
-(The Rust crate lives at `implementations/rust/` in this repo — one of
-several planned language implementations of the same protocol, see
-`spec/protocol.md`. A path dependency from within a clone of this repo
-needs that subdirectory, e.g. `{ path = "implementations/rust" }`.)
-
-Merge its router into your existing Axum app, passing it a config and a
-`DbSource` wrapping your service's own `sqlx::PgPool` — no new DB connection,
-no new credentials:
-
-```rust
-use ashurbanipal::{Config, PgPoolSource};
-
-let toml_str = std::fs::read_to_string("ashurbanipal.toml")?;
-let config = Config::from_toml(&toml_str)?;
-
-let app = Router::new()
-    // ... your existing routes ...
-    .merge(ashurbanipal::router(config, PgPoolSource::new(pool.clone())));
-```
-
-That mounts six routes under `/__ashurbanipal` (the UI plus five read-only
-API endpoints). The kill switch is fail-closed: `environment` must be listed
-in `enabled_for` (or `enabled_for` must contain `"any"`), and anything
-production-like (`production`, `prod`, `prd`, `live`, any casing) is rejected
-at config-parse time rather than silently ignored at request time. If it
-isn't enabled for the current environment, `router()` returns an empty
-router — a plain 404, same as if the crate weren't merged in.
-
-`ashurbanipal.toml`:
-
-```toml
-environment = "dev"
-enabled_for = ["dev", "integration", "staging"]
-
-[limits]
-default_page_size = 50
-max_page_size = 100
-query_timeout_secs = 5
-
-[[siblings]]
-name = "billing"
-dbviewer_url = "https://billing.internal.vpn/__ashurbanipal"
-health_path = "/health"
-
-[[siblings]]
-name = "notifications"
-dbviewer_url = "https://notifications.internal.vpn/__ashurbanipal"
-health_path = "/health"
-```
-
-`siblings` are optional links to other services' Ashurbanipal instances
-(health-checked live, ~15s poll) so you can jump between databases in a
-multi-service setup — omit the array entirely if you don't need it.
-
-If the `[ashurbanipal]` table needs to live nested inside your own app's
-config file instead of a dedicated file, nest `Config` as a field in your own
-`Deserialize` struct and call `.validate()` yourself before `router()` (only
-`Config::from_toml` calls it for you):
-
-```rust
-#[derive(serde::Deserialize)]
-struct HostConfig {
-    ashurbanipal: ashurbanipal::Config,
-    // ...your other app settings
-}
-
-let host_config: HostConfig = toml::from_str(&raw)?;
-host_config.ashurbanipal.validate()?;
-```
+See each implementation's own README for install and config instructions
+— e.g. `implementations/rust/README.md` for the Rust/Axum crate.
 
 See `docs/design.md` for the full API contract, filter DSL, and config
-reference. `mise run rust:demo` runs a working example host app against the
-seeded devcontainer database.
+reference.
 
 ## Implementations
+
+The canonical artifact of this project isn't any one backend — it's
+`frontend/dbviewer.html` plus the contract it's served against
+(`spec/protocol.md` + `spec/openapi.yaml`). The Rust crate above is the
+reference implementation of that contract, not a privileged one.
+
+If your service isn't Rust/Axum/Postgres, you have two options, in this
+order:
+
+1. **Port it.** `PORTING.md` is the full checklist: vendor the released
+   `dbviewer.html`, implement the five API routes per the spec, pass
+   conformance. This repo doesn't (and won't try to) ship a first-party
+   implementation for every language/framework/DB combination — a port
+   for your stack is expected to live in your own service or org, using
+   the spec and docs as the contract, not as a request against this repo.
+2. **No time to port? Use a sidecar instead**, e.g. `pgweb`
+   (`docker run sosedoff/pgweb --readonly`) pointed at the same DB. It
+   can't join the sibling mesh or share the DSL/UI, and it allows
+   arbitrary `SELECT` rather than the schema-validated subset this
+   project exposes — but it needs zero code. See `PORTING.md` for the
+   fuller comparison.
+
+A first-party port only gets added to the table below once it's actually
+built and passes conformance in its own CI — new-stack requests are
+better spent as a port PR than an issue asking for support.
 
 Every implementation below implements the same `spec/protocol.md` +
 `spec/openapi.yaml` contract and vendors the same `frontend/dbviewer.html`
@@ -134,6 +85,6 @@ implementation's own CI.
 
 | Implementation | Language / framework | Protocol version | Conformance CI |
 |----------------|-----------------------|-------------------|-----------------|
-| `implementations/rust` | Rust / Axum | 1 | `.github/workflows/conformance-rust.yml` |
-| `implementations/spring-boot-starter` | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |
-| `implementations/go-nethttp` | Go / `net/http` (framework-agnostic library) | 1 | not yet wired — both layers verified manually against a live demo (40/40 behavior, 346/346 schema); see phase report |
+| [`implementations/rust`](implementations/rust/README.md) | Rust / Axum | 1 | `.github/workflows/conformance-rust.yml` |
+| [`implementations/spring-boot-starter`](implementations/spring-boot-starter) | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |
+| [`implementations/go-nethttp`](implementations/go-nethttp/README.md) | Go / `net/http` (framework-agnostic library) | 1 | not yet wired — both layers verified manually against a live demo (40/40 behavior, 346/346 schema); see phase report |

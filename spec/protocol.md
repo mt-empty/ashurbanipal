@@ -3,7 +3,10 @@
 Status: normative
 Companions: `spec/openapi.yaml` (machine-readable shapes),
 `spec/filter-dsl.md` (the frontend's filter grammar), `docs/design.md`
-(rationale and history — non-normative).
+(rationale and history — non-normative), `docs/adapter-decisions.md`
+(per-backend mechanism for each clause below that names a property
+without prescribing how a specific database engine satisfies it —
+non-normative, but read it before porting to a non-Postgres engine).
 
 This document defines the HTTP contract every Ashurbanipal implementation
 — the Rust reference and any port — must satisfy. The shared frontend
@@ -19,10 +22,17 @@ interpreted as described in RFC 2119.
   the routes in §5 under a mount point.
 - **Mount** — the URL path prefix under which an implementation serves the
   UI and API (see §3).
-- **Connected schema** — the Postgres schema the implementation browses:
-  the result of `current_schema()` on the connection in use. All table
-  listing, validation, metadata, and data queries MUST be scoped to the
-  connected schema, never hardcoded to `public`.
+- **Connected schema** — the namespace of tables the implementation
+  browses, for engines that have one (on Postgres: the result of
+  `current_schema()` resolved at the start of an operation). All table
+  listing, validation, metadata, and data queries MUST be scoped to that
+  resolved schema, never hardcoded to a default such as `public`. An
+  operation that performs multiple queries to produce one response (such
+  as `/tables/data` or `/tables/common-values`) MUST use the same resolved
+  schema for every query, even when its connection pool uses sessions with
+  different `search_path` settings. Engines with no schema concept above a
+  single database (e.g. SQLite) satisfy this trivially — see
+  `docs/adapter-decisions.md`.
 
 ## 2. Transport
 
@@ -116,10 +126,14 @@ Response:
 { "counts": [{ "table": "users", "approx_rows": 108234 }] }
 ```
 
-- `approx_rows` MUST come from catalog statistics
-  (`pg_class.reltuples`), never `COUNT(*)`. It MAY be stale, and MAY be
-  `-1` for a table never yet analyzed or vacuumed — clients MUST tolerate
-  both.
+- `approx_rows` MUST come from the cheapest mechanism the engine offers for
+  a whole-table cardinality figure, and MUST NOT cost a full table scan
+  when the engine maintains a catalog estimate that avoids one (on
+  Postgres: `pg_class.reltuples`, never `COUNT(*)`). It MAY be stale, and
+  MAY be `-1` for a table the engine has no estimate for yet (e.g. never
+  analyzed or vacuumed) — clients MUST tolerate both. Engines with no such
+  catalog fall back to an exact count as a documented per-backend
+  trade-off — see `docs/adapter-decisions.md`.
 
 ### 5.4 `GET {mount}/api/tables/data`
 
@@ -226,13 +240,20 @@ Evaluation rules:
   identifiers can't be parameterized, so exact-match validation against
   the live schema is what makes splicing them safe.)
 - Each `op` MUST be mapped through a hardcoded operator→SQL-fragment
-  table; client-supplied text is never used as an operator.
+  table; client-supplied text is never used as an operator. The wire-level
+  operator set (§5.4.2's list) is fixed regardless of engine; an engine
+  MAY map two distinct wire operators to the same SQL fragment when its
+  native semantics already collapse them (e.g. `ILIKE`, meaning
+  case-insensitive `LIKE`, may map to plain `LIKE` on an engine whose
+  `LIKE` is already case-insensitive) as long as the *observable* behavior
+  each operator promises still holds — see `docs/adapter-decisions.md`.
 - Each `value` MUST be bound as a query parameter, never concatenated
   into SQL text.
-- Comparison is applied to the column cast to text
-  (`column::text OP $n`), so one filter works uniformly across `uuid`,
-  `timestamptz`, `jsonb`, etc. Known consequence: `>`/`<`/`>=`/`<=` are
-  lexicographic, wrong for numerics (`"10" < "9"`) — deliberate v1
+- Comparison is applied to the column cast to text in the query itself
+  (Postgres: `column::text OP $n`; see `docs/adapter-decisions.md` for
+  other engines' cast syntax), so one filter works uniformly across
+  `uuid`, `timestamptz`, `jsonb`, etc. Known consequence: `>`/`<`/`>=`/`<=`
+  are lexicographic, wrong for numerics (`"10" < "9"`) — deliberate v1
   behavior.
 - `not: true` wraps the condition's mapped fragment in `NOT (...)`; it
   MUST NOT have its own operator table.
@@ -245,32 +266,36 @@ Evaluation rules:
 
 Every cell value crosses the wire as a **JSON string or `null`** — no JSON
 numbers, booleans, or nested objects, regardless of column type. `uuid`,
-numerics, timestamps, `jsonb`: all strings (the Postgres text rendering,
-i.e. the result of casting the column to `text`). SQL `NULL` is JSON
-`null`. A value that cannot be decoded as text MUST be replaced by the
-sentinel string `"<undecodable>"` rather than failing the request.
+numerics, timestamps, `jsonb`: all strings (the engine's own text
+rendering, i.e. the result of casting the column to text *in the query*).
+SQL `NULL` is JSON `null`. A value that cannot be decoded as text MUST be
+replaced by the sentinel string `"<undecodable>"` rather than failing the
+request.
 
 A port that returns JSON numbers for numeric columns is **non-conformant**
 — the frontend's type-aware rendering keys off column *type metadata*
 (§5.4.1), not JSON value types.
 
-The `::text` cast MUST happen in the query text itself, not by decoding a
-column into a native type and then formatting it in application code.
-Postgres's own cast is locale- and timezone-independent; a driver-level
+The text cast MUST happen in the query text itself (each engine's own cast
+syntax — see `docs/adapter-decisions.md`), not by decoding a column into a
+native type and then formatting it in application code. An engine's own
+cast is locale- and timezone-independent; a driver-level
 decode-then-restringify step can silently diverge from it (e.g. a JVM
 default locale using `,` as a decimal separator, or a timestamp formatted
-without Postgres's `+00` suffix) while still technically satisfying
-"every value is a JSON string" — the shape is right but the *content*
-drifts from what every other implementation renders for the same row.
-This applies to every column-value read (`/tables/data`'s rows,
+without the engine's own timezone-offset suffix) while still technically
+satisfying "every value is a JSON string" — the shape is right but the
+*content* drifts from what every other implementation renders for the same
+row. This applies to every column-value read (`/tables/data`'s rows,
 `/tables/common-values`'s `value` field), not just numerics.
 
 #### 5.4.4 `total_approx`
 
-- MUST be the whole-table estimate from `pg_class.reltuples`.
+- MUST be the same whole-table cardinality figure as §5.3's `approx_rows`
+  for this table (same mechanism, same per-backend trade-offs — see
+  `docs/adapter-decisions.md`).
 - MUST NOT be affected by `filter` (it is not a filtered count).
-- MAY be stale, and MAY be `-1` before the table's first
-  ANALYZE/VACUUM.
+- MAY be stale, and MAY be `-1` when the engine has no estimate yet (on
+  Postgres: before the table's first ANALYZE/VACUUM).
 
 ### 5.5 `GET {mount}/api/tables/common-values`
 
@@ -287,10 +312,15 @@ Response:
 { "values": [{ "value": "active", "freq": 0.62 }, { "value": "closed", "freq": 0.31 }] }
 ```
 
-- Values MUST come from catalog statistics only
-  (`pg_stats.most_common_vals`/`most_common_freqs`) — never
-  `SELECT DISTINCT` or any data query.
-- A column with no planner statistics (never analyzed, or all-unique)
+- Values SHOULD come from pre-computed catalog/planner statistics where the
+  engine maintains them (on Postgres:
+  `pg_stats.most_common_vals`/`most_common_freqs`) — never an unbounded
+  `SELECT DISTINCT`. An engine with no such statistics MAY compute
+  frequencies via a bounded, capped aggregate query instead, as a
+  documented per-backend trade-off (see `docs/adapter-decisions.md`) —
+  the cap MUST still be applied, and the query MUST remain subject to
+  §6's timeout invariant like any other query.
+- A column with no statistics available (never analyzed, or all-unique)
   MUST yield an empty `values` list, not an error.
 - `freq` is the fraction of rows (0–1], most frequent first.
 - `value` strings SHOULD match the §5.4.3 rendering of the same data
@@ -340,12 +370,15 @@ These hold across all routes:
   reference default 5 s) — catalog and metadata queries included, not
   just row fetches — so a pathological query can't hold a host-pool
   connection indefinitely. A timed-out query is a 500.
-- **Single table per query, no joins ever.** FK navigation in the UI is
-  two sequential single-table queries; no response mixes rows from two
-  tables.
+- **Single-table data queries.** A data response MUST retrieve rows from
+  exactly one browsed table and MUST NOT combine user rows from multiple
+  tables. FK navigation in the UI is two sequential single-table queries.
+  Catalog and metadata queries MAY join system catalogs when needed to
+  satisfy this protocol.
 - **Schema scoping.** Every catalog and data query MUST be scoped to the
-  connected schema (§1), i.e. `current_schema()`, not a hardcoded
-  `'public'`.
+  connected schema (§1), not a hardcoded default such as `'public'`. On
+  engines with no schema concept this is trivially satisfied — see
+  `docs/adapter-decisions.md`.
 - **Statelessness.** No server-side session or cache is required by the
   protocol; all request handling is self-contained.
 

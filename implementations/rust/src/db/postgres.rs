@@ -1,255 +1,24 @@
 use std::collections::{HashMap, HashSet};
 
-use serde::Serialize;
 use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 
-use crate::filter::{Condition, FilterOp, Logic};
-
-#[derive(Debug, Clone)]
-pub struct QueryOpts {
-    pub limit: u32,
-    pub offset: u32,
-    pub sort: Option<String>,
-    pub descending: bool,
-    pub timeout_secs: u32,
-    pub filter: Option<Vec<Condition>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum KeyKind {
-    Pk,
-    Fk,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ColumnRef {
-    pub table: String,
-    pub column: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ColumnInfo {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub type_name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key: Option<KeyKind>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub references: Option<ColumnRef>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub comment: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TableInfo {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub comment: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TableData {
-    pub columns: Vec<ColumnInfo>,
-    pub rows: Vec<serde_json::Map<String, serde_json::Value>>,
-    pub total_approx: i64,
-}
-
-#[derive(Debug)]
-pub enum DbError {
-    NotAllowed(String),
-    FilterParse(String),
-    Sqlx(sqlx::Error),
-}
-
-impl std::fmt::Display for DbError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotAllowed(what) => write!(f, "not in schema allow-list: {what}"),
-            Self::FilterParse(reason) => write!(f, "invalid filter: {reason}"),
-            Self::Sqlx(e) => write!(f, "database error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for DbError {}
-
-impl From<sqlx::Error> for DbError {
-    fn from(e: sqlx::Error) -> Self {
-        Self::Sqlx(e)
-    }
-}
-
-pub trait DbSource: Send + Sync + 'static {
-    fn list_tables(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<TableInfo>, DbError>> + Send;
-    fn table_counts(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<(String, i64)>, DbError>> + Send;
-    fn query_table(
-        &self,
-        table: &str,
-        opts: QueryOpts,
-    ) -> impl std::future::Future<Output = Result<TableData, DbError>> + Send;
-    fn common_values(
-        &self,
-        table: &str,
-        column: &str,
-    ) -> impl std::future::Future<Output = Result<Vec<(String, f32)>, DbError>> + Send;
-}
+use super::{
+    op_sql, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData, TableInfo,
+};
+use crate::filter::{Condition, Logic};
 
 /// Catalog/metadata queries have no per-request timeout knob, but must
 /// still be bounded — same value as `Limits::query_timeout_secs`'s default.
 const CATALOG_TIMEOUT_SECS: u32 = 5;
 
-#[derive(Clone)]
-pub struct PgPoolSource {
-    pool: PgPool,
-}
-
-impl PgPoolSource {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
-    }
-
-    /// Every query runs through one of these so nothing can hold a
-    /// connection unbounded: `SET LOCAL statement_timeout` only lasts for
-    /// the enclosing transaction.
-    async fn bounded_tx(
-        &self,
-        timeout_secs: u32,
-    ) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, DbError> {
-        let mut tx = self.pool.begin().await?;
-        // AssertSqlSafe: interpolates only a u32.
-        sqlx::query(sqlx::AssertSqlSafe(format!(
-            "set local statement_timeout = '{timeout_secs}s'"
-        )))
-        .execute(&mut *tx)
-        .await?;
-        Ok(tx)
-    }
-
-    async fn allowed_tables(&self) -> Result<Vec<String>, DbError> {
-        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
-        let rows = sqlx::query_scalar::<_, String>(
-            "select table_name from information_schema.tables \
-             where table_schema = current_schema() and table_type = 'BASE TABLE' \
-             order by table_name",
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(rows)
-    }
-
-    async fn allowed_columns(&self, table: &str) -> Result<Vec<String>, DbError> {
-        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
-        let rows = sqlx::query_scalar::<_, String>(
-            "select column_name from information_schema.columns \
-             where table_schema = current_schema() and table_name = $1 \
-             order by ordinal_position",
-        )
-        .bind(table)
-        .fetch_all(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(rows)
-    }
-
-    /// Composite FKs are dropped rather than risk mislabeling which
-    /// referencing column pairs with which referenced column.
-    async fn key_metadata(
-        &self,
-        table: &str,
-    ) -> Result<(HashSet<String>, HashMap<String, ColumnRef>), DbError> {
-        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
-        let rows = sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>)>(
-            "select tc.constraint_name, tc.constraint_type, kcu.column_name, \
-                    ccu.table_name as ref_table, ccu.column_name as ref_column \
-             from information_schema.table_constraints tc \
-             join information_schema.key_column_usage kcu \
-               on kcu.constraint_name = tc.constraint_name \
-              and kcu.table_schema = tc.table_schema \
-             left join information_schema.constraint_column_usage ccu \
-               on ccu.constraint_name = tc.constraint_name \
-              and ccu.table_schema = tc.table_schema \
-              and tc.constraint_type = 'FOREIGN KEY' \
-             where tc.table_schema = current_schema() \
-               and tc.table_name = $1 \
-               and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
-        )
-        .bind(table)
-        .fetch_all(&mut *tx)
-        .await?;
-        tx.commit().await?;
-
-        type FkCandidateRow = (String, Option<String>, Option<String>);
-
-        let mut pk_columns = HashSet::new();
-        let mut fk_candidates: HashMap<String, Vec<FkCandidateRow>> = HashMap::new();
-        for (constraint_name, constraint_type, column_name, ref_table, ref_column) in rows {
-            match constraint_type.as_str() {
-                "PRIMARY KEY" => {
-                    pk_columns.insert(column_name);
-                }
-                "FOREIGN KEY" => {
-                    fk_candidates.entry(constraint_name).or_default().push((
-                        column_name,
-                        ref_table,
-                        ref_column,
-                    ));
-                }
-                _ => {}
-            }
-        }
-
-        let mut fk_columns = HashMap::new();
-        for members in fk_candidates.into_values() {
-            let distinct_columns: HashSet<&str> =
-                members.iter().map(|(name, _, _)| name.as_str()).collect();
-            if distinct_columns.len() != 1 {
-                continue;
-            }
-            if let Some((column_name, Some(ref_table), Some(ref_column))) =
-                members.into_iter().next()
-            {
-                fk_columns.insert(
-                    column_name,
-                    ColumnRef {
-                        table: ref_table,
-                        column: ref_column,
-                    },
-                );
-            }
-        }
-        Ok((pk_columns, fk_columns))
-    }
-}
-
-/// The hardcoded operator→SQL-fragment table (`spec/protocol.md` §5.4.2) —
-/// wire text never becomes an operator except through this match.
-fn op_sql(op: FilterOp) -> &'static str {
-    match op {
-        FilterOp::Eq => "=",
-        FilterOp::Ne => "!=",
-        FilterOp::Gt => ">",
-        FilterOp::Ge => ">=",
-        FilterOp::Lt => "<",
-        FilterOp::Le => "<=",
-        FilterOp::Like => "LIKE",
-        FilterOp::Ilike => "ILIKE",
-        FilterOp::IsNull => "IS NULL",
-        FilterOp::IsNotNull => "IS NOT NULL",
-    }
-}
-
 /// Parameter numbering continues after `$1` (limit) and `$2` (offset), so
 /// the first filter value is `$3`. Every column is matched against
 /// `allowed_columns` before being spliced in. Conditions are joined with
 /// their own `logic` tokens, relying on SQL's native AND-tighter-than-OR
-/// precedence — no grouping exists in the AST.
+/// precedence — no grouping exists in the AST. Postgres-specific:
+/// `::text` cast syntax and `$N` placeholders are not portable to other
+/// backends — see `sqlite::build_where_clause` for the SQLite equivalent.
 fn build_where_clause(
     conditions: &[Condition],
     column_names: &[String],
@@ -301,6 +70,132 @@ fn build_where_clause(
     Ok((format!(" where {clause}"), values))
 }
 
+#[derive(Clone)]
+pub struct PgPoolSource {
+    pool: PgPool,
+}
+
+impl PgPoolSource {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// Every query runs through one of these so nothing can hold a
+    /// connection unbounded: `SET LOCAL statement_timeout` only lasts for
+    /// the enclosing transaction.
+    async fn bounded_tx(
+        &self,
+        timeout_secs: u32,
+    ) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, DbError> {
+        let mut tx = self.pool.begin().await?;
+        // AssertSqlSafe: interpolates only a u32.
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "set local statement_timeout = '{timeout_secs}s'"
+        )))
+        .execute(&mut *tx)
+        .await?;
+        Ok(tx)
+    }
+
+    async fn allowed_tables_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+    ) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query_scalar::<_, String>(
+            "select table_name from information_schema.tables \
+             where table_schema = current_schema() and table_type = 'BASE TABLE' \
+             order by table_name",
+        )
+        .fetch_all(&mut **tx)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn allowed_columns_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        table: &str,
+    ) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query_scalar::<_, String>(
+            "select column_name from information_schema.columns \
+             where table_schema = current_schema() and table_name = $1 \
+             order by ordinal_position",
+        )
+        .bind(table)
+        .fetch_all(&mut **tx)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Composite FKs are dropped rather than risk mislabeling which
+    /// referencing column pairs with which referenced column.
+    async fn key_metadata_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        table: &str,
+    ) -> Result<(HashSet<String>, HashMap<String, ColumnRef>), DbError> {
+        let rows = sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>)>(
+            "select tc.constraint_name, tc.constraint_type, kcu.column_name, \
+                    ccu.table_name as ref_table, ccu.column_name as ref_column \
+             from information_schema.table_constraints tc \
+             join information_schema.key_column_usage kcu \
+               on kcu.constraint_name = tc.constraint_name \
+              and kcu.table_schema = tc.table_schema \
+             left join information_schema.constraint_column_usage ccu \
+               on ccu.constraint_name = tc.constraint_name \
+              and ccu.table_schema = tc.table_schema \
+              and tc.constraint_type = 'FOREIGN KEY' \
+             where tc.table_schema = current_schema() \
+               and tc.table_name = $1 \
+               and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
+        )
+        .bind(table)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        type FkCandidateRow = (String, Option<String>, Option<String>);
+
+        let mut pk_columns = HashSet::new();
+        let mut fk_candidates: HashMap<String, Vec<FkCandidateRow>> = HashMap::new();
+        for (constraint_name, constraint_type, column_name, ref_table, ref_column) in rows {
+            match constraint_type.as_str() {
+                "PRIMARY KEY" => {
+                    pk_columns.insert(column_name);
+                }
+                "FOREIGN KEY" => {
+                    fk_candidates.entry(constraint_name).or_default().push((
+                        column_name,
+                        ref_table,
+                        ref_column,
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        let mut fk_columns = HashMap::new();
+        for members in fk_candidates.into_values() {
+            let distinct_columns: HashSet<&str> =
+                members.iter().map(|(name, _, _)| name.as_str()).collect();
+            if distinct_columns.len() != 1 {
+                continue;
+            }
+            if let Some((column_name, Some(ref_table), Some(ref_column))) =
+                members.into_iter().next()
+            {
+                fk_columns.insert(
+                    column_name,
+                    ColumnRef {
+                        table: ref_table,
+                        column: ref_column,
+                    },
+                );
+            }
+        }
+        Ok((pk_columns, fk_columns))
+    }
+}
+
 fn row_to_json(row: &PgRow, columns: &[ColumnInfo]) -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::with_capacity(columns.len());
     for (i, col) in columns.iter().enumerate() {
@@ -349,14 +244,15 @@ impl DbSource for PgPoolSource {
     }
 
     async fn query_table(&self, table: &str, opts: QueryOpts) -> Result<TableData, DbError> {
-        let tables = self.allowed_tables().await?;
+        let mut tx = self.bounded_tx(opts.timeout_secs).await?;
+        let tables = self.allowed_tables_in_tx(&mut tx).await?;
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
             .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
             .clone();
 
-        let column_names = self.allowed_columns(&table).await?;
+        let column_names = self.allowed_columns_in_tx(&mut tx, &table).await?;
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
@@ -373,14 +269,13 @@ impl DbSource for PgPoolSource {
             None => (String::new(), Vec::new()),
         };
 
-        let mut meta_tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let column_types = sqlx::query_as::<_, (String, String)>(
             "select column_name, data_type from information_schema.columns \
              where table_schema = current_schema() and table_name = $1 \
              order by ordinal_position",
         )
         .bind(&table)
-        .fetch_all(&mut *meta_tx)
+        .fetch_all(&mut *tx)
         .await?;
         // Joins through pg_attribute/pg_class directly: col_description is
         // keyed by attnum, which can diverge from ordinal_position once a
@@ -395,13 +290,12 @@ impl DbSource for PgPoolSource {
                and a.attnum > 0 and not a.attisdropped",
             )
             .bind(&table)
-            .fetch_all(&mut *meta_tx)
+            .fetch_all(&mut *tx)
             .await?
             .into_iter()
             .filter_map(|(name, comment)| comment.map(|c| (name, c)))
             .collect();
-        meta_tx.commit().await?;
-        let (pk_columns, fk_columns) = self.key_metadata(&table).await?;
+        let (pk_columns, fk_columns) = self.key_metadata_in_tx(&mut tx, &table).await?;
         let columns: Vec<ColumnInfo> = column_types
             .into_iter()
             .map(|(name, type_name)| {
@@ -444,7 +338,6 @@ impl DbSource for PgPoolSource {
             "select {select_list} from \"{table}\"{where_clause}{order_clause} limit $1 offset $2"
         );
 
-        let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         // AssertSqlSafe: sql interpolates only schema-validated identifiers
         // and hardcoded operator fragments; all values are bound.
         let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
@@ -477,20 +370,20 @@ impl DbSource for PgPoolSource {
         table: &str,
         column: &str,
     ) -> Result<Vec<(String, f32)>, DbError> {
-        let tables = self.allowed_tables().await?;
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
+        let tables = self.allowed_tables_in_tx(&mut tx).await?;
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
             .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
             .clone();
-        let columns = self.allowed_columns(&table).await?;
+        let columns = self.allowed_columns_in_tx(&mut tx, &table).await?;
         let column = columns
             .iter()
             .find(|c| c.as_str() == column)
             .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?
             .clone();
 
-        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         // most_common_vals is anyarray; ::text::text[] reads it uniformly
         // without fighting Rust-side type inference. NULL (no ANALYZE stats
         // yet) unnests to zero rows, not an error.
@@ -544,7 +437,7 @@ mod tests {
     /// (schema: `spec/fixtures/README.md`) — the same file every port's
     /// runner and the black-box HTTP suite consume, so validation/building
     /// behavior can't drift between them.
-    const FIXTURES: &str = include_str!("../../../spec/fixtures/filter-builder-tests.json");
+    const FIXTURES: &str = include_str!("../../../../spec/fixtures/filter-builder-tests.json");
 
     #[derive(serde::Deserialize)]
     struct FixtureFile {
