@@ -1404,7 +1404,7 @@ function renderHeader(columns) {
       : "none");
     th.onclick = () => {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
-      state.sort = col.name; state.offset = 0; persist(); loadData();
+      state.sort = col.name; state.offset = 0; persist(); loadData({ resetScroll: false });
     };
     // A focusable control nested in the sortable th — stopPropagation so
     // opening it doesn't also toggle sort.
