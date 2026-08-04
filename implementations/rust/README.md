@@ -16,7 +16,7 @@ ashurbanipal = { path = "implementations/rust" }
 | Backend | Type | Status |
 |---|---|---|
 | Postgres (`PgPoolSource`) | default, no feature flag | Conformant — the reference implementation `spec/protocol.md` is written against; covered by the full conformance suite. |
-| SQLite (`SqliteSource`) | opt-in via the `sqlite` Cargo feature (off by default) | Spike, not a listed/conformant port — works end-to-end (own unit test suite, not `conformance/runner`), but comments and pre-computed common-values statistics have no SQLite equivalent and degrade to empty/`None`; table counts are exact `COUNT(*)` rather than Postgres's fast planner estimate. See `docs/design.md` §2 (SQLite is a stated non-goal for v1) and `PORTING.md` before depending on this outside a spike. |
+| SQLite (`SqliteSource`) | opt-in via the `sqlite` Cargo feature (off by default) | Reviewed and supported, with known degraded features — comments and pre-computed common-values statistics have no SQLite equivalent and degrade to empty/`None`; table counts are exact `COUNT(*)` rather than Postgres's fast planner estimate. Not run through `conformance/runner` (that suite targets Postgres); has its own unit test suite instead. See `docs/adapter-decisions.md` for the per-clause backend decisions this relies on. |
 
 ```toml
 [dependencies]

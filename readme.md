@@ -87,4 +87,5 @@ implementation's own CI.
 |----------------|-----------------------|-------------------|-----------------|
 | [`implementations/rust`](implementations/rust/README.md) | Rust / Axum | 1 | `.github/workflows/conformance-rust.yml` |
 | [`implementations/spring-boot-starter`](implementations/spring-boot-starter) | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |
-| [`implementations/go-nethttp`](implementations/go-nethttp/README.md) | Go / `net/http` (framework-agnostic library) | 1 | not yet wired — both layers verified manually against a live demo (40/40 behavior, 346/346 schema); see phase report |
+| [`implementations/go-nethttp`](implementations/go-nethttp/README.md) | Go / `net/http` (framework-agnostic library) | 1 | `.github/workflows/go-conformance.yml` |
+| [`implementations/node-express`](implementations/node-express/README.md) | Node.js / TypeScript / Express | 1 | `.github/workflows/node-conformance.yml` |
