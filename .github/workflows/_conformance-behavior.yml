@@ -89,7 +89,7 @@ jobs:
 
       - name: Set up pnpm
         if: inputs.toolchain == 'node'
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: 11
 
