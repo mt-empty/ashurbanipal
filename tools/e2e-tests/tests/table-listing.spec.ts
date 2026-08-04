@@ -25,7 +25,7 @@ test("sidebar lists all seeded tables alphabetically with approx row counts", as
   // _conformance_meta/feature_flags are deliberately never ANALYZEd, so
   // the frontend shows "?" (formatApproxCount) instead of a raw -1.
   await expect(buttons).toHaveText(
-    SEEDED_TABLES.map((name) => new RegExp(`^${name}~(\\?|\\d+)$`)),
+    SEEDED_TABLES.map((name) => new RegExp(`^${name}(~\\d+|\\?)$`)),
   );
 });
 
