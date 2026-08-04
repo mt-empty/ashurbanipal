@@ -296,11 +296,17 @@
      position-try-fallbacks flips it away from the viewport edge with no
      clamping math. Unsupported browsers fall back to default placement,
      not breakage. */
+  /* width:max-content sidesteps a Firefox shrink-to-fit quirk: with only
+     max-width set, Firefox sizes the popover from min-content rather than
+     available space, and break-word's min-content is a single character —
+     collapsing the box to a one-letter-wide column. Sizing to max-content
+     (still clamped by max-width) fixes that without capping width. */
   #cell-pop { position: fixed; position-anchor: --cell-anchor;
               position-try-fallbacks: flip-block, flip-inline;
               inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
               margin: 0; border: 1px solid var(--border-strong);
-              border-radius: 8px; padding: 0; max-width: min(40rem, 90vw);
+              border-radius: 8px; padding: 0; width: max-content;
+              max-width: min(40rem, 90vw);
               box-shadow: 0 4px 16px #0004; }
   #cell-pop pre, #cell-pop .json-tree { margin: 0; padding: .6rem var(--gap-lg); overflow: auto;
                   max-height: 50vh; word-break: break-word; }
@@ -313,7 +319,8 @@
             position-try-fallbacks: flip-block, flip-inline;
             inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
             margin: 0; border: 1px solid var(--border-strong);
-            border-radius: 8px; padding: .3rem; max-width: min(20rem, 90vw);
+            border-radius: 8px; padding: .3rem; width: max-content;
+            max-width: min(20rem, 90vw);
             max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
   #cv-pop .cv-empty { opacity: .6; padding: .3rem .5rem; margin: 0; }
   #cv-pop button.cv-value { display: flex; justify-content: space-between; gap: .75rem;
@@ -1280,10 +1287,13 @@ function filterTables() {
 $("table-filter").oninput = filterTables;
 
 // approx_rows/total_approx is -1 when Postgres has no reltuples estimate
-// yet; show "?" rather than a confusing raw negative number.
+// yet; show "?" rather than a confusing raw negative number. No leading
+// "~" in that case either — "~?" would read as "approximately unknown".
 function formatApproxCount(n) {
-  return n == null || n < 0 ? "?" : n;
+  return n == null || n < 0 ? "?" : `~${n}`;
 }
+const APPROX_COUNT_TITLE = "~ = approximate, from Postgres's statistics, not a live count; "
+  + "? = no estimate yet (table hasn't been analyzed)";
 
 async function loadTables() {
   setStatus("loading tables…");
@@ -1299,7 +1309,9 @@ async function loadTables() {
     const btn = document.createElement("button");
     btn.innerHTML = `<span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
     btn.firstChild.textContent = t.name;
-    btn.querySelector(".count").textContent = `~${formatApproxCount(countMap[t.name])}`;
+    const countEl = btn.querySelector(".count");
+    countEl.textContent = formatApproxCount(countMap[t.name]);
+    countEl.title = APPROX_COUNT_TITLE;
     btn.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
     // (see .row-name), so the title tooltip is the escape hatch.
@@ -1397,7 +1409,7 @@ function renderHeader(columns) {
       : "none");
     th.onclick = () => {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
-      state.sort = col.name; state.offset = 0; persist(); loadData();
+      state.sort = col.name; state.offset = 0; persist(); loadData({ resetScroll: false });
     };
     // A focusable control nested in the sortable th — stopPropagation so
     // opening it doesn't also toggle sort.
@@ -1552,7 +1564,8 @@ function renderRows(data) {
 
 function updatePager(data) {
   const page = Math.floor(state.offset / state.limit) + 1;
-  $("page").textContent = `page ${page} · ~${formatApproxCount(data.total_approx)} rows`;
+  $("page").textContent = `page ${page} · ${formatApproxCount(data.total_approx)} rows`;
+  $("page").title = APPROX_COUNT_TITLE;
   $("prev").disabled = state.offset === 0;
   $("next").disabled = data.rows.length < state.limit;
 }
