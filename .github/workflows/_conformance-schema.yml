@@ -9,11 +9,16 @@ on:
   workflow_call:
     inputs:
       toolchain:
-        description: "Language toolchain the demo needs to start: rust | java | go"
+        description: "Language toolchain the demo needs to start: rust | java | go | node"
         required: true
         type: string
       go-version-file:
         description: "go.mod path to pin the Go version from (required when toolchain == 'go')"
+        required: false
+        type: string
+        default: ""
+      node-version:
+        description: "Node version to install (required when toolchain == 'node')"
         required: false
         type: string
         default: ""
@@ -76,6 +81,18 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: ${{ inputs.go-version-file }}
+
+      - name: Set up pnpm
+        if: inputs.toolchain == 'node'
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Set up Node toolchain
+        if: inputs.toolchain == 'node'
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
 
       - uses: dtolnay/rust-toolchain@stable
 
