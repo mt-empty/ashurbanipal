@@ -1279,6 +1279,12 @@ function filterTables() {
 }
 $("table-filter").oninput = filterTables;
 
+// approx_rows/total_approx is -1 when Postgres has no reltuples estimate
+// yet; show "?" rather than a confusing raw negative number.
+function formatApproxCount(n) {
+  return n == null || n < 0 ? "?" : n;
+}
+
 async function loadTables() {
   setStatus("loading tables…");
   const [{ tables }, { counts }] = await Promise.all([
@@ -1293,7 +1299,7 @@ async function loadTables() {
     const btn = document.createElement("button");
     btn.innerHTML = `<span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
     btn.firstChild.textContent = t.name;
-    btn.querySelector(".count").textContent = `~${countMap[t.name] ?? "?"}`;
+    btn.querySelector(".count").textContent = `~${formatApproxCount(countMap[t.name])}`;
     btn.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
     // (see .row-name), so the title tooltip is the escape hatch.
@@ -1546,7 +1552,7 @@ function renderRows(data) {
 
 function updatePager(data) {
   const page = Math.floor(state.offset / state.limit) + 1;
-  $("page").textContent = `page ${page} · ~${data.total_approx} rows`;
+  $("page").textContent = `page ${page} · ~${formatApproxCount(data.total_approx)} rows`;
   $("prev").disabled = state.offset === 0;
   $("next").disabled = data.rows.length < state.limit;
 }

@@ -30,5 +30,5 @@ if [ "$#" -ne 0 ]; then
 fi
 
 cp "$source" "$go_frontend"
-sed -i -E "s/(const pinnedFrontendSHA256 = \[\")[0-9a-f]{64}/\1$sha256/" "$go_embed"
-sed -i -E "s/(val pinnedFrontendSha256 = \[\")[0-9a-f]{64}/\1$sha256/" "$spring_build"
+sed -i -E "s/(const pinnedFrontendSHA256 = \")[0-9a-f]{64}/\1$sha256/" "$go_embed"
+sed -i -E "s/(val pinnedFrontendSha256 = \")[0-9a-f]{64}/\1$sha256/" "$spring_build"

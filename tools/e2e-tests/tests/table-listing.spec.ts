@@ -22,11 +22,10 @@ test("sidebar lists all seeded tables alphabetically with approx row counts", as
   await gotoApp(page);
   const buttons = page.locator("#tables button");
   await expect(buttons).toHaveCount(SEEDED_TABLES.length);
-  // approx_rows is -1 for a never-ANALYZEd table (spec/protocol.md
-  // §5.4.4's staleness allowance) — _conformance_meta and feature_flags
-  // are seeded that way deliberately, so the count isn't always \d+.
+  // _conformance_meta/feature_flags are deliberately never ANALYZEd, so
+  // the frontend shows "?" (formatApproxCount) instead of a raw -1.
   await expect(buttons).toHaveText(
-    SEEDED_TABLES.map((name) => new RegExp(`^${name}~(-1|\\d+)$`)),
+    SEEDED_TABLES.map((name) => new RegExp(`^${name}~(\\?|\\d+)$`)),
   );
 });
 
