@@ -74,8 +74,10 @@ implementation/area has its own umbrella task that fans out to namespaced
 mise run check                       # everything CI would run, across every implementation
 mise run rust                        # rust:fmt-check + rust:lint + rust:test
 mise run spring                      # spring gradle build + test
+mise run go                          # go build/vet/fmt-check + test (go-nethttp)
+mise run node                        # node typecheck + build + test (node-express)
 mise run frontend                    # frontend Playwright e2e suite
-mise run conformance                 # conformance:test + conformance:schema-test
+mise run conformance                 # seed sync check + conformance:test + conformance:schema-test
 
 mise run rust:build
 mise run rust:test                       # unit tests live inline (#[cfg(test)] mod tests in config.rs, routes.rs)
@@ -86,7 +88,8 @@ mise run rust:demo                       # host demo app at http://localhost:400
 mise run rust:demo-sibling               # second instance, to demo sibling health-poll
 mise run rust:dev                        # demo app, auto-rebuild/restart on implementations/rust/src/ or frontend/dbviewer.html changes (watchexec)
 
-mise run conformance:seed-gen            # regenerate .devcontainer/db/init/01-seed.sql
+mise run conformance:seed-gen            # regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql
+mise run conformance:seed-check          # verify both seed files still match tools/seed-gen's output
 mise run frontend:test-e2e-install       # one-time Playwright browser install (Chromium/Firefox/WebKit)
 mise run frontend:test-e2e               # Playwright E2E suite against frontend/dbviewer.html (tools/e2e-tests)
 ```

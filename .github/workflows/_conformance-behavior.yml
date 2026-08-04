@@ -52,6 +52,7 @@ jobs:
   conformance:
     name: conformance kit (layer 3, behavior — external-URL path)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       db:
         image: postgres:18-alpine
@@ -72,7 +73,7 @@ jobs:
       - name: Apply the conformance seed
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql "$DATABASE_URL" -f conformance/seed/seed.sql
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
 
       - name: Set up Java toolchain
         if: inputs.toolchain == 'java'
@@ -80,6 +81,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
 
       - name: Set up Go toolchain
         if: inputs.toolchain == 'go'

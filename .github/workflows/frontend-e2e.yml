@@ -1,17 +1,34 @@
-name: CI
+name: frontend e2e
 
 on:
   push:
     branches: [main]
+    paths:
+      - "frontend/dbviewer.html"
+      - "tools/e2e-tests/**"
+      - "implementations/rust/**"
+      - "conformance/seed/seed.sql"
+      - ".github/workflows/frontend-e2e.yml"
   pull_request:
+    paths:
+      - "frontend/dbviewer.html"
+      - "tools/e2e-tests/**"
+      - "implementations/rust/**"
+      - "conformance/seed/seed.sql"
+      - ".github/workflows/frontend-e2e.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
 
 jobs:
-  check:
-    name: rust (fmt, clippy, test) + frontend e2e
+  test-e2e:
+    name: Playwright e2e suite against dbviewer.html
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       db:
         image: postgres:18-alpine
@@ -32,25 +49,21 @@ jobs:
       - name: Seed database
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql "$DATABASE_URL" -f .devcontainer/db/init/01-seed.sql
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
 
       - uses: jdx/mise-action@v4
         with:
           install: false
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "implementations/rust -> target"
 
-      - run: mise run rust
-
       - run: mise run frontend:test-e2e-install
 
-      - run: mise run frontend
+      - run: mise run frontend:test-e2e
 
       - uses: actions/upload-artifact@v7
         if: failure()

@@ -12,8 +12,8 @@ java = "temurin-21"
 # `<layer>:*` subtasks below.
 
 [tasks.check]
-description = "everything CI would run, across every implementation: rust, spring, frontend, conformance"
-depends = ["rust", "spring", "frontend", "conformance"]
+description = "everything CI would run, across every implementation: rust, spring, go, node, frontend, conformance"
+depends = ["rust", "spring", "go", "node", "frontend", "conformance"]
 
 [tasks.rust]
 description = "rust implementation checks: fmt-check, lint, test"
@@ -22,6 +22,14 @@ depends = ["rust:fmt-check", "rust:lint", "rust:test"]
 [tasks.spring]
 description = "spring-boot-starter implementation checks: build, test"
 depends = ["spring:check"]
+
+[tasks.go]
+description = "go-nethttp implementation checks: build, vet, fmt-check, test"
+depends = ["go:build", "go:vet", "go:fmt-check", "go:test"]
+
+[tasks.node]
+description = "node-express implementation checks: typecheck, build, test"
+depends = ["node:typecheck", "node:build", "node:test"]
 
 [tasks.frontend]
 description = "frontend checks: Playwright e2e suite against dbviewer.html"
@@ -36,8 +44,8 @@ description = "verify vendored frontend copies and pins match frontend/dbviewer.
 run = "tools/sync-go-frontend.sh --check"
 
 [tasks.conformance]
-description = "conformance suite: black-box conformance + schema fuzzing"
-depends = ["conformance:test", "conformance:schema-test"]
+description = "conformance suite: seed sync check + black-box conformance + schema fuzzing"
+depends = ["conformance:seed-check", "conformance:test", "conformance:schema-test"]
 
 # ---- rust:* -------------------------------------------------------------
 
@@ -107,6 +115,65 @@ dir = "implementations/spring-boot-starter"
 description = "gradle build + test"
 depends = ["spring:build", "spring:test"]
 
+# ---- go:* -----------------------------------------------------------------
+
+[tasks."go:build"]
+description = "go build ./..."
+run = "go build ./..."
+dir = "implementations/go-nethttp"
+
+[tasks."go:vet"]
+description = "go vet ./..."
+run = "go vet ./..."
+dir = "implementations/go-nethttp"
+
+[tasks."go:fmt"]
+description = "gofmt -w ."
+run = "gofmt -w ."
+dir = "implementations/go-nethttp"
+
+[tasks."go:fmt-check"]
+description = "gofmt -l . (fails if any file needs reformatting)"
+run = '''
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+  echo "gofmt would reformat:" >&2
+  echo "$unformatted" >&2
+  exit 1
+fi
+'''
+dir = "implementations/go-nethttp"
+
+[tasks."go:test"]
+description = "go test -race ./... (integration_test.go needs DATABASE_URL + the conformance seed applied)"
+run = "go test -race ./..."
+dir = "implementations/go-nethttp"
+
+# ---- node:* ---------------------------------------------------------------
+
+[tasks."node:install"]
+description = "pnpm install --frozen-lockfile"
+run = "pnpm install --frozen-lockfile"
+dir = "implementations/node-express"
+
+[tasks."node:typecheck"]
+description = "tsc --noEmit"
+run = "pnpm run typecheck"
+dir = "implementations/node-express"
+depends = ["node:install"]
+
+[tasks."node:build"]
+description = "tsc build + vendor the frontend into dist/"
+run = "pnpm run build"
+dir = "implementations/node-express"
+depends = ["node:install"]
+
+[tasks."node:test"]
+description = "vitest run (fixture + kill-switch tests, no database needed)"
+run = "pnpm test"
+dir = "implementations/node-express"
+depends = ["node:install"]
+
 # ---- frontend:* ---------------------------------------------------------
 
 [tasks."frontend:test-e2e-install"]
@@ -130,6 +197,10 @@ dir = "tools/e2e-tests"
 description = "regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql from tools/seed-gen (same generator, kept identical)"
 run = "cargo run > ../../.devcontainer/db/init/01-seed.sql && cp ../../.devcontainer/db/init/01-seed.sql ../../conformance/seed/seed.sql"
 dir = "tools/seed-gen"
+
+[tasks."conformance:seed-check"]
+description = "verify .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql match tools/seed-gen's current output"
+run = "tools/check-seed-sync.sh"
 
 [tasks."conformance:test"]
 description = "run the conformance kit (spawns the Rust implementation by default; set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead)"

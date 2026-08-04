@@ -1,0 +1,77 @@
+name: rust conformance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "implementations/rust/**"
+      - "spec/**"
+      - "conformance/**"
+      - "frontend/dbviewer.html"
+      - ".devcontainer/db/init/01-seed.sql"
+      - "tools/seed-gen/**"
+      - ".github/workflows/rust-conformance.yml"
+      - ".github/workflows/_conformance-behavior.yml"
+      - ".github/workflows/_conformance-schema.yml"
+  pull_request:
+    paths:
+      - "implementations/rust/**"
+      - "spec/**"
+      - "conformance/**"
+      - "frontend/dbviewer.html"
+      - ".devcontainer/db/init/01-seed.sql"
+      - "tools/seed-gen/**"
+      - ".github/workflows/rust-conformance.yml"
+      - ".github/workflows/_conformance-behavior.yml"
+      - ".github/workflows/_conformance-schema.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: cargo fmt/clippy/test --lib + seed sync check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v4
+        with:
+          install: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            implementations/rust -> target
+            tools/seed-gen -> target
+
+      - run: mise run conformance:seed-check
+
+      - run: mise run rust
+
+  conformance:
+    name: Rust — conformance kit (external-URL path)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: rust
+      start-command: "cargo run --manifest-path implementations/rust/Cargo.toml --example demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: conformance-report
+
+  schema-conformance:
+    name: Rust — schema conformance
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-schema.yml
+    with:
+      toolchain: rust
+      start-command: "cargo run --manifest-path implementations/rust/Cargo.toml --example demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
