@@ -27,9 +27,9 @@ reqwest = { version = "0.13", default-features = false, features = [
 ] }
 
 [features]
-# Spike-only, off by default: SQLite isn't a listed/conformant backend
-# yet (docs/design.md §2 non-goal) — this feature exists to prototype
-# SqliteSource without adding sqlx's sqlite feature to the default build.
+# Off by default: keeps sqlx's sqlite feature out of the default build for
+# hosts that only need Postgres. See docs/adapter-decisions.md for the
+# per-clause decisions SqliteSource makes vs. the Postgres reference.
 sqlite = ["sqlx/sqlite"]
 
 [dev-dependencies]

@@ -324,6 +324,7 @@ above against the port's actual CI config and served HTML); items 1, 2,
 | `implementations/rust` | n/a — reference | ✅ (see note) | n/a — nothing to vendor | n/a — origin of the requirement | ✅ | ✅ | n/a — reference | Claude (AI-assisted), 2026-07-25 |
 | `implementations/spring-boot-starter` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-07-25 |
 | `implementations/go-nethttp` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-07-25 |
+| `implementations/node-express` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | MT (human review, merged PR #12); Claude (AI-assisted re-verification), 2026-08-04 |
 
 Note on the Rust row, item 2: the reference had no test for the specific
 "`enabled_for` key absent from the TOML text entirely" case (only for an
