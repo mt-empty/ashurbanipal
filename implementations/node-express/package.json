@@ -1,0 +1,28 @@
+{
+  "name": "ashurbanipal-node-express",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node.js/Express + node-postgres port of Ashurbanipal (spec/protocol.md)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').mkdirSync('dist/frontend',{recursive:true});require('fs').copyFileSync('frontend/dbviewer.html','dist/frontend/dbviewer.html')\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "demo": "tsx demo/main.ts"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.2",
+    "@types/pg": "^8.20.3",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
