@@ -9,7 +9,10 @@ or narrating obvious next steps. Don't add comments to explain code that's
 already clear from names/structure; a comment only earns its place by
 stating a non-obvious *why* (see the `implementations/rust/src/*.rs`
 comment-discipline rule below, which applies project-wide, not just to
-Rust).
+Rust). That discipline includes length, not just content: when a comment
+is warranted, keep it to one line, occasionally two — everywhere in the
+repo, any language, any file, tests and scripts included, not just
+`implementations/rust/src/*.rs` and `dbviewer.html`.
 
 ## What this is
 
