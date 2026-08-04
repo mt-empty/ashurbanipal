@@ -9,6 +9,8 @@ on:
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".github/workflows/go-conformance.yml"
+      - ".github/workflows/_conformance-behavior.yml"
+      - ".github/workflows/_conformance-schema.yml"
   pull_request:
     paths:
       - "implementations/go-nethttp/**"
@@ -16,6 +18,12 @@ on:
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".github/workflows/go-conformance.yml"
+      - ".github/workflows/_conformance-behavior.yml"
+      - ".github/workflows/_conformance-schema.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
@@ -24,6 +32,7 @@ jobs:
   build-and-test:
     name: go build/vet/fmt + fixture/kill-switch/integration tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       db:
         image: postgres:18-alpine
@@ -44,7 +53,7 @@ jobs:
       - name: Apply the conformance seed
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql "$DATABASE_URL" -f conformance/seed/seed.sql
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
 
       - uses: actions/setup-go@v7
         with:
@@ -77,6 +86,7 @@ jobs:
 
   conformance:
     name: Go — conformance kit (external-URL path)
+    needs: build-and-test
     uses: ./.github/workflows/_conformance-behavior.yml
     with:
       toolchain: go
@@ -88,6 +98,7 @@ jobs:
 
   schema-conformance:
     name: Go — schema conformance
+    needs: build-and-test
     uses: ./.github/workflows/_conformance-schema.yml
     with:
       toolchain: go

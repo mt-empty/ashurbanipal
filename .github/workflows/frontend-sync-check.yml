@@ -1,0 +1,36 @@
+name: frontend sync check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/dbviewer.html"
+      - "implementations/go-nethttp/**"
+      - "implementations/spring-boot-starter/**"
+      - "tools/sync-go-frontend.sh"
+      - ".github/workflows/frontend-sync-check.yml"
+  pull_request:
+    paths:
+      - "frontend/dbviewer.html"
+      - "implementations/go-nethttp/**"
+      - "implementations/spring-boot-starter/**"
+      - "tools/sync-go-frontend.sh"
+      - ".github/workflows/frontend-sync-check.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: verify Go/Spring vendored frontend copies match frontend/dbviewer.html
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v4
+        with:
+          install: false
+
+      - run: mise run frontend:check-go-sync

@@ -8,9 +8,27 @@ permissions:
   contents: write
 
 jobs:
+  check-branch:
+    name: verify tag is on main
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need full history to check branch ancestry
+
+      - name: Check that the tagged commit is on main
+        run: |
+          if ! git branch -r --contains "${{ github.sha }}" | grep -q 'origin/main$'; then
+            echo "tag ${{ github.ref_name }} (${{ github.sha }}) is not on main — refusing to release" >&2
+            exit 1
+          fi
+
   release:
     name: attach frontend artifact to the GitHub Release
+    needs: check-branch
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
@@ -25,6 +43,7 @@ jobs:
       - name: Create the release
         uses: softprops/action-gh-release@v3
         with:
+          generate_release_notes: true
           files: |
             frontend/dbviewer.html
             LICENSE
