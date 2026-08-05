@@ -19,6 +19,11 @@ const (
 type ColumnRef struct {
 	Table  string `json:"table"`
 	Column string `json:"column"`
+	// Schema is only set when the referenced table lives in a schema other
+	// than the referencing column's own — same-schema FKs (the common
+	// case) omit it, so the wire payload is unchanged from before this
+	// field existed (additive, spec/protocol.md §7 versioning policy).
+	Schema string `json:"schema,omitempty"`
 }
 
 // ColumnInfo is one column's metadata, sourced entirely from schema
@@ -140,13 +145,21 @@ func (c *cellValue) asJSON() *string {
 	return &s
 }
 
-func (c *Catalog) allowedTables(ctx context.Context, db queryer) ([]string, error) {
+// allowedSchemas excludes the catalogs themselves (`pg_catalog`,
+// `information_schema`, `pg_toast%`, `pg_temp_%`) and anything the
+// connected role can't actually use, so a schema only ever appears here if
+// it's both a real user namespace and one this role has USAGE on
+// (spec/protocol.md §5.7).
+func (c *Catalog) allowedSchemas(ctx context.Context, db queryer) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := db.QueryContext(ctx,
-		`select table_name from information_schema.tables
-		 where table_schema = current_schema() and table_type = 'BASE TABLE'
-		 order by table_name`)
+		`select nspname from pg_namespace
+		 where nspname not in ('pg_catalog', 'information_schema')
+		   and nspname not like 'pg_toast%'
+		   and nspname not like 'pg_temp\_%' escape '\'
+		   and has_schema_privilege(nspname, 'USAGE')
+		 order by nspname`)
 	if err != nil {
 		return nil, err
 	}
@@ -162,13 +175,64 @@ func (c *Catalog) allowedTables(ctx context.Context, db queryer) ([]string, erro
 	return out, rows.Err()
 }
 
-func (c *Catalog) allowedColumns(ctx context.Context, db queryer, table string) ([]string, error) {
+// resolveSchema resolves the schema for one operation exactly once: an
+// explicit request and an absent one (resolved via current_schema()) both
+// go through the same allow-list, so neither path can reach a schema the
+// other would reject (docs/adapter-decisions.md §1). Callers run this
+// against the operation's own transaction, which pins the whole operation
+// to one physical connection — immune to pool sessions with divergent
+// search_path.
+func (c *Catalog) resolveSchema(ctx context.Context, db queryer, requested *string) (string, error) {
+	schemas, err := c.allowedSchemas(ctx, db)
+	if err != nil {
+		return "", err
+	}
+	var resolved string
+	if requested != nil {
+		resolved = *requested
+	} else {
+		ctx, cancel := c.bounded(ctx)
+		defer cancel()
+		if err := db.QueryRowContext(ctx, "select current_schema()").Scan(&resolved); err != nil {
+			return "", err
+		}
+	}
+	real, ok := findExact(schemas, resolved)
+	if !ok {
+		return "", &NotAllowedError{What: fmt.Sprintf("schema %q", resolved)}
+	}
+	return real, nil
+}
+
+func (c *Catalog) allowedTables(ctx context.Context, db queryer, schema string) ([]string, error) {
+	ctx, cancel := c.bounded(ctx)
+	defer cancel()
+	rows, err := db.QueryContext(ctx,
+		`select table_name from information_schema.tables
+		 where table_schema = $1 and table_type = 'BASE TABLE'
+		 order by table_name`, schema)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+func (c *Catalog) allowedColumns(ctx context.Context, db queryer, schema, table string) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := db.QueryContext(ctx,
 		`select column_name from information_schema.columns
-		 where table_schema = current_schema() and table_name = $1
-		 order by ordinal_position`, table)
+		 where table_schema = $1 and table_name = $2
+		 order by ordinal_position`, schema, table)
 	if err != nil {
 		return nil, err
 	}
@@ -186,6 +250,7 @@ func (c *Catalog) allowedColumns(ctx context.Context, db queryer, table string) 
 
 type fkCandidate struct {
 	column    string
+	refSchema sql.NullString
 	refTable  sql.NullString
 	refColumn sql.NullString
 }
@@ -196,23 +261,31 @@ type fkCandidate struct {
 // with which referenced column (spec/protocol.md §5.4.1). Composite
 // *primary* keys are NOT dropped this way — every PK column still gets
 // key="pk" regardless of how many columns are in the PK.
-func (c *Catalog) keyMetadata(ctx context.Context, db queryer, table string) (map[string]bool, map[string]ColumnRef, error) {
+//
+// The `ccu` join must match on `ccu.constraint_schema` (the schema the
+// constraint itself lives in, always equal to `tc.table_schema`), not
+// `ccu.table_schema` (the schema of the table constraint_column_usage is
+// describing — for a FOREIGN KEY row that's the *referenced* table's
+// schema, which for a cross-schema FK differs from the constraining
+// table's schema). Joining on `ccu.table_schema` instead silently drops
+// every cross-schema FK's metadata (the LEFT JOIN just never matches).
+func (c *Catalog) keyMetadata(ctx context.Context, db queryer, schema, table string) (map[string]bool, map[string]ColumnRef, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := db.QueryContext(ctx,
 		`select tc.constraint_name, tc.constraint_type, kcu.column_name,
-		        ccu.table_name as ref_table, ccu.column_name as ref_column
+		        ccu.table_schema as ref_schema, ccu.table_name as ref_table, ccu.column_name as ref_column
 		 from information_schema.table_constraints tc
 		 join information_schema.key_column_usage kcu
 		   on kcu.constraint_name = tc.constraint_name
 		  and kcu.table_schema = tc.table_schema
 		 left join information_schema.constraint_column_usage ccu
 		   on ccu.constraint_name = tc.constraint_name
-		  and ccu.table_schema = tc.table_schema
+		  and ccu.constraint_schema = tc.table_schema
 		  and tc.constraint_type = 'FOREIGN KEY'
-		 where tc.table_schema = current_schema()
-		   and tc.table_name = $1
-		   and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')`, table)
+		 where tc.table_schema = $1
+		   and tc.table_name = $2
+		   and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')`, schema, table)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -222,8 +295,8 @@ func (c *Catalog) keyMetadata(ctx context.Context, db queryer, table string) (ma
 	fkCandidates := map[string][]fkCandidate{}
 	for rows.Next() {
 		var constraintName, constraintType, columnName string
-		var refTable, refColumn sql.NullString
-		if err := rows.Scan(&constraintName, &constraintType, &columnName, &refTable, &refColumn); err != nil {
+		var refSchema, refTable, refColumn sql.NullString
+		if err := rows.Scan(&constraintName, &constraintType, &columnName, &refSchema, &refTable, &refColumn); err != nil {
 			return nil, nil, err
 		}
 		switch constraintType {
@@ -231,7 +304,7 @@ func (c *Catalog) keyMetadata(ctx context.Context, db queryer, table string) (ma
 			pkColumns[columnName] = true
 		case "FOREIGN KEY":
 			fkCandidates[constraintName] = append(fkCandidates[constraintName], fkCandidate{
-				column: columnName, refTable: refTable, refColumn: refColumn,
+				column: columnName, refSchema: refSchema, refTable: refTable, refColumn: refColumn,
 			})
 		}
 	}
@@ -249,32 +322,62 @@ func (c *Catalog) keyMetadata(ctx context.Context, db queryer, table string) (ma
 			continue // composite FK: omit entirely
 		}
 		first := members[0]
-		if first.refTable.Valid && first.refColumn.Valid {
-			fkColumns[first.column] = ColumnRef{Table: first.refTable.String, Column: first.refColumn.String}
+		if first.refSchema.Valid && first.refTable.Valid && first.refColumn.Valid {
+			ref := ColumnRef{Table: first.refTable.String, Column: first.refColumn.String}
+			// Same-schema is the overwhelming common case; omitting Schema
+			// there keeps the wire payload byte-identical to before this
+			// field existed.
+			if first.refSchema.String != schema {
+				ref.Schema = first.refSchema.String
+			}
+			fkColumns[first.column] = ref
 		}
 	}
 	return pkColumns, fkColumns, nil
 }
 
-// ListTables serves GET /api/tables.
-func (c *Catalog) ListTables(ctx context.Context) ([]TableInfo, error) {
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := c.db.QueryContext(ctx,
-		`select c.relname::text, obj_description(c.oid, 'pg_class')
-		 from pg_class c
-		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = current_schema() and c.relkind = 'r'
-		 order by c.relname`)
+// ListSchemas serves GET /api/schemas.
+func (c *Catalog) ListSchemas(ctx context.Context) ([]string, error) {
+	schemas, err := c.allowedSchemas(ctx, c.db)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	if schemas == nil {
+		schemas = []string{}
+	}
+	return schemas, nil
+}
+
+// ListTables serves GET /api/tables.
+func (c *Catalog) ListTables(ctx context.Context, schema *string) ([]TableInfo, error) {
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	realSchema, err := c.resolveSchema(ctx, tx, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := c.bounded(ctx)
+	defer cancel()
+	rows, err := tx.QueryContext(ctx,
+		`select c.relname::text, obj_description(c.oid, 'pg_class')
+		 from pg_class c
+		 join pg_namespace n on n.oid = c.relnamespace
+		 where n.nspname = $1 and c.relkind = 'r'
+		 order by c.relname`, realSchema)
+	if err != nil {
+		return nil, err
+	}
 	var out []TableInfo
 	for rows.Next() {
 		var name string
 		var comment sql.NullString
 		if err := rows.Scan(&name, &comment); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		t := TableInfo{Name: name}
@@ -283,50 +386,77 @@ func (c *Catalog) ListTables(ctx context.Context) ([]TableInfo, error) {
 		}
 		out = append(out, t)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
 	if out == nil {
 		out = []TableInfo{}
 	}
-	return out, rows.Err()
+	return out, tx.Commit()
 }
 
 // TableCounts serves GET /api/table-counts.
-func (c *Catalog) TableCounts(ctx context.Context) ([]CountEntry, error) {
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := c.db.QueryContext(ctx,
-		`select c.relname::text, c.reltuples::bigint
-		 from pg_class c
-		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = current_schema() and c.relkind = 'r'
-		 order by c.relname`)
+func (c *Catalog) TableCounts(ctx context.Context, schema *string) ([]CountEntry, error) {
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer tx.Rollback()
+
+	realSchema, err := c.resolveSchema(ctx, tx, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := c.bounded(ctx)
+	defer cancel()
+	rows, err := tx.QueryContext(ctx,
+		`select c.relname::text, c.reltuples::bigint
+		 from pg_class c
+		 join pg_namespace n on n.oid = c.relnamespace
+		 where n.nspname = $1 and c.relkind = 'r'
+		 order by c.relname`, realSchema)
+	if err != nil {
+		return nil, err
+	}
 	var out []CountEntry
 	for rows.Next() {
 		var entry CountEntry
 		if err := rows.Scan(&entry.Table, &entry.ApproxRows); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		out = append(out, entry)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
 	if out == nil {
 		out = []CountEntry{}
 	}
-	return out, rows.Err()
+	return out, tx.Commit()
 }
 
-// QueryTable serves GET /api/tables/data: validates table/sort/filter
-// columns against the live schema, then runs one parameterized SELECT.
-func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) (TableData, error) {
+// QueryTable serves GET /api/tables/data: validates schema/table/sort/
+// filter columns against the live schema, then runs one parameterized
+// SELECT.
+func (c *Catalog) QueryTable(ctx context.Context, schema *string, table string, opts QueryOpts) (TableData, error) {
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return TableData{}, err
 	}
 	defer tx.Rollback()
 
-	tables, err := c.allowedTables(ctx, tx)
+	realSchema, err := c.resolveSchema(ctx, tx, schema)
+	if err != nil {
+		return TableData{}, err
+	}
+
+	tables, err := c.allowedTables(ctx, tx, realSchema)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -335,7 +465,7 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 		return TableData{}, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
 	}
 
-	columnNames, err := c.allowedColumns(ctx, tx, realTable)
+	columnNames, err := c.allowedColumns(ctx, tx, realSchema, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -361,8 +491,8 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 	metaCtx, metaCancel := c.bounded(ctx)
 	columnTypeRows, err := tx.QueryContext(metaCtx,
 		`select column_name, data_type from information_schema.columns
-		 where table_schema = current_schema() and table_name = $1
-		 order by ordinal_position`, realTable)
+		 where table_schema = $1 and table_name = $2
+		 order by ordinal_position`, realSchema, realTable)
 	if err != nil {
 		metaCancel()
 		return TableData{}, err
@@ -393,8 +523,8 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 		 from pg_attribute a
 		 join pg_class c on c.oid = a.attrelid
 		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = current_schema() and c.relname = $1
-		   and a.attnum > 0 and not a.attisdropped`, realTable)
+		 where n.nspname = $1 and c.relname = $2
+		   and a.attnum > 0 and not a.attisdropped`, realSchema, realTable)
 	if err != nil {
 		metaCancel()
 		return TableData{}, err
@@ -420,7 +550,7 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 	commentRows.Close()
 	metaCancel()
 
-	pkColumns, fkColumns, err := c.keyMetadata(ctx, tx, realTable)
+	pkColumns, fkColumns, err := c.keyMetadata(ctx, tx, realSchema, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -448,9 +578,11 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 	}
 	selectList := joinComma(selectParts)
 
-	// Table-qualified: an unqualified `order by "col"` would resolve to
-	// the ::text-cast output column in selectList, sorting
-	// lexicographically instead of by the real typed value.
+	// Table-qualified (by relation name, not schema — a FROM item's
+	// correlation name is its own relation name regardless of whether
+	// FROM itself is schema-qualified): an unqualified `order by "col"`
+	// would resolve to the ::text-cast output column in selectList,
+	// sorting lexicographically instead of by the real typed value.
 	orderClause := ""
 	if sort != nil {
 		direction := "asc"
@@ -460,12 +592,13 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 		orderClause = fmt.Sprintf(" order by %s.%s %s", quoteIdent(realTable), quoteIdent(*sort), direction)
 	}
 
-	// Identifiers spliced here are schema-validated (realTable/columns via
-	// allowedTables/allowedColumns, sort via the findExact check above,
-	// filter columns via BuildWhereClause's own allow-list check); every
-	// value is a bound $N parameter.
-	query := fmt.Sprintf("select %s from %s%s%s limit $1 offset $2",
-		selectList, quoteIdent(realTable), whereClause, orderClause)
+	// Identifiers spliced here are schema-validated (realSchema via
+	// resolveSchema, realTable/columns via allowedTables/allowedColumns,
+	// sort via the findExact check above, filter columns via
+	// BuildWhereClause's own allow-list check); every value is a bound $N
+	// parameter.
+	query := fmt.Sprintf("select %s from %s.%s%s%s limit $1 offset $2",
+		selectList, quoteIdent(realSchema), quoteIdent(realTable), whereClause, orderClause)
 
 	args := make([]interface{}, 0, 2+len(filterValues))
 	args = append(args, opts.Limit, opts.Offset)
@@ -508,7 +641,7 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 	err = tx.QueryRowContext(queryCtx,
 		`select reltuples::bigint from pg_class c
 		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = current_schema() and c.relname = $1`, realTable).Scan(&totalApprox)
+		 where n.nspname = $1 and c.relname = $2`, realSchema, realTable).Scan(&totalApprox)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -520,14 +653,19 @@ func (c *Catalog) QueryTable(ctx context.Context, table string, opts QueryOpts) 
 }
 
 // CommonValues serves GET /api/tables/common-values.
-func (c *Catalog) CommonValues(ctx context.Context, table, column string) ([]CommonValueEntry, error) {
+func (c *Catalog) CommonValues(ctx context.Context, schema *string, table, column string) ([]CommonValueEntry, error) {
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	tables, err := c.allowedTables(ctx, tx)
+	realSchema, err := c.resolveSchema(ctx, tx, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	tables, err := c.allowedTables(ctx, tx, realSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -535,7 +673,7 @@ func (c *Catalog) CommonValues(ctx context.Context, table, column string) ([]Com
 	if !ok {
 		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
 	}
-	columnNames, err := c.allowedColumns(ctx, tx, realTable)
+	columnNames, err := c.allowedColumns(ctx, tx, realSchema, realTable)
 	if err != nil {
 		return nil, err
 	}
@@ -553,8 +691,8 @@ func (c *Catalog) CommonValues(ctx context.Context, table, column string) ([]Com
 		`select t.val, t.freq
 		 from pg_stats,
 		      lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq)
-		 where schemaname = current_schema() and tablename = $1 and attname = $2
-		 order by t.freq desc`, realTable, realColumn)
+		 where schemaname = $1 and tablename = $2 and attname = $3
+		 order by t.freq desc`, realSchema, realTable, realColumn)
 	if err != nil {
 		return nil, err
 	}
@@ -576,8 +714,8 @@ func (c *Catalog) CommonValues(ctx context.Context, table, column string) ([]Com
 	var dataType sql.NullString
 	err = tx.QueryRowContext(ctx,
 		`select data_type from information_schema.columns
-		 where table_schema = current_schema() and table_name = $1 and column_name = $2`,
-		realTable, realColumn).Scan(&dataType)
+		 where table_schema = $1 and table_name = $2 and column_name = $3`,
+		realSchema, realTable, realColumn).Scan(&dataType)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
