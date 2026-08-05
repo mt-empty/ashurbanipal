@@ -237,4 +237,73 @@ class AshurbanipalIntegrationTest {
         val names = (body["tables"] as Iterable<JsonNode>).map { it["name"].asText() }
         assertFalse(names.contains("decoy_items"))
     }
+
+    @Test
+    fun `api schemas lists the seed's schemas excluding system namespaces`() {
+        val body = getJson("/api/schemas")
+        val names = (body["schemas"] as Iterable<JsonNode>).map { it.asText() }
+        assertTrue(names.contains("public") && names.contains("other_schema") && names.contains("warehouse"))
+        assertFalse(names.any { it == "pg_catalog" || it == "information_schema" || it.startsWith("pg_") })
+    }
+
+    @Test
+    fun `explicit schema=public matches the implicit default`() {
+        assertEquals(getJson("/api/tables"), getJson("/api/tables?schema=public"))
+    }
+
+    @Test
+    fun `explicit other schema selects only its own table`() {
+        val body = getJson("/api/tables?schema=other_schema")
+        val names = (body["tables"] as Iterable<JsonNode>).map { it["name"].asText() }
+        assertEquals(listOf("decoy_items"), names)
+
+        val data = getJson("/api/tables/data?schema=other_schema&table=decoy_items")
+        assertEquals(2, data["rows"].size())
+    }
+
+    @Test
+    fun `unrecognized schema values are rejected cleanly on every route`() {
+        for (evil in listOf("", "nonexistent_schema", "public\"; drop schema public cascade; --", "public' OR '1'='1")) {
+            for (path in listOf(
+                "/api/tables?schema=$evil",
+                "/api/table-counts?schema=$evil",
+                "/api/tables/data?schema=$evil&table=users",
+                "/api/tables/common-values?schema=$evil&table=users&column=email",
+            )) {
+                val ex = org.junit.jupiter.api.Assertions.assertThrows(HttpClientErrorException::class.java) {
+                    http.getForObject(url(path), String::class.java)
+                }
+                assertEquals(HttpStatus.BAD_REQUEST, ex.statusCode, path)
+            }
+        }
+
+        // Confirm no damage: the default view is unaffected by the attempts above.
+        val body = getJson("/api/tables")
+        val names = (body["tables"] as Iterable<JsonNode>).map { it["name"].asText() }
+        assertFalse(names.contains("decoy_items"))
+        assertTrue(names.contains("users"))
+    }
+
+    @Test
+    fun `cross-schema fk reference includes the referenced table's schema`() {
+        val body = getJson("/api/tables/data?schema=warehouse&table=shipments&limit=1")
+        val columns = body["columns"]
+        val orderId = columns.first { it["name"].asText() == "order_id" }
+        assertEquals("fk", orderId["key"].asText())
+        assertEquals("orders", orderId["references"]["table"].asText())
+        assertEquals("public", orderId["references"]["schema"].asText())
+    }
+
+    @Test
+    fun `same-schema fk reference omits the schema field`() {
+        val body = getJson("/api/tables/data?table=orders&limit=1")
+        val userId = body["columns"].first { it["name"].asText() == "user_id" }
+        assertFalse(userId["references"].has("schema"))
+    }
+
+    @Test
+    fun `every schemas response carries the protocol version header`() {
+        val response = http.getForEntity(url("/api/schemas"), String::class.java)
+        assertEquals("1", response.headers.getFirst("x-ashurbanipal-protocol"))
+    }
 }
