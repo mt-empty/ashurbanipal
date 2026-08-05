@@ -18,6 +18,7 @@ const noPool = null as unknown as Pool;
 
 const ALL_MOUNT_PATHS = [
   "/__ashurbanipal",
+  "/__ashurbanipal/api/schemas",
   "/__ashurbanipal/api/tables",
   "/__ashurbanipal/api/table-counts",
   "/__ashurbanipal/api/tables/data",
