@@ -62,7 +62,7 @@ Two components, same as the original concept:
   crate ships as one artifact — no separate static file to build, deploy, or
   whitelist per environment.
 - Served by the backend as the 6th route, gated by the same kill switch as
-  the five API routes.
+    the six API routes.
 - Talks to the backend exclusively through the REST endpoints in §4.
 - **Inspection affordances** (native elements, no library):
   - *Raw payload viewer* — a "payload" button opens a native `<dialog>`
@@ -182,7 +182,8 @@ its full path space and the host doesn't need to pick a mount point.
 | Method | Path                          | Purpose                                              |
 |--------|-------------------------------|-------------------------------------------------------|
 | GET    | `/__ashurbanipal`              | Serves the embedded `dbviewer.html`.                   |
-| GET    | `/__ashurbanipal/api/tables`       | List table names in the connected schema.             |
+| GET    | `/__ashurbanipal/api/schemas`      | List selectable schema names.                          |
+| GET    | `/__ashurbanipal/api/tables`       | List table names in the resolved schema.               |
 | GET    | `/__ashurbanipal/api/table-counts` | Approximate row counts via `pg_class.reltuples`.       |
 | GET    | `/__ashurbanipal/api/tables/data`  | Paginated, filtered, sorted rows for a single table.   |
 | GET    | `/__ashurbanipal/api/tables/common-values` | Most-common values for one column, from `pg_stats`. |
@@ -205,7 +206,8 @@ Paths below are shorthand for the full routes in §3.3 (e.g. `/tables` means
 
 ### `GET /tables`
 
-Returns table names in the connected database's schema, validated against
+Returns table names in the resolved schema (`schema` param, `spec/protocol.md`
+§1), validated against
 `information_schema` at request time (also doubles as the allow-list used by
 `/tables/data`). `comment` is each table's `COMMENT ON TABLE` text and is
 omitted when the table has none.
@@ -425,10 +427,11 @@ criteria if this gets expensive).
 
 ```rust
 pub trait DbSource: Send + Sync + 'static {
-    async fn list_tables(&self) -> Result<Vec<TableInfo>, DbError>;
-    async fn table_counts(&self) -> Result<Vec<(String, i64)>, DbError>;
-    async fn query_table(&self, table: &str, opts: QueryOpts) -> Result<TableData, DbError>;
-    async fn common_values(&self, table: &str, column: &str) -> Result<Vec<(String, f32)>, DbError>;
+    async fn list_schemas(&self) -> Result<Vec<String>, DbError>;
+    async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError>;
+    async fn table_counts(&self, schema: Option<&str>) -> Result<Vec<(String, i64)>, DbError>;
+    async fn query_table(&self, schema: Option<&str>, table: &str, opts: QueryOpts) -> Result<TableData, DbError>;
+    async fn common_values(&self, schema: Option<&str>, table: &str, column: &str) -> Result<Vec<(String, f32)>, DbError>;
 }
 ```
 
@@ -441,7 +444,14 @@ implementation.
   adapter can be added later without touching route handlers — this is
   intentionally the only piece of the crate designed for a hypothetical
   future backend; everything else stays concrete to v1's scope.
-- Single schema assumption (`public`) for v1; not abstracted further.
+- `schema: None` resolves to `current_schema()`; an explicit value is
+  checked against the same live `pg_namespace` allow-list (excluding
+  catalog/toast/temp schemas and anything the connected role lacks `USAGE`
+  on) that the implicit path is also checked against, so neither path can
+  reach a schema the other would reject. Resolved once per operation, as
+  the first statement in that operation's transaction, so every later
+  query in the same transaction reuses the same value even under pool
+  session drift (`tests/schema_isolation.rs`).
 - `TableInfo` (§4's `/tables` shape: `name` + optional `comment`) and
   `common_values` (§4's `/tables/common-values`) both read schema catalogs
   (`pg_description`/`pg_stats`), never table data beyond what `query_table`

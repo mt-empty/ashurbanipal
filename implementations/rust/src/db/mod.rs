@@ -31,6 +31,12 @@ pub enum KeyKind {
 pub struct ColumnRef {
     pub table: String,
     pub column: String,
+    /// Only set when the referenced table lives in a schema other than the
+    /// referencing column's own — same-schema FKs (the common case) omit it,
+    /// so the wire payload is unchanged from before this field existed
+    /// (additive, spec/protocol.md §7 versioning policy).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,22 +92,38 @@ impl From<sqlx::Error> for DbError {
 }
 
 pub trait DbSource: Send + Sync + 'static {
+    fn list_schemas(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, DbError>> + Send;
     fn list_tables(
         &self,
+        schema: Option<&str>,
     ) -> impl std::future::Future<Output = Result<Vec<TableInfo>, DbError>> + Send;
     fn table_counts(
         &self,
+        schema: Option<&str>,
     ) -> impl std::future::Future<Output = Result<Vec<(String, i64)>, DbError>> + Send;
     fn query_table(
         &self,
+        schema: Option<&str>,
         table: &str,
         opts: QueryOpts,
     ) -> impl std::future::Future<Output = Result<TableData, DbError>> + Send;
     fn common_values(
         &self,
+        schema: Option<&str>,
         table: &str,
         column: &str,
     ) -> impl std::future::Future<Output = Result<Vec<(String, f32)>, DbError>> + Send;
+}
+
+/// Escapes an identifier for splicing into SQL text by doubling embedded
+/// `"` (the standard Postgres/SQLite quoted-identifier escape) — every name
+/// reaching this must already be allow-list-validated against a live
+/// catalog lookup; this only makes a validated name syntactically safe to
+/// splice; it is not itself a validation step.
+pub(crate) fn quote_ident(ident: &str) -> String {
+    format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
 /// The hardcoded operator→SQL-keyword table (`spec/protocol.md` §5.4.2) —
@@ -125,5 +147,22 @@ pub(crate) fn op_sql(op: FilterOp) -> &'static str {
         FilterOp::Ilike => "ILIKE",
         FilterOp::IsNull => "IS NULL",
         FilterOp::IsNotNull => "IS NOT NULL",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quote_ident;
+
+    #[test]
+    fn quote_ident_doubles_embedded_quotes() {
+        assert_eq!(quote_ident("users"), "\"users\"");
+        // A name containing `"` must not let the attacker close the quoted
+        // identifier early — doubling is the escape, not omission.
+        assert_eq!(quote_ident("foo\"bar"), "\"foo\"\"bar\"");
+        assert_eq!(
+            quote_ident("a\"; drop table users; --"),
+            "\"a\"\"; drop table users; --\""
+        );
     }
 }

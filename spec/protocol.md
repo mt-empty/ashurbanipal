@@ -22,17 +22,26 @@ interpreted as described in RFC 2119.
   the routes in §5 under a mount point.
 - **Mount** — the URL path prefix under which an implementation serves the
   UI and API (see §3).
-- **Connected schema** — the namespace of tables the implementation
-  browses, for engines that have one (on Postgres: the result of
-  `current_schema()` resolved at the start of an operation). All table
-  listing, validation, metadata, and data queries MUST be scoped to that
-  resolved schema, never hardcoded to a default such as `public`. An
-  operation that performs multiple queries to produce one response (such
-  as `/tables/data` or `/tables/common-values`) MUST use the same resolved
-  schema for every query, even when its connection pool uses sessions with
-  different `search_path` settings. Engines with no schema concept above a
-  single database (e.g. SQLite) satisfy this trivially — see
-  `docs/adapter-decisions.md`.
+- **Resolved schema** — the namespace of tables one operation browses, for
+  engines that have a schema concept above a single database. Every
+  route that takes a `schema` parameter (§5.2–§5.5) resolves it the same
+  way:
+  - **Absent** — resolves to the connection's own default (on Postgres:
+    `current_schema()`).
+  - **Present** — MUST match an entry from §5.7's live list exactly
+    (case-sensitive); otherwise 400. An implementation MUST NOT accept a
+    schema name that hasn't been validated against that same live list,
+    whether the name came from the request or from resolving the
+    connection's default.
+  All table listing, validation, metadata, and data queries for one
+  operation MUST be scoped to that operation's resolved schema, never
+  hardcoded to a default such as `public`. An operation that performs
+  multiple queries to produce one response (such as `/tables/data` or
+  `/tables/common-values`) MUST resolve the schema once and use that same
+  resolved value for every query in the operation, even when its
+  connection pool uses sessions with different `search_path` settings.
+  Engines with no schema concept above a single database (e.g. SQLite)
+  satisfy this trivially — see `docs/adapter-decisions.md`.
 
 ## 2. Transport
 
@@ -47,12 +56,12 @@ interpreted as described in RFC 2119.
   The body is a short human-readable reason. Its exact wording is
   implementation-defined; clients MUST NOT parse it. (A structured error
   envelope would be a protocol v2 change.)
-- Every API response (§5.2–§5.6), success or error, MUST carry the
+- Every API response (§5.2–§5.7), success or error, MUST carry the
   protocol version header (§7).
 
 ## 3. Mount contract
 
-- The UI is served at `{mount}`; the five API routes live at
+- The UI is served at `{mount}`; the six API routes live at
   `{mount}/api/...`.
 - `{mount}` is implementation-defined. `/__ashurbanipal` is the Rust
   implementation's default, not a requirement.
@@ -78,8 +87,9 @@ interpreted as described in RFC 2119.
   token is a valid environment name (`int`, `uat`, `sit`, ...). The
   special token `any` matches every environment except production-like
   ones. Environment matching is case-insensitive.
-- When disabled, all six routes MUST behave exactly as if the viewer were
-  never mounted: 404, indistinguishable from an absent implementation.
+- When disabled, all seven routes MUST behave exactly as if the viewer
+  were never mounted: 404, indistinguishable from an absent
+  implementation.
   The enabled check is a startup-time decision, not per-request.
 
 ## 5. Routes
@@ -96,8 +106,13 @@ Implementations MUST serve the released frontend artifact unmodified
 
 ### 5.2 `GET {mount}/api/tables`
 
-Lists the base tables of the connected schema. This list is also the
-allow-list every other route validates `table` parameters against.
+Lists the base tables of the resolved schema (§1). This list is also the
+allow-list every other route validates `table` parameters against, scoped
+to that same resolved schema.
+
+| Param    | Required | Rules                                             |
+|----------|----------|----------------------------------------------------|
+| `schema` | no       | See §1's resolution rules; unrecognized value → 400. |
 
 Response:
 
@@ -118,7 +133,11 @@ Response:
 
 ### 5.3 `GET {mount}/api/table-counts`
 
-Approximate row counts for every table in the connected schema.
+Approximate row counts for every table in the resolved schema (§1).
+
+| Param    | Required | Rules                                             |
+|----------|----------|----------------------------------------------------|
+| `schema` | no       | See §1's resolution rules; unrecognized value → 400. |
 
 Response:
 
@@ -141,7 +160,8 @@ Paginated, filtered, sorted rows for a single table.
 
 | Param    | Required | Rules                                                         |
 |----------|----------|---------------------------------------------------------------|
-| `table`  | yes      | MUST match a table from §5.2 exactly (case-sensitive); otherwise 400. |
+| `schema` | no       | See §1's resolution rules; unrecognized value → 400.          |
+| `table`  | yes      | MUST match a table from §5.2 (resolved against the same `schema`) exactly (case-sensitive); otherwise 400. |
 | `filter` | no       | URL-encoded JSON AST, see §5.4.2.                             |
 | `limit`  | no       | Clamped, never an error — see below.                          |
 | `offset` | no       | Clamped, never an error — see below.                          |
@@ -188,7 +208,11 @@ Each `columns` entry is `{name, type}` plus optional fields, all sourced
 from schema catalogs (never data queries):
 
 - `key` — `"pk"` or `"fk"`.
-- `references` — `{table, column}`, present only when `key` is `"fk"`.
+- `references` — `{table, column}`, present only when `key` is `"fk"`, plus
+  an optional `schema`: present only when the referenced table lives in a
+  schema other than the referencing column's own (a cross-schema FK);
+  omitted for the common same-schema case, so existing clients that ignore
+  it see no change (§7 versioning policy — additive, no version bump).
 - `comment` — `COMMENT ON COLUMN` text, omitted when absent.
 - **Composite foreign keys MUST be omitted** from `key`/`references`
   entirely (the columns appear with no key metadata) rather than risk
@@ -303,7 +327,8 @@ Most-common values for one column, from planner statistics.
 
 | Param    | Required | Rules                                             |
 |----------|----------|---------------------------------------------------|
-| `table`  | yes      | Validated against §5.2's list; unknown → 400.     |
+| `schema` | no       | See §1's resolution rules; unrecognized value → 400. |
+| `table`  | yes      | Validated against §5.2's list (resolved against the same `schema`); unknown → 400. |
 | `column` | yes      | Validated against the table's real columns; unknown → 400. |
 
 Response:
@@ -355,6 +380,33 @@ Response:
 - Checks SHOULD run in parallel and MUST be individually bounded by a
   timeout (reference: 3 s) so one dead sibling can't stall the response.
 
+### 5.7 `GET {mount}/api/schemas`
+
+Lists the schema names selectable as the `schema` parameter on §5.2–§5.5.
+This is the live allow-list §1's "present" case validates against.
+
+Response:
+
+```json
+{ "schemas": ["public", "reporting"] }
+```
+
+- MUST list every schema §1's default-resolution case could ever resolve
+  to, so the implicit and explicit paths never diverge on what counts as
+  valid — an implementation MUST NOT accept, via either path, a schema
+  this list doesn't contain.
+- MUST exclude the engine's own system/internal namespaces (on Postgres:
+  `pg_catalog`, `information_schema`, and any `pg_toast`/`pg_temp`
+  namespace) — this route lists browsable schemas, not every namespace
+  the engine happens to expose.
+- SHOULD exclude any schema the connected role cannot access, so nothing
+  offered here would be rejected by §5.2–§5.5's schema check for lack of
+  privilege.
+- Engines with no schema concept above a single database (e.g. SQLite)
+  MUST return exactly one entry — see `docs/adapter-decisions.md`.
+- Schemas SHOULD be returned in a stable order (the Rust implementation
+  sorts by name).
+
 ## 6. Server invariants
 
 These hold across all routes:
@@ -376,21 +428,28 @@ These hold across all routes:
   Catalog and metadata queries MAY join system catalogs when needed to
   satisfy this protocol.
 - **Schema scoping.** Every catalog and data query MUST be scoped to the
-  connected schema (§1), not a hardcoded default such as `'public'`. On
-  engines with no schema concept this is trivially satisfied — see
-  `docs/adapter-decisions.md`.
+  operation's resolved schema (§1), not a hardcoded default such as
+  `'public'`, and MUST reject a `schema` value that isn't on §5.7's live
+  list before it reaches SQL text — same allow-list-before-splice
+  discipline as this section's first bullet, applied to schema names, not
+  just table/column names. On engines with no schema concept this is
+  trivially satisfied — see `docs/adapter-decisions.md`.
 - **Statelessness.** No server-side session or cache is required by the
   protocol; all request handling is self-contained.
 
 ## 7. Protocol version
 
-- Every API response (§5.2–§5.6) MUST carry the header
+- Every API response (§5.2–§5.7) MUST carry the header
   `x-ashurbanipal-protocol: 1`.
-- **Versioning policy**: adding an optional response field is still the
-  same version. Anything else — removing or renaming a field, changing a
-  type or serialization rule, changing a route or parameter's semantics —
-  bumps the version. The policy applies to changes made *after* a version
-  ships, measured from this document's shape forward.
+- **Versioning policy**: adding an optional response field, an optional
+  request parameter, or a wholly new route is still the same version —
+  none of these change what an existing caller that ignores them
+  observes. Anything else — removing or renaming a field, changing a
+  type or serialization rule, changing an *existing* route or parameter's
+  semantics — bumps the version. The policy applies to changes made
+  *after* a version ships, measured from this document's shape forward.
+  §5.7 and the `schema` parameter on §5.2–§5.5 are the first instance of
+  this: purely additive, so v1 stands.
 - **v1 baseline**: v1 is the first protocol version ever emitted; nothing
   shipped a `x-ashurbanipal-protocol` header before it. The pre-spec
   reference's DSL-text `filter` parameter was an implementation detail,

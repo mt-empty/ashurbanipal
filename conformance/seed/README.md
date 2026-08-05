@@ -39,7 +39,7 @@ produces byte-identical output.
 
 The seed ends with a `_conformance_meta` table (one row: `seed_version`,
 an informational `checksum`, `generated_at`). It's an ordinary base table
-in the connected schema — reachable over the regular protocol, no special
+in the connection's default resolved schema — reachable over the regular protocol, no special
 access needed — so the runner can confirm a target is running *this* seed
 (not stale or absent data) with a plain
 `GET {mount}/api/tables/data?table=_conformance_meta` call, even against
@@ -71,6 +71,15 @@ plus tables and a second schema added for conformance coverage:
   table, so `current_schema()`-scoping (`spec/protocol.md` §6) is
   falsifiable: `decoy_items` must never appear in `/api/tables`, and
   requesting it directly must 400 like any other unknown table.
+- **`warehouse`** — a third schema (`carriers`, `shipments`,
+  `shipment_events`) modeling a fulfillment subsystem, added for richer
+  multi-schema coverage and two cross-schema FK shapes:
+  `shipments.order_id` is a lone, required FK into `public.orders`;
+  `shipment_events` carries both a same-schema FK (`shipment_id` ->
+  `warehouse.shipments`) and a nullable cross-schema one
+  (`handled_by_user_id` -> `public.users`) on the same table, so a
+  key-metadata query that only follows same-schema FKs can't pass this
+  fixture by coincidence.
 
 Also present: table/column comments (partial, both commented and
 uncommented tables/columns exist on purpose), `jsonb`, `uuid`,
