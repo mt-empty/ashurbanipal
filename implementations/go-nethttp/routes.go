@@ -51,6 +51,7 @@ func Router(cfg Config, db *sql.DB) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+base, serveHTML)
+	mux.Handle("GET "+base+"/api/schemas", withProtocolHeader(listSchemasHandler(catalog)))
 	mux.Handle("GET "+base+"/api/tables", withProtocolHeader(listTablesHandler(catalog)))
 	mux.Handle("GET "+base+"/api/table-counts", withProtocolHeader(tableCountsHandler(catalog)))
 	mux.Handle("GET "+base+"/api/tables/data", withProtocolHeader(tableDataHandler(catalog, limits)))
@@ -102,9 +103,34 @@ func writeError(w http.ResponseWriter, err error) {
 	}
 }
 
+// querySchema returns the "schema" query param as a *string, nil when
+// absent — the same optionality QueryOpts.Sort already uses, so an absent
+// param and a resolved current_schema() fallback stay distinguishable all
+// the way down to Catalog.resolveSchema.
+func querySchema(q url.Values) *string {
+	if !q.Has("schema") {
+		return nil
+	}
+	s := q.Get("schema")
+	return &s
+}
+
+func listSchemasHandler(c *Catalog) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		schemas, err := c.ListSchemas(r.Context())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, struct {
+			Schemas []string `json:"schemas"`
+		}{schemas})
+	}
+}
+
 func listTablesHandler(c *Catalog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tables, err := c.ListTables(r.Context())
+		tables, err := c.ListTables(r.Context(), querySchema(r.URL.Query()))
 		if err != nil {
 			writeError(w, err)
 			return
@@ -117,7 +143,7 @@ func listTablesHandler(c *Catalog) http.HandlerFunc {
 
 func tableCountsHandler(c *Catalog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		counts, err := c.TableCounts(r.Context())
+		counts, err := c.TableCounts(r.Context(), querySchema(r.URL.Query()))
 		if err != nil {
 			writeError(w, err)
 			return
@@ -188,7 +214,7 @@ func tableDataHandler(c *Catalog, limits Limits) http.HandlerFunc {
 			return
 		}
 
-		data, err := c.QueryTable(r.Context(), table, QueryOpts{
+		data, err := c.QueryTable(r.Context(), querySchema(q), table, QueryOpts{
 			Limit:      limit,
 			Offset:     offset,
 			Sort:       sort,
@@ -210,7 +236,7 @@ func commonValuesHandler(c *Catalog) http.HandlerFunc {
 			httpTextError(w, http.StatusBadRequest, "table and column parameters are required")
 			return
 		}
-		values, err := c.CommonValues(r.Context(), q.Get("table"), q.Get("column"))
+		values, err := c.CommonValues(r.Context(), querySchema(q), q.Get("table"), q.Get("column"))
 		if err != nil {
 			writeError(w, err)
 			return
