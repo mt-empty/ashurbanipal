@@ -43,6 +43,7 @@ const AUDIT_LOG_COUNT: usize = 30_000;
 // ANALYZE/VACUUM) — see the `analyze` block in `main()`.
 const FEATURE_FLAG_COUNT: usize = 6;
 const INVENTORY_COUNT_ROWS: usize = 40;
+const CARRIER_COUNT: usize = 6;
 
 /// Schema/content version stamped into `_conformance_meta` — the sentinel
 /// `conformance/runner` checks for when it isn't asked to apply the seed
@@ -199,6 +200,10 @@ fn main() {
     write_feature_flags(&mut out, &mut rng);
     // feature_flags is deliberately excluded from analyze below.
 
+    write_carriers(&mut out, &mut rng);
+    let shipped_offsets_mins = write_shipments(&mut out, &mut rng, &orders);
+    write_shipment_events(&mut out, &mut rng, &shipped_offsets_mins, &staff_users);
+
     out.push_str(
         "\n-- pg_class.reltuples is only populated by ANALYZE/autovacuum; without this,\n\
          -- a freshly seeded dev db shows -1 via /table-counts until autovacuum runs. This\n\
@@ -216,7 +221,10 @@ fn main() {
          analyze audit_log;\n\
          analyze saved_reports;\n\
          analyze inventory_locations;\n\
-         analyze inventory_counts;\n",
+         analyze inventory_counts;\n\
+         analyze warehouse.carriers;\n\
+         analyze warehouse.shipments;\n\
+         analyze warehouse.shipment_events;\n",
     );
 
     write_conformance_meta(&mut out);
@@ -232,7 +240,8 @@ fn write_header(out: &mut String) {
          -- spanning uuid/bigint-identity PKs, enums, numeric/real, arrays, inet, jsonb,\n\
          -- date/timestamptz, varchar(n), and NULLs throughout, plus single-column FKs\n\
          -- (including two distinct FK columns from one table to the same target) and one\n\
-         -- deliberately empty table. Idempotent (drops first) so it can be re-run against\n\
+         -- deliberately empty table, across three schemas (public, other_schema, warehouse)\n\
+         -- including cross-schema FKs. Idempotent (drops first) so it can be re-run against\n\
          -- a live dev db.\n\n\
          create extension if not exists pgcrypto;\n\n\
          -- A second schema with its own table, same name pattern as nothing else here —\n\
@@ -248,6 +257,10 @@ fn write_header(out: &mut String) {
          \x20   label text not null\n\
          );\n\
          insert into other_schema.decoy_items (label) values ('decoy-1'), ('decoy-2');\n\n\
+         -- A third schema, `warehouse`, whose tables reference `public` (see write_schema());\n\
+         -- created there, after `public`'s tables exist, but dropped up front like\n\
+         -- other_schema — `cascade` covers the ordering either way.\n\
+         drop schema if exists warehouse cascade;\n\n\
          -- New tables are dropped before the originals they reference — `cascade` handles\n\
          -- dependent constraints/views either way, but this keeps the drop order honest.\n\
          drop table if exists _conformance_meta cascade;\n\
@@ -442,6 +455,45 @@ fn write_schema(out: &mut String) {
          'Full ticket body as submitted by the customer.';\n\n\
          comment on table _conformance_meta is \
          'Conformance-suite sentinel row; not part of the application schema.';\n\n",
+    );
+    write_warehouse_schema(out);
+}
+
+/// A fulfillment subsystem in its own schema, referencing `public` — the
+/// cross-schema-FK fixture. Two distinct shapes: `shipments.order_id` is a
+/// lone, required FK crossing into `public`; `shipment_events` carries both
+/// a same-schema FK (`shipment_id`) and a nullable cross-schema one
+/// (`handled_by_user_id`) on the same row, so a query that only handles
+/// same-schema FKs can't accidentally pass by coincidence. Must be created
+/// after `public`'s tables above, since it references them.
+fn write_warehouse_schema(out: &mut String) {
+    out.push_str(
+        "create schema warehouse;\n\n\
+         create table warehouse.carriers (\n\
+         \x20   id bigint generated always as identity primary key,\n\
+         \x20   name text not null unique,\n\
+         \x20   contact_email text,\n\
+         \x20   is_active boolean not null default true\n\
+         );\n\n\
+         create table warehouse.shipments (\n\
+         \x20   id bigint generated always as identity primary key,\n\
+         \x20   order_id uuid not null references public.orders(id),\n\
+         \x20   carrier_id bigint references warehouse.carriers(id),\n\
+         \x20   tracking_number varchar(30) not null,\n\
+         \x20   status varchar(20) not null,\n\
+         \x20   shipped_at timestamptz not null,\n\
+         \x20   delivered_at timestamptz\n\
+         );\n\n\
+         create table warehouse.shipment_events (\n\
+         \x20   id bigint generated always as identity primary key,\n\
+         \x20   shipment_id bigint not null references warehouse.shipments(id),\n\
+         \x20   handled_by_user_id uuid references public.users(id),\n\
+         \x20   event_type varchar(30) not null,\n\
+         \x20   occurred_at timestamptz not null,\n\
+         \x20   notes text\n\
+         );\n\n\
+         comment on table warehouse.shipments is \
+         'Outbound shipments fulfilling orders placed in the public schema.';\n\n",
     );
 }
 
@@ -1256,6 +1308,177 @@ fn write_feature_flags(out: &mut String, rng: &mut StdRng) {
             "    ({}, {enabled}, {rollout}, {}){sep}",
             q(key),
             date_minus_days(created_days_ago),
+        )
+        .unwrap();
+    }
+}
+
+const CARRIER_NAMES: [&str; CARRIER_COUNT] = [
+    "Northwind Freight",
+    "BlueDart Logistics",
+    "Meridian Parcel",
+    "Coastal Express",
+    "Ironclad Shipping",
+    "Swift Relay",
+];
+
+fn write_carriers(out: &mut String, rng: &mut StdRng) {
+    out.push_str("insert into warehouse.carriers (name, contact_email, is_active) values\n");
+    let n = CARRIER_NAMES.len();
+    for (i, name) in CARRIER_NAMES.iter().enumerate() {
+        let email: String = SafeEmail().fake_with_rng(rng);
+        let active = rng.random_bool(0.85);
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(out, "    ({}, {}, {active}){sep}", q(name), q(&email)).unwrap();
+    }
+}
+
+const SHIPMENT_STATUS_POOL: [&str; 4] = ["in_transit", "delivered", "delivered", "returned"];
+
+/// `warehouse.shipments` — cross-schema FK shape #1: `order_id` is the lone
+/// FK on this table, required, pointing at `public.orders`. Only orders that
+/// weren't cancelled ship, and not every one of those does either. Returns
+/// each created shipment's `shipped_at` offset (identity-id order, so index
+/// 0 is id 1) for `write_shipment_events` to stay chronologically downstream
+/// of it.
+fn write_shipments(out: &mut String, rng: &mut StdRng, orders: &[GenOrder]) -> Vec<u32> {
+    struct Row {
+        order_id: Uuid,
+        carrier_id: Option<i64>,
+        tracking_number: String,
+        status: &'static str,
+        shipped_offset_mins: u32,
+        delivered_offset_mins: Option<u32>,
+    }
+
+    let mut rows = Vec::new();
+    for o in orders {
+        if o.status == "cancelled" || !rng.random_bool(0.7) {
+            continue;
+        }
+        let carrier_id = if rng.random_bool(0.9) {
+            Some(rng.random_range(1..=(CARRIER_COUNT as i64)))
+        } else {
+            None
+        };
+        let tracking_number = format!("TRK{:09}", rng.random_range(100_000_000u32..999_999_999));
+        let status = *SHIPMENT_STATUS_POOL.choose(rng).unwrap();
+        let ship_gap = rng.random_range(30..2000).min(o.created_offset_mins);
+        let shipped_offset_mins = o.created_offset_mins - ship_gap;
+        let delivered_offset_mins = if status == "delivered" {
+            let delivery_gap = rng.random_range(60..4000).min(shipped_offset_mins);
+            Some(shipped_offset_mins - delivery_gap)
+        } else {
+            None
+        };
+        rows.push(Row {
+            order_id: o.id,
+            carrier_id,
+            tracking_number,
+            status,
+            shipped_offset_mins,
+            delivered_offset_mins,
+        });
+    }
+
+    out.push_str(
+        "insert into warehouse.shipments \
+         (order_id, carrier_id, tracking_number, status, shipped_at, delivered_at) values\n",
+    );
+    let n = rows.len();
+    for (i, r) in rows.iter().enumerate() {
+        let carrier_sql = int_sql(r.carrier_id);
+        let delivered_sql = r
+            .delivered_offset_mins
+            .map(ts_minus_mins)
+            .unwrap_or_else(|| "NULL".into());
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ('{order_id}', {carrier_sql}, {tracking_sql}, {status_sql}, {shipped}, {delivered_sql}){sep}",
+            order_id = r.order_id,
+            tracking_sql = q(&r.tracking_number),
+            status_sql = q(r.status),
+            shipped = ts_minus_mins(r.shipped_offset_mins),
+        )
+        .unwrap();
+    }
+
+    rows.iter().map(|r| r.shipped_offset_mins).collect()
+}
+
+const SHIPMENT_EVENT_TYPES: [&str; 6] = [
+    "label_created",
+    "picked_up",
+    "in_transit",
+    "out_for_delivery",
+    "delivered",
+    "exception",
+];
+
+/// `warehouse.shipment_events` — cross-schema FK shape #2: this table
+/// carries a same-schema FK (`shipment_id` -> `warehouse.shipments`) and a
+/// nullable cross-schema one (`handled_by_user_id` -> `public.users`) side
+/// by side, so a key-metadata query that only handles same-schema FKs can't
+/// pass this fixture by coincidence.
+fn write_shipment_events(
+    out: &mut String,
+    rng: &mut StdRng,
+    shipped_offsets_mins: &[u32],
+    staff_users: &[&GenUser],
+) {
+    struct Row {
+        shipment_id: i64,
+        handled_by: Option<Uuid>,
+        event_type: &'static str,
+        occurred_offset_mins: u32,
+        notes: Option<String>,
+    }
+
+    let mut rows = Vec::new();
+    for (idx, &shipped_offset_mins) in shipped_offsets_mins.iter().enumerate() {
+        let shipment_id = idx as i64 + 1;
+        let n_events = rng.random_range(1..=4);
+        for _ in 0..n_events {
+            let handled_by = if !staff_users.is_empty() && rng.random_bool(0.4) {
+                Some(staff_users.choose(rng).unwrap().id)
+            } else {
+                None
+            };
+            let event_type = *SHIPMENT_EVENT_TYPES.choose(rng).unwrap();
+            let gap = rng.random_range(0..1500).min(shipped_offset_mins);
+            let occurred_offset_mins = shipped_offset_mins - gap;
+            let notes = if rng.random_bool(0.3) {
+                let p: String = Paragraph(1..2).fake_with_rng(rng);
+                Some(p)
+            } else {
+                None
+            };
+            rows.push(Row {
+                shipment_id,
+                handled_by,
+                event_type,
+                occurred_offset_mins,
+                notes,
+            });
+        }
+    }
+
+    out.push_str(
+        "insert into warehouse.shipment_events \
+         (shipment_id, handled_by_user_id, event_type, occurred_at, notes) values\n",
+    );
+    let n = rows.len();
+    for (i, r) in rows.iter().enumerate() {
+        let handled_sql = uuid_sql(r.handled_by);
+        let notes_sql = r.notes.as_ref().map(|n| q(n)).unwrap_or_else(|| "NULL".into());
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ({shipment_id}, {handled_sql}, {event_sql}, {occurred}, {notes_sql}){sep}",
+            shipment_id = r.shipment_id,
+            event_sql = q(r.event_type),
+            occurred = ts_minus_mins(r.occurred_offset_mins),
         )
         .unwrap();
     }

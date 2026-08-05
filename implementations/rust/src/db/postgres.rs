@@ -4,7 +4,8 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use super::{
-    op_sql, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData, TableInfo,
+    op_sql, quote_ident, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData,
+    TableInfo,
 };
 use crate::filter::{Condition, Logic};
 
@@ -43,12 +44,16 @@ fn build_where_clause(
             let value = condition.value.clone().ok_or_else(|| {
                 DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
             })?;
-            let frag = format!("\"{column}\"::text {} ${next_param}", op_sql(condition.op));
+            let frag = format!(
+                "{}::text {} ${next_param}",
+                quote_ident(column),
+                op_sql(condition.op)
+            );
             values.push(value);
             next_param += 1;
             frag
         } else {
-            format!("\"{column}\"::text {}", op_sql(condition.op))
+            format!("{}::text {}", quote_ident(column), op_sql(condition.op))
         };
         let wrapped = if condition.not {
             format!("(NOT ({inner}))")
@@ -97,15 +102,66 @@ impl PgPoolSource {
         Ok(tx)
     }
 
-    async fn allowed_tables_in_tx(
+    /// Excludes the catalogs themselves (`pg_catalog`, `information_schema`,
+    /// `pg_toast%`, `pg_temp_%`) and anything the connected role can't
+    /// actually use, so a schema only ever appears here if it's both a real
+    /// user namespace and one this role has `USAGE` on.
+    async fn list_schemas_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
     ) -> Result<Vec<String>, DbError> {
         let rows = sqlx::query_scalar::<_, String>(
+            "select nspname from pg_namespace \
+             where nspname not in ('pg_catalog', 'information_schema') \
+               and nspname not like 'pg_toast%' \
+               and nspname not like 'pg_temp\\_%' escape '\\' \
+               and has_schema_privilege(nspname, 'USAGE') \
+             order by nspname",
+        )
+        .fetch_all(&mut **tx)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Resolves the schema for this operation exactly once, as the first
+    /// statement in `tx`, and every later query in the same transaction
+    /// reuses this value — since a `Transaction` stays pinned to one
+    /// physical connection for its whole lifetime, this is immune to the
+    /// pool session drift `tests/schema_isolation.rs` guards against. An
+    /// explicit request and an absent one (resolved via `current_schema()`)
+    /// both go through the same `list_schemas_in_tx` allow-list, so neither
+    /// path can reach a schema the other would reject.
+    async fn resolve_schema_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        requested: Option<&str>,
+    ) -> Result<String, DbError> {
+        let schemas = self.list_schemas_in_tx(tx).await?;
+        let resolved = match requested {
+            Some(name) => name.to_string(),
+            None => {
+                sqlx::query_scalar::<_, String>("select current_schema()")
+                    .fetch_one(&mut **tx)
+                    .await?
+            }
+        };
+        schemas
+            .into_iter()
+            .find(|s| s == &resolved)
+            .ok_or_else(|| DbError::NotAllowed(format!("schema {resolved:?}")))
+    }
+
+    async fn allowed_tables_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        schema: &str,
+    ) -> Result<Vec<String>, DbError> {
+        let rows = sqlx::query_scalar::<_, String>(
             "select table_name from information_schema.tables \
-             where table_schema = current_schema() and table_type = 'BASE TABLE' \
+             where table_schema = $1 and table_type = 'BASE TABLE' \
              order by table_name",
         )
+        .bind(schema)
         .fetch_all(&mut **tx)
         .await?;
         Ok(rows)
@@ -114,13 +170,15 @@ impl PgPoolSource {
     async fn allowed_columns_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
+        schema: &str,
         table: &str,
     ) -> Result<Vec<String>, DbError> {
         let rows = sqlx::query_scalar::<_, String>(
             "select column_name from information_schema.columns \
-             where table_schema = current_schema() and table_name = $1 \
+             where table_schema = $1 and table_name = $2 \
              order by ordinal_position",
         )
+        .bind(schema)
         .bind(table)
         .fetch_all(&mut **tx)
         .await?;
@@ -129,35 +187,60 @@ impl PgPoolSource {
 
     /// Composite FKs are dropped rather than risk mislabeling which
     /// referencing column pairs with which referenced column.
+    ///
+    /// The `ccu` join must match on `ccu.constraint_schema` (the schema the
+    /// constraint itself lives in, always equal to `tc.table_schema`), not
+    /// `ccu.table_schema` (the schema of the table constraint_column_usage
+    /// is describing — for a FOREIGN KEY row that's the *referenced*
+    /// table's schema, which for a cross-schema FK differs from the
+    /// constraining table's schema). Joining on `ccu.table_schema` instead
+    /// silently drops every cross-schema FK's metadata (the LEFT JOIN just
+    /// never matches), which is the bug this comment is guarding against
+    /// regressing to.
     async fn key_metadata_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
+        schema: &str,
         table: &str,
     ) -> Result<(HashSet<String>, HashMap<String, ColumnRef>), DbError> {
-        let rows = sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>)>(
+        let rows = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
             "select tc.constraint_name, tc.constraint_type, kcu.column_name, \
-                    ccu.table_name as ref_table, ccu.column_name as ref_column \
+                    ccu.table_schema as ref_schema, ccu.table_name as ref_table, \
+                    ccu.column_name as ref_column \
              from information_schema.table_constraints tc \
              join information_schema.key_column_usage kcu \
                on kcu.constraint_name = tc.constraint_name \
               and kcu.table_schema = tc.table_schema \
              left join information_schema.constraint_column_usage ccu \
                on ccu.constraint_name = tc.constraint_name \
-              and ccu.table_schema = tc.table_schema \
+              and ccu.constraint_schema = tc.table_schema \
               and tc.constraint_type = 'FOREIGN KEY' \
-             where tc.table_schema = current_schema() \
-               and tc.table_name = $1 \
+             where tc.table_schema = $1 \
+               and tc.table_name = $2 \
                and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
         )
+        .bind(schema)
         .bind(table)
         .fetch_all(&mut **tx)
         .await?;
 
-        type FkCandidateRow = (String, Option<String>, Option<String>);
+        type FkCandidateRow = (String, Option<String>, Option<String>, Option<String>);
 
         let mut pk_columns = HashSet::new();
         let mut fk_candidates: HashMap<String, Vec<FkCandidateRow>> = HashMap::new();
-        for (constraint_name, constraint_type, column_name, ref_table, ref_column) in rows {
+        for (constraint_name, constraint_type, column_name, ref_schema, ref_table, ref_column) in
+            rows
+        {
             match constraint_type.as_str() {
                 "PRIMARY KEY" => {
                     pk_columns.insert(column_name);
@@ -165,6 +248,7 @@ impl PgPoolSource {
                 "FOREIGN KEY" => {
                     fk_candidates.entry(constraint_name).or_default().push((
                         column_name,
+                        ref_schema,
                         ref_table,
                         ref_column,
                     ));
@@ -175,19 +259,26 @@ impl PgPoolSource {
 
         let mut fk_columns = HashMap::new();
         for members in fk_candidates.into_values() {
-            let distinct_columns: HashSet<&str> =
-                members.iter().map(|(name, _, _)| name.as_str()).collect();
+            let distinct_columns: HashSet<&str> = members
+                .iter()
+                .map(|(name, _, _, _)| name.as_str())
+                .collect();
             if distinct_columns.len() != 1 {
                 continue;
             }
-            if let Some((column_name, Some(ref_table), Some(ref_column))) =
+            if let Some((column_name, Some(ref_schema), Some(ref_table), Some(ref_column))) =
                 members.into_iter().next()
             {
+                // Same-schema is the overwhelming common case; omitting
+                // `schema` there keeps the wire payload byte-identical to
+                // before this field existed.
+                let schema = (ref_schema != schema).then_some(ref_schema);
                 fk_columns.insert(
                     column_name,
                     ColumnRef {
                         table: ref_table,
                         column: ref_column,
+                        schema,
                     },
                 );
             }
@@ -210,15 +301,24 @@ fn row_to_json(row: &PgRow, columns: &[ColumnInfo]) -> serde_json::Map<String, s
 }
 
 impl DbSource for PgPoolSource {
-    async fn list_tables(&self) -> Result<Vec<TableInfo>, DbError> {
+    async fn list_schemas(&self) -> Result<Vec<String>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
+        let schemas = self.list_schemas_in_tx(&mut tx).await?;
+        tx.commit().await?;
+        Ok(schemas)
+    }
+
+    async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
+        let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
         let rows = sqlx::query_as::<_, (String, Option<String>)>(
             "select c.relname::text, obj_description(c.oid, 'pg_class') \
              from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = current_schema() and c.relkind = 'r' \
+             where n.nspname = $1 and c.relkind = 'r' \
              order by c.relname",
         )
+        .bind(&schema)
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -228,31 +328,39 @@ impl DbSource for PgPoolSource {
             .collect())
     }
 
-    async fn table_counts(&self) -> Result<Vec<(String, i64)>, DbError> {
+    async fn table_counts(&self, schema: Option<&str>) -> Result<Vec<(String, i64)>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
+        let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
         let rows = sqlx::query_as::<_, (String, i64)>(
             "select c.relname::text, c.reltuples::bigint \
              from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = current_schema() and c.relkind = 'r' \
+             where n.nspname = $1 and c.relkind = 'r' \
              order by c.relname",
         )
+        .bind(&schema)
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
         Ok(rows)
     }
 
-    async fn query_table(&self, table: &str, opts: QueryOpts) -> Result<TableData, DbError> {
+    async fn query_table(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+        opts: QueryOpts,
+    ) -> Result<TableData, DbError> {
         let mut tx = self.bounded_tx(opts.timeout_secs).await?;
-        let tables = self.allowed_tables_in_tx(&mut tx).await?;
+        let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
+        let tables = self.allowed_tables_in_tx(&mut tx, &schema).await?;
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
             .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
             .clone();
 
-        let column_names = self.allowed_columns_in_tx(&mut tx, &table).await?;
+        let column_names = self.allowed_columns_in_tx(&mut tx, &schema, &table).await?;
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
@@ -271,9 +379,10 @@ impl DbSource for PgPoolSource {
 
         let column_types = sqlx::query_as::<_, (String, String)>(
             "select column_name, data_type from information_schema.columns \
-             where table_schema = current_schema() and table_name = $1 \
+             where table_schema = $1 and table_name = $2 \
              order by ordinal_position",
         )
+        .bind(&schema)
         .bind(&table)
         .fetch_all(&mut *tx)
         .await?;
@@ -286,16 +395,17 @@ impl DbSource for PgPoolSource {
              from pg_attribute a \
              join pg_class c on c.oid = a.attrelid \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = current_schema() and c.relname = $1 \
+             where n.nspname = $1 and c.relname = $2 \
                and a.attnum > 0 and not a.attisdropped",
             )
+            .bind(&schema)
             .bind(&table)
             .fetch_all(&mut *tx)
             .await?
             .into_iter()
             .filter_map(|(name, comment)| comment.map(|c| (name, c)))
             .collect();
-        let (pk_columns, fk_columns) = self.key_metadata_in_tx(&mut tx, &table).await?;
+        let (pk_columns, fk_columns) = self.key_metadata_in_tx(&mut tx, &schema, &table).await?;
         let columns: Vec<ColumnInfo> = column_types
             .into_iter()
             .map(|(name, type_name)| {
@@ -319,23 +429,27 @@ impl DbSource for PgPoolSource {
 
         let select_list = columns
             .iter()
-            .map(|c| format!("\"{}\"::text", c.name))
+            .map(|c| format!("{}::text", quote_ident(&c.name)))
             .collect::<Vec<_>>()
             .join(", ");
-        // Table-qualified: an unqualified `order by "col"` would resolve to
-        // the `::text`-cast output column in select_list, sorting
-        // lexicographically instead of by the real typed value.
+        // Table-qualified (by relation name, not schema — a FROM item's
+        // correlation name is its own relation name regardless of whether
+        // FROM itself is schema-qualified): an unqualified `order by "col"`
+        // would resolve to the `::text`-cast output column in select_list,
+        // sorting lexicographically instead of by the real typed value.
         let order_clause = match &sort {
             Some(col) => format!(
-                " order by \"{}\".\"{}\" {}",
-                table,
-                col,
+                " order by {}.{} {}",
+                quote_ident(&table),
+                quote_ident(col),
                 if opts.descending { "desc" } else { "asc" }
             ),
             None => String::new(),
         };
         let sql = format!(
-            "select {select_list} from \"{table}\"{where_clause}{order_clause} limit $1 offset $2"
+            "select {select_list} from {}.{}{where_clause}{order_clause} limit $1 offset $2",
+            quote_ident(&schema),
+            quote_ident(&table)
         );
 
         // AssertSqlSafe: sql interpolates only schema-validated identifiers
@@ -350,8 +464,9 @@ impl DbSource for PgPoolSource {
         let total_approx = sqlx::query_scalar::<_, i64>(
             "select reltuples::bigint from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = current_schema() and c.relname = $1",
+             where n.nspname = $1 and c.relname = $2",
         )
+        .bind(&schema)
         .bind(&table)
         .fetch_one(&mut *tx)
         .await?;
@@ -367,17 +482,19 @@ impl DbSource for PgPoolSource {
 
     async fn common_values(
         &self,
+        schema: Option<&str>,
         table: &str,
         column: &str,
     ) -> Result<Vec<(String, f32)>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
-        let tables = self.allowed_tables_in_tx(&mut tx).await?;
+        let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
+        let tables = self.allowed_tables_in_tx(&mut tx, &schema).await?;
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
             .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
             .clone();
-        let columns = self.allowed_columns_in_tx(&mut tx, &table).await?;
+        let columns = self.allowed_columns_in_tx(&mut tx, &schema, &table).await?;
         let column = columns
             .iter()
             .find(|c| c.as_str() == column)
@@ -391,9 +508,10 @@ impl DbSource for PgPoolSource {
             "select t.val, t.freq \
              from pg_stats, \
                   lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq) \
-             where schemaname = current_schema() and tablename = $1 and attname = $2 \
+             where schemaname = $1 and tablename = $2 and attname = $3 \
              order by t.freq desc",
         )
+        .bind(&schema)
         .bind(&table)
         .bind(&column)
         .fetch_all(&mut *tx)
@@ -401,8 +519,9 @@ impl DbSource for PgPoolSource {
 
         let data_type = sqlx::query_scalar::<_, String>(
             "select data_type from information_schema.columns \
-             where table_schema = current_schema() and table_name = $1 and column_name = $2",
+             where table_schema = $1 and table_name = $2 and column_name = $3",
         )
+        .bind(&schema)
         .bind(&table)
         .bind(&column)
         .fetch_optional(&mut *tx)

@@ -19,10 +19,32 @@ servers:
         description: Implementation-defined mount point.
 
 paths:
+  /schemas:
+    get:
+      operationId: listSchemas
+      summary: List schema names selectable as the `schema` param elsewhere.
+      responses:
+        "200":
+          description: >
+            Live allow-list for the `schema` param on /tables,
+            /table-counts, /tables/data, and /tables/common-values
+            (spec/protocol.md §5.7).
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchemasResponse"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
   /tables:
     get:
       operationId: listTables
-      summary: List base tables of the connected schema.
+      summary: List base tables of the resolved schema.
+      parameters:
+        - $ref: "#/components/parameters/Schema"
       responses:
         "200":
           description: Table list (also the allow-list for `table` params).
@@ -39,6 +61,8 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/TableInfo"
+        "400":
+          $ref: "#/components/responses/ClientError"
         "500":
           $ref: "#/components/responses/ServerError"
 
@@ -46,6 +70,8 @@ paths:
     get:
       operationId: tableCounts
       summary: Approximate row counts from pg_class.reltuples.
+      parameters:
+        - $ref: "#/components/parameters/Schema"
       responses:
         "200":
           description: Approximate counts for every table.
@@ -56,6 +82,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CountsResponse"
+        "400":
+          $ref: "#/components/responses/ClientError"
         "500":
           $ref: "#/components/responses/ServerError"
 
@@ -64,6 +92,7 @@ paths:
       operationId: tableData
       summary: Paginated, filtered, sorted rows for a single table.
       parameters:
+        - $ref: "#/components/parameters/Schema"
         - name: table
           in: query
           required: true
@@ -179,6 +208,7 @@ paths:
       operationId: commonValues
       summary: Most-common values for one column, from pg_stats.
       parameters:
+        - $ref: "#/components/parameters/Schema"
         - name: table
           in: query
           required: true
@@ -238,6 +268,19 @@ paths:
                 $ref: "#/components/schemas/SiblingsResponse"
 
 components:
+  parameters:
+    Schema:
+      name: schema
+      in: query
+      required: false
+      description: >
+        Selects which schema this operation is scoped to (spec/protocol.md
+        §1). Absent resolves to the connection's own default. Present
+        must exactly match (case-sensitive) an entry from GET /schemas;
+        otherwise 400.
+      schema:
+        type: string
+
   headers:
     ProtocolVersion:
       description: Protocol version; "1" for this document.
@@ -270,6 +313,19 @@ components:
             type: string
 
   schemas:
+    SchemasResponse:
+      type: object
+      required: [schemas]
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          description: >
+            Selectable schema names, excluding the engine's own
+            system/internal namespaces. Exactly one entry on engines with
+            no schema concept above a single database.
+
     TableInfo:
       type: object
       required: [name]
@@ -304,6 +360,12 @@ components:
               type: string
             column:
               type: string
+            schema:
+              type: string
+              description: >
+                Present only when the referenced table lives in a schema
+                other than the referencing column's own (a cross-schema
+                FK); omitted for the common same-schema case.
         comment:
           type: string
           description: COMMENT ON COLUMN text; omitted when absent.
