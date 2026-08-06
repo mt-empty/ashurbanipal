@@ -15,11 +15,6 @@ use crate::filter::{Condition, FilterOp, Logic};
 /// (mirrors `postgres::CATALOG_TIMEOUT_SECS`).
 const CATALOG_TIMEOUT_SECS: u32 = 5;
 
-/// Cap for the live `GROUP BY` `common_values` falls back to (SQLite has no
-/// `pg_stats` equivalent to read pre-computed frequencies from) — matches
-/// roughly what Postgres's planner-stats typically return.
-const COMMON_VALUES_LIMIT: i64 = 20;
-
 /// SQLite has no schema namespace above a single database file — this is
 /// the only name `list_schemas` ever returns, mirroring how a bare
 /// `ATTACH`-less connection exposes its one implicit `main` schema.
@@ -275,24 +270,10 @@ impl DbSource for SqliteSource {
     async fn table_counts(&self, schema: Option<&str>) -> Result<Vec<(String, i64)>, DbError> {
         check_schema(schema)?;
         let tables = self.allowed_tables().await?;
-        let mut counts = Vec::with_capacity(tables.len());
-        for table in tables {
-            let t = quote_ident(&table);
-            let count = self
-                .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-                    // `t` came from `allowed_tables` (sqlite_master), not
-                    // user input.
-                    let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                        "select count(*) from {t}"
-                    )))
-                    .fetch_one(&mut *conn)
-                    .await?;
-                    Ok(count)
-                })
-                .await?;
-            counts.push((table, count));
-        }
-        Ok(counts)
+        // SQLite has no reltuples-equivalent catalog estimate; -1 is the
+        // documented "no estimate" sentinel (spec/protocol.md §5.3) rather
+        // than a per-table COUNT(*) scan. See docs/adapter-decisions.md.
+        Ok(tables.into_iter().map(|table| (table, -1i64)).collect())
     }
 
     async fn query_table(
@@ -385,38 +366,33 @@ impl DbSource for SqliteSource {
         let sql = format!(
             "select {select_list} from {quoted_table}{where_clause}{order_clause} limit ? offset ?"
         );
-        let count_sql = format!("select count(*) from {quoted_table}{where_clause}");
 
         let limit = opts.limit as i64;
         let offset = opts.offset as i64;
-        let values_for_rows = filter_values.clone();
-        let (rows, columns, total_approx) = self
+        let (rows, columns) = self
             .bounded(opts.timeout_secs, async move |conn| {
                 let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
-                for value in &values_for_rows {
+                for value in &filter_values {
                     query = query.bind(value);
                 }
                 query = query.bind(limit).bind(offset);
                 let sqlite_rows = query.fetch_all(&mut *conn).await?;
 
-                let mut count_query = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(count_sql));
-                for value in &filter_values {
-                    count_query = count_query.bind(value);
-                }
-                let total_approx = count_query.fetch_one(&mut *conn).await?;
-
                 let rows = sqlite_rows
                     .iter()
                     .map(|r| row_to_json(r, &columns))
                     .collect();
-                Ok((rows, columns, total_approx))
+                Ok((rows, columns))
             })
             .await?;
 
         Ok(TableData {
             columns,
             rows,
-            total_approx,
+            // No reltuples-equivalent estimate to read; -1 is the
+            // documented "no estimate" sentinel (spec/protocol.md §5.4.4),
+            // not a second COUNT(*) scan on every page load.
+            total_approx: -1,
         })
     }
 
@@ -434,36 +410,15 @@ impl DbSource for SqliteSource {
             .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
             .clone();
         let columns = self.allowed_columns(&table).await?;
-        let column = columns
+        columns
             .iter()
             .find(|c| c.as_str() == column)
-            .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?
-            .clone();
-        let quoted_table = quote_ident(&table);
-        let quoted_column = quote_ident(&column);
+            .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?;
 
-        self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-            let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "select count(*) from {quoted_table}"
-            )))
-            .fetch_one(&mut *conn)
-            .await?;
-            if total == 0 {
-                return Ok(Vec::new());
-            }
-            let rows = sqlx::query_as::<_, (String, i64)>(sqlx::AssertSqlSafe(format!(
-                "select CAST({quoted_column} AS TEXT) as val, count(*) as freq \
-                 from {quoted_table} where {quoted_column} is not null \
-                 group by {quoted_column} order by freq desc limit {COMMON_VALUES_LIMIT}"
-            )))
-            .fetch_all(&mut *conn)
-            .await?;
-            Ok(rows
-                .into_iter()
-                .map(|(val, freq)| (val, freq as f32 / total as f32))
-                .collect())
-        })
-        .await
+        // No pg_stats equivalent to read; an empty list is the documented
+        // "no statistics available" answer (spec/protocol.md §5.5), not a
+        // live GROUP BY scan. See docs/adapter-decisions.md.
+        Ok(Vec::new())
     }
 }
 
@@ -538,7 +493,9 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(data.total_approx, 3);
+        // No reltuples-equivalent estimate on SQLite; always the -1
+        // sentinel (spec/protocol.md §5.4.4), not a live COUNT(*).
+        assert_eq!(data.total_approx, -1);
         assert_eq!(data.rows.len(), 3);
         assert_eq!(
             data.columns.iter().find(|c| c.name == "id").unwrap().key,
@@ -578,12 +535,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn common_values_groups_and_reports_fractions() {
+    async fn table_counts_reports_no_estimate_sentinel() {
         let source = SqliteSource::new(seeded_pool().await);
+        let counts = source.table_counts(None).await.unwrap();
+        // No reltuples-equivalent catalog on SQLite; always -1
+        // (spec/protocol.md §5.3), not a per-table COUNT(*).
+        assert_eq!(
+            counts,
+            vec![("orders".to_string(), -1), ("users".to_string(), -1)]
+        );
+    }
+
+    #[tokio::test]
+    async fn common_values_is_always_empty_on_sqlite() {
+        let source = SqliteSource::new(seeded_pool().await);
+        // No pg_stats equivalent on SQLite; always empty
+        // (spec/protocol.md §5.5's "no statistics available" case), not a
+        // live GROUP BY scan.
         let values = source.common_values(None, "users", "age").await.unwrap();
-        let (val_30, freq_30) = values.iter().find(|(v, _)| v == "30").unwrap();
-        assert_eq!(val_30, "30");
-        assert!((freq_30 - 2.0 / 3.0).abs() < 1e-6);
+        assert!(values.is_empty());
+    }
+
+    #[tokio::test]
+    async fn common_values_rejects_unknown_column() {
+        let source = SqliteSource::new(seeded_pool().await);
+        assert!(matches!(
+            source.common_values(None, "users", "nope").await,
+            Err(DbError::NotAllowed(_))
+        ));
     }
 
     #[tokio::test]

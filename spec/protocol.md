@@ -149,10 +149,12 @@ Response:
   a whole-table cardinality figure, and MUST NOT cost a full table scan
   when the engine maintains a catalog estimate that avoids one (on
   Postgres: `pg_class.reltuples`, never `COUNT(*)`). It MAY be stale, and
-  MAY be `-1` for a table the engine has no estimate for yet (e.g. never
-  analyzed or vacuumed) — clients MUST tolerate both. Engines with no such
-  catalog fall back to an exact count as a documented per-backend
-  trade-off — see `docs/adapter-decisions.md`.
+  MAY be `-1` either for a table the engine has no estimate for yet (e.g.
+  never analyzed or vacuumed) or for an engine that maintains no such
+  estimate mechanism at all — clients MUST tolerate both. An engine with no
+  such catalog MAY return `-1` unconditionally rather than pay a full-table
+  scan to produce an exact count — see `docs/adapter-decisions.md` for the
+  per-backend choice.
 
 ### 5.4 `GET {mount}/api/tables/data`
 
@@ -318,8 +320,9 @@ row. This applies to every column-value read (`/tables/data`'s rows,
   for this table (same mechanism, same per-backend trade-offs — see
   `docs/adapter-decisions.md`).
 - MUST NOT be affected by `filter` (it is not a filtered count).
-- MAY be stale, and MAY be `-1` when the engine has no estimate yet (on
-  Postgres: before the table's first ANALYZE/VACUUM).
+- MAY be stale, and MAY be `-1` either when the engine has no estimate yet
+  (on Postgres: before the table's first ANALYZE/VACUUM) or when the engine
+  maintains no such estimate mechanism at all.
 
 ### 5.5 `GET {mount}/api/tables/common-values`
 
