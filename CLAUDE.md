@@ -20,13 +20,20 @@ Ashurbanipal is a Rust/Axum crate that a host service embeds to get a
 read-only web UI for browsing its own Postgres tables (no separate DB
 client, no extra credentials, no build step). It ships as a single crate:
 the host does `app.merge(ashurbanipal::router(config, db_source))` and gets
-six routes under a fixed `/__ashurbanipal` prefix, including the UI itself.
+seven routes under a fixed `/__ashurbanipal` prefix — six API routes plus
+the UI itself.
 
-The Rust crate lives at `implementations/rust/` — one of several planned
-language implementations (Spring Boot/Go/Elixir, later) of the same
-`spec/protocol.md` + `spec/openapi.yaml` contract; none is structurally
-privileged over another. `spec/`, `conformance/`, `docs/`, `frontend/`,
-and `tools/` are shared, implementation-neutral and stay at the repo root.
+The Rust crate lives at `implementations/rust/` — one of several peer
+language implementations of the same `spec/protocol.md` +
+`spec/openapi.yaml` contract: Kotlin/Spring Boot
+(`implementations/spring-boot-starter/`), Go/`net-http`
+(`implementations/go-nethttp/`), and Node/Express
+(`implementations/node-express/`) all exist and pass their own conformance
+CI (see the table in `readme.md`); none is structurally privileged over
+another — `PORTING.md` is the checklist a port must clear, including the
+listing bar and cross-port hardening review. `spec/`, `conformance/`,
+`docs/`, `frontend/`, and `tools/` are shared, implementation-neutral and
+stay at the repo root.
 
 Two components:
 - **Frontend** — `frontend/dbviewer.html`, a single static HTML file
@@ -41,14 +48,22 @@ Two components:
   lands, it must be an enhancement only, i.e. the page keeps working if
   the CDN is unreachable.
 - **Backend (Rust implementation)** — `implementations/rust/src/config.rs`
-  (kill switch + limits + siblings config), `implementations/rust/src/db.rs`
-  (the `DbSource` trait + its one impl, `PgPoolSource`),
-  `implementations/rust/src/routes.rs` (the Axum router and the five API
-  handlers).
+  (kill switch + limits + siblings config), `implementations/rust/src/db/`
+  (the `DbSource` trait in `mod.rs` + two impls: `postgres.rs`'s
+  `PgPoolSource`, the default, and `sqlite.rs`'s `SqliteSource`, gated
+  behind the opt-in `sqlite` Cargo feature — see `docs/adapter-decisions.md`
+  for where the two backends' catalog queries diverge),
+  `implementations/rust/src/routes.rs` (the Axum router and the six API
+  handlers, including multi-schema's `list_schemas`).
 
 Read `docs/design.md` first for anything non-obvious — it's the source of
 truth for intended behavior. `spec/protocol.md` is the normative endpoint
-contract (design.md §4 stays as rationale). `spec/filter-dsl.md` has the
+contract (design.md §4 stays as rationale). `PORTING.md` is the contract
+for adding or reviewing a port — what it reuses, what it implements, and
+the governance/hardening checklist a reviewer signs off against.
+`docs/adapter-decisions.md` is the companion registry of per-backend
+protocol relaxations (Postgres vs. SQLite today) where a MUST can't be
+satisfied by the same mechanism on every engine. `spec/filter-dsl.md` has the
 filter grammar and its full test table (implement/verify against that
 table, not ad hoc cases) — it specs the *frontend's* DSL parser; the
 backend's filter contract is the JSON AST in `spec/protocol.md`. `docs/ui-guidelines.md` and `docs/frontend-style-guide.md` are the
@@ -140,13 +155,15 @@ RNG seed, so regenerating without source edits produces an identical file.
 ## Architecture invariants (don't break these)
 
 - **`DbSource` is the only seam to the database.** Route handlers never touch
-  `sqlx` directly. v1 has exactly one implementation, `PgPoolSource`; the
-  trait exists so other adapters can be added later without touching
-  handlers. It's native async-fn-in-trait (no `async_trait`), and the router
-  is generic (`router<S: DbSource>`) — no `dyn`. Don't add `async_trait` or
-  `dyn DbSource` unless a second implementation actually shows up.
+  `sqlx` directly. Two implementations exist today — `postgres.rs`'s
+  `PgPoolSource` (the default/reference) and `sqlite.rs`'s `SqliteSource`
+  (opt-in via the `sqlite` Cargo feature, off by default) — and the trait
+  stayed native async-fn-in-trait (no `async_trait`) with the router generic
+  over it (`router<S: DbSource>`, no `dyn`) even after the second impl
+  landed. Keep it that way; per-backend behavioral differences belong in
+  `docs/adapter-decisions.md`, not in a `dyn`/`async_trait` escape hatch.
 - **Kill switch is fail-closed and checked once, at router construction.**
-  `Config::is_enabled()` gates all six routes identically — if disabled,
+  `Config::is_enabled()` gates all seven routes identically — if disabled,
   `router()` returns an empty `Router::new()`, so the mounted app 404s
   exactly as if the crate weren't merged in at all. Never add a route that
   bypasses this, and never move the enabled-check to per-request.
@@ -157,20 +174,31 @@ RNG seed, so regenerating without source edits produces an identical file.
   property, not incidental validation.
 - **No unvalidated identifier ever reaches SQL text.** Table and column
   names are only ever spliced into a query after being matched exactly
-  against a live `information_schema` lookup (see `allowed_tables` /
-  `allowed_columns` in `db.rs`); everything else is a bound parameter. The
-  filter DSL's columns follow the same rule (`db.rs`'s `build_where_clause`):
-  each condition's column is matched against `allowed_columns` before being
-  spliced in, exactly like `sort` — the parsed column name from
-  `implementations/rust/src/filter.rs` is never trusted directly.
+  against a live catalog lookup (`information_schema` for Postgres,
+  `sqlite_master`/`pragma_table_info` for SQLite — each backend does its own
+  in `db/postgres.rs` / `db/sqlite.rs`); everything else is a bound
+  parameter. The filter DSL's columns follow the same rule (each backend's
+  own `build_where_clause`): each condition's column is matched against the
+  live allow-list before being spliced in, exactly like `sort` — the parsed
+  column name from `implementations/rust/src/filter.rs` is never trusted
+  directly.
+- **Multi-schema queries pin one connection per operation.** `schema: None`
+  resolves to the connection's default schema; an explicit value is
+  allow-list-checked the same way. That resolution happens once, as the
+  first statement of the operation's own transaction, so a later query in
+  the same operation can't see a different schema after pool session reuse
+  — see `docs/design.md` §5 and `implementations/rust/tests/schema_isolation.rs`
+  for the regression test. An endpoint that issues multiple schema-sensitive
+  queries to build one response MUST stay on that one connection/transaction;
+  never re-borrow from the pool mid-operation.
 - **The filter DSL is implemented.** `implementations/rust/src/filter.rs` deserializes and
   structurally validates the JSON filter AST wire format (`spec/protocol.md` §5.4.2) — it never
   parses DSL text, that's frontend-only (`spec/filter-dsl.md`);
-  `db.rs`'s `query_table` validates each condition's column against the live
+  each backend's `query_table` validates each condition's column against the live
   schema and maps each operator through a hardcoded SQL-fragment match
   before binding its value as a parameter — see `spec/filter-dsl.md` for the
   grammar and the full valid/rejected/adversarial test table it's verified
-  against (`tests/black_box/filter_dsl.rs`). Per `spec/protocol.md`, DSL
+  against (`conformance/runner/filter_dsl.rs`). Per `spec/protocol.md`, DSL
   *text* parsing is becoming frontend-only and the wire contract is the
   JSON filter AST — the grammar doc specs the frontend parser, and the
   server-side steps (column allow-listing, operator mapping, value
@@ -189,5 +217,5 @@ RNG seed, so regenerating without source edits produces an identical file.
   bug it guards against — in one or two sentences, never a *what* the
   type/function name already says, and never a citation-heavy restatement
   of a design doc. This drifted once already (verbose doc-section citations
-  accumulated across `db.rs`/`filter.rs` over several feature PRs and needed
+  accumulated across `db/*.rs`/`filter.rs` over several feature PRs and needed
   a dedicated cleanup pass); don't let it recur.
