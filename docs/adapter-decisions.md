@@ -26,7 +26,7 @@ approximate — it is explicitly not a correctness-critical value.
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
 | Postgres | `pg_class.reltuples` | Planner estimate; MAY be `-1` before the table's first ANALYZE/VACUUM. Never `COUNT(*)` — the whole point is avoiding a full scan on every table on every page load. |
-| SQLite   | `SELECT COUNT(*)` | SQLite has no `reltuples`-equivalent cardinality catalog. `implementations/rust/src/db/sqlite.rs::table_counts` falls back to an exact count. Flagged as a perf concern on large tables — every `/api/table-counts` call is now O(tables × rows), not O(tables) — and worth revisiting (e.g. `PRAGMA` page-count-based estimate, or caching) as a follow-up, not a blocker. |
+| SQLite   | Always `-1` | SQLite has no `reltuples`-equivalent cardinality catalog. `implementations/rust/src/db/sqlite.rs::table_counts`/`query_table` used to fall back to an exact `COUNT(*)` (O(tables × rows) per `/api/table-counts` call, and a second `COUNT(*)` per page load for `total_approx`); that fallback was removed in favor of the protocol's own "no estimate" sentinel — deliberately disabled, not a stopgap. This also fixed a latent §5.4.4 nonconformance: the old `total_approx` count re-applied the request's filter `WHERE` clause, so a filtered page load returned a filtered count, not the whole-table figure the spec requires. The previously-suggested `PRAGMA` page-count estimate and caching are superseded by this decision, not still open. |
 
 ## §5.5 — `common-values`
 
@@ -36,7 +36,7 @@ values for one column; an empty list is a valid answer, not an error.
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
 | Postgres | `pg_stats.most_common_vals`/`most_common_freqs` | Pre-computed by ANALYZE; a column with no stats (never analyzed, or all-unique) yields an empty list. Never `SELECT DISTINCT` or any other data query. |
-| SQLite   | Live `GROUP BY ... ORDER BY COUNT(*) DESC LIMIT 20` | No `pg_stats` analog exists. `sqlite.rs` computes frequencies from a bounded, capped live aggregate (`COMMON_VALUES_LIMIT = 20`) rather than reading pre-computed stats. This is a real relaxation of "never a data query" — accepted because the query is `GROUP BY` + `LIMIT`, not an unbounded `SELECT DISTINCT`, but it does real I/O proportional to table size on every call, unlike the Postgres path. Worth reconsidering (e.g. caching, or reading SQLite's own `ANALYZE`-produced `sqlite_stat1`/`sqlite_stat4` tables when present) as a follow-up. |
+| SQLite   | Always empty `values` | No `pg_stats` analog exists. `sqlite.rs::common_values` used to compute frequencies from a bounded, capped live `GROUP BY ... LIMIT 20` aggregate; that was removed in favor of the protocol's own "no statistics available" answer — SQLite never maintains such statistics, so an unconditional empty list is the deliberate, permanent answer, not a stopgap. Table/column names are still validated against the live allow-list first, so an unknown table/column is still rejected before the (now-skipped) query would have run. The previously-suggested `sqlite_stat1`/`sqlite_stat4` reads and caching are superseded by this decision, not still open. |
 
 ## §5.4.3 — value serialization (text cast)
 

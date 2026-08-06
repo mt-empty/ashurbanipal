@@ -1324,14 +1324,16 @@ function filterTables() {
 }
 $("table-filter").oninput = filterTables;
 
-// approx_rows/total_approx is -1 when Postgres has no reltuples estimate
-// yet; show "?" rather than a confusing raw negative number. No leading
-// "~" in that case either — "~?" would read as "approximately unknown".
+// approx_rows/total_approx is -1 when the backend has no cheap estimate for
+// this table (e.g. Postgres before ANALYZE, or an engine with no such
+// catalog at all — see docs/adapter-decisions.md); show "?" rather than a
+// confusing raw negative number. No leading "~" in that case either —
+// "~?" would read as "approximately unknown".
 function formatApproxCount(n) {
   return n == null || n < 0 ? "?" : `~${n}`;
 }
-const APPROX_COUNT_TITLE = "~ = approximate, from Postgres's statistics, not a live count; "
-  + "? = no estimate yet (table hasn't been analyzed)";
+const APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; "
+  + "? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
 
 // ==== Schema selector ====
 // Hidden entirely for a single-schema deployment (the overwhelming common
