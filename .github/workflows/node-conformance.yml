@@ -31,11 +31,30 @@ env:
 
 jobs:
   build-and-test:
-    name: npm build/typecheck + fixture/kill-switch tests
+    name: npm build/typecheck + fixture/kill-switch/schema tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ashurbanipal
+          POSTGRES_PASSWORD: ashurbanipal
+          POSTGRES_DB: ashurbanipal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
+
+      - name: Apply the conformance seed
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
 
       - uses: pnpm/action-setup@v6
         with:
@@ -60,8 +79,8 @@ jobs:
         run: pnpm run build
 
       # Fixture tests (test/filter-fixture.test.ts) and kill-switch tests
-      # (test/killswitch.test.ts) need no database — they never construct
-      # a real Pool.
+      # (test/killswitch.test.ts) need no database; test/schema.integration.test.ts
+      # needs DATABASE_URL (set above) and the conformance seed applied.
       - name: Test
         working-directory: implementations/node-express
         run: pnpm test
