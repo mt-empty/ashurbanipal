@@ -5,7 +5,8 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
 use super::{
-    op_sql, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData, TableInfo,
+    op_sql, quote_ident, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData,
+    TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -18,6 +19,22 @@ const CATALOG_TIMEOUT_SECS: u32 = 5;
 /// `pg_stats` equivalent to read pre-computed frequencies from) — matches
 /// roughly what Postgres's planner-stats typically return.
 const COMMON_VALUES_LIMIT: i64 = 20;
+
+/// SQLite has no schema namespace above a single database file — this is
+/// the only name `list_schemas` ever returns, mirroring how a bare
+/// `ATTACH`-less connection exposes its one implicit `main` schema.
+const ONLY_SCHEMA: &str = "main";
+
+/// A request naming any schema other than `ONLY_SCHEMA` is asking for
+/// something that doesn't exist on this backend — same `NotAllowed` shape
+/// Postgres returns for a schema absent from its live allow-list, so
+/// callers don't need to special-case which backend rejected it.
+fn check_schema(schema: Option<&str>) -> Result<(), DbError> {
+    match schema {
+        None | Some(ONLY_SCHEMA) => Ok(()),
+        Some(other) => Err(DbError::NotAllowed(format!("schema {other:?}"))),
+    }
+}
 
 /// SQLite spike, gated behind the `sqlite` feature — not a listed/conformant
 /// port (`docs/design.md` §2 non-goal, `PORTING.md`). See
@@ -89,10 +106,10 @@ impl SqliteSource {
     /// table name, so this is the one identifier spliced into a PRAGMA
     /// string rather than bound.
     async fn allowed_columns(&self, table: &str) -> Result<Vec<String>, DbError> {
-        let table = table.to_string();
+        let table = quote_ident(table);
         self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
             let rows = sqlx::query_as::<_, (i64, String)>(sqlx::AssertSqlSafe(format!(
-                "select cid, name from pragma_table_info(\"{table}\") order by cid"
+                "select cid, name from pragma_table_info({table}) order by cid"
             )))
             .fetch_all(&mut *conn)
             .await?;
@@ -108,10 +125,10 @@ impl SqliteSource {
         &self,
         table: &str,
     ) -> Result<(Vec<String>, HashMap<String, ColumnRef>), DbError> {
-        let table = table.to_string();
+        let table = quote_ident(table);
         self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
             let cols = sqlx::query_as::<_, (i64, String, i64)>(sqlx::AssertSqlSafe(format!(
-                "select cid, name, pk from pragma_table_info(\"{table}\") order by cid"
+                "select cid, name, pk from pragma_table_info({table}) order by cid"
             )))
             .fetch_all(&mut *conn)
             .await?;
@@ -122,11 +139,14 @@ impl SqliteSource {
                 .collect();
 
             // (id, seq, table, from, to) — `id` groups columns belonging to
-            // the same constraint (composite FKs share an id).
+            // the same constraint (composite FKs share an id). The quoted
+            // "table"/"from"/"to" are pragma_foreign_key_list's own fixed
+            // output column names (SQL keywords needing escape), not the
+            // caller-supplied table.
             let fks = sqlx::query_as::<_, (i64, i64, String, String, String)>(sqlx::AssertSqlSafe(
                 format!(
                     "select id, seq, \"table\", \"from\", \"to\" \
-                     from pragma_foreign_key_list(\"{table}\")"
+                     from pragma_foreign_key_list({table})"
                 ),
             ))
             .fetch_all(&mut *conn)
@@ -149,6 +169,8 @@ impl SqliteSource {
                     ColumnRef {
                         table: ref_table,
                         column: to,
+                        // SQLite has no schema namespace (see ONLY_SCHEMA).
+                        schema: None,
                     },
                 );
             }
@@ -201,15 +223,16 @@ fn build_where_clause(
         } else {
             op_sql(condition.op)
         };
+        let quoted_column = quote_ident(column);
         let inner = if condition.op.takes_value() {
             let value = condition.value.clone().ok_or_else(|| {
                 DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
             })?;
-            let frag = format!("CAST(\"{column}\" AS TEXT) {keyword} ?");
+            let frag = format!("CAST({quoted_column} AS TEXT) {keyword} ?");
             values.push(value);
             frag
         } else {
-            format!("CAST(\"{column}\" AS TEXT) {keyword}")
+            format!("CAST({quoted_column} AS TEXT) {keyword}")
         };
         let wrapped = if condition.not {
             format!("(NOT ({inner}))")
@@ -232,7 +255,12 @@ fn build_where_clause(
 }
 
 impl DbSource for SqliteSource {
-    async fn list_tables(&self) -> Result<Vec<TableInfo>, DbError> {
+    async fn list_schemas(&self) -> Result<Vec<String>, DbError> {
+        Ok(vec![ONLY_SCHEMA.to_string()])
+    }
+
+    async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
+        check_schema(schema)?;
         let names = self.allowed_tables().await?;
         // No `obj_description` equivalent in SQLite — comments unsupported.
         Ok(names
@@ -244,17 +272,18 @@ impl DbSource for SqliteSource {
             .collect())
     }
 
-    async fn table_counts(&self) -> Result<Vec<(String, i64)>, DbError> {
+    async fn table_counts(&self, schema: Option<&str>) -> Result<Vec<(String, i64)>, DbError> {
+        check_schema(schema)?;
         let tables = self.allowed_tables().await?;
         let mut counts = Vec::with_capacity(tables.len());
         for table in tables {
-            let t = table.clone();
+            let t = quote_ident(&table);
             let count = self
                 .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
                     // `t` came from `allowed_tables` (sqlite_master), not
                     // user input.
                     let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                        "select count(*) from \"{t}\""
+                        "select count(*) from {t}"
                     )))
                     .fetch_one(&mut *conn)
                     .await?;
@@ -266,7 +295,13 @@ impl DbSource for SqliteSource {
         Ok(counts)
     }
 
-    async fn query_table(&self, table: &str, opts: QueryOpts) -> Result<TableData, DbError> {
+    async fn query_table(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+        opts: QueryOpts,
+    ) -> Result<TableData, DbError> {
+        check_schema(schema)?;
         let tables = self.allowed_tables().await?;
         let table = tables
             .iter()
@@ -292,12 +327,12 @@ impl DbSource for SqliteSource {
         };
 
         let (pk_columns, fk_columns) = self.key_metadata(&table).await?;
-        let pragma_table = table.clone();
+        let pragma_table = quote_ident(&table);
         let column_types: Vec<(String, String)> = self
             .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
                 let rows =
                     sqlx::query_as::<_, (i64, String, String)>(sqlx::AssertSqlSafe(format!(
-                        "select cid, name, type from pragma_table_info(\"{pragma_table}\") \
+                        "select cid, name, type from pragma_table_info({pragma_table}) \
                          order by cid"
                     )))
                     .fetch_all(&mut *conn)
@@ -334,22 +369,23 @@ impl DbSource for SqliteSource {
 
         let select_list = columns
             .iter()
-            .map(|c| format!("CAST(\"{}\" AS TEXT)", c.name))
+            .map(|c| format!("CAST({} AS TEXT)", quote_ident(&c.name)))
             .collect::<Vec<_>>()
             .join(", ");
         let order_clause = match &sort {
             Some(col) => format!(
-                " order by \"{}\".\"{}\" {}",
-                table,
-                col,
+                " order by {}.{} {}",
+                quote_ident(&table),
+                quote_ident(col),
                 if opts.descending { "desc" } else { "asc" }
             ),
             None => String::new(),
         };
+        let quoted_table = quote_ident(&table);
         let sql = format!(
-            "select {select_list} from \"{table}\"{where_clause}{order_clause} limit ? offset ?"
+            "select {select_list} from {quoted_table}{where_clause}{order_clause} limit ? offset ?"
         );
-        let count_sql = format!("select count(*) from \"{table}\"{where_clause}");
+        let count_sql = format!("select count(*) from {quoted_table}{where_clause}");
 
         let limit = opts.limit as i64;
         let offset = opts.offset as i64;
@@ -386,9 +422,11 @@ impl DbSource for SqliteSource {
 
     async fn common_values(
         &self,
+        schema: Option<&str>,
         table: &str,
         column: &str,
     ) -> Result<Vec<(String, f32)>, DbError> {
+        check_schema(schema)?;
         let tables = self.allowed_tables().await?;
         let table = tables
             .iter()
@@ -401,10 +439,12 @@ impl DbSource for SqliteSource {
             .find(|c| c.as_str() == column)
             .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?
             .clone();
+        let quoted_table = quote_ident(&table);
+        let quoted_column = quote_ident(&column);
 
         self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
             let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "select count(*) from \"{table}\""
+                "select count(*) from {quoted_table}"
             )))
             .fetch_one(&mut *conn)
             .await?;
@@ -412,9 +452,9 @@ impl DbSource for SqliteSource {
                 return Ok(Vec::new());
             }
             let rows = sqlx::query_as::<_, (String, i64)>(sqlx::AssertSqlSafe(format!(
-                "select CAST(\"{column}\" AS TEXT) as val, count(*) as freq \
-                 from \"{table}\" where \"{column}\" is not null \
-                 group by \"{column}\" order by freq desc limit {COMMON_VALUES_LIMIT}"
+                "select CAST({quoted_column} AS TEXT) as val, count(*) as freq \
+                 from {quoted_table} where {quoted_column} is not null \
+                 group by {quoted_column} order by freq desc limit {COMMON_VALUES_LIMIT}"
             )))
             .fetch_all(&mut *conn)
             .await?;
@@ -472,13 +512,20 @@ mod tests {
     async fn list_tables_and_query_table_round_trip() {
         let source = SqliteSource::new(seeded_pool().await);
 
-        let tables = source.list_tables().await.unwrap();
+        let tables = source.list_tables(None).await.unwrap();
         let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, vec!["orders", "users"]);
         assert!(tables.iter().all(|t| t.comment.is_none()));
 
+        assert_eq!(source.list_schemas().await.unwrap(), vec!["main"]);
+        assert!(matches!(
+            source.list_tables(Some("other")).await,
+            Err(DbError::NotAllowed(_))
+        ));
+
         let data = source
             .query_table(
+                None,
                 "users",
                 QueryOpts {
                     limit: 10,
@@ -511,6 +558,7 @@ mod tests {
         let source = SqliteSource::new(seeded_pool().await);
         let data = source
             .query_table(
+                None,
                 "orders",
                 QueryOpts {
                     limit: 10,
@@ -532,7 +580,7 @@ mod tests {
     #[tokio::test]
     async fn common_values_groups_and_reports_fractions() {
         let source = SqliteSource::new(seeded_pool().await);
-        let values = source.common_values("users", "age").await.unwrap();
+        let values = source.common_values(None, "users", "age").await.unwrap();
         let (val_30, freq_30) = values.iter().find(|(v, _)| v == "30").unwrap();
         assert_eq!(val_30, "30");
         assert!((freq_30 - 2.0 / 3.0).abs() < 1e-6);

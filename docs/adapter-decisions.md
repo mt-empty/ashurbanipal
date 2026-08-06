@@ -66,15 +66,30 @@ case-sensitive `LIKE`, for every implementation.
 | Postgres | `ILIKE` keyword | Native case-insensitive operator. |
 | SQLite   | Mapped to plain `LIKE` | SQLite's `LIKE` is already ASCII case-insensitive by default, so there's no separate keyword to map to — `ILIKE` and `LIKE` compile to the same SQL fragment (`sqlite.rs::build_where_clause`). The *observable* behavior (case-insensitive match) still holds; only the SQL-fragment mechanism collapses. Note this only covers ASCII case-folding — Postgres's `ILIKE` is more permissive on non-ASCII text, a known gap if a table has non-ASCII data. |
 
-## §1 — connected schema
+## §1 — resolved schema
 
-Protocol property: every catalog and data query is scoped to one
-connected schema, never hardcoded to a default.
+Protocol property: every catalog and data query for one operation is
+scoped to that operation's resolved schema — an absent `schema` param
+resolves to the connection's own default, a present one MUST be validated
+against §5.7's live list before use — never hardcoded to a default such
+as `public`.
 
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
-| Postgres | `current_schema()` | A Postgres database has multiple schemas; the protocol's "connected schema" concept maps directly. |
-| SQLite   | N/A — whole database | SQLite has no schema concept above the single main database file (ignoring `ATTACH`, which this crate doesn't use). "Connected schema" degenerates to "the whole database" — there's nothing to scope against, so the property is trivially satisfied rather than actively enforced. |
+| Postgres | A bound `$N` parameter against `information_schema`/`pg_catalog` predicates (e.g. `table_schema = $1`), resolved once as the first statement in the operation's transaction and reused for every later query in that same transaction; absent `schema` falls back to `select current_schema()` on that connection. The one place the resolved name becomes *part of spliced SQL text* — the data query's `FROM` clause — goes through the same allow-list-then-escape discipline as table/column names (validated against §5.7's list first, then `db::quote_ident`, never spliced raw). | A Postgres database has multiple schemas; the protocol's "resolved schema" concept maps directly. Resolving once per transaction (not re-querying `current_schema()` per statement) is what keeps a multi-query operation immune to connection-pool sessions with divergent `search_path` — see `implementations/rust/tests/schema_isolation.rs`. |
+| SQLite   | Fixed single name (`"main"`); any other requested value is rejected the same way an unrecognized Postgres schema name would be | SQLite has no schema concept above the single main database file (ignoring `ATTACH`, which this crate doesn't use) — §5.7's list always has exactly one entry, and "resolved schema" degenerates to "the whole database". |
+
+## §5.7 — schema listing
+
+Protocol property: `GET /api/schemas` lists exactly the schemas an
+operation's `schema` param may validly name — MUST exclude the engine's
+own system/internal namespaces, SHOULD exclude anything the connected
+role can't access.
+
+| Backend  | Mechanism | Notes |
+|----------|-----------|-------|
+| Postgres | `pg_namespace`, filtered to exclude `pg_catalog`, `information_schema`, `pg_toast%`, `pg_temp_%`, and gated by `has_schema_privilege(nspname, 'USAGE')` | The `has_schema_privilege` filter is what satisfies the SHOULD clause — a schema the connected role can't use is never offered as a choice that same role's later request would then have to reject. |
+| SQLite   | Fixed single-element list (`["main"]`) | No live catalog to query — trivially satisfied the same way §1's resolution is. |
 
 ## §5.2 — table/column comments
 

@@ -12,6 +12,14 @@ below.
 pass/fail against; `Test` is `module::function`, matching `cargo test`
 output exactly.
 
+## §1 Terminology
+
+| ID | Requirement | Test |
+|---|---|---|
+| `P1-SCHEMA-DEFAULT` | Absent `schema` resolves to the connection's own default | `schemas::explicit_schema_public_matches_the_implicit_default` |
+| `P1-SCHEMA-VALIDATED` | Present `schema` MUST match a live §5.7 entry exactly; else 400 | `schemas::unrecognized_schema_values_are_rejected_cleanly_on_every_route` |
+| `P1-SCHEMA-RESOLVED-ONCE` | One operation resolves the schema once, reuses it for every query in that operation | not independently observable over black-box HTTP beyond internal consistency of one response's shape — covered at the implementation level by `implementations/rust/tests/schema_isolation.rs` (Postgres-specific: pool sessions with divergent `search_path`) |
+
 ## §2 Transport
 
 | ID | Requirement | Test |
@@ -46,6 +54,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 |---|---|---|
 | `P5.2-COMMENT-OMITTED` | `comment` omitted when the table has none | `tables::table_comments_are_present_only_where_seeded` |
 | `P5.2-STABLE-ORDER` | Stable (name) order | `tables::lists_exactly_the_seeded_tables_in_alphabetical_order` |
+| `P5.2-SCHEMA-PARAM` | `schema` selects the resolved schema (§1) | `schemas::explicit_other_schema_selects_only_its_own_table`, `schemas::explicit_schema_public_matches_the_implicit_default` |
 
 ## §5.3 `GET /api/table-counts`
 
@@ -53,12 +62,14 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 |---|---|---|
 | `P5.3-FROM-CATALOG` | `approx_rows` from `pg_class.reltuples`, never `COUNT(*)` | `tables::table_counts_cover_all_seeded_tables_with_approx_rows` (range tier: can't distinguish reltuples from `COUNT(*)` output directly over HTTP, but the never-analyzed-table `-1` case below can only come from reltuples) |
 | `P5.3-NEG-ONE-TOLERATED` | MAY be `-1` before first ANALYZE/VACUUM, clients tolerate both | `tables::table_counts_cover_all_seeded_tables_with_approx_rows` (`feature_flags` case) |
+| `P5.3-SCHEMA-PARAM` | `schema` selects the resolved schema (§1); unrecognized → 400 | `schemas::unrecognized_schema_values_are_rejected_cleanly_on_every_route` |
 
 ## §5.4 `GET /api/tables/data`
 
 | ID | Requirement | Test |
 |---|---|---|
 | `P5.4-TABLE-EXACT-MATCH` | `table` MUST match §5.2 exactly, case-sensitive; else 400 | `table_data::malicious_table_values_are_rejected_cleanly_and_do_no_damage`, `table_data::table_param_match_is_case_sensitive` |
+| `P5.4-SCHEMA-PARAM` | `schema` selects which schema `table` is resolved against; unrecognized → 400 | `schemas::explicit_other_schema_selects_only_its_own_table`, `schemas::unrecognized_schema_values_are_rejected_cleanly_on_every_route` |
 | `P5.4-SORT-VALIDATED` | `sort` validated against real columns; unknown → 400 | `table_data::malicious_sort_value_against_a_valid_table_is_rejected_cleanly` |
 | `P5.4-ORDER-INVALID` | `order` invalid value → 400 | `table_data::invalid_order_value_is_rejected` |
 | `P5.4-LIMIT-CLAMPED` | `limit` clamped to `[1, max_page_size]`, never rejected | `table_data::limit_defaults_to_fifty_and_clamps_to_configured_range`, `table_data::limit_boundary_values_are_not_off_by_one` |
@@ -111,6 +122,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | ID | Requirement | Test |
 |---|---|---|
 | `P5.5-VALIDATED` | `table`/`column` validated against live schema | `common_values::invalid_table_or_column_is_rejected_cleanly`, `common_values::column_belonging_to_a_different_table_is_rejected` |
+| `P5.5-SCHEMA-PARAM` | `schema` selects which schema `table`/`column` are resolved against; unrecognized → 400 | `schemas::unrecognized_schema_values_are_rejected_cleanly_on_every_route` |
 | `P5.5-FROM-CATALOG-STATS` | From catalog stats only, never `SELECT DISTINCT` | `common_values::returns_value_freq_pairs_with_booleans_as_text_not_pg_array_literals` (proxy: boolean rendering only makes sense if the value came from `pg_stats`'s array literal form, not a live data scan) |
 | `P5.5-EMPTY-WHEN-NO-STATS` | No stats → empty list, not an error | `common_values::no_stats_column_yields_empty_values_not_error` |
 | `P5.5-FREQ-RANGE-AND-ORDER` | `freq` in `(0, 1]`, most frequent first | `common_values::returns_value_freq_pairs_with_booleans_as_text_not_pg_array_literals` (range tier + explicit ordering check) |
@@ -125,6 +137,14 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.6-2XX-ONLY` | `healthy` true iff 2xx; any failure → false, never an error response | **gap** — see [Known gaps](#known-gaps) |
 | `P5.6-PARALLEL-TIMEOUT-BOUND` | Checks SHOULD run in parallel, MUST be individually timeout-bounded | **gap** — see [Known gaps](#known-gaps) |
 
+## §5.7 `GET /api/schemas`
+
+| ID | Requirement | Test |
+|---|---|---|
+| `P5.7-LISTS-LIVE-SCHEMAS` | Lists every schema §1's default-resolution case could resolve to | `schemas::lists_public_and_the_seed_s_second_schema_excluding_system_namespaces`, `schemas::explicit_schema_public_matches_the_implicit_default` |
+| `P5.7-EXCLUDES-SYSTEM-NAMESPACES` | Excludes engine system/internal namespaces | `schemas::lists_public_and_the_seed_s_second_schema_excluding_system_namespaces` |
+| `P5.7-HEADER` | Carries the protocol version header | `schemas::every_schemas_response_carries_the_protocol_version_header` |
+
 ## §6 Server invariants
 
 | ID | Requirement | Test |
@@ -133,7 +153,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P6-READ-ONLY` | Read-only: only `SELECT`s execute | `protocol::writes_are_not_accepted` |
 | `P6-QUERY-TIMEOUT-BOUNDED` | Every query bounded by a timeout | **gap** — see [Known gaps](#known-gaps) |
 | `P6-SINGLE-TABLE-NO-JOINS` | Single table per query, no joins | not independently observable over HTTP beyond "every route's response only ever contains one table's columns/rows" — implicit in every `table_data`/`common_values` test, none of which ever request or receive cross-table shape |
-| `P6-SCHEMA-SCOPING` | Schema scoping — `current_schema()`, never hardcoded | `tables::schema_scoping_excludes_other_schemas` |
+| `P6-SCHEMA-SCOPING` | Schema scoping — resolved schema (§1), never hardcoded; unrecognized `schema` rejected before reaching SQL text | `tables::schema_scoping_excludes_other_schemas`, `schemas::unrecognized_schema_values_are_rejected_cleanly_on_every_route` |
 | `P6-STATELESS` | Statelessness — no required server-side session | `protocol::every_api_response_carries_the_protocol_version_header` (asserts no `Set-Cookie`) |
 
 ## §7 Protocol version
@@ -152,7 +172,7 @@ tests (`cargo test` in the main crate, not this suite):
 
 - **§4 Kill switch: production-like names rejected at config load.**
   `config::tests::production_aliases_rejected_at_parse_time`.
-- **§4 Kill switch: disabled → all six routes 404.** No dedicated unit
+- **§4 Kill switch: disabled → all seven routes 404.** No dedicated unit
   test name (the property falls out of `router()` returning
   `Router::new()` when `Config::is_enabled()` is false — see
   `src/routes.rs`'s `router()` doc comment); nothing to observe from

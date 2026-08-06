@@ -45,6 +45,7 @@ pub fn router<S: DbSource>(config: Config, source: S) -> Router {
     // The version header goes on every API response (errors included) but
     // not the HTML route, hence the separate layered sub-router.
     let api = Router::new()
+        .route("/__ashurbanipal/api/schemas", get(list_schemas::<S>))
         .route("/__ashurbanipal/api/tables", get(list_tables::<S>))
         .route("/__ashurbanipal/api/table-counts", get(table_counts::<S>))
         .route("/__ashurbanipal/api/tables/data", get(table_data::<S>))
@@ -88,12 +89,32 @@ async fn serve_html<S: DbSource>(State(_): State<Arc<AppState<S>>>) -> Html<&'st
 }
 
 #[derive(Serialize)]
+struct SchemasResponse {
+    schemas: Vec<String>,
+}
+
+async fn list_schemas<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Response {
+    match state.source.list_schemas().await {
+        Ok(schemas) => Json(SchemasResponse { schemas }).into_response(),
+        Err(e) => error_response(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct SchemaParams {
+    schema: Option<String>,
+}
+
+#[derive(Serialize)]
 struct TablesResponse {
     tables: Vec<TableInfo>,
 }
 
-async fn list_tables<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Response {
-    match state.source.list_tables().await {
+async fn list_tables<S: DbSource>(
+    State(state): State<Arc<AppState<S>>>,
+    Query(params): Query<SchemaParams>,
+) -> Response {
+    match state.source.list_tables(params.schema.as_deref()).await {
         Ok(tables) => Json(TablesResponse { tables }).into_response(),
         Err(e) => error_response(e),
     }
@@ -110,8 +131,11 @@ struct CountsResponse {
     counts: Vec<CountEntry>,
 }
 
-async fn table_counts<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Response {
-    match state.source.table_counts().await {
+async fn table_counts<S: DbSource>(
+    State(state): State<Arc<AppState<S>>>,
+    Query(params): Query<SchemaParams>,
+) -> Response {
+    match state.source.table_counts(params.schema.as_deref()).await {
         Ok(counts) => Json(CountsResponse {
             counts: counts
                 .into_iter()
@@ -125,6 +149,7 @@ async fn table_counts<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Res
 
 #[derive(Deserialize)]
 struct DataParams {
+    schema: Option<String>,
     table: String,
     filter: Option<String>,
     #[serde(default, deserialize_with = "deserialize_saturating_u32")]
@@ -209,7 +234,11 @@ async fn table_data<S: DbSource>(
         timeout_secs: limits.query_timeout_secs,
         filter: parsed_filter,
     };
-    match state.source.query_table(&params.table, opts).await {
+    match state
+        .source
+        .query_table(params.schema.as_deref(), &params.table, opts)
+        .await
+    {
         Ok(data) => Json(data).into_response(),
         Err(e) => error_response(e),
     }
@@ -217,6 +246,7 @@ async fn table_data<S: DbSource>(
 
 #[derive(Deserialize)]
 struct CommonValuesParams {
+    schema: Option<String>,
     table: String,
     column: String,
 }
@@ -238,7 +268,7 @@ async fn common_values<S: DbSource>(
 ) -> Response {
     match state
         .source
-        .common_values(&params.table, &params.column)
+        .common_values(params.schema.as_deref(), &params.table, &params.column)
         .await
     {
         Ok(values) => Json(CommonValuesResponse {
