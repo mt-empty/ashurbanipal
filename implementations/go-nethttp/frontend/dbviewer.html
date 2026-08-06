@@ -96,6 +96,13 @@
     li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
   }
 
+  /* ==== Schema selector ==== */
+  /* hidden by default (single-schema deployments never show this — see
+     loadSchemas); margin matches #table-search's so hiding/showing it
+     doesn't shift the search box's position underneath. */
+  #schema-select-wrap { margin-bottom: var(--gap-lg); }
+  #schema-select { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
+
   /* ==== Sidebar table search ==== */
   #table-search { margin-bottom: var(--gap); }
   #table-filter { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
@@ -187,10 +194,13 @@
   #protocol-warning button:hover { background: var(--hover); }
   .empty td { text-align: center; opacity: .6; padding: 1rem; }
 
+  /* Shared by any small sidebar section heading — currently #siblings' h2
+     and the schema selector's label (see their sections below). */
+  .section-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+                 font-weight: 600; opacity: .6; margin: 0 0 var(--gap); display: block; }
+
   /* ==== Siblings ==== */
   #siblings { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: var(--gap); }
-  #siblings h2 { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
-                 font-weight: 600; opacity: .6; margin: 0 0 var(--gap); }
   .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
          margin-right: .4em; background: #999; flex: none; }
   .dot.up { background: var(--success); } .dot.down { background: var(--danger); }
@@ -366,13 +376,17 @@
 <body>
 <nav>
   <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
+  <div id="schema-select-wrap" hidden>
+    <label for="schema-select" class="section-label">schema</label>
+    <select id="schema-select"></select>
+  </div>
   <search id="table-search">
     <input id="table-filter" type="search" enterkeyhint="search" placeholder="filter tables…" aria-label="filter tables" autocomplete="off">
   </search>
   <ul id="tables"></ul>
   <p id="tables-empty" hidden>no matching tables</p>
   <div id="siblings">
-    <h2 id="siblings-heading" hidden>siblings</h2>
+    <h2 id="siblings-heading" class="section-label" hidden>siblings</h2>
     <div id="siblings-list"></div>
   </div>
 </nav>
@@ -452,10 +466,10 @@ const THEME_KEY = "ashurbanipal_theme";
 // the live #filter input text — only committing (submit, or a
 // click-to-filter action) updates it, so an unfinished edit never gets
 // silently resent by an unrelated sort/page click.
-let state = { table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, filter: "" };
+let state = { schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, filter: "" };
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-  for (const k of ["table", "sort", "order", "limit"])
+  for (const k of ["schema", "table", "sort", "order", "limit"])
     if (saved[k] !== undefined) state[k] = saved[k];
   // Keyed by table name so hiding a column on one table never hides a
   // same-named column on another. A malformed value is discarded rather
@@ -472,14 +486,15 @@ try {
 // URL query params win over localStorage: opening a shared/bookmarked link
 // should reproduce that link's view, not the visitor's own saved prefs.
 const urlParams = new URLSearchParams(location.search);
+if (urlParams.has("schema")) state.schema = urlParams.get("schema");
 if (urlParams.has("table")) state.table = urlParams.get("table");
 if (urlParams.has("sort")) state.sort = urlParams.get("sort");
 if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "desc" : "asc";
 if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
 if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
 function persist() {
-  const { table, sort, order, limit, hiddenColumns } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ table, sort, order, limit, hiddenColumns }));
+  const { schema, table, sort, order, limit, hiddenColumns } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ schema, table, sort, order, limit, hiddenColumns }));
 }
 // replaceState: no new history entries per action. filter is never included.
 function syncUrl() {
@@ -487,7 +502,14 @@ function syncUrl() {
     table: state.table, limit: state.limit, offset: state.offset,
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  if (state.schema) params.set("schema", state.schema);
   history.replaceState(null, "", "?" + params);
+}
+// Only set once a multi-schema deployment is confirmed (loadSchemas) — a
+// single-schema deployment never sends this param at all, identical to the
+// wire shape before schema selection existed.
+function schemaQuery() {
+  return state.schema ? "?" + new URLSearchParams({ schema: state.schema }) : "";
 }
 
 // A stale table key or column name absent from the current table's
@@ -611,7 +633,9 @@ function jsonScalar(value) {
 
 async function api(path) {
   const resp = await fetch(API + path);
-  if (path === "/tables") checkProtocolVersion(resp);
+  // path may carry a query string (e.g. "/tables?schema=…") — compare just
+  // the route, not the whole path, so the version check still fires.
+  if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
   if (!resp.ok) throw new Error(await resp.text());
   return resp.json();
 }
@@ -676,16 +700,27 @@ function buildApiReference() {
     endpoints: [
       {
         method: "GET",
-        path: `${base}/tables`,
-        summary: "List table names in the connected schema — also the allow-list for every other endpoint's `table` param.",
+        path: `${base}/schemas`,
+        summary: "List selectable Postgres schema names for this connection (excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). Not every implementation/port has this route yet — treat its absence as \"single schema only\", not an error.",
         params: [],
+        example_response: { schemas: ["public"] },
+      },
+      {
+        method: "GET",
+        path: `${base}/tables`,
+        summary: "List table names in the resolved schema — also the allow-list for every other endpoint's `table` param.",
+        params: [
+          { name: "schema", required: false, notes: "must be a name returned by GET /schemas; omit to use the connection's default schema" },
+        ],
         example_response: { tables: [{ name: "users", comment: "Registered accounts." }, { name: "sessions" }] },
       },
       {
         method: "GET",
         path: `${base}/table-counts`,
         summary: "Approximate row count per table (pg_class.reltuples, not COUNT(*)).",
-        params: [],
+        params: [
+          { name: "schema", required: false, notes: "same as GET /tables" },
+        ],
         example_response: { counts: [{ table: "users", approx_rows: 108234 }] },
       },
       {
@@ -693,6 +728,7 @@ function buildApiReference() {
         path: `${base}/tables/data`,
         summary: "Paginated, filtered, sorted rows for one table.",
         params: [
+          { name: "schema", required: false, notes: "same as GET /tables" },
           { name: "table", required: true, notes: "must be a name returned by GET /tables" },
           { name: "filter", required: false, notes: "URL-encoded JSON array of condition objects — see the `filter` key below" },
           { name: "limit", required: false, notes: "default 50, max 100" },
@@ -712,6 +748,7 @@ function buildApiReference() {
         path: `${base}/tables/common-values`,
         summary: "Most frequent values for one column (pg_stats — approximate; empty if the column has no planner statistics yet).",
         params: [
+          { name: "schema", required: false, notes: "same as GET /tables" },
           { name: "table", required: true },
           { name: "column", required: true },
         ],
@@ -1162,6 +1199,7 @@ async function showCommonValues(e, column) {
   // actually showing.
   const token = ++cvRequestToken;
   const params = new URLSearchParams({ table: state.table, column });
+  if (state.schema) params.set("schema", state.schema);
   let values;
   try {
     ({ values } = await api("/tables/common-values?" + params));
@@ -1295,11 +1333,51 @@ function formatApproxCount(n) {
 const APPROX_COUNT_TITLE = "~ = approximate, from Postgres's statistics, not a live count; "
   + "? = no estimate yet (table hasn't been analyzed)";
 
+// ==== Schema selector ====
+// Hidden entirely for a single-schema deployment (the overwhelming common
+// case) — no dropdown clutter, and no `schema` param on any request, byte-
+// for-byte the same wire shape as before schema selection existed. Once a
+// second schema is confirmed, state.schema is pinned to a concrete name
+// (never left as "no explicit choice") so every subsequent request is
+// unambiguous about which schema it means.
+async function loadSchemas() {
+  let schemas;
+  try { ({ schemas } = await api("/schemas")); }
+  catch { return; } // older port without /schemas — degrade to single-schema behavior
+  if (schemas.length <= 1) { state.schema = null; return; }
+  if (!state.schema || !schemas.includes(state.schema)) {
+    state.schema = schemas.includes("public") ? "public" : schemas[0];
+  }
+  const select = $("schema-select");
+  select.replaceChildren(...schemas.map(s => {
+    const opt = document.createElement("option");
+    opt.value = s; opt.textContent = s;
+    return opt;
+  }));
+  select.value = state.schema;
+  $("schema-select-wrap").hidden = false;
+}
+$("schema-select").onchange = () => {
+  state.schema = $("schema-select").value;
+  state.table = null; state.sort = null; state.offset = 0;
+  state.filter = ""; appliedFilterAst = []; $("filter").value = "";
+  persist();
+  loadTables().catch(e => { $("error").textContent = e.message; });
+};
+
+// A slower earlier loadTables() (e.g. from a schema switch quickly
+// followed by another) resolving after a faster later one would otherwise
+// clobber the sidebar with the wrong schema's table list — same shape of
+// guard as loadDataToken/cvRequestToken/siblingsRequestToken.
+let loadTablesToken = 0;
+
 async function loadTables() {
   setStatus("loading tables…");
+  const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
-    api("/tables"), api("/table-counts"),
+    api("/tables" + schemaQuery()), api("/table-counts" + schemaQuery()),
   ]);
+  if (token !== loadTablesToken) return; // superseded by a newer call
   const countMap = Object.fromEntries(counts.map(c => [c.table, c.approx_rows]));
   const ul = $("tables");
   ul.innerHTML = "";
@@ -1357,6 +1435,7 @@ async function fetchTableData() {
     table, limit: state.limit, offset: state.offset,
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  if (state.schema) params.set("schema", state.schema);
   // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
   // box's DSL text — URLSearchParams handles the URL-encoding.
   if (state.filter) params.set("filter", JSON.stringify(appliedFilterAst));
@@ -1508,10 +1587,30 @@ function buildCell(col, raw) {
     // for the referenced row. Reset sort first — the current sort column
     // belongs to this table and may not exist on the target one.
     cellText.classList.add("fk-cell");
-    cellText.title = `go to ${col.references.table}.${col.references.column} = ${raw}`;
+    const refLabel = col.references.schema
+      ? `${col.references.schema}.${col.references.table}`
+      : col.references.table;
+    cellText.title = `go to ${refLabel}.${col.references.column} = ${raw}`;
     cellText.onclick = () => {
       state.table = col.references.table;
       state.sort = null;
+      // `references.schema` is only present when it differs from the
+      // current schema (a cross-schema FK) — switch the selector too,
+      // mirroring #schema-select's onchange, before navigating so the
+      // table lookup below lands in the right schema rather than a
+      // same-named table in the wrong one. loadTables() auto-loads a
+      // default view as a side effect (same as #schema-select's onchange
+      // triggers); applyFilterClause's own load immediately supersedes it
+      // via loadDataToken, so the extra fetch is discarded, not shown.
+      if (col.references.schema && col.references.schema !== state.schema) {
+        state.schema = col.references.schema;
+        $("schema-select").value = state.schema;
+        persist();
+        loadTables()
+          .then(() => applyFilterClause(col.references.column, "=", raw))
+          .catch(e => { $("error").textContent = e.message; });
+        return;
+      }
       persist();
       applyFilterClause(col.references.column, "=", raw);
     };
@@ -1717,7 +1816,10 @@ new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
 }).observe($("toolbar"));
 
-loadTables().catch(e => { $("error").textContent = e.message; });
+// loadSchemas resolves state.schema before loadTables' first request needs
+// it — bootstrap-only ordering; loadTables is safe to call on its own after
+// this (schema switching does exactly that).
+loadSchemas().then(loadTables).catch(e => { $("error").textContent = e.message; });
 loadSiblings();
 setInterval(loadSiblings, 15_000);
 </script>
