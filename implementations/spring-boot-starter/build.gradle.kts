@@ -1,8 +1,8 @@
 import java.security.MessageDigest
 
 plugins {
-    kotlin("jvm") version "2.2.20"
-    kotlin("plugin.spring") version "2.2.20"
+    kotlin("jvm") version "2.3.21"
+    kotlin("plugin.spring") version "2.3.21"
     `maven-publish`
 }
 
@@ -28,7 +28,7 @@ repositories {
 }
 
 dependencies {
-    val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.0.7")
+    val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.1.0")
     implementation(springBootBom)
     compileOnly(springBootBom)
 

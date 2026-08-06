@@ -94,7 +94,7 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
                 "  and has_schema_privilege(nspname, 'USAGE') " +
                 "order by nspname",
             String::class.java,
-        )
+        ).filterNotNull()
 
     /**
      * Resolves the schema for one operation exactly once: an explicit
@@ -148,7 +148,7 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
                 "order by table_name",
             String::class.java,
             schema,
-        )
+        ).filterNotNull()
 
     private fun allowedColumns(schema: String, table: String): List<String> =
         jdbcTemplate.queryForList(
@@ -158,7 +158,7 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
             String::class.java,
             schema,
             table,
-        )
+        ).filterNotNull()
 
     private fun requireTable(schema: String, table: String): String =
         allowedTables(schema).find { it == table } ?: throw NotAllowedException("not allowed: table $table")
