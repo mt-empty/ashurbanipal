@@ -170,11 +170,11 @@ class DbViewerController(
 
     @ExceptionHandler(MissingServletRequestParameterException::class)
     fun handleMissingParam(e: MissingServletRequestParameterException): ResponseEntity<String> =
-        errorResponse(HttpStatus.BAD_REQUEST, e.message ?: "bad request")
+        errorResponse(HttpStatus.BAD_REQUEST, e.message)
 
     @ExceptionHandler(MethodArgumentTypeMismatchException::class)
     fun handleTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<String> =
-        errorResponse(HttpStatus.BAD_REQUEST, e.message ?: "bad request")
+        errorResponse(HttpStatus.BAD_REQUEST, e.message)
 
     @ExceptionHandler(DataAccessException::class)
     fun handleDatabaseError(e: DataAccessException): ResponseEntity<String> =
