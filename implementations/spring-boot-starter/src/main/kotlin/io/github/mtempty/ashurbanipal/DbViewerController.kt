@@ -26,6 +26,7 @@ private const val PROTOCOL_HEADER = "x-ashurbanipal-protocol"
 /** Bumped only for non-additive wire changes; additive optional fields keep the same version (spec/protocol.md §7). Value must track implementations/rust/src/routes.rs's PROTOCOL_VERSION constant. */
 private const val PROTOCOL_VERSION = "1"
 
+data class SchemasResponse(val schemas: List<String>)
 data class TablesResponse(val tables: List<TableInfo>)
 data class CountsResponse(val counts: List<CountEntry>)
 data class TableDataResponse(
@@ -64,16 +65,21 @@ class DbViewerController(
     fun serveHtml(): ResponseEntity<ByteArray> =
         ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(dbviewerHtml)
 
+    @GetMapping("/api/schemas")
+    fun listSchemas(): ResponseEntity<SchemasResponse> =
+        apiOk(SchemasResponse(catalog.listSchemas()))
+
     @GetMapping("/api/tables")
-    fun listTables(): ResponseEntity<TablesResponse> =
-        apiOk(TablesResponse(catalog.listTables()))
+    fun listTables(@RequestParam(required = false) schema: String?): ResponseEntity<TablesResponse> =
+        apiOk(TablesResponse(catalog.listTables(schema)))
 
     @GetMapping("/api/table-counts")
-    fun tableCounts(): ResponseEntity<CountsResponse> =
-        apiOk(CountsResponse(catalog.tableCounts()))
+    fun tableCounts(@RequestParam(required = false) schema: String?): ResponseEntity<CountsResponse> =
+        apiOk(CountsResponse(catalog.tableCounts(schema)))
 
     @GetMapping("/api/tables/data")
     fun tableData(
+        @RequestParam(required = false) schema: String?,
         @RequestParam table: String,
         @RequestParam(required = false) filter: String?,
         @RequestParam(required = false) limit: String?,
@@ -99,6 +105,7 @@ class DbViewerController(
         }
 
         val data = catalog.queryTable(
+            schema,
             table,
             QueryOpts(
                 limit = effectiveLimit,
@@ -113,10 +120,11 @@ class DbViewerController(
 
     @GetMapping("/api/tables/common-values")
     fun commonValues(
+        @RequestParam(required = false) schema: String?,
         @RequestParam table: String,
         @RequestParam column: String,
     ): ResponseEntity<CommonValuesResponse> =
-        apiOk(CommonValuesResponse(catalog.commonValues(table, column)))
+        apiOk(CommonValuesResponse(catalog.commonValues(schema, table, column)))
 
     @GetMapping("/api/siblings")
     fun siblings(): ResponseEntity<SiblingsResponse> {

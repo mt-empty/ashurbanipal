@@ -44,6 +44,7 @@ export function createRouter(config: Config, pool: Pool): ExpressRouter {
   const mount = basePath(config);
 
   registerGet(router, mount, serveHtml);
+  registerGet(router, `${mount}/api/schemas`, withProtocolHeader(listSchemasHandler(catalog)));
   registerGet(router, `${mount}/api/tables`, withProtocolHeader(listTablesHandler(catalog)));
   registerGet(router, `${mount}/api/table-counts`, withProtocolHeader(tableCountsHandler(catalog)));
   registerGet(router, `${mount}/api/tables/data`, withProtocolHeader(tableDataHandler(catalog, limits)));
@@ -112,22 +113,32 @@ function writeError(res: Response, err: unknown): void {
   httpTextError(res, 500, `database error: ${message}`);
 }
 
-function listTablesHandler(catalog: Catalog) {
+function listSchemasHandler(catalog: Catalog) {
   return async (_req: Request, res: Response): Promise<void> => {
-    const tables = await catalog.listTables();
+    const schemas = await catalog.listSchemas();
+    res.json({ schemas });
+  };
+}
+
+function listTablesHandler(catalog: Catalog) {
+  return async (req: Request, res: Response): Promise<void> => {
+    const schema = firstQueryValue(req, "schema");
+    const tables = await catalog.listTables(schema);
     res.json({ tables });
   };
 }
 
 function tableCountsHandler(catalog: Catalog) {
-  return async (_req: Request, res: Response): Promise<void> => {
-    const counts = await catalog.tableCounts();
+  return async (req: Request, res: Response): Promise<void> => {
+    const schema = firstQueryValue(req, "schema");
+    const counts = await catalog.tableCounts(schema);
     res.json({ counts });
   };
 }
 
 function tableDataHandler(catalog: Catalog, limits: ResolvedLimits) {
   return async (req: Request, res: Response): Promise<void> => {
+    const schema = firstQueryValue(req, "schema");
     const table = firstQueryValue(req, "table");
     if (table === undefined) {
       httpTextError(res, 400, "table parameter is required");
@@ -179,7 +190,7 @@ function tableDataHandler(catalog: Catalog, limits: ResolvedLimits) {
       return;
     }
 
-    const data = await catalog.queryTable(table, {
+    const data = await catalog.queryTable(schema, table, {
       limit,
       offset,
       sort: sort && sort !== "" ? sort : undefined,
@@ -192,13 +203,14 @@ function tableDataHandler(catalog: Catalog, limits: ResolvedLimits) {
 
 function commonValuesHandler(catalog: Catalog) {
   return async (req: Request, res: Response): Promise<void> => {
+    const schema = firstQueryValue(req, "schema");
     const table = firstQueryValue(req, "table");
     const column = firstQueryValue(req, "column");
     if (table === undefined || column === undefined) {
       httpTextError(res, 400, "table and column parameters are required");
       return;
     }
-    const values = await catalog.commonValues(table, column);
+    const values = await catalog.commonValues(schema, table, column);
     res.json({ values });
   };
 }

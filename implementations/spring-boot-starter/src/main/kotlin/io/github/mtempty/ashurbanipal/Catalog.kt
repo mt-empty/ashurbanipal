@@ -9,8 +9,18 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.sql.ResultSet
 import javax.sql.DataSource
 
-/** Table/column not in the live schema allow-list; the controller maps this to 400 (`spec/protocol.md` §6 — no unvalidated identifier ever reaches SQL text). */
+/** Table/column/schema not in the live allow-list; the controller maps this to 400 (`spec/protocol.md` §6 — no unvalidated identifier ever reaches SQL text). */
 class NotAllowedException(message: String) : RuntimeException(message)
+
+/**
+ * Escapes an identifier for splicing into SQL text by doubling embedded `"`
+ * (the standard Postgres quoted-identifier escape) — every name reaching
+ * this must already be allow-list-validated against a live catalog lookup;
+ * this only makes a validated name syntactically safe to splice, it is not
+ * itself a validation step (`spec/protocol.md` §6, mirrors
+ * `implementations/rust/src/db/mod.rs::quote_ident`).
+ */
+internal fun quoteIdent(ident: String): String = "\"" + ident.replace("\"", "\"\"") + "\""
 
 // `@JsonInclude(NON_NULL)` per optional field, not mapper-wide: a mapper-wide
 // NON_NULL setting would also strip null *row cell* values (Map<String,
@@ -19,7 +29,15 @@ class NotAllowedException(message: String) : RuntimeException(message)
 // treatment, so the mapper's default (include nulls) stays the baseline.
 data class TableInfo(val name: String, @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null)
 data class CountEntry(val table: String, @JsonProperty("approx_rows") val approxRows: Long)
-data class ColumnRef(val table: String, val column: String)
+data class ColumnRef(
+    val table: String,
+    val column: String,
+    // Only set when the referenced table lives in a schema other than the
+    // referencing column's own — same-schema FKs (the common case) omit it,
+    // so the wire payload is unchanged from before this field existed
+    // (additive, spec/protocol.md §7 versioning policy).
+    @JsonInclude(JsonInclude.Include.NON_NULL) val schema: String? = null,
+)
 data class ColumnInfo(
     val name: String,
     val type: String,
@@ -58,72 +76,133 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
         transactionTemplate.execute { action() }
             ?: throw IllegalStateException("read-only transaction did not produce a result")
 
-    fun listTables(): List<TableInfo> {
+    /**
+     * Excludes the catalogs themselves (`pg_catalog`, `information_schema`,
+     * `pg_toast%`, `pg_temp_%`) and anything the connected role can't
+     * actually use, so a schema only ever appears here if it's both a real
+     * user namespace and one this role has `USAGE` on (`spec/protocol.md` §5.7,
+     * mirrors `implementations/rust/src/db/postgres.rs::list_schemas_in_tx`).
+     */
+    fun listSchemas(): List<String> = listAllowedSchemas()
+
+    private fun listAllowedSchemas(): List<String> =
+        jdbcTemplate.queryForList(
+            "select nspname from pg_namespace " +
+                "where nspname not in ('pg_catalog', 'information_schema') " +
+                "  and nspname not like 'pg_toast%' " +
+                "  and nspname not like 'pg_temp\\_%' escape '\\' " +
+                "  and has_schema_privilege(nspname, 'USAGE') " +
+                "order by nspname",
+            String::class.java,
+        )
+
+    /**
+     * Resolves the schema for one operation exactly once: an explicit
+     * request and an absent one (resolved via `current_schema()`) both go
+     * through the same allow-list, so neither path can reach a schema the
+     * other would reject (`docs/adapter-decisions.md` §1). Callers that run
+     * more than one query per operation ([queryTableInTransaction],
+     * [commonValuesInTransaction]) call this once inside their
+     * [inReadOnlyTransaction] block, which pins the whole operation to one
+     * physical connection — immune to pool sessions with divergent
+     * `search_path`, same reasoning as
+     * `implementations/rust/tests/schema_isolation.rs`.
+     */
+    private fun resolveSchema(requested: String?): String {
+        val schemas = listAllowedSchemas()
+        val resolved = requested
+            ?: jdbcTemplate.queryForObject("select current_schema()", String::class.java)!!
+        return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved")
+    }
+
+    fun listTables(schema: String?): List<TableInfo> {
+        val realSchema = resolveSchema(schema)
         return jdbcTemplate.query(
             "select c.relname::text, obj_description(c.oid, 'pg_class') " +
                 "from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
-                "where n.nspname = current_schema() and c.relkind = 'r' " +
+                "where n.nspname = ? and c.relkind = 'r' " +
                 "order by c.relname",
             RowMapper { rs, _ -> TableInfo(rs.getString(1), rs.getString(2)) },
+            realSchema,
         )
     }
 
-    fun tableCounts(): List<CountEntry> {
+    fun tableCounts(schema: String?): List<CountEntry> {
+        val realSchema = resolveSchema(schema)
         return jdbcTemplate.query(
             "select c.relname::text, c.reltuples::bigint " +
                 "from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
-                "where n.nspname = current_schema() and c.relkind = 'r' " +
+                "where n.nspname = ? and c.relkind = 'r' " +
                 "order by c.relname",
             RowMapper { rs, _ -> CountEntry(rs.getString(1), rs.getLong(2)) },
+            realSchema,
         )
     }
 
-    private fun allowedTables(): List<String> =
+    private fun allowedTables(schema: String): List<String> =
         jdbcTemplate.queryForList(
             "select table_name from information_schema.tables " +
-                "where table_schema = current_schema() and table_type = 'BASE TABLE' " +
+                "where table_schema = ? and table_type = 'BASE TABLE' " +
                 "order by table_name",
             String::class.java,
+            schema,
         )
 
-    private fun allowedColumns(table: String): List<String> =
+    private fun allowedColumns(schema: String, table: String): List<String> =
         jdbcTemplate.queryForList(
             "select column_name from information_schema.columns " +
-                "where table_schema = current_schema() and table_name = ? " +
+                "where table_schema = ? and table_name = ? " +
                 "order by ordinal_position",
             String::class.java,
+            schema,
             table,
         )
 
-    private fun requireTable(table: String): String =
-        allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table")
+    private fun requireTable(schema: String, table: String): String =
+        allowedTables(schema).find { it == table } ?: throw NotAllowedException("not allowed: table $table")
 
     private data class ConstraintRow(
         val constraintName: String,
         val constraintType: String,
         val columnName: String,
+        val refSchema: String?,
         val refTable: String?,
         val refColumn: String?,
     )
 
-    private data class FkCandidate(val columnName: String, val refTable: String?, val refColumn: String?)
+    private data class FkCandidate(
+        val columnName: String,
+        val refSchema: String?,
+        val refTable: String?,
+        val refColumn: String?,
+    )
 
-    /** Composite FKs are dropped rather than risk mislabeling which referencing column pairs with which referenced column (`spec/protocol.md` §5.4.1). Composite *primary* keys are NOT dropped this way — every PK column still gets `key: "pk"` regardless of how many columns are in the PK. */
-    private fun keyMetadata(table: String): Pair<Set<String>, Map<String, ColumnRef>> {
+    /**
+     * Composite FKs are dropped rather than risk mislabeling which referencing column pairs with which referenced column (`spec/protocol.md` §5.4.1). Composite *primary* keys are NOT dropped this way — every PK column still gets `key: "pk"` regardless of how many columns are in the PK.
+     *
+     * The `ccu` join matches on `ccu.constraint_schema` (the schema the
+     * constraint itself lives in, always equal to `tc.table_schema`), not
+     * `ccu.table_schema` (the schema of the table constraint_column_usage is
+     * describing — for a FOREIGN KEY row that's the *referenced* table's
+     * schema, which for a cross-schema FK differs from the constraining
+     * table's schema). Joining on `ccu.table_schema` instead silently drops
+     * every cross-schema FK's metadata (the LEFT JOIN just never matches).
+     */
+    private fun keyMetadata(schema: String, table: String): Pair<Set<String>, Map<String, ColumnRef>> {
         val rows = jdbcTemplate.query(
             "select tc.constraint_name, tc.constraint_type, kcu.column_name, " +
-                "ccu.table_name as ref_table, ccu.column_name as ref_column " +
+                "ccu.table_schema as ref_schema, ccu.table_name as ref_table, ccu.column_name as ref_column " +
                 "from information_schema.table_constraints tc " +
                 "join information_schema.key_column_usage kcu " +
                 "  on kcu.constraint_name = tc.constraint_name " +
                 " and kcu.table_schema = tc.table_schema " +
                 "left join information_schema.constraint_column_usage ccu " +
                 "  on ccu.constraint_name = tc.constraint_name " +
-                " and ccu.table_schema = tc.table_schema " +
+                " and ccu.constraint_schema = tc.table_schema " +
                 " and tc.constraint_type = 'FOREIGN KEY' " +
-                "where tc.table_schema = current_schema() " +
+                "where tc.table_schema = ? " +
                 "  and tc.table_name = ? " +
                 "  and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
             RowMapper { rs, _ ->
@@ -131,10 +210,12 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
                     rs.getString("constraint_name"),
                     rs.getString("constraint_type"),
                     rs.getString("column_name"),
+                    rs.getString("ref_schema"),
                     rs.getString("ref_table"),
                     rs.getString("ref_column"),
                 )
             },
+            schema,
             table,
         )
 
@@ -144,7 +225,7 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
             when (row.constraintType) {
                 "PRIMARY KEY" -> pkColumns.add(row.columnName)
                 "FOREIGN KEY" -> fkCandidates.getOrPut(row.constraintName) { mutableListOf() }
-                    .add(FkCandidate(row.columnName, row.refTable, row.refColumn))
+                    .add(FkCandidate(row.columnName, row.refSchema, row.refTable, row.refColumn))
             }
         }
         val fkColumns = mutableMapOf<String, ColumnRef>()
@@ -152,21 +233,27 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
             val distinctColumns = members.map { it.columnName }.toSet()
             if (distinctColumns.size != 1) continue // composite FK: omit entirely
             val first = members.first()
+            val refSchema = first.refSchema
             val refTable = first.refTable
             val refColumn = first.refColumn
-            if (refTable != null && refColumn != null) {
-                fkColumns[first.columnName] = ColumnRef(refTable, refColumn)
+            if (refSchema != null && refTable != null && refColumn != null) {
+                // Same-schema is the overwhelming common case; omitting
+                // `schema` there keeps the wire payload byte-identical to
+                // before this field existed.
+                val fkSchema = if (refSchema != schema) refSchema else null
+                fkColumns[first.columnName] = ColumnRef(refTable, refColumn, fkSchema)
             }
         }
         return pkColumns to fkColumns
     }
 
-    fun queryTable(table: String, opts: QueryOpts): TableData =
-        inReadOnlyTransaction { queryTableInTransaction(table, opts) }
+    fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData =
+        inReadOnlyTransaction { queryTableInTransaction(schema, table, opts) }
 
-    private fun queryTableInTransaction(table: String, opts: QueryOpts): TableData {
-        val realTable = requireTable(table)
-        val columnNames = allowedColumns(realTable)
+    private fun queryTableInTransaction(schema: String?, table: String, opts: QueryOpts): TableData {
+        val realSchema = resolveSchema(schema)
+        val realTable = requireTable(realSchema, table)
+        val columnNames = allowedColumns(realSchema, realTable)
 
         val sort = opts.sort?.let { requested ->
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested")
@@ -177,9 +264,10 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
 
         val columnTypes = jdbcTemplate.query(
             "select column_name, data_type from information_schema.columns " +
-                "where table_schema = current_schema() and table_name = ? " +
+                "where table_schema = ? and table_name = ? " +
                 "order by ordinal_position",
             RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
+            realSchema,
             realTable,
         )
         // Joins through pg_attribute/pg_class directly: col_description is keyed
@@ -190,13 +278,14 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
                 "from pg_attribute a " +
                 "join pg_class c on c.oid = a.attrelid " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
-                "where n.nspname = current_schema() and c.relname = ? " +
+                "where n.nspname = ? and c.relname = ? " +
                 "  and a.attnum > 0 and not a.attisdropped",
             RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
+            realSchema,
             realTable,
         ).filter { it.second != null }.associate { it.first to it.second!! }
 
-        val (pkColumns, fkColumns) = keyMetadata(realTable)
+        val (pkColumns, fkColumns) = keyMetadata(realSchema, realTable)
         val columns = columnTypes.map { (name, typeName) ->
             val key: String?
             val references: ColumnRef?
@@ -217,14 +306,18 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
             ColumnInfo(name, typeName, key, references, columnComments[name])
         }
 
-        val selectList = columns.joinToString(", ") { "\"${it.name}\"::text" }
-        // Table-qualified: an unqualified `order by "col"` would resolve to the
-        // ::text-cast output column instead of the source column, sorting
-        // lexicographically instead of by the real typed value.
+        val selectList = columns.joinToString(", ") { "${quoteIdent(it.name)}::text" }
+        // Table-qualified by relation name, not schema — a FROM item's
+        // correlation name is its own relation name regardless of whether
+        // FROM itself is schema-qualified. An unqualified `order by "col"`
+        // would resolve to the ::text-cast output column instead of the
+        // source column, sorting lexicographically instead of by the real
+        // typed value.
         val orderClause = sort?.let {
-            " order by \"$realTable\".\"$it\" ${if (opts.descending) "desc" else "asc"}"
+            " order by ${quoteIdent(realTable)}.${quoteIdent(it)} ${if (opts.descending) "desc" else "asc"}"
         } ?: ""
-        val sql = "select $selectList from \"$realTable\"${whereClause.sql}$orderClause limit ? offset ?"
+        val sql = "select $selectList from ${quoteIdent(realSchema)}.${quoteIdent(realTable)}" +
+            "${whereClause.sql}$orderClause limit ? offset ?"
 
         val bindArgs = mutableListOf<Any>()
         bindArgs.addAll(whereClause.values)
@@ -236,8 +329,9 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
         val totalApprox = jdbcTemplate.queryForObject(
             "select reltuples::bigint from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
-                "where n.nspname = current_schema() and c.relname = ?",
+                "where n.nspname = ? and c.relname = ?",
             Long::class.java,
+            realSchema,
             realTable,
         ) ?: -1L
 
@@ -257,12 +351,13 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
         return map
     }
 
-    fun commonValues(table: String, column: String): List<CommonValueEntry> =
-        inReadOnlyTransaction { commonValuesInTransaction(table, column) }
+    fun commonValues(schema: String?, table: String, column: String): List<CommonValueEntry> =
+        inReadOnlyTransaction { commonValuesInTransaction(schema, table, column) }
 
-    private fun commonValuesInTransaction(table: String, column: String): List<CommonValueEntry> {
-        val realTable = requireTable(table)
-        val realColumn = allowedColumns(realTable).find { it == column }
+    private fun commonValuesInTransaction(schema: String?, table: String, column: String): List<CommonValueEntry> {
+        val realSchema = resolveSchema(schema)
+        val realTable = requireTable(realSchema, table)
+        val realColumn = allowedColumns(realSchema, realTable).find { it == column }
             ?: throw NotAllowedException("not allowed: column $column")
 
         // most_common_vals is anyarray; ::text::text[] reads it uniformly.
@@ -271,17 +366,19 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
             "select t.val, t.freq " +
                 "from pg_stats, " +
                 "     lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq) " +
-                "where schemaname = current_schema() and tablename = ? and attname = ? " +
+                "where schemaname = ? and tablename = ? and attname = ? " +
                 "order by t.freq desc",
             RowMapper { rs, _ -> rs.getString(1) to rs.getFloat(2) },
+            realSchema,
             realTable,
             realColumn,
         )
 
         val dataType = jdbcTemplate.query(
             "select data_type from information_schema.columns " +
-                "where table_schema = current_schema() and table_name = ? and column_name = ?",
+                "where table_schema = ? and table_name = ? and column_name = ?",
             RowMapper { rs, _ -> rs.getString(1) },
+            realSchema,
             realTable,
             realColumn,
         ).firstOrNull()
