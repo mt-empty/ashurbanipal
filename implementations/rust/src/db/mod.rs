@@ -1,7 +1,11 @@
+#[cfg(feature = "mysql")]
+mod mysql;
 mod postgres;
 #[cfg(feature = "sqlite")]
 mod sqlite;
 
+#[cfg(feature = "mysql")]
+pub use mysql::MySqlSource;
 pub use postgres::PgPoolSource;
 #[cfg(feature = "sqlite")]
 pub use sqlite::SqliteSource;
@@ -121,7 +125,9 @@ pub trait DbSource: Send + Sync + 'static {
 /// `"` (the standard Postgres/SQLite quoted-identifier escape) — every name
 /// reaching this must already be allow-list-validated against a live
 /// catalog lookup; this only makes a validated name syntactically safe to
-/// splice; it is not itself a validation step.
+/// splice; it is not itself a validation step. Not universal: MySQL's
+/// default identifier quote is the backtick, not `"`, so
+/// `mysql::quote_ident_mysql` is its own function, not a reuse of this one.
 pub(crate) fn quote_ident(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
 }
@@ -129,12 +135,15 @@ pub(crate) fn quote_ident(ident: &str) -> String {
 /// The hardcoded operator→SQL-keyword table (`spec/protocol.md` §5.4.2) —
 /// wire text never becomes an operator except through this match. The
 /// keyword is shared across backends; the *fragment* built around it
-/// (cast syntax, placeholder style) is not — see `postgres::build_where_clause`
-/// and `sqlite::build_where_clause`, each of which calls this and then
-/// applies its own dialect's cast/placeholder rules. Note `Ilike` has no
-/// SQLite keyword — `sqlite::build_where_clause` special-cases it to plain
-/// `LIKE` (SQLite's `LIKE` is already ASCII case-insensitive) rather than
-/// calling this for that variant.
+/// (cast syntax, placeholder style) is not — see `postgres::build_where_clause`,
+/// `sqlite::build_where_clause`, and `mysql::build_where_clause`, each of
+/// which calls this and then applies its own dialect's cast/placeholder
+/// rules. Note `Ilike` has no keyword on either SQLite or MySQL —
+/// `sqlite::build_where_clause` special-cases it to plain `LIKE` (SQLite's
+/// `LIKE` is already ASCII case-insensitive), while `mysql::build_where_clause`
+/// special-cases it to `LOWER(...) LIKE LOWER(...)` (MySQL's plain `LIKE`
+/// case-sensitivity depends on the column's collation, so a bare swap to
+/// `LIKE` wouldn't reliably hold) — neither calls this for that variant.
 pub(crate) fn op_sql(op: FilterOp) -> &'static str {
     match op {
         FilterOp::Eq => "=",

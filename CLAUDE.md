@@ -49,10 +49,11 @@ Two components:
   the CDN is unreachable.
 - **Backend (Rust implementation)** — `implementations/rust/src/config.rs`
   (kill switch + limits + siblings config), `implementations/rust/src/db/`
-  (the `DbSource` trait in `mod.rs` + two impls: `postgres.rs`'s
-  `PgPoolSource`, the default, and `sqlite.rs`'s `SqliteSource`, gated
-  behind the opt-in `sqlite` Cargo feature — see `docs/adapter-decisions.md`
-  for where the two backends' catalog queries diverge),
+  (the `DbSource` trait in `mod.rs` + three impls: `postgres.rs`'s
+  `PgPoolSource`, the default, and `sqlite.rs`'s `SqliteSource` and
+  `mysql.rs`'s `MySqlSource`, each gated behind its own opt-in Cargo
+  feature (`sqlite`, `mysql`) — see `docs/adapter-decisions.md` for where
+  the backends' catalog queries diverge),
   `implementations/rust/src/routes.rs` (the Axum router and the six API
   handlers, including multi-schema's `list_schemas`).
 
@@ -62,8 +63,8 @@ contract (design.md §4 stays as rationale). `PORTING.md` is the contract
 for adding or reviewing a port — what it reuses, what it implements, and
 the governance/hardening checklist a reviewer signs off against.
 `docs/adapter-decisions.md` is the companion registry of per-backend
-protocol relaxations (Postgres vs. SQLite today) where a MUST can't be
-satisfied by the same mechanism on every engine. `spec/filter-dsl.md` has the
+protocol relaxations (Postgres vs. SQLite vs. MySQL today) where a MUST
+can't be satisfied by the same mechanism on every engine. `spec/filter-dsl.md` has the
 filter grammar and its full test table (implement/verify against that
 table, not ad hoc cases) — it specs the *frontend's* DSL parser; the
 backend's filter contract is the JSON AST in `spec/protocol.md`. `docs/ui-guidelines.md` and `docs/frontend-style-guide.md` are the
@@ -155,13 +156,15 @@ RNG seed, so regenerating without source edits produces an identical file.
 ## Architecture invariants (don't break these)
 
 - **`DbSource` is the only seam to the database.** Route handlers never touch
-  `sqlx` directly. Two implementations exist today — `postgres.rs`'s
-  `PgPoolSource` (the default/reference) and `sqlite.rs`'s `SqliteSource`
-  (opt-in via the `sqlite` Cargo feature, off by default) — and the trait
-  stayed native async-fn-in-trait (no `async_trait`) with the router generic
-  over it (`router<S: DbSource>`, no `dyn`) even after the second impl
-  landed. Keep it that way; per-backend behavioral differences belong in
-  `docs/adapter-decisions.md`, not in a `dyn`/`async_trait` escape hatch.
+  `sqlx` directly. Three implementations exist today — `postgres.rs`'s
+  `PgPoolSource` (the default/reference), `sqlite.rs`'s `SqliteSource`
+  (opt-in via the `sqlite` Cargo feature, off by default), and `mysql.rs`'s
+  `MySqlSource` (opt-in via the `mysql` Cargo feature, off by default) —
+  and the trait stayed native async-fn-in-trait (no `async_trait`) with the
+  router generic over it (`router<S: DbSource>`, no `dyn`) even after the
+  second and third impls landed. Keep it that way; per-backend behavioral
+  differences belong in `docs/adapter-decisions.md`, not in a
+  `dyn`/`async_trait` escape hatch.
 - **Kill switch is fail-closed and checked once, at router construction.**
   `Config::is_enabled()` gates all seven routes identically — if disabled,
   `router()` returns an empty `Router::new()`, so the mounted app 404s
@@ -174,10 +177,10 @@ RNG seed, so regenerating without source edits produces an identical file.
   property, not incidental validation.
 - **No unvalidated identifier ever reaches SQL text.** Table and column
   names are only ever spliced into a query after being matched exactly
-  against a live catalog lookup (`information_schema` for Postgres,
-  `sqlite_master`/`pragma_table_info` for SQLite — each backend does its own
-  in `db/postgres.rs` / `db/sqlite.rs`); everything else is a bound
-  parameter. The filter DSL's columns follow the same rule (each backend's
+  against a live catalog lookup (`information_schema` for Postgres and
+  MySQL, `sqlite_master`/`pragma_table_info` for SQLite — each backend does
+  its own in `db/postgres.rs` / `db/sqlite.rs` / `db/mysql.rs`); everything
+  else is a bound parameter. The filter DSL's columns follow the same rule (each backend's
   own `build_where_clause`): each condition's column is matched against the
   live allow-list before being spliced in, exactly like `sort` — the parsed
   column name from `implementations/rust/src/filter.rs` is never trusted

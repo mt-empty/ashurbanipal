@@ -33,12 +33,14 @@ v1 targets Rust services built on Axum, backed by Postgres.
 - Writes of any kind.
 - Dynamic sibling discovery (service registry, k8s, etc.) — static config only.
 - Diff viewer (Monaco / `@pierre/diffs`) — deferred to a later iteration.
-- Non-Postgres backends beyond SQLite — the DB layer is trait-based so
-  these are additive changes later, not a rewrite. A SQLite `DbSource`
-  (`implementations/rust/src/db/sqlite.rs`, opt-in `sqlite` Cargo feature)
-  has been reviewed and merged; see `docs/adapter-decisions.md` for the
-  per-clause decisions it makes where Postgres-specific catalog/stats
-  mechanisms have no SQLite equivalent.
+- Non-Postgres backends beyond SQLite and MySQL — the DB layer is
+  trait-based so these are additive changes later, not a rewrite. A SQLite
+  `DbSource` (`implementations/rust/src/db/sqlite.rs`, opt-in `sqlite`
+  Cargo feature) and a MySQL/MariaDB `DbSource`
+  (`implementations/rust/src/db/mysql.rs`, opt-in `mysql` Cargo feature)
+  have both been reviewed and merged; see `docs/adapter-decisions.md` for
+  the per-clause decisions each makes where Postgres-specific catalog/stats
+  mechanisms have no equivalent.
 - In-app authentication/authorization — access control is perimeter-based
   (see §6).
 
@@ -537,9 +539,9 @@ health_path = "/health"
   the core browser is in use.
 - **Multi-column sort.**
 - **Dynamic sibling discovery.**
-- **Non-Postgres `DbSource` implementations beyond SQLite** — a SQLite
-  adapter is now in (§2, `docs/adapter-decisions.md`); further backends
-  remain deferred.
+- **Non-Postgres `DbSource` implementations beyond SQLite and MySQL** — a
+  SQLite adapter and a MySQL/MariaDB adapter are now in (§2,
+  `docs/adapter-decisions.md`); further backends remain deferred.
 - **Health check caching/background polling** — if per-request parallel
   health checks on `/siblings` turn out to be too chatty or slow with many
   siblings, move to a background-polled cache with the same 15s cadence
