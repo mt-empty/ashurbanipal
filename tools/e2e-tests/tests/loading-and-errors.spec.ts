@@ -63,8 +63,13 @@ test("a slow, superseded response never overwrites a newer table's render", asyn
 
 test("a missing protocol header warns non-blockingly and is dismissible", async ({ page }) => {
   // Simulates a version-skewed backend by stripping the header the real
-  // server always sends — a missing header counts as a mismatch too.
-  await page.route("**/api/tables", async (route) => {
+  // server always sends — a missing header counts as a mismatch too. A
+  // predicate, not a glob string: the seed DB can carry more than one
+  // schema, in which case /tables picks up a `?schema=` query string, and a
+  // plain "**/api/tables" glob (no trailing wildcard) stops matching a
+  // querystring'd URL — this matches on pathname alone, same as the other
+  // routes' "**/api/tables/data*" wildcard already does for their query.
+  await page.route((url) => url.pathname.endsWith("/api/tables"), async (route) => {
     const response = await route.fetch();
     const headers = { ...response.headers() };
     delete headers["x-ashurbanipal-protocol"];
