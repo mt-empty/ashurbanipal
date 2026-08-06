@@ -42,10 +42,11 @@ State back to the user, or decide directly if unambiguous:
 - Idiomatic web framework for that language (e.g. Phoenix for Elixir,
   Express for Node) — pick the ecosystem-standard choice, not something
   exotic.
-- Postgres driver for that language. **Postgres first** — SQLite/other
-  engines are a stretch goal per `docs/adapter-decisions.md`'s spike
-  status note, not the default target. Don't build a multi-backend
-  abstraction unless asked.
+- Postgres driver for that language. **Postgres first** — a SQLite/other
+  non-Postgres backend is a stretch goal, not the default target, even
+  though the Rust port's `SqliteSource` is reviewed and supported (see
+  `docs/adapter-decisions.md`). Don't build a multi-backend abstraction
+  unless asked.
 
 ## 2. Scaffold layout
 

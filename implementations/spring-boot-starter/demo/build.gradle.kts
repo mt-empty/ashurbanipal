@@ -1,6 +1,6 @@
 plugins {
-    kotlin("jvm") version "2.2.20"
-    kotlin("plugin.spring") version "2.2.20"
+    kotlin("jvm") version "2.3.21"
+    kotlin("plugin.spring") version "2.3.21"
     id("org.springframework.boot") version "4.0.7"
 }
 
@@ -22,7 +22,7 @@ repositories {
 }
 
 dependencies {
-    implementation(platform("org.springframework.boot:spring-boot-dependencies:4.0.7"))
+    implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
 
     implementation(project(":"))
     implementation("org.springframework.boot:spring-boot-starter-web")
