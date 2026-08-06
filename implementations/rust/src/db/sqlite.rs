@@ -36,10 +36,10 @@ fn check_schema(schema: Option<&str>) -> Result<(), DbError> {
     }
 }
 
-/// SQLite spike, gated behind the `sqlite` feature — not a listed/conformant
-/// port (`docs/design.md` §2 non-goal, `PORTING.md`). See
-/// `/home/vscode/.claude/plans/sharded-swimming-wozniak.md` for the scope
-/// this was built against.
+/// Reviewed and supported, gated behind the `sqlite` feature (off by
+/// default). Not run through `conformance/runner` — see
+/// `docs/adapter-decisions.md` for the per-clause decisions this makes
+/// where Postgres-specific catalog/stats mechanisms have no equivalent.
 #[derive(Clone)]
 pub struct SqliteSource {
     pool: SqlitePool,
