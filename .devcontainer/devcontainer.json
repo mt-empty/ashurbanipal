@@ -10,10 +10,11 @@
         "ghcr.io/mt-empty/devcontainer-features/shell-history:1": {},
         "ghcr.io/devcontainers-extra/features/mise:1": {}
     },
-    "forwardPorts": [5432, 3306],
+    "forwardPorts": [5432, 3306, 3307],
     "containerEnv": {
         "DATABASE_URL": "postgres://ashurbanipal:ashurbanipal@db:5432/ashurbanipal",
-        "MYSQL_TEST_URL": "mysql://root:ashurbanipal@mysql:3306/ashurbanipal"
+        "MYSQL_TEST_URL": "mysql://root:ashurbanipal@mysql:3306/ashurbanipal",
+        "MARIADB_TEST_URL": "mysql://root:ashurbanipal@mariadb:3306/ashurbanipal"
     },
     "postCreateCommand": "sudo apt-get update && sudo apt-get install -y postgresql-client"
 }
