@@ -1,13 +1,12 @@
 /**
- * quoteIdent double-quotes a SQL identifier by plain concatenation, not a
- * JS-string-escaping helper: Postgres quoted-identifier escaping doubles an
- * embedded `"` rather than backslash-escaping it, so a generic string
- * escaper would produce the wrong SQL for that exact input. Callers must
- * only pass a value already exact-matched against a live schema-catalog
- * lookup (spec/protocol.md §6); this function does no validation itself.
+ * Escapes an identifier for splicing into SQL text by doubling embedded
+ * `"` (the standard Postgres quoted-identifier escape). Callers must only
+ * pass a value already exact-matched against a live schema-catalog lookup
+ * (spec/protocol.md §6); this function does no validation itself, it only
+ * makes an already-validated name syntactically safe to splice.
  */
 export function quoteIdent(name: string): string {
-  return `"${name}"`;
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /** A table/column/sort name did not match the live schema allow-list (spec/protocol.md §6). Maps to 400. */

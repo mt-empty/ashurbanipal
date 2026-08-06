@@ -102,9 +102,9 @@ class FilterValidator {
                 val value = condition.value
                     ?: throw FilterException("op ${condition.op} requires a value")
                 values.add(value)
-                "\"$column\"::text ${opSql(condition.op)} ?"
+                "${quoteIdent(column)}::text ${opSql(condition.op)} ?"
             } else {
-                "\"$column\"::text ${opSql(condition.op)}"
+                "${quoteIdent(column)}::text ${opSql(condition.op)}"
             }
             val wrapped = if (condition.not) "(NOT ($inner))" else "($inner)"
 
