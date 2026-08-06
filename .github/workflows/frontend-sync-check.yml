@@ -7,14 +7,14 @@ on:
       - "frontend/dbviewer.html"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
-      - "tools/sync-go-frontend.sh"
+      - "tools/sync-ports-frontend.sh"
       - ".github/workflows/frontend-sync-check.yml"
   pull_request:
     paths:
       - "frontend/dbviewer.html"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
-      - "tools/sync-go-frontend.sh"
+      - "tools/sync-ports-frontend.sh"
       - ".github/workflows/frontend-sync-check.yml"
 
 concurrency:

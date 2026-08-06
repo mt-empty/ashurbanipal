@@ -59,7 +59,7 @@ grammar parser (`spec/filter-dsl.md`), vendoring it pins filter *syntax*
 compatibility, not just UI/UX — treat a version bump here with the same
 care as a `spec/protocol.md` version bump.
 
-Within this repository, `mise run frontend:sync-go` copies the canonical
+Within this repository, `mise run frontend:sync-ports` copies the canonical
 frontend into the Go port and updates the Go and Spring checksum pins;
 `mise run frontend:check-go-sync` verifies those artifacts in CI.
 
