@@ -1,22 +1,25 @@
 # Structured filter builder UI (Airtable/Notion/Linear-style)
 
-Status: discussed during the client-side-AST filter decision (2026-07-22);
-not designed, not scheduled. Captured as the natural follow-on to that
-decision so the option doesn't need to be reconstructed from scratch later.
+Status: the client-side-AST filter decision this builds on (`roadmap.md`
+§6, resolved 2026-07-22) has since shipped — the wire format is the JSON
+AST, and `filter.rs` no longer parses DSL text at all (`spec/protocol.md`
+§5.4.2). The builder UI itself remains not designed, not scheduled.
+Captured as the natural follow-on so the option doesn't need to be
+reconstructed from scratch later.
 
 ## 1. The ask
 
-`roadmap.md` §6's open question on client-side filter parsing was resolved
-in discussion on 2026-07-22: the frontend will submit a JSON AST (a list of
-`{logic?, not?, column, op, value?}` triples — the same shape `filter.rs`
-already parses text *into*, per `spec/filter-dsl.md` §3) instead of a raw DSL
-string, with no server-side text-parser fallback in the spec. The `#filter`
-free-text input still exists to *produce* that AST client-side, but nothing
-structural requires it to. This entry captures the option one step further
-down that same road: replace (or offer alongside) the free-text input with
-a row-based builder — column/operator/value dropdowns that compose the AST
-directly, the way Airtable, Notion, and Linear build filters. No parsing
-anywhere, client or server, because the UI state already *is* the AST.
+The frontend submits a JSON AST (a list of `{logic?, not?, column, op,
+value?}` triples, per `spec/filter-dsl.md` §3) instead of a raw DSL string;
+there is no server-side text-parser fallback — `filter.rs` structurally
+validates the AST and never sees DSL text. The `#filter` free-text input
+still exists to *produce* that AST client-side (parsed by `parseFilterDsl`
+in `dbviewer.html`), but nothing structural requires it to. This entry
+captures the option one step further down that same road: replace (or
+offer alongside) the free-text input with a row-based builder —
+column/operator/value dropdowns that compose the AST directly, the way
+Airtable, Notion, and Linear build filters. No parsing anywhere, client or
+server, because the UI state already *is* the AST.
 
 ## 2. Shape
 
@@ -41,12 +44,12 @@ Filters
   restriction (`spec/filter-dsl.md` §1) — the UI can't express anything the
   grammar couldn't already represent.
 
-## 3. What's gained over free-text (parsed client- or server-side)
+## 3. What's gained over free-text (parsed client-side today)
 
-- No grammar anywhere. `filter.rs`'s ~8-operator recursive-descent parser
-  (and any JS port of it, had the AST-via-client-parsing route been taken
-  instead) becomes unnecessary for the primary UI flow — it only survives
-  as an optional convenience for `curl`/API users typing a filter by hand.
+- No grammar anywhere. `parseFilterDsl`'s recursive-descent parser in
+  `dbviewer.html` becomes unnecessary for the primary UI flow — it only
+  survives as an optional convenience for hand-typing a filter before
+  it's submitted as AST.
 - Zero escaping/quoting edge cases (`spec/filter-dsl.md` §2's `''`-doubling,
   forced-quoting of literal `AND`/`OR`/`NOT` values) — a value typed into a
   builder's input box is never at risk of being misread as a keyword,
@@ -69,11 +72,11 @@ Filters
   and the caret-anchoring code in `dbviewer.html` outright — more deleted
   and rewritten code than the AST-with-client-side-parser route would have
   needed, which could've left the existing text UI untouched.
-- **`filter.rs`'s role shrinks further.** Already optional once AST-on-submit
-  ships; under this option it additionally stops being exercised by the
-  primary UI at all, only by hand-typed `curl` filters — worth remembering
-  before trimming or "simplifying" it later, since its only remaining
-  caller would be outside the frontend entirely.
+- **`parseFilterDsl`'s role shrinks further.** Already optional today (the
+  wire format is AST, not DSL text); under this option it additionally
+  stops being exercised by the primary UI at all, only by whatever "raw
+  expression" toggle survives (see §6) — worth remembering before trimming
+  it, since its only remaining caller would be that toggle.
 
 ## 5. Prior art
 
