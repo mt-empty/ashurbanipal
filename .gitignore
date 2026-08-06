@@ -16,3 +16,4 @@ tools/e2e-tests/playwright/.cache/
 implementations/spring-boot-starter/**/build/
 implementations/spring-boot-starter/.gradle/
 implementations/spring-boot-starter/**/out/
+*.gitignore
