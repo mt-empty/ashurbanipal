@@ -1,9 +1,19 @@
 package ashurbanipal
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // DB-backed coverage of resolveSchema against the devcontainer's seeded
@@ -113,4 +123,145 @@ func TestSameSchemaFKReferenceOmitsSchemaField(t *testing.T) {
 		return
 	}
 	t.Fatal("user_id column not found")
+}
+
+const (
+	schemaIsolationSchemaA = "ashb_test_schema_isolation_a"
+	schemaIsolationSchemaB = "ashb_test_schema_isolation_b"
+)
+
+func mustExecIsolation(t *testing.T, db *sql.DB, stmt string) {
+	t.Helper()
+	if _, err := db.Exec(stmt); err != nil {
+		t.Fatalf("exec %q: %v", stmt, err)
+	}
+}
+
+// Regression test for the "connection pool sessions with different
+// search_path settings must not let a request's schema resolution drift
+// mid-flight" guarantee (spec/protocol.md §1, §5) — Go equivalent of
+// implementations/rust/tests/schema_isolation.rs's
+// query_table_never_mixes_schemas_across_pooled_connections.
+//
+// Builds its own 2-connection pool (separate from TestMain's shared one)
+// whose physical connections alternate search_path between two schemas
+// that each hold a same-named probe table with a different column shape.
+// QueryTable resolves+validates the schema and later selects columns from
+// it inside one BeginTx (catalog.go's resolveSchema doc comment) — if those
+// steps could ever land on different pooled connections, a response would
+// mix shapes/values across schemas or fail outright.
+func TestQueryTableNeverMixesSchemasAcrossPooledConnections(t *testing.T) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("DATABASE_URL not set (the devcontainer sets it automatically)")
+	}
+
+	setupDB, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("opening setup connection: %v", err)
+	}
+	defer setupDB.Close()
+
+	for _, schema := range []string{schemaIsolationSchemaA, schemaIsolationSchemaB} {
+		mustExecIsolation(t, setupDB, fmt.Sprintf("drop schema if exists %s cascade", schema))
+		mustExecIsolation(t, setupDB, fmt.Sprintf("create schema %s", schema))
+	}
+	mustExecIsolation(t, setupDB, fmt.Sprintf("create table %s.probe_isolation (id int primary key, marker text)", schemaIsolationSchemaA))
+	mustExecIsolation(t, setupDB, fmt.Sprintf("insert into %s.probe_isolation values (1, 'A'), (2, 'A')", schemaIsolationSchemaA))
+	mustExecIsolation(t, setupDB, fmt.Sprintf("create table %s.probe_isolation (id int primary key, marker text, extra text)", schemaIsolationSchemaB))
+	mustExecIsolation(t, setupDB, fmt.Sprintf("insert into %s.probe_isolation values (1, 'B', 'X'), (2, 'B', 'X')", schemaIsolationSchemaB))
+	t.Cleanup(func() {
+		for _, schema := range []string{schemaIsolationSchemaA, schemaIsolationSchemaB} {
+			setupDB.Exec(fmt.Sprintf("drop schema if exists %s cascade", schema))
+		}
+	})
+
+	// Alternates each newly-opened physical connection's search_path
+	// between the two schemas, simulating a host pool whose sessions don't
+	// all agree on which schema current_schema() resolves to.
+	connConfig, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatalf("parsing DATABASE_URL: %v", err)
+	}
+	var connCount int64
+	connConfig.AfterConnect = func(ctx context.Context, pc *pgconn.PgConn) error {
+		n := atomic.AddInt64(&connCount, 1) - 1
+		schema := schemaIsolationSchemaA
+		if n%2 != 0 {
+			schema = schemaIsolationSchemaB
+		}
+		_, err := pc.Exec(ctx, fmt.Sprintf("set search_path = %s", schema)).ReadAll()
+		return err
+	}
+	connStr := stdlib.RegisterConnConfig(connConfig)
+	defer stdlib.UnregisterConnConfig(connStr)
+
+	db, err := sql.Open("pgx", connStr)
+	if err != nil {
+		t.Fatalf("opening pool under test: %v", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(2)
+
+	// Acquire both connections while both are still checked out (neither
+	// idle yet), forcing the pool to dial two distinct physical
+	// connections; only then release them both back to the idle set, so
+	// both schemas are represented once the concurrent calls below begin.
+	ctx := context.Background()
+	c1, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquiring conn 1: %v", err)
+	}
+	c2, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquiring conn 2: %v", err)
+	}
+	c1.Close()
+	c2.Close()
+
+	catalog := newCatalog(db, 5)
+	opts := QueryOpts{Limit: 10, Offset: 0, Descending: false}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 40)
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			data, err := catalog.QueryTable(ctx, nil, "probe_isolation", opts)
+			if err != nil {
+				errs <- fmt.Errorf("query_table must not error from a mid-request schema drift: %w", err)
+				return
+			}
+			names := make([]string, len(data.Columns))
+			for i, c := range data.Columns {
+				names[i] = c.Name
+			}
+			switch {
+			case len(names) == 2 && names[0] == "id" && names[1] == "marker":
+				for _, row := range data.Rows {
+					if row["marker"] == nil || *row["marker"] != "A" {
+						errs <- fmt.Errorf("schema_a shape must only ever contain schema_a's rows, got %v", row["marker"])
+					}
+				}
+			case len(names) == 3 && names[0] == "id" && names[1] == "marker" && names[2] == "extra":
+				for _, row := range data.Rows {
+					if row["marker"] == nil || *row["marker"] != "B" {
+						errs <- fmt.Errorf("schema_b shape must only ever contain schema_b's rows, got %v", row["marker"])
+					}
+					if row["extra"] == nil || *row["extra"] != "X" {
+						errs <- fmt.Errorf("schema_b shape must carry extra=X, got %v", row["extra"])
+					}
+				}
+			default:
+				errs <- fmt.Errorf("response mixed columns from both schemas — mid-request schema drift: %v", names)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
 }
