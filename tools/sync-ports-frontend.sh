@@ -10,15 +10,15 @@ sha256=$(sha256sum "$source" | awk '{print $1}')
 
 if [ "${1:-}" = "--check" ]; then
     cmp -s "$source" "$go_frontend" || {
-        printf '%s\n' 'Go frontend is out of sync; run: mise run frontend:sync-go' >&2
+        printf '%s\n' 'Go frontend is out of sync; run: mise run frontend:sync-ports' >&2
         exit 1
     }
     grep -Fq "const pinnedFrontendSHA256 = \"$sha256\"" "$go_embed" || {
-        printf '%s\n' 'Go frontend checksum is out of sync; run: mise run frontend:sync-go' >&2
+        printf '%s\n' 'Go frontend checksum is out of sync; run: mise run frontend:sync-ports' >&2
         exit 1
     }
     grep -Fq "val pinnedFrontendSha256 = \"$sha256\"" "$spring_build" || {
-        printf '%s\n' 'Spring frontend checksum is out of sync; run: mise run frontend:sync-go' >&2
+        printf '%s\n' 'Spring frontend checksum is out of sync; run: mise run frontend:sync-ports' >&2
         exit 1
     }
     exit 0
