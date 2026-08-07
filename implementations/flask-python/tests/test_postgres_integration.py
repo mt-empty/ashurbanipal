@@ -89,6 +89,33 @@ def test_unknown_column_sort_rejected(source) -> None:
         source.query_table(None, "orders", QueryOpts(limit=5, offset=0, timeout_secs=5, sort="no_such_column"))
 
 
+def test_query_table_wires_the_lenient_text_loader_before_cursor_creation(source) -> None:
+    """Regression test: psycopg's Cursor snapshots conn.adapters at
+    creation time (copy-on-write, not a live view), so registering the
+    loader after conn.cursor() has already run would silently never take
+    effect — caught by a cross-port review that read the wiring directly.
+    """
+    from unittest import mock
+
+    import psycopg
+
+    from ashurbanipal.db.postgres import _LenientTextLoader
+
+    created_cursors = []
+    real_cursor = psycopg.Connection.cursor
+
+    def spying_cursor(self, *args, **kwargs):
+        cur = real_cursor(self, *args, **kwargs)
+        created_cursors.append(cur)
+        return cur
+
+    with mock.patch.object(psycopg.Connection, "cursor", spying_cursor):
+        source.query_table(None, "orders", QueryOpts(limit=1, offset=0, timeout_secs=5))
+
+    assert created_cursors, "query_table created no cursor"
+    assert created_cursors[0].adapters.get_loader(25, psycopg.pq.Format.TEXT) is _LenientTextLoader
+
+
 def test_query_timeout_is_enforced(source) -> None:
     # pg_sleep blocks for longer than the 1s statement_timeout — the query
     # must be aborted, not left to run (spec/protocol.md §6). A separate
