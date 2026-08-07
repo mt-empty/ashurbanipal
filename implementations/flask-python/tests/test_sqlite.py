@@ -89,6 +89,39 @@ def test_common_values_rejects_unknown_column(seeded_path) -> None:
         source.common_values(None, "users", "nope")
 
 
+def test_list_tables_is_bounded_by_the_catalog_timeout(seeded_path, monkeypatch) -> None:
+    """Regression test: catalog lookups (list_tables/table_counts/
+    common_values, and query_table's own catalog phase) must actually be
+    bounded, not just query_table's final row-fetch — spec/protocol.md §6
+    requires every query to be bounded. Monkeypatches _allowed_tables to
+    run a genuinely slow recursive query in place of the real (fast)
+    sqlite_master lookup, so an unbounded catalog phase would hang for the
+    query's full duration instead of aborting near CATALOG_TIMEOUT_SECS.
+    """
+    import time
+
+    from ashurbanipal.db import sqlite as sqlite_module
+
+    monkeypatch.setattr(sqlite_module, "CATALOG_TIMEOUT_SECS", 1)
+
+    def slow_allowed_tables(self, cur):
+        cur.execute(
+            "with recursive slow(x) as ("
+            "  select 1 union all select x + 1 from slow where x < 100000000"
+            ") select group_concat(x) from slow"
+        )
+        return []
+
+    monkeypatch.setattr(sqlite_module.SqliteSource, "_allowed_tables", slow_allowed_tables)
+
+    source = SqliteSource(seeded_path)
+    start = time.monotonic()
+    with pytest.raises(sqlite3.OperationalError):
+        source.list_tables(None)
+    elapsed = time.monotonic() - start
+    assert elapsed < 5, f"expected the catalog timeout to abort near its 1s budget, took {elapsed}s"
+
+
 def test_invalid_utf8_bytes_become_the_undecodable_sentinel(seeded_path) -> None:
     """stdlib sqlite3's default text_factory raises on invalid UTF-8,
     which would otherwise surface as an unhandled 500 instead of the

@@ -89,6 +89,35 @@ def test_unknown_column_sort_rejected(source) -> None:
         source.query_table(None, "orders", QueryOpts(limit=5, offset=0, timeout_secs=5, sort="no_such_column"))
 
 
+def test_list_schemas_is_bounded_by_the_catalog_timeout(source, monkeypatch) -> None:
+    """Regression test: CATALOG_TIMEOUT_SECS must actually be applied to
+    catalog queries, not just declared and left unused — spec/protocol.md
+    §6 requires every query, catalog queries included, to be bounded.
+    Simulates a slow catalog query (e.g. blocked behind a DDL lock) by
+    monkeypatching the private helper to sleep instead of querying
+    pg_namespace; if the timeout weren't wired, this would hang for the
+    full sleep duration instead of aborting near budget.
+    """
+    import time
+
+    import psycopg
+
+    import ashurbanipal.db.postgres as postgres_module
+
+    monkeypatch.setattr(postgres_module, "CATALOG_TIMEOUT_SECS", 1)
+    monkeypatch.setattr(
+        postgres_module.PgSource,
+        "_list_schemas",
+        lambda self, cur: cur.execute("select pg_sleep(5)"),
+    )
+
+    start = time.monotonic()
+    with pytest.raises(psycopg.Error):
+        source.list_schemas()
+    elapsed = time.monotonic() - start
+    assert elapsed < 5, f"expected the catalog timeout to abort near its 1s budget, took {elapsed}s"
+
+
 def test_query_table_wires_the_lenient_text_loader_before_cursor_creation(source) -> None:
     """Regression test: psycopg's Cursor snapshots conn.adapters at
     creation time (copy-on-write, not a live view), so registering the
