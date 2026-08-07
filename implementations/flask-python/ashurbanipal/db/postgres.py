@@ -228,89 +228,92 @@ class PgSource(DbSource):
             return list(cur.fetchall())
 
     def query_table(self, schema: Optional[str], table: str, opts: QueryOpts) -> TableData:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect() as conn:
+            # Cursor.__init__ snapshots conn.adapters at creation time (copy-
+            # on-write, not a live view) — this must run before conn.cursor()
+            # or the registration silently never takes effect.
             conn.adapters.register_loader("text", _LenientTextLoader)
-            cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
 
-            resolved_schema = self._resolve_schema(cur, schema)
-            tables = self._allowed_tables(cur, resolved_schema)
-            if table not in tables:
-                raise NotAllowed(f"table {table!r}")
+                resolved_schema = self._resolve_schema(cur, schema)
+                tables = self._allowed_tables(cur, resolved_schema)
+                if table not in tables:
+                    raise NotAllowed(f"table {table!r}")
 
-            column_names = self._allowed_columns(cur, resolved_schema, table)
-            sort = None
-            if opts.sort is not None:
-                if opts.sort not in column_names:
-                    raise NotAllowed(f"column {opts.sort!r}")
-                sort = opts.sort
+                column_names = self._allowed_columns(cur, resolved_schema, table)
+                sort = None
+                if opts.sort is not None:
+                    if opts.sort not in column_names:
+                        raise NotAllowed(f"column {opts.sort!r}")
+                    sort = opts.sort
 
-            where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
+                where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
-            cur.execute(
-                "select column_name, data_type from information_schema.columns "
-                "where table_schema = %s and table_name = %s "
-                "order by ordinal_position",
-                (resolved_schema, table),
-            )
-            column_types = list(cur.fetchall())
-
-            # col_description is keyed by attnum, which can diverge from
-            # ordinal_position once a column has been dropped — join
-            # through pg_attribute directly rather than trust ordinal
-            # position to line up.
-            cur.execute(
-                "select a.attname::text, col_description(a.attrelid, a.attnum::int) "
-                "from pg_attribute a "
-                "join pg_class c on c.oid = a.attrelid "
-                "join pg_namespace n on n.oid = c.relnamespace "
-                "where n.nspname = %s and c.relname = %s "
-                "  and a.attnum > 0 and not a.attisdropped",
-                (resolved_schema, table),
-            )
-            column_comments = {name: comment for name, comment in cur.fetchall() if comment is not None}
-
-            pk_columns, fk_columns = self._key_metadata(cur, resolved_schema, table)
-            columns = [
-                ColumnInfo(
-                    name=name,
-                    type_name=type_name,
-                    key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
-                    references=fk_columns.get(name),
-                    comment=column_comments.get(name),
+                cur.execute(
+                    "select column_name, data_type from information_schema.columns "
+                    "where table_schema = %s and table_name = %s "
+                    "order by ordinal_position",
+                    (resolved_schema, table),
                 )
-                for name, type_name in column_types
-            ]
+                column_types = list(cur.fetchall())
 
-            select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
-            order_clause = ""
-            if sort is not None:
-                # Table-qualified: an unqualified `order by "col"` would
-                # resolve to the ::text-cast output column in select_list,
-                # sorting lexicographically instead of by the real typed
-                # value (mirrors postgres.rs's same comment).
-                order_clause = (
-                    f" order by {quote_ident(table)}.{quote_ident(sort)} {'desc' if opts.descending else 'asc'}"
+                # col_description is keyed by attnum, which can diverge from
+                # ordinal_position once a column has been dropped — join
+                # through pg_attribute directly rather than trust ordinal
+                # position to line up.
+                cur.execute(
+                    "select a.attname::text, col_description(a.attrelid, a.attnum::int) "
+                    "from pg_attribute a "
+                    "join pg_class c on c.oid = a.attrelid "
+                    "join pg_namespace n on n.oid = c.relnamespace "
+                    "where n.nspname = %s and c.relname = %s "
+                    "  and a.attnum > 0 and not a.attisdropped",
+                    (resolved_schema, table),
                 )
-            query = (
-                f"select {select_list} from {quote_ident(resolved_schema)}.{quote_ident(table)}"
-                f"{where_clause}{order_clause} limit %s offset %s"
-            )
-            cur.execute(query, (*filter_values, opts.limit, opts.offset))
-            pg_rows = cur.fetchall()
-            rows = [
-                {col.name: (None if value is None else str(value)) for col, value in zip(columns, row)}
-                for row in pg_rows
-            ]
+                column_comments = {name: comment for name, comment in cur.fetchall() if comment is not None}
 
-            cur.execute(
-                "select reltuples::bigint from pg_class c "
-                "join pg_namespace n on n.oid = c.relnamespace "
-                "where n.nspname = %s and c.relname = %s",
-                (resolved_schema, table),
-            )
-            total_approx = cur.fetchone()[0]
+                pk_columns, fk_columns = self._key_metadata(cur, resolved_schema, table)
+                columns = [
+                    ColumnInfo(
+                        name=name,
+                        type_name=type_name,
+                        key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
+                        references=fk_columns.get(name),
+                        comment=column_comments.get(name),
+                    )
+                    for name, type_name in column_types
+                ]
 
-            return TableData(columns=columns, rows=rows, total_approx=total_approx)
+                select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
+                order_clause = ""
+                if sort is not None:
+                    # Table-qualified: an unqualified `order by "col"` would
+                    # resolve to the ::text-cast output column in select_list,
+                    # sorting lexicographically instead of by the real typed
+                    # value (mirrors postgres.rs's same comment).
+                    direction = "desc" if opts.descending else "asc"
+                    order_clause = f" order by {quote_ident(table)}.{quote_ident(sort)} {direction}"
+                query = (
+                    f"select {select_list} from {quote_ident(resolved_schema)}.{quote_ident(table)}"
+                    f"{where_clause}{order_clause} limit %s offset %s"
+                )
+                cur.execute(query, (*filter_values, opts.limit, opts.offset))
+                pg_rows = cur.fetchall()
+                rows = [
+                    {col.name: (None if value is None else str(value)) for col, value in zip(columns, row)}
+                    for row in pg_rows
+                ]
+
+                cur.execute(
+                    "select reltuples::bigint from pg_class c "
+                    "join pg_namespace n on n.oid = c.relnamespace "
+                    "where n.nspname = %s and c.relname = %s",
+                    (resolved_schema, table),
+                )
+                total_approx = cur.fetchone()[0]
+
+                return TableData(columns=columns, rows=rows, total_approx=total_approx)
 
     def common_values(self, schema: Optional[str], table: str, column: str) -> list[tuple[str, float]]:
         with self._connect() as conn, conn.cursor() as cur:
