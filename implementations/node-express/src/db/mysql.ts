@@ -149,13 +149,24 @@ export class MySqlSource implements DbSource {
   // drivers use, since there's no dedicated boolean-returning function
   // for it. Cached in a memoized promise so concurrent first calls share
   // one detection; a lost race between concurrent callers is harmless
-  // since both would detect the same value.
+  // since both would detect the same value. On failure the cached promise
+  // is cleared so the next call retries, instead of pinning every future
+  // request to one transient blip forever (mirrors mysql.rs's OnceLock,
+  // which is only .set() after a successful query).
   private async variant(): Promise<Variant> {
-    this.variantPromise ??= (async (): Promise<Variant> => {
-      const [rows] = await this.pool.query<RowDataPacket[]>("select version() as v");
-      const version = String(rows[0]?.v ?? "");
-      return version.toLowerCase().includes("mariadb") ? "mariadb" : "mysql";
-    })();
+    if (this.variantPromise === undefined) {
+      const detect = (async (): Promise<Variant> => {
+        const [rows] = await this.pool.query<RowDataPacket[]>("select version() as v");
+        const version = String(rows[0]?.v ?? "");
+        return version.toLowerCase().includes("mariadb") ? "mariadb" : "mysql";
+      })();
+      detect.catch(() => {
+        if (this.variantPromise === detect) {
+          this.variantPromise = undefined;
+        }
+      });
+      this.variantPromise = detect;
+    }
     return this.variantPromise;
   }
 

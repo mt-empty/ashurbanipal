@@ -11,6 +11,32 @@ import type { QueryOpts } from "../../src/db/types.js";
 // MariaDB server, not just assumed API-symmetric with MySQL. Skips
 // cleanly (no failure) when its own env var is absent.
 
+// No live instance needed — a fake pool proves variant() retries after a
+// transient failure instead of pinning every future call to one stale
+// rejection forever (the `??=`-memoized-promise bug this test guards
+// against).
+describe("MySqlSource variant() detection", () => {
+  it("does not permanently poison itself after one failed detection", async () => {
+    let calls = 0;
+    const fakePool = {
+      query: async () => {
+        calls++;
+        if (calls === 1) {
+          throw new Error("connection reset (simulated transient failure)");
+        }
+        return [[{ v: "8.0.35" }]];
+      },
+    } as unknown as Pool;
+
+    const source = new MySqlSource(fakePool);
+    const variant = source as unknown as { variant(): Promise<Variant> };
+
+    await expect(variant.variant()).rejects.toThrow(/simulated transient failure/);
+    await expect(variant.variant()).resolves.toBe("mysql");
+    expect(calls).toBe(2);
+  });
+});
+
 let counter = 0;
 
 interface SeededDb {
