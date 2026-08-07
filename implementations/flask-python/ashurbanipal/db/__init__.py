@@ -15,9 +15,12 @@ backend-specific catalog/timeout/cast mechanism
 from __future__ import annotations
 
 import abc
+import functools
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional, TypeVar
+
+_F = TypeVar("_F", bound=Callable)
 
 
 class KeyKind(str, Enum):
@@ -81,6 +84,30 @@ class FilterParseError(DbError):
 
 class DatabaseError(DbError):
     """The underlying driver raised (connection failure, timeout, syntax error, ...)."""
+
+
+def wrap_driver_errors(driver_error_cls: type[BaseException]) -> Callable[[_F], _F]:
+    """Decorator: re-raises `driver_error_cls` (a backend driver's own
+    exception hierarchy — psycopg.Error, sqlite3.Error, pymysql.err.Error)
+    as DatabaseError, so routes.py's `@bp.errorhandler(DbError)` actually
+    fires for a real driver failure instead of falling through to Flask's
+    default HTML error page. Mirrors mod.rs's `impl From<sqlx::Error> for
+    DbError`, which sqlx's `?` applies automatically; Python has no
+    equivalent auto-conversion, hence the explicit wrap on every DbSource
+    method.
+    """
+
+    def decorator(fn: _F) -> _F:
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except driver_error_cls as exc:
+                raise DatabaseError(str(exc)) from exc
+
+        return wrapper  # type: ignore[return-value]
+
+    return decorator
 
 
 class DbSource(abc.ABC):

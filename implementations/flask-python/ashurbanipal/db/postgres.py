@@ -41,6 +41,7 @@ from . import (
     TableData,
     TableInfo,
     quote_ident,
+    wrap_driver_errors,
 )
 
 # Catalog/metadata queries have no per-request timeout knob, but must still
@@ -197,11 +198,13 @@ class PgSource(DbSource):
             )
         return pk_columns, fk_columns
 
+    @wrap_driver_errors(psycopg.Error)
     def list_schemas(self) -> list[str]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             return self._list_schemas(cur)
 
+    @wrap_driver_errors(psycopg.Error)
     def list_tables(self, schema: Optional[str]) -> list[TableInfo]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
@@ -216,6 +219,7 @@ class PgSource(DbSource):
             )
             return [TableInfo(name=name, comment=comment) for name, comment in cur.fetchall()]
 
+    @wrap_driver_errors(psycopg.Error)
     def table_counts(self, schema: Optional[str]) -> list[tuple[str, int]]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
@@ -230,6 +234,7 @@ class PgSource(DbSource):
             )
             return list(cur.fetchall())
 
+    @wrap_driver_errors(psycopg.Error)
     def query_table(self, schema: Optional[str], table: str, opts: QueryOpts) -> TableData:
         with self._connect() as conn:
             # Cursor.__init__ snapshots conn.adapters at creation time (copy-
@@ -318,6 +323,7 @@ class PgSource(DbSource):
 
                 return TableData(columns=columns, rows=rows, total_approx=total_approx)
 
+    @wrap_driver_errors(psycopg.Error)
     def common_values(self, schema: Optional[str], table: str, column: str) -> list[tuple[str, float]]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
