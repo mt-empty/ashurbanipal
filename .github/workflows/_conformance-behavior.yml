@@ -10,7 +10,7 @@ on:
   workflow_call:
     inputs:
       toolchain:
-        description: "Language toolchain the demo needs to start: rust | java | go | node"
+        description: "Language toolchain the demo needs to start: rust | java | go | node | python"
         required: true
         type: string
       go-version-file:
@@ -20,6 +20,11 @@ on:
         default: ""
       node-version:
         description: "Node version to install (required when toolchain == 'node')"
+        required: false
+        type: string
+        default: ""
+      python-version:
+        description: "Python version to install (required when toolchain == 'python')"
         required: false
         type: string
         default: ""
@@ -100,6 +105,12 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
+
+      - name: Set up Python toolchain
+        if: inputs.toolchain == 'python'
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python-version }}
 
       # The conformance runner itself (layer 3) is Rust regardless of which
       # implementation is under test — report.sh always runs `cargo test`

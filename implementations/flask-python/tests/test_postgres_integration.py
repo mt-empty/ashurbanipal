@@ -1,0 +1,101 @@
+"""PgSource integration tests against the devcontainer's seeded Postgres
+(`DATABASE_URL`, `conformance/seed/seed.sql`). Skips cleanly if unset —
+mirrors `implementations/rust/tests/schema_isolation.rs`'s DATABASE_URL
+gating.
+"""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+
+from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts
+from ashurbanipal.db.postgres import PgSource
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL not set")
+
+
+@pytest.fixture
+def source():
+    return PgSource(DATABASE_URL)
+
+
+def test_list_schemas_excludes_system_namespaces(source) -> None:
+    schemas = source.list_schemas()
+    assert "public" in schemas
+    assert "pg_catalog" not in schemas
+    assert "information_schema" not in schemas
+
+
+def test_schema_scoping_hides_other_schemas_tables(source) -> None:
+    # other_schema.decoy_items must never appear when resolved against the
+    # connection's default schema (public) — spec/protocol.md §1/§6.
+    tables = source.list_tables(None)
+    assert "decoy_items" not in [t.name for t in tables]
+    assert "users" in [t.name for t in tables]
+
+
+def test_unknown_schema_rejected(source) -> None:
+    with pytest.raises(NotAllowed):
+        source.list_tables("no_such_schema")
+
+
+def test_foreign_key_column_reports_key_and_references(source) -> None:
+    data = source.query_table(None, "orders", QueryOpts(limit=5, offset=0, timeout_secs=5))
+    user_id_col = next(c for c in data.columns if c.name == "user_id")
+    assert user_id_col.key == KeyKind.FK
+    assert user_id_col.references.table == "users"
+    assert user_id_col.references.column == "id"
+    pk_col = next(c for c in data.columns if c.name == "id")
+    assert pk_col.key == KeyKind.PK
+
+
+def test_every_cell_is_string_or_null(source) -> None:
+    data = source.query_table(None, "orders", QueryOpts(limit=20, offset=0, timeout_secs=5))
+    assert len(data.rows) > 0
+    for row in data.rows:
+        for value in row.values():
+            assert value is None or isinstance(value, str)
+
+
+def test_total_approx_is_whole_table_not_filtered(source) -> None:
+    unfiltered = source.query_table(None, "orders", QueryOpts(limit=1, offset=0, timeout_secs=5))
+    import json
+
+    from ashurbanipal import filter as filter_module
+
+    conditions = filter_module.parse(json.dumps([{"column": "status", "op": "=", "value": "completed"}]))
+    filtered = source.query_table(None, "orders", QueryOpts(limit=1, offset=0, timeout_secs=5, filter=conditions))
+    assert filtered.total_approx == unfiltered.total_approx
+
+
+def test_common_values_for_enum_column(source) -> None:
+    values = source.common_values(None, "orders", "status")
+    assert values, "expected at least one common value for orders.status"
+    for value, freq in values:
+        assert isinstance(value, str)
+        assert 0 < freq <= 1
+
+
+def test_unknown_table_rejected(source) -> None:
+    with pytest.raises(NotAllowed):
+        source.query_table(None, "no_such_table", QueryOpts(limit=5, offset=0, timeout_secs=5))
+
+
+def test_unknown_column_sort_rejected(source) -> None:
+    with pytest.raises(NotAllowed):
+        source.query_table(None, "orders", QueryOpts(limit=5, offset=0, timeout_secs=5, sort="no_such_column"))
+
+
+def test_query_timeout_is_enforced(source) -> None:
+    # pg_sleep blocks for longer than the 1s statement_timeout — the query
+    # must be aborted, not left to run (spec/protocol.md §6). A separate
+    # connection (not query_table) since pg_sleep isn't a real table read.
+    import psycopg
+
+    with pytest.raises(psycopg.Error):
+        with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout = '1s'")
+            cur.execute("select pg_sleep(5)")
