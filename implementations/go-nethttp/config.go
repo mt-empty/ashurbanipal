@@ -33,9 +33,13 @@ func defaultLimits() Limits {
 	return Limits{DefaultPageSize: 50, MaxPageSize: 100, QueryTimeoutSecs: 5}
 }
 
-// withDefaults fills any zero field from defaultLimits(), mirroring the
-// Rust reference's #[serde(default)] struct-level Limits::default().
-func (l Limits) withDefaults() Limits {
+// WithDefaults fills any zero field from defaultLimits(), mirroring the
+// Rust reference's #[serde(default)] struct-level Limits::default(). A
+// caller constructing a DbSource directly (NewPostgresSource et al., which
+// take an already-resolved timeout rather than a Config) calls this
+// itself before reading QueryTimeoutSecs — Router no longer does it on
+// their behalf.
+func (l Limits) WithDefaults() Limits {
 	d := defaultLimits()
 	if l.DefaultPageSize == 0 {
 		l.DefaultPageSize = d.DefaultPageSize
