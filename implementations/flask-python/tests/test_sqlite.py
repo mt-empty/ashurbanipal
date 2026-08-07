@@ -89,6 +89,22 @@ def test_common_values_rejects_unknown_column(seeded_path) -> None:
         source.common_values(None, "users", "nope")
 
 
+def test_invalid_utf8_bytes_become_the_undecodable_sentinel(seeded_path) -> None:
+    """stdlib sqlite3's default text_factory raises on invalid UTF-8,
+    which would otherwise surface as an unhandled 500 instead of the
+    protocol-required sentinel (spec/protocol.md §5.4.3).
+    """
+    conn = sqlite3.connect(seeded_path)
+    conn.execute("insert into users (id, email, age) values (99, ?, 50)", (b"\xff\xfe bad bytes",))
+    conn.commit()
+    conn.close()
+
+    source = SqliteSource(seeded_path)
+    data = source.query_table(None, "users", QueryOpts(limit=10, offset=0, timeout_secs=5, sort="id"))
+    row = next(r for r in data.rows if r["id"] == "99")
+    assert row["email"] == "<undecodable>"
+
+
 def test_slow_query_is_aborted_by_the_progress_handler_not_left_to_run(seeded_path) -> None:
     """Empirical proof (not just documentation) that
     `Connection.set_progress_handler` actually interrupts a running query,

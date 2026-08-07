@@ -59,6 +59,24 @@ can only decode-then-restringify would need a protocol conversation, not
 just a row in this table — see the locale/timezone drift example in
 `spec/protocol.md` §5.4.3.
 
+**Undecodable bytes** (spec/protocol.md §5.4.3's `"<undecodable>"`
+sentinel): SQLite is dynamically typed, so `CAST(blob AS TEXT)` passes raw
+bytes through unchanged — a genuinely non-UTF-8 BLOB reaches the Python
+driver's decode step and must be caught there (`sqlite.py`'s
+`text_factory`). MySQL/MariaDB instead sanitize a `VARBINARY`/`BLOB`
+column's `CAST(... AS CHAR)` *server-side*, before the client ever sees
+it — and the two forks diverge again here: MySQL returns SQL `NULL` for
+the cast (observed, not just documented — `1300 Invalid utf8mb4 character
+string` warning), MariaDB substitutes `?` per invalid byte and still
+returns a valid string. Neither engine's driver-level decode step is
+actually reachable with invalid bytes as a result, so `mysql.py`'s
+per-cell decode/sentinel guard is defense-in-depth (parity with
+`mysql.rs`), not a fix for a live-reproducible crash there. Postgres never
+reaches this either: `bytea::text` renders as a hex-encoded (`\x...`)
+string, always valid ASCII, and Postgres enforces UTF-8 validity for
+`text`/`varchar` storage directly, so `postgres.py`'s guard is the same
+kind of defense-in-depth as MySQL/MariaDB's.
+
 ## §5.4.2 — filter operator mapping (`ILIKE`)
 
 Protocol property: `ILIKE` is case-insensitive `LIKE`, distinct from

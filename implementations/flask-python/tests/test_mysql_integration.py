@@ -139,6 +139,28 @@ def test_common_values_rejects_unknown_column(seeded) -> None:
         seeded.common_values(None, "users", "nope")
 
 
+def test_invalid_utf8_bytes_do_not_crash_the_query(seeded) -> None:
+    """`CAST(col AS CHAR)` on a VARBINARY column holding non-UTF-8 bytes is
+    sanitized server-side before it ever reaches the client — MySQL nulls
+    the cast result, MariaDB substitutes `?` for the invalid bytes — so
+    PyMySQL's decode never actually sees raw invalid bytes here. This just
+    guards the `conn.use_unicode = False` / per-cell decode path (added
+    for parity with mysql.rs's `Err(_) => "<undecodable>"`) against ever
+    raising should that server-side sanitizing assumption stop holding.
+    """
+    conn = pymysql.connect(**seeded.kwargs)
+    with conn.cursor() as cur:
+        cur.execute("create table blobs (id integer primary key, val varbinary(32))")
+        cur.execute("insert into blobs (id, val) values (1, %s)", (b"\xff\xfe bad bytes",))
+    conn.commit()
+    conn.close()
+
+    data = seeded.query_table(None, "blobs", QueryOpts(limit=10, offset=0, timeout_secs=5))
+    assert len(data.rows) == 1
+    for value in data.rows[0].values():
+        assert value is None or isinstance(value, str)
+
+
 def test_slow_query_is_aborted_by_the_timeout_mechanism(seeded) -> None:
     """Empirical proof (not just documentation) that both forks' per-query
     timeout mechanisms actually abort a running query — mirrors

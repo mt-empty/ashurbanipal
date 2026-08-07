@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Optional
 
 import psycopg
+from psycopg.types.string import TextLoader
 
 from ..filter import Condition
 from . import (
@@ -45,6 +46,20 @@ from . import (
 # Catalog/metadata queries have no per-request timeout knob, but must still
 # be bounded — same default as Limits.query_timeout_secs.
 CATALOG_TIMEOUT_SECS = 5
+
+
+class _LenientTextLoader(TextLoader):
+    """psycopg's stock text loader raises UnicodeDecodeError on invalid
+    bytes for the connection's encoding; substitute the protocol's
+    sentinel instead (spec/protocol.md §5.4.3), mirroring postgres.rs's
+    per-cell `Err(_) => "<undecodable>"`.
+    """
+
+    def load(self, data):
+        try:
+            return super().load(data)
+        except UnicodeDecodeError:
+            return "<undecodable>"
 
 
 def _build_where_clause(conditions: list[Condition], column_names: list[str]) -> tuple[str, list[str]]:
@@ -214,6 +229,7 @@ class PgSource(DbSource):
 
     def query_table(self, schema: Optional[str], table: str, opts: QueryOpts) -> TableData:
         with self._connect() as conn, conn.cursor() as cur:
+            conn.adapters.register_loader("text", _LenientTextLoader)
             cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
 
             resolved_schema = self._resolve_schema(cur, schema)
