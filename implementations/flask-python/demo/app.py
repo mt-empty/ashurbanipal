@@ -1,0 +1,98 @@
+"""The living usage example and conformance harness for the Flask port —
+the host service embedding Ashurbanipal, mirroring
+`implementations/rust/examples/demo.rs` and the Go/Node ports' `cmd/demo`/
+`demo/main.ts`.
+
+Backend selection via `ASHURBANIPAL_BACKEND` (default `postgres`):
+
+    python demo/app.py                              # postgres, needs DATABASE_URL
+    ASHURBANIPAL_BACKEND=sqlite ASHURBANIPAL_SQLITE_PATH=./demo.db python demo/app.py
+    ASHURBANIPAL_BACKEND=mysql MYSQL_TEST_URL=mysql://... python demo/app.py
+
+Then open http://localhost:4000/__ashurbanipal. To demo sibling
+health-polling, run a second instance:
+
+    PORT=4001 SIBLING_PORT=4000 python demo/app.py
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from flask import Flask, Response, redirect
+
+from ashurbanipal import Config, Sibling, router
+
+
+def _env_int(name: str, fallback: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return fallback
+    return int(raw)
+
+
+def _build_source():
+    backend = os.environ.get("ASHURBANIPAL_BACKEND", "postgres")
+    if backend == "postgres":
+        from ashurbanipal.db.postgres import PgSource
+
+        dsn = os.environ.get("DATABASE_URL")
+        if not dsn:
+            raise RuntimeError("DATABASE_URL must be set (the devcontainer sets it automatically)")
+        return PgSource(dsn)
+    if backend == "sqlite":
+        from ashurbanipal.db.sqlite import SqliteSource
+
+        path = os.environ.get("ASHURBANIPAL_SQLITE_PATH", "./ashurbanipal-demo.db")
+        return SqliteSource(path)
+    if backend == "mysql":
+        from ashurbanipal.db.mysql import MySqlSource, connect_kwargs_from_url
+
+        url = os.environ.get("MYSQL_TEST_URL") or os.environ.get("MARIADB_TEST_URL")
+        if not url:
+            raise RuntimeError("MYSQL_TEST_URL or MARIADB_TEST_URL must be set for ASHURBANIPAL_BACKEND=mysql")
+        return MySqlSource(**connect_kwargs_from_url(url))
+    raise RuntimeError(f"unknown ASHURBANIPAL_BACKEND {backend!r} (expected postgres|sqlite|mysql)")
+
+
+def main() -> None:
+    port = _env_int("PORT", 4000)
+    source = _build_source()
+
+    config = Config(environment="dev", enabled_for=["dev"])
+    sibling_port = os.environ.get("SIBLING_PORT")
+    if sibling_port:
+        config.siblings = [
+            Sibling(
+                name=f"demo-{sibling_port}",
+                dbviewer_url=f"http://localhost:{sibling_port}/__ashurbanipal",
+                health_path="/health",
+            )
+        ]
+
+    app = Flask(__name__)
+
+    @app.get("/health")
+    def health() -> Response:
+        return Response("ok", mimetype="text/plain")
+
+    @app.get("/")
+    def index():
+        return redirect("/__ashurbanipal", code=307)
+
+    # router() raises ProductionEnabledError for a production-like
+    # enabled_for value (spec/protocol.md §4) — let it propagate and
+    # refuse to start, exactly what a real host must do rather than
+    # silently swallowing it.
+    app.register_blueprint(router(config, source))
+
+    print(f"demo host on http://localhost:{port} — browser at http://localhost:{port}/__ashurbanipal")
+    app.run(host="0.0.0.0", port=port)
+
+
+if __name__ == "__main__":
+    main()
