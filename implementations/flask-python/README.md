@@ -11,9 +11,8 @@ from flask import Flask
 from ashurbanipal import Config, router
 from ashurbanipal.db.postgres import PgSource
 
-config = Config(environment="dev", enabled_for=["dev"])  # raises
-                                                            # ProductionEnabledError
-                                                            # for a production-like value
+# raises ProductionEnabledError for a production-like value
+config = Config(environment="dev", enabled_for=["dev"])
 source = PgSource(dsn=os.environ["DATABASE_URL"])
 
 app = Flask(__name__)
