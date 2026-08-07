@@ -89,6 +89,23 @@ def _timed_select(variant: str, timeout_secs: int, body: str) -> str:
     return f"set statement max_statement_time={int(timeout_secs)} for select {body}"
 
 
+def _decode_cell(value: Optional[bytes], encoding: str) -> Optional[str]:
+    """PyMySQL's default row decoding raises UnicodeDecodeError on invalid
+    bytes for the connection's charset, aborting the whole result set —
+    there's no per-cell hook to intercept mid-decode. Callers instead read
+    rows with `conn.use_unicode = False` (raw bytes, no auto-decode) and
+    decode here per cell, substituting the protocol's sentinel on failure
+    (spec/protocol.md §5.4.3), mirroring mysql.rs's `Err(_) =>
+    "<undecodable>"`.
+    """
+    if value is None:
+        return None
+    try:
+        return value.decode(encoding)
+    except UnicodeDecodeError:
+        return "<undecodable>"
+
+
 def _build_where_clause(conditions: list[Condition], column_names: list[str]) -> tuple[str, list[str]]:
     """`?`-free positional `%s` placeholders (PyMySQL's paramstyle),
     `CAST(col AS CHAR)` (MySQL has no `::` operator or `TEXT` cast
@@ -373,10 +390,14 @@ class MySqlSource(DbSource):
                     f"{select_list} from {_quote_ident(resolved_schema)}.{_quote_ident(table)}"
                     f"{where_clause}{order_clause} limit %s offset %s",
                 )
-                cur.execute(sql, (*filter_values, opts.limit, opts.offset))
-                mysql_rows = cur.fetchall()
+                conn.use_unicode = False
+                try:
+                    cur.execute(sql, (*filter_values, opts.limit, opts.offset))
+                    mysql_rows = cur.fetchall()
+                finally:
+                    conn.use_unicode = True
                 rows = [
-                    {col.name: (None if value is None else str(value)) for col, value in zip(columns, row)}
+                    {col.name: _decode_cell(value, conn.encoding) for col, value in zip(columns, row)}
                     for row in mysql_rows
                 ]
 
