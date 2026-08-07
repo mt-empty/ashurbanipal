@@ -199,10 +199,12 @@ class PgSource(DbSource):
 
     def list_schemas(self) -> list[str]:
         with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             return self._list_schemas(cur)
 
     def list_tables(self, schema: Optional[str]) -> list[TableInfo]:
         with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved = self._resolve_schema(cur, schema)
             cur.execute(
                 "select c.relname::text, obj_description(c.oid, 'pg_class') "
@@ -216,6 +218,7 @@ class PgSource(DbSource):
 
     def table_counts(self, schema: Optional[str]) -> list[tuple[str, int]]:
         with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved = self._resolve_schema(cur, schema)
             cur.execute(
                 "select c.relname::text, c.reltuples::bigint "
@@ -317,6 +320,7 @@ class PgSource(DbSource):
 
     def common_values(self, schema: Optional[str], table: str, column: str) -> list[tuple[str, float]]:
         with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved_schema = self._resolve_schema(cur, schema)
             tables = self._allowed_tables(cur, resolved_schema)
             if table not in tables:

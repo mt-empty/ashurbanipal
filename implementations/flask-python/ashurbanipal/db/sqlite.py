@@ -164,7 +164,11 @@ class SqliteSource(DbSource):
         _check_schema(schema)
         conn = self._connect()
         try:
-            names = self._allowed_tables(conn.cursor())
+            self._bounded(conn, CATALOG_TIMEOUT_SECS)
+            try:
+                names = self._allowed_tables(conn.cursor())
+            finally:
+                self._clear_bound(conn)
         finally:
             conn.close()
         # No obj_description equivalent in SQLite — comments unsupported.
@@ -174,7 +178,11 @@ class SqliteSource(DbSource):
         _check_schema(schema)
         conn = self._connect()
         try:
-            names = self._allowed_tables(conn.cursor())
+            self._bounded(conn, CATALOG_TIMEOUT_SECS)
+            try:
+                names = self._allowed_tables(conn.cursor())
+            finally:
+                self._clear_bound(conn)
         finally:
             conn.close()
         # No reltuples-equivalent catalog estimate; -1 is the documented
@@ -187,35 +195,45 @@ class SqliteSource(DbSource):
         conn = self._connect()
         try:
             cur = conn.cursor()
-            tables = self._allowed_tables(cur)
-            if table not in tables:
-                raise NotAllowed(f"table {table!r}")
+            self._bounded(conn, CATALOG_TIMEOUT_SECS)
+            try:
+                tables = self._allowed_tables(cur)
+                if table not in tables:
+                    raise NotAllowed(f"table {table!r}")
 
-            column_names = self._allowed_columns(cur, table)
-            sort = None
-            if opts.sort is not None:
-                if opts.sort not in column_names:
-                    raise NotAllowed(f"column {opts.sort!r}")
-                sort = opts.sort
+                column_names = self._allowed_columns(cur, table)
+                sort = None
+                if opts.sort is not None:
+                    if opts.sort not in column_names:
+                        raise NotAllowed(f"column {opts.sort!r}")
+                    sort = opts.sort
 
-            where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
+                where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
-            pk_columns, fk_columns = self._key_metadata(cur, table)
-            quoted_table = quote_ident(table)
-            cur.execute(f"select cid, name, type from pragma_table_info({quoted_table}) order by cid")
-            columns = []
-            for _, name, type_name in cur.fetchall():
-                columns.append(
-                    ColumnInfo(
-                        name=name,
-                        # SQLite's declared column types can be empty (""),
-                        # fall back to a stable label rather than emitting "".
-                        type_name=type_name or "unknown",
-                        key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
-                        references=fk_columns.get(name),
-                        comment=None,
+                pk_columns, fk_columns = self._key_metadata(cur, table)
+                quoted_table = quote_ident(table)
+                cur.execute(f"select cid, name, type from pragma_table_info({quoted_table}) order by cid")
+                columns = []
+                for _, name, type_name in cur.fetchall():
+                    if name in pk_columns:
+                        key = KeyKind.PK
+                    elif name in fk_columns:
+                        key = KeyKind.FK
+                    else:
+                        key = None
+                    columns.append(
+                        ColumnInfo(
+                            name=name,
+                            # SQLite's declared column types can be empty (""),
+                            # fall back to a stable label rather than emitting "".
+                            type_name=type_name or "unknown",
+                            key=key,
+                            references=fk_columns.get(name),
+                            comment=None,
+                        )
                     )
-                )
+            finally:
+                self._clear_bound(conn)
 
             select_list = ", ".join(f"CAST({quote_ident(c.name)} AS TEXT)" for c in columns)
             order_clause = ""
@@ -251,12 +269,16 @@ class SqliteSource(DbSource):
         conn = self._connect()
         try:
             cur = conn.cursor()
-            tables = self._allowed_tables(cur)
-            if table not in tables:
-                raise NotAllowed(f"table {table!r}")
-            columns = self._allowed_columns(cur, table)
-            if column not in columns:
-                raise NotAllowed(f"column {column!r}")
+            self._bounded(conn, CATALOG_TIMEOUT_SECS)
+            try:
+                tables = self._allowed_tables(cur)
+                if table not in tables:
+                    raise NotAllowed(f"table {table!r}")
+                columns = self._allowed_columns(cur, table)
+                if column not in columns:
+                    raise NotAllowed(f"column {column!r}")
+            finally:
+                self._clear_bound(conn)
         finally:
             conn.close()
         # No pg_stats equivalent to read; an empty list is the documented
