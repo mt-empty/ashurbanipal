@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test
 import java.net.URI
 import java.sql.DriverManager
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.system.measureTimeMillis
 
 /**
  * Port of `implementations/rust/src/db/mysql.rs`'s test suite. Runs against
@@ -213,14 +214,19 @@ class MySqlSourceTest {
             val source = MySqlSource(db.dataSource, 1)
             val variant = source.variant()
             db.dataSource.connection.use { conn ->
-                // MariaDB caps WITH RECURSIVE at max_recursive_iterations
-                // (default 1000) regardless of max_statement_time — without
-                // raising it the CTE finishes in under a millisecond, before
-                // the 1s timeout gets a chance to fire, making this a broken
-                // test rather than a passing one on that fork. No-op on MySQL.
-                if (variant == Variant.MARIADB) {
-                    conn.createStatement().use { it.execute("set session max_recursive_iterations = 100000000") }
+                // Both forks cap recursive CTEs by default, independently of
+                // the query-timeout mechanism under test here — without
+                // raising the cap the CTE finishes in under a millisecond,
+                // before the 1s timeout gets a chance to fire, making this a
+                // broken test rather than a passing one (it would "pass" for
+                // an unrelated reason on either fork).
+                val raiseCap = if (variant == Variant.MARIADB) {
+                    "set session max_recursive_iterations = 100000000"
+                } else {
+                    "set session cte_max_recursion_depth = 100000000"
                 }
+                conn.createStatement().use { it.execute(raiseCap) }
+
                 // Drives MySqlSource's own timedSelect directly — the same
                 // fork-branching function query_table uses internally — so
                 // this proves the real mechanism, not a hand-copied SQL string.
@@ -232,12 +238,28 @@ class MySqlSourceTest {
                         ") select x from slow) t",
                 )
                 var errored = false
-                try {
-                    conn.createStatement().use { st -> st.executeQuery(sql) }
-                } catch (e: Exception) {
-                    errored = true
+                // execute() + getResultSet(), not executeQuery(): Connector/J's
+                // executeQuery() rejects MariaDB's `SET STATEMENT ... FOR
+                // SELECT` wrapping client-side before the server ever gets a
+                // chance to enforce the timeout (see MySqlSource.kt's query()
+                // helper, which this test must mirror to exercise the real
+                // mechanism rather than tripping over the same JDBC quirk it
+                // exists to route around).
+                val elapsedMs = measureTimeMillis {
+                    try {
+                        conn.createStatement().use { st ->
+                            st.execute(sql)
+                            st.resultSet?.use { it.next() }
+                        }
+                    } catch (e: Exception) {
+                        errored = true
+                    }
                 }
                 assertTrue(errored, "[$envVar] expected the slow query to be interrupted")
+                // Generous upper bound: proves this is a real interrupt near
+                // the 1s budget, not a lucky fast completion (e.g. the CTE
+                // cap silently biting again) nor an unrelated hang.
+                assertTrue(elapsedMs < 10_000, "[$envVar] expected abortion near the 1s budget, took ${elapsedMs}ms")
 
                 // The same connection must still be usable afterward — proves
                 // the per-statement mechanism is self-resetting.
