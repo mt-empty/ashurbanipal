@@ -28,15 +28,15 @@ class AshurbanipalAutoConfiguration {
     fun ashurbanipalFilterValidator(): FilterValidator = FilterValidator()
 
     @Bean
-    fun ashurbanipalCatalog(
+    fun ashurbanipalDbSource(
         properties: AshurbanipalProperties,
         applicationContext: ApplicationContext,
         filterValidator: FilterValidator,
-    ): Catalog {
+    ): DbSource {
         val dataSource = properties.dataSourceBean
             ?.let { applicationContext.getBean(it, DataSource::class.java) }
             ?: applicationContext.getBean(DataSource::class.java)
-        return Catalog(dataSource, properties.limits.queryTimeoutSecs, filterValidator)
+        return PostgresSource(dataSource, properties.limits.queryTimeoutSecs, filterValidator)
     }
 
     @Bean
@@ -46,8 +46,8 @@ class AshurbanipalAutoConfiguration {
     @Bean
     fun ashurbanipalDbViewerController(
         properties: AshurbanipalProperties,
-        catalog: Catalog,
+        dbSource: DbSource,
         filterValidator: FilterValidator,
         httpClient: HttpClient,
-    ): DbViewerController = DbViewerController(properties, catalog, filterValidator, httpClient)
+    ): DbViewerController = DbViewerController(properties, dbSource, filterValidator, httpClient)
 }

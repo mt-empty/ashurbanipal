@@ -53,7 +53,7 @@ data class SiblingsResponse(val siblings: List<SiblingStatus>)
 @RequestMapping("\${ashurbanipal.base-path:/__ashurbanipal}")
 class DbViewerController(
     private val properties: AshurbanipalProperties,
-    private val catalog: Catalog,
+    private val catalog: DbSource,
     private val filterValidator: FilterValidator,
     private val httpClient: HttpClient,
 ) {

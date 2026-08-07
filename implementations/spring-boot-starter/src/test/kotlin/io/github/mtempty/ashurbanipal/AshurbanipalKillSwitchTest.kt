@@ -36,7 +36,7 @@ class AshurbanipalKillSwitchTest {
         runner().run { context ->
             assertThat(context).hasNotFailed()
             assertThat(context).doesNotHaveBean(DbViewerController::class.java)
-            assertThat(context).doesNotHaveBean(Catalog::class.java)
+            assertThat(context).doesNotHaveBean(DbSource::class.java)
         }
     }
 
@@ -57,7 +57,7 @@ class AshurbanipalKillSwitchTest {
             .run { context ->
                 assertThat(context).hasNotFailed()
                 assertThat(context).hasSingleBean(DbViewerController::class.java)
-                assertThat(context).hasSingleBean(Catalog::class.java)
+                assertThat(context).hasSingleBean(DbSource::class.java)
             }
     }
 
