@@ -1,7 +1,6 @@
 package ashurbanipal
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +24,12 @@ const (
 // choice baked in, so it mounts into any net/http-compatible mux (stdlib
 // ServeMux, Chi, or anything else).
 //
+// source is the one seam to the database (see DbSource in db.go) — the
+// caller constructs it (NewPostgresSource, NewSQLiteSource, NewMySQLSource,
+// or a custom implementation) already bound to its own query timeout, the
+// same way implementations/rust/src/routes.rs's router<S: DbSource> takes
+// an already-constructed source rather than a raw connection.
+//
 // Router returns (nil, err) when EnabledFor names a production-like value
 // (spec/protocol.md §4) — fail-closed via the error return, not a panic,
 // so a host's own main() fails to start exactly like the Rust binary does
@@ -36,7 +41,7 @@ const (
 // item 2) — Router returns a handler that 404s every request,
 // indistinguishable from the viewer never having been mounted at all
 // (spec/protocol.md §4).
-func Router(cfg Config, db *sql.DB) (http.Handler, error) {
+func Router(cfg Config, source DbSource) (http.Handler, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -44,18 +49,17 @@ func Router(cfg Config, db *sql.DB) (http.Handler, error) {
 		return http.NotFoundHandler(), nil
 	}
 
-	limits := cfg.Limits.withDefaults()
-	catalog := newCatalog(db, limits.QueryTimeoutSecs)
+	limits := cfg.Limits.WithDefaults()
 	client := &http.Client{}
 	base := cfg.basePath()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+base, serveHTML)
-	mux.Handle("GET "+base+"/api/schemas", withProtocolHeader(listSchemasHandler(catalog)))
-	mux.Handle("GET "+base+"/api/tables", withProtocolHeader(listTablesHandler(catalog)))
-	mux.Handle("GET "+base+"/api/table-counts", withProtocolHeader(tableCountsHandler(catalog)))
-	mux.Handle("GET "+base+"/api/tables/data", withProtocolHeader(tableDataHandler(catalog, limits)))
-	mux.Handle("GET "+base+"/api/tables/common-values", withProtocolHeader(commonValuesHandler(catalog)))
+	mux.Handle("GET "+base+"/api/schemas", withProtocolHeader(listSchemasHandler(source)))
+	mux.Handle("GET "+base+"/api/tables", withProtocolHeader(listTablesHandler(source)))
+	mux.Handle("GET "+base+"/api/table-counts", withProtocolHeader(tableCountsHandler(source)))
+	mux.Handle("GET "+base+"/api/tables/data", withProtocolHeader(tableDataHandler(source, limits)))
+	mux.Handle("GET "+base+"/api/tables/common-values", withProtocolHeader(commonValuesHandler(source)))
 	mux.Handle("GET "+base+"/api/siblings", withProtocolHeader(siblingsHandler(client, cfg.Siblings)))
 	return mux, nil
 }
@@ -87,7 +91,7 @@ func httpTextError(w http.ResponseWriter, status int, msg string) {
 	fmt.Fprintln(w, msg)
 }
 
-// writeError maps a Catalog error to the wire's two error classes
+// writeError maps a DbSource error to the wire's two error classes
 // (spec/protocol.md §2): a *NotAllowedError or *FilterError is a client
 // mistake (400, plain text); anything else is a database failure (500).
 // Status code is the contract — wording is implementation-defined and
@@ -106,7 +110,7 @@ func writeError(w http.ResponseWriter, err error) {
 // querySchema returns the "schema" query param as a *string, nil when
 // absent — the same optionality QueryOpts.Sort already uses, so an absent
 // param and a resolved current_schema() fallback stay distinguishable all
-// the way down to Catalog.resolveSchema.
+// the way down to each backend's own resolveSchema.
 func querySchema(q url.Values) *string {
 	if !q.Has("schema") {
 		return nil
@@ -115,7 +119,7 @@ func querySchema(q url.Values) *string {
 	return &s
 }
 
-func listSchemasHandler(c *Catalog) http.HandlerFunc {
+func listSchemasHandler(c DbSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		schemas, err := c.ListSchemas(r.Context())
 		if err != nil {
@@ -128,7 +132,7 @@ func listSchemasHandler(c *Catalog) http.HandlerFunc {
 	}
 }
 
-func listTablesHandler(c *Catalog) http.HandlerFunc {
+func listTablesHandler(c DbSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tables, err := c.ListTables(r.Context(), querySchema(r.URL.Query()))
 		if err != nil {
@@ -141,7 +145,7 @@ func listTablesHandler(c *Catalog) http.HandlerFunc {
 	}
 }
 
-func tableCountsHandler(c *Catalog) http.HandlerFunc {
+func tableCountsHandler(c DbSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		counts, err := c.TableCounts(r.Context(), querySchema(r.URL.Query()))
 		if err != nil {
@@ -154,7 +158,7 @@ func tableCountsHandler(c *Catalog) http.HandlerFunc {
 	}
 }
 
-func tableDataHandler(c *Catalog, limits Limits) http.HandlerFunc {
+func tableDataHandler(c DbSource, limits Limits) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if !q.Has("table") {
@@ -229,7 +233,7 @@ func tableDataHandler(c *Catalog, limits Limits) http.HandlerFunc {
 	}
 }
 
-func commonValuesHandler(c *Catalog) http.HandlerFunc {
+func commonValuesHandler(c DbSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if !q.Has("table") || !q.Has("column") {
