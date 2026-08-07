@@ -52,6 +52,18 @@ ONLY_SCHEMA = "main"
 _KEYWORD = {"ILIKE": "LIKE"}
 
 
+def _lenient_text_factory(data: bytes) -> str:
+    """stdlib sqlite3's default text_factory raises UnicodeDecodeError on
+    invalid UTF-8; substitute the protocol's sentinel instead
+    (spec/protocol.md §5.4.3), mirroring sqlite.rs's per-cell
+    `Err(_) => "<undecodable>"`.
+    """
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return "<undecodable>"
+
+
 def _check_schema(schema: Optional[str]) -> None:
     if schema is not None and schema != ONLY_SCHEMA:
         raise NotAllowed(f"schema {schema!r}")
@@ -89,7 +101,9 @@ class SqliteSource(DbSource):
         self._path = path
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._path)
+        conn = sqlite3.connect(self._path)
+        conn.text_factory = _lenient_text_factory
+        return conn
 
     def _bounded(self, conn: sqlite3.Connection, timeout_secs: int) -> None:
         """Must be cleared (see callers) before the connection is discarded
