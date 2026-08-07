@@ -27,6 +27,13 @@ class AshurbanipalAutoConfiguration {
     @Bean
     fun ashurbanipalFilterValidator(): FilterValidator = FilterValidator()
 
+    /**
+     * Which [DbSource] gets constructed is chosen by [AshurbanipalProperties.backend]
+     * alone — an explicit opt-in property, never classpath/driver detection
+     * (`PORTING.md`'s hardening checklist item 2). [AshurbanipalProperties]'s
+     * own init block already rejects an unrecognized value at config-parse
+     * time, so the `else` branch below is unreachable, not a silent fallback.
+     */
     @Bean
     fun ashurbanipalDbSource(
         properties: AshurbanipalProperties,
@@ -36,7 +43,13 @@ class AshurbanipalAutoConfiguration {
         val dataSource = properties.dataSourceBean
             ?.let { applicationContext.getBean(it, DataSource::class.java) }
             ?: applicationContext.getBean(DataSource::class.java)
-        return PostgresSource(dataSource, properties.limits.queryTimeoutSecs, filterValidator)
+        val queryTimeoutSecs = properties.limits.queryTimeoutSecs
+        return when (properties.backend.lowercase()) {
+            "postgres" -> PostgresSource(dataSource, queryTimeoutSecs, filterValidator)
+            "mysql" -> MySqlSource(dataSource, queryTimeoutSecs)
+            "sqlite" -> SqliteSource(dataSource, queryTimeoutSecs)
+            else -> error("unreachable: AshurbanipalProperties validates backend at construction")
+        }
     }
 
     @Bean
