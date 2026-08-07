@@ -12,8 +12,8 @@ java = "temurin-21"
 # `<layer>:*` subtasks below.
 
 [tasks.check]
-description = "everything CI would run, across every implementation: rust, spring, go, node, frontend, conformance"
-depends = ["rust", "spring", "go", "node", "frontend", "conformance"]
+description = "everything CI would run, across every implementation: rust, spring, go, node, flask, frontend, conformance"
+depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance"]
 
 [tasks.rust]
 description = "rust implementation checks: fmt-check, lint, test"
@@ -30,6 +30,10 @@ depends = ["go:build", "go:vet", "go:fmt-check", "go:test"]
 [tasks.node]
 description = "node-express implementation checks: typecheck, build, test"
 depends = ["node:typecheck", "node:build", "node:test"]
+
+[tasks.flask]
+description = "flask-python implementation checks: lint, fmt-check, test"
+depends = ["flask:lint", "flask:fmt-check", "flask:test"]
 
 [tasks.frontend]
 description = "frontend checks: Playwright e2e suite against dbviewer.html"
@@ -173,6 +177,42 @@ description = "vitest run (fixture + kill-switch tests, no database needed)"
 run = "pnpm test"
 dir = "implementations/node-express"
 depends = ["node:install"]
+
+# ---- flask:* --------------------------------------------------------------
+
+[tasks."flask:install"]
+description = "pip install -e .[dev] into implementations/flask-python/.venv"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+[ -d .venv ] || python3 -m venv .venv
+.venv/bin/pip install -q -e ".[dev]"
+'''
+dir = "implementations/flask-python"
+
+[tasks."flask:lint"]
+description = "ruff check ."
+run = ".venv/bin/ruff check ."
+dir = "implementations/flask-python"
+depends = ["flask:install"]
+
+[tasks."flask:fmt-check"]
+description = "ruff format --check ."
+run = ".venv/bin/ruff format --check ."
+dir = "implementations/flask-python"
+depends = ["flask:install"]
+
+[tasks."flask:test"]
+description = "pytest -q (postgres/mysql integration tests skip without DATABASE_URL/MYSQL_TEST_URL/MARIADB_TEST_URL)"
+run = ".venv/bin/pytest -q"
+dir = "implementations/flask-python"
+depends = ["flask:install"]
+
+[tasks."flask:demo"]
+description = "host demo app at http://localhost:4000/__ashurbanipal (ASHURBANIPAL_BACKEND selects postgres|sqlite|mysql)"
+run = ".venv/bin/python demo/app.py"
+dir = "implementations/flask-python"
+depends = ["flask:install"]
 
 # ---- frontend:* ---------------------------------------------------------
 
