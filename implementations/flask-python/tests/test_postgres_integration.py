@@ -100,9 +100,8 @@ def test_list_schemas_is_bounded_by_the_catalog_timeout(source, monkeypatch) -> 
     """
     import time
 
-    import psycopg
-
     import ashurbanipal.db.postgres as postgres_module
+    from ashurbanipal.db import DatabaseError
 
     monkeypatch.setattr(postgres_module, "CATALOG_TIMEOUT_SECS", 1)
     monkeypatch.setattr(
@@ -112,7 +111,7 @@ def test_list_schemas_is_bounded_by_the_catalog_timeout(source, monkeypatch) -> 
     )
 
     start = time.monotonic()
-    with pytest.raises(psycopg.Error):
+    with pytest.raises(DatabaseError):
         source.list_schemas()
     elapsed = time.monotonic() - start
     assert elapsed < 5, f"expected the catalog timeout to abort near its 1s budget, took {elapsed}s"

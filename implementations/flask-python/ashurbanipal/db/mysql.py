@@ -45,6 +45,7 @@ from . import (
     QueryOpts,
     TableData,
     TableInfo,
+    wrap_driver_errors,
 )
 
 CATALOG_TIMEOUT_SECS = 5
@@ -265,6 +266,7 @@ class MySqlSource(DbSource):
             )
         return pk_columns, fk_columns
 
+    @wrap_driver_errors(pymysql.Error)
     def list_schemas(self) -> list[str]:
         conn = self._connect()
         try:
@@ -276,6 +278,7 @@ class MySqlSource(DbSource):
         finally:
             conn.close()
 
+    @wrap_driver_errors(pymysql.Error)
     def list_tables(self, schema: Optional[str]) -> list[TableInfo]:
         conn = self._connect()
         try:
@@ -302,6 +305,7 @@ class MySqlSource(DbSource):
         finally:
             conn.close()
 
+    @wrap_driver_errors(pymysql.Error)
     def table_counts(self, schema: Optional[str]) -> list[tuple[str, int]]:
         conn = self._connect()
         try:
@@ -329,6 +333,7 @@ class MySqlSource(DbSource):
         finally:
             conn.close()
 
+    @wrap_driver_errors(pymysql.Error)
     def query_table(self, schema: Optional[str], table: str, opts: QueryOpts) -> TableData:
         conn = self._connect()
         try:
@@ -417,6 +422,7 @@ class MySqlSource(DbSource):
         finally:
             conn.close()
 
+    @wrap_driver_errors(pymysql.Error)
     def common_values(self, schema: Optional[str], table: str, column: str) -> list[tuple[str, float]]:
         conn = self._connect()
         try:

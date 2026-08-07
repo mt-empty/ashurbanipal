@@ -37,6 +37,7 @@ from . import (
     TableData,
     TableInfo,
     quote_ident,
+    wrap_driver_errors,
 )
 
 CATALOG_TIMEOUT_SECS = 5
@@ -160,6 +161,7 @@ class SqliteSource(DbSource):
     def list_schemas(self) -> list[str]:
         return [ONLY_SCHEMA]
 
+    @wrap_driver_errors(sqlite3.Error)
     def list_tables(self, schema: Optional[str]) -> list[TableInfo]:
         _check_schema(schema)
         conn = self._connect()
@@ -174,6 +176,7 @@ class SqliteSource(DbSource):
         # No obj_description equivalent in SQLite — comments unsupported.
         return [TableInfo(name=name, comment=None) for name in names]
 
+    @wrap_driver_errors(sqlite3.Error)
     def table_counts(self, schema: Optional[str]) -> list[tuple[str, int]]:
         _check_schema(schema)
         conn = self._connect()
@@ -190,6 +193,7 @@ class SqliteSource(DbSource):
         # COUNT(*) scan. See docs/adapter-decisions.md.
         return [(name, -1) for name in names]
 
+    @wrap_driver_errors(sqlite3.Error)
     def query_table(self, schema: Optional[str], table: str, opts: QueryOpts) -> TableData:
         _check_schema(schema)
         conn = self._connect()
@@ -264,6 +268,7 @@ class SqliteSource(DbSource):
         finally:
             conn.close()
 
+    @wrap_driver_errors(sqlite3.Error)
     def common_values(self, schema: Optional[str], table: str, column: str) -> list[tuple[str, float]]:
         _check_schema(schema)
         conn = self._connect()
