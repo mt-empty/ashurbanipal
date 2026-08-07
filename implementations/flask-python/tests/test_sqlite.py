@@ -100,6 +100,7 @@ def test_list_tables_is_bounded_by_the_catalog_timeout(seeded_path, monkeypatch)
     """
     import time
 
+    from ashurbanipal.db import DatabaseError
     from ashurbanipal.db import sqlite as sqlite_module
 
     monkeypatch.setattr(sqlite_module, "CATALOG_TIMEOUT_SECS", 1)
@@ -116,7 +117,7 @@ def test_list_tables_is_bounded_by_the_catalog_timeout(seeded_path, monkeypatch)
 
     source = SqliteSource(seeded_path)
     start = time.monotonic()
-    with pytest.raises(sqlite3.OperationalError):
+    with pytest.raises(DatabaseError):
         source.list_tables(None)
     elapsed = time.monotonic() - start
     assert elapsed < 5, f"expected the catalog timeout to abort near its 1s budget, took {elapsed}s"
