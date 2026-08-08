@@ -223,7 +223,15 @@ export class MySqlSource implements DbSource {
       resolved = requested;
     } else {
       const rows = await queryRows(conn, timedSelect(variant, timeoutMs, "database() as db"));
-      resolved = rows[0]?.db as string;
+      // database() returns SQL NULL for a connection with no default
+      // database — surface a clear error rather than letting the `as
+      // string` cast paper over it and produce a confusing
+      // `not allowed: schema "null"` message below.
+      const defaultDatabase = rows[0]?.db as string | null | undefined;
+      if (defaultDatabase === null || defaultDatabase === undefined) {
+        throw new NotAllowedError("no schema requested and this connection has no default database");
+      }
+      resolved = defaultDatabase;
     }
     const real = findExact(schemas, resolved);
     if (!real) {

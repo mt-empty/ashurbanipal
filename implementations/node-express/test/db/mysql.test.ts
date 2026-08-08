@@ -101,6 +101,18 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       return db;
     }
 
+    it("resolving the default schema with no default database gives a clear error", async () => {
+      const url = new URL(baseUrl!);
+      url.pathname = "";
+      const noDefaultDbPool = mysql.createPool(url.toString());
+      try {
+        const source = new MySqlSource(noDefaultDbPool);
+        await expect(source.listTables(undefined, 5000)).rejects.toThrow(/no default database/);
+      } finally {
+        await noDefaultDbPool.end();
+      }
+    });
+
     it("lists tables and round-trips query_table", async () => {
       const db = await fresh();
       const source = new MySqlSource(db.pool);
