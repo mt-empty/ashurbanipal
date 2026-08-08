@@ -118,7 +118,13 @@ private fun <T> query(dataSource: DataSource, sql: String, params: List<Any?> = 
         conn.prepareStatement(sql).use { ps ->
             bindParams(ps, params)
             ps.execute()
-            ps.resultSet.use { rs ->
+            // getResultSet() is nullable per the JDBC spec when the last-executed
+            // SQL was an update rather than a query — every call site here only
+            // ever routes SELECT-shaped SQL through this helper, but check
+            // explicitly rather than let a future caller hit a bare NPE.
+            val rs: ResultSet? = ps.resultSet
+            checkNotNull(rs) { "query produced no result set: $sql" }
+            rs.use {
                 val results = mutableListOf<T>()
                 while (rs.next()) {
                     results.add(mapper(rs))
@@ -196,8 +202,15 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     /** `current_schema()` has no MySQL equivalent; `select database()` is the analogous "connection's own default" read. */
     private fun resolveSchema(variant: Variant, requested: String?): String {
         val schemas = listAllowedSchemas(variant)
-        val resolved = requested
-            ?: query(dataSource, timedSelect(variant, queryTimeoutSecs, "database()")) { rs -> rs.getString(1) }.first()
+        // `getString(1)` is a Java platform type (String!) — explicitly typing the
+        // query as String? here, rather than letting it infer non-null, is what
+        // makes the null case below reachable instead of silently interpolating
+        // "null" into a confusing "not allowed: schema null" message.
+        val resolved = requested ?: query<String?>(
+            dataSource,
+            timedSelect(variant, queryTimeoutSecs, "database()"),
+        ) { rs -> rs.getString(1) }.first()
+            ?: throw NotAllowedException("no schema requested and this connection has no default database")
         return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved")
     }
 
