@@ -1,21 +1,19 @@
 # ashurbanipal (node-express)
 
 A Node.js/TypeScript port of [Ashurbanipal](../../readme.md), targeting
-Express and [`pg`](https://node-postgres.com/) (node-postgres) — implements
-the same `spec/protocol.md` + `spec/openapi.yaml` contract as the Rust
-reference and the Go/Spring Boot ports. Postgres only, per
-`docs/adapter-decisions.md`'s stretch-goal framing for other engines.
+Express — implements the same `spec/protocol.md` + `spec/openapi.yaml`
+contract as the Rust reference and the Go/Spring Boot ports.
 
 ```ts
 import express from "express";
 import { Pool } from "pg";
-import { createRouter } from "ashurbanipal-node-express"; // or a relative import to src/index.ts
+import { createRouter, PostgresSource } from "ashurbanipal-node-express"; // or a relative import to src/index.ts
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 // createRouter throws ProductionEnabledError for a production-like
 // enabledFor value (spec/protocol.md §4) — fail-closed, at construction.
-const viewer = createRouter({ environment: "dev", enabledFor: ["dev"] }, pool);
+const viewer = createRouter({ environment: "dev", enabledFor: ["dev"] }, new PostgresSource(pool));
 
 const app = express();
 app.use(viewer); // paths already include the mount (default /__ashurbanipal)
@@ -27,16 +25,59 @@ undefined, so no environment ever matches. A host that forgets to
 configure anything gets a 404'd viewer, never one silently enabled with
 defaults.
 
+## Database support
+
+| Backend | Type | Status |
+|---|---|---|
+| Postgres (`PostgresSource`) | default, always available from the package's main barrel (`ashurbanipal-node-express`) | Conformant — the reference implementation `spec/protocol.md` is written against; covered by the full conformance suite (below) plus a live-Postgres integration suite (`test/schema.integration.test.ts`). |
+| MySQL/MariaDB (`MySqlSource`, [`mysql2`](https://github.com/sidorares/node-mysql2)) | opt-in — import directly from `ashurbanipal-node-express/dist/db/mysql.js` (not re-exported from the main barrel; see "Backend selection" below) | Reviewed and supported, with the same known degraded features as the Rust reference — `common_values` has no reliable cross-version statistics equivalent and is always empty; table counts and comments come from `information_schema`. Detects MySQL vs. MariaDB at runtime (`SELECT VERSION()`, cached) since the two forks need different query-timeout SQL — see `docs/adapter-decisions.md` §6. Not run through `conformance/runner` (that suite targets Postgres); has its own unit test suite instead (`test/db/mysql.test.ts`), requiring live instances via `MYSQL_TEST_URL`/`MARIADB_TEST_URL`. |
+| SQLite (`SqliteSource`, [`sqlite3`](https://github.com/TryGhost/node-sqlite3)) | opt-in — import directly from `ashurbanipal-node-express/dist/db/sqlite.js` | Reviewed and supported, with the same known degraded features as the Rust reference — comments and `common_values` have no SQLite equivalent and degrade to omitted/empty; table counts are always the "no estimate" sentinel. Uses `sqlite3` (mapbox/node-sqlite3), not the built-in `node:sqlite` or `better-sqlite3` — both of those execute fully synchronously with no query-cancellation hook, confirmed empirically (see `docs/adapter-decisions.md` §6). Not run through `conformance/runner`; has its own unit test suite instead (`test/db/sqlite.test.ts`), no external infrastructure needed. |
+
+### Backend selection
+
+Explicit by construction, never driver auto-detection: the host imports
+whichever `DbSource` implementation it wants and passes an instance to
+`createRouter`. `SqliteSource`/`MySqlSource` are deliberately not
+re-exported from the package's main entry point, so a Postgres-only
+consumer's module graph never loads `sqlite3`/`mysql2` — the closest
+Node/npm analog to the Rust reference's Cargo feature gating, which has
+no direct npm equivalent.
+
+```ts
+import { createRouter } from "ashurbanipal-node-express";
+import { SqliteSource } from "ashurbanipal-node-express/dist/db/sqlite.js";
+import { MySqlSource } from "ashurbanipal-node-express/dist/db/mysql.js";
+import { Database } from "sqlite3";
+import { createPool } from "mysql2/promise";
+
+const sqliteViewer = createRouter(config, new SqliteSource(new Database("app.db")));
+const mysqlViewer = createRouter(config, new MySqlSource(createPool(process.env.MYSQL_URL!)));
+```
+
+`demo/main.ts` demonstrates all three via a `DB_BACKEND=postgres|sqlite|mysql`
+env var (see "Running the demo" below).
+
 ## Layout
 
 - `src/config.ts` — `Config`/`Limits`/`Sibling`, the fail-closed kill switch.
-- `src/catalog.ts` — the one seam to `pg.Pool`; ported against
-  `implementations/rust/src/db.rs`'s catalog SQL (also cross-checked
-  against `implementations/go-nethttp/catalog.go`).
+- `src/db/types.ts` — the `DbSource` seam (interface + shared wire types)
+  route handlers depend on; mirrors `implementations/rust/src/db/mod.rs`'s
+  `DbSource` trait.
+- `src/db/postgres.ts` — `PostgresSource`, the default backend; ported
+  against `implementations/rust/src/db/postgres.rs`'s catalog SQL (also
+  cross-checked against `implementations/go-nethttp/catalog.go`).
+- `src/db/sqlite.ts` — `SqliteSource`, opt-in; ported against
+  `implementations/rust/src/db/sqlite.rs`.
+- `src/db/mysql.ts` — `MySqlSource`, opt-in; ported against
+  `implementations/rust/src/db/mysql.rs`, including the MySQL-vs-MariaDB
+  runtime variant detection for the query-timeout mechanism.
 - `src/filter.ts` — the filter AST's structural validation and
-  WHERE-clause builder, ported against `implementations/rust/src/filter.rs`.
+  Postgres-dialect WHERE-clause builder, ported against
+  `implementations/rust/src/filter.rs`; `db/sqlite.ts`/`db/mysql.ts` each
+  carry their own dialect-specific WHERE-clause builder (placeholder
+  style, cast syntax, `ILIKE` mapping all differ per backend).
 - `src/siblings.ts` — health fan-out via `Promise.all` + `AbortController`.
-- `src/routes.ts` — `createRouter(config, pool)` and the six HTTP handlers.
+- `src/routes.ts` — `createRouter(config, dbSource)` and the six HTTP handlers.
 - `src/embed.ts` — the vendored `frontend/dbviewer.html`, sha256-reverified
   on every process start (see `PORTING.md`'s vendoring contract).
 - `demo/main.ts` — the runnable example host, `pnpm run demo`.
@@ -54,7 +95,8 @@ at vendoring time, so a build step that mangles the file fails loudly.
 
 ```sh
 pnpm install
-pnpm test              # fixture + kill-switch tests, no database needed
+pnpm test              # fixture + kill-switch + db/sqlite tests always run; db/mysql and the
+                        # live-Postgres integration suite skip cleanly without their env vars
 pnpm run typecheck
 ```
 
@@ -63,13 +105,31 @@ pnpm run typecheck
 `test/killswitch.test.ts` covers the two kill-switch properties conformance
 can't observe over HTTP (spec/protocol.md §4): the no-config-means-disabled
 case, and production-alias rejection at construction.
+`test/schema.integration.test.ts` needs `DATABASE_URL`;
+`test/db/mysql.test.ts` needs `MYSQL_TEST_URL`/`MARIADB_TEST_URL` (each
+variant's describe block skips independently if its own var is absent).
+`test/db/sqlite.test.ts` needs no external infrastructure (in-memory db).
+
+`sqlite3`'s prebuilt native binary is built against a newer glibc baseline
+than some Linux hosts ship (observed on this devcontainer's Debian
+bookworm image: `GLIBC_2.38' not found`) — if `pnpm install` reports that
+error at require-time, `pnpm rebuild sqlite3` forces a from-source build
+via `node-gyp` (needs `python3`, `make`, `g++`) against the host's actual
+glibc.
 
 ## Running the demo
 
 ```sh
 pnpm install
-pnpm run demo   # DATABASE_URL must point at a seeded Postgres instance
+pnpm run demo   # DB_BACKEND=postgres (default); DATABASE_URL must point at a seeded Postgres instance
 # then open http://localhost:4000/__ashurbanipal
+```
+
+To run against SQLite or MySQL/MariaDB instead:
+
+```sh
+DB_BACKEND=sqlite SQLITE_PATH=./app.db pnpm run demo
+DB_BACKEND=mysql MYSQL_URL="mysql://user:pass@host:3306/db" pnpm run demo
 ```
 
 To demo sibling health-polling, run a second instance:

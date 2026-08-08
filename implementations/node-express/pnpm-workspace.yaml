@@ -1,4 +1,5 @@
 allowBuilds:
   esbuild: true
+  sqlite3: true
 minimumReleaseAgeExclude:
   - tsx@4.23.5
