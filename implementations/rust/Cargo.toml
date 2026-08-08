@@ -30,6 +30,9 @@ reqwest = { version = "0.13", default-features = false, features = [
 # hosts that only need Postgres. See docs/adapter-decisions.md for the
 # per-clause decisions SqliteSource makes vs. the Postgres reference.
 sqlite = ["sqlx/sqlite"]
+# Off by default, same rationale as `sqlite`. See docs/adapter-decisions.md
+# for the per-clause decisions MySqlSource makes vs. the Postgres reference.
+mysql = ["sqlx/mysql"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

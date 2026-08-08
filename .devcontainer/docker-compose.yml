@@ -7,6 +7,8 @@ services:
     command: sleep infinity
     depends_on:
       - db
+      - mysql
+      - mariadb
 
   db:
     image: postgres:18-alpine
@@ -21,6 +23,40 @@ services:
     ports:
       - "5432:5432"
 
+  # Backs the opt-in `mysql` Cargo feature's tests only (MYSQL_TEST_URL) —
+  # not part of any CI workflow, same zero-CI-footprint precedent as sqlite.
+  mysql:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ashurbanipal
+      MYSQL_USER: ashurbanipal
+      MYSQL_PASSWORD: ashurbanipal
+      MYSQL_DATABASE: ashurbanipal
+    volumes:
+      - mysql-data-v1:/var/lib/mysql
+    ports:
+      - "3306:3306"
+
+  # Same rationale as `mysql` above — backs MARIADB_TEST_URL only. A
+  # separate service (not a mode flag on `mysql`) because MySqlSource's own
+  # runtime variant detection (SELECT VERSION()) needs two genuinely
+  # different servers to verify against, not two configs of one image.
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ashurbanipal
+      MARIADB_USER: ashurbanipal
+      MARIADB_PASSWORD: ashurbanipal
+      MARIADB_DATABASE: ashurbanipal
+    volumes:
+      - mariadb-data-v1:/var/lib/mysql
+    ports:
+      - "3307:3306"
+
 volumes:
   postgres-data-v2:
+  mysql-data-v1:
+  mariadb-data-v1:
   claude-config:
