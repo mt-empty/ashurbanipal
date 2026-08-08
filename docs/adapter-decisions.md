@@ -59,6 +59,24 @@ can only decode-then-restringify would need a protocol conversation, not
 just a row in this table — see the locale/timezone drift example in
 `spec/protocol.md` §5.4.3.
 
+**Undecodable bytes** (spec/protocol.md §5.4.3's `"<undecodable>"`
+sentinel): SQLite is dynamically typed, so `CAST(blob AS TEXT)` passes raw
+bytes through unchanged — a genuinely non-UTF-8 BLOB reaches the Python
+driver's decode step and must be caught there (`sqlite.py`'s
+`text_factory`). MySQL/MariaDB instead sanitize a `VARBINARY`/`BLOB`
+column's `CAST(... AS CHAR)` *server-side*, before the client ever sees
+it — and the two forks diverge again here: MySQL returns SQL `NULL` for
+the cast (observed, not just documented — `1300 Invalid utf8mb4 character
+string` warning), MariaDB substitutes `?` per invalid byte and still
+returns a valid string. Neither engine's driver-level decode step is
+actually reachable with invalid bytes as a result, so `mysql.py`'s
+per-cell decode/sentinel guard is defense-in-depth (parity with
+`mysql.rs`), not a fix for a live-reproducible crash there. Postgres never
+reaches this either: `bytea::text` renders as a hex-encoded (`\x...`)
+string, always valid ASCII, and Postgres enforces UTF-8 validity for
+`text`/`varchar` storage directly, so `postgres.py`'s guard is the same
+kind of defense-in-depth as MySQL/MariaDB's.
+
 ## §5.4.2 — filter operator mapping (`ILIKE`)
 
 Protocol property: `ILIKE` is case-insensitive `LIKE`, distinct from
@@ -119,7 +137,7 @@ a host-pool connection indefinitely.
 | Postgres | `SET LOCAL statement_timeout` inside the operation's transaction | Genuinely transaction-scoped in Postgres — set once, applies to every query in that transaction, no explicit cleanup needed. |
 | MySQL    | `MAX_EXECUTION_TIME(ms)` optimizer hint on every individual `SELECT` | MySQL's `SET LOCAL` is a documented plain synonym for `SET SESSION`, not transaction-scoped like Postgres's — reusing the Postgres pattern verbatim would leak the timeout onto the pooled connection's next reuse. The hint is self-resetting (applies only to the one statement it's attached to), so unlike SQLite's progress handler it needs no explicit clear-before-pool-return step. |
 | MariaDb  | `SET STATEMENT max_statement_time=N FOR SELECT ...` wrapping every individual `SELECT` (`N` in seconds, not ms) | MariaDB never implemented MySQL's `MAX_EXECUTION_TIME` optimizer-hint syntax at all — an unrecognized `/*+ ... */` comment is silently ignored rather than rejected, so reusing MySQL's hint on MariaDB would fail open (query runs unbounded, no error). `mysql.rs::timed_select` detects which fork it's talking to once per `MySqlSource` (`SELECT VERSION()` containing `MariaDB`, cached) and branches accordingly. Also self-resetting, no explicit cleanup needed. |
-| SQLite   | `sqlite3_progress_handler`, checked every 1000 VM opcodes, explicitly cleared after each query | No `SET LOCAL`/session-timeout equivalent, and no per-statement hint mechanism either; each SQLite connection runs on its own dedicated worker thread, so wrapping the query future in `tokio::time::timeout` would only stop *waiting*, not the blocking call itself. Must be cleared (`set_progress_handler(0, ...)`) before the connection returns to the pool, or a reused connection would inherit an already-elapsed deadline — see `sqlite.rs::bounded`. |
+| SQLite   | `sqlite3_progress_handler`, checked every 1000 VM opcodes, explicitly cleared after each query | No `SET LOCAL`/session-timeout equivalent, and no per-statement hint mechanism either; each SQLite connection runs on its own dedicated worker thread, so wrapping the query future in `tokio::time::timeout` would only stop *waiting*, not the blocking call itself. Must be cleared (`set_progress_handler(0, ...)`) before the connection returns to the pool, or a reused connection would inherit an already-elapsed deadline — see `sqlite.rs::bounded`. Not Rust-specific: `implementations/flask-python`'s port confirmed the same C-level hook is exposed by Python's stdlib `sqlite3` too (`Connection.set_progress_handler`), empirically aborting a real slow query rather than just failing to observe one — see `flask-python/ashurbanipal/db/sqlite.py` and its `test_slow_query_is_aborted_by_the_progress_handler_not_left_to_run` test. Worth confirming per-driver rather than assuming a binding lacks it. |
 
 ## Status note
 
