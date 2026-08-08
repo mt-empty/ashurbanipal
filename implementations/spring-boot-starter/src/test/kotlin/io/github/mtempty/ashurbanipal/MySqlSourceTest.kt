@@ -111,6 +111,36 @@ class MySqlSourceTest {
         org.junit.jupiter.api.Assumptions.assumeTrue(ranAny, "neither MYSQL_TEST_URL nor MARIADB_TEST_URL is set")
     }
 
+    /**
+     * `database()` returns SQL NULL for a connection with no default
+     * database — `resolveSchema` must surface a clear error rather than
+     * `getString`'s platform-typed null silently reaching the "not
+     * allowed: schema $resolved" message as the literal string "null".
+     */
+    @Test
+    fun `resolving the default schema with no default database gives a clear error`() = forEachReachableInstance { envVar ->
+        val (u, p) = credentialsFor(envVar)
+        val ds = HikariDataSource(
+            HikariConfig().apply {
+                jdbcUrl = jdbcUrlFor(envVar)
+                username = u
+                password = p
+                maximumPoolSize = 2
+                poolName = "mysql-source-test-no-default-db-${System.nanoTime()}"
+            },
+        )
+        try {
+            val source = MySqlSource(ds, 5)
+            val ex = assertThrows(NotAllowedException::class.java) { source.listTables(null) }
+            assertTrue(
+                ex.message?.contains("no default database") == true,
+                "[$envVar] expected a clear no-default-database message, got: ${ex.message}",
+            )
+        } finally {
+            ds.close()
+        }
+    }
+
     @Test
     fun `list tables and query table round trip against every reachable instance`() = forEachReachableInstance { envVar ->
         SeededDb(envVar).use { db ->
