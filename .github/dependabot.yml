@@ -4,6 +4,8 @@ updates:
     directory: "/implementations/rust"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types:
@@ -14,6 +16,8 @@ updates:
     directory: "/tools/seed-gen"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types:
@@ -24,6 +28,8 @@ updates:
     directory: "/tools/e2e-tests"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types:
@@ -34,6 +40,8 @@ updates:
     directory: "/implementations/node-express"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types:
@@ -44,6 +52,8 @@ updates:
     directory: "/implementations/flask-python"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types:
@@ -54,6 +64,8 @@ updates:
     directory: "/implementations/spring-boot-starter"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types:
@@ -64,6 +76,8 @@ updates:
     directory: "/implementations/go-nethttp"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       minor-and-patch:
         update-types:
