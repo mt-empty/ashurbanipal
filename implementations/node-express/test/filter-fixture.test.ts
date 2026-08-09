@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildWhereClause, parseFilter } from "../src/filter.js";
 import { NotAllowedError } from "../src/errors.js";
+import { buildWhereClause, parseFilter } from "../src/filter.js";
 
 // Consumes spec/fixtures/filter-builder-tests.json directly from the repo
 // root (schema: spec/fixtures/README.md) — the same file the Rust

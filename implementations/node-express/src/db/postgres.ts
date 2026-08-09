@@ -1,14 +1,14 @@
 import type { Pool, PoolClient } from "pg";
-import { buildWhereClause } from "../filter.js";
 import { NotAllowedError, quoteIdent } from "../errors.js";
+import { buildWhereClause } from "../filter.js";
 import {
-  cellToJson,
-  findExact,
   type ColumnInfo,
   type ColumnRef,
   type CommonValueEntry,
   type CountEntry,
+  cellToJson,
   type DbSource,
+  findExact,
   type QueryOpts,
   type TableData,
   type TableInfo,
@@ -224,12 +224,7 @@ export class PostgresSource implements DbSource {
     });
   }
 
-  async queryTable(
-    schema: string | undefined,
-    table: string,
-    opts: QueryOpts,
-    timeoutMs: number,
-  ): Promise<TableData> {
+  async queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const tables = await this.allowedTables(client, realSchema);

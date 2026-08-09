@@ -1,10 +1,10 @@
-import express, { type Request, type Response, type Router as ExpressRouter } from "express";
-import { basePath, isEnabled, validateConfig, withDefaults, type Config, type ResolvedLimits } from "./config.js";
+import express, { type Router as ExpressRouter, type Request, type Response } from "express";
+import { basePath, type Config, isEnabled, type ResolvedLimits, validateConfig, withDefaults } from "./config.js";
 import type { DbSource } from "./db/types.js";
-import { parseFilter, type Condition } from "./filter.js";
-import { FilterError, NotAllowedError } from "./errors.js";
-import { checkSiblings } from "./siblings.js";
 import { dbviewerHtml } from "./embed.js";
+import { FilterError, NotAllowedError } from "./errors.js";
+import { type Condition, parseFilter } from "./filter.js";
+import { checkSiblings } from "./siblings.js";
 
 const PROTOCOL_HEADER = "x-ashurbanipal-protocol";
 // Bumped only for non-additive wire changes; must track the Rust
@@ -47,16 +47,8 @@ export function createRouter(config: Config, dbSource: DbSource): ExpressRouter 
   registerGet(router, mount, serveHtml);
   registerGet(router, `${mount}/api/schemas`, withProtocolHeader(listSchemasHandler(dbSource, timeoutMs)));
   registerGet(router, `${mount}/api/tables`, withProtocolHeader(listTablesHandler(dbSource, timeoutMs)));
-  registerGet(
-    router,
-    `${mount}/api/table-counts`,
-    withProtocolHeader(tableCountsHandler(dbSource, timeoutMs)),
-  );
-  registerGet(
-    router,
-    `${mount}/api/tables/data`,
-    withProtocolHeader(tableDataHandler(dbSource, limits, timeoutMs)),
-  );
+  registerGet(router, `${mount}/api/table-counts`, withProtocolHeader(tableCountsHandler(dbSource, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/data`, withProtocolHeader(tableDataHandler(dbSource, limits, timeoutMs)));
   registerGet(
     router,
     `${mount}/api/tables/common-values`,
@@ -74,11 +66,7 @@ export function createRouter(config: Config, dbSource: DbSource): ExpressRouter 
 // wrong verb, which is what every path already registered under `{mount}`
 // should return (RFC 9110), and what the Rust/Go routers' underlying
 // method-aware routers do automatically by matching path before method.
-function registerGet(
-  router: ExpressRouter,
-  path: string,
-  handler: (req: Request, res: Response) => void,
-): void {
+function registerGet(router: ExpressRouter, path: string, handler: (req: Request, res: Response) => void): void {
   router.all(path, (req, res) => {
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.status(405).set("Allow", "GET, HEAD").type("text/plain; charset=utf-8").send("Method Not Allowed");

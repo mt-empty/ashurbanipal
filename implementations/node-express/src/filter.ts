@@ -13,18 +13,7 @@ export const MAX_CONDITIONS = 10;
 // The hardcoded wire-op allow-list (spec/protocol.md §5.4.2) — client
 // text is only ever compared against this set, never used as an operator
 // directly.
-const VALID_OPS = new Set([
-  "=",
-  "!=",
-  ">",
-  "<",
-  ">=",
-  "<=",
-  "LIKE",
-  "ILIKE",
-  "IS NULL",
-  "IS NOT NULL",
-]);
+const VALID_OPS = new Set(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
 
 function opTakesValue(op: string): boolean {
   return op !== "IS NULL" && op !== "IS NOT NULL";
@@ -179,11 +168,7 @@ export interface WhereClause {
  * native AND-tighter-than-OR precedence; there is no grouping/nesting in
  * the AST.
  */
-export function buildWhereClause(
-  conditions: Condition[],
-  columnNames: string[],
-  startParam: number,
-): WhereClause {
+export function buildWhereClause(conditions: Condition[], columnNames: string[], startParam: number): WhereClause {
   if (conditions.length === 0) {
     return { where: "", values: [] };
   }

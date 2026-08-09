@@ -16,8 +16,8 @@
 // from which env vars happen to be set (spec/protocol.md's "explicit, not
 // implicit" principle, per PORTING.md's hardening checklist).
 import express from "express";
-import { Pool } from "pg";
 import { createPool as createMysqlPool } from "mysql2/promise";
+import { Pool } from "pg";
 // Default import + property access, not `import { Database } from "sqlite3"`:
 // sqlite3 is CommonJS, and Node's native ESM loader's static export
 // detection (cjs-module-lexer) doesn't always see its named exports —
@@ -26,11 +26,11 @@ import { createPool as createMysqlPool } from "mysql2/promise";
 // type-checks fine, since TS's own module resolution is more lenient
 // than Node's actual runtime interop).
 import sqlite3 from "sqlite3";
-import { createRouter, type Config } from "../src/index.js";
+import { MySqlSource } from "../src/db/mysql.js";
 import { PostgresSource } from "../src/db/postgres.js";
 import { SqliteSource } from "../src/db/sqlite.js";
-import { MySqlSource } from "../src/db/mysql.js";
 import type { DbSource } from "../src/db/types.js";
+import { type Config, createRouter } from "../src/index.js";
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];

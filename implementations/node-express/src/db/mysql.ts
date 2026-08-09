@@ -1,16 +1,16 @@
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
+import { FilterError, NotAllowedError } from "../errors.js";
 import type { Condition } from "../filter.js";
-import { NotAllowedError, FilterError } from "../errors.js";
 import {
-  cellToJson,
-  findExact,
-  opSql,
-  opTakesValue,
   type ColumnInfo,
   type ColumnRef,
   type CommonValueEntry,
   type CountEntry,
+  cellToJson,
   type DbSource,
+  findExact,
+  opSql,
+  opTakesValue,
   type QueryOpts,
   type TableData,
   type TableInfo,
@@ -68,7 +68,10 @@ export function quoteIdentMysql(ident: string): string {
  * column's collation, which this crate has no control over. See
  * docs/adapter-decisions.md §5.4.2.
  */
-export function buildWhereClauseMysql(conditions: Condition[], columnNames: string[]): { where: string; values: string[] } {
+export function buildWhereClauseMysql(
+  conditions: Condition[],
+  columnNames: string[],
+): { where: string; values: string[] } {
   if (conditions.length === 0) {
     return { where: "", values: [] };
   }
@@ -396,12 +399,7 @@ export class MySqlSource implements DbSource {
     });
   }
 
-  async queryTable(
-    schema: string | undefined,
-    table: string,
-    opts: QueryOpts,
-    timeoutMs: number,
-  ): Promise<TableData> {
+  async queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData> {
     return this.withTx(async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       const tables = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);

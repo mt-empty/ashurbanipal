@@ -98,6 +98,7 @@ pnpm install
 pnpm test              # fixture + kill-switch + db/sqlite tests always run; db/mysql and the
                         # live-Postgres integration suite skip cleanly without their env vars
 pnpm run typecheck
+pnpm run lint           # biome check .; pnpm run lint:fix applies safe fixes
 ```
 
 `test/filter-fixture.test.ts` consumes

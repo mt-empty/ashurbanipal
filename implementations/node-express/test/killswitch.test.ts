@@ -2,9 +2,9 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { describe, expect, it } from "vitest";
-import { createRouter } from "../src/routes.js";
 import { ProductionEnabledError } from "../src/config.js";
 import type { DbSource } from "../src/db/types.js";
+import { createRouter } from "../src/routes.js";
 
 // Ports the Rust reference's fail-closed guarantees
 // (implementations/rust/src/config.rs's tests) and the Go port's

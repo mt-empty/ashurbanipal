@@ -84,7 +84,9 @@ maybeDescribe("multi-schema support (live db)", () => {
   it("a cross-schema FK reference includes the referenced table's schema", async () => {
     const { status, body } = await getJson("/__ashurbanipal/api/tables/data?schema=warehouse&table=shipments&limit=1");
     expect(status).toBe(200);
-    const columns = (body as { columns: { name: string; key?: string; references?: { table: string; schema?: string } }[] }).columns;
+    const columns = (
+      body as { columns: { name: string; key?: string; references?: { table: string; schema?: string } }[] }
+    ).columns;
     const orderId = columns.find((c) => c.name === "order_id");
     expect(orderId?.key).toBe("fk");
     expect(orderId?.references?.table).toBe("orders");
@@ -115,77 +117,73 @@ maybeDescribe("multi-schema support (live db)", () => {
   // shapes/values across schemas or fail outright. onConnect is awaited by
   // pg-pool before a client is handed to any caller (unlike the 'connect'
   // event), so the SET runs before any real query can race it.
-  it(
-    "query_table never mixes schemas across pooled connections",
-    async () => {
-      const schemaA = "ashb_test_schema_isolation_a";
-      const schemaB = "ashb_test_schema_isolation_b";
+  it("query_table never mixes schemas across pooled connections", async () => {
+    const schemaA = "ashb_test_schema_isolation_a";
+    const schemaB = "ashb_test_schema_isolation_b";
 
-      const setupPool = new Pool({ connectionString: databaseUrl, max: 1 });
+    const setupPool = new Pool({ connectionString: databaseUrl, max: 1 });
+    try {
+      for (const schema of [schemaA, schemaB]) {
+        await setupPool.query(`drop schema if exists ${schema} cascade`);
+        await setupPool.query(`create schema ${schema}`);
+      }
+      await setupPool.query(`create table ${schemaA}.probe_isolation (id int primary key, marker text)`);
+      await setupPool.query(`insert into ${schemaA}.probe_isolation values (1, 'A'), (2, 'A')`);
+      await setupPool.query(`create table ${schemaB}.probe_isolation (id int primary key, marker text, extra text)`);
+      await setupPool.query(`insert into ${schemaB}.probe_isolation values (1, 'B', 'X'), (2, 'B', 'X')`);
+
+      let connectionCount = 0;
+      const testPool = new Pool({
+        connectionString: databaseUrl,
+        max: 2,
+        onConnect: async (client) => {
+          const schema = connectionCount % 2 === 0 ? schemaA : schemaB;
+          connectionCount += 1;
+          await client.query(`set search_path = ${schema}`);
+        },
+      });
+
       try {
-        for (const schema of [schemaA, schemaB]) {
-          await setupPool.query(`drop schema if exists ${schema} cascade`);
-          await setupPool.query(`create schema ${schema}`);
-        }
-        await setupPool.query(`create table ${schemaA}.probe_isolation (id int primary key, marker text)`);
-        await setupPool.query(`insert into ${schemaA}.probe_isolation values (1, 'A'), (2, 'A')`);
-        await setupPool.query(`create table ${schemaB}.probe_isolation (id int primary key, marker text, extra text)`);
-        await setupPool.query(`insert into ${schemaB}.probe_isolation values (1, 'B', 'X'), (2, 'B', 'X')`);
+        // Acquire both connections while both are still checked out
+        // (neither idle yet), forcing the pool to dial two distinct
+        // physical connections; only then release them both back to the
+        // idle set, so both schemas are represented once the concurrent
+        // calls below begin.
+        const c1 = await testPool.connect();
+        const c2 = await testPool.connect();
+        c1.release();
+        c2.release();
 
-        let connectionCount = 0;
-        const testPool = new Pool({
-          connectionString: databaseUrl,
-          max: 2,
-          onConnect: async (client) => {
-            const schema = connectionCount % 2 === 0 ? schemaA : schemaB;
-            connectionCount += 1;
-            await client.query(`set search_path = ${schema}`);
-          },
-        });
+        const source = new PostgresSource(testPool);
+        const opts: QueryOpts = { limit: 10, offset: 0, descending: false, filter: [] };
 
-        try {
-          // Acquire both connections while both are still checked out
-          // (neither idle yet), forcing the pool to dial two distinct
-          // physical connections; only then release them both back to the
-          // idle set, so both schemas are represented once the concurrent
-          // calls below begin.
-          const c1 = await testPool.connect();
-          const c2 = await testPool.connect();
-          c1.release();
-          c2.release();
+        const results = await Promise.all(
+          Array.from({ length: 40 }, () => source.queryTable(undefined, "probe_isolation", opts, 5000)),
+        );
 
-          const source = new PostgresSource(testPool);
-          const opts: QueryOpts = { limit: 10, offset: 0, descending: false, filter: [] };
-
-          const results = await Promise.all(
-            Array.from({ length: 40 }, () => source.queryTable(undefined, "probe_isolation", opts, 5000)),
-          );
-
-          for (const data of results) {
-            const names = data.columns.map((c) => c.name);
-            if (names.length === 2 && names[0] === "id" && names[1] === "marker") {
-              for (const row of data.rows) {
-                expect(row.marker, "schema_a shape must only ever contain schema_a's rows").toBe("A");
-              }
-            } else if (names.length === 3 && names[0] === "id" && names[1] === "marker" && names[2] === "extra") {
-              for (const row of data.rows) {
-                expect(row.marker, "schema_b shape must only ever contain schema_b's rows").toBe("B");
-                expect(row.extra).toBe("X");
-              }
-            } else {
-              throw new Error(`response mixed columns from both schemas — mid-request schema drift: ${names}`);
+        for (const data of results) {
+          const names = data.columns.map((c) => c.name);
+          if (names.length === 2 && names[0] === "id" && names[1] === "marker") {
+            for (const row of data.rows) {
+              expect(row.marker, "schema_a shape must only ever contain schema_a's rows").toBe("A");
             }
+          } else if (names.length === 3 && names[0] === "id" && names[1] === "marker" && names[2] === "extra") {
+            for (const row of data.rows) {
+              expect(row.marker, "schema_b shape must only ever contain schema_b's rows").toBe("B");
+              expect(row.extra).toBe("X");
+            }
+          } else {
+            throw new Error(`response mixed columns from both schemas — mid-request schema drift: ${names}`);
           }
-        } finally {
-          await testPool.end();
         }
       } finally {
-        for (const schema of [schemaA, schemaB]) {
-          await setupPool.query(`drop schema if exists ${schema} cascade`).catch(() => {});
-        }
-        await setupPool.end();
+        await testPool.end();
       }
-    },
-    20000,
-  );
+    } finally {
+      for (const schema of [schemaA, schemaB]) {
+        await setupPool.query(`drop schema if exists ${schema} cascade`).catch(() => {});
+      }
+      await setupPool.end();
+    }
+  }, 20000);
 });
