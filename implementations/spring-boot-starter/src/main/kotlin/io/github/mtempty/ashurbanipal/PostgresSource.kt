@@ -1,7 +1,5 @@
 package io.github.mtempty.ashurbanipal
 
-import com.fasterxml.jackson.annotation.JsonInclude
-import com.fasterxml.jackson.annotation.JsonProperty
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
@@ -9,62 +7,15 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.sql.ResultSet
 import javax.sql.DataSource
 
-/** Table/column/schema not in the live allow-list; the controller maps this to 400 (`spec/protocol.md` §6 — no unvalidated identifier ever reaches SQL text). */
-class NotAllowedException(message: String) : RuntimeException(message)
-
 /**
- * Escapes an identifier for splicing into SQL text by doubling embedded `"`
- * (the standard Postgres quoted-identifier escape) — every name reaching
- * this must already be allow-list-validated against a live catalog lookup;
- * this only makes a validated name syntactically safe to splice, it is not
- * itself a validation step (`spec/protocol.md` §6, mirrors
- * `implementations/rust/src/db/mod.rs::quote_ident`).
- */
-internal fun quoteIdent(ident: String): String = "\"" + ident.replace("\"", "\"\"") + "\""
-
-// `@JsonInclude(NON_NULL)` per optional field, not mapper-wide: a mapper-wide
-// NON_NULL setting would also strip null *row cell* values (Map<String,
-// String?> entries) elsewhere, which spec/protocol.md §5.4.3 requires to stay
-// present as JSON null — optional metadata fields and row nulls need opposite
-// treatment, so the mapper's default (include nulls) stays the baseline.
-data class TableInfo(val name: String, @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null)
-data class CountEntry(val table: String, @JsonProperty("approx_rows") val approxRows: Long)
-data class ColumnRef(
-    val table: String,
-    val column: String,
-    // Only set when the referenced table lives in a schema other than the
-    // referencing column's own — same-schema FKs (the common case) omit it,
-    // so the wire payload is unchanged from before this field existed
-    // (additive, spec/protocol.md §7 versioning policy).
-    @JsonInclude(JsonInclude.Include.NON_NULL) val schema: String? = null,
-)
-data class ColumnInfo(
-    val name: String,
-    val type: String,
-    @JsonInclude(JsonInclude.Include.NON_NULL) val key: String? = null,
-    @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
-    @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
-)
-data class TableData(val columns: List<ColumnInfo>, val rows: List<LinkedHashMap<String, String?>>, val totalApprox: Long)
-data class CommonValueEntry(val value: String, val freq: Float)
-
-data class QueryOpts(
-    val limit: Long,
-    val offset: Long,
-    val sort: String?,
-    val descending: Boolean,
-    val filter: List<Condition>?,
-)
-
-/**
- * Port of `implementations/rust/src/db.rs`'s SQL, byte-for-byte where
- * possible (implementation.md §5.2). Every query goes through the one
- * [jdbcTemplate], whose `queryTimeout` is set once from
+ * The default/reference [DbSource] — port of `implementations/rust/src/db/postgres.rs`'s
+ * SQL, byte-for-byte where possible (implementation.md §5.2). Every query
+ * goes through the one [jdbcTemplate], whose `queryTimeout` is set once from
  * `limits.queryTimeoutSecs` at construction — catalog queries included, not
  * just row fetches (implementation.md §5.5 item 1's sibling requirement:
  * every query bounded, no exceptions).
  */
-class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterValidator: FilterValidator) {
+class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val filterValidator: FilterValidator) : DbSource {
     private val jdbcTemplate = JdbcTemplate(dataSource).apply {
         queryTimeout = queryTimeoutSecs
     }
@@ -83,7 +34,7 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
      * user namespace and one this role has `USAGE` on (`spec/protocol.md` §5.7,
      * mirrors `implementations/rust/src/db/postgres.rs::list_schemas_in_tx`).
      */
-    fun listSchemas(): List<String> = listAllowedSchemas()
+    override fun listSchemas(): List<String> = listAllowedSchemas()
 
     private fun listAllowedSchemas(): List<String> =
         jdbcTemplate.queryForList(
@@ -115,7 +66,7 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
         return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved")
     }
 
-    fun listTables(schema: String?): List<TableInfo> {
+    override fun listTables(schema: String?): List<TableInfo> {
         val realSchema = resolveSchema(schema)
         return jdbcTemplate.query(
             "select c.relname::text, obj_description(c.oid, 'pg_class') " +
@@ -128,7 +79,7 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
         )
     }
 
-    fun tableCounts(schema: String?): List<CountEntry> {
+    override fun tableCounts(schema: String?): List<CountEntry> {
         val realSchema = resolveSchema(schema)
         return jdbcTemplate.query(
             "select c.relname::text, c.reltuples::bigint " +
@@ -247,7 +198,7 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
         return pkColumns to fkColumns
     }
 
-    fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData =
+    override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData =
         inReadOnlyTransaction { queryTableInTransaction(schema, table, opts) }
 
     private fun queryTableInTransaction(schema: String?, table: String, opts: QueryOpts): TableData {
@@ -351,7 +302,7 @@ class Catalog(dataSource: DataSource, queryTimeoutSecs: Int, private val filterV
         return map
     }
 
-    fun commonValues(schema: String?, table: String, column: String): List<CommonValueEntry> =
+    override fun commonValues(schema: String?, table: String, column: String): List<CommonValueEntry> =
         inReadOnlyTransaction { commonValuesInTransaction(schema, table, column) }
 
     private fun commonValuesInTransaction(schema: String?, table: String, column: String): List<CommonValueEntry> {
