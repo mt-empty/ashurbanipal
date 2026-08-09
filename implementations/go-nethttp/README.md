@@ -18,10 +18,9 @@ go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
 ```go
 import ashurbanipal "github.com/mt-empty/ashurbanipal/implementations/go-nethttp"
 
-viewer, err := ashurbanipal.Router(ashurbanipal.Config{
-	Environment: "dev",
-	EnabledFor:  []string{"dev"},
-}, db) // *sql.DB the host already constructed
+cfg := ashurbanipal.Config{Environment: "dev", EnabledFor: []string{"dev"}}
+source := ashurbanipal.NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
+viewer, err := ashurbanipal.Router(cfg, source)
 if err != nil {
 	// a production-like EnabledFor value fails here, at construction —
 	// fail-closed, mirroring Config::from_toml in the Rust reference.
@@ -34,25 +33,74 @@ mux.Handle("/", viewer) // or nest it under any net/http-compatible router
 `nil`, so no environment ever matches. A host that forgets to configure
 anything gets a 404'd viewer, never one silently enabled with defaults.
 
+## Database support
+
+| Backend | Type | Status |
+|---|---|---|
+| Postgres (`PostgresSource`) | default, always compiled | Conformant — the reference implementation `spec/protocol.md` is written against; covered by the full `conformance/runner` suite. |
+| SQLite (`SQLiteSource`) | opt-in via the `sqlite` build tag (`go build -tags sqlite ./...`) | Ported against `implementations/rust/src/db/sqlite.rs`: comments and pre-computed common-values statistics have no SQLite equivalent and degrade to omitted/empty; table counts are always the "no estimate" sentinel rather than Postgres's fast planner estimate. Not run through `conformance/runner` (that suite targets Postgres); has its own unit test suite instead (`sqlite_test.go`, no external service needed — a real on-disk file). Diverges from the Rust reference on the timeout mechanism: plain `context.WithTimeout` around `database/sql`'s `QueryContext` is sufficient with `modernc.org/sqlite` (empirically verified — see `sqlite_test.go`'s `TestSQLiteSlowQueryIsAbortedNotLeftToRun`), unlike Rust's sqlx driver, which needed a `sqlite3_progress_handler` because context cancellation there only stopped waiting, not the blocking call. See `docs/adapter-decisions.md`. |
+| MySQL/MariaDB (`MySQLSource`) | opt-in via the `mysql` build tag (`go build -tags mysql ./...`) | Ported against `implementations/rust/src/db/mysql.rs`: pre-computed common-values statistics have no reliable cross-version equivalent and degrade to empty. Table counts and comments come from `information_schema`, same as Postgres. Detects MySQL vs. MariaDB at runtime (`SELECT VERSION()`, cached) since the two forks need different query-timeout SQL — see `docs/adapter-decisions.md` §6. Not run through `conformance/runner`; has its own unit test suite instead (`mysql_test.go`), requiring a live instance via `MYSQL_TEST_URL`/`MARIADB_TEST_URL`. |
+
+```sh
+# Postgres only (default):
+go build ./...
+# To also compile SQLiteSource:
+go build -tags sqlite ./...
+# To also compile MySQLSource:
+go build -tags mysql ./...
+# Everything:
+go build -tags sqlite,mysql ./...
+```
+
+Swapping backends only changes which `NewXSource` constructor builds the
+`DbSource` passed to `Router` — config, kill switch, filter DSL, and
+frontend are identical either way:
+
+```go
+import ashurbanipal "github.com/mt-empty/ashurbanipal/implementations/go-nethttp"
+
+source := ashurbanipal.NewSQLiteSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
+viewer, err := ashurbanipal.Router(cfg, source)
+```
+
+```go
+source := ashurbanipal.NewMySQLSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
+viewer, err := ashurbanipal.Router(cfg, source)
+```
+
 ## Layout
 
 - `config.go` — `Config`/`Limits`/`Sibling`, the fail-closed kill switch.
-- `catalog.go` — the one seam to `*sql.DB`; ported line-for-line against
-  `implementations/rust/src/db.rs`'s catalog SQL.
-- `filter.go` — the filter AST's structural validation and WHERE-clause
-  builder, ported against `implementations/rust/src/filter.rs`.
+- `db.go` — the `DbSource` interface (the one seam to the database; route
+  handlers never touch `*sql.DB`/`*sql.Tx` directly) plus the shared
+  wire types.
+- `postgres.go` — `PostgresSource`, the default `DbSource` implementation;
+  ported line-for-line against `implementations/rust/src/db/postgres.rs`'s
+  catalog SQL.
+- `sqlite.go` (`sqlite` build tag) — `SQLiteSource`, ported against
+  `implementations/rust/src/db/sqlite.rs`.
+- `mysql.go` (`mysql` build tag) — `MySQLSource`, ported against
+  `implementations/rust/src/db/mysql.rs`.
+- `filter.go` — the filter AST's structural validation and Postgres's
+  WHERE-clause builder, ported against `implementations/rust/src/filter.rs`
+  (`sqlite.go`/`mysql.go` each carry their own dialect-specific builder).
 - `siblings.go` — health fan-out via `errgroup`.
-- `routes.go` — `Router(cfg, db)` and the six HTTP handlers.
+- `routes.go` — `Router(cfg, source)` and the six HTTP handlers.
 - `embed.go` — the vendored `frontend/dbviewer.html`, sha256-reverified
   on every package load (see `PORTING.md`'s vendoring contract).
-- `cmd/demo` — the runnable example host, `go run ./cmd/demo`.
+- `cmd/demo` — the runnable example host (Postgres only), `go run ./cmd/demo`.
 
 ## Tests
 
 ```sh
-go test ./...              # fixture + kill-switch tests always run;
-                            # integration tests skip without DATABASE_URL
-go test -race ./...
+go test ./...                        # Postgres-only: fixture + kill-switch
+                                      # tests always run; integration tests
+                                      # skip without DATABASE_URL
+go test -tags sqlite ./...           # + SQLite unit tests (no external
+                                      # service needed)
+go test -tags mysql ./...            # + MySQL/MariaDB unit tests (skip
+                                      # without MYSQL_TEST_URL/MARIADB_TEST_URL)
+go test -tags sqlite,mysql -race ./...
 ```
 
 Fixture tests (`filter_fixture_test.go`) consume

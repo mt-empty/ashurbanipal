@@ -220,7 +220,7 @@ func TestQueryTableNeverMixesSchemasAcrossPooledConnections(t *testing.T) {
 	c1.Close()
 	c2.Close()
 
-	catalog := newCatalog(db, 5)
+	source := NewPostgresSource(db, 5)
 	opts := QueryOpts{Limit: 10, Offset: 0, Descending: false}
 
 	var wg sync.WaitGroup
@@ -229,7 +229,7 @@ func TestQueryTableNeverMixesSchemasAcrossPooledConnections(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := catalog.QueryTable(ctx, nil, "probe_isolation", opts)
+			data, err := source.QueryTable(ctx, nil, "probe_isolation", opts)
 			if err != nil {
 				errs <- fmt.Errorf("query_table must not error from a mid-request schema drift: %w", err)
 				return
