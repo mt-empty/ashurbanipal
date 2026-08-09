@@ -36,7 +36,7 @@ class AshurbanipalKillSwitchTest {
         runner().run { context ->
             assertThat(context).hasNotFailed()
             assertThat(context).doesNotHaveBean(DbViewerController::class.java)
-            assertThat(context).doesNotHaveBean(Catalog::class.java)
+            assertThat(context).doesNotHaveBean(DbSource::class.java)
         }
     }
 
@@ -57,7 +57,7 @@ class AshurbanipalKillSwitchTest {
             .run { context ->
                 assertThat(context).hasNotFailed()
                 assertThat(context).hasSingleBean(DbViewerController::class.java)
-                assertThat(context).hasSingleBean(Catalog::class.java)
+                assertThat(context).hasSingleBean(DbSource::class.java)
             }
     }
 
@@ -96,5 +96,47 @@ class AshurbanipalKillSwitchTest {
                     assertThat(context).doesNotHaveBean(DbViewerController::class.java)
                 }
         }
+    }
+
+    /** No `ashurbanipal.backend` at all MUST mean Postgres (today's only pre-existing behavior), never a startup failure — absent config must not accidentally read as an invalid value. */
+    @Test
+    fun `no backend configured defaults to postgres`() {
+        runner()
+            .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev")
+            .run { context ->
+                assertThat(context).hasNotFailed()
+                assertThat(context.getBean(DbSource::class.java)).isInstanceOf(PostgresSource::class.java)
+            }
+    }
+
+    /** An unrecognized `backend` value MUST be rejected at config load, the same fail-fast treatment as a production-like `enabled-for` value — never silently falling back to Postgres. */
+    @Test
+    fun `unrecognized backend value fails startup`() {
+        runner()
+            .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev", "ashurbanipal.backend=oracle")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure).hasRootCauseInstanceOf(InvalidBackendException::class.java)
+            }
+    }
+
+    @Test
+    fun `explicit mysql backend constructs MySqlSource`() {
+        runner()
+            .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev", "ashurbanipal.backend=mysql")
+            .run { context ->
+                assertThat(context).hasNotFailed()
+                assertThat(context.getBean(DbSource::class.java)).isInstanceOf(MySqlSource::class.java)
+            }
+    }
+
+    @Test
+    fun `explicit sqlite backend constructs SqliteSource`() {
+        runner()
+            .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev", "ashurbanipal.backend=sqlite")
+            .run { context ->
+                assertThat(context).hasNotFailed()
+                assertThat(context.getBean(DbSource::class.java)).isInstanceOf(SqliteSource::class.java)
+            }
     }
 }
