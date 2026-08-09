@@ -36,3 +36,22 @@ ashurbanipal:
 See `docs/adapter-decisions.md` for the full per-backend mechanism registry
 (row counts, common-values, text casting, `ILIKE` mapping, schema scoping,
 comments, query timeouts) shared across every implementation in this repo.
+
+## Kill switch
+
+`src/test/kotlin/io/github/mtempty/ashurbanipal/AshurbanipalKillSwitchTest.kt`
+is this port's kill-switch test suite — absent config, a non-matching
+`environment`, and a production-like `enabled-for` value all disable the
+starter (no `DbViewerController`/`DbSource` bean registered) without
+failing application startup; a production-like value fails startup
+outright. Conformance can't observe any of this over HTTP (`PORTING.md`
+hardening checklist item 2), so this file is the only evidence the
+property holds.
+
+## CSP note
+
+Per `PORTING.md`, this port takes the same option the Rust reference and
+every other port take: it sets no `Content-Security-Policy` header and
+injects no nonce. A host running under a strict CSP forbidding inline
+scripts must extend it for `${ashurbanipal.base-path}` before the UI's
+inline `<script type="module">` will execute client-side.
