@@ -231,7 +231,15 @@ following are true — green CI is necessary, not sufficient:
    production-alias rejection, and disabled-environment → 404 — are
    covered by the port's own linked implementation tests (its kill-switch
    test file), referenced from its README.
-4. A named reviewer has signed off against every item in the Governance
+4. The port ships its own unit and integration test suite (adapter/catalog
+   queries, filter-AST validation, config parsing) beyond the conformance
+   kit — conformance proves protocol compliance over HTTP, it doesn't prove
+   the implementation's internals are individually tested.
+5. The port's package ecosystem has a dependency-update automation entry
+   (`.github/dependabot.yml`, one `package-ecosystem` block pointed at the
+   port's directory) so its dependencies don't silently go stale relative
+   to the other ports.
+6. A named reviewer has signed off against every item in the Governance
    checklist below, for properties none of the automated layers can
    prove (injection absence, fail-closed defaults, vendoring integrity).
    Recorded in that section's sign-off log.
@@ -325,6 +333,7 @@ above against the port's actual CI config and served HTML); items 1, 2,
 | `implementations/spring-boot-starter` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-07-25 |
 | `implementations/go-nethttp` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-07-25 |
 | `implementations/node-express` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | MT (human review, merged PR #12); Claude (AI-assisted re-verification), 2026-08-04 |
+| `implementations/flask-python` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-08-09 |
 
 Note on the Rust row, item 2: the reference had no test for the specific
 "`enabled_for` key absent from the TOML text entirely" case (only for an
