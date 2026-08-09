@@ -56,7 +56,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y postgresql-client
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
 
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
