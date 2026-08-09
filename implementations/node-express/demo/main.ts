@@ -10,9 +10,27 @@
 // To demo sibling health-polling, run a second instance:
 //
 //   PORT=4001 SIBLING_PORT=4000 npm run demo
+//
+// DB_BACKEND selects which DbSource to construct — postgres (default),
+// sqlite, or mysql/mariadb — always an explicit choice, never inferred
+// from which env vars happen to be set (spec/protocol.md's "explicit, not
+// implicit" principle, per PORTING.md's hardening checklist).
 import express from "express";
 import { Pool } from "pg";
+import { createPool as createMysqlPool } from "mysql2/promise";
+// Default import + property access, not `import { Database } from "sqlite3"`:
+// sqlite3 is CommonJS, and Node's native ESM loader's static export
+// detection (cjs-module-lexer) doesn't always see its named exports —
+// confirmed at runtime (`tsx demo/main.ts` threw "does not provide an
+// export named 'Database'" with the named-import form even though it
+// type-checks fine, since TS's own module resolution is more lenient
+// than Node's actual runtime interop).
+import sqlite3 from "sqlite3";
 import { createRouter, type Config } from "../src/index.js";
+import { PostgresSource } from "../src/db/postgres.js";
+import { SqliteSource } from "../src/db/sqlite.js";
+import { MySqlSource } from "../src/db/mysql.js";
+import type { DbSource } from "../src/db/types.js";
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -24,14 +42,31 @@ function envInt(name: string, fallback: number): number {
   return parsed;
 }
 
-async function main(): Promise<void> {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL must be set (the devcontainer sets it automatically)");
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} must be set for DB_BACKEND=${process.env.DB_BACKEND}`);
   }
-  const port = envInt("PORT", 4000);
+  return value;
+}
 
-  const pool = new Pool({ connectionString: databaseUrl, max: 5 });
+function buildDbSource(backend: string): DbSource {
+  switch (backend) {
+    case "postgres":
+      return new PostgresSource(new Pool({ connectionString: requireEnv("DATABASE_URL"), max: 5 }));
+    case "sqlite":
+      return new SqliteSource(new sqlite3.Database(requireEnv("SQLITE_PATH")));
+    case "mysql":
+      return new MySqlSource(createMysqlPool(requireEnv("MYSQL_URL")));
+    default:
+      throw new Error(`unknown DB_BACKEND "${backend}" (expected "postgres", "sqlite", or "mysql")`);
+  }
+}
+
+async function main(): Promise<void> {
+  const backend = process.env.DB_BACKEND ?? "postgres";
+  const dbSource = buildDbSource(backend);
+  const port = envInt("PORT", 4000);
 
   const config: Config = { environment: "dev", enabledFor: ["dev"] };
   const siblingPort = process.env.SIBLING_PORT;
@@ -50,7 +85,7 @@ async function main(): Promise<void> {
   // host's own startup actually observes and acts on it, so this demo
   // does exactly what a real host must: let it propagate and refuse to
   // start, rather than silently swallowing it.
-  const viewer = createRouter(config, pool);
+  const viewer = createRouter(config, dbSource);
 
   const app = express();
   app.get("/health", (_req, res) => res.send("ok"));
@@ -59,7 +94,7 @@ async function main(): Promise<void> {
 
   app.listen(port, "0.0.0.0", () => {
     console.log(
-      `demo host on http://localhost:${port} — browser at http://localhost:${port}/__ashurbanipal`,
+      `demo host (backend=${backend}) on http://localhost:${port} — browser at http://localhost:${port}/__ashurbanipal`,
     );
   });
 }

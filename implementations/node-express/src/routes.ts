@@ -1,7 +1,6 @@
 import express, { type Request, type Response, type Router as ExpressRouter } from "express";
-import type { Pool } from "pg";
 import { basePath, isEnabled, validateConfig, withDefaults, type Config, type ResolvedLimits } from "./config.js";
-import { Catalog } from "./catalog.js";
+import type { DbSource } from "./db/types.js";
 import { parseFilter, type Condition } from "./filter.js";
 import { FilterError, NotAllowedError } from "./errors.js";
 import { checkSiblings } from "./siblings.js";
@@ -16,7 +15,9 @@ const PROTOCOL_VERSION = "1";
 /**
  * Mounts the Ashurbanipal viewer's six routes (the UI plus five API
  * routes) at cfg's base path into a plain express.Router — the host does
- * `app.use(createRouter(config, pool))`.
+ * `app.use(createRouter(config, dbSource))`, constructing whichever
+ * `DbSource` implementation (PostgresSource, SqliteSource, MySqlSource)
+ * it wants itself; there is no driver auto-detection.
  *
  * Throws ProductionEnabledError when enabledFor names a production-like
  * value (spec/protocol.md §4) — fail-closed via a thrown error, not a
@@ -28,7 +29,7 @@ const PROTOCOL_VERSION = "1";
  * a router that 404s every request under basePath, indistinguishable from
  * the viewer never having been mounted at all (spec/protocol.md §4).
  */
-export function createRouter(config: Config, pool: Pool): ExpressRouter {
+export function createRouter(config: Config, dbSource: DbSource): ExpressRouter {
   validateConfig(config);
 
   const router = express.Router();
@@ -40,18 +41,26 @@ export function createRouter(config: Config, pool: Pool): ExpressRouter {
   }
 
   const limits = withDefaults(config.limits);
-  const catalog = new Catalog(pool, limits.queryTimeoutSecs * 1000);
+  const timeoutMs = limits.queryTimeoutSecs * 1000;
   const mount = basePath(config);
 
   registerGet(router, mount, serveHtml);
-  registerGet(router, `${mount}/api/schemas`, withProtocolHeader(listSchemasHandler(catalog)));
-  registerGet(router, `${mount}/api/tables`, withProtocolHeader(listTablesHandler(catalog)));
-  registerGet(router, `${mount}/api/table-counts`, withProtocolHeader(tableCountsHandler(catalog)));
-  registerGet(router, `${mount}/api/tables/data`, withProtocolHeader(tableDataHandler(catalog, limits)));
+  registerGet(router, `${mount}/api/schemas`, withProtocolHeader(listSchemasHandler(dbSource, timeoutMs)));
+  registerGet(router, `${mount}/api/tables`, withProtocolHeader(listTablesHandler(dbSource, timeoutMs)));
+  registerGet(
+    router,
+    `${mount}/api/table-counts`,
+    withProtocolHeader(tableCountsHandler(dbSource, timeoutMs)),
+  );
+  registerGet(
+    router,
+    `${mount}/api/tables/data`,
+    withProtocolHeader(tableDataHandler(dbSource, limits, timeoutMs)),
+  );
   registerGet(
     router,
     `${mount}/api/tables/common-values`,
-    withProtocolHeader(commonValuesHandler(catalog)),
+    withProtocolHeader(commonValuesHandler(dbSource, timeoutMs)),
   );
   registerGet(router, `${mount}/api/siblings`, withProtocolHeader(siblingsHandler(config.siblings ?? [])));
 
@@ -100,7 +109,7 @@ function httpTextError(res: Response, status: number, message: string): void {
   res.status(status).type("text/plain; charset=utf-8").send(message);
 }
 
-// Maps a Catalog/filter error to the wire's two error classes
+// Maps a DbSource/filter error to the wire's two error classes
 // (spec/protocol.md §2): NotAllowedError/FilterError is a client mistake
 // (400, plain text); anything else is a database failure (500). Status
 // code is the contract — wording is implementation-defined.
@@ -113,30 +122,30 @@ function writeError(res: Response, err: unknown): void {
   httpTextError(res, 500, `database error: ${message}`);
 }
 
-function listSchemasHandler(catalog: Catalog) {
+function listSchemasHandler(dbSource: DbSource, timeoutMs: number) {
   return async (_req: Request, res: Response): Promise<void> => {
-    const schemas = await catalog.listSchemas();
+    const schemas = await dbSource.listSchemas(timeoutMs);
     res.json({ schemas });
   };
 }
 
-function listTablesHandler(catalog: Catalog) {
+function listTablesHandler(dbSource: DbSource, timeoutMs: number) {
   return async (req: Request, res: Response): Promise<void> => {
     const schema = firstQueryValue(req, "schema");
-    const tables = await catalog.listTables(schema);
+    const tables = await dbSource.listTables(schema, timeoutMs);
     res.json({ tables });
   };
 }
 
-function tableCountsHandler(catalog: Catalog) {
+function tableCountsHandler(dbSource: DbSource, timeoutMs: number) {
   return async (req: Request, res: Response): Promise<void> => {
     const schema = firstQueryValue(req, "schema");
-    const counts = await catalog.tableCounts(schema);
+    const counts = await dbSource.tableCounts(schema, timeoutMs);
     res.json({ counts });
   };
 }
 
-function tableDataHandler(catalog: Catalog, limits: ResolvedLimits) {
+function tableDataHandler(dbSource: DbSource, limits: ResolvedLimits, timeoutMs: number) {
   return async (req: Request, res: Response): Promise<void> => {
     const schema = firstQueryValue(req, "schema");
     const table = firstQueryValue(req, "table");
@@ -190,18 +199,23 @@ function tableDataHandler(catalog: Catalog, limits: ResolvedLimits) {
       return;
     }
 
-    const data = await catalog.queryTable(schema, table, {
-      limit,
-      offset,
-      sort: sort && sort !== "" ? sort : undefined,
-      descending,
-      filter: conditions,
-    });
+    const data = await dbSource.queryTable(
+      schema,
+      table,
+      {
+        limit,
+        offset,
+        sort: sort && sort !== "" ? sort : undefined,
+        descending,
+        filter: conditions,
+      },
+      timeoutMs,
+    );
     res.json(data);
   };
 }
 
-function commonValuesHandler(catalog: Catalog) {
+function commonValuesHandler(dbSource: DbSource, timeoutMs: number) {
   return async (req: Request, res: Response): Promise<void> => {
     const schema = firstQueryValue(req, "schema");
     const table = firstQueryValue(req, "table");
@@ -210,7 +224,7 @@ function commonValuesHandler(catalog: Catalog) {
       httpTextError(res, 400, "table and column parameters are required");
       return;
     }
-    const values = await catalog.commonValues(schema, table, column);
+    const values = await dbSource.commonValues(schema, table, column, timeoutMs);
     res.json({ values });
   };
 }

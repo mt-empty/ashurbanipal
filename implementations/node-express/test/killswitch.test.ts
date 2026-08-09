@@ -1,20 +1,21 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
-import type { Pool } from "pg";
 import { describe, expect, it } from "vitest";
 import { createRouter } from "../src/routes.js";
 import { ProductionEnabledError } from "../src/config.js";
+import type { DbSource } from "../src/db/types.js";
 
 // Ports the Rust reference's fail-closed guarantees
 // (implementations/rust/src/config.rs's tests) and the Go port's
 // killswitch_test.go at the level a plain library function can observe
 // them directly — createRouter's thrown-or-not behavior is itself the
 // whole mechanism here (no DI container, no context-refresh failure to
-// assert against). `null` stands in for a Pool throughout: createRouter
-// never touches the database at construction time, only per-request, and
-// none of these tests issue a request that would reach the database.
-const noPool = null as unknown as Pool;
+// assert against). `null` stands in for a DbSource throughout:
+// createRouter never touches the database at construction time, only
+// per-request, and none of these tests issue a request that would reach
+// the database.
+const noDbSource = null as unknown as DbSource;
 
 const ALL_MOUNT_PATHS = [
   "/__ashurbanipal",
@@ -42,7 +43,7 @@ async function withServer(router: express.Router, fn: (baseUrl: string) => Promi
 // implementation.md §5.5 item 2 / PORTING.md hardening checklist item 2:
 // absent config MUST mean disabled, never "enabled with defaults".
 it("empty config is disabled", async () => {
-  const router = createRouter({}, noPool);
+  const router = createRouter({}, noDbSource);
   await withServer(router, async (baseUrl) => {
     for (const path of ALL_MOUNT_PATHS) {
       const res = await fetch(`${baseUrl}${path}`);
@@ -52,7 +53,7 @@ it("empty config is disabled", async () => {
 });
 
 it("environment not in enabledFor is disabled", async () => {
-  const router = createRouter({ environment: "staging", enabledFor: ["dev"] }, noPool);
+  const router = createRouter({ environment: "staging", enabledFor: ["dev"] }, noDbSource);
   await withServer(router, async (baseUrl) => {
     for (const path of ALL_MOUNT_PATHS) {
       const res = await fetch(`${baseUrl}${path}`);
@@ -62,7 +63,7 @@ it("environment not in enabledFor is disabled", async () => {
 });
 
 it("matching environment enables routes", async () => {
-  const router = createRouter({ environment: "dev", enabledFor: ["dev", "integration"] }, noPool);
+  const router = createRouter({ environment: "dev", enabledFor: ["dev", "integration"] }, noDbSource);
   await withServer(router, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/__ashurbanipal`);
     expect(res.status).toBe(200);
@@ -76,7 +77,7 @@ it("matching environment enables routes", async () => {
 // spec/protocol.md §4: "any" matches every environment except
 // production-like ones.
 it("'any' matches every non-production environment", async () => {
-  const router = createRouter({ environment: "qa-eu-1", enabledFor: ["any"] }, noPool);
+  const router = createRouter({ environment: "qa-eu-1", enabledFor: ["any"] }, noDbSource);
   await withServer(router, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/__ashurbanipal`);
     expect(res.status).toBe(200);
@@ -90,7 +91,7 @@ describe("production-like enabledFor fails to construct", () => {
   // config-load step before it.
   for (const alias of ["production", "prod", "PROD", "Production", "PRD", "live"]) {
     it(alias, () => {
-      expect(() => createRouter({ environment: "dev", enabledFor: ["dev", alias] }, noPool)).toThrow(
+      expect(() => createRouter({ environment: "dev", enabledFor: ["dev", alias] }, noDbSource)).toThrow(
         ProductionEnabledError,
       );
     });
@@ -103,7 +104,7 @@ describe("running environment itself production-like disables without failing", 
   // since enabledFor itself names no production-like value here.
   for (const env of ["production", "PROD", "live"]) {
     it(env, async () => {
-      const router = createRouter({ environment: env, enabledFor: ["any"] }, noPool);
+      const router = createRouter({ environment: env, enabledFor: ["any"] }, noDbSource);
       await withServer(router, async (baseUrl) => {
         for (const path of ALL_MOUNT_PATHS) {
           const res = await fetch(`${baseUrl}${path}`);
