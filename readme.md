@@ -2,7 +2,7 @@
 
 <img src="docs/media/icon.svg" alt="" width="66" height="66" align="right">
 
-No-bullshit db browser for schemaful databases — self-contained, embeddable, read-only. No separate DB client, no extra credentials, no build step.
+No-bullshit Database browser for schemaful databases — self-contained, embeddable, read-only. No separate DB client, no extra credentials, no build step.
 
 ![Ashurbanipal demo](tools/e2e-tests/showcase.gif)
 
@@ -85,7 +85,8 @@ implementation's own CI.
 
 | Implementation | Language / framework | Protocol version | Conformance CI |
 |----------------|-----------------------|-------------------|-----------------|
-| [`implementations/rust`](implementations/rust/README.md) | Rust / Axum | 1 | `.github/workflows/rust-conformance.yml` |
-| [`implementations/spring-boot-starter`](implementations/spring-boot-starter) | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |
-| [`implementations/go-nethttp`](implementations/go-nethttp/README.md) | Go / `net/http` (framework-agnostic library) | 1 | `.github/workflows/go-conformance.yml` |
-| [`implementations/node-express`](implementations/node-express/README.md) | Node.js / TypeScript / Express | 1 | `.github/workflows/node-conformance.yml` |
+| [`rust`](implementations/rust/README.md) | Rust / Axum | 1 | `.github/workflows/rust-conformance.yml` |
+| [`spring-boot-starter`](implementations/spring-boot-starter) | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |
+| [`go-nethttp`](implementations/go-nethttp/README.md) | Go / `net/http` (framework-agnostic library) | 1 | `.github/workflows/go-conformance.yml` |
+| [`node-express`](implementations/node-express/README.md) | Node.js / TypeScript / Express | 1 | `.github/workflows/node-conformance.yml` |
+| [`flask-python`](implementations/flask-python/README.md) | Python / Flask | 1 | `.github/workflows/flask-conformance.yml` |
