@@ -28,7 +28,7 @@ postgres = [
 requires-dist = [
     { name = "ashurbanipal-flask", extras = ["postgres", "mysql"], marker = "extra == 'dev'" },
     { name = "flask", specifier = ">=3.0" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.3.4" },
     { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
