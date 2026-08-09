@@ -69,7 +69,7 @@ dependencies {
     // to provide at runtime (via their own DataSource bean), never a main
     // dependency of this starter (mirrors the Rust crate's mysql/sqlite
     // Cargo features being opt-in, not always-linked).
-    testImplementation("com.mysql:mysql-connector-j:9.7.0")
+    testImplementation("com.mysql:mysql-connector-j:26.7.0")
     testImplementation("org.xerial:sqlite-jdbc:3.53.2.1")
     // Gradle's own test worker bundles an older junit-platform-launcher than
     // Spring Boot's BOM-managed junit-jupiter needs; without this explicit
