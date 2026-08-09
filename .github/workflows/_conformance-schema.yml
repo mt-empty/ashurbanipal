@@ -9,7 +9,7 @@ on:
   workflow_call:
     inputs:
       toolchain:
-        description: "Language toolchain the demo needs to start: rust | java | go | node"
+        description: "Language toolchain the demo needs to start: rust | java | go | node | python"
         required: true
         type: string
       go-version-file:
@@ -19,6 +19,11 @@ on:
         default: ""
       node-version:
         description: "Node version to install (required when toolchain == 'node')"
+        required: false
+        type: string
+        default: ""
+      python-version:
+        description: "Python version to install (required when toolchain == 'python')"
         required: false
         type: string
         default: ""
@@ -95,6 +100,13 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
+
+      - name: Set up uv (Python toolchain)
+        if: inputs.toolchain == 'python'
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: ${{ inputs.python-version }}
+          enable-cache: true
 
       - uses: dtolnay/rust-toolchain@stable
 

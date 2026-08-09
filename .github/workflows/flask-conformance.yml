@@ -1,0 +1,121 @@
+name: flask-python conformance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "implementations/flask-python/**"
+      - "spec/**"
+      - "conformance/**"
+      - "frontend/dbviewer.html"
+      - ".github/workflows/flask-conformance.yml"
+      - ".github/workflows/_conformance-behavior.yml"
+      - ".github/workflows/_conformance-schema.yml"
+  pull_request:
+    paths:
+      - "implementations/flask-python/**"
+      - "spec/**"
+      - "conformance/**"
+      - "frontend/dbviewer.html"
+      - ".github/workflows/flask-conformance.yml"
+      - ".github/workflows/_conformance-behavior.yml"
+      - ".github/workflows/_conformance-schema.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build-and-test:
+    name: ruff + fixture/kill-switch/sqlite/postgres tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ashurbanipal
+          POSTGRES_PASSWORD: ashurbanipal
+          POSTGRES_DB: ashurbanipal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply the conformance seed
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+
+      - name: Install
+        working-directory: implementations/flask-python
+        run: uv sync --extra dev
+
+      - name: ruff check
+        working-directory: implementations/flask-python
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        working-directory: implementations/flask-python
+        run: uv run ruff format --check .
+
+      # Vendored frontend re-hash: catches a build pipeline silently
+      # mangling the copy at implementations/flask-python/frontend/dbviewer.html
+      # (PORTING.md's vendoring contract, hardening checklist item 3) —
+      # embed.py itself already raises at import time on a mismatch, so
+      # importing it is the check.
+      - name: Verify vendored frontend checksum
+        working-directory: implementations/flask-python
+        run: uv run python -c "import ashurbanipal.embed"
+
+      # test_filter_fixtures.py, test_config.py, test_killswitch.py and
+      # test_sqlite.py need no external service; test_postgres_integration.py
+      # needs DATABASE_URL (set above) and the conformance seed applied;
+      # test_mysql_integration.py skips cleanly without MYSQL_TEST_URL/
+      # MARIADB_TEST_URL (no such service in this job).
+      - name: Test
+        working-directory: implementations/flask-python
+        run: uv run pytest -q
+
+  conformance:
+    name: Flask — conformance kit (external-URL path)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: python
+      python-version: "3.12"
+      start-command: >-
+        cd implementations/flask-python &&
+        uv sync --extra postgres &&
+        PORT=4000 uv run python demo/app.py
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: flask-python-conformance-report
+
+  schema-conformance:
+    name: Flask — schema conformance
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-schema.yml
+    with:
+      toolchain: python
+      python-version: "3.12"
+      start-command: >-
+        cd implementations/flask-python &&
+        uv sync --extra postgres &&
+        PORT=4000 uv run python demo/app.py
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
