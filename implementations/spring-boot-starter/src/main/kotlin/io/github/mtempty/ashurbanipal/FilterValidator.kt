@@ -15,12 +15,14 @@ const val MAX_FILTER_BYTES = 8192
 const val MAX_CONDITIONS = 10
 
 private val VALID_OPS = setOf("=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL")
-private val OPS_WITHOUT_VALUE = setOf("IS NULL", "IS NOT NULL")
+
+/** Shared with each backend's own `buildWhereClause` (mirrors `implementations/rust/src/filter.rs::FilterOp::takes_value`). */
+internal val OPS_WITHOUT_VALUE = setOf("IS NULL", "IS NOT NULL")
 
 /** Thrown for any structural/allow-list violation; the controller maps every instance to 400 plain text (`spec/protocol.md` §2 — wording is implementation-defined). */
 class FilterException(message: String) : RuntimeException(message)
 
-/** `column` is exactly as received on the wire; only [Catalog] checks it against the live schema before it reaches SQL. */
+/** `column` is exactly as received on the wire; only a [DbSource] implementation checks it against the live schema before it reaches SQL. */
 data class Condition(
     val logic: String? = null,
     val not: Boolean = false,
@@ -33,10 +35,14 @@ data class WhereClause(val sql: String, val values: List<String>)
 
 /**
  * Deserializes and structurally validates the `filter` query param
- * (`spec/protocol.md` §5.4.2), then renders a WHERE fragment with `?`
- * placeholders. No DSL text is ever understood here — grammar parsing
- * (DSL text -> AST) is frontend-only (`spec/filter-dsl.md`); this class
- * only ever sees the JSON AST.
+ * (`spec/protocol.md` §5.4.2) — [parse] is shared by every backend. No DSL
+ * text is ever understood here — grammar parsing (DSL text -> AST) is
+ * frontend-only (`spec/filter-dsl.md`); this class only ever sees the JSON
+ * AST. [buildWhereClause] renders the WHERE fragment in Postgres's own
+ * dialect (`::text` cast, native `ILIKE`); `MySqlSource`/`SqliteSource` have
+ * their own `buildWhereClause` for their dialects, mirroring
+ * `implementations/rust/src/db/postgres.rs`/`mysql.rs`/`sqlite.rs` each
+ * having their own.
  */
 class FilterValidator {
     private val mapper: ObjectMapper = jacksonMapperBuilder()
@@ -83,8 +89,8 @@ class FilterValidator {
 
     /**
      * Every column is matched against [columnNames] (the live
-     * `information_schema` allow-list, from [Catalog]) before it's spliced
-     * into SQL — the same discipline `sort` gets. Conditions are joined by
+     * `information_schema` allow-list, from [PostgresSource]) before it's
+     * spliced into SQL — the same discipline `sort` gets. Conditions are joined by
      * their own `logic` tokens, relying on SQL's native AND-tighter-than-OR
      * precedence; there is no grouping/nesting in the AST.
      */
@@ -116,18 +122,28 @@ class FilterValidator {
         return WhereClause(" where $clause", values)
     }
 
-    /** The hardcoded operator -> SQL-fragment table (`spec/protocol.md` §5.4.2) — wire text is never used as an operator except through this match. */
-    private fun opSql(op: String): String = when (op) {
-        "=" -> "="
-        "!=" -> "!="
-        ">" -> ">"
-        "<" -> "<"
-        ">=" -> ">="
-        "<=" -> "<="
-        "LIKE" -> "LIKE"
-        "ILIKE" -> "ILIKE"
-        "IS NULL" -> "IS NULL"
-        "IS NOT NULL" -> "IS NOT NULL"
-        else -> throw FilterException("invalid op $op")
-    }
+    private fun opSql(op: String): String = opSqlKeyword(op)
+}
+
+/**
+ * The hardcoded operator -> SQL-keyword table (`spec/protocol.md` §5.4.2) —
+ * wire text is never used as an operator except through this match. Shared
+ * across backends (mirrors `implementations/rust/src/db/mod.rs::op_sql`);
+ * the *fragment* built around the keyword (cast syntax, placeholder style,
+ * `ILIKE`'s per-engine remapping) is each backend's own concern — see
+ * [PostgresSource]'s use via [FilterValidator.buildWhereClause],
+ * `MySqlSource.buildWhereClause`, and `SqliteSource.buildWhereClause`.
+ */
+internal fun opSqlKeyword(op: String): String = when (op) {
+    "=" -> "="
+    "!=" -> "!="
+    ">" -> ">"
+    "<" -> "<"
+    ">=" -> ">="
+    "<=" -> "<="
+    "LIKE" -> "LIKE"
+    "ILIKE" -> "ILIKE"
+    "IS NULL" -> "IS NULL"
+    "IS NOT NULL" -> "IS NOT NULL"
+    else -> throw FilterException("invalid op $op")
 }
