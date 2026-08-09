@@ -3,7 +3,8 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Catalog, type QueryOpts } from "../src/catalog.js";
+import { PostgresSource } from "../src/db/postgres.js";
+import type { QueryOpts } from "../src/db/types.js";
 import { createRouter } from "../src/routes.js";
 
 // DB-backed coverage of resolveSchema against the devcontainer's seeded
@@ -24,7 +25,7 @@ maybeDescribe("multi-schema support (live db)", () => {
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 2 });
-    const router = createRouter({ environment: "dev", enabledFor: ["dev"] }, pool);
+    const router = createRouter({ environment: "dev", enabledFor: ["dev"] }, new PostgresSource(pool));
     const app = express();
     app.use(router);
     server = createServer(app);
@@ -153,11 +154,11 @@ maybeDescribe("multi-schema support (live db)", () => {
           c1.release();
           c2.release();
 
-          const catalog = new Catalog(testPool, 5000);
+          const source = new PostgresSource(testPool);
           const opts: QueryOpts = { limit: 10, offset: 0, descending: false, filter: [] };
 
           const results = await Promise.all(
-            Array.from({ length: 40 }, () => catalog.queryTable(undefined, "probe_isolation", opts)),
+            Array.from({ length: 40 }, () => source.queryTable(undefined, "probe_isolation", opts, 5000)),
           );
 
           for (const data of results) {

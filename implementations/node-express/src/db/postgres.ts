@@ -1,96 +1,41 @@
 import type { Pool, PoolClient } from "pg";
-import { buildWhereClause, type Condition } from "./filter.js";
-import { NotAllowedError, quoteIdent } from "./errors.js";
-
-export type KeyKind = "pk" | "fk";
-
-export interface ColumnRef {
-  table: string;
-  column: string;
-  // Only set when the referenced table lives in a schema other than the
-  // referencing column's own — same-schema FKs (the common case) omit it,
-  // so the wire payload is unchanged from before this field existed
-  // (additive, spec/protocol.md §7 versioning policy).
-  schema?: string;
-}
-
-export interface ColumnInfo {
-  name: string;
-  type: string;
-  key?: KeyKind;
-  references?: ColumnRef;
-  comment?: string;
-}
-
-export interface TableInfo {
-  name: string;
-  comment?: string;
-}
-
-export interface TableData {
-  columns: ColumnInfo[];
-  rows: Record<string, string | null>[];
-  total_approx: number;
-}
-
-export interface CountEntry {
-  table: string;
-  approx_rows: number;
-}
-
-export interface CommonValueEntry {
-  value: string;
-  freq: number;
-}
-
-export interface QueryOpts {
-  limit: number;
-  offset: number;
-  sort?: string;
-  descending: boolean;
-  filter: Condition[];
-}
-
-function findExact(haystack: string[], needle: string): string | undefined {
-  return haystack.find((s) => s === needle);
-}
-
-// Every SELECTed column is already `::text`-cast in the query text itself
-// (never decoded into a native JS type and reformatted — spec/protocol.md
-// §5.4.3's cast-in-SQL requirement), so node-postgres always hands back a
-// string or null for these columns. Anything else (a driver decode this
-// port doesn't expect) falls back to the sentinel rather than throwing and
-// aborting the whole row.
-function cellToJson(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "string") return value;
-  if (Buffer.isBuffer(value)) return value.toString("utf8");
-  return "<undecodable>";
-}
+import { buildWhereClause } from "../filter.js";
+import { NotAllowedError, quoteIdent } from "../errors.js";
+import {
+  cellToJson,
+  findExact,
+  type ColumnInfo,
+  type ColumnRef,
+  type CommonValueEntry,
+  type CountEntry,
+  type DbSource,
+  type QueryOpts,
+  type TableData,
+  type TableInfo,
+} from "./types.js";
 
 /**
- * Catalog is the one seam to the database — route handlers never touch
- * `pg` directly. Every query (catalog/metadata included, not just row
- * fetches) is bounded by the same configured statement_timeout, applied
- * per-connection via `SET LOCAL statement_timeout` inside a transaction so
- * it never leaks onto a pooled connection reused by another request.
+ * The default/reference `DbSource` — ported against
+ * implementations/rust/src/db/postgres.rs (also cross-checked against
+ * implementations/go-nethttp/catalog.go). Every query (catalog/metadata
+ * included, not just row fetches) is bounded by the caller-supplied
+ * timeoutMs, applied per-connection via `SET LOCAL statement_timeout`
+ * inside a transaction so it never leaks onto a pooled connection reused
+ * by another request.
  */
-export class Catalog {
-  constructor(
-    private readonly pool: Pool,
-    private readonly queryTimeoutMs: number,
-  ) {}
+export class PostgresSource implements DbSource {
+  constructor(private readonly pool: Pool) {}
 
   // Runs `fn` against a client with statement_timeout bounded for the
   // duration of this one query, inside its own transaction — SET LOCAL is
   // transaction-scoped, so this is the only way to bound a timeout
   // per-query without mutating the pooled connection's session state for
   // whichever request borrows it next.
-  private async withTimeout<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  private async withTimeout<T>(timeoutMs: number, fn: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`SET LOCAL statement_timeout = ${this.queryTimeoutMs}`);
+      await client.query(`SET LOCAL statement_timeout = ${timeoutMs}`);
       const result = await fn(client);
       await client.query("COMMIT");
       return result;
@@ -106,7 +51,7 @@ export class Catalog {
   // `pg_toast%`, `pg_temp_%`) and anything the connected role can't
   // actually use, so a schema only ever appears here if it's both a real
   // user namespace and one this role has USAGE on.
-  async allowedSchemas(client: PoolClient): Promise<string[]> {
+  private async allowedSchemas(client: PoolClient): Promise<string[]> {
     const { rows } = await client.query<{ nspname: string }>(
       `select nspname from pg_namespace
        where nspname not in ('pg_catalog', 'information_schema')
@@ -142,7 +87,7 @@ export class Catalog {
     return real;
   }
 
-  async allowedTables(client: PoolClient, schema: string): Promise<string[]> {
+  private async allowedTables(client: PoolClient, schema: string): Promise<string[]> {
     const { rows } = await client.query<{ table_name: string }>(
       `select table_name from information_schema.tables
        where table_schema = $1 and table_type = 'BASE TABLE'
@@ -152,7 +97,7 @@ export class Catalog {
     return rows.map((r) => r.table_name);
   }
 
-  async allowedColumns(client: PoolClient, schema: string, table: string): Promise<string[]> {
+  private async allowedColumns(client: PoolClient, schema: string, table: string): Promise<string[]> {
     const { rows } = await client.query<{ column_name: string }>(
       `select column_name from information_schema.columns
        where table_schema = $1 and table_name = $2
@@ -241,14 +186,12 @@ export class Catalog {
     return { pkColumns, fkColumns };
   }
 
-  /** Serves GET /api/schemas. */
-  async listSchemas(): Promise<string[]> {
-    return this.withTimeout((client) => this.allowedSchemas(client));
+  async listSchemas(timeoutMs: number): Promise<string[]> {
+    return this.withTimeout(timeoutMs, (client) => this.allowedSchemas(client));
   }
 
-  /** Serves GET /api/tables. */
-  async listTables(schema: string | undefined): Promise<TableInfo[]> {
-    return this.withTimeout(async (client) => {
+  async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {
+    return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const { rows } = await client.query<{ relname: string; comment: string | null }>(
         `select c.relname::text, obj_description(c.oid, 'pg_class') as comment
@@ -266,9 +209,8 @@ export class Catalog {
     });
   }
 
-  /** Serves GET /api/table-counts. */
-  async tableCounts(schema: string | undefined): Promise<CountEntry[]> {
-    return this.withTimeout(async (client) => {
+  async tableCounts(schema: string | undefined, timeoutMs: number): Promise<CountEntry[]> {
+    return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const { rows } = await client.query<{ relname: string; reltuples: string }>(
         `select c.relname::text, c.reltuples::bigint::text as reltuples
@@ -282,9 +224,13 @@ export class Catalog {
     });
   }
 
-  /** Serves GET /api/tables/data: validates schema/table/sort/filter columns against the live schema, then runs one parameterized SELECT. */
-  async queryTable(schema: string | undefined, table: string, opts: QueryOpts): Promise<TableData> {
-    return this.withTimeout(async (client) => {
+  async queryTable(
+    schema: string | undefined,
+    table: string,
+    opts: QueryOpts,
+    timeoutMs: number,
+  ): Promise<TableData> {
+    return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const tables = await this.allowedTables(client, realSchema);
       const realTable = findExact(tables, table);
@@ -391,9 +337,13 @@ export class Catalog {
     });
   }
 
-  /** Serves GET /api/tables/common-values. */
-  async commonValues(schema: string | undefined, table: string, column: string): Promise<CommonValueEntry[]> {
-    return this.withTimeout(async (client) => {
+  async commonValues(
+    schema: string | undefined,
+    table: string,
+    column: string,
+    timeoutMs: number,
+  ): Promise<CommonValueEntry[]> {
+    return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const tables = await this.allowedTables(client, realSchema);
       const realTable = findExact(tables, table);
