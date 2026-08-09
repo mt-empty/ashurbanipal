@@ -29,7 +29,6 @@ per-statement mechanism, but not the same one — detected once per
 
 from __future__ import annotations
 
-from typing import Optional
 from urllib.parse import urlsplit
 
 import pymysql
@@ -90,7 +89,7 @@ def _timed_select(variant: str, timeout_secs: int, body: str) -> str:
     return f"set statement max_statement_time={int(timeout_secs)} for select {body}"
 
 
-def _decode_cell(value: Optional[bytes], encoding: str) -> Optional[str]:
+def _decode_cell(value: bytes | None, encoding: str) -> str | None:
     """PyMySQL's default row decoding raises UnicodeDecodeError on invalid
     bytes for the connection's charset, aborting the whole result set —
     there's no per-cell hook to intercept mid-decode. Callers instead read
@@ -147,7 +146,7 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
 class MySqlSource(DbSource):
     def __init__(self, **connect_kwargs):
         self._connect_kwargs = connect_kwargs
-        self._variant: Optional[str] = None
+        self._variant: str | None = None
 
     def _connect(self) -> pymysql.connections.Connection:
         return pymysql.connect(**self._connect_kwargs)
@@ -178,7 +177,7 @@ class MySqlSource(DbSource):
         )
         return [row[0] for row in cur.fetchall()]
 
-    def _resolve_schema(self, cur, variant: str, requested: Optional[str], timeout_secs: int) -> str:
+    def _resolve_schema(self, cur, variant: str, requested: str | None, timeout_secs: int) -> str:
         schemas = self._list_schemas(cur, variant, timeout_secs)
         if requested is not None:
             resolved = requested
@@ -279,7 +278,7 @@ class MySqlSource(DbSource):
             conn.close()
 
     @wrap_driver_errors(pymysql.Error)
-    def list_tables(self, schema: Optional[str]) -> list[TableInfo]:
+    def list_tables(self, schema: str | None) -> list[TableInfo]:
         conn = self._connect()
         try:
             variant = self._variant_of(conn)
@@ -306,7 +305,7 @@ class MySqlSource(DbSource):
             conn.close()
 
     @wrap_driver_errors(pymysql.Error)
-    def table_counts(self, schema: Optional[str]) -> list[tuple[str, int]]:
+    def table_counts(self, schema: str | None) -> list[tuple[str, int]]:
         conn = self._connect()
         try:
             variant = self._variant_of(conn)
@@ -334,7 +333,7 @@ class MySqlSource(DbSource):
             conn.close()
 
     @wrap_driver_errors(pymysql.Error)
-    def query_table(self, schema: Optional[str], table: str, opts: QueryOpts) -> TableData:
+    def query_table(self, schema: str | None, table: str, opts: QueryOpts) -> TableData:
         conn = self._connect()
         try:
             variant = self._variant_of(conn)
@@ -402,7 +401,7 @@ class MySqlSource(DbSource):
                 finally:
                     conn.use_unicode = True
                 rows = [
-                    {col.name: _decode_cell(value, conn.encoding) for col, value in zip(columns, row)}
+                    {col.name: _decode_cell(value, conn.encoding) for col, value in zip(columns, row, strict=True)}
                     for row in mysql_rows
                 ]
 
@@ -423,7 +422,7 @@ class MySqlSource(DbSource):
             conn.close()
 
     @wrap_driver_errors(pymysql.Error)
-    def common_values(self, schema: Optional[str], table: str, column: str) -> list[tuple[str, float]]:
+    def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]:
         conn = self._connect()
         try:
             variant = self._variant_of(conn)

@@ -24,8 +24,6 @@ from under it between queries.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import psycopg
 from psycopg.types.string import TextLoader
 
@@ -119,7 +117,7 @@ class PgSource(DbSource):
         )
         return [row[0] for row in cur.fetchall()]
 
-    def _resolve_schema(self, cur: psycopg.Cursor, requested: Optional[str]) -> str:
+    def _resolve_schema(self, cur: psycopg.Cursor, requested: str | None) -> str:
         schemas = self._list_schemas(cur)
         if requested is not None:
             resolved = requested
@@ -205,7 +203,7 @@ class PgSource(DbSource):
             return self._list_schemas(cur)
 
     @wrap_driver_errors(psycopg.Error)
-    def list_tables(self, schema: Optional[str]) -> list[TableInfo]:
+    def list_tables(self, schema: str | None) -> list[TableInfo]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved = self._resolve_schema(cur, schema)
@@ -220,7 +218,7 @@ class PgSource(DbSource):
             return [TableInfo(name=name, comment=comment) for name, comment in cur.fetchall()]
 
     @wrap_driver_errors(psycopg.Error)
-    def table_counts(self, schema: Optional[str]) -> list[tuple[str, int]]:
+    def table_counts(self, schema: str | None) -> list[tuple[str, int]]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved = self._resolve_schema(cur, schema)
@@ -235,7 +233,7 @@ class PgSource(DbSource):
             return list(cur.fetchall())
 
     @wrap_driver_errors(psycopg.Error)
-    def query_table(self, schema: Optional[str], table: str, opts: QueryOpts) -> TableData:
+    def query_table(self, schema: str | None, table: str, opts: QueryOpts) -> TableData:
         with self._connect() as conn:
             # Cursor.__init__ snapshots conn.adapters at creation time (copy-
             # on-write, not a live view) — this must run before conn.cursor()
@@ -309,7 +307,10 @@ class PgSource(DbSource):
                 cur.execute(query, (*filter_values, opts.limit, opts.offset))
                 pg_rows = cur.fetchall()
                 rows = [
-                    {col.name: (None if value is None else str(value)) for col, value in zip(columns, row)}
+                    {
+                        col.name: (None if value is None else str(value))
+                        for col, value in zip(columns, row, strict=True)
+                    }
                     for row in pg_rows
                 ]
 
@@ -324,7 +325,7 @@ class PgSource(DbSource):
                 return TableData(columns=columns, rows=rows, total_approx=total_approx)
 
     @wrap_driver_errors(psycopg.Error)
-    def common_values(self, schema: Optional[str], table: str, column: str) -> list[tuple[str, float]]:
+    def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved_schema = self._resolve_schema(cur, schema)

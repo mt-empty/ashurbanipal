@@ -18,6 +18,8 @@ import pytest
 from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts
 from ashurbanipal.db.mysql import _MARIADB, MySqlSource, connect_kwargs_from_url
 
+pytestmark = pytest.mark.mysql
+
 _URLS = {
     "mysql": os.environ.get("MYSQL_TEST_URL"),
     "mariadb": os.environ.get("MARIADB_TEST_URL"),

@@ -12,6 +12,7 @@ import os
 import sqlite3
 import tempfile
 import time
+from pathlib import Path
 
 import pytest
 
@@ -36,7 +37,7 @@ def seeded_path():
     conn.commit()
     conn.close()
     yield path
-    os.unlink(path)
+    Path(path).unlink()
 
 
 def test_list_tables_and_query_table_round_trip(seeded_path) -> None:

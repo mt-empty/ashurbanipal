@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from typing import Optional
 
 from ..filter import Condition
 from . import (
@@ -65,7 +64,7 @@ def _lenient_text_factory(data: bytes) -> str:
         return "<undecodable>"
 
 
-def _check_schema(schema: Optional[str]) -> None:
+def _check_schema(schema: str | None) -> None:
     if schema is not None and schema != ONLY_SCHEMA:
         raise NotAllowed(f"schema {schema!r}")
 
@@ -162,7 +161,7 @@ class SqliteSource(DbSource):
         return [ONLY_SCHEMA]
 
     @wrap_driver_errors(sqlite3.Error)
-    def list_tables(self, schema: Optional[str]) -> list[TableInfo]:
+    def list_tables(self, schema: str | None) -> list[TableInfo]:
         _check_schema(schema)
         conn = self._connect()
         try:
@@ -177,7 +176,7 @@ class SqliteSource(DbSource):
         return [TableInfo(name=name, comment=None) for name in names]
 
     @wrap_driver_errors(sqlite3.Error)
-    def table_counts(self, schema: Optional[str]) -> list[tuple[str, int]]:
+    def table_counts(self, schema: str | None) -> list[tuple[str, int]]:
         _check_schema(schema)
         conn = self._connect()
         try:
@@ -194,7 +193,7 @@ class SqliteSource(DbSource):
         return [(name, -1) for name in names]
 
     @wrap_driver_errors(sqlite3.Error)
-    def query_table(self, schema: Optional[str], table: str, opts: QueryOpts) -> TableData:
+    def query_table(self, schema: str | None, table: str, opts: QueryOpts) -> TableData:
         _check_schema(schema)
         conn = self._connect()
         try:
@@ -254,7 +253,10 @@ class SqliteSource(DbSource):
                 self._clear_bound(conn)
 
             rows = [
-                {col.name: (None if value is None else str(value)) for col, value in zip(columns, row)}
+                {
+                    col.name: (None if value is None else str(value))
+                    for col, value in zip(columns, row, strict=True)
+                }
                 for row in sqlite_rows
             ]
             return TableData(
@@ -269,7 +271,7 @@ class SqliteSource(DbSource):
             conn.close()
 
     @wrap_driver_errors(sqlite3.Error)
-    def common_values(self, schema: Optional[str], table: str, column: str) -> list[tuple[str, float]]:
+    def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]:
         _check_schema(schema)
         conn = self._connect()
         try:

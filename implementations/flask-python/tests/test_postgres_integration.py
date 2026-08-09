@@ -14,7 +14,10 @@ from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts
 from ashurbanipal.db.postgres import PgSource
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL not set")
+pytestmark = [
+    pytest.mark.postgres,
+    pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL not set"),
+]
 
 
 @pytest.fixture
@@ -150,7 +153,6 @@ def test_query_timeout_is_enforced(source) -> None:
     # connection (not query_table) since pg_sleep isn't a real table read.
     import psycopg
 
-    with pytest.raises(psycopg.Error):
-        with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
-            cur.execute("SET LOCAL statement_timeout = '1s'")
-            cur.execute("select pg_sleep(5)")
+    with pytest.raises(psycopg.Error), psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+        cur.execute("SET LOCAL statement_timeout = '1s'")
+        cur.execute("select pg_sleep(5)")

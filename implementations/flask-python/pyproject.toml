@@ -19,13 +19,21 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "postgres: needs DATABASE_URL (skips cleanly otherwise)",
+    "mysql: needs MYSQL_TEST_URL and/or MARIADB_TEST_URL (skips cleanly otherwise)",
+]
+filterwarnings = [
+    "error::DeprecationWarning",
+    "error::PendingDeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 115
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "PTH"]
 
 [build-system]
 requires = ["hatchling"]
