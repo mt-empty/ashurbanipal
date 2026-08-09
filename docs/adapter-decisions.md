@@ -121,6 +121,8 @@ a host-pool connection indefinitely.
 | MariaDb  | `SET STATEMENT max_statement_time=N FOR SELECT ...` wrapping every individual `SELECT` (`N` in seconds, not ms) | MariaDB never implemented MySQL's `MAX_EXECUTION_TIME` optimizer-hint syntax at all — an unrecognized `/*+ ... */` comment is silently ignored rather than rejected, so reusing MySQL's hint on MariaDB would fail open (query runs unbounded, no error). `mysql.rs::timed_select` detects which fork it's talking to once per `MySqlSource` (`SELECT VERSION()` containing `MariaDB`, cached) and branches accordingly. Also self-resetting, no explicit cleanup needed. |
 | SQLite (Rust) | `sqlite3_progress_handler`, checked every 1000 VM opcodes, explicitly cleared after each query | No `SET LOCAL`/session-timeout equivalent, and no per-statement hint mechanism either; each SQLite connection runs on its own dedicated worker thread, so wrapping the query future in `tokio::time::timeout` would only stop *waiting*, not the blocking call itself. Must be cleared (`set_progress_handler(0, ...)`) before the connection returns to the pool, or a reused connection would inherit an already-elapsed deadline — see `sqlite.rs::bounded`. |
 | SQLite (Go/net-http) | Plain `context.WithTimeout` around every `database/sql` `QueryContext`/`QueryRowContext` call | Genuinely different mechanism from the Rust reference, not just a different binding of the same one — `sqlite3_progress_handler` is an `sqlx`-driver-specific escape hatch the *C* library forced (the Rust async runtime's own cancellation only stops waiting, not the underlying blocking call), not something inherent to every SQLite binding. Empirically verified (not inferred from documentation) against a real on-disk file with a single-connection pool: a slow recursive-CTE query canceled by `ctx` returns in ~1s rather than running to completion, and a query issued immediately afterward on the *same physical connection* completes without delay — proving `modernc.org/sqlite` actually aborts execution on cancellation, not just the caller's wait. See `implementations/go-nethttp/sqlite.go::bounded` and `sqlite_test.go::TestSQLiteSlowQueryIsAbortedNotLeftToRun`. Nothing needs clearing afterward, unlike the Rust mechanism. |
+| MySQL/MariaDB (Spring Boot) | Same `timedSelect`-wrapped SQL text as the Rust rows above (`MySqlSource.kt::timedSelect`, identical branch logic) | The JDBC layer needs one extra step the Rust `sqlx` driver doesn't: Connector/J's `PreparedStatement.executeQuery()` rejects any SQL that doesn't *textually* start with a query keyword, and MariaDB's `SET STATEMENT ... FOR SELECT ...` wrapping trips this even though the server would return a result set (`Statement.executeQuery() cannot issue statements that do not produce result sets`, verified empirically). `MySqlSource.kt`'s `query()` helper uses `PreparedStatement.execute()` + `getResultSet()` instead, which has no such restriction. |
+| SQLite (Spring Boot) | `org.sqlite.ProgressHandler` (Xerial `sqlite-jdbc`'s public binding to `sqlite3_progress_handler`), checked every 1000 VM opcodes, explicitly cleared after each query — `SqliteSource.kt::bounded` | Verified empirically (not trusted from documented intent) that plain JDBC `Statement.setQueryTimeout()` does **not** cancel a running query on this driver — decompiling `JDBC3Statement.withConnectionTimeout` shows it only calls `SQLiteConnection.setBusyTimeout()`, the *lock-wait* timeout, not a query-execution bound; a first version of the timeout test using `setQueryTimeout` ran a genuinely slow query to completion in ~11s instead of aborting near a 1s budget. The real mechanism is Xerial's own `org.sqlite.ProgressHandler.setHandler(Connection, int, ProgressHandler)`/`clearHandler(Connection)` static API, which requires the connection to be (or unwrap to) `org.sqlite.SQLiteConnection` — a pooled connection (HikariCP) hands back a proxy that fails that `instanceof` check directly, so `SqliteSource.kt::bounded` calls `Connection.unwrap(SQLiteConnection::class.java)` before registering/clearing the handler. |
 
 ## Status note
 
@@ -150,3 +152,20 @@ mechanisms — most notably SQLite's exact-`COUNT(*)`-turned-`-1` and live-
 wrapped `ILIKE`, always-empty `common_values`, and per-fork timeout
 mechanism — which remain real behavioral differences from the Postgres
 path (see their notes above), not open questions blocking use.
+
+`implementations/spring-boot-starter`'s `MySqlSource`/`SqliteSource`
+(Kotlin, gated behind the explicit `ashurbanipal.backend=mysql`/`sqlite`
+config property, never classpath/driver detection — see `PORTING.md`'s
+hardening checklist item 2) follow the same per-clause decisions as their
+Rust counterparts, with the two JDBC-specific mechanism notes in the §6
+rows above (the "MySQL/MariaDB (Spring Boot)" and "SQLite (Spring Boot)"
+rows). Also off by default, also not a separate `readme.md` entry (an
+alternate `DbSource` within an already-listed port, not a distinct port),
+also outside `conformance/runner`. `SqliteSourceTest` needs no external
+infrastructure (a temp on-disk file — `sqlite::memory:`-equivalent
+isolation isn't available through plain JDBC `DriverManager` connections
+the way `SqlitePool` gives Rust); `MySqlSourceTest` needs
+`MYSQL_TEST_URL`/`MARIADB_TEST_URL` and, unlike the Rust suite, actively
+runs every test against *both* when both are reachable (the devcontainer
+has permanent `mysql` and `mariadb` services), rather than only one
+variable covering whichever fork happens to be behind it.

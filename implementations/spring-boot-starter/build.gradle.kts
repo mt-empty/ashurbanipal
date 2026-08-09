@@ -46,6 +46,15 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     compileOnly("org.springframework:spring-webmvc")
     compileOnly("jakarta.servlet:jakarta.servlet-api")
+    // SqliteSource needs Xerial's own org.sqlite.ProgressHandler class at
+    // compile time — the real sqlite3_progress_handler binding, since plain
+    // JDBC Statement.setQueryTimeout only maps to SQLiteConnection's *busy*
+    // timeout on this driver (file-lock waits, not query execution — see
+    // docs/adapter-decisions.md §6). compileOnly for the same reason as
+    // spring-webmvc above: a host opting into ashurbanipal.backend=sqlite
+    // already needs this driver on its own runtime classpath to build a
+    // working SQLite DataSource in the first place.
+    compileOnly("org.xerial:sqlite-jdbc:3.49.1.0")
 
     // Test-only: a host app's web stack, JDBC driver, and JSON-Kotlin glue
     // to actually boot the starter against a live database.
@@ -55,6 +64,13 @@ dependencies {
         exclude(group = "org.junit.vintage", module = "junit-vintage-engine")
     }
     testImplementation("org.postgresql:postgresql")
+    // Test-only JDBC drivers for the opt-in MySqlSource/SqliteSource backends
+    // — like the Postgres driver above, these are the host's responsibility
+    // to provide at runtime (via their own DataSource bean), never a main
+    // dependency of this starter (mirrors the Rust crate's mysql/sqlite
+    // Cargo features being opt-in, not always-linked).
+    testImplementation("com.mysql:mysql-connector-j:9.3.0")
+    testImplementation("org.xerial:sqlite-jdbc:3.49.1.0")
     // Gradle's own test worker bundles an older junit-platform-launcher than
     // Spring Boot's BOM-managed junit-jupiter needs; without this explicit
     // version-aligned one, test discovery fails with an
@@ -68,6 +84,9 @@ tasks.withType<Test> {
     // (no Testcontainers/Docker available here, see PORTING.md and the
     // Phase 5 brief) — DATABASE_URL is set by the devcontainer.
     environment("DATABASE_URL", System.getenv("DATABASE_URL") ?: "")
+    // MySqlSourceTest skips cleanly (JUnit5 Assumptions) when neither is set.
+    environment("MYSQL_TEST_URL", System.getenv("MYSQL_TEST_URL") ?: "")
+    environment("MARIADB_TEST_URL", System.getenv("MARIADB_TEST_URL") ?: "")
     // Fixture and seed files live at the repo root, shared with every other
     // implementation's test suite (implementation.md §5.3) rather than
     // duplicated into src/test/resources.

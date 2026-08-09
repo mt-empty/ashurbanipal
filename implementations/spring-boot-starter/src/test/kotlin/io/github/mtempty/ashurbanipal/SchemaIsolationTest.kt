@@ -58,12 +58,11 @@ private class AlternatingSchemaDataSource(
  * `implementations/rust/tests/schema_isolation.rs`'s
  * `query_table_never_mixes_schemas_across_pooled_connections`.
  *
- * Runs directly against [Catalog] (like [CatalogTest], not the full Spring
- * app [AshurbanipalIntegrationTest] boots) so the pool under test can be
- * built by hand. [Catalog.queryTable] resolves+validates the schema and
- * later selects columns from it inside one [Catalog.inReadOnlyTransaction]
- * — pinned to one physical connection, per [Catalog.resolveSchema]'s doc
- * comment — so if those steps could ever land on different pooled
+ * Runs directly against [PostgresSource] (not the full Spring app
+ * [AshurbanipalIntegrationTest] boots) so the pool under test can be built
+ * by hand. `PostgresSource.queryTable` resolves+validates the schema and
+ * later selects columns from it inside one read-only transaction — pinned
+ * to one physical connection — so if those steps could ever land on different pooled
  * connections, a response would mix shapes/values across schemas or fail
  * outright.
  */
@@ -113,7 +112,7 @@ class SchemaIsolationTest {
                     c1.close()
                     c2.close()
 
-                    val catalog = Catalog(poolDs, 5, FilterValidator())
+                    val catalog = PostgresSource(poolDs, 5, FilterValidator())
                     val opts = QueryOpts(limit = 10, offset = 0, sort = null, descending = false, filter = null)
 
                     val executor = Executors.newFixedThreadPool(8)

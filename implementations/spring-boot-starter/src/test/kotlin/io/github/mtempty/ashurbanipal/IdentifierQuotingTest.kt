@@ -3,7 +3,7 @@ package io.github.mtempty.ashurbanipal
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
-class CatalogTest {
+class IdentifierQuotingTest {
     @Test
     fun `quoteIdent doubles embedded quotes`() {
         assertEquals("\"users\"", quoteIdent("users"))
