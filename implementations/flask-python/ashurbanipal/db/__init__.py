@@ -16,14 +16,15 @@ from __future__ import annotations
 
 import abc
 import functools
+from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
-from typing import Callable, Optional, TypeVar
+from enum import StrEnum
+from typing import TypeVar
 
 _F = TypeVar("_F", bound=Callable)
 
 
-class KeyKind(str, Enum):
+class KeyKind(StrEnum):
     PK = "pk"
     FK = "fk"
 
@@ -35,28 +36,28 @@ class ColumnRef:
     # Only set when the referenced table lives in a schema other than the
     # referencing column's own — omitted (not null) for the common
     # same-schema case (spec/protocol.md §5.4.1, additive field).
-    schema: Optional[str] = None
+    schema: str | None = None
 
 
 @dataclass
 class ColumnInfo:
     name: str
     type_name: str
-    key: Optional[KeyKind] = None
-    references: Optional[ColumnRef] = None
-    comment: Optional[str] = None
+    key: KeyKind | None = None
+    references: ColumnRef | None = None
+    comment: str | None = None
 
 
 @dataclass
 class TableInfo:
     name: str
-    comment: Optional[str] = None
+    comment: str | None = None
 
 
 @dataclass
 class TableData:
     columns: list[ColumnInfo]
-    rows: list[dict[str, Optional[str]]]
+    rows: list[dict[str, str | None]]
     total_approx: int
 
 
@@ -65,9 +66,9 @@ class QueryOpts:
     limit: int
     offset: int
     timeout_secs: int
-    sort: Optional[str] = None
+    sort: str | None = None
     descending: bool = False
-    filter: Optional[list] = None  # list[filter.Condition]; typed loosely to avoid a circular import
+    filter: list | None = None  # list[filter.Condition]; typed loosely to avoid a circular import
 
 
 class DbError(Exception):
@@ -121,16 +122,16 @@ class DbSource(abc.ABC):
     def list_schemas(self) -> list[str]: ...
 
     @abc.abstractmethod
-    def list_tables(self, schema: Optional[str]) -> list[TableInfo]: ...
+    def list_tables(self, schema: str | None) -> list[TableInfo]: ...
 
     @abc.abstractmethod
-    def table_counts(self, schema: Optional[str]) -> list[tuple[str, int]]: ...
+    def table_counts(self, schema: str | None) -> list[tuple[str, int]]: ...
 
     @abc.abstractmethod
-    def query_table(self, schema: Optional[str], table: str, opts: QueryOpts) -> TableData: ...
+    def query_table(self, schema: str | None, table: str, opts: QueryOpts) -> TableData: ...
 
     @abc.abstractmethod
-    def common_values(self, schema: Optional[str], table: str, column: str) -> list[tuple[str, float]]: ...
+    def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]: ...
 
 
 # The hardcoded wire-operator -> SQL-keyword table (spec/protocol.md

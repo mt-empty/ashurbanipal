@@ -68,7 +68,7 @@ class Config:
         return any(e.lower() in ("any", env) for e in self.enabled_for)
 
     @classmethod
-    def from_toml(cls, text: str) -> "Config":
+    def from_toml(cls, text: str) -> Config:
         data = tomllib.loads(text)
         if "environment" not in data:
             raise ValueError('ashurbanipal config: missing required key "environment"')

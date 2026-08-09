@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Optional
 
 # Derived by measurement (implementations/rust/src/filter.rs), not picked
 # fresh here: over the valid cases in spec/fixtures/parser-tests.json the
@@ -31,9 +30,9 @@ _CONDITION_FIELDS = {"logic", "not", "column", "op", "value"}
 class Condition:
     column: str
     op: str
-    logic: Optional[str] = None
+    logic: str | None = None
     not_: bool = False
-    value: Optional[str] = None
+    value: str | None = None
 
 
 class FilterError(Exception):
