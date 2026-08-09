@@ -592,6 +592,12 @@
       "table": "users",
       "raw": "[{\"column\":\"email\",",
       "expect_error": "malformed"
+    },
+    {
+      "name": "null-array-elements",
+      "table": "users",
+      "raw": "[null,null,null]",
+      "expect_error": "malformed"
     }
   ]
 }

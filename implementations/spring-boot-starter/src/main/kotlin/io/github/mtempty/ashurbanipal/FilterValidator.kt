@@ -55,7 +55,11 @@ class FilterValidator {
         if (byteLength > MAX_FILTER_BYTES) {
             throw FilterException("filter too long: $byteLength bytes (max $MAX_FILTER_BYTES)")
         }
-        val conditions: List<Condition> = try {
+        // Jackson/jackson-module-kotlin enforces non-null on constructor params it
+        // fills in, but not on a collection's element type, so `List<Condition>`
+        // can come back holding a runtime null despite the compile-time type —
+        // checked and rejected explicitly below before anything dereferences it.
+        val conditions: List<Condition?> = try {
             mapper.readValue(raw)
         } catch (e: Exception) {
             throw FilterException("filter must be a JSON array of conditions: ${e.message}")
@@ -63,7 +67,8 @@ class FilterValidator {
         if (conditions.size > MAX_CONDITIONS) {
             throw FilterException("too many conditions: ${conditions.size} (max $MAX_CONDITIONS)")
         }
-        conditions.forEachIndexed { i, condition ->
+        return conditions.mapIndexed { i, maybeCondition ->
+            val condition = maybeCondition ?: throw FilterException("condition $i must not be null")
             if (i == 0 && condition.logic != null) {
                 throw FilterException("logic must be absent on the first condition")
             }
@@ -83,8 +88,8 @@ class FilterValidator {
             if (!takesValue && condition.value != null) {
                 throw FilterException("op ${condition.op} takes no value")
             }
+            condition
         }
-        return conditions
     }
 
     /**
