@@ -52,16 +52,16 @@ viewer, never one silently enabled with defaults.
   Flask view functions.
 - `ashurbanipal/embed.py` — the vendored `frontend/dbviewer.html`,
   sha256-reverified on every import (see "Vendoring" below).
-- `demo/app.py` — the runnable example host, `python demo/app.py`.
+- `demo/app.py` — the runnable example host, `uv run python demo/app.py`.
 
 ## Backends
 
 Set `ASHURBANIPAL_BACKEND` (default `postgres`) before running `demo/app.py`:
 
 ```sh
-python demo/app.py                                                    # postgres, needs DATABASE_URL
-ASHURBANIPAL_BACKEND=sqlite ASHURBANIPAL_SQLITE_PATH=./demo.db python demo/app.py
-ASHURBANIPAL_BACKEND=mysql MYSQL_TEST_URL=mysql://root:pw@host:3306/db python demo/app.py  # or MARIADB_TEST_URL
+uv run python demo/app.py                                                    # postgres, needs DATABASE_URL
+ASHURBANIPAL_BACKEND=sqlite ASHURBANIPAL_SQLITE_PATH=./demo.db uv run python demo/app.py
+ASHURBANIPAL_BACKEND=mysql MYSQL_TEST_URL=mysql://root:pw@host:3306/db uv run python demo/app.py  # or MARIADB_TEST_URL
 ```
 
 `SqliteSource` needs a real file path, not `:memory:` — SQLite's in-memory
@@ -80,8 +80,8 @@ open if reused unchanged). Verified empirically against both engines in
 ## Tests
 
 ```sh
-pip install -e ".[dev]"
-pytest -q
+uv sync --extra dev
+uv run pytest -q
 ```
 
 - `tests/test_filter_fixtures.py` — the shared
@@ -110,7 +110,7 @@ pytest -q
 ## Conformance
 
 ```sh
-python demo/app.py &
+uv run python demo/app.py &
 ASHURBANIPAL_CONFORMANCE_URL=http://localhost:4000/__ashurbanipal bash ../../conformance/runner/report.sh
 ASHURBANIPAL_CONFORMANCE_URL=http://localhost:4000/__ashurbanipal bash ../../conformance/runner/schema-check.sh
 ```
