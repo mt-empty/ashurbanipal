@@ -1,8 +1,8 @@
 import java.security.MessageDigest
 
 plugins {
-    kotlin("jvm") version "2.3.21"
-    kotlin("plugin.spring") version "2.3.21"
+    kotlin("jvm") version "2.4.0"
+    kotlin("plugin.spring") version "2.4.0"
     `maven-publish`
 }
 
@@ -54,7 +54,7 @@ dependencies {
     // spring-webmvc above: a host opting into ashurbanipal.backend=sqlite
     // already needs this driver on its own runtime classpath to build a
     // working SQLite DataSource in the first place.
-    compileOnly("org.xerial:sqlite-jdbc:3.49.1.0")
+    compileOnly("org.xerial:sqlite-jdbc:3.53.2.1")
 
     // Test-only: a host app's web stack, JDBC driver, and JSON-Kotlin glue
     // to actually boot the starter against a live database.
@@ -69,8 +69,8 @@ dependencies {
     // to provide at runtime (via their own DataSource bean), never a main
     // dependency of this starter (mirrors the Rust crate's mysql/sqlite
     // Cargo features being opt-in, not always-linked).
-    testImplementation("com.mysql:mysql-connector-j:9.3.0")
-    testImplementation("org.xerial:sqlite-jdbc:3.49.1.0")
+    testImplementation("com.mysql:mysql-connector-j:9.7.0")
+    testImplementation("org.xerial:sqlite-jdbc:3.53.2.1")
     // Gradle's own test worker bundles an older junit-platform-launcher than
     // Spring Boot's BOM-managed junit-jupiter needs; without this explicit
     // version-aligned one, test discovery fails with an
