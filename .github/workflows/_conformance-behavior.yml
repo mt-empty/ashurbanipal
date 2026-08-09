@@ -106,11 +106,12 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
-      - name: Set up Python toolchain
+      - name: Set up uv (Python toolchain)
         if: inputs.toolchain == 'python'
-        uses: actions/setup-python@v6
+        uses: astral-sh/setup-uv@v9
         with:
           python-version: ${{ inputs.python-version }}
+          enable-cache: true
 
       # The conformance runner itself (layer 3) is Rust regardless of which
       # implementation is under test — report.sh always runs `cargo test`

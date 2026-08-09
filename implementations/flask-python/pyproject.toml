@@ -12,8 +12,7 @@ postgres = ["psycopg[binary]>=3.1"]
 mysql = ["pymysql>=1.1"]
 # sqlite uses the stdlib sqlite3 module — no extra dependency.
 dev = [
-    "psycopg[binary]>=3.1",
-    "pymysql>=1.1",
+    "ashurbanipal-flask[postgres,mysql]",
     "pytest>=8.0",
     "ruff>=0.6",
 ]
@@ -29,8 +28,8 @@ target-version = "py311"
 select = ["E", "F", "I"]
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.packages.find]
-include = ["ashurbanipal*"]
+[tool.hatch.build.targets.wheel]
+packages = ["ashurbanipal"]

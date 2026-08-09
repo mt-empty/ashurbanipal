@@ -56,21 +56,22 @@ jobs:
           sudo apt-get update && sudo apt-get install -y postgresql-client
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
 
-      - uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@v9
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
 
       - name: Install
         working-directory: implementations/flask-python
-        run: pip install -e ".[dev]"
+        run: uv sync --extra dev
 
       - name: ruff check
         working-directory: implementations/flask-python
-        run: ruff check .
+        run: uv run ruff check .
 
       - name: ruff format --check
         working-directory: implementations/flask-python
-        run: ruff format --check .
+        run: uv run ruff format --check .
 
       # Vendored frontend re-hash: catches a build pipeline silently
       # mangling the copy at implementations/flask-python/frontend/dbviewer.html
@@ -79,7 +80,7 @@ jobs:
       # importing it is the check.
       - name: Verify vendored frontend checksum
         working-directory: implementations/flask-python
-        run: python -c "import ashurbanipal.embed"
+        run: uv run python -c "import ashurbanipal.embed"
 
       # test_filter_fixtures.py, test_config.py, test_killswitch.py and
       # test_sqlite.py need no external service; test_postgres_integration.py
@@ -88,7 +89,7 @@ jobs:
       # MARIADB_TEST_URL (no such service in this job).
       - name: Test
         working-directory: implementations/flask-python
-        run: pytest -q
+        run: uv run pytest -q
 
   conformance:
     name: Flask — conformance kit (external-URL path)
@@ -99,8 +100,8 @@ jobs:
       python-version: "3.12"
       start-command: >-
         cd implementations/flask-python &&
-        pip install -e ".[postgres]" &&
-        PORT=4000 python demo/app.py
+        uv sync --extra postgres &&
+        PORT=4000 uv run python demo/app.py
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: flask-python-conformance-report
@@ -114,7 +115,7 @@ jobs:
       python-version: "3.12"
       start-command: >-
         cd implementations/flask-python &&
-        pip install -e ".[postgres]" &&
-        PORT=4000 python demo/app.py
+        uv sync --extra postgres &&
+        PORT=4000 uv run python demo/app.py
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
