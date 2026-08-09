@@ -1,8 +1,8 @@
 import { Database } from "sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { SqliteSource } from "../../src/db/sqlite.js";
-import { NotAllowedError } from "../../src/errors.js";
 import type { QueryOpts } from "../../src/db/types.js";
+import { NotAllowedError } from "../../src/errors.js";
 
 // No external infrastructure needed (":memory:"), mirroring
 // implementations/rust/src/db/sqlite.rs's own #[cfg(test)] suite.

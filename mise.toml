@@ -29,8 +29,8 @@ description = "go-nethttp implementation checks: build, vet, fmt-check, test"
 depends = ["go:build", "go:vet", "go:fmt-check", "go:test"]
 
 [tasks.node]
-description = "node-express implementation checks: typecheck, build, test"
-depends = ["node:typecheck", "node:build", "node:test"]
+description = "node-express implementation checks: lint, typecheck, build, test"
+depends = ["node:lint", "node:typecheck", "node:build", "node:test"]
 
 [tasks.flask]
 description = "flask-python implementation checks: lint, fmt-check, test"
@@ -160,6 +160,12 @@ dir = "implementations/go-nethttp"
 description = "pnpm install --frozen-lockfile"
 run = "pnpm install --frozen-lockfile"
 dir = "implementations/node-express"
+
+[tasks."node:lint"]
+description = "biome check ."
+run = "pnpm run lint"
+dir = "implementations/node-express"
+depends = ["node:install"]
 
 [tasks."node:typecheck"]
 description = "tsc --noEmit"

@@ -1,8 +1,8 @@
 import mysql, { type Pool } from "mysql2/promise";
 import { afterAll, describe, expect, it } from "vitest";
 import { MySqlSource, timedSelect, type Variant } from "../../src/db/mysql.js";
-import { NotAllowedError } from "../../src/errors.js";
 import type { QueryOpts } from "../../src/db/types.js";
+import { NotAllowedError } from "../../src/errors.js";
 
 // Live-instance coverage, mirroring implementations/rust/src/db/mysql.rs's
 // #[cfg(test)] suite — run against the devcontainer's real `mysql` and

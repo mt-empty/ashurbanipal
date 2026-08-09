@@ -31,7 +31,7 @@ env:
 
 jobs:
   build-and-test:
-    name: npm build/typecheck + fixture/kill-switch/schema tests
+    name: biome + npm build/typecheck + fixture/kill-switch/schema tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -69,6 +69,10 @@ jobs:
       - name: Install
         working-directory: implementations/node-express
         run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        working-directory: implementations/node-express
+        run: pnpm run lint
 
       - name: Typecheck
         working-directory: implementations/node-express

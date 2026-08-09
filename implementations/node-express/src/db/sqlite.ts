@@ -1,16 +1,16 @@
 import type { Database } from "sqlite3";
+import { FilterError, NotAllowedError, quoteIdent } from "../errors.js";
 import type { Condition } from "../filter.js";
-import { NotAllowedError, FilterError, quoteIdent } from "../errors.js";
 import {
-  cellToJson,
-  findExact,
-  opSql,
-  opTakesValue,
   type ColumnInfo,
   type ColumnRef,
   type CommonValueEntry,
   type CountEntry,
+  cellToJson,
   type DbSource,
+  findExact,
+  opSql,
+  opTakesValue,
   type QueryOpts,
   type TableData,
   type TableInfo,
@@ -233,12 +233,7 @@ export class SqliteSource implements DbSource {
     return tables.map((table) => ({ table, approx_rows: -1 }));
   }
 
-  async queryTable(
-    schema: string | undefined,
-    table: string,
-    opts: QueryOpts,
-    timeoutMs: number,
-  ): Promise<TableData> {
+  async queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData> {
     checkSchema(schema);
     const tables = await allowedTables(this.db, timeoutMs);
     const realTable = findExact(tables, table);
@@ -287,13 +282,9 @@ export class SqliteSource implements DbSource {
     // SQLite (confirmed empirically), not the source column name — row
     // access by name below (cellToJson via col.name) would otherwise
     // silently read undefined for every cell.
-    const selectList = columns
-      .map((c) => `CAST(${quoteIdent(c.name)} AS TEXT) AS ${quoteIdent(c.name)}`)
-      .join(", ");
+    const selectList = columns.map((c) => `CAST(${quoteIdent(c.name)} AS TEXT) AS ${quoteIdent(c.name)}`).join(", ");
     const orderClause =
-      sort !== undefined
-        ? ` order by ${quotedTable}.${quoteIdent(sort)} ${opts.descending ? "desc" : "asc"}`
-        : "";
+      sort !== undefined ? ` order by ${quotedTable}.${quoteIdent(sort)} ${opts.descending ? "desc" : "asc"}` : "";
     const sql = `select ${selectList} from ${quotedTable}${whereClause}${orderClause} limit ? offset ?`;
     const params = [...filterValues, opts.limit, opts.offset];
 
