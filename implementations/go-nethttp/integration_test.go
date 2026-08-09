@@ -42,7 +42,8 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	cfg := Config{Environment: "dev", EnabledFor: []string{"dev"}}
-	handler, err := Router(cfg, db)
+	source := NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
+	handler, err := Router(cfg, source)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Router: %v\n", err)
 		os.Exit(1)

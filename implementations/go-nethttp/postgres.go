@@ -7,72 +7,10 @@ import (
 	"time"
 )
 
-// KeyKind is "pk" or "fk" — spec/protocol.md §5.4.1.
-type KeyKind string
-
-const (
-	KeyPK KeyKind = "pk"
-	KeyFK KeyKind = "fk"
-)
-
-// ColumnRef is the {table, column} a foreign-key column references.
-type ColumnRef struct {
-	Table  string `json:"table"`
-	Column string `json:"column"`
-	// Schema is only set when the referenced table lives in a schema other
-	// than the referencing column's own — same-schema FKs (the common
-	// case) omit it, so the wire payload is unchanged from before this
-	// field existed (additive, spec/protocol.md §7 versioning policy).
-	Schema string `json:"schema,omitempty"`
-}
-
-// ColumnInfo is one column's metadata, sourced entirely from schema
-// catalogs (spec/protocol.md §5.4.1) — never used to build SQL itself.
-type ColumnInfo struct {
-	Name       string     `json:"name"`
-	Type       string     `json:"type"`
-	Key        KeyKind    `json:"key,omitempty"`
-	References *ColumnRef `json:"references,omitempty"`
-	Comment    string     `json:"comment,omitempty"`
-}
-
-// TableInfo is one entry of GET /api/tables.
-type TableInfo struct {
-	Name    string  `json:"name"`
-	Comment *string `json:"comment,omitempty"`
-}
-
-// TableData is the full response body of GET /api/tables/data.
-type TableData struct {
-	Columns     []ColumnInfo         `json:"columns"`
-	Rows        []map[string]*string `json:"rows"`
-	TotalApprox int64                `json:"total_approx"`
-}
-
-// CountEntry is one entry of GET /api/table-counts.
-type CountEntry struct {
-	Table      string `json:"table"`
-	ApproxRows int64  `json:"approx_rows"`
-}
-
-// CommonValueEntry is one entry of GET /api/tables/common-values.
-type CommonValueEntry struct {
-	Value string  `json:"value"`
-	Freq  float32 `json:"freq"`
-}
-
-// QueryOpts parameterizes GET /api/tables/data.
-type QueryOpts struct {
-	Limit      int64
-	Offset     int64
-	Sort       *string
-	Descending bool
-	Filter     []Condition
-}
-
-// Catalog is the one seam to the database — the query.go handlers never
-// touch *sql.DB directly. Every query (catalog/metadata included, not just
-// row fetches) is bounded by the same configured timeout.
+// PostgresSource is the default/reference DbSource implementation — ported
+// line-for-line against implementations/rust/src/db/postgres.rs's catalog
+// SQL. Every query (catalog/metadata included, not just row fetches) is
+// bounded by the same configured timeout.
 //
 // Deliberate deviation from the Rust reference, documented per
 // implementation.md §5.5 item 7 (catalog SQL diffed against db.rs, not
@@ -84,65 +22,22 @@ type QueryOpts struct {
 // require a second, separately-hardcoded bound for catalog queries. This
 // port applies the one configured value uniformly — matching the Spring
 // Boot port's single JdbcTemplate.queryTimeout, which does the same.
-type Catalog struct {
+type PostgresSource struct {
 	db      *sql.DB
 	timeout time.Duration
 }
 
-type queryer interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
+// NewPostgresSource builds a DbSource backed by db, bounding every query
+// (catalog and data alike) by queryTimeoutSecs. db must already be opened
+// with a Postgres driver (e.g. github.com/jackc/pgx/v5/stdlib).
+func NewPostgresSource(db *sql.DB, queryTimeoutSecs int) *PostgresSource {
+	return &PostgresSource{db: db, timeout: time.Duration(queryTimeoutSecs) * time.Second}
 }
 
-func newCatalog(db *sql.DB, queryTimeoutSecs int) *Catalog {
-	return &Catalog{db: db, timeout: time.Duration(queryTimeoutSecs) * time.Second}
-}
+var _ DbSource = (*PostgresSource)(nil)
 
-func (c *Catalog) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
+func (c *PostgresSource) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, c.timeout)
-}
-
-func findExact(haystack []string, needle string) (string, bool) {
-	for _, s := range haystack {
-		if s == needle {
-			return s, true
-		}
-	}
-	return "", false
-}
-
-// cellValue is a database/sql.Scanner that never fails: since every
-// SELECTed column is already `::text`-cast in the query text itself (never
-// decoded into a native type and reformatted in Go — spec/protocol.md
-// §5.4.3's cast-in-SQL requirement), the driver always hands back a
-// string, []byte, or nil. Falling back to the sentinel on any other shape
-// (rather than returning an error and aborting the whole row's Scan)
-// mirrors the Rust reference's per-column row_to_json fallback.
-type cellValue struct {
-	null bool
-	str  string
-}
-
-func (c *cellValue) Scan(src interface{}) error {
-	switch v := src.(type) {
-	case nil:
-		c.null = true
-	case string:
-		c.str = v
-	case []byte:
-		c.str = string(v)
-	default:
-		c.str = "<undecodable>"
-	}
-	return nil
-}
-
-func (c *cellValue) asJSON() *string {
-	if c.null {
-		return nil
-	}
-	s := c.str
-	return &s
 }
 
 // allowedSchemas excludes the catalogs themselves (`pg_catalog`,
@@ -150,7 +45,7 @@ func (c *cellValue) asJSON() *string {
 // connected role can't actually use, so a schema only ever appears here if
 // it's both a real user namespace and one this role has USAGE on
 // (spec/protocol.md §5.7).
-func (c *Catalog) allowedSchemas(ctx context.Context, db queryer) ([]string, error) {
+func (c *PostgresSource) allowedSchemas(ctx context.Context, db queryer) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := db.QueryContext(ctx,
@@ -182,7 +77,7 @@ func (c *Catalog) allowedSchemas(ctx context.Context, db queryer) ([]string, err
 // against the operation's own transaction, which pins the whole operation
 // to one physical connection — immune to pool sessions with divergent
 // search_path.
-func (c *Catalog) resolveSchema(ctx context.Context, db queryer, requested *string) (string, error) {
+func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requested *string) (string, error) {
 	schemas, err := c.allowedSchemas(ctx, db)
 	if err != nil {
 		return "", err
@@ -204,7 +99,7 @@ func (c *Catalog) resolveSchema(ctx context.Context, db queryer, requested *stri
 	return real, nil
 }
 
-func (c *Catalog) allowedTables(ctx context.Context, db queryer, schema string) ([]string, error) {
+func (c *PostgresSource) allowedTables(ctx context.Context, db queryer, schema string) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := db.QueryContext(ctx,
@@ -226,7 +121,7 @@ func (c *Catalog) allowedTables(ctx context.Context, db queryer, schema string) 
 	return out, rows.Err()
 }
 
-func (c *Catalog) allowedColumns(ctx context.Context, db queryer, schema, table string) ([]string, error) {
+func (c *PostgresSource) allowedColumns(ctx context.Context, db queryer, schema, table string) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := db.QueryContext(ctx,
@@ -269,7 +164,7 @@ type fkCandidate struct {
 // schema, which for a cross-schema FK differs from the constraining
 // table's schema). Joining on `ccu.table_schema` instead silently drops
 // every cross-schema FK's metadata (the LEFT JOIN just never matches).
-func (c *Catalog) keyMetadata(ctx context.Context, db queryer, schema, table string) (map[string]bool, map[string]ColumnRef, error) {
+func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, table string) (map[string]bool, map[string]ColumnRef, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := db.QueryContext(ctx,
@@ -337,7 +232,7 @@ func (c *Catalog) keyMetadata(ctx context.Context, db queryer, schema, table str
 }
 
 // ListSchemas serves GET /api/schemas.
-func (c *Catalog) ListSchemas(ctx context.Context) ([]string, error) {
+func (c *PostgresSource) ListSchemas(ctx context.Context) ([]string, error) {
 	schemas, err := c.allowedSchemas(ctx, c.db)
 	if err != nil {
 		return nil, err
@@ -349,7 +244,7 @@ func (c *Catalog) ListSchemas(ctx context.Context) ([]string, error) {
 }
 
 // ListTables serves GET /api/tables.
-func (c *Catalog) ListTables(ctx context.Context, schema *string) ([]TableInfo, error) {
+func (c *PostgresSource) ListTables(ctx context.Context, schema *string) ([]TableInfo, error) {
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
@@ -398,7 +293,7 @@ func (c *Catalog) ListTables(ctx context.Context, schema *string) ([]TableInfo, 
 }
 
 // TableCounts serves GET /api/table-counts.
-func (c *Catalog) TableCounts(ctx context.Context, schema *string) ([]CountEntry, error) {
+func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]CountEntry, error) {
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
@@ -444,7 +339,7 @@ func (c *Catalog) TableCounts(ctx context.Context, schema *string) ([]CountEntry
 // QueryTable serves GET /api/tables/data: validates schema/table/sort/
 // filter columns against the live schema, then runs one parameterized
 // SELECT.
-func (c *Catalog) QueryTable(ctx context.Context, schema *string, table string, opts QueryOpts) (TableData, error) {
+func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table string, opts QueryOpts) (TableData, error) {
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return TableData{}, err
@@ -653,7 +548,7 @@ func (c *Catalog) QueryTable(ctx context.Context, schema *string, table string, 
 }
 
 // CommonValues serves GET /api/tables/common-values.
-func (c *Catalog) CommonValues(ctx context.Context, schema *string, table, column string) ([]CommonValueEntry, error) {
+func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table, column string) ([]CommonValueEntry, error) {
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
@@ -739,15 +634,4 @@ func (c *Catalog) CommonValues(ctx context.Context, schema *string, table, colum
 		return nil, err
 	}
 	return entries, nil
-}
-
-func joinComma(parts []string) string {
-	out := ""
-	for i, p := range parts {
-		if i > 0 {
-			out += ", "
-		}
-		out += p
-	}
-	return out
 }
