@@ -2,10 +2,22 @@
 name = "ashurbanipal-flask"
 version = "0.1.0"
 description = "Flask port of Ashurbanipal — spec/protocol.md read-only DB-browsing web UI"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "MT" }]
 requires-python = ">=3.11"
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Framework :: Flask",
+]
 dependencies = [
     "flask>=3.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/mt-empty/ashurbanipal"
+Homepage = "https://github.com/mt-empty/ashurbanipal/tree/main/implementations/flask-python"
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.3.4"]

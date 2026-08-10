@@ -1,5 +1,5 @@
 //! True black-box test harness: talks to an implementation only over real
-//! HTTP. This file must never `use ashurbanipal::...` — the whole point is
+//! HTTP. This file must never `use ashurbanipal_axum::...` — the whole point is
 //! that this suite (and every test file in `conformance/runner`) is
 //! rewritable in any language with no loss; it's the mechanism a Spring
 //! Boot/Go/Elixir port's own CI runs unmodified against its own server.

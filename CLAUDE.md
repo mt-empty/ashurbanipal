@@ -19,7 +19,7 @@ repo, any language, any file, tests and scripts included, not just
 Ashurbanipal is a Rust/Axum crate that a host service embeds to get a
 read-only web UI for browsing its own Postgres tables (no separate DB
 client, no extra credentials, no build step). It ships as a single crate:
-the host does `app.merge(ashurbanipal::router(config, db_source))` and gets
+the host does `app.merge(ashurbanipal_axum::router(config, db_source))` and gets
 seven routes under a fixed `/__ashurbanipal` prefix — six API routes plus
 the UI itself.
 

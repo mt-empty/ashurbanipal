@@ -6,12 +6,12 @@
 //!
 //! ```no_run
 //! # async fn example(pool: sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
-//! let config = ashurbanipal::Config::from_toml(r#"
+//! let config = ashurbanipal_axum::Config::from_toml(r#"
 //!     environment = "dev"
 //!     enabled_for = ["dev", "integration"]
 //! "#)?;
 //! let app: axum::Router = axum::Router::new()
-//!     .merge(ashurbanipal::router(config, ashurbanipal::PgPoolSource::new(pool)));
+//!     .merge(ashurbanipal_axum::router(config, ashurbanipal_axum::PgPoolSource::new(pool)));
 //! # Ok(()) }
 //! ```
 //!

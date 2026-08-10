@@ -1,8 +1,14 @@
 {
   "name": "ashurbanipal-node-express",
   "version": "0.1.0",
-  "private": true,
   "description": "Node.js/Express + node-postgres port of Ashurbanipal (spec/protocol.md)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mt-empty/ashurbanipal.git",
+    "directory": "implementations/node-express"
+  },
+  "homepage": "https://github.com/mt-empty/ashurbanipal/tree/main/implementations/node-express",
   "type": "module",
   "engines": {
     "node": ">=24"

@@ -1,10 +1,12 @@
 [package]
-name = "ashurbanipal"
+name = "ashurbanipal-axum"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.94"
 description = "Embeddable, read-only database browser for lower environments"
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/mt-empty/ashurbanipal"
 
 [dependencies]
 axum = "0.8"

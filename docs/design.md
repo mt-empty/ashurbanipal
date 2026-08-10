@@ -168,7 +168,7 @@ Two components, same as the original concept:
   host service merges into its own app, e.g.:
 
   ```rust
-  app.merge(ashurbanipal::router(config, db_source));
+  app.merge(ashurbanipal_axum::router(config, db_source));
   ```
 
 - Does not open its own DB connection. Takes a `DbSource` (see §5) backed by

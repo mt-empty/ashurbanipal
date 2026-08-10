@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ashurbanipal"
+name = "ashurbanipal-axum"
 version = "0.1.0"
 dependencies = [
  "axum",
