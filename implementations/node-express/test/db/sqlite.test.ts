@@ -22,8 +22,13 @@ function seededDb(): Promise<Database> {
            user_id integer references users(id),
            status text not null
          );
+         create table order_extra (
+           order_id integer primary key references orders(id),
+           gift_message text
+         );
          insert into users (email, age) values ('a@x.com', 30), ('b@x.com', 30), ('c@x.com', 40);
-         insert into orders (user_id, status) values (1, 'open');`,
+         insert into orders (user_id, status) values (1, 'open');
+         insert into order_extra (order_id, gift_message) values (1, 'enjoy!');`,
         (execErr) => {
           if (execErr) reject(execErr);
           else resolve(db);
@@ -53,7 +58,7 @@ describe("SqliteSource", () => {
     const source = new SqliteSource(db);
 
     const tables = await source.listTables(undefined, 5000);
-    expect(tables.map((t) => t.name)).toEqual(["orders", "users"]);
+    expect(tables.map((t) => t.name)).toEqual(["order_extra", "orders", "users"]);
     expect(tables.every((t) => t.comment === undefined)).toBe(true);
 
     expect(await source.listSchemas()).toEqual(["main"]);
@@ -81,11 +86,21 @@ describe("SqliteSource", () => {
     expect(userIdCol?.references).toEqual({ table: "users", column: "id" });
   });
 
+  it("reports both key and references for a column that is its own PK and an FK", async () => {
+    db = await seededDb();
+    const source = new SqliteSource(db);
+    const data = await source.queryTable(undefined, "order_extra", baseOpts, 5000);
+    const orderIdCol = data.columns.find((c) => c.name === "order_id");
+    expect(orderIdCol?.key).toBe("pk");
+    expect(orderIdCol?.references).toEqual({ table: "orders", column: "id" });
+  });
+
   it("table_counts always reports the -1 no-estimate sentinel", async () => {
     db = await seededDb();
     const source = new SqliteSource(db);
     const counts = await source.tableCounts(undefined, 5000);
     expect(counts).toEqual([
+      { table: "order_extra", approx_rows: -1 },
       { table: "orders", approx_rows: -1 },
       { table: "users", approx_rows: -1 },
     ]);

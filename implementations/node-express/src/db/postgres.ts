@@ -281,6 +281,7 @@ export class PostgresSource implements DbSource {
         const col: ColumnInfo = { name: ct.column_name, type: ct.data_type };
         if (pkColumns.has(ct.column_name)) {
           col.key = "pk";
+          if (fkColumns.has(ct.column_name)) col.references = fkColumns.get(ct.column_name);
         } else if (fkColumns.has(ct.column_name)) {
           col.key = "fk";
           col.references = fkColumns.get(ct.column_name);

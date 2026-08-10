@@ -357,15 +357,15 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 		if col.Type == "" {
 			col.Type = "unknown"
 		}
+		if ref, ok := fkColumns[ct.name]; ok {
+			r := ref
+			col.References = &r
+		}
 		switch {
 		case pkColumns[ct.name]:
 			col.Key = KeyPK
-		default:
-			if ref, ok := fkColumns[ct.name]; ok {
-				col.Key = KeyFK
-				r := ref
-				col.References = &r
-			}
+		case col.References != nil:
+			col.Key = KeyFK
 		}
 		columns = append(columns, col)
 	}

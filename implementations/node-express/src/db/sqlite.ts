@@ -270,6 +270,7 @@ export class SqliteSource implements DbSource {
       };
       if (pkColumns.has(ct.name)) {
         col.key = "pk";
+        if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
       } else if (fkColumns.has(ct.name)) {
         col.key = "fk";
         col.references = fkColumns.get(ct.name);

@@ -79,6 +79,11 @@ func seededMySQLDB(t *testing.T, baseURL string) *sql.DB {
 			status varchar(50) not null,
 			constraint fk_orders_user foreign key (user_id) references users(id)
 		)`,
+		`create table order_extra (
+			order_id integer primary key,
+			gift_message varchar(255),
+			constraint fk_order_extra_order foreign key (order_id) references orders(id)
+		)`,
 	}
 	for _, stmt := range schema {
 		if _, err := db.Exec(stmt); err != nil {
@@ -95,6 +100,9 @@ func seededMySQLDB(t *testing.T, baseURL string) *sql.DB {
 	}
 	if _, err := db.Exec("insert into orders (user_id, status) values (1, 'open')"); err != nil {
 		t.Fatalf("seeding orders: %v", err)
+	}
+	if _, err := db.Exec("insert into order_extra (order_id, gift_message) values (1, 'enjoy!')"); err != nil {
+		t.Fatalf("seeding order_extra: %v", err)
 	}
 	return db
 }
@@ -145,8 +153,8 @@ func TestMySQLListTablesAndQueryTableRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTables: %v", err)
 	}
-	if len(tables) != 2 || tables[0].Name != "orders" || tables[1].Name != "users" {
-		t.Fatalf("got tables %+v, want [orders users]", tables)
+	if len(tables) != 3 || tables[0].Name != "order_extra" || tables[1].Name != "orders" || tables[2].Name != "users" {
+		t.Fatalf("got tables %+v, want [order_extra orders users]", tables)
 	}
 
 	other := "no_such_schema"
@@ -191,6 +199,27 @@ func TestMySQLForeignKeyColumnReportsKeyAndReferences(t *testing.T) {
 	}
 	if userID.References == nil || userID.References.Table != "users" || userID.References.Column != "id" {
 		t.Errorf("orders.user_id.references = %+v, want {users id}", userID.References)
+	}
+}
+
+func TestMySQLPKAndFKColumnReportsBoth(t *testing.T) {
+	db := seededMySQLDB(t, testURL(t))
+	source := NewMySQLSource(db, 5)
+	data, err := source.QueryTable(context.Background(), nil, "order_extra", QueryOpts{Limit: 10})
+	if err != nil {
+		t.Fatalf("QueryTable: %v", err)
+	}
+	var orderID *ColumnInfo
+	for i := range data.Columns {
+		if data.Columns[i].Name == "order_id" {
+			orderID = &data.Columns[i]
+		}
+	}
+	if orderID == nil || orderID.Key != KeyPK {
+		t.Fatalf("order_extra.order_id = %+v, want key=pk", orderID)
+	}
+	if orderID.References == nil || orderID.References.Table != "orders" || orderID.References.Column != "id" {
+		t.Errorf("order_extra.order_id.references = %+v, want {orders id}", orderID.References)
 	}
 }
 

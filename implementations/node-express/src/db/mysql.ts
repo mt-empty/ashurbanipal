@@ -438,6 +438,7 @@ export class MySqlSource implements DbSource {
         const col: ColumnInfo = { name, type: r.data_type as string };
         if (pkColumns.has(name)) {
           col.key = "pk";
+          if (fkColumns.has(name)) col.references = fkColumns.get(name);
         } else if (fkColumns.has(name)) {
           col.key = "fk";
           col.references = fkColumns.get(name);

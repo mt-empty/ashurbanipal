@@ -41,7 +41,7 @@ description = "frontend checks: Playwright e2e suite against dbviewer.html"
 depends = ["frontend:check-go-sync", "frontend:test-e2e"]
 
 [tasks."frontend:sync-ports"]
-description = "sync the canonical frontend and re-pin its Go and Spring consumers"
+description = "sync the canonical frontend and re-pin its Go, Spring, Node, and Flask consumers"
 run = "tools/sync-ports-frontend.sh"
 
 [tasks."frontend:check-go-sync"]

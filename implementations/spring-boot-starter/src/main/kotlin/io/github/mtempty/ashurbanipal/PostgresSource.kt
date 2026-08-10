@@ -243,7 +243,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             when {
                 pkColumns.contains(name) -> {
                     key = "pk"
-                    references = null
+                    references = fkColumns[name]
                 }
                 fkColumns.containsKey(name) -> {
                     key = "fk"
