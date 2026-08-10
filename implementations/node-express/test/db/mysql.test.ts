@@ -61,6 +61,10 @@ async function seededDb(baseUrl: string): Promise<SeededDb> {
     "create table orders (id integer primary key auto_increment, user_id integer, status varchar(50) not null, " +
       "constraint fk_orders_user foreign key (user_id) references users(id))",
   );
+  await pool.query(
+    "create table order_extra (order_id integer primary key, gift_message varchar(255), " +
+      "constraint fk_order_extra_order foreign key (order_id) references orders(id))",
+  );
   for (const [email, age] of [
     ["a@x.com", 30],
     ["b@x.com", 30],
@@ -69,6 +73,7 @@ async function seededDb(baseUrl: string): Promise<SeededDb> {
     await pool.query("insert into users (email, age) values (?, ?)", [email, age]);
   }
   await pool.query("insert into orders (user_id, status) values (1, 'open')");
+  await pool.query("insert into order_extra (order_id, gift_message) values (1, 'enjoy!')");
 
   return { pool, name };
 }
@@ -118,7 +123,11 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       const source = new MySqlSource(db.pool);
 
       const tables = await source.listTables(undefined, 5000);
-      expect(tables.map((t) => t.name)).toEqual(["orders", "users"]);
+      // Set, not array order: MariaDB's default collation sorts "order_extra"
+      // after "orders" (underscore outweighs letters), unlike MySQL — exact
+      // cross-collation ordering isn't a guarantee this project makes (see
+      // docs/adapter-decisions.md §5.2).
+      expect(new Set(tables.map((t) => t.name))).toEqual(new Set(["order_extra", "orders", "users"]));
       expect(tables.every((t) => t.comment === undefined)).toBe(true);
 
       await expect(source.listTables("no_such_schema", 5000)).rejects.toBeInstanceOf(NotAllowedError);
@@ -141,6 +150,16 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       expect(userIdCol?.key).toBe("fk");
       expect(userIdCol?.references?.table).toBe("users");
       expect(userIdCol?.references?.column).toBe("id");
+    });
+
+    it("reports both key and references for a column that is its own PK and an FK", async () => {
+      const db = await fresh();
+      const source = new MySqlSource(db.pool);
+      const data = await source.queryTable(undefined, "order_extra", baseOpts, 5000);
+      const orderIdCol = data.columns.find((c) => c.name === "order_id");
+      expect(orderIdCol?.key).toBe("pk");
+      expect(orderIdCol?.references?.table).toBe("orders");
+      expect(orderIdCol?.references?.column).toBe("id");
     });
 
     it("table_counts reports a real estimate, not the no-mechanism sentinel", async () => {

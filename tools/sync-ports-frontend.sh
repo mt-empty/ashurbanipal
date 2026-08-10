@@ -6,6 +6,10 @@ source="$root/frontend/dbviewer.html"
 go_frontend="$root/implementations/go-nethttp/frontend/dbviewer.html"
 go_embed="$root/implementations/go-nethttp/embed.go"
 spring_build="$root/implementations/spring-boot-starter/build.gradle.kts"
+node_frontend="$root/implementations/node-express/frontend/dbviewer.html"
+node_embed="$root/implementations/node-express/src/embed.ts"
+flask_frontend="$root/implementations/flask-python/frontend/dbviewer.html"
+flask_embed="$root/implementations/flask-python/ashurbanipal/embed.py"
 sha256=$(sha256sum "$source" | awk '{print $1}')
 
 if [ "${1:-}" = "--check" ]; then
@@ -21,6 +25,22 @@ if [ "${1:-}" = "--check" ]; then
         printf '%s\n' 'Spring frontend checksum is out of sync; run: mise run frontend:sync-ports' >&2
         exit 1
     }
+    cmp -s "$source" "$node_frontend" || {
+        printf '%s\n' 'Node frontend is out of sync; run: mise run frontend:sync-ports' >&2
+        exit 1
+    }
+    grep -Fq "const PINNED_FRONTEND_SHA256 = \"$sha256\"" "$node_embed" || {
+        printf '%s\n' 'Node frontend checksum is out of sync; run: mise run frontend:sync-ports' >&2
+        exit 1
+    }
+    cmp -s "$source" "$flask_frontend" || {
+        printf '%s\n' 'Flask frontend is out of sync; run: mise run frontend:sync-ports' >&2
+        exit 1
+    }
+    grep -Fq "PINNED_FRONTEND_SHA256 = \"$sha256\"" "$flask_embed" || {
+        printf '%s\n' 'Flask frontend checksum is out of sync; run: mise run frontend:sync-ports' >&2
+        exit 1
+    }
     exit 0
 fi
 
@@ -32,3 +52,7 @@ fi
 cp "$source" "$go_frontend"
 sed -i -E "s/(const pinnedFrontendSHA256 = \")[0-9a-f]{64}/\1$sha256/" "$go_embed"
 sed -i -E "s/(val pinnedFrontendSha256 = \")[0-9a-f]{64}/\1$sha256/" "$spring_build"
+cp "$source" "$node_frontend"
+sed -i -E "s/(const PINNED_FRONTEND_SHA256 = \")[0-9a-f]{64}/\1$sha256/" "$node_embed"
+cp "$source" "$flask_frontend"
+sed -i -E "s/(PINNED_FRONTEND_SHA256 = \")[0-9a-f]{64}/\1$sha256/" "$flask_embed"

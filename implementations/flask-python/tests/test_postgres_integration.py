@@ -55,6 +55,18 @@ def test_foreign_key_column_reports_key_and_references(source) -> None:
     assert pk_col.key == KeyKind.PK
 
 
+def test_pk_and_fk_column_reports_both(source) -> None:
+    # docs/feature-backlog/13-pk-that-is-also-fk-loses-references.md:
+    # order_extra.order_id is both its own table's PK and an FK into
+    # orders(id) — key must still report pk, but references must be
+    # populated too, not omitted the way a plain PK's is.
+    data = source.query_table(None, "order_extra", QueryOpts(limit=1, offset=0, timeout_secs=5))
+    order_id_col = next(c for c in data.columns if c.name == "order_id")
+    assert order_id_col.key == KeyKind.PK
+    assert order_id_col.references.table == "orders"
+    assert order_id_col.references.column == "id"
+
+
 def test_every_cell_is_string_or_null(source) -> None:
     data = source.query_table(None, "orders", QueryOpts(limit=20, offset=0, timeout_secs=5))
     assert len(data.rows) > 0

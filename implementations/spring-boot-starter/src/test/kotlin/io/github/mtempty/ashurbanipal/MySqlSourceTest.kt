@@ -83,8 +83,14 @@ class MySqlSourceTest {
                             "id integer primary key auto_increment, user_id integer, status varchar(50) not null, " +
                             "constraint fk_orders_user foreign key (user_id) references users(id))",
                     )
+                    st.execute(
+                        "create table order_extra (" +
+                            "order_id integer primary key, gift_message varchar(255), " +
+                            "constraint fk_order_extra_order foreign key (order_id) references orders(id))",
+                    )
                     st.execute("insert into users (email, age) values ('a@x.com', 30), ('b@x.com', 30), ('c@x.com', 40)")
                     st.execute("insert into orders (user_id, status) values (1, 'open')")
+                    st.execute("insert into order_extra (order_id, gift_message) values (1, 'enjoy!')")
                 }
             }
         }
@@ -147,7 +153,10 @@ class MySqlSourceTest {
             val source = MySqlSource(db.dataSource, 5)
 
             val tables = source.listTables(null)
-            assertEquals(listOf("orders", "users"), tables.map { it.name }, "[$envVar]")
+            // Set, not List: MariaDB's default collation sorts "order_extra" after
+            // "orders" (underscore outweighs letters), unlike MySQL/Postgres/SQLite —
+            // exact cross-collation ordering isn't a guarantee this project makes.
+            assertEquals(setOf("order_extra", "orders", "users"), tables.map { it.name }.toSet(), "[$envVar]")
             assertTrue(tables.all { it.comment == null }, "[$envVar]")
 
             assertThrows(NotAllowedException::class.java) { source.listTables("no_such_schema") }
@@ -205,6 +214,18 @@ class MySqlSourceTest {
             assertEquals("fk", userIdCol.key, "[$envVar]")
             assertEquals("users", userIdCol.references?.table, "[$envVar]")
             assertEquals("id", userIdCol.references?.column, "[$envVar]")
+        }
+    }
+
+    @Test
+    fun `pk and fk column reports both`() = forEachReachableInstance { envVar ->
+        SeededDb(envVar).use { db ->
+            val source = MySqlSource(db.dataSource, 5)
+            val data = source.queryTable(null, "order_extra", QueryOpts(10, 0, null, false, null))
+            val orderIdCol = data.columns.find { it.name == "order_id" }!!
+            assertEquals("pk", orderIdCol.key, "[$envVar]")
+            assertEquals("orders", orderIdCol.references?.table, "[$envVar]")
+            assertEquals("id", orderIdCol.references?.column, "[$envVar]")
         }
     }
 

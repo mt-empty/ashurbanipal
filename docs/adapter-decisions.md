@@ -126,6 +126,20 @@ omitted (never emitted as `null` or `""`) when the table/column has none.
 | MySQL    | `information_schema.tables.table_comment` / `columns.column_comment` | Both sit as plain columns — no `obj_description`-style function call, and no `pg_attribute` join needed (MySQL doesn't reuse ordinal positions after a dropped column the way Postgres's `attnum` can diverge from `ordinal_position`, so there's no attnum-drift problem to work around either). The empty string means "no comment" and is mapped to `None` rather than emitted as `""`. |
 | SQLite   | Always omitted | No comment mechanism exists in SQLite's catalog. `TableInfo.comment`/`ColumnInfo.comment` are always `None` — not a relaxation of the property (comments are still correctly omitted when absent), just a backend where they're *always* absent. |
 
+## §5.2 — table listing order
+
+Protocol property: tables SHOULD be returned in a stable order (`sort by
+name` in the reference implementation) — a SHOULD, not a MUST, and "by
+name" doesn't pin a specific collation. Discovered while adding the
+`order_extra` fixture (docs/feature-backlog/13-pk-that-is-also-fk-loses-references.md):
+MariaDB's default collation sorts `order_extra` *after* `orders`
+(underscore outweighs letters), while MySQL, Postgres, and SQLite all
+sort it before — each backend's `order by table_name`/equivalent defers
+to that engine's own default collation, so exact cross-backend ordering
+of two names sharing a prefix isn't guaranteed. Port-level tests that
+assert on table order should treat this as backend-specific rather than
+assume ASCII/byte ordering universally.
+
 ## §6 — query timeouts
 
 Protocol property: every database query, catalog and metadata queries

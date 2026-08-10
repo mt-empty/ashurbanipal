@@ -353,7 +353,10 @@ components:
             foreign keys (composite FKs are omitted entirely).
         references:
           type: object
-          description: Present only when key is "fk".
+          description: >
+            Present whenever the column is a foreign key, independent of
+            what key reports — including alongside key: pk for a column
+            that is both its table's primary key and a foreign key.
           required: [table, column]
           properties:
             table:

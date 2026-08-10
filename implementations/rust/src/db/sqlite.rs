@@ -326,7 +326,7 @@ impl DbSource for SqliteSource {
             .into_iter()
             .map(|(name, type_name)| {
                 let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), None)
+                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
                 } else if let Some(r) = fk_columns.get(&name) {
                     (Some(KeyKind::Fk), Some(r.clone()))
                 } else {
@@ -438,6 +438,10 @@ mod tests {
                 id integer primary key, \
                 user_id integer references users(id), \
                 status text not null\
+             );\
+             create table order_extra (\
+                order_id integer primary key references orders(id), \
+                gift_message text\
              );"
             .to_string(),
         ))
@@ -460,6 +464,12 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "insert into order_extra (order_id, gift_message) values (1, 'enjoy!')".to_string(),
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
         pool
     }
 
@@ -469,7 +479,7 @@ mod tests {
 
         let tables = source.list_tables(None).await.unwrap();
         let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names, vec!["orders", "users"]);
+        assert_eq!(names, vec!["order_extra", "orders", "users"]);
         assert!(tables.iter().all(|t| t.comment.is_none()));
 
         assert_eq!(source.list_schemas().await.unwrap(), vec!["main"]);
@@ -535,6 +545,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pk_and_fk_column_reports_both() {
+        let source = SqliteSource::new(seeded_pool().await);
+        let data = source
+            .query_table(
+                None,
+                "order_extra",
+                QueryOpts {
+                    limit: 10,
+                    offset: 0,
+                    sort: None,
+                    descending: false,
+                    timeout_secs: 5,
+                    filter: None,
+                },
+            )
+            .await
+            .unwrap();
+        let order_id_col = data.columns.iter().find(|c| c.name == "order_id").unwrap();
+        assert_eq!(order_id_col.key, Some(KeyKind::Pk));
+        assert_eq!(order_id_col.references.as_ref().unwrap().table, "orders");
+        assert_eq!(order_id_col.references.as_ref().unwrap().column, "id");
+    }
+
+    #[tokio::test]
     async fn table_counts_reports_no_estimate_sentinel() {
         let source = SqliteSource::new(seeded_pool().await);
         let counts = source.table_counts(None).await.unwrap();
@@ -542,7 +576,11 @@ mod tests {
         // (spec/protocol.md §5.3), not a per-table COUNT(*).
         assert_eq!(
             counts,
-            vec![("orders".to_string(), -1), ("users".to_string(), -1)]
+            vec![
+                ("order_extra".to_string(), -1),
+                ("orders".to_string(), -1),
+                ("users".to_string(), -1)
+            ]
         );
     }
 

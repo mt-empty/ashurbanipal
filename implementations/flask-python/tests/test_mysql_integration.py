@@ -55,9 +55,15 @@ class _SeededDb:
                 "status varchar(50) not null, "
                 "constraint fk_orders_user foreign key (user_id) references users(id))"
             )
+            cur.execute(
+                "create table order_extra (order_id integer primary key, "
+                "gift_message varchar(255), "
+                "constraint fk_order_extra_order foreign key (order_id) references orders(id))"
+            )
             for email, age in [("a@x.com", 30), ("b@x.com", 30), ("c@x.com", 40)]:
                 cur.execute("insert into users (email, age) values (%s, %s)", (email, age))
             cur.execute("insert into orders (user_id, status) values (1, 'open')")
+            cur.execute("insert into order_extra (order_id, gift_message) values (1, 'enjoy!')")
         conn.commit()
         conn.close()
 
@@ -96,7 +102,11 @@ def seeded(variant_url):
 
 def test_list_tables_and_query_table_round_trip(seeded) -> None:
     tables = seeded.list_tables(None)
-    assert [t.name for t in tables] == ["orders", "users"]
+    # Set, not list order: MariaDB's default collation sorts "order_extra"
+    # after "orders" (underscore outweighs letters), unlike MySQL — exact
+    # cross-collation ordering isn't a guarantee this project makes (see
+    # docs/adapter-decisions.md §5.2).
+    assert {t.name for t in tables} == {"order_extra", "orders", "users"}
     assert all(t.comment is None for t in tables)
 
     with pytest.raises(NotAllowed):
@@ -117,6 +127,14 @@ def test_foreign_key_column_reports_key_and_references(seeded) -> None:
     assert user_id_col.key == KeyKind.FK
     assert user_id_col.references.table == "users"
     assert user_id_col.references.column == "id"
+
+
+def test_pk_and_fk_column_reports_both(seeded) -> None:
+    data = seeded.query_table(None, "order_extra", QueryOpts(limit=10, offset=0, timeout_secs=5))
+    order_id_col = next(c for c in data.columns if c.name == "order_id")
+    assert order_id_col.key == KeyKind.PK
+    assert order_id_col.references.table == "orders"
+    assert order_id_col.references.column == "id"
 
 
 def test_table_counts_reports_a_real_estimate(seeded) -> None:
