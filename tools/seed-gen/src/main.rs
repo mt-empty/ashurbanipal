@@ -168,6 +168,7 @@ fn main() {
 
     let orders = gen_orders(&mut rng, &users);
     write_orders(&mut out, &orders);
+    gen_and_write_order_extra(&mut out, &mut rng, &orders);
 
     write_products(&mut out, &mut rng);
     write_events(&mut out, &mut rng, &users);
@@ -212,6 +213,7 @@ fn main() {
          -- at all, which would look like \"never analyzed\" rather than \"genuinely empty\".\n\
          analyze users;\n\
          analyze orders;\n\
+         analyze order_extra;\n\
          analyze products;\n\
          analyze events;\n\
          analyze sessions;\n\
@@ -274,6 +276,7 @@ fn write_header(out: &mut String) {
          drop table if exists saved_reports cascade;\n\
          drop table if exists sessions cascade;\n\
          drop table if exists events cascade;\n\
+         drop table if exists order_extra cascade;\n\
          drop table if exists orders cascade;\n\
          drop table if exists products cascade;\n\
          drop table if exists users cascade;\n\
@@ -309,6 +312,13 @@ fn write_schema(out: &mut String) {
          \x20   discount_pct numeric(5,2),\n\
          \x20   tags text[],\n\
          \x20   line_items jsonb not null default '[]',\n\
+         \x20   created_at timestamptz not null default now()\n\
+         );\n\n\
+         -- 1:1 detail table: order_id is both this table's own PK and an FK into orders(id).\n\
+         create table order_extra (\n\
+         \x20   order_id uuid primary key references orders(id),\n\
+         \x20   gift_message text,\n\
+         \x20   is_gift boolean not null default false,\n\
          \x20   created_at timestamptz not null default now()\n\
          );\n\n\
          create table products (\n\
@@ -665,6 +675,42 @@ fn write_orders(out: &mut String, orders: &[GenOrder]) {
             created = ts_minus_mins(o.created_offset_mins),
         )
         .unwrap();
+    }
+}
+
+/// `order_extra` — the PK+FK conformance fixture (see write_schema): each
+/// row's `order_id` is both its own primary key and an FK into
+/// `orders(id)`. Only a fraction of orders get one, same "not every FK is
+/// populated" shape as reviews'/support_tickets' order_id.
+fn gen_and_write_order_extra(out: &mut String, rng: &mut StdRng, orders: &[GenOrder]) {
+    let messages = [
+        "Happy birthday!",
+        "Congrats on the new place.",
+        "Thanks for everything.",
+        "Enjoy!",
+    ];
+    let mut rows: Vec<(Uuid, Option<&str>, bool)> = Vec::new();
+    for o in orders {
+        if !rng.random_bool(0.15) {
+            continue;
+        }
+        let is_gift = rng.random_bool(0.7);
+        let message = if is_gift && rng.random_bool(0.8) {
+            Some(*messages.choose(rng).unwrap())
+        } else {
+            None
+        };
+        rows.push((o.id, message, is_gift));
+    }
+    if rows.is_empty() {
+        return;
+    }
+    out.push_str("insert into order_extra (order_id, gift_message, is_gift) values\n");
+    let n = rows.len();
+    for (i, (order_id, message, is_gift)) in rows.iter().enumerate() {
+        let message_sql = message.map(|m| q(m)).unwrap_or_else(|| "NULL".into());
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(out, "    ('{order_id}', {message_sql}, {is_gift}){sep}").unwrap();
     }
 }
 

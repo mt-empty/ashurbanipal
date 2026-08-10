@@ -453,13 +453,14 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	columns := make([]ColumnInfo, 0, len(columnTypes))
 	for _, ct := range columnTypes {
 		col := ColumnInfo{Name: ct.name, Type: ct.typ}
+		if ref, ok := fkColumns[ct.name]; ok {
+			col.References = &ref
+		}
 		switch {
 		case pkColumns[ct.name]:
 			col.Key = KeyPK
-		case func() bool { _, ok := fkColumns[ct.name]; return ok }():
+		case col.References != nil:
 			col.Key = KeyFK
-			ref := fkColumns[ct.name]
-			col.References = &ref
 		}
 		if comment, ok := columnComments[ct.name]; ok {
 			col.Comment = comment

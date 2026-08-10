@@ -525,7 +525,7 @@ impl DbSource for MySqlSource {
             .into_iter()
             .map(|(name, type_name, comment)| {
                 let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), None)
+                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
                 } else if let Some(r) = fk_columns.get(&name) {
                     (Some(KeyKind::Fk), Some(r.clone()))
                 } else {
@@ -728,6 +728,17 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "create table order_extra (\
+                order_id integer primary key, \
+                gift_message varchar(255), \
+                constraint fk_order_extra_order foreign key (order_id) references orders(id)\
+             )"
+            .to_string(),
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
 
         for (email, age) in [("a@x.com", 30), ("b@x.com", 30), ("c@x.com", 40)] {
             sqlx::query(sqlx::AssertSqlSafe(
@@ -745,6 +756,12 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "insert into order_extra (order_id, gift_message) values (1, 'enjoy!')".to_string(),
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
 
         SeededDb { pool, name }
     }
@@ -756,7 +773,7 @@ mod tests {
 
         let tables = source.list_tables(None).await.unwrap();
         let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names, vec!["orders", "users"]);
+        assert_eq!(names, vec!["order_extra", "orders", "users"]);
         assert!(tables.iter().all(|t| t.comment.is_none()));
 
         assert!(matches!(
@@ -818,6 +835,33 @@ mod tests {
         assert_eq!(user_id_col.key, Some(KeyKind::Fk));
         assert_eq!(user_id_col.references.as_ref().unwrap().table, "users");
         assert_eq!(user_id_col.references.as_ref().unwrap().column, "id");
+
+        db.drop_and_close().await;
+    }
+
+    #[tokio::test]
+    async fn pk_and_fk_column_reports_both() {
+        let db = seeded_db().await;
+        let source = MySqlSource::new(db.pool.clone());
+        let data = source
+            .query_table(
+                None,
+                "order_extra",
+                QueryOpts {
+                    limit: 10,
+                    offset: 0,
+                    sort: None,
+                    descending: false,
+                    timeout_secs: 5,
+                    filter: None,
+                },
+            )
+            .await
+            .unwrap();
+        let order_id_col = data.columns.iter().find(|c| c.name == "order_id").unwrap();
+        assert_eq!(order_id_col.key, Some(KeyKind::Pk));
+        assert_eq!(order_id_col.references.as_ref().unwrap().table, "orders");
+        assert_eq!(order_id_col.references.as_ref().unwrap().column, "id");
 
         db.drop_and_close().await;
     }

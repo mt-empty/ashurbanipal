@@ -29,11 +29,13 @@ def seeded_path():
         """
         create table users (id integer primary key, email text not null, age integer);
         create table orders (id integer primary key, user_id integer references users(id), status text not null);
+        create table order_extra (order_id integer primary key references orders(id), gift_message text);
         """
     )
     for email, age in [("a@x.com", 30), ("b@x.com", 30), ("c@x.com", 40)]:
         conn.execute("insert into users (email, age) values (?, ?)", (email, age))
     conn.execute("insert into orders (user_id, status) values (1, 'open')")
+    conn.execute("insert into order_extra (order_id, gift_message) values (1, 'enjoy!')")
     conn.commit()
     conn.close()
     yield path
@@ -44,7 +46,7 @@ def test_list_tables_and_query_table_round_trip(seeded_path) -> None:
     source = SqliteSource(seeded_path)
 
     tables = source.list_tables(None)
-    assert [t.name for t in tables] == ["orders", "users"]
+    assert [t.name for t in tables] == ["order_extra", "orders", "users"]
     assert all(t.comment is None for t in tables)
 
     assert source.list_schemas() == ["main"]
@@ -74,9 +76,18 @@ def test_foreign_key_column_reports_key_and_references(seeded_path) -> None:
     assert user_id_col.references.column == "id"
 
 
+def test_pk_and_fk_column_reports_both(seeded_path) -> None:
+    source = SqliteSource(seeded_path)
+    data = source.query_table(None, "order_extra", QueryOpts(limit=10, offset=0, timeout_secs=5))
+    order_id_col = next(c for c in data.columns if c.name == "order_id")
+    assert order_id_col.key == KeyKind.PK
+    assert order_id_col.references.table == "orders"
+    assert order_id_col.references.column == "id"
+
+
 def test_table_counts_reports_no_estimate_sentinel(seeded_path) -> None:
     source = SqliteSource(seeded_path)
-    assert source.table_counts(None) == [("orders", -1), ("users", -1)]
+    assert source.table_counts(None) == [("order_extra", -1), ("orders", -1), ("users", -1)]
 
 
 def test_common_values_is_always_empty(seeded_path) -> None:

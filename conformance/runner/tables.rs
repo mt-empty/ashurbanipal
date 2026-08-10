@@ -1,13 +1,14 @@
 use crate::assert::{assert_exact, assert_row_estimate, assert_status};
 use crate::common::TestServer;
 
-pub(crate) const SEEDED_TABLES: [&str; 14] = [
+pub(crate) const SEEDED_TABLES: [&str; 15] = [
     "_conformance_meta",
     "audit_log",
     "events",
     "feature_flags",
     "inventory_counts",
     "inventory_locations",
+    "order_extra",
     "orders",
     "payments",
     "products",

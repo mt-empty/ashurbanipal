@@ -209,12 +209,20 @@ Response:
 Each `columns` entry is `{name, type}` plus optional fields, all sourced
 from schema catalogs (never data queries):
 
-- `key` — `"pk"` or `"fk"`.
-- `references` — `{table, column}`, present only when `key` is `"fk"`, plus
-  an optional `schema`: present only when the referenced table lives in a
-  schema other than the referencing column's own (a cross-schema FK);
-  omitted for the common same-schema case, so existing clients that ignore
-  it see no change (§7 versioning policy — additive, no version bump).
+- `key` — `"pk"` or `"fk"`. A column that is simultaneously its own
+  table's primary key *and* a foreign key (the 1:1 "detail table" shape,
+  e.g. `order_extra.order_id integer primary key references orders(id)`)
+  reports `key: "pk"` — primary-key-ness wins the single-value field —
+  but see `references` below, which is populated regardless.
+- `references` — `{table, column}`, present whenever the column is a
+  foreign key, independent of what `key` reports (so it MUST be present
+  for `key: "fk"`, and MAY also be present alongside `key: "pk"` for a
+  PK+FK column). Plus an optional `schema`: present only when the
+  referenced table lives in a schema other than the referencing column's
+  own (a cross-schema FK); omitted for the common same-schema case. Both
+  of these are additive relaxations of an already-optional field, so
+  existing clients that ignore `references` when `key` isn't `"fk"` see
+  no change (§7 versioning policy — additive, no version bump).
 - `comment` — `COMMENT ON COLUMN` text, omitted when absent.
 - **Composite foreign keys MUST be omitted** from `key`/`references`
   entirely (the columns appear with no key metadata) rather than risk

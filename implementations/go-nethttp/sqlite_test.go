@@ -36,6 +36,10 @@ func seededDB(t *testing.T) *sql.DB {
 			id integer primary key,
 			user_id integer references users(id),
 			status text not null
+		);
+		create table order_extra (
+			order_id integer primary key references orders(id),
+			gift_message text
 		);`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("creating schema: %v", err)
@@ -51,6 +55,9 @@ func seededDB(t *testing.T) *sql.DB {
 	if _, err := db.Exec("insert into orders (user_id, status) values (1, 'open')"); err != nil {
 		t.Fatalf("seeding orders: %v", err)
 	}
+	if _, err := db.Exec("insert into order_extra (order_id, gift_message) values (1, 'enjoy!')"); err != nil {
+		t.Fatalf("seeding order_extra: %v", err)
+	}
 	return db
 }
 
@@ -62,8 +69,8 @@ func TestSQLiteListTablesAndQueryTableRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTables: %v", err)
 	}
-	if len(tables) != 2 || tables[0].Name != "orders" || tables[1].Name != "users" {
-		t.Fatalf("got tables %+v, want [orders users]", tables)
+	if len(tables) != 3 || tables[0].Name != "order_extra" || tables[1].Name != "orders" || tables[2].Name != "users" {
+		t.Fatalf("got tables %+v, want [order_extra orders users]", tables)
 	}
 	for _, tbl := range tables {
 		if tbl.Comment != nil {
@@ -125,6 +132,26 @@ func TestSQLiteForeignKeyColumnReportsKeyAndReferences(t *testing.T) {
 	}
 	if userID.References == nil || userID.References.Table != "users" || userID.References.Column != "id" {
 		t.Errorf("orders.user_id.references = %+v, want {users id}", userID.References)
+	}
+}
+
+func TestSQLitePKAndFKColumnReportsBoth(t *testing.T) {
+	source := NewSQLiteSource(seededDB(t), 5)
+	data, err := source.QueryTable(context.Background(), nil, "order_extra", QueryOpts{Limit: 10})
+	if err != nil {
+		t.Fatalf("QueryTable: %v", err)
+	}
+	var orderID *ColumnInfo
+	for i := range data.Columns {
+		if data.Columns[i].Name == "order_id" {
+			orderID = &data.Columns[i]
+		}
+	}
+	if orderID == nil || orderID.Key != KeyPK {
+		t.Fatalf("order_extra.order_id = %+v, want key=pk", orderID)
+	}
+	if orderID.References == nil || orderID.References.Table != "orders" || orderID.References.Column != "id" {
+		t.Errorf("order_extra.order_id.references = %+v, want {orders id}", orderID.References)
 	}
 }
 
