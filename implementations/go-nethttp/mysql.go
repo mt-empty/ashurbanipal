@@ -582,15 +582,15 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	columns := make([]ColumnInfo, 0, len(columnMeta))
 	for _, cm := range columnMeta {
 		col := ColumnInfo{Name: cm.name, Type: cm.typ}
+		if ref, ok := fkColumns[cm.name]; ok {
+			r := ref
+			col.References = &r
+		}
 		switch {
 		case pkColumns[cm.name]:
 			col.Key = KeyPK
-		default:
-			if ref, ok := fkColumns[cm.name]; ok {
-				col.Key = KeyFK
-				r := ref
-				col.References = &r
-			}
+		case col.References != nil:
+			col.Key = KeyFK
 		}
 		if cm.comment != "" {
 			col.Comment = cm.comment

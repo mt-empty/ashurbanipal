@@ -1,5 +1,6 @@
 use crate::assert::{assert_exact, assert_row_estimate, assert_status};
 use crate::common::TestServer;
+use crate::tables::SEEDED_TABLES;
 
 #[tokio::test]
 async fn returns_requested_shape_and_row_count() {
@@ -110,6 +111,40 @@ async fn composite_foreign_key_columns_omit_key_metadata() {
         col("product_id")["references"].clone(),
         serde_json::json!({"table": "products", "column": "id"}),
         "inventory_counts.product_id references",
+    );
+}
+
+/// docs/feature-backlog/13-pk-that-is-also-fk-loses-references.md:
+/// `order_extra.order_id` is both its own table's PK and an FK into
+/// `orders(id)` — `key` MUST still report `pk`, but `references` MUST be
+/// populated too, not omitted the way a plain PK's is.
+#[tokio::test]
+async fn pk_and_fk_column_reports_both() {
+    let srv = TestServer::spawn().await;
+    let body: serde_json::Value = srv
+        .client()
+        .get(srv.url("/api/tables/data"))
+        .query(&[("table", "order_extra"), ("limit", "1")])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let columns = body["columns"].as_array().unwrap();
+    let col = columns
+        .iter()
+        .find(|c| c["name"] == "order_id")
+        .unwrap_or_else(|| panic!("order_extra has no order_id column"));
+    assert_exact(
+        col["key"].clone(),
+        serde_json::json!("pk"),
+        "order_extra.order_id key",
+    );
+    assert_exact(
+        col["references"].clone(),
+        serde_json::json!({"table": "orders", "column": "id"}),
+        "order_extra.order_id references",
     );
 }
 
@@ -439,7 +474,7 @@ async fn malicious_table_values_are_rejected_cleanly_and_do_no_damage() {
         .unwrap();
     assert_exact(
         body["tables"].as_array().unwrap().len(),
-        14,
+        SEEDED_TABLES.len(),
         "table count after injection attempts",
     );
 }

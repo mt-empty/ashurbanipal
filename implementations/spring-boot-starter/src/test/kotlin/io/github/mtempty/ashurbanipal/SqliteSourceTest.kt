@@ -34,8 +34,13 @@ class SqliteSourceTest {
                     "create table orders (" +
                         "id integer primary key, user_id integer references users(id), status text not null)",
                 )
+                st.execute(
+                    "create table order_extra (" +
+                        "order_id integer primary key references orders(id), gift_message text)",
+                )
                 st.execute("insert into users (email, age) values ('a@x.com', 30), ('b@x.com', 30), ('c@x.com', 40)")
                 st.execute("insert into orders (user_id, status) values (1, 'open')")
+                st.execute("insert into order_extra (order_id, gift_message) values (1, 'enjoy!')")
             }
         }
         return HikariDataSource(
@@ -59,7 +64,7 @@ class SqliteSourceTest {
             val source = SqliteSource(ds, 5)
 
             val tables = source.listTables(null)
-            assertEquals(listOf("orders", "users"), tables.map { it.name })
+            assertEquals(listOf("order_extra", "orders", "users"), tables.map { it.name })
             assertTrue(tables.all { it.comment == null })
 
             assertEquals(listOf("main"), source.listSchemas())
@@ -135,12 +140,30 @@ class SqliteSourceTest {
     }
 
     @Test
+    fun `pk and fk column reports both`() {
+        val ds = seededDataSource()
+        try {
+            val source = SqliteSource(ds, 5)
+            val data = source.queryTable(null, "order_extra", QueryOpts(10, 0, null, false, null))
+            val orderIdCol = data.columns.find { it.name == "order_id" }!!
+            assertEquals("pk", orderIdCol.key)
+            assertEquals("orders", orderIdCol.references?.table)
+            assertEquals("id", orderIdCol.references?.column)
+        } finally {
+            ds.close()
+        }
+    }
+
+    @Test
     fun `table counts report the no-estimate sentinel`() {
         val ds = seededDataSource()
         try {
             val source = SqliteSource(ds, 5)
             val counts = source.tableCounts(null)
-            assertEquals(listOf(CountEntry("orders", -1L), CountEntry("users", -1L)), counts)
+            assertEquals(
+                listOf(CountEntry("order_extra", -1L), CountEntry("orders", -1L), CountEntry("users", -1L)),
+                counts,
+            )
         } finally {
             ds.close()
         }

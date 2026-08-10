@@ -33,3 +33,18 @@ test("a null FK cell has no navigation affordance", async ({ page }) => {
   await nullUserIdCell.locator(".cell-text").click();
   await expect(page.locator("#current")).toHaveText("events");
 });
+
+test("a column that is both PK and FK shows both facts and navigates like an FK", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "order_extra");
+  await expect(page.locator('th[data-col="order_id"] .key-icon')).toHaveAttribute(
+    "title",
+    "primary key, also references orders.id",
+  );
+  const firstCell = page.locator("#tbody tr").first().locator('td[data-col="order_id"] .fk-cell');
+  const orderId = await firstCell.textContent();
+  await firstCell.click();
+
+  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
+  await expect(page.locator("#filter")).toHaveValue(`id = ${orderId}`);
+});

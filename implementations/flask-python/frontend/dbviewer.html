@@ -397,6 +397,8 @@
       <button id="protocol-warning-dismiss" type="button" aria-label="dismiss warning">✕</button>
     </div>
     <search id="controls">
+      <button id="nav-back" type="button" disabled title="back to previous table view" aria-label="back">‹</button>
+      <button id="nav-forward" type="button" disabled title="forward to next table view" aria-label="forward">›</button>
       <strong id="current">—</strong>
       <output id="status" aria-live="polite" class="sr-only"></output>
       <form id="filter-form">
@@ -496,15 +498,61 @@ function persist() {
   const { schema, table, sort, order, limit, hiddenColumns } = state;
   localStorage.setItem(UI_KEY, JSON.stringify({ schema, table, sort, order, limit, hiddenColumns }));
 }
-// replaceState: no new history entries per action. filter is never included.
+// Back/forward navigation stops at table/schema switches, not every sort/page
+// tweak within the same table — otherwise "back" would undo pagination one
+// row-page at a time instead of returning to the previously viewed table.
+// navStack mirrors the browser's own session-history entries we've pushed
+// (their order, not their content) so the in-app buttons know when they're
+// at either end; the entries themselves live in the URL/history.state, never
+// duplicated into a JS-held array of visited data.
+let navStack = [];
+let navIndex = -1;
+let restoringFromHistory = false; // true while a popstate-triggered reload is in flight
+function navViewKey() { return `${state.schema ?? ""} ${state.table ?? ""}`; }
+function updateNavButtons() {
+  $("nav-back").disabled = navIndex <= 0;
+  $("nav-forward").disabled = navIndex >= navStack.length - 1;
+}
+// filter is never included (ui-guidelines.md R6) — applies to history.state
+// exactly as it does to the URL and localStorage.
 function syncUrl() {
   const params = new URLSearchParams({
     table: state.table, limit: state.limit, offset: state.offset,
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
   if (state.schema) params.set("schema", state.schema);
-  history.replaceState(null, "", "?" + params);
+  const qs = "?" + params;
+  const key = navViewKey();
+  const samePlace = navIndex >= 0 && navStack[navIndex] === key;
+  if (restoringFromHistory || navStack.length === 0 || samePlace) {
+    if (navStack.length === 0) { navStack = [key]; navIndex = 0; }
+    history.replaceState({ navIndex }, "", qs);
+  } else {
+    navStack = navStack.slice(0, navIndex + 1);
+    navStack.push(key);
+    navIndex = navStack.length - 1;
+    history.pushState({ navIndex }, "", qs);
+  }
+  updateNavButtons();
 }
+window.addEventListener("popstate", (ev) => {
+  if (!ev.state || typeof ev.state.navIndex !== "number") return;
+  if (ev.state.navIndex < 0 || ev.state.navIndex >= navStack.length) return;
+  navIndex = ev.state.navIndex;
+  const params = new URLSearchParams(location.search);
+  state.schema = params.get("schema") || null;
+  state.table = params.get("table") || null;
+  state.sort = params.get("sort") || null;
+  state.order = params.get("order") === "desc" ? "desc" : "asc";
+  state.limit = Number(params.get("limit")) || state.limit;
+  state.offset = Number(params.get("offset")) || 0;
+  state.filter = ""; appliedFilterAst = []; $("filter").value = "";
+  if ($("schema-select")) $("schema-select").value = state.schema ?? "";
+  persist();
+  updateNavButtons();
+  restoringFromHistory = true;
+  loadTables().catch(e => { $("error").textContent = e.message; }).finally(() => { restoringFromHistory = false; });
+});
 // Only set once a multi-schema deployment is confirmed (loadSchemas) — a
 // single-schema deployment never sends this param at all, identical to the
 // wire shape before schema selection existed.
@@ -1469,8 +1517,13 @@ function renderHeader(columns) {
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
     if (col.key === "pk" || col.key === "fk") {
+      // A column can be its own table's PK and an FK at once (1:1 detail
+      // table shape) — key still reports "pk", but references is populated
+      // too (spec/protocol.md §5.4.1), so the label surfaces both facts.
       const keyLabel = col.key === "pk"
-        ? "primary key"
+        ? (col.references
+          ? `primary key, also references ${col.references.table}.${col.references.column}`
+          : "primary key")
         : `foreign key, references ${col.references.table}.${col.references.column}`;
       const icon = document.createElement("span");
       icon.className = "key-icon";
@@ -1584,7 +1637,7 @@ function buildCell(col, raw) {
   cellText.appendChild(formatCellValue(col, raw));
   btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
   filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
-  if (col.key === "fk" && col.references) {
+  if (col.references) {
     // In-app navigation: switch to the referenced table and seed a filter
     // for the referenced row. Reset sort first — the current sort column
     // belongs to this table and may not exist on the target one.
@@ -1811,6 +1864,8 @@ $("filter").addEventListener("search", () => {
 });
 $("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData({ resetScroll: false }); };
 $("next").onclick = () => { state.offset += state.limit; loadData({ resetScroll: false }); };
+$("nav-back").onclick = () => history.back();
+$("nav-forward").onclick = () => history.forward();
 
 // Feeds --toolbar-h (thead th's sticky `top`) — #toolbar's height isn't
 // static (flex-wrap, #error appearing/disappearing).

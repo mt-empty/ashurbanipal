@@ -204,7 +204,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
             val key: String?
             val references: ColumnRef?
             when {
-                pkColumns.contains(name) -> { key = "pk"; references = null }
+                pkColumns.contains(name) -> { key = "pk"; references = fkColumns[name] }
                 fkColumns.containsKey(name) -> { key = "fk"; references = fkColumns[name] }
                 else -> { key = null; references = null }
             }

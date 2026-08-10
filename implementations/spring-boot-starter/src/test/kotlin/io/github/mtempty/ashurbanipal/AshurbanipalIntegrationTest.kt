@@ -93,8 +93,8 @@ class AshurbanipalIntegrationTest {
         val names = (body["tables"] as Iterable<JsonNode>).map { it["name"].asText() }
         val expected = listOf(
             "_conformance_meta", "audit_log", "events", "feature_flags", "inventory_counts",
-            "inventory_locations", "orders", "payments", "products", "reviews", "saved_reports",
-            "sessions", "support_tickets", "users",
+            "inventory_locations", "order_extra", "orders", "payments", "products", "reviews",
+            "saved_reports", "sessions", "support_tickets", "users",
         )
         assertEquals(expected, names)
     }
@@ -124,6 +124,19 @@ class AshurbanipalIntegrationTest {
         assertEquals("fk", userId["key"].asText())
         assertEquals("users", userId["references"]["table"].asText())
         assertEquals("id", userId["references"]["column"].asText())
+    }
+
+    @Test
+    fun `pk and fk column reports both`() {
+        // docs/feature-backlog/13-pk-that-is-also-fk-loses-references.md:
+        // order_extra.order_id is both its own table's PK and an FK into
+        // orders(id) — key must still report pk, but references must be
+        // populated too, not omitted the way a plain PK's is.
+        val body = getJson("/api/tables/data?table=order_extra&limit=1")
+        val orderId = body["columns"].first { it["name"].asText() == "order_id" }
+        assertEquals("pk", orderId["key"].asText())
+        assertEquals("orders", orderId["references"]["table"].asText())
+        assertEquals("id", orderId["references"]["column"].asText())
     }
 
     @Test

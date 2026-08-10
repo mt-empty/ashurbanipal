@@ -94,8 +94,8 @@ func TestListsExactlySeededTablesInAlphabeticalOrder(t *testing.T) {
 	}
 	expected := []string{
 		"_conformance_meta", "audit_log", "events", "feature_flags", "inventory_counts",
-		"inventory_locations", "orders", "payments", "products", "reviews", "saved_reports",
-		"sessions", "support_tickets", "users",
+		"inventory_locations", "order_extra", "orders", "payments", "products", "reviews",
+		"saved_reports", "sessions", "support_tickets", "users",
 	}
 	if len(names) != len(expected) {
 		t.Fatalf("got %v tables, want %v", names, expected)
@@ -166,6 +166,33 @@ func TestPKAndFKColumnMetadataIsCorrect(t *testing.T) {
 	ref, _ := userID["references"].(map[string]interface{})
 	if ref["table"] != "users" || ref["column"] != "id" {
 		t.Errorf("orders.user_id references = %v, want {users id}", ref)
+	}
+}
+
+// docs/feature-backlog/13-pk-that-is-also-fk-loses-references.md:
+// order_extra.order_id is both its own table's PK and an FK into
+// orders(id) — key MUST still report pk, but references MUST be
+// populated too, not omitted the way a plain PK's is.
+func TestPKAndFKColumnReportsBoth(t *testing.T) {
+	body := getJSON(t, testServer(t), "/api/tables/data?table=order_extra&limit=1")
+	columns, _ := body["columns"].([]interface{})
+	byName := func(name string) map[string]interface{} {
+		for _, c := range columns {
+			m := c.(map[string]interface{})
+			if m["name"] == name {
+				return m
+			}
+		}
+		t.Fatalf("column %q not found", name)
+		return nil
+	}
+	orderID := byName("order_id")
+	if k := orderID["key"]; k != "pk" {
+		t.Errorf("order_extra.order_id key = %v, want pk", k)
+	}
+	ref, _ := orderID["references"].(map[string]interface{})
+	if ref["table"] != "orders" || ref["column"] != "id" {
+		t.Errorf("order_extra.order_id references = %v, want {orders id}", ref)
 	}
 }
 

@@ -410,7 +410,7 @@ impl DbSource for PgPoolSource {
             .into_iter()
             .map(|(name, type_name)| {
                 let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), None)
+                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
                 } else if let Some(r) = fk_columns.get(&name) {
                     (Some(KeyKind::Fk), Some(r.clone()))
                 } else {
