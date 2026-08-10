@@ -147,6 +147,30 @@ publishing {
         create<MavenPublication>("maven") {
             from(components["java"])
             artifactId = "ashurbanipal-spring-boot-starter"
+            // Central Portal requires name/description/url/licenses/developers/scm
+            // on every published POM; filled in ahead of the actual namespace
+            // verification + signing setup (docs/publishing-checklist.md).
+            pom {
+                name.set("Ashurbanipal Spring Boot Starter")
+                description.set("Kotlin/Spring Boot autoconfiguration starter implementing spec/protocol.md — embeddable, read-only database browser for lower environments.")
+                url.set("https://github.com/mt-empty/ashurbanipal/tree/main/implementations/spring-boot-starter")
+                licenses {
+                    license {
+                        name.set("MIT")
+                        url.set("https://github.com/mt-empty/ashurbanipal/blob/main/LICENSE")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("mt-empty")
+                        url.set("https://github.com/mt-empty")
+                    }
+                }
+                scm {
+                    url.set("https://github.com/mt-empty/ashurbanipal")
+                    connection.set("scm:git:https://github.com/mt-empty/ashurbanipal.git")
+                }
+            }
         }
     }
     // Inert on purpose (implementation.md §5.4 / the brief's "no real

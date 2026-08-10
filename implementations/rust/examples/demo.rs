@@ -14,7 +14,7 @@
 //! PORT=4001 SIBLING_PORT=4000 cargo run --example demo
 //! ```
 
-use ashurbanipal::{Config, PgPoolSource};
+use ashurbanipal_axum::{Config, PgPoolSource};
 use axum::routing::get;
 use axum::Router;
 
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "#
     ))?;
 
-    let ashurbanipal = ashurbanipal::router(config, PgPoolSource::new(pool));
+    let ashurbanipal = ashurbanipal_axum::router(config, PgPoolSource::new(pool));
     // MOUNT_PREFIX (e.g. "/svc") simulates a reverse proxy that serves the
     // host under a path prefix, to exercise the frontend's mount-point
     // agnosticism; unset means the plain one-line merge as before.

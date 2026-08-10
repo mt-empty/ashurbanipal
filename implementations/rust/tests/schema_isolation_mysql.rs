@@ -20,7 +20,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use ashurbanipal::{DbSource, MySqlSource, QueryOpts};
+use ashurbanipal_axum::{DbSource, MySqlSource, QueryOpts};
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::{Executor, MySqlPool};
 
@@ -228,7 +228,7 @@ async fn explicit_schema_selects_that_schema_and_rejects_unknown_ones() {
         )
         .await;
     assert!(
-        matches!(rejected, Err(ashurbanipal::DbError::NotAllowed(_))),
+        matches!(rejected, Err(ashurbanipal_axum::DbError::NotAllowed(_))),
         "an unknown schema must be rejected before touching SQL text, not passed through"
     );
 

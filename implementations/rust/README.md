@@ -1,14 +1,17 @@
-# ashurbanipal (rust)
+# ashurbanipal-axum
 
-The Rust/Axum reference implementation of [Ashurbanipal](../../readme.md).
+The Rust/Axum reference implementation of [Ashurbanipal](../../readme.md),
+published as the `ashurbanipal-axum` crate — the `-axum` suffix leaves room
+for a future alternate-framework crate (`ashurbanipal-actix`, etc.) without
+a breaking rename of this one (see `docs/publishing-checklist.md`).
 
 Not published to crates.io yet — depend on it by path or git:
 
 ```toml
 [dependencies]
-ashurbanipal = { git = "https://github.com/you/ashurbanipal" }
+ashurbanipal-axum = { git = "https://github.com/mt-empty/ashurbanipal" }
 # or, from within a clone of this repo:
-ashurbanipal = { path = "implementations/rust" }
+ashurbanipal-axum = { path = "implementations/rust" }
 ```
 
 ## Database support
@@ -22,24 +25,24 @@ ashurbanipal = { path = "implementations/rust" }
 ```toml
 [dependencies]
 # Postgres only (default):
-ashurbanipal = { path = "implementations/rust" }
+ashurbanipal-axum = { path = "implementations/rust" }
 # To also pull in MySqlSource:
-ashurbanipal = { path = "implementations/rust", features = ["mysql"] }
+ashurbanipal-axum = { path = "implementations/rust", features = ["mysql"] }
 # To also pull in SqliteSource:
-ashurbanipal = { path = "implementations/rust", features = ["sqlite"] }
+ashurbanipal-axum = { path = "implementations/rust", features = ["sqlite"] }
 ```
 
 ## Usage
 
 ```rust
-use ashurbanipal::{Config, PgPoolSource};
+use ashurbanipal_axum::{Config, PgPoolSource};
 
 let toml_str = std::fs::read_to_string("ashurbanipal.toml")?;
 let config = Config::from_toml(&toml_str)?;
 
 let app = Router::new()
     // ... your existing routes ...
-    .merge(ashurbanipal::router(config, PgPoolSource::new(pool.clone())));
+    .merge(ashurbanipal_axum::router(config, PgPoolSource::new(pool.clone())));
 ```
 
 Or, with the `mysql`/`sqlite` feature enabled, swap in `MySqlSource`/
@@ -47,17 +50,17 @@ Or, with the `mysql`/`sqlite` feature enabled, swap in `MySqlSource`/
 frontend) is identical:
 
 ```rust
-use ashurbanipal::{Config, MySqlSource};
+use ashurbanipal_axum::{Config, MySqlSource};
 
 let app = Router::new()
-    .merge(ashurbanipal::router(config, MySqlSource::new(pool.clone())));
+    .merge(ashurbanipal_axum::router(config, MySqlSource::new(pool.clone())));
 ```
 
 ```rust
-use ashurbanipal::{Config, SqliteSource};
+use ashurbanipal_axum::{Config, SqliteSource};
 
 let app = Router::new()
-    .merge(ashurbanipal::router(config, SqliteSource::new(pool.clone())));
+    .merge(ashurbanipal_axum::router(config, SqliteSource::new(pool.clone())));
 ```
 
 `ashurbanipal.toml`:
@@ -89,7 +92,7 @@ instead of a dedicated file:
 ```rust
 #[derive(serde::Deserialize)]
 struct HostConfig {
-    ashurbanipal: ashurbanipal::Config,
+    ashurbanipal: ashurbanipal_axum::Config,
     // ...your other app settings
 }
 
