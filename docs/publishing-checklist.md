@@ -105,11 +105,23 @@ per-framework split, ever.
    coordinate, and the Go module path (`go get` needs no reservation,
    it's the repo path) should each be checked for squatting/collisions on
    their respective registry before the first publish, not after a failed
-   `publish` command reveals it.
+   `publish` command reveals it. — *Done for Rust*: `curl`'d
+   `https://crates.io/api/v1/crates/ashurbanipal-axum` directly, got
+   `"crate \`ashurbanipal-axum\` does not exist"` — unclaimed. Node, Flask,
+   Spring still pending.
 6. **CI publish job gated on the port's own tag prefix**, using
    OIDC trusted publishing where the registry supports it, mirroring
    `release.yml`'s existing `check-branch` job (tag must be on `main`)
-   rather than trusting whoever cut the tag.
+   rather than trusting whoever cut the tag. — *Done for Rust*:
+   `rust-publish.yml`'s `check-branch` job does this exact check, and the
+   `refactor/frontend-typescript-modules` branch carrying all the rename/
+   vendoring work merged into `main` (PR #37, `614cdf0`), so a `rust-v*`
+   tag cut from current `main` will pass the gate. `rust-publish.yml`'s
+   `publish` job also declares `environment: crates-io-publish` — *now
+   configured*: required reviewer `mt-empty`, and deployment restricted to
+   tags matching `rust-v*` (a tag policy, not a branch policy — this
+   workflow triggers on a tag push, so a `main`-only branch policy would
+   never match the tag ref and would silently block every run).
 7. **Decide whether `frontend/dbviewer.html` needs to be independently
    versioned/pinned** for a published artifact the way `PORTING.md`'s
    vendoring contract already expects in spirit (each port re-hashes it
@@ -175,9 +187,13 @@ per-framework split, ever.
   --all-features -- -D warnings` all pass under the new name. Frontend
   vendoring blocker (gate item 7) is also now closed — `cargo publish
   --dry-run` packages, verifies, and gets to the upload step cleanly. No
-  remaining manifest gaps; only the crates.io name-availability check (for
-  `ashurbanipal-axum` now, not bare `ashurbanipal`) and the actual publish
-  job are outstanding.
+  remaining manifest gaps. Name availability confirmed (`ashurbanipal-axum`
+  unclaimed on crates.io) and the branch carrying all this work merged to
+  `main` (PR #37) — `rust-publish.yml`'s `check-branch` gate will now pass.
+  `crates-io-publish` environment's required-reviewer + tag-restriction
+  protection rules are configured. Only remaining: the one-time manual
+  bootstrap publish (classic API token, can't be automated — see the
+  workflow's header comment) and cutting the `rust-v0.1.0` tag itself.
 - **Node** (`implementations/node-express/package.json`) — ~~`"private":
   true` blocks `npm publish`; missing `repository`, `license`,
   `homepage`~~ **closed**: `private` removed, all three fields added.
