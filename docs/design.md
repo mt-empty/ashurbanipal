@@ -51,6 +51,11 @@ Two components, same as the original concept:
 ### 3.1 Frontend — `dbviewer.html`
 
 - Single static HTML file: markup, CSS, and JS in one file, framework-agnostic.
+  Generated (`mise run frontend:build`) from TypeScript/CSS sources in
+  `frontend/src/`, bundled with esbuild and inlined back into one file —
+  the shipped artifact and everything downstream of it (vendoring, CSP,
+  the release checksum) sees no difference from a hand-edited file; see
+  `docs/frontend-style-guide.md` §1 for the source layout.
 - No CDN dependency is wired in. `jsonb` tree rendering (collapsible via
   native `<details>`/`<summary>`) and per-type coloring (JSON scalars, plus
   `uuid`/`boolean`/numeric/date columns) are hand-rolled directly in

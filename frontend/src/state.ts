@@ -1,0 +1,92 @@
+import type { FilterCondition, TableData } from "./types.js";
+
+const UI_KEY = "ashurbanipal_ui";
+
+export interface State {
+  schema: string | null;
+  table: string | null;
+  sort: string | null;
+  order: "asc" | "desc";
+  limit: number;
+  offset: number;
+  hiddenColumns: Record<string, string[]>;
+  filter: string;
+}
+
+// Persisted to localStorage and mirrored to the URL: table/sort/order/
+// limit/offset only — never filter. A filter can contain data values, and
+// a URL is even more exposed than localStorage (history, access logs,
+// Referer headers). state.filter is the *applied* filter, decoupled from
+// the live #filter input text — only committing (submit, or a
+// click-to-filter action) updates it, so an unfinished edit never gets
+// silently resent by an unrelated sort/page click.
+export const state: State = {
+  schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, filter: "",
+};
+
+try {
+  const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+  for (const k of ["schema", "table", "sort", "order", "limit"] as const) {
+    if (saved[k] !== undefined) (state as unknown as Record<string, unknown>)[k] = saved[k];
+  }
+  // Keyed by table name so hiding a column on one table never hides a
+  // same-named column on another. A malformed value is discarded rather
+  // than migrated — it's cheap to lose and there's no reliable way to
+  // guess which table it belonged to.
+  if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
+    for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
+      if (!Array.isArray(cols)) continue;
+      const clean = cols.filter((c) => typeof c === "string");
+      if (clean.length) state.hiddenColumns[table] = clean;
+    }
+  }
+} catch {
+  localStorage.removeItem(UI_KEY);
+}
+// URL query params win over localStorage: opening a shared/bookmarked link
+// should reproduce that link's view, not the visitor's own saved prefs.
+const urlParams = new URLSearchParams(location.search);
+if (urlParams.has("schema")) state.schema = urlParams.get("schema");
+if (urlParams.has("table")) state.table = urlParams.get("table");
+if (urlParams.has("sort")) state.sort = urlParams.get("sort");
+if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "desc" : "asc";
+if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
+if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
+
+export function persist(): void {
+  const { schema, table, sort, order, limit, hiddenColumns } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ schema, table, sort, order, limit, hiddenColumns }));
+}
+
+// A stale table key or column name absent from the current table's
+// columns simply matches nothing wherever it's consulted, so no separate
+// validation pass is needed here.
+export function hiddenColumnsForTable(): string[] {
+  return state.hiddenColumns[state.table ?? ""] ?? [];
+}
+
+// Only set once a multi-schema deployment is confirmed (loadSchemas) — a
+// single-schema deployment never sends this param at all, identical to the
+// wire shape before schema selection existed.
+export function schemaQuery(): string {
+  return state.schema ? "?" + new URLSearchParams({ schema: state.schema }) : "";
+}
+
+// state.filter stays the applied *text*; the AST that actually goes on the
+// wire is derived from it once, at commit time, so unparseable box text
+// never produces a request at all (spec/filter-dsl.md §4).
+let appliedFilterAst: FilterCondition[] = [];
+export function getAppliedFilterAst(): FilterCondition[] {
+  return appliedFilterAst;
+}
+export function setAppliedFilterAst(ast: FilterCondition[]): void {
+  appliedFilterAst = ast;
+}
+
+let lastPayload: TableData | null = null;
+export function getLastPayload(): TableData | null {
+  return lastPayload;
+}
+export function setLastPayload(data: TableData | null): void {
+  lastPayload = data;
+}
