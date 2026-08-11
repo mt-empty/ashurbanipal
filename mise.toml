@@ -37,14 +37,45 @@ description = "flask-python implementation checks: lint, fmt-check, test"
 depends = ["flask:lint", "flask:fmt-check", "flask:test"]
 
 [tasks.frontend]
-description = "frontend checks: Playwright e2e suite against dbviewer.html"
-depends = ["frontend:check-go-sync", "frontend:test-e2e"]
+description = "frontend checks: typecheck, build-check, vendored-copy sync, Playwright e2e suite"
+depends = ["frontend:typecheck", "frontend:build-check", "frontend:check-ports-sync", "frontend:test-e2e"]
+
+[tasks."frontend:install"]
+description = "pnpm install --frozen-lockfile"
+run = "pnpm install --frozen-lockfile"
+dir = "frontend"
+
+[tasks."frontend:build"]
+description = "bundle frontend/src/ into frontend/dbviewer.html"
+run = "node build.mjs"
+dir = "frontend"
+depends = ["frontend:install"]
+
+[tasks."frontend:typecheck"]
+description = "tsc --noEmit over frontend/src/"
+run = "pnpm exec tsc --noEmit"
+dir = "frontend"
+depends = ["frontend:install"]
+
+[tasks."frontend:build-check"]
+description = "verify frontend/dbviewer.html is what frontend/src/ currently builds to"
+run = '''
+cp dbviewer.html /tmp/ashurbanipal-dbviewer-committed.html
+node build.mjs
+if ! diff -q dbviewer.html /tmp/ashurbanipal-dbviewer-committed.html > /dev/null; then
+  echo "frontend/dbviewer.html is out of date — run \`mise run frontend:build\` and commit the result" >&2
+  cp /tmp/ashurbanipal-dbviewer-committed.html dbviewer.html
+  exit 1
+fi
+'''
+dir = "frontend"
+depends = ["frontend:install"]
 
 [tasks."frontend:sync-ports"]
-description = "sync the canonical frontend and re-pin its Go, Spring, Node, and Flask consumers"
+description = "sync the canonical frontend and re-pin its Rust, Go, Spring, Node, and Flask consumers"
 run = "tools/sync-ports-frontend.sh"
 
-[tasks."frontend:check-go-sync"]
+[tasks."frontend:check-ports-sync"]
 description = "verify vendored frontend copies and pins match frontend/dbviewer.html"
 run = "tools/sync-ports-frontend.sh --check"
 
@@ -91,14 +122,14 @@ dir = "implementations/rust"
 description = "run the demo host app at http://localhost:4000/__ashurbanipal"
 run = "cargo run --example demo"
 dir = "implementations/rust"
-sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "../../frontend/dbviewer.html"]
+sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "frontend/dbviewer.html"]
 
 [tasks."rust:demo-sibling"]
 description = "run a second demo instance on 4001, sibling-polling the one on 4000"
 run = "cargo run --example demo"
 env = { PORT = "4001", SIBLING_PORT = "4000" }
 dir = "implementations/rust"
-sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "../../frontend/dbviewer.html"]
+sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "frontend/dbviewer.html"]
 
 [tasks."rust:dev"]
 description = "run the demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"

@@ -1,0 +1,353 @@
+:root {
+  color-scheme: light dark;
+  font-family: ui-monospace, monospace;
+}
+/* Overrides the system-default `light dark` above — light-dark() reads
+   the *used* color-scheme value, so pinning it here is enough to force
+   every light-dark() token in the file without touching each one. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+:root {
+  --border: #8884;
+  --border-strong: #8886;
+  --hover: #8882;
+  --danger: light-dark(#d33, #f66);
+  --warning: light-dark(#a60, #fb5);
+  --success: light-dark(#2a2, #5c5);
+  --active: light-dark(#08f2, #08f5);
+  --backdrop: light-dark(#0006, #0009);
+  --gap: .5rem;
+  --gap-lg: .75rem;
+  /* --type-* (grid/record cells) and --json-* (json tree tokens) share
+     values for bool/number/uuid, so a value looks identical whether it's
+     a top-level column or nested inside a jsonb blob. */
+  --json-string: light-dark(#a11, #e88);
+  --json-number: light-dark(#166, #6cc);
+  --json-bool: light-dark(#a60, #fb5);
+  --json-null: light-dark(#888, #999);
+  --type-uuid: light-dark(#639, #c9f);
+  --type-bool: var(--json-bool);
+  --type-number: var(--json-number);
+  --type-date: light-dark(#2a6, #6db);
+}
+
+/* ==== Layout ==== */
+body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
+nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
+/* No padding here: #toolbar is sticky and must reach main's actual
+   edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
+main { overflow: auto; }
+/* width: max-content (floored at 100%) makes #content's own box grow to
+   match a wide table's overflow instead of staying clipped to main's
+   visible width. Without this, #pager/#toolbar's sticky `left` has no
+   room to travel — their containing block (#content) is only as wide as
+   the viewport, so once scrolled past that they run out of stickiness
+   and get dragged along horizontally. */
+#content { padding: 0 var(--gap-lg) var(--gap-lg); width: max-content; min-width: 100%; }
+h1 { font-size: 1rem; margin: 0 0 var(--gap); }
+h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
+h1 a:hover { text-decoration-thickness: 2px; }
+
+/* ==== Sidebar table list ==== */
+ul { list-style: none; margin: 0; padding: 0; }
+li button { width: 100%; text-align: left; background: none; border: none;
+            padding: .3rem .4rem; cursor: pointer; font: inherit; color: inherit;
+            border-radius: 4px; display: flex; justify-content: space-between; }
+li button:hover { background: var(--hover); }
+li button.active { background: var(--active); }
+/* min-width:0 overrides the flex-item default of min-width:auto, which
+   otherwise blocks shrinking below content size and prevents the
+   ellipsis truncation below from ever kicking in. Full name is in
+   `title` (see loadTables()) as the escape hatch. */
+.row-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; }
+.row-right { display: flex; align-items: center; gap: .35rem; flex: none; }
+.count { opacity: .6; }
+/* Always in the DOM at a fixed size; only visibility toggles (never
+   display), so gaining/losing the spinner never reflows layout — this
+   replaced an old #status text in #controls that shoved #filter sideways
+   every time it appeared/disappeared. */
+.row-spinner { width: .7rem; height: .7rem; border-radius: 50%;
+               border: 2px solid var(--border-strong); border-top-color: transparent;
+               visibility: hidden; flex: none; }
+li button.loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
+}
+
+/* ==== Schema selector ==== */
+/* hidden by default (single-schema deployments never show this — see
+   loadSchemas); margin matches #table-search's so hiding/showing it
+   doesn't shift the search box's position underneath. */
+#schema-select-wrap { margin-bottom: var(--gap-lg); }
+#schema-select { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
+
+/* ==== Sidebar table search ==== */
+#table-search { margin-bottom: var(--gap); }
+#table-filter { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
+#tables-empty { opacity: .6; margin: .3rem .4rem; }
+::highlight(table-match) { background: var(--active); }
+
+/* ==== Data table ==== */
+/* separate/0, not collapse: verified that collapsed borders let
+   scrolled-under row content bleed through a sticky <th>'s background at
+   the collapsed border seams in Chromium. */
+table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: var(--gap); }
+th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
+th { cursor: pointer; user-select: none; }
+/* z-index is load-bearing: td has position:relative (for the copy
+   button), and since tbody follows thead in DOM order, its positioned
+   <td>s paint over a sticky <th> with the default stacking order unless
+   the header is explicitly raised. top tracks #toolbar's live height
+   (--toolbar-h, set via ResizeObserver) since it isn't constant. */
+thead th { position: sticky; top: var(--toolbar-h, 0px); z-index: 1; background: canvas; }
+/* Arrow always rendered (dim when unsorted), not just on the active
+   column: keeps every th's width stable across sort changes and shows
+   sortability before the first click. "↑" default previews the real
+   first-click behavior (ascending — see th.onclick). */
+th[aria-sort]::after { content: " ↑"; opacity: .35; }
+th[aria-sort="ascending"]::after { content: " ↑"; opacity: 1; }
+th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
+/* Decorative (aria-hidden) — the th carries an aria-label with the text
+   equivalent. */
+.key-icon { margin-right: .2rem; }
+/* Not part of the sort click target — its onclick stops propagation so
+   it doesn't also trigger th's sort handler. */
+.common-values-btn { background: none; border: none; cursor: pointer; font: inherit;
+            color: inherit; margin-left: .3rem; padding: 0 .15rem; border-radius: 3px; }
+.common-values-btn:hover { background: var(--hover); }
+/* Styled distinctly from the plain cell-text button so it doesn't read
+   as an <a> hyperlink — it's an in-app state change, not navigation. */
+.fk-cell { cursor: pointer; text-decoration: underline dotted;
+           text-underline-offset: .15em; }
+.fk-cell:hover { text-decoration-style: solid; }
+th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
+td.row-actions { padding-right: .25rem; }
+.record-btn { background: none; border: none; cursor: pointer; font: inherit;
+              color: inherit; padding: 0 .15rem; border-radius: 3px; }
+.record-btn:hover { background: var(--hover); }
+td { position: relative; padding-right: 2.7rem; }
+.cell-text { display: block; max-width: 24rem; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+button.cell-text { background: none; border: none; padding: 0; margin: 0;
+                   font: inherit; color: inherit; text-align: left; cursor: inherit; }
+td.expandable .cell-text { cursor: zoom-in; }
+.copy, .filter-eq { position: absolute; top: 50%; transform: translateY(-50%);
+        background: none; border: none; cursor: pointer; font: inherit;
+        color: inherit; opacity: 0; padding: 0 .15rem; border-radius: 3px; }
+.copy { right: .15rem; }
+.filter-eq { right: 1.45rem; }
+/* Null cells have no copy button, so their lone filter button sits in
+   copy's slot instead of leaving that corner visibly empty. */
+.filter-eq.only-action { right: .15rem; }
+td:hover .copy, td:hover .filter-eq, .copy:focus-visible, .filter-eq:focus-visible { opacity: .7; }
+.copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+
+/* ==== Controls / status ==== */
+/* Pinned in both axes (unlike thead th, top:0 only — header cells must
+   still scroll horizontally). #error lives inside so a rejection message
+   stays paired with the filter. z-index above thead th's + opaque
+   background stop rows from showing through. */
+#toolbar { position: sticky; top: 0; left: 0; z-index: 2; background: canvas;
+           padding: var(--gap-lg) var(--gap-lg) var(--gap);
+           border-bottom: 1px solid var(--border); }
+#controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
+/* display: contents keeps #filter/#apply direct flex items of #controls,
+   so wrapping them in a <form> doesn't change layout. */
+#filter-form { display: contents; }
+#filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
+/* Visually hidden but still in the accessibility tree — the aria-live
+   loading text never occupies space in #controls's flex row, which used
+   to shove #filter sideways on every load. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
+           margin: -1px; overflow: hidden; clip-path: inset(50%);
+           white-space: nowrap; border: 0; }
+#error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap; }
+#protocol-warning { display: flex; gap: var(--gap); align-items: baseline;
+                    color: var(--warning); margin-bottom: var(--gap); }
+/* display:flex above would silently defeat the hidden attribute's
+   UA-level display:none — restate it at author-level specificity. */
+#protocol-warning[hidden] { display: none; }
+#protocol-warning button { background: none; border: none; cursor: pointer; font: inherit;
+                           color: inherit; padding: 0 .15rem; border-radius: 3px; }
+#protocol-warning button:hover { background: var(--hover); }
+.empty td { text-align: center; opacity: .6; padding: 1rem; }
+
+/* Shared by any small sidebar section heading — currently #siblings' h2
+   and the schema selector's label (see their sections below). */
+.section-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+               font-weight: 600; opacity: .6; margin: 0 0 var(--gap); display: block; }
+
+/* ==== Siblings ==== */
+#siblings { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: var(--gap); }
+.dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
+       margin-right: .4em; background: #999; flex: none; }
+.dot.up { background: var(--success); } .dot.down { background: var(--danger); }
+/* Same truncation shape as .row-name above. Full name is in `title`
+   (see loadSiblings()) as the escape hatch. */
+.sibling-row { display: flex; align-items: center; }
+.sibling-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                min-width: 0; }
+
+/* ==== Pager ==== */
+/* Sticky left, same reasoning as #toolbar above: #content (and #pager's
+   own position in normal flow) is only as wide as the table, so once a
+   wide table pushes main's horizontal scrollbar out, an unpinned pager
+   scrolls away with it instead of staying reachable. */
+#pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center;
+         position: sticky; left: var(--gap-lg); width: fit-content; }
+
+/* Native <dialog>: showModal() gives backdrop, Esc-to-close, and focus
+   trapping for free. */
+dialog { border: 1px solid var(--border-strong); border-radius: 8px; padding: 0;
+         max-width: min(60rem, 92vw); max-height: 80vh; box-sizing: border-box; }
+dialog::backdrop { background: var(--backdrop); }
+.dialog-head { display: flex; justify-content: space-between; align-items: center;
+               gap: 1rem; padding: var(--gap) var(--gap-lg); border-bottom: 1px solid var(--border); }
+.dialog-head button { background: none; border: none; cursor: pointer;
+                      font: inherit; color: inherit; }
+/* border-box (here and on <dialog> above) keeps padding inside the
+   max-height budget — content-box padding let long content overflow the
+   dialog and add a second scrollbar around the pre's own. */
+dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
+                        max-height: calc(80vh - 3rem); box-sizing: border-box; }
+dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
+            gap: .3rem var(--gap-lg); }
+dialog dl dt { font-weight: 600; }
+dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A grid item, not absolutely positioned over a td, so it needs
+   `position: static`; hover-to-reveal otherwise matches the table's
+   copy button, keyed off dd:hover since dt/dd/button are flat grid
+   siblings here. */
+dialog dl .copy { position: static; top: auto; transform: none; opacity: 0; align-self: start; }
+dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
+/* Lives in the dialog header, so it stays visible regardless of hover —
+   a standalone action, not a per-field affordance. */
+.dialog-head-title { display: flex; align-items: center; gap: .5rem; }
+.dialog-head .copy { position: static; top: auto; transform: none; opacity: 1; }
+
+/* white-space: normal resets the pre-wrap inherited from ancestors
+   (#cell-pop / dialog dl dd's plain-text case). Not <details>/<summary>:
+   that replaced JSON's actual {}/[]/,/: shape with a generic tree-widget
+   look, so this renders real pretty-printed JSON instead and folds one
+   block at a time to an inline "{…}", editor-gutter style. */
+.json-tree { white-space: normal; }
+.json-line { display: flex; }
+.json-children { margin-left: 1.05rem; border-left: 1px solid var(--border); padding-left: .5rem; }
+.json-fold { all: unset; cursor: pointer; flex: none; width: 1rem; text-align: center;
+             color: var(--border-strong); transform-origin: 45% 50%; }
+.json-fold::before { content: "▾"; font-size: .65em; }
+.json-node.collapsed > .json-line:first-child .json-fold { transform: rotate(-90deg); }
+.json-node.collapsed > .json-children,
+.json-node.collapsed > .json-line:last-child { display: none; }
+.json-ellipsis { display: none; opacity: .7; }
+.json-node.collapsed .json-ellipsis { display: inline; }
+.json-punct { color: var(--border-strong); }
+.json-key { font-weight: 600; }
+.json-string { color: var(--json-string); }
+.json-number { color: var(--json-number); }
+.json-bool { color: var(--json-bool); }
+.json-null { color: var(--json-null); }
+.json-uuid { color: var(--type-uuid); }
+.cell-type-uuid { color: var(--type-uuid); }
+.cell-type-bool { color: var(--type-bool); }
+.cell-type-number { color: var(--type-number); }
+.cell-type-date { color: var(--type-date); }
+
+/* Deliberately outside the nav/main grid so it stays reachable
+   regardless of which table/dialog is showing. */
+#api-help-btn { position: fixed; left: var(--gap-lg); bottom: var(--gap-lg); z-index: 1;
+                width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+                border: 1px solid var(--border-strong); background: canvas;
+                color: inherit; cursor: pointer; font: inherit; }
+#api-help-btn:hover { background: var(--hover); }
+
+/* Sits directly beside #api-help-btn in the same fixed corner, rather
+   than a separate corner of its own. */
+#theme-toggle { position: fixed; left: calc(var(--gap-lg) * 2 + 1.75rem); bottom: var(--gap-lg); z-index: 1;
+                width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+                border: 1px solid var(--border-strong); background: canvas;
+                color: inherit; cursor: pointer; font: inherit; line-height: 1; }
+#theme-toggle:hover { background: var(--hover); }
+/* Icon is pure CSS, no JS: it's driven by the same cascade the
+   color-scheme rules above use (system prefers-color-scheme by default,
+   overridden by an explicit :root[data-theme]), so it always reflects
+   the theme actually in effect without a matchMedia listener. */
+#theme-toggle::before { content: "☀️"; }
+@media (prefers-color-scheme: dark) {
+  #theme-toggle::before { content: "🌙"; }
+}
+:root[data-theme="light"] #theme-toggle::before { content: "☀️"; }
+:root[data-theme="dark"] #theme-toggle::before { content: "🌙"; }
+
+/* Popover API: non-modal, light-dismiss. Positioned via CSS Anchor
+   Positioning — the clicked cell gets anchor-name set in JS, and
+   position-try-fallbacks flips it away from the viewport edge with no
+   clamping math. Unsupported browsers fall back to default placement,
+   not breakage. */
+/* width:max-content sidesteps a Firefox shrink-to-fit quirk: with only
+   max-width set, Firefox sizes the popover from min-content rather than
+   available space, and break-word's min-content is a single character —
+   collapsing the box to a one-letter-wide column. Sizing to max-content
+   (still clamped by max-width) fixes that without capping width. */
+#cell-pop { position: fixed; position-anchor: --cell-anchor;
+            position-try-fallbacks: flip-block, flip-inline;
+            inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+            margin: 0; border: 1px solid var(--border-strong);
+            border-radius: 8px; padding: 0; width: max-content;
+            max-width: min(40rem, 90vw);
+            box-shadow: 0 4px 16px #0004; }
+#cell-pop pre, #cell-pop .json-tree { margin: 0; padding: .6rem var(--gap-lg); overflow: auto;
+                max-height: 50vh; word-break: break-word; }
+#cell-pop pre { white-space: pre-wrap; }
+
+/* Same shape as #cell-pop, anchored to the header's ▾ button. Separate
+   anchor-name (--cv-anchor): both popovers can be open from the same
+   render pass and each anchor-name resolves to one element. */
+#cv-pop { position: fixed; position-anchor: --cv-anchor;
+          position-try-fallbacks: flip-block, flip-inline;
+          inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+          margin: 0; border: 1px solid var(--border-strong);
+          border-radius: 8px; padding: .3rem; width: max-content;
+          max-width: min(20rem, 90vw);
+          max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
+#cv-pop .cv-empty { opacity: .6; padding: .3rem .5rem; margin: 0; }
+#cv-pop button.cv-value { display: flex; justify-content: space-between; gap: .75rem;
+          width: 100%; box-sizing: border-box; background: none; border: none;
+          font: inherit; color: inherit; text-align: left; padding: .3rem .5rem;
+          cursor: pointer; border-radius: 4px; }
+#cv-pop button.cv-value:hover { background: var(--hover); }
+#cv-pop .cv-freq { opacity: .6; }
+
+/* Same shape as #cv-pop, but the anchor is a single static button
+   rather than one per header, so anchor-name is set once in CSS. */
+#columns-btn { anchor-name: --columns-anchor; }
+#columns-pop { position: fixed; position-anchor: --columns-anchor;
+          position-try-fallbacks: flip-block, flip-inline;
+          inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+          margin: 0; border: 1px solid var(--border-strong);
+          border-radius: 8px; padding: .3rem; max-width: min(20rem, 90vw);
+          max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
+#columns-pop label { display: flex; align-items: center; gap: .4rem;
+          padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+#columns-pop label:hover { background: var(--hover); }
+.col-hidden { display: none; }
+
+/* Anchored to the text caret inside #filter, not the input's box — a
+   zero-size tracking element whose left/top JS recomputes on every
+   keystroke via mirror-div caret measurement (no native way to anchor to
+   a point inside plain text). Manual popover, not auto: it must stay
+   open while typing, which the browser's default light-dismiss would
+   treat as "outside" — see the JS for the light-dismiss substitute. */
+#filter-caret-anchor { position: fixed; width: 0; height: 0; anchor-name: --filter-caret; }
+#filter-suggest { position: fixed; position-anchor: --filter-caret;
+          position-try-fallbacks: flip-block;
+          inset: auto; top: calc(anchor(bottom) + .15rem); left: anchor(left);
+          margin: 0; border: 1px solid var(--border-strong);
+          border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
+          overflow: auto; box-shadow: 0 4px 16px #0004; }
+#filter-suggest button { display: block; width: 100%; box-sizing: border-box;
+          background: none; border: none; font: inherit; color: inherit;
+          text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
+#filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }

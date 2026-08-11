@@ -1,41 +1,61 @@
-# Frontend style guide — maintaining `dbviewer.html`
+# Frontend style guide — building `dbviewer.html`
 
 Status: agreed
-Scope: `src/frontend/dbviewer.html`. Governs code *shape* — layout,
-structure, naming — as it grows. Complements `ui-guidelines.md` (which
-governs *behavior*: what the UI must/must-not do) and the `CLAUDE.md`
-invariant that the frontend is one hand-edited file, no build step, no
-framework.
+Scope: `frontend/src/`, the TypeScript/CSS/HTML sources
+`frontend/dbviewer.html` is generated from (`mise run frontend:build`).
+Governs code *shape* — module boundaries, layout, naming — as it grows.
+Complements `ui-guidelines.md` (which governs *behavior*: what the UI
+must/must-not do) and the `CLAUDE.md` invariant that the *shipped*
+`frontend/dbviewer.html` stays one generated, self-contained file — this
+doc is about the sources that build it, not an exception to that
+invariant.
 
-The tenets below are already reflected in the current file, not aspirations
-for it — treat deviation from any of them in a new change as something a
-review should flag.
+The tenets below are already reflected in the current sources, not
+aspirations for them — treat deviation from any of them in a new change as
+something a review should flag.
 
-## 1. File layout (fixed order, top to bottom)
+## 1. Source layout (`frontend/src/`)
 
-1. `<!doctype>` + a top-of-file comment: what this file is, one line
-   pointing at `design.md` §3.1.
-2. `<head>`: meta tags, title, then one `<style>` block.
-3. `<body>`: structural markup only. No inline `style=` attributes, no
-   inline `onclick=`-style attributes — every behavior wire-up happens in
-   `<script>`, so there's exactly one place to look for "what does this
-   element do."
-4. `<script type="module">` at the end of `<body>`, internally ordered:
-   a. Constants and state (`API`, `UI_KEY`, the `state` object, its
-      load/persist functions).
-   b. Generic helpers with no feature-specific knowledge (`$`, `api()`,
-      `setStatus()`).
-   c. One block per feature, each under a `// ==== Feature name ====`
-      banner, containing that feature's render logic *and* its event
-      wiring together (locality of behavior).
-   d. Bootstrap calls at the very bottom (`loadTables()`, `loadSiblings()`,
-      the polling `setInterval`) — nothing else after them.
+- `index.html` — head meta/favicon/pre-paint theme bootstrap script, and
+  body structural markup only. No inline `style=` attributes, no inline
+  `onclick=`-style attributes — every behavior wire-up happens in a
+  TypeScript module, so there's exactly one place to look for "what does
+  this element do."
+- `styles.css` — one file; see §2 for why it isn't split further.
+- One TypeScript module per feature (`grid.ts`, `filter-ui.ts`,
+  `sidebar.ts`, etc.), each containing that feature's render logic *and*
+  its event wiring together (locality of behavior) — the same principle
+  the old single-file layout expressed with banners, now expressed as file
+  boundaries.
+- `state.ts` owns the state genuinely shared across modules (the `state`
+  object, the applied filter AST, the last-fetched payload) — the latter
+  two behind getter/setter functions, since a plain `let` export can't be
+  reassigned from outside its own module under ESM.
+- `dom.ts` holds generic, feature-agnostic helpers (`$`, `setStatus`,
+  `copyText`, `prettyPrint`).
+- `main.ts` is the entry point: owns `loadData` (the render-orchestration
+  hub touching multiple feature modules), the remaining top-level wiring,
+  and the bootstrap calls at the very bottom (`loadSchemas().then(loadTables)`,
+  `loadSiblings()`, the polling `setInterval`) — nothing else after them.
+- Circular imports between feature modules are expected and safe here
+  (e.g. `grid.ts` ↔ `main.ts` for `loadData`, `grid.ts` ↔ `record-view.ts`
+  for `formatCellValue`/`openRecordView`): every cross-module call happens
+  inside a function body invoked later — an event handler, a bootstrap
+  call — never at module-evaluation time, which is exactly the case ESM
+  circular imports handle correctly. Don't restructure a module boundary
+  just to avoid a cycle that's safe by this rule.
 
-The payoff: a reviewer with "the bug is in pagination" can jump straight to
-the pagination banner instead of reading the whole file top to bottom.
+The payoff: a reviewer with "the bug is in pagination" opens `grid.ts`
+instead of searching one file for a banner.
 
 ## 2. CSS
 
+- Kept as one `frontend/src/styles.css` file, not split per feature: the
+  `--json-*` (jsonb tree tokens) and `--type-*` (grid/record cell tokens)
+  custom properties are deliberately shared across what would otherwise be
+  separate files, so a value looks identical whether it's a top-level
+  column or nested inside a jsonb blob — splitting them apart risks them
+  drifting out of visual sync with nothing to catch it.
 - Every rule lives under a `/* ==== */` banner matching the JS section it
   styles.
 - Selector convention: `#id` for one-off structural elements, `.class` for
@@ -83,9 +103,14 @@ the pagination banner instead of reading the whole file top to bottom.
   explaining a non-obvious *why* (a browser quirk, a security invariant, a
   workaround) — never a *what* a well-named function or variable already
   says.
-- **Size discipline.** If this file crosses roughly 500 lines, that's the
-  signal to question scope before reaching for more structure, not to add
-  more of it.
+- **Size discipline.** If a module crosses roughly 300 lines, that's the
+  signal to question its scope and look for a real seam to split along
+  (see §1's coupling notes), not to add more structure within it.
+- **Types**: shared wire/domain shapes (`Column`, `TableData`,
+  `FilterCondition`, etc.) live in `types.ts`; a type used by only one
+  module stays local to it. Prefer a generic cast at the call site
+  (`$<HTMLInputElement>("filter")`) over introducing a new exported type
+  just to thread one DOM lookup's element type through.
 - **The filter grammar parser (DSL text → AST) is canonical here** — the
   one implementation every deployment shares, not something ports
   reimplement (see `spec/filter-dsl.md`, `spec/protocol.md`'s filter
@@ -146,7 +171,15 @@ a broken page.
 
 ## 7. What not to introduce
 
-- No bundler, no JSX, no TypeScript-flavored comments, no UI framework.
+- ~~No bundler, no TypeScript~~ — **reversed** (2026). `frontend/src/` is
+  TypeScript, bundled with esbuild into the single generated
+  `frontend/dbviewer.html` (§1; `CLAUDE.md`). The concern this originally
+  guarded against — a build pipeline sitting between the source and the
+  *shipped* artifact a port vendors — still fully applies to that shipped
+  artifact, which is exactly why it stays one generated file with nothing
+  external to fetch and no separate `.js`/`.css` route; it no longer
+  applies to how the source authoring itself works. No JSX, no UI
+  framework still stand.
 - No inline event-handler attributes in HTML markup (`<button
   onclick="...">`).
 - **Web Components / Shadow DOM** for repeated widgets (status dot, copy

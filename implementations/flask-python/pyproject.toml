@@ -53,3 +53,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ashurbanipal"]
+# Force-included despite being gitignored (generated fresh from
+# ../../frontend/dbviewer.html by tools/sync-ports-frontend.sh, never
+# committed) - hatchling's default packaging follows .gitignore like
+# Cargo/npm, so without this the wheel silently ships without the file.
+artifacts = ["ashurbanipal/frontend/dbviewer.html"]

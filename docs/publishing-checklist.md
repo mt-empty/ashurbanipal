@@ -113,15 +113,53 @@ per-framework split, ever.
 7. **Decide whether `frontend/dbviewer.html` needs to be independently
    versioned/pinned** for a published artifact the way `PORTING.md`'s
    vendoring contract already expects in spirit (each port re-hashes it
-   at build time against a pinned sha256 — see
-   `implementations/spring-boot-starter/build.gradle.kts`'s
-   `pinnedFrontendSha256`, `implementations/node-express`'s `src/embed.ts`,
-   `implementations/flask-python/ashurbanipal/embed.py`) — today every
-   port pins against this repo's own working-tree copy because "no tagged
+   at build/CI time against a pinned sha256) — today every port pins
+   against this repo's own working-tree copy because "no tagged
    `frontend/dbviewer.html` release currently exists to vendor from" per
-   `implementations/node-express/README.md`'s Vendoring section. A real
-   publish is the point where that stops being true and each port's
-   pinned hash should point at an actual tagged frontend release instead.
+   `PORTING.md`'s vendoring section. A real publish is the point where
+   that stops being true and each port's pinned hash should point at an
+   actual tagged frontend release instead. This item is still open for
+   all five — nothing below closes it, it's about *what* gets pinned, not
+   *how* the vendored copy reaches each port.
+   — *Vendoring mechanism itself is now closed for every port*, and turned
+   out to differ by ecosystem rather than being uniform (see `PORTING.md`'s
+   vendoring section for the full per-port rationale):
+   - **Rust and Go commit a real vendored copy**
+     (`implementations/rust/frontend/`, `implementations/go-nethttp/frontend/`)
+     — `cargo publish`/`go get module@tag` both need the file present in
+     an actual git commit at package time (verified empirically for Cargo:
+     even a staged-but-uncommitted file forces `--allow-dirty`, which
+     would also silently permit any *other* accidentally-uncommitted
+     change into an irreversible release — not a tradeoff worth taking).
+     `tools/sync-ports-frontend.sh --check` diffs both against the
+     canonical file in CI.
+   - **Spring, Node, and Flask generate theirs ephemerally instead** —
+     gitignored, never committed, regenerated on demand, since neither
+     Gradle, npm, nor hatchling has Cargo's uncommitted-file restriction.
+     Spring's `vendorFrontend` Gradle task already did this. Node now
+     mirrors it via a `sync-frontend` npm script wired into `pretest`/
+     `prebuild`/`predemo`/`prepack` hooks (verified: `pnpm test`, `npm
+     pack --dry-run` both regenerate it automatically, byte-identical to
+     the canonical file, and `npm pack`'s file list is unchanged from
+     before via an explicit `files` field, since gitignoring it would
+     otherwise silently drop it from the tarball). Flask now mirrors it
+     via an explicit `tools/sync-ports-frontend.sh` step added to
+     `flask-conformance.yml` (Python has no pre-hook convention to hang it
+     off automatically) plus a `[tool.hatch.build.targets.wheel]
+     artifacts` entry in `pyproject.toml` to force past hatchling's own
+     gitignore-based default exclusion.
+   - **Found and fixed a real, pre-existing bug while doing this**: Flask's
+     vendored copy lived at `implementations/flask-python/frontend/`,
+     *outside* the `ashurbanipal` package `pyproject.toml` actually
+     packages (`packages = ["ashurbanipal"]`). Built and inspected the
+     actual wheel (`uv build --wheel` + `zipfile -l`) — it shipped with no
+     `frontend/dbviewer.html` at all, meaning `pip install ashurbanipal-flask`
+     would have crashed at import time (`embed.py`'s module-level
+     `_load_frontend()` call). Fixed by moving the vendored copy to
+     `implementations/flask-python/ashurbanipal/frontend/dbviewer.html`
+     (inside the packaged directory) and updating `embed.py`'s path to
+     match; confirmed fixed by rebuilding the wheel and inspecting its
+     contents again.
 
 ## Per-port gaps (found by reading current manifests)
 
@@ -134,8 +172,10 @@ per-framework split, ever.
   `src/lib.rs`'s doctest, `tests/schema_isolation*.rs`,
   `conformance/runner/common.rs`, `CLAUDE.md`, and `docs/design.md` was
   updated to match; `cargo build`/`cargo test --doc`/`cargo clippy
-  --all-features -- -D warnings` all pass under the new name. No remaining
-  manifest gaps; only the crates.io name-availability check (for
+  --all-features -- -D warnings` all pass under the new name. Frontend
+  vendoring blocker (gate item 7) is also now closed — `cargo publish
+  --dry-run` packages, verifies, and gets to the upload step cleanly. No
+  remaining manifest gaps; only the crates.io name-availability check (for
   `ashurbanipal-axum` now, not bare `ashurbanipal`) and the actual publish
   job are outstanding.
 - **Node** (`implementations/node-express/package.json`) — ~~`"private":
