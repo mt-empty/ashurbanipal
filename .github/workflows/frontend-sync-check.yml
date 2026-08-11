@@ -5,15 +5,23 @@ on:
     branches: [main]
     paths:
       - "frontend/dbviewer.html"
+      - "frontend/src/**"
+      - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
+      - "implementations/node-express/**"
+      - "implementations/flask-python/**"
       - "tools/sync-ports-frontend.sh"
       - ".github/workflows/frontend-sync-check.yml"
   pull_request:
     paths:
       - "frontend/dbviewer.html"
+      - "frontend/src/**"
+      - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
+      - "implementations/node-express/**"
+      - "implementations/flask-python/**"
       - "tools/sync-ports-frontend.sh"
       - ".github/workflows/frontend-sync-check.yml"
 
@@ -23,7 +31,7 @@ concurrency:
 
 jobs:
   check:
-    name: verify Go/Spring vendored frontend copies match frontend/dbviewer.html
+    name: verify frontend/dbviewer.html matches frontend/src/, and vendored copies match it
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -33,4 +41,6 @@ jobs:
         with:
           install: false
 
-      - run: mise run frontend:check-go-sync
+      - run: mise run frontend:typecheck
+      - run: mise run frontend:build-check
+      - run: mise run frontend:check-ports-sync

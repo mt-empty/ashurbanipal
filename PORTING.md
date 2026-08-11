@@ -59,9 +59,42 @@ grammar parser (`spec/filter-dsl.md`), vendoring it pins filter *syntax*
 compatibility, not just UI/UX — treat a version bump here with the same
 care as a `spec/protocol.md` version bump.
 
-Within this repository, `mise run frontend:sync-ports` copies the canonical
-frontend into the Go port and updates the Go and Spring checksum pins;
-`mise run frontend:check-go-sync` verifies those artifacts in CI.
+Within this repository, `mise run frontend:sync-ports` regenerates every
+port's own copy from the canonical `frontend/dbviewer.html`, but *where*
+that copy lives differs by ecosystem, driven by what each one's packaging
+tooling actually requires:
+
+- **Rust and Go commit theirs** (`implementations/rust/frontend/`,
+  `implementations/go-nethttp/frontend/`) — `cargo publish` refuses to
+  package any file that isn't committed to git (verified: even a `git
+  add`-staged-but-uncommitted file triggers the "uncommitted changes"
+  error and forces `--allow-dirty`, which would also silently permit any
+  *other* accidentally-uncommitted change into an irreversible, yank-only
+  release), and Go modules have no separate "package" step at all — `go
+  get module@tag` fetches exactly what's in that tagged commit. `mise run
+  frontend:check-ports-sync` diffs these two against the canonical file in
+  CI; Go additionally keeps a `pinnedFrontendSHA256` checksum constant in
+  `embed.go`, re-verified at every process start.
+- **Spring, Node, and Flask generate theirs ephemerally** — gitignored,
+  never committed, regenerated whenever needed. None of these three
+  ecosystems has Cargo's "refuse on uncommitted files" behavior, so there's
+  no safety net to lose by doing this: Spring's `vendorFrontend` Gradle
+  task copies it into a `build/` output directory at every build; Node's
+  `package.json` wires a `sync-frontend` script into `pretest`/`prebuild`/
+  `predemo`/`prepack` hooks so any of `pnpm test`/`build`/`demo`/`npm pack`
+  regenerates it automatically; Flask has no such hook convention
+  available, so `flask-conformance.yml` calls
+  `tools/sync-ports-frontend.sh` as an explicit CI step, and its
+  `pyproject.toml` force-includes the gitignored file into the wheel via
+  `[tool.hatch.build.targets.wheel] artifacts` (confirmed empirically:
+  hatchling's default packaging also follows `.gitignore`, same as Cargo
+  and npm's default — without `artifacts`, the built wheel silently
+  shipped without the file at all, a real bug this caught). All three
+  still keep a `PINNED_FRONTEND_SHA256`-style checksum constant in their
+  own embed code, re-verified at build/runtime, same as Go's.
+
+`mise run frontend:check-ports-sync` verifies all five ports' checksum
+pins (and Rust/Go's committed bytes) against the canonical file in CI.
 
 ## What you implement
 

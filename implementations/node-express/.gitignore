@@ -1,2 +1,6 @@
 node_modules/
 dist/
+# Generated fresh from ../../frontend/dbviewer.html by the sync-frontend
+# script (see package.json's pre* hooks) - never committed here, same
+# reasoning Spring's Gradle vendorFrontend task already established.
+frontend/dbviewer.html

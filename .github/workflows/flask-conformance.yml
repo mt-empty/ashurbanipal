@@ -61,6 +61,14 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
 
+      # Unlike Node's npm-script pre-hooks, Python has no equivalent
+      # automatic pre-install/pre-test hook, so this port's ephemeral
+      # frontend copy (gitignored, see PORTING.md's vendoring section)
+      # needs an explicit generation step before anything imports
+      # ashurbanipal.embed.
+      - name: Sync vendored frontend
+        run: tools/sync-ports-frontend.sh
+
       - name: Install
         working-directory: implementations/flask-python
         run: uv sync --extra dev
@@ -73,8 +81,8 @@ jobs:
         working-directory: implementations/flask-python
         run: uv run ruff format --check .
 
-      # Vendored frontend re-hash: catches a build pipeline silently
-      # mangling the copy at implementations/flask-python/frontend/dbviewer.html
+      # Re-hash after generation: catches a build pipeline silently
+      # mangling the copy at implementations/flask-python/ashurbanipal/frontend/dbviewer.html
       # (PORTING.md's vendoring contract, hardening checklist item 3) —
       # embed.py itself already raises at import time on a mismatch, so
       # importing it is the check.
@@ -99,6 +107,7 @@ jobs:
       toolchain: python
       python-version: "3.12"
       start-command: >-
+        tools/sync-ports-frontend.sh &&
         cd implementations/flask-python &&
         uv sync --extra postgres &&
         PORT=4000 uv run python demo/app.py
@@ -114,6 +123,7 @@ jobs:
       toolchain: python
       python-version: "3.12"
       start-command: >-
+        tools/sync-ports-frontend.sh &&
         cd implementations/flask-python &&
         uv sync --extra postgres &&
         PORT=4000 uv run python demo/app.py

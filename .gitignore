@@ -17,4 +17,4 @@ implementations/spring-boot-starter/**/build/
 implementations/spring-boot-starter/.gradle/
 implementations/spring-boot-starter/**/out/
 implementations/spring-boot-starter/**/.kotlin/
-*.gitignore
+*.gitignore/
