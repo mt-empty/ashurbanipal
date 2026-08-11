@@ -13,7 +13,22 @@
   "engines": {
     "node": ">=24"
   },
+  "files": [
+    "src",
+    "demo",
+    "frontend/dbviewer.html",
+    "test",
+    "tsconfig.json",
+    "vitest.config.ts",
+    "biome.json",
+    "pnpm-workspace.yaml"
+  ],
   "scripts": {
+    "sync-frontend": "node -e \"require('fs').mkdirSync('frontend',{recursive:true});require('fs').copyFileSync('../../frontend/dbviewer.html','frontend/dbviewer.html')\"",
+    "pretest": "npm run sync-frontend",
+    "prebuild": "npm run sync-frontend",
+    "predemo": "npm run sync-frontend",
+    "prepack": "npm run sync-frontend",
     "build": "tsc -p tsconfig.json && node -e \"require('fs').mkdirSync('dist/frontend',{recursive:true});require('fs').copyFileSync('frontend/dbviewer.html','dist/frontend/dbviewer.html')\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",

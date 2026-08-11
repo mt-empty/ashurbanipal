@@ -17,7 +17,7 @@ from pathlib import Path
 
 PINNED_FRONTEND_SHA256 = "3fc87a2ede9b10f546981015451f820d36e27208e4bbf14e645de9db6592d93b"
 
-_FRONTEND_PATH = Path(__file__).resolve().parent.parent / "frontend" / "dbviewer.html"
+_FRONTEND_PATH = Path(__file__).resolve().parent / "frontend" / "dbviewer.html"
 
 
 def _load_frontend() -> str:
