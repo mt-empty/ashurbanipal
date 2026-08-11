@@ -5,13 +5,15 @@ published as the `ashurbanipal-axum` crate — the `-axum` suffix leaves room
 for a future alternate-framework crate (`ashurbanipal-actix`, etc.) without
 a breaking rename of this one (see `docs/publishing-checklist.md`).
 
-Not published to crates.io yet — depend on it by path or git:
+Published on [crates.io](https://crates.io/crates/ashurbanipal-axum):
+
+```sh
+cargo add ashurbanipal-axum
+```
 
 ```toml
 [dependencies]
-ashurbanipal-axum = { git = "https://github.com/mt-empty/ashurbanipal" }
-# or, from within a clone of this repo:
-ashurbanipal-axum = { path = "implementations/rust" }
+ashurbanipal-axum = "0.1"
 ```
 
 ## Database support
@@ -25,14 +27,20 @@ ashurbanipal-axum = { path = "implementations/rust" }
 ```toml
 [dependencies]
 # Postgres only (default):
-ashurbanipal-axum = { path = "implementations/rust" }
+ashurbanipal-axum = "0.1"
 # To also pull in MySqlSource:
-ashurbanipal-axum = { path = "implementations/rust", features = ["mysql"] }
+ashurbanipal-axum = { version = "0.1", features = ["mysql"] }
 # To also pull in SqliteSource:
-ashurbanipal-axum = { path = "implementations/rust", features = ["sqlite"] }
+ashurbanipal-axum = { version = "0.1", features = ["sqlite"] }
 ```
 
 ## Usage
+
+`ashurbanipal_axum::router` returns a state-erased `Router<()>` (its state
+is captured inside the handlers, not held generically) — if your own app
+router carries state (`Router<AppState>`), call `.with_state(...)` on it
+*before* `.merge()`-ing this one, since axum 0.8 requires the merge sides'
+state types to match:
 
 ```rust
 use ashurbanipal_axum::{Config, PgPoolSource};
@@ -42,6 +50,7 @@ let config = Config::from_toml(&toml_str)?;
 
 let app = Router::new()
     // ... your existing routes ...
+    .with_state(app_state) // resolves Router<AppState> to Router<()> before merging
     .merge(ashurbanipal_axum::router(config, PgPoolSource::new(pool.clone())));
 ```
 
