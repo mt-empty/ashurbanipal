@@ -6,14 +6,6 @@ export function setStatus(text: string): void {
   $("status").textContent = text;
 }
 
-export function prettyPrint(text: string): string {
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    return text;
-  }
-}
-
 // ---- per-cell copy (Clipboard API) ----
 export async function copyText(text: string, btn: HTMLElement): Promise<void> {
   try {

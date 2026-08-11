@@ -9,6 +9,12 @@ const dir = fileURLToPath(new URL(".", import.meta.url));
 
 const result = await esbuild.build({
   entryPoints: [`${dir}src/main.ts`],
+  // Pins esbuild's inline path comments to this script's own directory
+  // rather than process.cwd() (esbuild's default) — otherwise `node
+  // build.mjs` from the repo root vs. from frontend/ (what the mise task
+  // does) produces byte-different output, which is exactly what
+  // frontend:build-check exists to catch.
+  absWorkingDir: dir.replace(/\/$/, ""),
   bundle: true,
   write: false,
   format: "esm",
@@ -21,11 +27,24 @@ const script = result.outputFiles[0].text.trimEnd();
 const style = readFileSync(`${dir}src/styles.css`, "utf8").trimEnd();
 const template = readFileSync(`${dir}src/index.html`, "utf8");
 
-if (!template.includes("/*ASHURBANIPAL_STYLE*/") || !template.includes("/*ASHURBANIPAL_SCRIPT*/")) {
-  throw new Error("src/index.html is missing an ASHURBANIPAL_STYLE or ASHURBANIPAL_SCRIPT placeholder");
+// Requires exactly one occurrence of `marker` — not just "at least one" —
+// so a stray duplicate placeholder fails loudly instead of only the first
+// copy getting filled in.
+function splice(text, marker, value) {
+  const count = text.split(marker).length - 1;
+  if (count !== 1) {
+    throw new Error(`expected exactly one ${marker} placeholder in src/index.html, found ${count}`);
+  }
+  return text.replace(marker, () => value);
 }
-const html = template
-  .replace("/*ASHURBANIPAL_STYLE*/", () => style)
-  .replace("/*ASHURBANIPAL_SCRIPT*/", () => script);
+
+let html = splice(template, "/*ASHURBANIPAL_STYLE*/", style);
+html = splice(html, "/*ASHURBANIPAL_SCRIPT*/", script);
+// Guards against the marker text reappearing post-substitution (e.g. the
+// bundled script or CSS happening to contain a literal placeholder
+// string), which would otherwise silently ship broken markup.
+if (html.includes("/*ASHURBANIPAL_STYLE*/") || html.includes("/*ASHURBANIPAL_SCRIPT*/")) {
+  throw new Error("a placeholder marker survived substitution — check style/script content for a literal match");
+}
 
 writeFileSync(`${dir}dbviewer.html`, html);

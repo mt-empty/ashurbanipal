@@ -112,14 +112,19 @@ export function formatCellValue(col: Column, raw: string): Node {
 let cellPopAnchor: HTMLElement | null = null;
 function showCellPop(e: MouseEvent, text: string): void {
   // jsonb (or any JSON-shaped value) renders as a colored, collapsible
-  // tree; everything else falls back to the plain <pre>.
-  let parsed: unknown;
+  // tree; everything else falls back to the plain <pre>. Parsing and
+  // rendering share one try/catch, matching record-view.ts's pattern —
+  // a malformed tree build degrades to plain text the same as
+  // unparseable JSON, rather than throwing out of a click handler.
   let isJson = true;
-  try { parsed = JSON.parse(text); } catch { isJson = false; }
+  try {
+    $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text) as JsonValue));
+  } catch {
+    isJson = false;
+  }
   $("cell-pre").hidden = isJson;
   $("cell-json").hidden = !isJson;
-  if (isJson) $("cell-json").replaceChildren(renderJsonTree(parsed as JsonValue));
-  else $("cell-pre").textContent = text;
+  if (!isJson) $("cell-pre").textContent = text;
   if (cellPopAnchor) cellPopAnchor.style.anchorName = "";
   cellPopAnchor = e.currentTarget as HTMLElement;
   cellPopAnchor.style.anchorName = "--cell-anchor";
