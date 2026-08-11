@@ -4,3 +4,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.db
+# Generated fresh from ../../frontend/dbviewer.html by
+# tools/sync-ports-frontend.sh - never committed here, same reasoning
+# Spring's Gradle vendorFrontend task and Node's sync-frontend script
+# already established. pyproject.toml's wheel `artifacts` entry force-
+# includes it at build time despite being gitignored.
+ashurbanipal/frontend/dbviewer.html

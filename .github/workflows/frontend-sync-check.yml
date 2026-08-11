@@ -6,16 +6,22 @@ on:
     paths:
       - "frontend/dbviewer.html"
       - "frontend/src/**"
+      - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
+      - "implementations/node-express/**"
+      - "implementations/flask-python/**"
       - "tools/sync-ports-frontend.sh"
       - ".github/workflows/frontend-sync-check.yml"
   pull_request:
     paths:
       - "frontend/dbviewer.html"
       - "frontend/src/**"
+      - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
+      - "implementations/node-express/**"
+      - "implementations/flask-python/**"
       - "tools/sync-ports-frontend.sh"
       - ".github/workflows/frontend-sync-check.yml"
 
@@ -37,4 +43,4 @@ jobs:
 
       - run: mise run frontend:typecheck
       - run: mise run frontend:build-check
-      - run: mise run frontend:check-go-sync
+      - run: mise run frontend:check-ports-sync

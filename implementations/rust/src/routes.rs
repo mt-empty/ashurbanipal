@@ -13,7 +13,7 @@ use crate::config::Config;
 use crate::db::{DbError, DbSource, QueryOpts, TableInfo};
 use crate::filter;
 
-const DBVIEWER_HTML: &str = include_str!("../../../frontend/dbviewer.html");
+const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
 const PROTOCOL_HEADER: &str = "x-ashurbanipal-protocol";
 /// Bumped only for non-additive wire changes; additive optional fields
