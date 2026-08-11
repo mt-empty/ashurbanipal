@@ -83,7 +83,12 @@ function restoreTableFocus(captured: FocusCapture | null): void {
   if (!captured) return;
   const tr = $(captured.region)?.children[captured.rowIndex];
   const cell = tr?.children[captured.colIndex];
-  const target = cell?.querySelector<HTMLElement>(`.${captured.className}`);
+  // className can carry more than one class (e.g. a focused FK cell's
+  // button is both "cell-text" and "fk-cell") — join them into a single
+  // compound selector instead of interpolating the raw string, which
+  // `.${className}` would otherwise parse as a descendant combinator.
+  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
+  const target = classSelector ? cell?.querySelector<HTMLElement>(classSelector) : null;
   (target ?? document.querySelector<HTMLElement>("table")!).focus();
 }
 
@@ -148,10 +153,11 @@ export async function loadData({ resetScroll = true }: { resetScroll?: boolean }
     renderTable();
   }
   updatePager(data);
-  // Table switch/sort/filter jump to a new row 0, so snapping to the top
-  // orients the user; prev/next paginate in place and pass resetScroll:
-  // false so the pager buttons stay put instead of leaping away underneath
-  // the click that just landed on them.
+  // Default true: table switch and filter submit jump to a new row 0, so
+  // snapping to the top orients the user. Sort and prev/next explicitly
+  // pass resetScroll: false — they're in-place operations on the current
+  // view, and jumping the scroll position out from under the click that
+  // triggered them would be disorienting, not helpful.
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
 

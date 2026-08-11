@@ -128,7 +128,11 @@ export async function loadTables(): Promise<void> {
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
   if (!tableNames.includes(state.table ?? "")) state.table = tableNames[0] ?? null;
-  if (state.table) loadData();
+  // Awaited (not fire-and-forget): callers like nav.ts's popstate handler
+  // reset restoringFromHistory once this promise settles, and that flag
+  // must still be true when loadData()'s syncUrl() call runs, or a
+  // history restoration would push a new entry instead of replacing it.
+  if (state.table) await loadData();
   else setStatus("");
 }
 
