@@ -7,12 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Be terse, not verbose — short responses, no restating what was just asked
 or narrating obvious next steps. Don't add comments to explain code that's
 already clear from names/structure; a comment only earns its place by
-stating a non-obvious *why* (see the `implementations/rust/src/*.rs`
+stating a non-obvious *why* (see the `implementations/rust/{src,core/src}/**/*.rs`
 comment-discipline rule below, which applies project-wide, not just to
 Rust). That discipline includes length, not just content: when a comment
 is warranted, keep it to one line, occasionally two — everywhere in the
 repo, any language, any file, tests and scripts included, not just
-`implementations/rust/src/*.rs` and `dbviewer.html`.
+`implementations/rust/{src,core/src}/**/*.rs` and `dbviewer.html`.
 
 ## What this is
 
@@ -51,15 +51,22 @@ Two components:
   and the one place a CDN dependency is still under consideration; if it
   lands, it must be an enhancement only, i.e. the page keeps working if
   the CDN is unreachable.
-- **Backend (Rust implementation)** — `implementations/rust/src/config.rs`
-  (kill switch + limits + siblings config), `implementations/rust/src/db/`
-  (the `DbSource` trait in `mod.rs` + three impls: `postgres.rs`'s
-  `PgPoolSource`, the default, and `sqlite.rs`'s `SqliteSource` and
-  `mysql.rs`'s `MySqlSource`, each gated behind its own opt-in Cargo
-  feature (`sqlite`, `mysql`) — see `docs/adapter-decisions.md` for where
-  the backends' catalog queries diverge),
-  `implementations/rust/src/routes.rs` (the Axum router and the six API
-  handlers, including multi-schema's `list_schemas`).
+- **Backend (Rust implementation)** — a two-crate Cargo workspace rooted at
+  `implementations/rust/`. `implementations/rust/core/` is the
+  framework-agnostic `ashurbanipal` crate: `src/config.rs` (kill switch +
+  limits + siblings config), `src/db/` (the `DbSource` trait in `mod.rs` +
+  three impls: `postgres.rs`'s `PgPoolSource`, the default, and
+  `sqlite.rs`'s `SqliteSource` and `mysql.rs`'s `MySqlSource`, each gated
+  behind its own opt-in Cargo feature (`sqlite`, `mysql`) — see
+  `docs/adapter-decisions.md` for where the backends' catalog queries
+  diverge), `src/filter.rs` (the JSON filter AST). The workspace root
+  package, `implementations/rust/`, is `ashurbanipal-axum`: `src/lib.rs`
+  re-exports `ashurbanipal`'s public API unchanged, and `src/routes.rs`
+  (the only axum-coupled file) holds the Axum router and the six API
+  handlers, including multi-schema's `list_schemas`. See
+  `docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`
+  for why the split exists — reused by any future framework adapter
+  (e.g. a hypothetical `ashurbanipal-actix-web`), not just this one.
 
 Read `docs/design.md` first for anything non-obvious — it's the source of
 truth for intended behavior. `spec/protocol.md` is the normative endpoint
@@ -106,7 +113,7 @@ mise run rust:lint                       # cargo clippy -- -D warnings
 mise run rust:fmt-check
 mise run rust:demo                       # host demo app at http://localhost:4000/__ashurbanipal
 mise run rust:demo-sibling               # second instance, to demo sibling health-poll
-mise run rust:dev                        # demo app, auto-rebuild/restart on implementations/rust/src/ or frontend/dbviewer.html changes (watchexec)
+mise run rust:dev                        # demo app, auto-rebuild/restart on implementations/rust/{src,core/src}/ or frontend/dbviewer.html changes (watchexec)
 
 mise run conformance:seed-gen            # regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql
 mise run conformance:seed-check          # verify both seed files still match tools/seed-gen's output
@@ -187,7 +194,7 @@ RNG seed, so regenerating without source edits produces an identical file.
   else is a bound parameter. The filter DSL's columns follow the same rule (each backend's
   own `build_where_clause`): each condition's column is matched against the
   live allow-list before being spliced in, exactly like `sort` — the parsed
-  column name from `implementations/rust/src/filter.rs` is never trusted
+  column name from `implementations/rust/core/src/filter.rs` is never trusted
   directly.
 - **Multi-schema queries pin one connection per operation.** `schema: None`
   resolves to the connection's default schema; an explicit value is
@@ -198,7 +205,7 @@ RNG seed, so regenerating without source edits produces an identical file.
   for the regression test. An endpoint that issues multiple schema-sensitive
   queries to build one response MUST stay on that one connection/transaction;
   never re-borrow from the pool mid-operation.
-- **The filter DSL is implemented.** `implementations/rust/src/filter.rs` deserializes and
+- **The filter DSL is implemented.** `implementations/rust/core/src/filter.rs` deserializes and
   structurally validates the JSON filter AST wire format (`spec/protocol.md` §5.4.2) — it never
   parses DSL text, that's frontend-only (`spec/filter-dsl.md`);
   each backend's `query_table` validates each condition's column against the live
@@ -227,7 +234,7 @@ RNG seed, so regenerating without source edits produces an identical file.
   `native-tls`/OpenSSL.
 - **Demo-only deps stay in `[dev-dependencies]`.** `tracing-subscriber`,
   `dotenvy` etc. must never leak into the published crate's dependency list.
-- **Comments in `implementations/rust/src/*.rs` follow the same discipline `frontend-style-guide.md`
+- **Comments in `implementations/rust/{src,core/src}/**/*.rs` follow the same discipline `frontend-style-guide.md`
   §3 already enforces for `dbviewer.html`.** A comment earns its place only
   by stating a non-obvious *why* — a security invariant, a Postgres quirk, a
   bug it guards against — in one or two sentences, never a *what* the

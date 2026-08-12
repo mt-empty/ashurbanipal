@@ -80,6 +80,18 @@ Go is the one port exempt from ever needing this: `Router(cfg, source)
 returns the stdlib interface every Go framework speaks, so it needs no
 per-framework split, ever.
 
+**Amendment (added when `ashurbanipal-axum`'s framework-agnostic modules
+were extracted into their own crate):** this "no bare name" rule is about
+HTTP-facing, host-embedded artifacts specifically — the thing whose public
+API includes a framework-specific return type. It does not apply to an
+internal core library that a host never imports by name directly (it's
+only reached transitively through a framework adapter's re-exports). The
+bare name `ashurbanipal` is reserved for exactly that role, per
+`docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`
+— `ashurbanipal-axum` depends on plain `ashurbanipal` (path dep today,
+`implementations/rust/core`), and any future `ashurbanipal-actix-web` will
+do the same.
+
 ## Common gate items (every port, before its first publish)
 
 1. **Version discipline.** No `-SNAPSHOT`/`0.0.0` placeholder at publish
