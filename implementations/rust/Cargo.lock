@@ -18,9 +18,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ashurbanipal"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sqlx",
+ "toml",
+]
+
+[[package]]
 name = "ashurbanipal-axum"
 version = "0.1.0"
 dependencies = [
+ "ashurbanipal",
  "axum",
  "dotenvy",
  "escargot",
