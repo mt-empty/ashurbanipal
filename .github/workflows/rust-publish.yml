@@ -83,7 +83,10 @@ jobs:
 
       - name: cargo publish --dry-run (packaging check only)
         working-directory: implementations/rust
-        run: cargo publish --dry-run
+        # -p is required now that this is a workspace with sibling members
+        # (ashurbanipal core, ashurbanipal-actix-web) — a bare `cargo
+        # publish` silently resolves to the wrong package otherwise.
+        run: cargo publish -p ashurbanipal-axum --dry-run
 
   conformance:
     name: Rust — conformance kit (external-URL path)
@@ -91,7 +94,7 @@ jobs:
     uses: ./.github/workflows/_conformance-behavior.yml
     with:
       toolchain: rust
-      start-command: "cargo run --manifest-path implementations/rust/Cargo.toml --example demo"
+      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/Cargo.toml --example demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: rust-publish-conformance-report
@@ -102,7 +105,7 @@ jobs:
     uses: ./.github/workflows/_conformance-schema.yml
     with:
       toolchain: rust
-      start-command: "cargo run --manifest-path implementations/rust/Cargo.toml --example demo"
+      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/Cargo.toml --example demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
 
@@ -129,6 +132,9 @@ jobs:
 
       - name: cargo publish
         working-directory: implementations/rust
-        run: cargo publish
+        # -p is required now that this is a workspace with sibling members
+        # (ashurbanipal core, ashurbanipal-actix-web) — a bare `cargo
+        # publish` silently resolves to the wrong package otherwise.
+        run: cargo publish -p ashurbanipal-axum
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

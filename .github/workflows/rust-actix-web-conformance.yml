@@ -1,27 +1,29 @@
-name: rust conformance
+name: rust actix-web conformance
 
 on:
   push:
     branches: [main]
     paths:
-      - "implementations/rust/**"
+      - "implementations/rust/actix-web/**"
+      - "implementations/rust/core/**"
       - "spec/**"
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".devcontainer/db/init/01-seed.sql"
       - "tools/seed-gen/**"
-      - ".github/workflows/rust-conformance.yml"
+      - ".github/workflows/rust-actix-web-conformance.yml"
       - ".github/workflows/_conformance-behavior.yml"
       - ".github/workflows/_conformance-schema.yml"
   pull_request:
     paths:
-      - "implementations/rust/**"
+      - "implementations/rust/actix-web/**"
+      - "implementations/rust/core/**"
       - "spec/**"
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".devcontainer/db/init/01-seed.sql"
       - "tools/seed-gen/**"
-      - ".github/workflows/rust-conformance.yml"
+      - ".github/workflows/rust-actix-web-conformance.yml"
       - ".github/workflows/_conformance-behavior.yml"
       - ".github/workflows/_conformance-schema.yml"
 
@@ -31,7 +33,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: cargo fmt/clippy/test --lib + seed sync check
+    name: cargo fmt/clippy/test --lib (whole workspace) + seed sync check
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -56,22 +58,22 @@ jobs:
       - run: mise run rust
 
   conformance:
-    name: Rust — conformance kit (external-URL path)
+    name: Rust actix-web — conformance kit (external-URL path)
     needs: build-and-test
     uses: ./.github/workflows/_conformance-behavior.yml
     with:
       toolchain: rust
-      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/Cargo.toml --example demo"
+      start-command: "cargo run -p ashurbanipal-actix-web --manifest-path implementations/rust/actix-web/Cargo.toml --example demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
-      report-name: conformance-report
+      report-name: conformance-report-actix-web
 
   schema-conformance:
-    name: Rust — schema conformance
+    name: Rust actix-web — schema conformance
     needs: build-and-test
     uses: ./.github/workflows/_conformance-schema.yml
     with:
       toolchain: rust
-      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/Cargo.toml --example demo"
+      start-command: "cargo run -p ashurbanipal-actix-web --manifest-path implementations/rust/actix-web/Cargo.toml --example demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"

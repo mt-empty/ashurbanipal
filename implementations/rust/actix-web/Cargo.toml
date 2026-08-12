@@ -1,35 +1,18 @@
-[workspace]
-members = ["core", "actix-web"]
-default-members = [".", "core", "actix-web"]
-
-[workspace.dependencies]
-sqlx = { version = "0.9", default-features = false, features = [
-    "runtime-tokio",
-    "tls-rustls-ring-webpki",
-    "postgres",
-    "uuid",
-    "chrono",
-    "json",
-] }
-
 [package]
-name = "ashurbanipal-axum"
+name = "ashurbanipal-actix-web"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.94"
-description = "Embeddable, read-only database browser for lower environments"
+description = "Embeddable, read-only database browser for lower environments (Actix-web adapter)"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/mt-empty/ashurbanipal"
 
 [dependencies]
-axum = "0.8"
-ashurbanipal = { version = "0.1", path = "core" }
-sqlx = { workspace = true }
-tokio = { version = "1", features = ["rt", "macros"] }
+actix-web = "4"
+ashurbanipal = { version = "0.1", path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "1"
 reqwest = { version = "0.13", default-features = false, features = [
     "rustls",
     "json",
@@ -45,15 +28,9 @@ sqlite = ["ashurbanipal/sqlite"]
 mysql = ["ashurbanipal/mysql"]
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = "0.3"
 dotenvy = "0.15"
-escargot = "0.5.15"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
+sqlx = { workspace = true }
 
 [[example]]
 name = "demo"
-
-[[test]]
-name = "conformance"
-path = "../../conformance/runner/main.rs"
