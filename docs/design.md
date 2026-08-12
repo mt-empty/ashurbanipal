@@ -10,7 +10,13 @@ development, integration, and staging environments. A service embeds the
 Ashurbanipal crate, mounts its routes, and gets a web UI for browsing its own
 database tables — no separate DB client, no extra credentials, no build step.
 
-v1 targets Rust services built on Axum, backed by Postgres.
+v1 targets Rust services built on Axum, backed by Postgres. A second
+framework adapter, `ashurbanipal-actix-web` (`implementations/rust/actix-web/`),
+exists alongside the Axum one — everywhere this document describes
+framework-coupled behavior (the router/handler layer), it's describing
+Axum specifically; config, `DbSource`, the filter DSL, and the kill
+switch are framework-agnostic (`implementations/rust/core/`) and apply
+unchanged to both adapters.
 
 ## 2. Goals / Non-goals
 
