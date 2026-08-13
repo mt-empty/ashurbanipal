@@ -1,7 +1,7 @@
 # Publishing checklist
 
 Status: none of the five ports are published to a registry today; each
-README says so explicitly (`implementations/rust/README.md:5`,
+README says so explicitly (`implementations/rust/axum/README.md:5`,
 `implementations/go-nethttp/README.md:9`, and the equivalent "not yet"
 framing implied by node-express's `"private": true` and flask-python's
 missing PyPI metadata — see per-port gaps below). This document is the
@@ -65,7 +65,7 @@ matching Node's `ashurbanipal-node-express`, Flask's `ashurbanipal-flask`,
 and Spring's `ashurbanipal-spring-boot-starter`, which were already
 suffixed. Rationale: a web framework isn't an injectable dependency the
 way a DB backend is — `DbSource` swaps behind a fixed `router(config,
-source) -> Router` signature (`implementations/rust/src/routes.rs:32`),
+source) -> Router` signature (`implementations/rust/axum/src/routes.rs:32`),
 but a different framework changes the function's *return type itself*
 (`axum::Router` vs. `actix_web::Scope`, `Blueprint` vs. an ASGI app), so
 one framework per published artifact is the natural boundary, not an
@@ -88,9 +88,9 @@ internal core library that a host never imports by name directly (it's
 only reached transitively through a framework adapter's re-exports). The
 bare name `ashurbanipal` is reserved for exactly that role, per
 `docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`
-— `ashurbanipal-axum` depends on plain `ashurbanipal` (path dep today,
-`implementations/rust/core`), and any future `ashurbanipal-actix-web` will
-do the same.
+— `ashurbanipal-axum` and `ashurbanipal-actix-web` both depend on plain
+`ashurbanipal` (path dep today, `implementations/rust/core`) rather than
+on each other.
 
 ## Common gate items (every port, before its first publish)
 
@@ -149,13 +149,15 @@ do the same.
    out to differ by ecosystem rather than being uniform (see `PORTING.md`'s
    vendoring section for the full per-port rationale):
    - **Rust and Go commit a real vendored copy**
-     (`implementations/rust/frontend/`, `implementations/go-nethttp/frontend/`)
+     (`implementations/rust/axum/frontend/`,
+     `implementations/rust/actix-web/frontend/`,
+     `implementations/go-nethttp/frontend/`)
      — `cargo publish`/`go get module@tag` both need the file present in
      an actual git commit at package time (verified empirically for Cargo:
      even a staged-but-uncommitted file forces `--allow-dirty`, which
      would also silently permit any *other* accidentally-uncommitted
      change into an irreversible release — not a tradeoff worth taking).
-     `tools/sync-ports-frontend.sh --check` diffs both against the
+     `tools/sync-ports-frontend.sh --check` diffs all three against the
      canonical file in CI.
    - **Spring, Node, and Flask generate theirs ephemerally instead** —
      gitignored, never committed, regenerated on demand, since neither

@@ -41,9 +41,9 @@ unchanged to both adapters.
 - Diff viewer (Monaco / `@pierre/diffs`) — deferred to a later iteration.
 - Non-Postgres backends beyond SQLite and MySQL — the DB layer is
   trait-based so these are additive changes later, not a rewrite. A SQLite
-  `DbSource` (`implementations/rust/src/db/sqlite.rs`, opt-in `sqlite`
+  `DbSource` (`implementations/rust/core/src/db/sqlite.rs`, opt-in `sqlite`
   Cargo feature) and a MySQL/MariaDB `DbSource`
-  (`implementations/rust/src/db/mysql.rs`, opt-in `mysql` Cargo feature)
+  (`implementations/rust/core/src/db/mysql.rs`, opt-in `mysql` Cargo feature)
   have both been reviewed and merged; see `docs/adapter-decisions.md` for
   the per-clause decisions each makes where Postgres-specific catalog/stats
   mechanisms have no equivalent.

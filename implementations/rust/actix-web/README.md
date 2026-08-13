@@ -2,7 +2,7 @@
 
 The Rust/Actix-web adapter of [Ashurbanipal](../../../readme.md), sharing
 the framework-agnostic `ashurbanipal` core crate (`../core/`) with
-[`ashurbanipal-axum`](../README.md) — config, `DbSource` backends, and the
+[`ashurbanipal-axum`](../axum/README.md) — config, `DbSource` backends, and the
 filter DSL are identical between the two adapters; only the HTTP routing
 layer differs.
 
@@ -19,7 +19,7 @@ ashurbanipal-actix-web = { path = "implementations/rust/actix-web" }
 ## Database support
 
 Same `DbSource` backends as `ashurbanipal-axum`, unchanged — see
-[`../README.md`'s database support table](../README.md#database-support)
+[`../axum/README.md`'s database support table](../axum/README.md#database-support)
 for the full per-backend matrix (Postgres default, MySQL/SQLite behind
 the `mysql`/`sqlite` Cargo features).
 

@@ -7,12 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Be terse, not verbose — short responses, no restating what was just asked
 or narrating obvious next steps. Don't add comments to explain code that's
 already clear from names/structure; a comment only earns its place by
-stating a non-obvious *why* (see the `implementations/rust/{src,core/src}/**/*.rs`
+stating a non-obvious *why* (see the `implementations/rust/{axum/src,core/src}/**/*.rs`
 comment-discipline rule below, which applies project-wide, not just to
 Rust). That discipline includes length, not just content: when a comment
 is warranted, keep it to one line, occasionally two — everywhere in the
 repo, any language, any file, tests and scripts included, not just
-`implementations/rust/{src,core/src}/**/*.rs` and `dbviewer.html`.
+`implementations/rust/{axum/src,core/src}/**/*.rs` and `dbviewer.html`.
 
 ## What this is
 
@@ -43,7 +43,7 @@ Two components:
   is still one self-contained artifact with everything inlined, so
   `spec/`, ports, and conformance see no difference from a hand-edited
   file. The Rust crate embeds it into the binary via `include_str!` in
-  `implementations/rust/src/routes.rs`. `jsonb` tree
+  `implementations/rust/axum/src/routes.rs`. `jsonb` tree
   rendering and per-type cell/JSON coloring are hand-rolled directly in
   the file (`renderJsonTree`, `formatCellValue`) rather than pulled from a
   CDN — the original `@alenaksu/json-viewer`/Prism.js plan was
@@ -51,22 +51,25 @@ Two components:
   and the one place a CDN dependency is still under consideration; if it
   lands, it must be an enhancement only, i.e. the page keeps working if
   the CDN is unreachable.
-- **Backend (Rust implementation)** — a two-crate Cargo workspace rooted at
-  `implementations/rust/`. `implementations/rust/core/` is the
-  framework-agnostic `ashurbanipal` crate: `src/config.rs` (kill switch +
-  limits + siblings config), `src/db/` (the `DbSource` trait in `mod.rs` +
-  three impls: `postgres.rs`'s `PgPoolSource`, the default, and
-  `sqlite.rs`'s `SqliteSource` and `mysql.rs`'s `MySqlSource`, each gated
-  behind its own opt-in Cargo feature (`sqlite`, `mysql`) — see
-  `docs/adapter-decisions.md` for where the backends' catalog queries
-  diverge), `src/filter.rs` (the JSON filter AST). The workspace root
-  package, `implementations/rust/`, is `ashurbanipal-axum`: `src/lib.rs`
-  re-exports `ashurbanipal`'s public API unchanged, and `src/routes.rs`
-  (the only axum-coupled file) holds the Axum router and the six API
-  handlers, including multi-schema's `list_schemas`. See
-  `docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`
-  for why the split exists — reused by any future framework adapter
-  (e.g. a hypothetical `ashurbanipal-actix-web`), not just this one.
+- **Backend (Rust implementation)** — a three-crate Cargo workspace rooted
+  at `implementations/rust/` (a virtual workspace manifest; `axum/`,
+  `core/`, and `actix-web/` are flat sibling members, mirroring how
+  `juniper`/`async-graphql`/`utoipa` lay out their own core-plus-adapter
+  crates). `implementations/rust/core/` is the framework-agnostic
+  `ashurbanipal` crate: `src/config.rs` (kill switch + limits + siblings
+  config), `src/db/` (the `DbSource` trait in `mod.rs` + three impls:
+  `postgres.rs`'s `PgPoolSource`, the default, and `sqlite.rs`'s
+  `SqliteSource` and `mysql.rs`'s `MySqlSource`, each gated behind its own
+  opt-in Cargo feature (`sqlite`, `mysql`) — see `docs/adapter-decisions.md`
+  for where the backends' catalog queries diverge), `src/filter.rs` (the
+  JSON filter AST). `implementations/rust/axum/` is `ashurbanipal-axum`,
+  the reference framework adapter: `src/lib.rs` re-exports `ashurbanipal`'s
+  public API unchanged, and `src/routes.rs` (the only axum-coupled file)
+  holds the Axum router and the six API handlers, including multi-schema's
+  `list_schemas`. `implementations/rust/actix-web/` is
+  `ashurbanipal-actix-web`, a second framework adapter reusing the same
+  `core/` crate — see `docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`
+  for why the core/adapter split exists.
 
 Read `docs/design.md` first for anything non-obvious — it's the source of
 truth for intended behavior. `spec/protocol.md` is the normative endpoint
@@ -113,7 +116,7 @@ mise run rust:lint                       # cargo clippy -- -D warnings
 mise run rust:fmt-check
 mise run rust:demo                       # host demo app at http://localhost:4000/__ashurbanipal
 mise run rust:demo-sibling               # second instance, to demo sibling health-poll
-mise run rust:dev                        # demo app, auto-rebuild/restart on implementations/rust/{src,core/src}/ or frontend/dbviewer.html changes (watchexec)
+mise run rust:dev                        # demo app, auto-rebuild/restart on implementations/rust/{axum/src,core/src}/ or frontend/dbviewer.html changes (watchexec)
 
 mise run conformance:seed-gen            # regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql
 mise run conformance:seed-check          # verify both seed files still match tools/seed-gen's output
@@ -121,8 +124,11 @@ mise run frontend:test-e2e-install       # one-time Playwright browser install (
 mise run frontend:test-e2e               # Playwright E2E suite against frontend/dbviewer.html (tools/e2e-tests)
 ```
 
-The `rust:*` tasks `cd` into `implementations/rust` via mise's `dir` field —
-you don't need to `cd` there yourself when using `mise run`.
+The `rust:*` tasks `cd` into `implementations/rust` (the workspace root —
+`build`/`test`/`lint`/`fmt`/`fmt-check` run bare there and reach every
+member) or `implementations/rust/axum` (`demo`/`demo-sibling`, which are
+axum-specific) via mise's `dir` field — you don't need to `cd` yourself
+when using `mise run`.
 
 `frontend:test-e2e` is a separate, standalone-dev-only suite (pnpm/Playwright,
 `tools/e2e-tests/`) that doesn't run in the Rust `cargo test` suite; run it
@@ -140,7 +146,8 @@ concurrency, never in a single serial pass.
 
 Equivalent raw `cargo` invocations, if mise isn't available — run from
 `implementations/rust/` (or prefix each with `cd implementations/rust &&`
-from the repo root):
+from the repo root) for build/test/lint/fmt, or from
+`implementations/rust/axum/` for the demo binary:
 
 ```sh
 (cd implementations/rust && cargo build)
@@ -148,18 +155,24 @@ from the repo root):
 (cd implementations/rust && cargo test config::tests::name)
 (cd implementations/rust && cargo clippy -- -D warnings)
 (cd implementations/rust && cargo fmt --check)
-(cd implementations/rust && cargo run -p ashurbanipal-axum --example demo)
-(cd implementations/rust && PORT=4001 SIBLING_PORT=4000 cargo run -p ashurbanipal-axum --example demo)
+(cd implementations/rust/axum && cargo run -p ashurbanipal-axum --example demo)
+(cd implementations/rust/axum && PORT=4001 SIBLING_PORT=4000 cargo run -p ashurbanipal-axum --example demo)
 (cd tools/seed-gen && cargo run > ../../.devcontainer/db/init/01-seed.sql)
 ```
 
-`-p ashurbanipal-axum` is required, not optional, once `cargo run --example
-demo` is ambiguous: `implementations/rust/actix-web/` (the Actix-web
-adapter) also has its own `examples/demo.rs` in the same workspace — see
-`implementations/rust/actix-web/README.md` for its equivalent commands
-(`mise run actix:demo` / `cargo run -p ashurbanipal-actix-web --example demo`).
+`-p ashurbanipal-axum` is kept explicit above even though `cargo run
+--example demo` resolves unambiguously on its own from within
+`implementations/rust/axum/` (Cargo's current-package resolution only
+looks at that directory's own member) — it stays correct and more robust
+if the command is ever run from the workspace root instead, where it's
+genuinely required: `implementations/rust/actix-web/` (the Actix-web
+adapter) also has its own `examples/demo.rs` in the same workspace, so a
+bare `cargo run --example demo` from `implementations/rust/` is ambiguous
+— see `implementations/rust/actix-web/README.md` for its equivalent
+commands (`mise run actix:demo` / `cargo run -p ashurbanipal-actix-web
+--example demo`).
 
-`mise run rust:demo` (or `cd implementations/rust && cargo run -p
+`mise run rust:demo` (or `cd implementations/rust/axum && cargo run -p
 ashurbanipal-axum --example demo`) against the devcontainer's
 `DATABASE_URL` is the only command needed for a working browser on the
 seed db — this is an acceptance criterion, not just a convenience.
@@ -207,7 +220,7 @@ RNG seed, so regenerating without source edits produces an identical file.
   allow-list-checked the same way. That resolution happens once, as the
   first statement of the operation's own transaction, so a later query in
   the same operation can't see a different schema after pool session reuse
-  — see `docs/design.md` §5 and `implementations/rust/tests/schema_isolation.rs`
+  — see `docs/design.md` §5 and `implementations/rust/axum/tests/schema_isolation.rs`
   for the regression test. An endpoint that issues multiple schema-sensitive
   queries to build one response MUST stay on that one connection/transaction;
   never re-borrow from the pool mid-operation.
@@ -240,7 +253,7 @@ RNG seed, so regenerating without source edits produces an identical file.
   `native-tls`/OpenSSL.
 - **Demo-only deps stay in `[dev-dependencies]`.** `tracing-subscriber`,
   `dotenvy` etc. must never leak into the published crate's dependency list.
-- **Comments in `implementations/rust/{src,core/src}/**/*.rs` follow the same discipline `frontend-style-guide.md`
+- **Comments in `implementations/rust/{axum/src,core/src}/**/*.rs` follow the same discipline `frontend-style-guide.md`
   §3 already enforces for `dbviewer.html`.** A comment earns its place only
   by stating a non-obvious *why* — a security invariant, a Postgres quirk, a
   bug it guards against — in one or two sentences, never a *what* the

@@ -4,7 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 // Separate from playwright.config.ts so the main suite's video setting
 // (none — see git history around 157fc12 on screenshot-diff flakiness)
 // isn't touched just to support this.
-const CRATE_ROOT = "../../implementations/rust";
+const CRATE_ROOT = "../../implementations/rust/axum";
 const PORT = 4320;
 
 export default defineConfig({

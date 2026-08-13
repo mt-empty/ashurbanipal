@@ -1,9 +1,10 @@
 # ashurbanipal-axum
 
-The Rust/Axum reference implementation of [Ashurbanipal](../../readme.md),
+The Rust/Axum reference implementation of [Ashurbanipal](../../../readme.md),
 published as the `ashurbanipal-axum` crate — the `-axum` suffix leaves room
-for a future alternate-framework crate (`ashurbanipal-actix`, etc.) without
-a breaking rename of this one (see `docs/publishing-checklist.md`).
+for alternate-framework crates (see the sibling
+[`ashurbanipal-actix-web`](../actix-web/README.md)) without a breaking
+rename of this one (see `docs/publishing-checklist.md`).
 
 Published on [crates.io](https://crates.io/crates/ashurbanipal-axum):
 

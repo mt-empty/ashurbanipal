@@ -1,6 +1,6 @@
 //! Demo host service embedding the Actix-web adapter — the living usage
 //! example and integration-test harness (mirrors
-//! `implementations/rust/examples/demo.rs`, the Axum equivalent).
+//! `implementations/rust/axum/examples/demo.rs`, the Axum equivalent).
 //!
 //! Run against the devcontainer's seeded Postgres:
 //!

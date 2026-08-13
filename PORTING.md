@@ -64,7 +64,8 @@ port's own copy from the canonical `frontend/dbviewer.html`, but *where*
 that copy lives differs by ecosystem, driven by what each one's packaging
 tooling actually requires:
 
-- **Rust and Go commit theirs** (`implementations/rust/frontend/`,
+- **Rust and Go commit theirs** (`implementations/rust/axum/frontend/`,
+  `implementations/rust/actix-web/frontend/`,
   `implementations/go-nethttp/frontend/`) — `cargo publish` refuses to
   package any file that isn't committed to git (verified: even a `git
   add`-staged-but-uncommitted file triggers the "uncommitted changes"
@@ -72,7 +73,7 @@ tooling actually requires:
   *other* accidentally-uncommitted change into an irreversible, yank-only
   release), and Go modules have no separate "package" step at all — `go
   get module@tag` fetches exactly what's in that tagged commit. `mise run
-  frontend:check-ports-sync` diffs these two against the canonical file in
+  frontend:check-ports-sync` diffs all three against the canonical file in
   CI; Go additionally keeps a `pinnedFrontendSHA256` checksum constant in
   `embed.go`, re-verified at every process start.
 - **Spring, Node, and Flask generate theirs ephemerally** — gitignored,
@@ -182,7 +183,7 @@ psql "$YOUR_DSN" -f conformance/seed/seed.sql
 
 Behavior conformance — **requires a Rust toolchain even when the port
 under test isn't Rust**: the runner itself is a Rust test binary
-(`implementations/rust`'s `conformance` integration test) that drives
+(`implementations/rust/axum`'s `conformance` integration test) that drives
 plain HTTP requests at whatever `ASHURBANIPAL_CONFORMANCE_URL` names, so
 a port never reimplements the runner, it just needs `cargo` available to
 invoke it:
@@ -343,14 +344,14 @@ port's source, once per port, before it's added to the registry.
    query-construction code review: every identifier is allow-list-checked
    against the live schema, every value is bound, nothing is ever
    concatenated.
-7. **Catalog SQL is diffed against `db.rs`, not independently
+7. **Catalog SQL is diffed against `postgres.rs`, not independently
    "reimplemented."** The `information_schema`/`pg_stats` queries are
    hand-copied per language, in each language's own SQL dialect quirks.
    Require the port's catalog-query section of its PR to include a
    side-by-side diff against the reference's actual queries in
-   `implementations/rust/src/db.rs`, not just a description of what it
-   does — the fixture-driven conformance kit catches *behavioral* drift
-   here but doesn't make this review step optional.
+   `implementations/rust/core/src/db/postgres.rs`, not just a description
+   of what it does — the fixture-driven conformance kit catches
+   *behavioral* drift here but doesn't make this review step optional.
 
 ### Sign-off log
 
@@ -360,7 +361,7 @@ Items 3 and 4 are largely mechanical (checked by re-reading the sections
 above against the port's actual CI config and served HTML); items 1, 2,
 5, 6, and 7 require reading the port's source directly.
 
-| Port | 1. cast-in-SQL | 2. fail-closed default | 3. vendoring re-hash | 4. CSP documented | 5. kill-switch test read | 6. no injection | 7. catalog diffed vs `db.rs` | Reviewer |
+| Port | 1. cast-in-SQL | 2. fail-closed default | 3. vendoring re-hash | 4. CSP documented | 5. kill-switch test read | 6. no injection | 7. catalog diffed vs `postgres.rs` | Reviewer |
 |------|----------------|-------------------------|-----------------------|--------------------|----------------------------|-------------------|-------------------------------|----------|
 | `implementations/rust` | n/a — reference | ✅ (see note) | n/a — nothing to vendor | n/a — origin of the requirement | ✅ | ✅ | n/a — reference | Claude (AI-assisted), 2026-07-25 |
 | `implementations/spring-boot-starter` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-07-25 |

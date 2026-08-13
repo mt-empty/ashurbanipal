@@ -1,6 +1,6 @@
 name: rust-publish
 
-# Publishes implementations/rust to crates.io as `ashurbanipal-axum`, gated
+# Publishes implementations/rust/axum to crates.io as `ashurbanipal-axum`, gated
 # on a rust-v* tag (see docs/publishing-checklist.md's per-port tag scheme
 # — this crate's tags never share the bare v* release.yml uses).
 #
@@ -46,12 +46,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Compare tag to implementations/rust/Cargo.toml version
+      - name: Compare tag to implementations/rust/axum/Cargo.toml version
         run: |
           tag_version="${GITHUB_REF_NAME#rust-v}"
-          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' implementations/rust/Cargo.toml | head -1)
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' implementations/rust/axum/Cargo.toml | head -1)
           if [ "$tag_version" != "$cargo_version" ]; then
-            echo "tag $GITHUB_REF_NAME implies version $tag_version, but implementations/rust/Cargo.toml has $cargo_version" >&2
+            echo "tag $GITHUB_REF_NAME implies version $tag_version, but implementations/rust/axum/Cargo.toml has $cargo_version" >&2
             exit 1
           fi
 
@@ -82,7 +82,7 @@ jobs:
       - run: mise run rust
 
       - name: cargo publish --dry-run (packaging check only)
-        working-directory: implementations/rust
+        working-directory: implementations/rust/axum
         # -p is required now that this is a workspace with sibling members
         # (ashurbanipal core, ashurbanipal-actix-web) — a bare `cargo
         # publish` silently resolves to the wrong package otherwise.
@@ -94,7 +94,7 @@ jobs:
     uses: ./.github/workflows/_conformance-behavior.yml
     with:
       toolchain: rust
-      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/Cargo.toml --example demo"
+      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/axum/Cargo.toml --example demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: rust-publish-conformance-report
@@ -105,7 +105,7 @@ jobs:
     uses: ./.github/workflows/_conformance-schema.yml
     with:
       toolchain: rust
-      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/Cargo.toml --example demo"
+      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/axum/Cargo.toml --example demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
 
@@ -131,7 +131,7 @@ jobs:
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
       - name: cargo publish
-        working-directory: implementations/rust
+        working-directory: implementations/rust/axum
         # -p is required now that this is a workspace with sibling members
         # (ashurbanipal core, ashurbanipal-actix-web) — a bare `cargo
         # publish` silently resolves to the wrong package otherwise.
