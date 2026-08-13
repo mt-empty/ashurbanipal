@@ -206,6 +206,18 @@ do the same.
   protection rules are configured. Only remaining: the one-time manual
   bootstrap publish (classic API token, can't be automated — see the
   workflow's header comment) and cutting the `rust-v0.1.0` tag itself.
+  **New blocker, introduced by the `ashurbanipal` core-crate extraction**
+  (PR #38) and confirmed by direct reproduction: `ashurbanipal-axum` now
+  depends on the never-published `ashurbanipal` core crate via a
+  path+version dependency (`implementations/rust/Cargo.toml`), so
+  `cargo publish -p ashurbanipal-axum --dry-run` fails with `no matching
+  package named 'ashurbanipal' found, location searched: crates.io
+  index`. `rust-publish.yml`'s `build-and-test` (dry-run) and `publish`
+  (real) jobs will both fail on the next `rust-v*` tag push until
+  `ashurbanipal` is published to crates.io first (own bootstrap publish +
+  Trusted Publishing config, same process the axum crate itself went
+  through) — this must happen before, or as part of, the next Rust
+  release, not after.
 - **Node** (`implementations/node-express/package.json`) — ~~`"private":
   true` blocks `npm publish`; missing `repository`, `license`,
   `homepage`~~ **closed**: `private` removed, all three fields added.
