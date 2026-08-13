@@ -1,0 +1,45 @@
+[package]
+name = "ashurbanipal-axum"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+description = "Embeddable, read-only database browser for lower environments"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/mt-empty/ashurbanipal"
+
+[dependencies]
+axum = "0.8"
+ashurbanipal = { version = "0.1", path = "../core" }
+sqlx = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "json",
+] }
+
+[features]
+# Off by default: keeps sqlx's sqlite feature out of the default build for
+# hosts that only need Postgres. See docs/adapter-decisions.md for the
+# per-clause decisions SqliteSource makes vs. the Postgres reference.
+sqlite = ["ashurbanipal/sqlite"]
+# Off by default, same rationale as `sqlite`. See docs/adapter-decisions.md
+# for the per-clause decisions MySqlSource makes vs. the Postgres reference.
+mysql = ["ashurbanipal/mysql"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tracing-subscriber = "0.3"
+dotenvy = "0.15"
+escargot = "0.5.15"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
+
+[[example]]
+name = "demo"
+
+[[test]]
+name = "conformance"
+path = "../../../conformance/runner/main.rs"

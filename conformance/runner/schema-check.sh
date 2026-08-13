@@ -57,7 +57,7 @@ else
     : "${DATABASE_URL:?DATABASE_URL must be set (the devcontainer sets it automatically)}"
     PORT="${ASHURBANIPAL_SCHEMA_CHECK_PORT:-4020}"
     PORT="$PORT" DATABASE_URL="$DATABASE_URL" \
-        cargo run --manifest-path "$ROOT/implementations/rust/Cargo.toml" --example demo &
+        cargo run --manifest-path "$ROOT/implementations/rust/axum/Cargo.toml" --example demo &
     DEMO_PID=$!
 
     ready=""

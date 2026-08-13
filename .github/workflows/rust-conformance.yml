@@ -61,7 +61,7 @@ jobs:
     uses: ./.github/workflows/_conformance-behavior.yml
     with:
       toolchain: rust
-      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/Cargo.toml --example demo"
+      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/axum/Cargo.toml --example demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: conformance-report
@@ -72,6 +72,6 @@ jobs:
     uses: ./.github/workflows/_conformance-schema.yml
     with:
       toolchain: rust
-      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/Cargo.toml --example demo"
+      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/axum/Cargo.toml --example demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"

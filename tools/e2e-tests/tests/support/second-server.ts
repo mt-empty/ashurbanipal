@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 
-const CRATE_ROOT = new URL("../../../../implementations/rust", import.meta.url).pathname;
+const CRATE_ROOT = new URL("../../../../implementations/rust/axum", import.meta.url).pathname;
 
 /** An OS-assigned free TCP port, same technique tests/black_box/common.rs
  * uses on the Rust side — avoids hardcoding ports that might collide with

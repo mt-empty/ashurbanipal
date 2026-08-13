@@ -8,7 +8,7 @@ import { defineConfig, devices } from "@playwright/test";
 // is the one exception and spawns its own second instance directly on top
 // of whichever per-project server it's already using (see
 // tests/support/second-server.ts).
-const CRATE_ROOT = "../../implementations/rust";
+const CRATE_ROOT = "../../implementations/rust/axum";
 const PORTS = { chromium: 4310, firefox: 4311, webkit: 4312 };
 // Playwright's per-project `testIgnore` replaces the root one rather than
 // merging with it, so every project-level `testIgnore` below must include
