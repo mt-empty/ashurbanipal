@@ -25,7 +25,7 @@ const EXTERNAL_BASE_URL = process.env.PLAYWRIGHT_BASE_URL;
 
 function demoServer(port: number) {
   return {
-    command: "cargo run --example demo",
+    command: "cargo run -p ashurbanipal-axum --example demo",
     cwd: CRATE_ROOT,
     url: `http://localhost:${port}/health`,
     reuseExistingServer: !process.env.CI,
