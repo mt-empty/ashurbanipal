@@ -20,7 +20,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   webServer: {
-    command: "cargo run --example demo",
+    command: "cargo run -p ashurbanipal-axum --example demo",
     cwd: CRATE_ROOT,
     url: `http://localhost:${PORT}/health`,
     reuseExistingServer: !process.env.CI,

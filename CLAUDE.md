@@ -148,15 +148,21 @@ from the repo root):
 (cd implementations/rust && cargo test config::tests::name)
 (cd implementations/rust && cargo clippy -- -D warnings)
 (cd implementations/rust && cargo fmt --check)
-(cd implementations/rust && cargo run --example demo)
-(cd implementations/rust && PORT=4001 SIBLING_PORT=4000 cargo run --example demo)
+(cd implementations/rust && cargo run -p ashurbanipal-axum --example demo)
+(cd implementations/rust && PORT=4001 SIBLING_PORT=4000 cargo run -p ashurbanipal-axum --example demo)
 (cd tools/seed-gen && cargo run > ../../.devcontainer/db/init/01-seed.sql)
 ```
 
-`mise run rust:demo` (or `cd implementations/rust && cargo run --example demo`)
-against the devcontainer's `DATABASE_URL` is the only command needed for a
-working browser on the seed db — this is an acceptance criterion, not just
-a convenience.
+`-p ashurbanipal-axum` is required, not optional, once `cargo run --example
+demo` is ambiguous: `implementations/rust/actix-web/` (the Actix-web
+adapter) also has its own `examples/demo.rs` in the same workspace — see
+`implementations/rust/actix-web/README.md` for its equivalent commands
+(`mise run actix:demo` / `cargo run -p ashurbanipal-actix-web --example demo`).
+
+`mise run rust:demo` (or `cd implementations/rust && cargo run -p
+ashurbanipal-axum --example demo`) against the devcontainer's
+`DATABASE_URL` is the only command needed for a working browser on the
+seed db — this is an acceptance criterion, not just a convenience.
 
 `tools/seed-gen` is a standalone dev-only crate (uses `fake`) — deliberately
 not a dependency of the Rust crate, and not part of the workspace resolved

@@ -4,14 +4,17 @@
 //! Run against the devcontainer's seeded Postgres:
 //!
 //! ```sh
-//! cargo run --example demo
+//! cargo run -p ashurbanipal-axum --example demo
 //! # then open http://localhost:4000/__ashurbanipal
 //! ```
+//!
+//! `-p` disambiguates against the sibling `ashurbanipal-actix-web` crate's
+//! own `examples/demo.rs` in the same workspace.
 //!
 //! To demo sibling health-polling, run a second instance:
 //!
 //! ```sh
-//! PORT=4001 SIBLING_PORT=4000 cargo run --example demo
+//! PORT=4001 SIBLING_PORT=4000 cargo run -p ashurbanipal-axum --example demo
 //! ```
 
 use ashurbanipal_axum::{Config, PgPoolSource};
