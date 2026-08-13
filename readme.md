@@ -86,6 +86,7 @@ implementation's own CI.
 | Implementation | Language / framework | Protocol version | Conformance CI |
 |----------------|-----------------------|-------------------|-----------------|
 | [`rust`](implementations/rust/README.md) | Rust / Axum | 1 | `.github/workflows/rust-conformance.yml` |
+| [`rust/actix-web`](implementations/rust/actix-web/README.md) | Rust / Actix-web | 1 | `.github/workflows/rust-actix-web-conformance.yml` |
 | [`spring-boot-starter`](implementations/spring-boot-starter) | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |
 | [`go-nethttp`](implementations/go-nethttp/README.md) | Go / `net/http` (framework-agnostic library) | 1 | `.github/workflows/go-conformance.yml` |
 | [`node-express`](implementations/node-express/README.md) | Node.js / TypeScript / Express | 1 | `.github/workflows/node-conformance.yml` |
