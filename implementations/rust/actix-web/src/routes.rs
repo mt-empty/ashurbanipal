@@ -22,11 +22,8 @@ pub struct AppState<S> {
     pub http: reqwest::Client,
 }
 
-/// Built once by the caller, not per Actix worker — the DB pool and HTTP
-/// client inside are meant to be shared across workers via `web::Data`'s
-/// own internal `Arc`, unlike the route tree in [`service`], which Actix's
-/// per-worker `HttpServer::new` closure model requires rebuilding fresh
-/// every worker regardless.
+/// Built once, not per worker — cheap to share via `web::Data`'s `Arc`,
+/// unlike [`service`]'s route tree, which Actix rebuilds per worker anyway.
 pub fn app_state<S: DbSource>(config: Config, source: S) -> Data<AppState<S>> {
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
@@ -39,20 +36,14 @@ pub fn app_state<S: DbSource>(config: Config, source: S) -> Data<AppState<S>> {
     })
 }
 
-/// If the kill switch is off for the current environment, no routes are
-/// registered under the scope — every path under it (including the HTML
-/// one) falls through to the host `App`'s own 404, indistinguishable from
-/// the crate not being mounted at all.
+/// If disabled, no routes are registered — every path under the scope
+/// (including HTML) falls through to the host `App`'s 404, same as unmounted.
 pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
     if !state.config.is_enabled() {
         return web::scope("/__ashurbanipal");
     }
-    // The version header goes on every API response (errors included) but
-    // not the HTML route, hence the separate inner scope. Routes are
-    // registered via `web::resource` rather than `Scope::route` so that a
-    // matched path with an unsupported method 405s (with an `Allow`
-    // header), matching axum's `Router` behavior — `Scope::route` alone
-    // instead falls through to the app's 404 on a method mismatch.
+    // Version header only applies to /api (separate inner scope). Routes
+    // use `web::resource` (not `Scope::route`) so a method mismatch 405s.
     web::scope("/__ashurbanipal")
         .app_data(state)
         .service(web::resource("").route(web::get().to(serve_html)))
@@ -378,7 +369,7 @@ mod kill_switch_tests {
     use actix_web::{test, App};
 
     use super::*;
-    use ashurbanipal::{ColumnInfo, TableData};
+    use ashurbanipal::TableData;
 
     /// Routing-only double — the disabled-config kill switch must reject
     /// every request before any handler runs, so none of these bodies are
@@ -401,7 +392,6 @@ mod kill_switch_tests {
             _table: &str,
             _opts: QueryOpts,
         ) -> Result<TableData, DbError> {
-            let _: Option<ColumnInfo> = None;
             unreachable!("kill switch must 404 before reaching the handler")
         }
         async fn common_values(

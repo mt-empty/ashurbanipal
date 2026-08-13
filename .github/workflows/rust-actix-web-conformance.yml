@@ -6,6 +6,8 @@ on:
     paths:
       - "implementations/rust/actix-web/**"
       - "implementations/rust/core/**"
+      - "implementations/rust/Cargo.toml"
+      - "implementations/rust/Cargo.lock"
       - "spec/**"
       - "conformance/**"
       - "frontend/dbviewer.html"
@@ -18,6 +20,8 @@ on:
     paths:
       - "implementations/rust/actix-web/**"
       - "implementations/rust/core/**"
+      - "implementations/rust/Cargo.toml"
+      - "implementations/rust/Cargo.lock"
       - "spec/**"
       - "conformance/**"
       - "frontend/dbviewer.html"
