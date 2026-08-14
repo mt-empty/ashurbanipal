@@ -1,6 +1,13 @@
 target
 *.txt
 test.sh
+
+# Secrets (never commit)
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
 tools/e2e-tests/node_modules/
 tools/e2e-tests/test-results/
 tools/e2e-tests/showcase-results/

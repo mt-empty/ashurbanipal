@@ -77,6 +77,12 @@ jobs:
         working-directory: implementations/go-nethttp
         run: go vet ./...
 
+      - name: govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-file: implementations/go-nethttp/go.mod
+          work-dir: implementations/go-nethttp
+
       # Fixture tests (filter_fixture_test.go) and kill-switch tests always
       # run; integration_test.go needs DATABASE_URL (set above) and the
       # conformance seed applied to actually hit Postgres.
