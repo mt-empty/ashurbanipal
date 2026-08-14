@@ -37,8 +37,8 @@ description = "flask-python implementation checks: lint, fmt-check, test"
 depends = ["flask:lint", "flask:fmt-check", "flask:test"]
 
 [tasks.frontend]
-description = "frontend checks: typecheck, build-check, vendored-copy sync, Playwright e2e suite"
-depends = ["frontend:typecheck", "frontend:build-check", "frontend:check-ports-sync", "frontend:test-e2e"]
+description = "frontend checks: typecheck, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
+depends = ["frontend:typecheck", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
 
 [tasks."frontend:install"]
 description = "pnpm install --frozen-lockfile"
@@ -46,8 +46,8 @@ run = "pnpm install --frozen-lockfile"
 dir = "frontend"
 
 [tasks."frontend:build"]
-description = "bundle frontend/src/ into frontend/dbviewer.html"
-run = "node build.mjs"
+description = "bundle frontend/src/ into frontend/dbviewer.html, then regenerate the docs/demo/index.html GitHub Pages demo from it"
+run = "node build.mjs && node build-demo.mjs"
 dir = "frontend"
 depends = ["frontend:install"]
 
@@ -70,6 +70,26 @@ fi
 '''
 dir = "frontend"
 depends = ["frontend:install"]
+
+[tasks."frontend:build-demo"]
+description = "bundle a synthetic in-browser demo (fake data, no backend) into docs/demo/index.html for GitHub Pages — runs automatically as part of frontend:build; this is for explicit standalone use"
+run = "node build-demo.mjs"
+dir = "frontend"
+depends = ["frontend:build"]
+
+[tasks."frontend:build-demo-check"]
+description = "verify docs/demo/index.html is what frontend/src/ + dbviewer.html currently builds to"
+run = '''
+cp ../docs/demo/index.html /tmp/ashurbanipal-demo-committed.html
+node build-demo.mjs
+if ! diff -q ../docs/demo/index.html /tmp/ashurbanipal-demo-committed.html > /dev/null; then
+  echo "docs/demo/index.html is out of date — run \`mise run frontend:build-demo\` and commit the result" >&2
+  cp /tmp/ashurbanipal-demo-committed.html ../docs/demo/index.html
+  exit 1
+fi
+'''
+dir = "frontend"
+depends = ["frontend:build"]
 
 [tasks."frontend:sync-ports"]
 description = "sync the canonical frontend and re-pin its Rust, Go, Spring, Node, and Flask consumers"
