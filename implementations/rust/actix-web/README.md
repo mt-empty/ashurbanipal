@@ -6,14 +6,15 @@ the framework-agnostic `ashurbanipal` core crate (`../core/`) with
 filter DSL are identical between the two adapters; only the HTTP routing
 layer differs.
 
-Not yet published to crates.io — depend on it by path or git in the
-meantime:
+Published on [crates.io](https://crates.io/crates/ashurbanipal-actix-web):
+
+```sh
+cargo add ashurbanipal-actix-web
+```
 
 ```toml
 [dependencies]
-ashurbanipal-actix-web = { git = "https://github.com/mt-empty/ashurbanipal", path = "implementations/rust/actix-web" }
-# or, from within a clone of this repo:
-ashurbanipal-actix-web = { path = "implementations/rust/actix-web" }
+ashurbanipal-actix-web = "0.1"
 ```
 
 ## Database support
@@ -26,11 +27,11 @@ the `mysql`/`sqlite` Cargo features).
 ```toml
 [dependencies]
 # Postgres only (default):
-ashurbanipal-actix-web = { path = "implementations/rust/actix-web" }
+ashurbanipal-actix-web = "0.1"
 # To also pull in MySqlSource:
-ashurbanipal-actix-web = { path = "implementations/rust/actix-web", features = ["mysql"] }
+ashurbanipal-actix-web = { version = "0.1", features = ["mysql"] }
 # To also pull in SqliteSource:
-ashurbanipal-actix-web = { path = "implementations/rust/actix-web", features = ["sqlite"] }
+ashurbanipal-actix-web = { version = "0.1", features = ["sqlite"] }
 ```
 
 ## Usage

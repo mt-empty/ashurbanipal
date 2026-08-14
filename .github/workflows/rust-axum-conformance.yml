@@ -1,4 +1,4 @@
-name: rust conformance
+name: rust axum conformance
 
 on:
   push:
@@ -10,7 +10,8 @@ on:
       - "frontend/dbviewer.html"
       - ".devcontainer/db/init/01-seed.sql"
       - "tools/seed-gen/**"
-      - ".github/workflows/rust-conformance.yml"
+      - ".github/workflows/rust-axum-conformance.yml"
+      - ".github/workflows/_rust-crate-build-test.yml"
       - ".github/workflows/_conformance-behavior.yml"
       - ".github/workflows/_conformance-schema.yml"
   pull_request:
@@ -21,7 +22,8 @@ on:
       - "frontend/dbviewer.html"
       - ".devcontainer/db/init/01-seed.sql"
       - "tools/seed-gen/**"
-      - ".github/workflows/rust-conformance.yml"
+      - ".github/workflows/rust-axum-conformance.yml"
+      - ".github/workflows/_rust-crate-build-test.yml"
       - ".github/workflows/_conformance-behavior.yml"
       - ".github/workflows/_conformance-schema.yml"
 
@@ -49,29 +51,7 @@ jobs:
           working-directory: implementations/rust
 
   build-and-test:
-    name: cargo fmt/clippy/test --lib + seed sync check
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
-        with:
-          install: false
-
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: |
-            implementations/rust -> target
-            tools/seed-gen -> target
-
-      - run: mise run conformance:seed-check
-
-      - run: mise run rust
+    uses: ./.github/workflows/_rust-crate-build-test.yml
 
   conformance:
     name: Rust — conformance kit (external-URL path)
