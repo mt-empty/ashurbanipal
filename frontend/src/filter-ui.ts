@@ -47,10 +47,9 @@ $<HTMLInputElement>("filter").addEventListener("search", () => {
 // parseFilterDsl's accept/reject job. Scoped to the cursor sitting at
 // the end of the text — mid-string edits get no suggestions.
 //
-// Manual popover, not auto: it must stay open while typing (default
-// light-dismiss would treat that as "outside"), and arrow keys/Enter/Tab/
-// Escape are intercepted here instead of the browser's default behavior —
-// light-dismiss is hand-rolled too, via the pointerdown listener below. ----
+// popover="manual" so it stays open while typing; arrow keys/Enter/Tab/
+// Escape and light-dismiss (pointerdown listener below) are all
+// hand-rolled to match. ----
 const FILTER_COND_FIRST = /^\s*(?:NOT\s+)?$/i;
 const FILTER_COND_AFTER_LOGIC = /(^|\s)(?:AND|OR)\s+(?:NOT\s+)?$/i;
 const CARET_MIRROR_PROPS: Extract<keyof CSSStyleDeclaration, string>[] = [
