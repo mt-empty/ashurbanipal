@@ -70,6 +70,10 @@ jobs:
         working-directory: implementations/node-express
         run: pnpm install --frozen-lockfile
 
+      - name: Audit dependencies
+        working-directory: implementations/node-express
+        run: pnpm audit --audit-level=high
+
       - name: Lint
         working-directory: implementations/node-express
         run: pnpm run lint

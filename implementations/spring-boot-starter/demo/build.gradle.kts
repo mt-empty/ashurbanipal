@@ -21,6 +21,10 @@ repositories {
     mavenCentral()
 }
 
+dependencyLocking {
+    lockAllConfigurations()
+}
+
 dependencies {
     implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
 

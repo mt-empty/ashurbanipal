@@ -27,6 +27,10 @@ repositories {
     mavenCentral()
 }
 
+dependencyLocking {
+    lockAllConfigurations()
+}
+
 dependencies {
     val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.1.0")
     implementation(springBootBom)

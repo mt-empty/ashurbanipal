@@ -29,6 +29,31 @@ env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
 
 jobs:
+  # Submits the resolved Gradle dependency graph to GitHub's native
+  # dependency graph — unlike Cargo/Go/npm, GitHub can't parse Gradle
+  # manifests directly, so without this step Gradle deps get no Dependabot
+  # security alerts and dependency-review.yml can't see Gradle-side PR
+  # diffs. Push-only: the Dependency Submission API needs contents:write,
+  # which a pull_request-triggered GITHUB_TOKEN from a fork doesn't have.
+  dependency-submission:
+    name: Submit Gradle dependency graph
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/dependency-submission@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          build-root-directory: implementations/spring-boot-starter
+
   build-and-test:
     name: gradle build (vendoring hash re-check + fixture/kill-switch/integration tests)
     runs-on: ubuntu-latest

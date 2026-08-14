@@ -30,6 +30,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Covers the whole workspace (axum, core, actix-web) in one run — they
+  # share implementations/rust/Cargo.lock, so rust-actix-web-conformance.yml
+  # doesn't need a duplicate job.
+  cargo-audit:
+    name: cargo audit (RustSec advisory database)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          file: implementations/rust/Cargo.lock
+
   build-and-test:
     name: cargo fmt/clippy/test --lib + seed sync check
     runs-on: ubuntu-latest
