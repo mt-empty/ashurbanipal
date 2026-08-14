@@ -59,7 +59,7 @@
       { name: "created_at", type: "timestamp with time zone" }
     ],
     rowCount: 64,
-    approxRows: 1243,
+    approxRows: 61,
     row(i) {
       const rng = rngFor("users", i);
       const first = pick(rng, FIRST), last = pick(rng, LAST);
@@ -88,7 +88,7 @@
       { name: "metadata", type: "jsonb", comment: "Vendor-supplied attributes, shape varies by category." }
     ],
     rowCount: 48,
-    approxRows: 341,
+    approxRows: 45,
     row(i) {
       const rng = rngFor("products", i);
       const category = pick(rng, ["electronics", "home", "outdoors", "books", "toys"]);
@@ -114,7 +114,7 @@
       { name: "created_at", type: "timestamp with time zone" }
     ],
     rowCount: 96,
-    approxRows: 5312,
+    approxRows: 89,
     row(i) {
       const rng = rngFor("orders", i);
       const userIdx = Math.floor(rng() * users.rowCount);
@@ -520,7 +520,11 @@
 
 /* ==== Layout ==== */
 body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
-nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
+/* padding-bottom reserves room for #api-help-btn/#theme-toggle's fixed
+   viewport corner so a long table/siblings list scrolls above them
+   instead of under them. */
+nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto;
+      padding-bottom: calc(var(--gap-lg) * 2 + 1.75rem); }
 /* No padding here: #toolbar is sticky and must reach main's actual
    edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
 main { overflow: auto; }
