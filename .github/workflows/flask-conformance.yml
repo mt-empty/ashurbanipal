@@ -73,6 +73,12 @@ jobs:
         working-directory: implementations/flask-python
         run: uv sync --extra dev
 
+      # --with runs pip-audit inside the already-synced venv without adding
+      # it to pyproject.toml/uv.lock — a CI-only tool, not a project dep.
+      - name: Audit dependencies
+        working-directory: implementations/flask-python
+        run: uv run --with pip-audit pip-audit
+
       - name: ruff check
         working-directory: implementations/flask-python
         run: uv run ruff check .

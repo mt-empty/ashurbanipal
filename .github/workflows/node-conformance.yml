@@ -70,6 +70,13 @@ jobs:
         working-directory: implementations/node-express
         run: pnpm install --frozen-lockfile
 
+      # --prod: devDependencies (vitest's toolchain, etc.) never run in the
+      # embedded crate's own process, so a devDependency-only advisory isn't
+      # a real supply-chain risk here — scope the gate to what actually ships.
+      - name: Audit dependencies
+        working-directory: implementations/node-express
+        run: pnpm audit --audit-level=high --prod
+
       - name: Lint
         working-directory: implementations/node-express
         run: pnpm run lint
