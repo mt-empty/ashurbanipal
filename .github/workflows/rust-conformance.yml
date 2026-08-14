@@ -46,7 +46,7 @@ jobs:
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          file: implementations/rust/Cargo.lock
+          working-directory: implementations/rust
 
   build-and-test:
     name: cargo fmt/clippy/test --lib + seed sync check
