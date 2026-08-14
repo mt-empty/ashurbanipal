@@ -1,5 +1,5 @@
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
-import { FilterError, NotAllowedError } from "../errors.js";
+import { assertSafeTimeoutMs, FilterError, NotAllowedError } from "../errors.js";
 import type { Condition } from "../filter.js";
 import {
   type ColumnInfo,
@@ -35,6 +35,7 @@ export type Variant = "mysql" | "mariadb";
  * right after the `select` keyword this function supplies.
  */
 export function timedSelect(variant: Variant, timeoutMs: number, body: string): string {
+  assertSafeTimeoutMs(timeoutMs);
   if (variant === "mysql") {
     return `select /*+ MAX_EXECUTION_TIME(${timeoutMs}) */ ${body}`;
   }

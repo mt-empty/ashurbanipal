@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import { NotAllowedError, quoteIdent } from "../errors.js";
+import { assertSafeTimeoutMs, NotAllowedError, quoteIdent } from "../errors.js";
 import { buildWhereClause } from "../filter.js";
 import {
   type ColumnInfo,
@@ -32,6 +32,7 @@ export class PostgresSource implements DbSource {
   // per-query without mutating the pooled connection's session state for
   // whichever request borrows it next.
   private async withTimeout<T>(timeoutMs: number, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+    assertSafeTimeoutMs(timeoutMs);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
