@@ -6,6 +6,8 @@ No-bullshit Database browser for schemaful databases — self-contained, embedda
 
 ![Ashurbanipal demo](tools/e2e-tests/showcase.gif)
 
+**[Try it live](https://mt-empty.github.io/ashurbanipal/demo/)** — synthetic data, no backend.
+
 ## Why
 
 90% of engineers just want to browse their database. Having such functionality in a corporate environment currently means:
