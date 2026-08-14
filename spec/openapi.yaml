@@ -1,6 +1,7 @@
 # Machine-readable companion to spec/protocol.md (which is normative where
 # they disagree). Shapes derived from the Rust implementation's
-# serialization (implementations/rust/src/routes.rs, implementations/rust/src/db.rs).
+# serialization (implementations/rust/axum/src/routes.rs,
+# implementations/rust/core/src/db/postgres.rs).
 openapi: 3.1.0
 info:
   title: Ashurbanipal Protocol

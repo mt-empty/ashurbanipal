@@ -556,7 +556,7 @@ mod tests {
     /// (schema: `spec/fixtures/README.md`) — the same file every port's
     /// runner and the black-box HTTP suite consume, so validation/building
     /// behavior can't drift between them.
-    const FIXTURES: &str = include_str!("../../../../spec/fixtures/filter-builder-tests.json");
+    const FIXTURES: &str = include_str!("../../../../../spec/fixtures/filter-builder-tests.json");
 
     #[derive(serde::Deserialize)]
     struct FixtureFile {

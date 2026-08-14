@@ -1,0 +1,23 @@
+[package]
+name = "ashurbanipal"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+description = "Framework-agnostic core (config, DbSource backends, filter DSL) behind ashurbanipal-axum and future framework adapters"
+license = "MIT"
+repository = "https://github.com/mt-empty/ashurbanipal"
+
+[dependencies]
+sqlx = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+
+[features]
+# Off by default: keeps sqlx's sqlite feature out of the default build for
+# hosts that only need Postgres. See docs/adapter-decisions.md for the
+# per-clause decisions SqliteSource makes vs. the Postgres reference.
+sqlite = ["sqlx/sqlite"]
+# Off by default, same rationale as `sqlite`. See docs/adapter-decisions.md
+# for the per-clause decisions MySqlSource makes vs. the Postgres reference.
+mysql = ["sqlx/mysql"]
