@@ -11,7 +11,8 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source="$root/frontend/dbviewer.html"
-rust_frontend="$root/implementations/rust/frontend/dbviewer.html"
+rust_frontend="$root/implementations/rust/axum/frontend/dbviewer.html"
+actix_frontend="$root/implementations/rust/actix-web/frontend/dbviewer.html"
 go_frontend="$root/implementations/go-nethttp/frontend/dbviewer.html"
 go_embed="$root/implementations/go-nethttp/embed.go"
 spring_build="$root/implementations/spring-boot-starter/build.gradle.kts"
@@ -24,6 +25,10 @@ sha256=$(sha256sum "$source" | awk '{print $1}')
 if [ "${1:-}" = "--check" ]; then
     cmp -s "$source" "$rust_frontend" || {
         printf '%s\n' 'Rust frontend is out of sync; run: mise run frontend:sync-ports' >&2
+        exit 1
+    }
+    cmp -s "$source" "$actix_frontend" || {
+        printf '%s\n' 'Actix-web frontend is out of sync; run: mise run frontend:sync-ports' >&2
         exit 1
     }
     cmp -s "$source" "$go_frontend" || {
@@ -55,6 +60,7 @@ if [ "$#" -ne 0 ]; then
 fi
 
 cp "$source" "$rust_frontend"
+cp "$source" "$actix_frontend"
 cp "$source" "$go_frontend"
 sed -i -E "s/(const pinnedFrontendSHA256 = \")[0-9a-f]{64}/\1$sha256/" "$go_embed"
 sed -i -E "s/(val pinnedFrontendSha256 = \")[0-9a-f]{64}/\1$sha256/" "$spring_build"

@@ -10,7 +10,13 @@ development, integration, and staging environments. A service embeds the
 Ashurbanipal crate, mounts its routes, and gets a web UI for browsing its own
 database tables — no separate DB client, no extra credentials, no build step.
 
-v1 targets Rust services built on Axum, backed by Postgres.
+v1 targets Rust services built on Axum, backed by Postgres. A second
+framework adapter, `ashurbanipal-actix-web` (`implementations/rust/actix-web/`),
+exists alongside the Axum one — everywhere this document describes
+framework-coupled behavior (the router/handler layer), it's describing
+Axum specifically; config, `DbSource`, the filter DSL, and the kill
+switch are framework-agnostic (`implementations/rust/core/`) and apply
+unchanged to both adapters.
 
 ## 2. Goals / Non-goals
 
@@ -35,9 +41,9 @@ v1 targets Rust services built on Axum, backed by Postgres.
 - Diff viewer (Monaco / `@pierre/diffs`) — deferred to a later iteration.
 - Non-Postgres backends beyond SQLite and MySQL — the DB layer is
   trait-based so these are additive changes later, not a rewrite. A SQLite
-  `DbSource` (`implementations/rust/src/db/sqlite.rs`, opt-in `sqlite`
+  `DbSource` (`implementations/rust/core/src/db/sqlite.rs`, opt-in `sqlite`
   Cargo feature) and a MySQL/MariaDB `DbSource`
-  (`implementations/rust/src/db/mysql.rs`, opt-in `mysql` Cargo feature)
+  (`implementations/rust/core/src/db/mysql.rs`, opt-in `mysql` Cargo feature)
   have both been reviewed and merged; see `docs/adapter-decisions.md` for
   the per-clause decisions each makes where Postgres-specific catalog/stats
   mechanisms have no equivalent.

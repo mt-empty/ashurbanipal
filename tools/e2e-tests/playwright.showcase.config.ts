@@ -4,7 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
 // Separate from playwright.config.ts so the main suite's video setting
 // (none — see git history around 157fc12 on screenshot-diff flakiness)
 // isn't touched just to support this.
-const CRATE_ROOT = "../../implementations/rust";
+const CRATE_ROOT = "../../implementations/rust/axum";
 const PORT = 4320;
 
 export default defineConfig({
@@ -20,7 +20,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
   },
   webServer: {
-    command: "cargo run --example demo",
+    command: "cargo run -p ashurbanipal-axum --example demo",
     cwd: CRATE_ROOT,
     url: `http://localhost:${PORT}/health`,
     reuseExistingServer: !process.env.CI,

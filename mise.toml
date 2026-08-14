@@ -120,20 +120,45 @@ dir = "implementations/rust"
 
 [tasks."rust:demo"]
 description = "run the demo host app at http://localhost:4000/__ashurbanipal"
-run = "cargo run --example demo"
-dir = "implementations/rust"
-sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "frontend/dbviewer.html"]
+run = "cargo run -p ashurbanipal-axum --example demo"
+dir = "implementations/rust/axum"
+sources = ["src/**/*", "../core/src/**/*", "examples/**/*.rs", "Cargo.toml", "../core/Cargo.toml", "frontend/dbviewer.html"]
 
 [tasks."rust:demo-sibling"]
 description = "run a second demo instance on 4001, sibling-polling the one on 4000"
-run = "cargo run --example demo"
+run = "cargo run -p ashurbanipal-axum --example demo"
 env = { PORT = "4001", SIBLING_PORT = "4000" }
-dir = "implementations/rust"
-sources = ["src/**/*", "examples/**/*.rs", "Cargo.toml", "frontend/dbviewer.html"]
+dir = "implementations/rust/axum"
+sources = ["src/**/*", "../core/src/**/*", "examples/**/*.rs", "Cargo.toml", "../core/Cargo.toml", "frontend/dbviewer.html"]
 
 [tasks."rust:dev"]
 description = "run the demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"
 run = "mise watch rust:demo --restart"
+
+# ---- actix:* --------------------------------------------------------------
+# No actix:fmt-check/lint/test — rust:fmt-check/rust:lint/rust:test already
+# run bare (no -p/--workspace) from the virtual workspace root
+# (implementations/rust/Cargo.toml) and reach every member — axum, core,
+# and this crate — since Cargo defaults to all members there with no
+# explicit default-members needed. Only the demo binary is genuinely
+# per-crate.
+
+[tasks."actix:demo"]
+description = "run the actix-web demo host app at http://localhost:4000/__ashurbanipal"
+run = "cargo run -p ashurbanipal-actix-web --example demo"
+dir = "implementations/rust/actix-web"
+sources = ["src/**/*", "../core/src/**/*", "examples/**/*.rs", "Cargo.toml", "../core/Cargo.toml", "frontend/dbviewer.html"]
+
+[tasks."actix:demo-sibling"]
+description = "run a second actix-web demo instance on 4001, sibling-polling the one on 4000"
+run = "cargo run -p ashurbanipal-actix-web --example demo"
+env = { PORT = "4001", SIBLING_PORT = "4000" }
+dir = "implementations/rust/actix-web"
+sources = ["src/**/*", "../core/src/**/*", "examples/**/*.rs", "Cargo.toml", "../core/Cargo.toml", "frontend/dbviewer.html"]
+
+[tasks."actix:dev"]
+description = "run the actix-web demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"
+run = "mise watch actix:demo --restart"
 
 # ---- spring:* -----------------------------------------------------------
 

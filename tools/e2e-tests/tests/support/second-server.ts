@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 
-const CRATE_ROOT = new URL("../../../../implementations/rust", import.meta.url).pathname;
+const CRATE_ROOT = new URL("../../../../implementations/rust/axum", import.meta.url).pathname;
 
 /** An OS-assigned free TCP port, same technique tests/black_box/common.rs
  * uses on the Rust side — avoids hardcoding ports that might collide with
@@ -39,16 +39,20 @@ export async function spawnDemo(opts: {
   mountPrefix?: string;
 }): Promise<SpawnedDemo> {
   const baseUrl = `http://localhost:${opts.port}`;
-  const child: ChildProcess = spawn("cargo", ["run", "--example", "demo"], {
-    cwd: CRATE_ROOT,
-    env: {
-      ...process.env,
-      PORT: String(opts.port),
-      SIBLING_PORT: opts.siblingPort ? String(opts.siblingPort) : "",
-      MOUNT_PREFIX: opts.mountPrefix ?? "",
+  const child: ChildProcess = spawn(
+    "cargo",
+    ["run", "-p", "ashurbanipal-axum", "--example", "demo"],
+    {
+      cwd: CRATE_ROOT,
+      env: {
+        ...process.env,
+        PORT: String(opts.port),
+        SIBLING_PORT: opts.siblingPort ? String(opts.siblingPort) : "",
+        MOUNT_PREFIX: opts.mountPrefix ?? "",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
 
   let stdout = "";
   let stderr = "";

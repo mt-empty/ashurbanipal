@@ -1,7 +1,7 @@
 # Publishing checklist
 
 Status: none of the five ports are published to a registry today; each
-README says so explicitly (`implementations/rust/README.md:5`,
+README says so explicitly (`implementations/rust/axum/README.md:5`,
 `implementations/go-nethttp/README.md:9`, and the equivalent "not yet"
 framing implied by node-express's `"private": true` and flask-python's
 missing PyPI metadata — see per-port gaps below). This document is the
@@ -65,7 +65,7 @@ matching Node's `ashurbanipal-node-express`, Flask's `ashurbanipal-flask`,
 and Spring's `ashurbanipal-spring-boot-starter`, which were already
 suffixed. Rationale: a web framework isn't an injectable dependency the
 way a DB backend is — `DbSource` swaps behind a fixed `router(config,
-source) -> Router` signature (`implementations/rust/src/routes.rs:32`),
+source) -> Router` signature (`implementations/rust/axum/src/routes.rs:32`),
 but a different framework changes the function's *return type itself*
 (`axum::Router` vs. `actix_web::Scope`, `Blueprint` vs. an ASGI app), so
 one framework per published artifact is the natural boundary, not an
@@ -79,6 +79,18 @@ Go is the one port exempt from ever needing this: `Router(cfg, source)
 (http.Handler, error)` (`implementations/go-nethttp/routes.go:44`) already
 returns the stdlib interface every Go framework speaks, so it needs no
 per-framework split, ever.
+
+**Amendment (added when `ashurbanipal-axum`'s framework-agnostic modules
+were extracted into their own crate):** this "no bare name" rule is about
+HTTP-facing, host-embedded artifacts specifically — the thing whose public
+API includes a framework-specific return type. It does not apply to an
+internal core library that a host never imports by name directly (it's
+only reached transitively through a framework adapter's re-exports). The
+bare name `ashurbanipal` is reserved for exactly that role, per
+`docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`
+— `ashurbanipal-axum` and `ashurbanipal-actix-web` both depend on plain
+`ashurbanipal` (path dep today, `implementations/rust/core`) rather than
+on each other.
 
 ## Common gate items (every port, before its first publish)
 
@@ -137,13 +149,15 @@ per-framework split, ever.
    out to differ by ecosystem rather than being uniform (see `PORTING.md`'s
    vendoring section for the full per-port rationale):
    - **Rust and Go commit a real vendored copy**
-     (`implementations/rust/frontend/`, `implementations/go-nethttp/frontend/`)
+     (`implementations/rust/axum/frontend/`,
+     `implementations/rust/actix-web/frontend/`,
+     `implementations/go-nethttp/frontend/`)
      — `cargo publish`/`go get module@tag` both need the file present in
      an actual git commit at package time (verified empirically for Cargo:
      even a staged-but-uncommitted file forces `--allow-dirty`, which
      would also silently permit any *other* accidentally-uncommitted
      change into an irreversible release — not a tradeoff worth taking).
-     `tools/sync-ports-frontend.sh --check` diffs both against the
+     `tools/sync-ports-frontend.sh --check` diffs all three against the
      canonical file in CI.
    - **Spring, Node, and Flask generate theirs ephemerally instead** —
      gitignored, never committed, regenerated on demand, since neither
@@ -194,6 +208,18 @@ per-framework split, ever.
   protection rules are configured. Only remaining: the one-time manual
   bootstrap publish (classic API token, can't be automated — see the
   workflow's header comment) and cutting the `rust-v0.1.0` tag itself.
+  **New blocker, introduced by the `ashurbanipal` core-crate extraction**
+  (PR #38) and confirmed by direct reproduction: `ashurbanipal-axum` now
+  depends on the never-published `ashurbanipal` core crate via a
+  path+version dependency (`implementations/rust/Cargo.toml`), so
+  `cargo publish -p ashurbanipal-axum --dry-run` fails with `no matching
+  package named 'ashurbanipal' found, location searched: crates.io
+  index`. `rust-publish.yml`'s `build-and-test` (dry-run) and `publish`
+  (real) jobs will both fail on the next `rust-v*` tag push until
+  `ashurbanipal` is published to crates.io first (own bootstrap publish +
+  Trusted Publishing config, same process the axum crate itself went
+  through) — this must happen before, or as part of, the next Rust
+  release, not after.
 - **Node** (`implementations/node-express/package.json`) — ~~`"private":
   true` blocks `npm publish`; missing `repository`, `license`,
   `homepage`~~ **closed**: `private` removed, all three fields added.

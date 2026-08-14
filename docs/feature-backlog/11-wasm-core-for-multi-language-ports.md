@@ -9,7 +9,7 @@ instead of N synced PRs.
 **Impact / constraints:**
 - Scope would be narrow, not a rewrite of `DbSource`: only the pure,
   I/O-free logic is a good WASM candidate — the filter AST
-  validation/operator-to-SQL-fragment compiler (`implementations/rust/src/filter.rs`,
+  validation/operator-to-SQL-fragment compiler (`implementations/rust/core/src/filter.rs`,
   tested against `spec/filter-dsl.md`'s table) and the
   `spec/protocol.md`-shaped response/metadata JSON envelope. Everything
   else stays native per port: DB connection/pool/query execution, HTTP

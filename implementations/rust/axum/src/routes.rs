@@ -9,9 +9,8 @@ use axum::routing::get;
 use axum::Router;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
-use crate::db::{DbError, DbSource, QueryOpts, TableInfo};
-use crate::filter;
+use ashurbanipal::filter;
+use ashurbanipal::{Config, DbError, DbSource, QueryOpts, TableInfo};
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
