@@ -13,6 +13,10 @@ Rust). That discipline includes length, not just content: when a comment
 is warranted, keep it to one line, occasionally two — everywhere in the
 repo, any language, any file, tests and scripts included, not just
 `implementations/rust/{axum/src,core/src}/**/*.rs` and `dbviewer.html`.
+State what the code does now, not what it isn't or used to be — a reader
+doesn't care that something is "not a native `<datalist>`" or "not
+`<details>`/`<summary>`, unlike an earlier plan"; say what it is and why,
+skip the rejected alternative and the history.
 
 ## What this is
 

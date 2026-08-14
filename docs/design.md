@@ -63,9 +63,9 @@ Two components, same as the original concept:
   the release checksum) sees no difference from a hand-edited file; see
   `docs/frontend-style-guide.md` §1 for the source layout.
 - No CDN dependency is wired in. `jsonb` tree rendering (collapsible via
-  a hand-rolled fold toggle, not native `<details>`/`<summary>` — see
-  `frontend/src/styles.css`'s `.json-fold` rule for why) and per-type
-  coloring (JSON scalars, plus
+  a hand-rolled fold toggle, preserving JSON's actual `{}`/`[]`/`,`/`:`
+  shape rather than a generic tree-widget look) and per-type coloring
+  (JSON scalars, plus
   `uuid`/`boolean`/numeric/date columns) are hand-rolled directly in
   `dbviewer.html` rather than pulled from a CDN — the original
   `@alenaksu/json-viewer`/Prism.js plan was superseded once building a
@@ -119,11 +119,9 @@ Two components, same as the original concept:
     non-goal carve-out, this is two sequential single-table queries, never
     a join.
   - *Filter autocomplete* — the filter input suggests column names via a
-    hand-rolled, caret-anchored popover (not a native `<datalist>` — see
-    `frontend/src/filter-ui.ts`'s comment on why: it must stay open while
-    typing, which default light-dismiss would treat as "outside") at
-    condition-start boundaries (empty input, or right after `AND `/`OR `/
-    `NOT `). No value- or operator-level
+    hand-rolled, caret-anchored popover that stays open while typing (see
+    `frontend/src/filter-ui.ts`) at condition-start boundaries (empty
+    input, or right after `AND `/`OR `/`NOT `). No value- or operator-level
     autocomplete, and no *as-you-type* parsing of the filter text — both
     would require understanding where the cursor sits in the grammar.
     (The submit-time client-side parser — `spec/filter-dsl.md`,
