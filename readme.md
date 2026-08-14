@@ -83,11 +83,11 @@ conformance layers — the golden-fixture behavior runner and the
 schemathesis/equivalent shape check (`PORTING.md`) — pass in that
 implementation's own CI.
 
-| Implementation | Language / framework | Protocol version | Conformance CI |
-|----------------|-----------------------|-------------------|-----------------|
-| [`rust/axum`](implementations/rust/axum/README.md) | Rust / Axum | 1 | `.github/workflows/rust-conformance.yml` |
-| [`rust/actix-web`](implementations/rust/actix-web/README.md) | Rust / Actix-web | 1 | `.github/workflows/rust-actix-web-conformance.yml` |
-| [`spring-boot-starter`](implementations/spring-boot-starter) | Kotlin / Spring Boot (autoconfiguration starter) | 1 | `.github/workflows/spring-boot-conformance.yml` |
-| [`go-nethttp`](implementations/go-nethttp/README.md) | Go / `net/http` (framework-agnostic library) | 1 | `.github/workflows/go-conformance.yml` |
-| [`node-express`](implementations/node-express/README.md) | Node.js / TypeScript / Express | 1 | `.github/workflows/node-conformance.yml` |
-| [`flask-python`](implementations/flask-python/README.md) | Python / Flask | 1 | `.github/workflows/flask-conformance.yml` |
+| Implementation | Protocol version | Conformance CI |
+|----------------|-------------------|-----------------|
+| [`rust/axum`](implementations/rust/axum/README.md) | 1 | [![rust-axum-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-axum-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-axum-conformance.yml) |
+| [`rust/actix-web`](implementations/rust/actix-web/README.md) | 1 | [![rust-actix-web-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-actix-web-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-actix-web-conformance.yml) |
+| [`spring-boot-starter`](implementations/spring-boot-starter) | 1 | [![spring-boot-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/spring-boot-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/spring-boot-conformance.yml) |
+| [`go-nethttp`](implementations/go-nethttp/README.md) | 1 | [![go-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/go-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/go-conformance.yml) |
+| [`node-express`](implementations/node-express/README.md) | 1 | [![node-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/node-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/node-conformance.yml) |
+| [`flask-python`](implementations/flask-python/README.md) | 1 | [![flask-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/flask-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/flask-conformance.yml) |
