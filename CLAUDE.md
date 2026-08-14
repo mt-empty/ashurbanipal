@@ -31,8 +31,9 @@ The Rust crate lives at `implementations/rust/` — one of several peer
 language implementations of the same `spec/protocol.md` +
 `spec/openapi.yaml` contract: Kotlin/Spring Boot
 (`implementations/spring-boot-starter/`), Go/`net-http`
-(`implementations/go-nethttp/`), and Node/Express
-(`implementations/node-express/`) all exist and pass their own conformance
+(`implementations/go-nethttp/`), Node/Express
+(`implementations/node-express/`), and Python/Flask
+(`implementations/flask-python/`) all exist and pass their own conformance
 CI (see the table in `readme.md`); none is structurally privileged over
 another — `PORTING.md` is the checklist a port must clear, including the
 listing bar and cross-port hardening review. `spec/`, `conformance/`,
@@ -46,8 +47,12 @@ Two components:
   vendored by every implementation exactly as before — the generated file
   is still one self-contained artifact with everything inlined, so
   `spec/`, ports, and conformance see no difference from a hand-edited
-  file. The Rust crate embeds it into the binary via `include_str!` in
-  `implementations/rust/axum/src/routes.rs`. `jsonb` tree
+  file. `tools/sync-ports-frontend.sh` (`mise run frontend:sync-ports` /
+  `frontend:check-ports-sync`) copies it into each port and re-pins its
+  embedded sha256; Rust and Go commit their vendored copy, while
+  Spring/Node/Flask regenerate theirs ephemerally at build/CI time instead
+  (`PORTING.md`). The Rust crate embeds it into the binary via
+  `include_str!` in `implementations/rust/axum/src/routes.rs`. `jsonb` tree
   rendering and per-type cell/JSON coloring are hand-rolled directly in
   the file (`renderJsonTree`, `formatCellValue`) rather than pulled from a
   CDN — the original `@alenaksu/json-viewer`/Prism.js plan was
@@ -109,8 +114,9 @@ mise run check                       # everything CI would run, across every imp
 mise run rust                        # rust:fmt-check + rust:lint + rust:test
 mise run spring                      # spring gradle build + test
 mise run go                          # go build/vet/fmt-check + test (go-nethttp)
-mise run node                        # node typecheck + build + test (node-express)
-mise run frontend                    # frontend Playwright e2e suite
+mise run node                        # node lint + typecheck + build + test (node-express)
+mise run flask                       # flask lint + fmt-check + test (flask-python, ruff + pytest via uv)
+mise run frontend                    # frontend typecheck + build-check + ports-sync check + demo-sync check + Playwright e2e suite
 mise run conformance                 # seed sync check + conformance:test + conformance:schema-test
 
 mise run rust:build
