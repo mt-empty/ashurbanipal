@@ -18,13 +18,12 @@ import org.springframework.web.client.RestTemplate
 import java.net.URI
 
 /**
- * Boots the starter as a real Spring Boot app (item 2, implementation.md
- * §5.3), against the devcontainer's live Postgres with
- * `conformance/seed/seed.sql` applied directly (no Testcontainers/Docker
- * available in this environment — see the Phase 5 brief and PORTING.md).
+ * Boots the starter as a real Spring Boot app against the devcontainer's
+ * live Postgres with `conformance/seed/seed.sql` applied directly (no
+ * Testcontainers/Docker available in this environment — see PORTING.md).
  * This is a spot-check of the JSON shapes with a real HTTP client; the
  * actual conformance bar is the golden-fixture runner and schemathesis run
- * externally against this same app (see the phase report).
+ * externally against this same app.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,

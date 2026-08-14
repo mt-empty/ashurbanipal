@@ -14,7 +14,7 @@ import (
 const (
 	protocolHeader = "x-ashurbanipal-protocol"
 	// protocolVersion is bumped only for non-additive wire changes; must
-	// track implementations/rust/src/routes.rs's PROTOCOL_VERSION and the
+	// track implementations/rust/axum/src/routes.rs's PROTOCOL_VERSION and the
 	// Spring Boot starter's own constant (spec/protocol.md §7).
 	protocolVersion = "1"
 )
@@ -27,7 +27,7 @@ const (
 // source is the one seam to the database (see DbSource in db.go) — the
 // caller constructs it (NewPostgresSource, NewSQLiteSource, NewMySQLSource,
 // or a custom implementation) already bound to its own query timeout, the
-// same way implementations/rust/src/routes.rs's router<S: DbSource> takes
+// same way implementations/rust/axum/src/routes.rs's router<S: DbSource> takes
 // an already-constructed source rather than a raw connection.
 //
 // Router returns (nil, err) when EnabledFor names a production-like value
@@ -37,10 +37,9 @@ const (
 // forget to call.
 //
 // When cfg is not enabled for the running environment — including the
-// zero value Config{}, which MUST mean disabled (implementation.md §5.5
-// item 2) — Router returns a handler that 404s every request,
-// indistinguishable from the viewer never having been mounted at all
-// (spec/protocol.md §4).
+// zero value Config{}, which MUST mean disabled — Router returns a handler
+// that 404s every request, indistinguishable from the viewer never having
+// been mounted at all (spec/protocol.md §4).
 func Router(cfg Config, source DbSource) (http.Handler, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err

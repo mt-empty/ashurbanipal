@@ -7,7 +7,7 @@ import type { DbSource } from "../src/db/types.js";
 import { createRouter } from "../src/routes.js";
 
 // Ports the Rust reference's fail-closed guarantees
-// (implementations/rust/src/config.rs's tests) and the Go port's
+// (implementations/rust/core/src/config.rs's tests) and the Go port's
 // killswitch_test.go at the level a plain library function can observe
 // them directly — createRouter's thrown-or-not behavior is itself the
 // whole mechanism here (no DI container, no context-refresh failure to
@@ -40,8 +40,8 @@ async function withServer(router: express.Router, fn: (baseUrl: string) => Promi
   }
 }
 
-// implementation.md §5.5 item 2 / PORTING.md hardening checklist item 2:
-// absent config MUST mean disabled, never "enabled with defaults".
+// PORTING.md hardening checklist item 2: absent config MUST mean
+// disabled, never "enabled with defaults".
 it("empty config is disabled", async () => {
   const router = createRouter({}, noDbSource);
   await withServer(router, async (baseUrl) => {

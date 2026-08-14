@@ -132,18 +132,10 @@ pub(crate) fn quote_ident(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
-/// The hardcoded operator→SQL-keyword table (`spec/protocol.md` §5.4.2) —
-/// wire text never becomes an operator except through this match. The
-/// keyword is shared across backends; the *fragment* built around it
-/// (cast syntax, placeholder style) is not — see `postgres::build_where_clause`,
-/// `sqlite::build_where_clause`, and `mysql::build_where_clause`, each of
-/// which calls this and then applies its own dialect's cast/placeholder
-/// rules. Note `Ilike` has no keyword on either SQLite or MySQL —
-/// `sqlite::build_where_clause` special-cases it to plain `LIKE` (SQLite's
-/// `LIKE` is already ASCII case-insensitive), while `mysql::build_where_clause`
-/// special-cases it to `LOWER(...) LIKE LOWER(...)` (MySQL's plain `LIKE`
-/// case-sensitivity depends on the column's collation, so a bare swap to
-/// `LIKE` wouldn't reliably hold) — neither calls this for that variant.
+/// The hardcoded operator→SQL-keyword table — wire text never becomes an
+/// operator except through this match. Each backend's `build_where_clause`
+/// wraps the keyword in its own cast/placeholder syntax, and skips this
+/// entirely for `Ilike` on SQLite/MySQL, which have no such keyword.
 pub(crate) fn op_sql(op: FilterOp) -> &'static str {
     match op {
         FilterOp::Eq => "=",

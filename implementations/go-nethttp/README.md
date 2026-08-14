@@ -38,8 +38,8 @@ anything gets a 404'd viewer, never one silently enabled with defaults.
 | Backend | Type | Status |
 |---|---|---|
 | Postgres (`PostgresSource`) | default, always compiled | Conformant — the reference implementation `spec/protocol.md` is written against; covered by the full `conformance/runner` suite. |
-| SQLite (`SQLiteSource`) | opt-in via the `sqlite` build tag (`go build -tags sqlite ./...`) | Ported against `implementations/rust/src/db/sqlite.rs`: comments and pre-computed common-values statistics have no SQLite equivalent and degrade to omitted/empty; table counts are always the "no estimate" sentinel rather than Postgres's fast planner estimate. Not run through `conformance/runner` (that suite targets Postgres); has its own unit test suite instead (`sqlite_test.go`, no external service needed — a real on-disk file). Diverges from the Rust reference on the timeout mechanism: plain `context.WithTimeout` around `database/sql`'s `QueryContext` is sufficient with `modernc.org/sqlite` (empirically verified — see `sqlite_test.go`'s `TestSQLiteSlowQueryIsAbortedNotLeftToRun`), unlike Rust's sqlx driver, which needed a `sqlite3_progress_handler` because context cancellation there only stopped waiting, not the blocking call. See `docs/adapter-decisions.md`. |
-| MySQL/MariaDB (`MySQLSource`) | opt-in via the `mysql` build tag (`go build -tags mysql ./...`) | Ported against `implementations/rust/src/db/mysql.rs`: pre-computed common-values statistics have no reliable cross-version equivalent and degrade to empty. Table counts and comments come from `information_schema`, same as Postgres. Detects MySQL vs. MariaDB at runtime (`SELECT VERSION()`, cached) since the two forks need different query-timeout SQL — see `docs/adapter-decisions.md` §6. Not run through `conformance/runner`; has its own unit test suite instead (`mysql_test.go`), requiring a live instance via `MYSQL_TEST_URL`/`MARIADB_TEST_URL`. |
+| SQLite (`SQLiteSource`) | opt-in via the `sqlite` build tag (`go build -tags sqlite ./...`) | Ported against `implementations/rust/core/src/db/sqlite.rs`: comments and pre-computed common-values statistics have no SQLite equivalent and degrade to omitted/empty; table counts are always the "no estimate" sentinel rather than Postgres's fast planner estimate. Not run through `conformance/runner` (that suite targets Postgres); has its own unit test suite instead (`sqlite_test.go`, no external service needed — a real on-disk file). Diverges from the Rust reference on the timeout mechanism: plain `context.WithTimeout` around `database/sql`'s `QueryContext` is sufficient with `modernc.org/sqlite` (empirically verified — see `sqlite_test.go`'s `TestSQLiteSlowQueryIsAbortedNotLeftToRun`), unlike Rust's sqlx driver, which needed a `sqlite3_progress_handler` because context cancellation there only stopped waiting, not the blocking call. See `docs/adapter-decisions.md`. |
+| MySQL/MariaDB (`MySQLSource`) | opt-in via the `mysql` build tag (`go build -tags mysql ./...`) | Ported against `implementations/rust/core/src/db/mysql.rs`: pre-computed common-values statistics have no reliable cross-version equivalent and degrade to empty. Table counts and comments come from `information_schema`, same as Postgres. Detects MySQL vs. MariaDB at runtime (`SELECT VERSION()`, cached) since the two forks need different query-timeout SQL — see `docs/adapter-decisions.md` §6. Not run through `conformance/runner`; has its own unit test suite instead (`mysql_test.go`), requiring a live instance via `MYSQL_TEST_URL`/`MARIADB_TEST_URL`. |
 
 ```sh
 # Postgres only (default):
@@ -75,14 +75,14 @@ viewer, err := ashurbanipal.Router(cfg, source)
   handlers never touch `*sql.DB`/`*sql.Tx` directly) plus the shared
   wire types.
 - `postgres.go` — `PostgresSource`, the default `DbSource` implementation;
-  ported line-for-line against `implementations/rust/src/db/postgres.rs`'s
+  ported line-for-line against `implementations/rust/core/src/db/postgres.rs`'s
   catalog SQL.
 - `sqlite.go` (`sqlite` build tag) — `SQLiteSource`, ported against
-  `implementations/rust/src/db/sqlite.rs`.
+  `implementations/rust/core/src/db/sqlite.rs`.
 - `mysql.go` (`mysql` build tag) — `MySQLSource`, ported against
-  `implementations/rust/src/db/mysql.rs`.
+  `implementations/rust/core/src/db/mysql.rs`.
 - `filter.go` — the filter AST's structural validation and Postgres's
-  WHERE-clause builder, ported against `implementations/rust/src/filter.rs`
+  WHERE-clause builder, ported against `implementations/rust/core/src/filter.rs`
   (`sqlite.go`/`mysql.go` each carry their own dialect-specific builder).
 - `siblings.go` — health fan-out via `errgroup`.
 - `routes.go` — `Router(cfg, source)` and the six HTTP handlers.

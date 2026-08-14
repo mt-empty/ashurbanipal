@@ -61,15 +61,15 @@ type Sibling struct {
 	HealthPath  string
 }
 
-// Config mirrors the Rust reference's TOML config 1:1 (implementation.md
-// §5.2's mapping table), expressed as a plain Go struct rather than tied to
-// any particular config-file format — the host populates it however it
-// likes (env vars, flags, its own config library).
+// Config mirrors the Rust reference's TOML config 1:1 (docs/design.md §7),
+// expressed as a plain Go struct rather than tied to any particular
+// config-file format — the host populates it however it likes (env vars,
+// flags, its own config library).
 //
 // The zero value, Config{}, MUST mean disabled: EnabledFor is nil, so
 // IsEnabled reports false regardless of Environment. This is load-bearing
-// (implementation.md §5.5 item 2) — a host that forgets to configure
-// anything gets a 404'd viewer, never one silently enabled with defaults.
+// (spec/protocol.md §4) — a host that forgets to configure anything gets a
+// 404'd viewer, never one silently enabled with defaults.
 type Config struct {
 	Environment string
 	// EnabledFor is the allow-list of environments the viewer is enabled

@@ -165,13 +165,11 @@ func BuildWhereClause(conditions []Condition, columnNames []string) (string, []s
 		if !allowed[cond.Column] {
 			return "", nil, &NotAllowedError{What: fmt.Sprintf("column %q", cond.Column)}
 		}
-		// Defense in depth: BuildWhereClause is only ever fed
-		// ParseFilter's already-op-validated output in production, but
-		// it's a package-exported function a future caller (or a test)
-		// could feed conditions straight from JSON without going through
-		// ParseFilter first — re-checking here, not just trusting the
-		// caller, is what makes opSQL's hardcoded table load-bearing
-		// rather than decorative (implementation.md §5.5 item 6).
+		// Defense in depth: BuildWhereClause is exported, so a future
+		// caller could feed it conditions straight from JSON without
+		// going through ParseFilter first — re-checking here is what
+		// makes opSQL's hardcoded table load-bearing, not decorative
+		// (PORTING.md hardening item 6).
 		if !validOps[cond.Op] {
 			return "", nil, filterErr("condition %d has invalid op %q", i, cond.Op)
 		}

@@ -18,11 +18,11 @@ import (
 
 // Boots a real httptest.Server wrapping Router(...) against the
 // devcontainer's live Postgres with conformance/seed/seed.sql applied
-// (no Testcontainers/Docker available in this environment — see the
-// Phase 5 brief and PORTING.md). This is a spot-check of the JSON shapes
-// with a real HTTP client; the actual conformance bar is the golden-
-// fixture runner and schemathesis run externally against a demo binary
-// using this same Router (see the phase report).
+// (no Testcontainers/Docker available in this environment — see
+// PORTING.md). This is a spot-check of the JSON shapes with a real HTTP
+// client; the actual conformance bar is the golden-fixture runner and
+// schemathesis run externally against a demo binary using this same
+// Router.
 //
 // The server is built once in TestMain, not lazily per-test: a lazily
 // built server torn down via the first test's own t.Cleanup would close

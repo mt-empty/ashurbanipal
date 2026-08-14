@@ -6,7 +6,7 @@ import org.springframework.context.annotation.ConditionContext
 import org.springframework.core.type.AnnotatedTypeMetadata
 
 /**
- * Ports `Config::is_enabled` (implementations/rust/src/config.rs): binds
+ * Ports `Config::is_enabled` (implementations/rust/core/src/config.rs): binds
  * `ashurbanipal.*` straight from the `Environment` (not from the
  * `AshurbanipalProperties` bean — conditions are evaluated before bean
  * creation) so a `false` result here means the whole

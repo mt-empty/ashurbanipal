@@ -11,10 +11,10 @@ import java.io.File
 /**
  * Consumes `spec/fixtures/filter-builder-tests.json` directly from the repo
  * root (schema: `spec/fixtures/README.md`) — the same file
- * `implementations/rust/src/db.rs`'s unit runner and the black-box HTTP
- * suite consume, so this port's validation/building behavior can't drift
- * from the reference's without a fixture-level failure. Not copied into
- * `src/test/resources`, per implementation.md §5.3 item 1.
+ * `implementations/rust/core/src/db/postgres.rs`'s unit runner and the
+ * black-box HTTP suite consume, so this port's validation/building
+ * behavior can't drift from the reference's without a fixture-level
+ * failure. Not copied into `src/test/resources`.
  */
 class FilterValidatorFixtureTest {
     private val mapper = ObjectMapper()

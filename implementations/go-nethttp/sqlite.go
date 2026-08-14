@@ -12,7 +12,7 @@ import (
 // onlySchema is the only name ListSchemas ever returns — SQLite has no
 // schema namespace above a single database file, mirroring how a bare
 // ATTACH-less connection exposes its one implicit "main" schema
-// (implementations/rust/src/db/sqlite.rs::ONLY_SCHEMA).
+// (implementations/rust/core/src/db/sqlite.rs::ONLY_SCHEMA).
 const onlySchema = "main"
 
 // checkSchema rejects any requested schema other than onlySchema with the
@@ -191,7 +191,7 @@ func (c *SQLiteSource) keyMetadata(ctx context.Context, table string) (map[strin
 // BuildWhereClause: `?` placeholders instead of `$N`, `CAST(col AS TEXT)`
 // instead of `col::text`, and ILIKE mapped to plain LIKE — SQLite's LIKE
 // is already ASCII case-insensitive by default, so there's no separate
-// case-insensitive keyword to map to (spec/adapter-decisions.md §5.4.2).
+// case-insensitive keyword to map to (docs/adapter-decisions.md §5.4.2).
 func sqliteBuildWhereClause(conditions []Condition, columnNames []string) (string, []string, error) {
 	if len(conditions) == 0 {
 		return "", nil, nil

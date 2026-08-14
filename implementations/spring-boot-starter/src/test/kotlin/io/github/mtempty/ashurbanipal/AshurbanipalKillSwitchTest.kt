@@ -17,20 +17,20 @@ class TestDataSourceConfig {
 
 /**
  * Ports the Rust reference's fail-closed guarantees
- * (implementations/rust/src/config.rs's tests) at the level this port can
- * actually observe them: config-time bean registration, since a Spring
+ * (implementations/rust/core/src/config.rs's tests) at the level this port
+ * can actually observe them: config-time bean registration, since a Spring
  * context that fails to start is process-startup behavior, not an HTTP
- * response the conformance kit could ever see (implementation.md §5.5 item
- * 5 / docs/design.md §4.2's third paragraph). Uses a mock `DataSource` — the
- * enabled-path beans only need one to construct a `JdbcTemplate`, never to
- * actually connect, so no live database is needed for these tests.
+ * response the conformance kit could ever see (PORTING.md hardening item
+ * 5). Uses a mock `DataSource` — the enabled-path beans only need one to
+ * construct a `JdbcTemplate`, never to actually connect, so no live
+ * database is needed for these tests.
  */
 class AshurbanipalKillSwitchTest {
     private fun runner(): WebApplicationContextRunner =
         WebApplicationContextRunner()
             .withUserConfiguration(AshurbanipalAutoConfiguration::class.java, TestDataSourceConfig::class.java)
 
-    /** implementation.md §5.5 item 2: absent config MUST mean disabled, never "enabled with defaults". */
+    /** PORTING.md hardening item 2: absent config MUST mean disabled, never "enabled with defaults". */
     @Test
     fun `no config at all means disabled`() {
         runner().run { context ->

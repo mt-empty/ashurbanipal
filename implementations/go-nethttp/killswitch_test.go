@@ -8,7 +8,7 @@ import (
 )
 
 // Ports the Rust reference's fail-closed guarantees
-// (implementations/rust/src/config.rs's tests) and the Spring Boot
+// (implementations/rust/core/src/config.rs's tests) and the Spring Boot
 // starter's AshurbanipalKillSwitchTest.kt at the level a plain library
 // function can observe them directly — Router's error return is itself
 // the whole mechanism here (no DI container, no context-refresh failure
@@ -16,7 +16,7 @@ import (
 // back. A nil *sql.DB is safe throughout: Router never touches the
 // database at construction time, only per-request.
 
-// implementation.md §5.5 item 2: absent config MUST mean disabled, never
+// PORTING.md hardening item 2: absent config MUST mean disabled, never
 // "enabled with defaults".
 func TestZeroValueConfigIsDisabled(t *testing.T) {
 	handler, err := Router(Config{}, nil)
@@ -58,9 +58,9 @@ func TestAnyMatchesEveryNonProductionEnvironment(t *testing.T) {
 // spec/protocol.md §4: a production-like name in EnabledFor MUST be
 // rejected at config load — Router(...) returning a non-nil error is
 // this port's only observable form of "startup fails", since there's no
-// separate config-load step to fail before it (implementation.md §5.5
-// item 5's caveat: this is the property a conformance run over HTTP can
-// never observe, so it has to be asserted here).
+// separate config-load step to fail before it (PORTING.md hardening item
+// 5's caveat: this is the property a conformance run over HTTP can never
+// observe, so it has to be asserted here).
 func TestProductionLikeEnabledForFailsToConstruct(t *testing.T) {
 	for _, alias := range []string{"production", "prod", "PROD", "Production", "PRD", "live"} {
 		t.Run(alias, func(t *testing.T) {

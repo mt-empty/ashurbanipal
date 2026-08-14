@@ -16,8 +16,8 @@ import {
 
 /**
  * The default/reference `DbSource` — ported against
- * implementations/rust/src/db/postgres.rs (also cross-checked against
- * implementations/go-nethttp/catalog.go). Every query (catalog/metadata
+ * implementations/rust/core/src/db/postgres.rs (also cross-checked against
+ * implementations/go-nethttp/postgres.go). Every query (catalog/metadata
  * included, not just row fetches) is bounded by the caller-supplied
  * timeoutMs, applied per-connection via `SET LOCAL statement_timeout`
  * inside a transaction so it never leaks onto a pooled connection reused

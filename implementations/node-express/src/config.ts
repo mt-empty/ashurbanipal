@@ -1,7 +1,6 @@
-// Config mirrors the Rust reference's TOML config (implementation.md
-// §5.2's mapping table) as a plain object the host populates however it
-// likes (env vars, its own config loader) — this module imposes no file
-// format.
+// Config mirrors the Rust reference's TOML config as a plain object the
+// host populates however it likes (env vars, its own config loader) —
+// this module imposes no file format.
 //
 // The empty/undefined case MUST mean disabled: an absent `enabledFor`
 // (or a Config the host never constructs at all) means IsEnabled() is
