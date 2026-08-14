@@ -1,11 +1,10 @@
 # UI/UX guidelines
 
 Status: agreed
-Scope: applies to all work on `src/frontend/dbviewer.html`, present and
-future. Companion to `design.md` §3.1 (which specs *what* the frontend does)
-and `acceptance-criteria.md` (which specs *whether v1 is done*) — this doc
-specs the behavioral rules a change must not violate regardless of what
-feature it's implementing.
+Scope: applies to all work on `frontend/dbviewer.html` (built from
+`frontend/src/`), present and future. Companion to `design.md` §3.1 (which
+specs *what* the frontend does) — this doc specs the behavioral rules a
+change must not violate regardless of what feature it's implementing.
 
 Written proactively, not in response to an incident — the goal is to give
 future changes (mine or a human's) a fast way to check "does this feel
@@ -30,8 +29,7 @@ carries here. This is a read-only internal dev tool with one user type
 these on purpose rather than by neglect:
 
 1. **Visibility of system status** — the user always knows what's
-   happening (loading, empty, error). Full weight — see the loading-state
-   gap in §3.
+   happening (loading, empty, error). Full weight — see R9.
 2. **Match between system and the real world** — use the vocabulary the
    audience already has (table/column/row, actual Postgres type names).
    Full weight; no need to paper over DB jargon for this audience.
@@ -71,7 +69,7 @@ these on purpose rather than by neglect:
 
 Checkable, not aspirational — each ties back to §1 and (where relevant)
 notes current implementation status. Treat these as things a PR review
-should block on, the same way `acceptance-criteria.md` gates "v1 done."
+should block on.
 
 - **R1 — Read-only is load-bearing in the UI, not just the API.** No
   element may *look* mutable: no edit-in-place, no optimistic updates, no
@@ -115,7 +113,7 @@ should block on, the same way `acceptance-criteria.md` gates "v1 done."
   point that doesn't wire this up is a bug, not a style choice. *(Derives
   from: visibility of system status, user control and freedom.)*
 - **R9 — Every async action reports its own status.** Loading, success, and
-  error are all visible states — not just error. See the gap in §3: right
-  now there's error-on-failure but no loading indicator, which technically
-  violates this rule already. *(Derives from: visibility of system status —
-  heuristic #1, given full weight above.)*
+  error are all visible states — not just error (a `#status` live region,
+  a per-row spinner in the sidebar, and `aria-busy` on the table cover
+  loading; `#error` covers failure). *(Derives from: visibility of system
+  status — heuristic #1, given full weight above.)*

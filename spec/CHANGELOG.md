@@ -10,5 +10,4 @@ Initial protocol version — `spec/protocol.md` + `spec/openapi.yaml` as
 published. There is no prior externally-observable version to bump away
 from: the pre-spec reference's DSL-text filter format was never itself a
 versioned wire contract, just an implementation detail, so v1 already
-bakes in the JSON-AST filter representation as its baseline (see
-`implementation.md` §1.4's note on this).
+bakes in the JSON-AST filter representation as its baseline.
