@@ -1,0 +1,83 @@
+name: _rust-crate-publish-check
+
+# Shared by rust-axum-publish.yml, rust-core-publish.yml, and
+# rust-actix-web-publish.yml — the tag/version verification and
+# build+dry-run-package steps are identical across the three crates
+# (implementations/rust/{axum,core,actix-web}), varying only by tag
+# prefix, crate name, and crate directory. Each crate's own publish
+# workflow calls this once, then adds whatever's genuinely per-crate on
+# top (conformance jobs for the two HTTP-facing crates, the crates.io
+# Trusted Publishing `publish` job with its own GitHub Environment name).
+# The build+test step itself is shared one level further, via
+# _rust-crate-build-test.yml — the same job the conformance workflows use.
+#
+# Prerequisite this workflow can't do for you: crates.io only lets you
+# create a Trusted Publisher Config for a crate that already exists, so
+# the very first `cargo publish` for a new crate has to be done manually,
+# once, with a classic API token
+# (https://crates.io/docs/trusted-publishing) — after that one-time
+# bootstrap, every release flows through the calling workflow's `publish`
+# job with no stored secret at all.
+
+on:
+  workflow_call:
+    inputs:
+      tag-prefix:
+        required: true
+        type: string
+      crate-name:
+        required: true
+        type: string
+      crate-dir:
+        required: true
+        type: string
+
+jobs:
+  verify-version:
+    name: verify tag is on main + matches Cargo.toml version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need full history for the branch-ancestry check below
+
+      - name: Check that the tagged commit is on main
+        run: |
+          if ! git branch -r --contains "${{ github.sha }}" | grep -q 'origin/main$'; then
+            echo "tag ${{ github.ref_name }} (${{ github.sha }}) is not on main — refusing to publish" >&2
+            exit 1
+          fi
+
+      - name: Compare tag to ${{ inputs.crate-dir }}/Cargo.toml version
+        run: |
+          tag_version="${GITHUB_REF_NAME#${{ inputs.tag-prefix }}}"
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' "${{ inputs.crate-dir }}/Cargo.toml")
+          if [ "$tag_version" != "$cargo_version" ]; then
+            echo "tag $GITHUB_REF_NAME implies version $tag_version, but ${{ inputs.crate-dir }}/Cargo.toml has $cargo_version" >&2
+            exit 1
+          fi
+
+  build-and-test:
+    needs: verify-version
+    uses: ./.github/workflows/_rust-crate-build-test.yml
+
+  dry-run-publish:
+    name: cargo publish --dry-run (packaging check only)
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: |
+            implementations/rust -> target
+            tools/seed-gen -> target
+
+      - name: cargo publish --dry-run
+        working-directory: ${{ inputs.crate-dir }}
+        run: cargo publish -p ${{ inputs.crate-name }} --dry-run
