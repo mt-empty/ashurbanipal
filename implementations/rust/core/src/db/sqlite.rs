@@ -45,17 +45,12 @@ impl SqliteSource {
         Self { pool }
     }
 
-    /// SQLite has no `SET LOCAL statement_timeout` equivalent — `busy_timeout`
-    /// only bounds waiting for a file lock, not a slow `SELECT`, and each
-    /// connection runs on its own dedicated worker thread, so wrapping the
-    /// query future in `tokio::time::timeout` would abandon *waiting* for a
-    /// result without actually stopping the blocking call on that thread
-    /// (the connection would stay tied up for the query's real duration
-    /// regardless). The real interrupt mechanism is `sqlite3_progress_handler`
-    /// (`SqliteConnection::set_progress_handler`): invoked periodically
-    /// during query execution, and returning `false` aborts the query
-    /// immediately on the same thread — that's what this wraps every query
-    /// in, mirroring what `postgres::PgPoolSource::bounded_tx` guarantees.
+    /// SQLite has no `SET LOCAL statement_timeout` equivalent, and
+    /// `tokio::time::timeout` wouldn't work either — each connection runs on
+    /// its own blocking worker thread, so it would abandon waiting without
+    /// stopping the call. `sqlite3_progress_handler` (`set_progress_handler`)
+    /// is the real interrupt: polled during execution, and returning `false`
+    /// aborts the query in place — mirrors `postgres::PgPoolSource::bounded_tx`.
     async fn bounded<T>(
         &self,
         timeout_secs: u32,

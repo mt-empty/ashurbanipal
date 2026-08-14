@@ -8,7 +8,7 @@ private val PRODUCTION_ALIASES = setOf("production", "prod", "prd", "live")
 private fun isProductionLike(value: String): Boolean =
     PRODUCTION_ALIASES.any { it.equals(value, ignoreCase = true) }
 
-/** Config load fails outright rather than silently ignoring the value — mirrors `Config::validate` (implementations/rust/src/config.rs). */
+/** Config load fails outright rather than silently ignoring the value — mirrors `Config::validate` (implementations/rust/core/src/config.rs). */
 class ProductionEnabledException(value: String) : RuntimeException(
     "ashurbanipal must never be enabled in production: `enabled-for` contains \"$value\""
 )
@@ -21,10 +21,10 @@ class InvalidBackendException(value: String) : RuntimeException(
 )
 
 /**
- * Mirrors the Rust TOML config 1:1 (implementation.md §5.2's mapping table).
- * Absent config binds every field to its default here, which makes
- * [isEnabled] false (`enabledFor` defaults to empty) — the no-config case
- * is disabled by construction, not by a separate check.
+ * Mirrors the Rust TOML config 1:1. Absent config binds every field to its
+ * default here, which makes [isEnabled] false (`enabledFor` defaults to
+ * empty) — the no-config case is disabled by construction, not by a
+ * separate check.
  */
 @ConfigurationProperties(prefix = "ashurbanipal")
 class AshurbanipalProperties(
@@ -36,7 +36,7 @@ class AshurbanipalProperties(
     /**
      * Which [DbSource] implementation to construct — `postgres` (default),
      * `mysql` (covers MariaDB too, detected at runtime, mirrors
-     * `implementations/rust/src/db/mysql.rs`'s `Variant` sniff), or
+     * `implementations/rust/core/src/db/mysql.rs`'s `Variant` sniff), or
      * `sqlite`. Deliberately an explicit opt-in property, never inferred
      * from which JDBC driver happens to be on the host's classpath —
      * `PORTING.md`'s hardening checklist item 2 flags classpath-presence

@@ -8,7 +8,7 @@ import tools.jackson.module.kotlin.readValue
 /**
  * `spec/protocol.md` §5.4.2's byte bound on the URL-decoded `filter` JSON
  * text. Not the DSL-era 1024: measured JSON-over-DSL inflation (worst case
- * 5.67x, per `implementations/rust/src/filter.rs`), 8192 is the nearest
+ * 5.67x, per `implementations/rust/core/src/filter.rs`), 8192 is the nearest
  * clean power of two with margin.
  */
 const val MAX_FILTER_BYTES = 8192
@@ -16,7 +16,7 @@ const val MAX_CONDITIONS = 10
 
 private val VALID_OPS = setOf("=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL")
 
-/** Shared with each backend's own `buildWhereClause` (mirrors `implementations/rust/src/filter.rs::FilterOp::takes_value`). */
+/** Shared with each backend's own `buildWhereClause` (mirrors `implementations/rust/core/src/filter.rs::FilterOp::takes_value`). */
 internal val OPS_WITHOUT_VALUE = setOf("IS NULL", "IS NOT NULL")
 
 /** Thrown for any structural/allow-list violation; the controller maps every instance to 400 plain text (`spec/protocol.md` §2 — wording is implementation-defined). */
@@ -41,7 +41,7 @@ data class WhereClause(val sql: String, val values: List<String>)
  * AST. [buildWhereClause] renders the WHERE fragment in Postgres's own
  * dialect (`::text` cast, native `ILIKE`); `MySqlSource`/`SqliteSource` have
  * their own `buildWhereClause` for their dialects, mirroring
- * `implementations/rust/src/db/postgres.rs`/`mysql.rs`/`sqlite.rs` each
+ * `implementations/rust/core/src/db/postgres.rs`/`mysql.rs`/`sqlite.rs` each
  * having their own.
  */
 class FilterValidator {
@@ -133,7 +133,7 @@ class FilterValidator {
 /**
  * The hardcoded operator -> SQL-keyword table (`spec/protocol.md` §5.4.2) —
  * wire text is never used as an operator except through this match. Shared
- * across backends (mirrors `implementations/rust/src/db/mod.rs::op_sql`);
+ * across backends (mirrors `implementations/rust/core/src/db/mod.rs::op_sql`);
  * the *fragment* built around the keyword (cast syntax, placeholder style,
  * `ILIKE`'s per-engine remapping) is each backend's own concern — see
  * [PostgresSource]'s use via [FilterValidator.buildWhereClause],

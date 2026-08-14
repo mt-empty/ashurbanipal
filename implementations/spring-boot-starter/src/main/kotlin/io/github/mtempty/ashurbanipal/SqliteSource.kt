@@ -19,7 +19,7 @@ private fun checkSchema(schema: String?) {
  * SQLite equivalent of [FilterValidator.buildWhereClause]: `CAST(col AS
  * TEXT)` instead of `::text`, and `ILIKE` mapped to plain `LIKE` since
  * SQLite's `LIKE` is already ASCII case-insensitive by default. Mirrors
- * `implementations/rust/src/db/sqlite.rs::build_where_clause`.
+ * `implementations/rust/core/src/db/sqlite.rs::build_where_clause`.
  */
 private fun buildWhereClauseSqlite(conditions: List<Condition>, columnNames: List<String>): WhereClause {
     if (conditions.isEmpty()) {
@@ -77,7 +77,7 @@ private fun <T> query(conn: Connection, sql: String, params: List<Any?> = emptyL
 
 /**
  * SQLite [DbSource], opt-in via `ashurbanipal.backend=sqlite`. Port of
- * `implementations/rust/src/db/sqlite.rs`, mechanism-for-mechanism: the real
+ * `implementations/rust/core/src/db/sqlite.rs`, mechanism-for-mechanism: the real
  * interrupt is `sqlite3_progress_handler` (Xerial's `org.sqlite.ProgressHandler`),
  * checked every 1000 VM opcodes, not `Statement.setQueryTimeout` — verified
  * empirically that the latter does *not* abort a running query on this
@@ -88,16 +88,14 @@ private fun <T> query(conn: Connection, sql: String, params: List<Any?> = emptyL
 class SqliteSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
 
     /**
-     * Mirrors `implementations/rust/src/db/sqlite.rs::SqliteSource::bounded`:
-     * registers a real progress-handler interrupt for the duration of
-     * [block], always clearing it before the connection returns to the pool
-     * — an uncleared handler would abort the next borrower's first query
-     * instantly, inheriting an already-elapsed deadline. No
-     * connection-pinning is needed across separate [bounded] calls within
-     * one request (unlike Postgres/MySQL): SQLite has no schema/session
-     * state that could diverge between pooled connections.
+     * Mirrors `implementations/rust/core/src/db/sqlite.rs::SqliteSource::bounded`:
+     * registers a real progress-handler interrupt for [block]'s duration,
+     * always clearing it before the connection returns to the pool — an
+     * uncleared handler would abort the next borrower's first query
+     * instantly, inheriting an already-elapsed deadline. `internal`, not
+     * `private`, so [SqliteSourceTest] can drive this exact mechanism
+     * directly with a deliberately slow query.
      */
-    /** `internal`, not `private`, so [SqliteSourceTest] can drive this exact mechanism directly with a deliberately slow query — see that test's real-cancellation proof. */
     internal fun <T> bounded(timeoutSecs: Int, block: (Connection) -> T): T {
         dataSource.connection.use { conn ->
             // A pooled connection (e.g. HikariCP) hands back a proxy that

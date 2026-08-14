@@ -21,25 +21,18 @@ import {
  * the two forks need different SQL for the one thing this port relies on:
  * a per-query timeout (see timedSelect). Detected once per MySqlSource via
  * variant() and cached, not re-checked per request — mirrors
- * implementations/rust/src/db/mysql.rs's `Variant`.
+ * implementations/rust/core/src/db/mysql.rs's `Variant`.
  */
 export type Variant = "mysql" | "mariadb";
 
 /**
- * MySQL's `SET LOCAL` is a documented plain synonym for `SET SESSION` —
- * unlike Postgres's genuinely transaction-scoped `SET LOCAL
- * statement_timeout`, reusing that pattern verbatim would leak a timeout
- * onto the pooled connection's next reuse. Both forks instead offer a
- * self-resetting per-statement mechanism, but not the same one: MySQL's
- * `MAX_EXECUTION_TIME` is an optimizer hint spliced inline right after
- * `select`, its required placement. MariaDB never implemented that hint —
- * an unrecognized `/*+ ... *\/` comment is silently ignored rather than
- * rejected, so reusing MySQL's hint there would fail open — and instead
- * wraps the whole statement in `SET STATEMENT max_statement_time=N FOR
- * ...` (plain seconds, fractional allowed, not milliseconds). Neither
- * needs clearing before the connection returns to the pool, unlike
- * SQLite's cancellation mechanism. `body` is the SQL text starting right
- * after the `select` keyword this function supplies.
+ * MySQL's `MAX_EXECUTION_TIME` hint must sit inline right after `select`.
+ * MariaDB never implemented it and silently ignores unrecognized
+ * `/*+ ... *\/` hints rather than rejecting them — reusing MySQL's hint
+ * there would fail open, silently not enforcing the timeout at all — so
+ * MariaDB instead gets `SET STATEMENT max_statement_time=N FOR ...`
+ * (whole-statement wrap, plain seconds). `body` is the SQL text starting
+ * right after the `select` keyword this function supplies.
  */
 export function timedSelect(variant: Variant, timeoutMs: number, body: string): string {
   if (variant === "mysql") {
@@ -136,7 +129,7 @@ async function queryRows(
 
 /**
  * The MySQL/MariaDB `DbSource`, ported against
- * implementations/rust/src/db/mysql.rs. Not run through
+ * implementations/rust/core/src/db/mysql.rs. Not run through
  * conformance/runner (that suite targets Postgres) — see
  * docs/adapter-decisions.md for the per-clause decisions this makes where
  * Postgres-specific catalog/stats mechanisms have no equivalent.

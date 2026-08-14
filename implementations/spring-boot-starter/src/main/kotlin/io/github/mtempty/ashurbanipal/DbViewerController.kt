@@ -23,7 +23,7 @@ import java.util.concurrent.CompletableFuture
 
 private const val PROTOCOL_HEADER = "x-ashurbanipal-protocol"
 
-/** Bumped only for non-additive wire changes; additive optional fields keep the same version (spec/protocol.md §7). Value must track implementations/rust/src/routes.rs's PROTOCOL_VERSION constant. */
+/** Bumped only for non-additive wire changes; additive optional fields keep the same version (spec/protocol.md §7). Value must track implementations/rust/axum/src/routes.rs's PROTOCOL_VERSION constant. */
 private const val PROTOCOL_VERSION = "1"
 
 data class SchemasResponse(val schemas: List<String>)
@@ -196,15 +196,12 @@ class DbViewerController(
 
 /**
  * `spec/protocol.md` §5.4 requires `limit`/`offset` to be clamped, never
- * rejected, for any out-of-range value. Binding them as `Int?`/`Long?`
- * `@RequestParam`s would let Spring's own type conversion reject an
- * out-of-Int/Long-range value with 400 before this code ever runs — the same
- * trap `implementations/rust/src/routes.rs`'s `deserialize_saturating_u32`
- * exists to avoid on the Rust side, just tripped by Spring's eager argument
- * binding instead of axum's `Query` extractor. Binding both as raw `String?`
- * and parsing with `BigInteger` here sidesteps it: only genuinely
- * non-numeric text (`"abc"`, `"1.5"`, `""`) 400s; anything else saturates
- * into `[0, Long.MAX_VALUE]` and gets clamped by the caller.
+ * rejected, for out-of-range values — binding as `Int?`/`Long?`
+ * `@RequestParam`s would let Spring's own type conversion 400 first, the
+ * same trap `deserialize_saturating_u32` in the Rust reference's
+ * `routes.rs` avoids. Binding as raw `String?` and parsing with
+ * `BigInteger` sidesteps it: only non-numeric text 400s, everything else
+ * saturates into `[0, Long.MAX_VALUE]` and gets clamped by the caller.
  */
 private fun parseSaturating(raw: String?): Long? {
     if (raw == null) return null

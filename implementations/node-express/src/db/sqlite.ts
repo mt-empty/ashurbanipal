@@ -20,7 +20,7 @@ import {
  * SQLite has no schema namespace above a single database file — this is
  * the only name listSchemas ever returns, mirroring how a bare
  * ATTACH-less connection exposes its one implicit `main` schema
- * (implementations/rust/src/db/sqlite.rs::ONLY_SCHEMA).
+ * (implementations/rust/core/src/db/sqlite.rs::ONLY_SCHEMA).
  */
 const ONLY_SCHEMA = "main";
 
@@ -199,7 +199,7 @@ function buildWhereClauseSqlite(conditions: Condition[], columnNames: string[]):
 
 /**
  * The SQLite `DbSource`, ported against
- * implementations/rust/src/db/sqlite.rs. Not run through
+ * implementations/rust/core/src/db/sqlite.rs. Not run through
  * conformance/runner (that suite targets Postgres) — see
  * docs/adapter-decisions.md for the per-clause decisions this makes where
  * Postgres-specific catalog/stats mechanisms have no equivalent. Uses a
