@@ -3,7 +3,7 @@ name: rust-actix-web-publish
 # Publishes implementations/rust/actix-web to crates.io as
 # `ashurbanipal-actix-web`, gated on an actix-web-v* tag (see
 # docs/publishing-checklist.md's per-port tag scheme — this crate's tags
-# never share rust-axum-publish.yml's rust-v* or rust-core-publish.yml's
+# never share rust-axum-publish.yml's axum-v* or rust-core-publish.yml's
 # core-v*). Tag/version verification and build+dry-run-package are shared
 # with those two workflows via _rust-crate-publish-check.yml — see that
 # file's header for the Trusted Publishing bootstrap caveat.

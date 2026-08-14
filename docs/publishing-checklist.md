@@ -43,7 +43,7 @@ token unless a specific reason rules it out.
 
 ## Decided: per-port tag scheme
 
-Per-port tag prefixes (`rust-vX.Y.Z`, `node-vX.Y.Z`, `flask-vX.Y.Z`,
+Per-port tag prefixes (`axum-vX.Y.Z`, `node-vX.Y.Z`, `flask-vX.Y.Z`,
 `spring-vX.Y.Z`, `go-vX.Y.Z`), each triggering its own publish job scoped
 to that one port's directory — not the bare `v*` scheme
 `.github/workflows/release.yml` uses today. Rationale: the five ports are
@@ -61,7 +61,10 @@ port's release, which defeats the point of publishing them separately.
 
 **Amendment (added once Rust became three crates instead of one):** the
 scheme goes one level finer inside Rust itself, per-crate rather than
-per-port — `rust-vX.Y.Z` (`ashurbanipal-axum`, `rust-axum-publish.yml`),
+per-port (originally `rust-vX.Y.Z` for the single Rust port, renamed to
+`axum-vX.Y.Z` once axum was one of three crates rather than "Rust" as a
+whole, for parity with the other two prefixes below) —
+`axum-vX.Y.Z` (`ashurbanipal-axum`, `rust-axum-publish.yml`),
 `core-vX.Y.Z` (`ashurbanipal`, `rust-core-publish.yml`), and
 `actix-web-vX.Y.Z` (`ashurbanipal-actix-web`,
 `rust-actix-web-publish.yml`) each tag and release independently. All
@@ -162,21 +165,21 @@ on each other.
    all do this exact check via their shared `_rust-crate-publish-check.yml`
    job, and the `refactor/frontend-typescript-modules` branch carrying all
    the rename/vendoring work merged into `main` (PR #37, `614cdf0`), so a
-   `rust-v*` tag cut from current `main` will pass the gate.
+   `axum-v*` tag cut from current `main` will pass the gate.
    All three `publish` jobs declare `environment: crates-io-publish` — one
    shared environment across all three crates rather than one per crate,
    since there's a single reviewer (`mt-empty`) for the whole project and
    a GitHub Environment's deployment branch/tag policy accepts multiple
-   patterns, so `rust-v*`/`core-v*`/`actix-web-v*` can all be registered
-   under it without losing per-tag scoping. — *now configured for
-   `rust-v*`*: required reviewer `mt-empty`, deployment restricted to tags
-   matching `rust-v*` (a tag policy, not a branch policy — these workflows
-   trigger on a tag push, so a `main`-only branch policy would never match
-   the tag ref and would silently block every run). — *Still open*: the
-   `crates-io-publish` environment's tag policy needs `core-v*` and
-   `actix-web-v*` added alongside the existing `rust-v*` pattern. This is
-   a GitHub Settings action, not a file in this repo — do it before
-   cutting the first `core-v*`/`actix-web-v*` tag, or the `publish` job
+   patterns, so `axum-v*`/`core-v*`/`actix-web-v*` can all be registered
+   under it without losing per-tag scoping. — *configured*: required
+   reviewer `mt-empty`, deployment restricted to tags matching those three
+   patterns (a tag policy, not a branch policy — these workflows trigger
+   on a tag push, so a `main`-only branch policy would never match the tag
+   ref and would silently block every run). `core-v*`/`actix-web-v*` were
+   added directly in GitHub Settings; the environment's original pattern
+   was `rust-v*` (from when `rust-axum-publish.yml` used that tag prefix)
+   and needs renaming to `axum-v*` to match the workflow's current trigger
+   — do this before cutting the first `axum-v*` tag, or the `publish` job
    will run with no gate at all. On crates.io's side, all three crates'
    Trusted Publisher config uses the same environment name
    (`crates-io-publish`), just a different workflow filename each.
@@ -277,10 +280,10 @@ on each other.
   alongside `ashurbanipal` and `ashurbanipal-actix-web` (also bumped to
   0.2.0, coordinated for this release — see the status line at the top).
   The `ashurbanipal` path+version dependency requirement was bumped to
-  `"0.2"` to match. `crates-io-publish` environment's required-reviewer +
-  tag-restriction protection rules are configured for `rust-v*`; `core-v*`
-  and `actix-web-v*` still need adding to that same environment's tag
-  policy before their tags can publish (see gate item 6).
+  `"0.2"` to match. Also renamed the tag prefix `rust-axum-publish.yml`
+  triggers on from `rust-v*` to `axum-v*`, for parity with `core-v*`/
+  `actix-web-v*` (see gate item 6's note on the environment's tag policy
+  needing the same rename).
 - **Node** (`implementations/node-express/package.json`) — ~~`"private":
   true` blocks `npm publish`; missing `repository`, `license`,
   `homepage`~~ **closed**: `private` removed, all three fields added.

@@ -1,16 +1,16 @@
 name: rust-axum-publish
 
 # Publishes implementations/rust/axum to crates.io as `ashurbanipal-axum`,
-# gated on a rust-v* tag (see docs/publishing-checklist.md's per-port tag
-# scheme — this crate's tags never share rust-core-publish.yml's core-v*,
-# rust-actix-web-publish.yml's actix-web-v*, or the bare v* release.yml
-# uses). Tag/version verification and build+dry-run-package are shared
-# with those two workflows via _rust-crate-publish-check.yml — see that
-# file's header for the Trusted Publishing bootstrap caveat.
+# gated on an axum-v* tag (see docs/publishing-checklist.md's per-port tag
+# scheme — this crate's tags never share rust-core-publish.yml's core-v*
+# or rust-actix-web-publish.yml's actix-web-v*). Tag/version verification
+# and build+dry-run-package are shared with those two workflows via
+# _rust-crate-publish-check.yml — see that file's header for the Trusted
+# Publishing bootstrap caveat.
 
 on:
   push:
-    tags: ["rust-v*"]
+    tags: ["axum-v*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,7 +19,7 @@ jobs:
   verify-and-build:
     uses: ./.github/workflows/_rust-crate-publish-check.yml
     with:
-      tag-prefix: "rust-v"
+      tag-prefix: "axum-v"
       crate-name: "ashurbanipal-axum"
       crate-dir: "implementations/rust/axum"
 

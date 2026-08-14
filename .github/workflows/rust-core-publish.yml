@@ -2,7 +2,7 @@ name: rust-core-publish
 
 # Publishes implementations/rust/core to crates.io as `ashurbanipal`,
 # gated on a core-v* tag (see docs/publishing-checklist.md's per-port tag
-# scheme — this crate's tags never share rust-axum-publish.yml's rust-v*
+# scheme — this crate's tags never share rust-axum-publish.yml's axum-v*
 # or rust-actix-web-publish.yml's actix-web-v*). Tag/version verification
 # and build+dry-run-package are shared with those two workflows via
 # _rust-crate-publish-check.yml — see that file's header for the Trusted
