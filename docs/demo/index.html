@@ -520,11 +520,7 @@
 
 /* ==== Layout ==== */
 body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
-/* padding-bottom reserves room for #api-help-btn/#theme-toggle's fixed
-   viewport corner so a long table/siblings list scrolls above them
-   instead of under them. */
-nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto;
-      padding-bottom: calc(var(--gap-lg) * 2 + 1.75rem); }
+nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
 /* No padding here: #toolbar is sticky and must reach main's actual
    edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
 main { overflow: auto; }
@@ -535,7 +531,8 @@ main { overflow: auto; }
    the viewport, so once scrolled past that they run out of stickiness
    and get dragged along horizontally. */
 #content { padding: 0 var(--gap-lg) var(--gap-lg); width: max-content; min-width: 100%; }
-h1 { font-size: 1rem; margin: 0 0 var(--gap); }
+.nav-header { display: flex; align-items: center; gap: var(--gap); margin: 0 0 var(--gap); }
+h1 { font-size: 1rem; margin: 0; flex: 1; min-width: 0; }
 h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
 h1 a:hover { text-decoration-thickness: 2px; }
 
@@ -743,18 +740,15 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 .cell-type-number { color: var(--type-number); }
 .cell-type-date { color: var(--type-date); }
 
-/* Deliberately outside the nav/main grid so it stays reachable
-   regardless of which table/dialog is showing. */
-#api-help-btn { position: fixed; left: var(--gap-lg); bottom: var(--gap-lg); z-index: 1;
-                width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+/* Lives in .nav-header beside the title, not fixed to the viewport — a
+   fixed corner overlapped the sidebar once #tables/#siblings grew past
+   one screenful. */
+#api-help-btn { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
                 border: 1px solid var(--border-strong); background: canvas;
                 color: inherit; cursor: pointer; font: inherit; }
 #api-help-btn:hover { background: var(--hover); }
 
-/* Sits directly beside #api-help-btn in the same fixed corner, rather
-   than a separate corner of its own. */
-#theme-toggle { position: fixed; left: calc(var(--gap-lg) * 2 + 1.75rem); bottom: var(--gap-lg); z-index: 1;
-                width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+#theme-toggle { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
                 border: 1px solid var(--border-strong); background: canvas;
                 color: inherit; cursor: pointer; font: inherit; line-height: 1; }
 #theme-toggle:hover { background: var(--hover); }
@@ -842,7 +836,11 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 </head>
 <body>
 <nav>
-  <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
+  <div class="nav-header">
+    <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
+    <button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
+    <button id="theme-toggle" type="button" aria-label="toggle light/dark theme" title="toggle light/dark theme"></button>
+  </div>
   <div id="schema-select-wrap" hidden>
     <label for="schema-select" class="section-label">schema</label>
     <select id="schema-select"></select>
@@ -918,8 +916,6 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
   </div>
   <pre id="api-help-pre"></pre>
 </dialog>
-<button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
-<button id="theme-toggle" type="button" aria-label="toggle light/dark theme" title="toggle light/dark theme"></button>
 
 <script type="module">
 // src/dom.ts
