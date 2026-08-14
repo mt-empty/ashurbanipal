@@ -71,7 +71,7 @@ const users: TableDef = {
     { name: "created_at", type: "timestamp with time zone" },
   ],
   rowCount: 64,
-  approxRows: 1243,
+  approxRows: 61,
   row(i) {
     const rng = rngFor("users", i);
     const first = pick(rng, FIRST), last = pick(rng, LAST);
@@ -100,7 +100,7 @@ const products: TableDef = {
     { name: "metadata", type: "jsonb", comment: "Vendor-supplied attributes, shape varies by category." },
   ],
   rowCount: 48,
-  approxRows: 341,
+  approxRows: 45,
   row(i) {
     const rng = rngFor("products", i);
     const category = pick(rng, ["electronics", "home", "outdoors", "books", "toys"]);
@@ -126,7 +126,7 @@ const orders: TableDef = {
     { name: "created_at", type: "timestamp with time zone" },
   ],
   rowCount: 96,
-  approxRows: 5312,
+  approxRows: 89,
   row(i) {
     const rng = rngFor("orders", i);
     const userIdx = Math.floor(rng() * users.rowCount);
