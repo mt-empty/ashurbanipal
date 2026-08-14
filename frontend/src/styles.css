@@ -44,7 +44,8 @@ main { overflow: auto; }
    the viewport, so once scrolled past that they run out of stickiness
    and get dragged along horizontally. */
 #content { padding: 0 var(--gap-lg) var(--gap-lg); width: max-content; min-width: 100%; }
-h1 { font-size: 1rem; margin: 0 0 var(--gap); }
+.nav-header { display: flex; align-items: center; gap: var(--gap); margin: 0 0 var(--gap); }
+h1 { font-size: 1rem; margin: 0; flex: 1; min-width: 0; }
 h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
 h1 a:hover { text-decoration-thickness: 2px; }
 
@@ -252,18 +253,15 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 .cell-type-number { color: var(--type-number); }
 .cell-type-date { color: var(--type-date); }
 
-/* Deliberately outside the nav/main grid so it stays reachable
-   regardless of which table/dialog is showing. */
-#api-help-btn { position: fixed; left: var(--gap-lg); bottom: var(--gap-lg); z-index: 1;
-                width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+/* Lives in .nav-header beside the title, not fixed to the viewport — a
+   fixed corner overlapped the sidebar once #tables/#siblings grew past
+   one screenful. */
+#api-help-btn { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
                 border: 1px solid var(--border-strong); background: canvas;
                 color: inherit; cursor: pointer; font: inherit; }
 #api-help-btn:hover { background: var(--hover); }
 
-/* Sits directly beside #api-help-btn in the same fixed corner, rather
-   than a separate corner of its own. */
-#theme-toggle { position: fixed; left: calc(var(--gap-lg) * 2 + 1.75rem); bottom: var(--gap-lg); z-index: 1;
-                width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
+#theme-toggle { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
                 border: 1px solid var(--border-strong); background: canvas;
                 color: inherit; cursor: pointer; font: inherit; line-height: 1; }
 #theme-toggle:hover { background: var(--hover); }

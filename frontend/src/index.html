@@ -25,7 +25,11 @@
 </head>
 <body>
 <nav>
-  <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
+  <div class="nav-header">
+    <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
+    <button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
+    <button id="theme-toggle" type="button" aria-label="toggle light/dark theme" title="toggle light/dark theme"></button>
+  </div>
   <div id="schema-select-wrap" hidden>
     <label for="schema-select" class="section-label">schema</label>
     <select id="schema-select"></select>
@@ -101,8 +105,6 @@
   </div>
   <pre id="api-help-pre"></pre>
 </dialog>
-<button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
-<button id="theme-toggle" type="button" aria-label="toggle light/dark theme" title="toggle light/dark theme"></button>
 
 <script type="module">
 /*ASHURBANIPAL_SCRIPT*/
