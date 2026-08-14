@@ -140,16 +140,16 @@ func mustExecIsolation(t *testing.T, db *sql.DB, stmt string) {
 // Regression test for the "connection pool sessions with different
 // search_path settings must not let a request's schema resolution drift
 // mid-flight" guarantee (spec/protocol.md §1, §5) — Go equivalent of
-// implementations/rust/tests/schema_isolation.rs's
+// implementations/rust/axum/tests/schema_isolation.rs's
 // query_table_never_mixes_schemas_across_pooled_connections.
 //
 // Builds its own 2-connection pool (separate from TestMain's shared one)
 // whose physical connections alternate search_path between two schemas
 // that each hold a same-named probe table with a different column shape.
 // QueryTable resolves+validates the schema and later selects columns from
-// it inside one BeginTx (catalog.go's resolveSchema doc comment) — if those
-// steps could ever land on different pooled connections, a response would
-// mix shapes/values across schemas or fail outright.
+// it inside one BeginTx (postgres.go's resolveSchema doc comment) — if
+// those steps could ever land on different pooled connections, a response
+// would mix shapes/values across schemas or fail outright.
 func TestQueryTableNeverMixesSchemasAcrossPooledConnections(t *testing.T) {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {

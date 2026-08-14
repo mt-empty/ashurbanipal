@@ -13,7 +13,7 @@ import (
 
 // Consumes spec/fixtures/filter-builder-tests.json directly from the repo
 // root (schema: spec/fixtures/README.md) — the same file
-// implementations/rust/src/db.rs's unit runner and the Spring Boot
+// implementations/rust/core/src/db/postgres.rs's unit runner and the Spring Boot
 // starter's FilterValidatorFixtureTest.kt consume, so this port's
 // validation/building behavior can't drift from the reference's without a
 // fixture-level failure.
@@ -51,7 +51,7 @@ func repoRoot(t *testing.T) string {
 // seedColumns is a static mirror of the seed schema's columns for the
 // fixture's tables (spec/fixtures/README.md: unit runners substitute this
 // for the live information_schema lookup), matching
-// implementations/rust/src/db.rs's and FilterValidatorFixtureTest.kt's
+// implementations/rust/core/src/db/postgres.rs's and FilterValidatorFixtureTest.kt's
 // own copies.
 func seedColumns(t *testing.T, table string) []string {
 	t.Helper()

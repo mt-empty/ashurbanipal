@@ -23,19 +23,12 @@ const (
 )
 
 // timedSelect wraps a `select`-less query body with the fork-appropriate
-// timeout mechanism. MySQL's SET LOCAL is a documented plain synonym for
-// SET SESSION — unlike Postgres's genuinely transaction-scoped SET LOCAL
-// statement_timeout, that pattern would leak a timeout onto the pooled
-// connection's next reuse. Both forks instead offer a self-resetting
-// per-statement mechanism, but not the same one: MySQL's
-// MAX_EXECUTION_TIME is an optimizer hint spliced inline right after
-// `select`. MariaDB never implemented that hint — an unrecognized
-// /*+ ... */ comment is silently ignored rather than rejected, so reusing
-// MySQL's hint there would fail open (query runs unbounded, no error) —
-// and instead wraps the whole statement in
-// `SET STATEMENT max_statement_time=N FOR ...` (plain seconds, not ms).
-// Either way nothing needs clearing before the connection returns to the
-// pool, unlike SQLite's context-cancellation-based timeout (sqlite.go).
+// timeout mechanism. MySQL's MAX_EXECUTION_TIME hint must sit inline right
+// after `select`. MariaDB never implemented it and silently ignores
+// unrecognized /*+ ... */ hints rather than rejecting them — reusing
+// MySQL's hint there would fail open, silently not enforcing the timeout
+// at all — so MariaDB instead gets `SET STATEMENT max_statement_time=N
+// FOR ...` (whole-statement wrap, plain seconds).
 func timedSelect(variant mysqlVariant, timeoutSecs int, body string) string {
 	if variant == variantMariaDB {
 		return fmt.Sprintf("set statement max_statement_time=%d for select %s", timeoutSecs, body)

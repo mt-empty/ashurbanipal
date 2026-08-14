@@ -12,7 +12,7 @@ class NotAllowedException(message: String) : RuntimeException(message)
  * reaching this must already be allow-list-validated against a live catalog
  * lookup; this only makes a validated name syntactically safe to splice, it
  * is not itself a validation step (`spec/protocol.md` §6, mirrors
- * `implementations/rust/src/db/mod.rs::quote_ident`). MySQL's default quote
+ * `implementations/rust/core/src/db/mod.rs::quote_ident`). MySQL's default quote
  * character is the backtick, not `"` — [MySqlSource] has its own
  * `quoteIdentMysql` rather than reusing this.
  */
@@ -58,7 +58,7 @@ data class QueryOpts(
  * `ashurbanipal.backend=mysql`), [SqliteSource] (opt-in via
  * `ashurbanipal.backend=sqlite`). Route handlers ([DbViewerController]) only
  * ever see this interface, never a concrete implementation or a raw
- * `DataSource`/JDBC type. Mirrors `implementations/rust/src/db/mod.rs`'s
+ * `DataSource`/JDBC type. Mirrors `implementations/rust/core/src/db/mod.rs`'s
  * `DbSource` trait; which implementation gets constructed is chosen by
  * [AshurbanipalAutoConfiguration] from explicit config, never by
  * classpath/driver detection (`PORTING.md`'s hardening checklist item 2 —

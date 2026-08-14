@@ -12,11 +12,11 @@ import javax.sql.DataSource
 
 /**
  * Fail-closed exactly like the Rust `Config::validate()`/`is_enabled()`
- * pair (implementation.md §5.2): [AshurbanipalEnabledCondition] gates this
- * whole class, so a disabled or unconfigured environment registers zero
- * beans — indistinguishable from the starter never being on the classpath —
- * and a production-like `enabled-for` value fails context startup instead
- * of silently disabling at request time.
+ * pair: [AshurbanipalEnabledCondition] gates this whole class, so a
+ * disabled or unconfigured environment registers zero beans —
+ * indistinguishable from the starter never being on the classpath — and a
+ * production-like `enabled-for` value fails context startup instead of
+ * silently disabling at request time.
  */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)

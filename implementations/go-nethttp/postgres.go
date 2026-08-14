@@ -8,20 +8,18 @@ import (
 )
 
 // PostgresSource is the default/reference DbSource implementation — ported
-// line-for-line against implementations/rust/src/db/postgres.rs's catalog
-// SQL. Every query (catalog/metadata included, not just row fetches) is
-// bounded by the same configured timeout.
+// line-for-line against implementations/rust/core/src/db/postgres.rs's
+// catalog SQL (PORTING.md hardening item 7). Every query (catalog/metadata
+// included, not just row fetches) is bounded by the same configured
+// timeout.
 //
-// Deliberate deviation from the Rust reference, documented per
-// implementation.md §5.5 item 7 (catalog SQL diffed against db.rs, not
-// independently reimplemented): db.rs hardcodes a separate
-// CATALOG_TIMEOUT_SECS=5 constant for catalog/metadata queries, distinct
-// from the configured limits.query_timeout_secs which only bounds the main
-// row-fetch query. spec/protocol.md §6 just requires every query be
-// "bounded by a timeout (configuration; reference default 5s)"; it doesn't
-// require a second, separately-hardcoded bound for catalog queries. This
-// port applies the one configured value uniformly — matching the Spring
-// Boot port's single JdbcTemplate.queryTimeout, which does the same.
+// Deliberate deviation from the Rust reference: postgres.rs hardcodes a
+// separate CATALOG_TIMEOUT_SECS=5 for catalog/metadata queries, distinct
+// from the main row-fetch query's configured limit. spec/protocol.md §6
+// only requires every query be bounded by *a* timeout, not a
+// separately-hardcoded one for catalog queries — this port applies the
+// one configured value uniformly, matching the Spring Boot port's single
+// JdbcTemplate.queryTimeout.
 type PostgresSource struct {
 	db      *sql.DB
 	timeout time.Duration

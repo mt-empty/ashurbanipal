@@ -61,19 +61,19 @@ env var (see "Running the demo" below).
 
 - `src/config.ts` — `Config`/`Limits`/`Sibling`, the fail-closed kill switch.
 - `src/db/types.ts` — the `DbSource` seam (interface + shared wire types)
-  route handlers depend on; mirrors `implementations/rust/src/db/mod.rs`'s
+  route handlers depend on; mirrors `implementations/rust/core/src/db/mod.rs`'s
   `DbSource` trait.
 - `src/db/postgres.ts` — `PostgresSource`, the default backend; ported
-  against `implementations/rust/src/db/postgres.rs`'s catalog SQL (also
-  cross-checked against `implementations/go-nethttp/catalog.go`).
+  against `implementations/rust/core/src/db/postgres.rs`'s catalog SQL (also
+  cross-checked against `implementations/go-nethttp/postgres.go`).
 - `src/db/sqlite.ts` — `SqliteSource`, opt-in; ported against
-  `implementations/rust/src/db/sqlite.rs`.
+  `implementations/rust/core/src/db/sqlite.rs`.
 - `src/db/mysql.ts` — `MySqlSource`, opt-in; ported against
-  `implementations/rust/src/db/mysql.rs`, including the MySQL-vs-MariaDB
+  `implementations/rust/core/src/db/mysql.rs`, including the MySQL-vs-MariaDB
   runtime variant detection for the query-timeout mechanism.
 - `src/filter.ts` — the filter AST's structural validation and
   Postgres-dialect WHERE-clause builder, ported against
-  `implementations/rust/src/filter.rs`; `db/sqlite.ts`/`db/mysql.ts` each
+  `implementations/rust/core/src/filter.rs`; `db/sqlite.ts`/`db/mysql.ts` each
   carry their own dialect-specific WHERE-clause builder (placeholder
   style, cast syntax, `ILIKE` mapping all differ per backend).
 - `src/siblings.ts` — health fan-out via `Promise.all` + `AbortController`.
@@ -85,7 +85,7 @@ env var (see "Running the demo" below).
 ## Vendoring
 
 `frontend/dbviewer.html` is copied from this repository's own working-tree
-copy (sha256 `57c0a2aa5487e66533950e170c63d4c1bf57609f557a8b47b213823f208a0991`),
+copy (sha256 `3fc87a2ede9b10f546981015451f820d36e27208e4bbf14e645de9db6592d93b`),
 since no tagged `frontend/dbviewer.html` release currently exists to vendor
 from — same caveat the Go and Spring Boot ports document. `src/embed.ts`
 re-verifies the hash on every process start (module load), not just once

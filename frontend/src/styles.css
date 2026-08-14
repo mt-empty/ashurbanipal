@@ -228,10 +228,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1; }
 
 /* white-space: normal resets the pre-wrap inherited from ancestors
-   (#cell-pop / dialog dl dd's plain-text case). Not <details>/<summary>:
-   that replaced JSON's actual {}/[]/,/: shape with a generic tree-widget
-   look, so this renders real pretty-printed JSON instead and folds one
-   block at a time to an inline "{…}", editor-gutter style. */
+   (#cell-pop / dialog dl dd's plain-text case). */
 .json-tree { white-space: normal; }
 .json-line { display: flex; }
 .json-children { margin-left: 1.05rem; border-left: 1px solid var(--border); padding-left: .5rem; }
@@ -337,9 +334,8 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 /* Anchored to the text caret inside #filter, not the input's box — a
    zero-size tracking element whose left/top JS recomputes on every
    keystroke via mirror-div caret measurement (no native way to anchor to
-   a point inside plain text). Manual popover, not auto: it must stay
-   open while typing, which the browser's default light-dismiss would
-   treat as "outside" — see the JS for the light-dismiss substitute. */
+   a point inside plain text). popover="manual" (see filter-ui.ts) so it
+   stays open while typing. */
 #filter-caret-anchor { position: fixed; width: 0; height: 0; anchor-name: --filter-caret; }
 #filter-suggest { position: fixed; position-anchor: --filter-caret;
           position-try-fallbacks: flip-block;

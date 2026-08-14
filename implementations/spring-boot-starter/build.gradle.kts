@@ -11,8 +11,8 @@ version = "0.1.0-SNAPSHOT"
 
 // Toolchain pinned to whatever JDK is actually installed in this devcontainer
 // (JDK 21 via mise — no JDK 17 available to auto-detect or download here).
-// The starter's own source targets the JDK 17+ baseline implementation.md
-// §5.1 asks for; nothing here uses a 21-only language feature.
+// The starter's own source targets a JDK 17+ baseline for broadest reach
+// as an embedded library; nothing here uses a 21-only language feature.
 java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
@@ -32,8 +32,8 @@ dependencies {
     implementation(springBootBom)
     compileOnly(springBootBom)
 
-    // Starter-lean per implementation.md §5.1: only what every Spring Boot
-    // host already has on its classpath. No JDBC driver, no HTTP client
+    // Starter-lean: only what every Spring Boot host already has on its
+    // classpath. No JDBC driver, no HTTP client
     // dependency (siblings health checks use java.net.http). spring-webmvc
     // is compileOnly: we need its annotation/response types (@RestController,
     // ResponseEntity, ...) to compile against, but the actual jar always
@@ -81,19 +81,19 @@ dependencies {
 tasks.withType<Test> {
     useJUnitPlatform()
     // Integration/kill-switch tests hit the devcontainer's live Postgres
-    // (no Testcontainers/Docker available here, see PORTING.md and the
-    // Phase 5 brief) — DATABASE_URL is set by the devcontainer.
+    // (no Testcontainers/Docker available here, see PORTING.md) —
+    // DATABASE_URL is set by the devcontainer.
     environment("DATABASE_URL", System.getenv("DATABASE_URL") ?: "")
     // MySqlSourceTest skips cleanly (JUnit5 Assumptions) when neither is set.
     environment("MYSQL_TEST_URL", System.getenv("MYSQL_TEST_URL") ?: "")
     environment("MARIADB_TEST_URL", System.getenv("MARIADB_TEST_URL") ?: "")
     // Fixture and seed files live at the repo root, shared with every other
-    // implementation's test suite (implementation.md §5.3) rather than
-    // duplicated into src/test/resources.
+    // implementation's test suite rather than duplicated into
+    // src/test/resources.
     systemProperty("ashurbanipal.repoRoot", rootDir.parentFile.parentFile.absolutePath)
 }
 
-// ---- Frontend vendoring (implementation.md §5.5 item 3 / PORTING.md) ----
+// ---- Frontend vendoring (PORTING.md hardening item 3) ----
 //
 // dbviewer.html is copied into generated (not checked-in) resources at
 // every build, and its hash re-verified against the pinned value every
@@ -104,7 +104,7 @@ tasks.withType<Test> {
 // copy since there is no separate tagged release to vendor from.
 val repoRoot = rootDir.parentFile.parentFile
 val frontendSource = repoRoot.resolve("frontend/dbviewer.html")
-val pinnedFrontendSha256 = "3fc87a2ede9b10f546981015451f820d36e27208e4bbf14e645de9db6592d93b"
+val pinnedFrontendSha256 = "e97d8d155d0a3de14779143ffdfccb20e8f1d69cc19b99776f6b5eb8cb8cb711"
 
 val vendorFrontend = tasks.register("vendorFrontend") {
     description = "Copies frontend/dbviewer.html into generated resources, re-verifying its sha256."
@@ -173,9 +173,8 @@ publishing {
             }
         }
     }
-    // Inert on purpose (implementation.md §5.4 / the brief's "no real
-    // publishing" instruction): shape only, no credentials wired, never
-    // executed by CI in this repo.
+    // Inert on purpose: shape only, no credentials wired, never executed
+    // by CI in this repo.
     repositories {
         maven {
             name = "placeholder"

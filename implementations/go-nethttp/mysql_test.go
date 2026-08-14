@@ -16,7 +16,7 @@ import (
 )
 
 // testURL reads MYSQL_TEST_URL, mirroring
-// implementations/rust/src/db/mysql.rs's own test_url() — the devcontainer
+// implementations/rust/core/src/db/mysql.rs's own test_url() — the devcontainer
 // sets this to a long-lived shared `mysql` service; MARIADB_TEST_URL (same
 // shape, pointed at the `mariadb` service) exercises the same tests against
 // the other fork via TestMySQLAgainstMariaDB below.
