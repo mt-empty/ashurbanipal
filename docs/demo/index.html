@@ -279,13 +279,14 @@
   }
   function typedCompare(t, a, b) {
     if (a === null && b === null) return 0;
-    if (a === null) return -1;
-    if (b === null) return 1;
+    if (a === null) return 1;
+    if (b === null) return -1;
     if (isNumericType(t)) return Number(a) - Number(b);
     if (isDateType(t)) return new Date(String(a)).getTime() - new Date(String(b)).getTime();
     if (typeof a === "boolean" && typeof b === "boolean") return a === b ? 0 : a ? 1 : -1;
     return String(toWire(a)).localeCompare(String(toWire(b)));
   }
+  var VALID_OPS = /* @__PURE__ */ new Set(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
   function likeToRegExp(pattern, ci) {
     const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
     return new RegExp(`^${escaped}$`, ci ? "i" : "");
@@ -378,6 +379,7 @@
       if (!Array.isArray(conditions)) return badRequest("invalid filter JSON");
       for (const c of conditions) {
         if (!table.columns.some((col) => col.name === c.column)) return badRequest(`unknown filter column: ${c.column}`);
+        if (!VALID_OPS.has(c.op)) return badRequest(`unknown filter op: ${c.op}`);
       }
       rows = rows.filter((r) => matchesFilter(table, r, conditions));
     }
@@ -390,8 +392,12 @@
       const t = columnType(table, sort);
       rows = [...rows].sort((a, b) => dir * typedCompare(t, a[sort], b[sort]));
     }
-    const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 50));
-    const offset = Math.max(0, Number(params.get("offset")) || 0);
+    const limitParam = params.get("limit");
+    const limitNum = limitParam === null ? NaN : Number(limitParam);
+    const limit = Math.min(100, Math.max(1, Number.isFinite(limitNum) ? limitNum : 50));
+    const offsetParam = params.get("offset");
+    const offsetNum = offsetParam === null ? NaN : Number(offsetParam);
+    const offset = Math.max(0, Number.isFinite(offsetNum) ? offsetNum : 0);
     const page = rows.slice(offset, offset + limit);
     return jsonResponse({
       columns: table.columns,

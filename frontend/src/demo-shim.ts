@@ -54,13 +54,17 @@ function isDateType(t: string): boolean {
 }
 function typedCompare(t: string, a: CellValue, b: CellValue): number {
   if (a === null && b === null) return 0;
-  if (a === null) return -1;
-  if (b === null) return 1;
+  // Nulls compare as greater than any value, matching Postgres's default
+  // (NULLS LAST ascending, NULLS FIRST descending) once the caller
+  // multiplies by direction — not a fixed "nulls always first" rule.
+  if (a === null) return 1;
+  if (b === null) return -1;
   if (isNumericType(t)) return Number(a) - Number(b);
   if (isDateType(t)) return new Date(String(a)).getTime() - new Date(String(b)).getTime();
   if (typeof a === "boolean" && typeof b === "boolean") return a === b ? 0 : a ? 1 : -1;
   return String(toWire(a)).localeCompare(String(toWire(b)));
 }
+const VALID_OPS = new Set(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
 function likeToRegExp(pattern: string, ci: boolean): RegExp {
   const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
   return new RegExp(`^${escaped}$`, ci ? "i" : "");
@@ -138,6 +142,7 @@ function handleTableData(params: URLSearchParams): Response {
     if (!Array.isArray(conditions)) return badRequest("invalid filter JSON");
     for (const c of conditions) {
       if (!table.columns.some((col) => col.name === c.column)) return badRequest(`unknown filter column: ${c.column}`);
+      if (!VALID_OPS.has(c.op)) return badRequest(`unknown filter op: ${c.op}`);
     }
     rows = rows.filter((r) => matchesFilter(table, r, conditions));
   }
@@ -152,8 +157,15 @@ function handleTableData(params: URLSearchParams): Response {
     rows = [...rows].sort((a, b) => dir * typedCompare(t, a[sort]!, b[sort]!));
   }
 
-  const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 50));
-  const offset = Math.max(0, Number(params.get("offset")) || 0);
+  // Number(x) || fallback treats an explicit "0" the same as absent —
+  // wrong for offset=0 (a legitimate value) and clamps limit=0 up to the
+  // default instead of down to the minimum. Check for absent/NaN instead.
+  const limitParam = params.get("limit");
+  const limitNum = limitParam === null ? NaN : Number(limitParam);
+  const limit = Math.min(100, Math.max(1, Number.isFinite(limitNum) ? limitNum : 50));
+  const offsetParam = params.get("offset");
+  const offsetNum = offsetParam === null ? NaN : Number(offsetParam);
+  const offset = Math.max(0, Number.isFinite(offsetNum) ? offsetNum : 0);
   const page = rows.slice(offset, offset + limit);
 
   return jsonResponse({
