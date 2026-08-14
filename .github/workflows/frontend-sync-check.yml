@@ -6,6 +6,8 @@ on:
     paths:
       - "frontend/dbviewer.html"
       - "frontend/src/**"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
       - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
@@ -17,6 +19,8 @@ on:
     paths:
       - "frontend/dbviewer.html"
       - "frontend/src/**"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
       - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
