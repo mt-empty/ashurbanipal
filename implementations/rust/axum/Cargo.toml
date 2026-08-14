@@ -1,6 +1,6 @@
 [package]
 name = "ashurbanipal-axum"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.94"
 description = "Embeddable, read-only database browser for lower environments"
@@ -10,7 +10,7 @@ repository = "https://github.com/mt-empty/ashurbanipal"
 
 [dependencies]
 axum = "0.8"
-ashurbanipal = { version = "0.1", path = "../core" }
+ashurbanipal = { version = "0.2", path = "../core" }
 sqlx = { workspace = true }
 tokio = { version = "1", features = ["rt", "macros"] }
 serde = { version = "1", features = ["derive"] }

@@ -1,11 +1,14 @@
 # Publishing checklist
 
-Status: two of Rust's three crates — `ashurbanipal` (core) and
-`ashurbanipal-actix-web` — are now published, following the
-core-extraction (#38), Actix-web port (#39), and flat-sibling-layout
-restructure (#41) all merging to `main`. The third, `ashurbanipal-axum`,
-still needs a version bump before its first post-extraction publish (see
-its per-port gap below). The other four ports (Node, Flask, Spring, Go)
+Status: `ashurbanipal` (core) and `ashurbanipal-actix-web` are published
+at 0.1.0, following the core-extraction (#38), Actix-web port (#39), and
+flat-sibling-layout restructure (#41) all merging to `main`.
+`ashurbanipal-axum` can't reuse 0.1.0 for its post-extraction content (see
+its per-port gap below), so all three crates are bumped to 0.2.0 together
+for the next release — a coordinated minor release, not three independent
+patch bumps, since axum's version had to move regardless and the other
+two rode along rather than drifting out of step for no reason. The other
+four ports (Node, Flask, Spring, Go)
 remain unpublished; each README says so explicitly
 (`implementations/go-nethttp/README.md:9`, and the equivalent "not yet"
 framing implied by node-express's `"private": true` and flask-python's
@@ -68,8 +71,8 @@ logic via a reusable `_rust-crate-publish-check.yml` workflow (the same
 already uses for `_conformance-behavior.yml`/`_conformance-schema.yml`) —
 each crate's own workflow file only adds what's genuinely per-crate: the
 axum/actix-web conformance jobs (core has no HTTP surface to conform) and
-the final `publish` job, scoped to its own crates.io Trusted Publishing
-GitHub Environment. Same
+the final `publish` job (all three share the same `crates-io-publish`
+GitHub Environment — see the amendment on that below). Same
 rationale as the per-port split: the three crates already version
 independently in `Cargo.toml` (`ashurbanipal-axum` is on 0.1.0 published
 pre-core-extraction and can't reuse that number for its post-extraction
@@ -160,23 +163,23 @@ on each other.
    job, and the `refactor/frontend-typescript-modules` branch carrying all
    the rename/vendoring work merged into `main` (PR #37, `614cdf0`), so a
    `rust-v*` tag cut from current `main` will pass the gate.
-   `rust-axum-publish.yml`'s `publish` job also declares
-   `environment: crates-io-publish` — *now configured*: required reviewer
-   `mt-empty`, and deployment restricted to tags matching `rust-v*` (a tag
-   policy, not a branch policy — this workflow triggers on a tag push, so
-   a `main`-only branch policy would never match the tag ref and would
-   silently block every run). — *Still open*: `rust-core-publish.yml` and
-   `rust-actix-web-publish.yml` reference `environment:
-   crates-io-publish-core` and `environment: crates-io-publish-actix-web`
-   respectively (kept separate from `crates-io-publish` so each crate's
-   approval/tag-restriction stays independently scoped) — neither
-   environment exists yet in GitHub Settings, so both are inert (no
-   protection rules) until created with the same
-   required-reviewer + tag-restricted-to-their-own-prefix configuration
-   `crates-io-publish` already has. This is a GitHub Settings action, not
-   a file in this repo — do it before cutting the first
-   `core-v*`/`actix-web-v*` tag, or the `publish` job will run with no
-   gate at all.
+   All three `publish` jobs declare `environment: crates-io-publish` — one
+   shared environment across all three crates rather than one per crate,
+   since there's a single reviewer (`mt-empty`) for the whole project and
+   a GitHub Environment's deployment branch/tag policy accepts multiple
+   patterns, so `rust-v*`/`core-v*`/`actix-web-v*` can all be registered
+   under it without losing per-tag scoping. — *now configured for
+   `rust-v*`*: required reviewer `mt-empty`, deployment restricted to tags
+   matching `rust-v*` (a tag policy, not a branch policy — these workflows
+   trigger on a tag push, so a `main`-only branch policy would never match
+   the tag ref and would silently block every run). — *Still open*: the
+   `crates-io-publish` environment's tag policy needs `core-v*` and
+   `actix-web-v*` added alongside the existing `rust-v*` pattern. This is
+   a GitHub Settings action, not a file in this repo — do it before
+   cutting the first `core-v*`/`actix-web-v*` tag, or the `publish` job
+   will run with no gate at all. On crates.io's side, all three crates'
+   Trusted Publisher config uses the same environment name
+   (`crates-io-publish`), just a different workflow filename each.
 7. **Decide whether `frontend/dbviewer.html` needs to be independently
    versioned/pinned** for a published artifact the way `PORTING.md`'s
    vendoring contract already expects in spirit (each port re-hashes it
@@ -263,22 +266,21 @@ on each other.
   availability confirmed (`ashurbanipal-axum` unclaimed on crates.io at
   the time) and the branch carrying all this work merged to `main` (PR
   #37) — `rust-axum-publish.yml`'s branch-check gate will now pass.
-  **New blocker, not yet closed**: `ashurbanipal-axum` 0.1.0 was already
-  published to crates.io on 2026-08-11, *before* the core-extraction (PR
-  #38, 2026-08-12) — that published version has no dependency on
-  `ashurbanipal` at all (confirmed via crates.io's dependency API; it's
-  the pre-extraction, single-crate content). crates.io permanently
-  reserves version numbers, so the current in-repo `ashurbanipal-axum`
-  (which now depends on the published `ashurbanipal` core crate) cannot be
-  republished as 0.1.0 — bump `implementations/rust/axum/Cargo.toml`'s
-  `version` (0.2.0 or later) before cutting the next `rust-v*` tag, or
-  `verify-version`/`cargo publish` will fail. `crates-io-publish`
-  environment's required-reviewer + tag-restriction protection rules are
-  configured (still gated to `rust-v*` only, unaffected by this blocker).
-  Once the version bump above is made, next step is cutting the
-  corresponding `rust-vX.Y.Z` tag — the path+version dependency on
-  `ashurbanipal` now resolves for real (core is published), so that
-  particular blocker from the core-extraction is closed.
+  **Blocker closed**: `ashurbanipal-axum` 0.1.0 was already published to
+  crates.io on 2026-08-11, *before* the core-extraction (PR #38,
+  2026-08-12) — that published version has no dependency on `ashurbanipal`
+  at all (confirmed via crates.io's dependency API; it's the
+  pre-extraction, single-crate content). crates.io permanently reserves
+  version numbers, so the current in-repo `ashurbanipal-axum` (which now
+  depends on the published `ashurbanipal` core crate) can't be republished
+  as 0.1.0 — bumped to 0.2.0 (`implementations/rust/axum/Cargo.toml`),
+  alongside `ashurbanipal` and `ashurbanipal-actix-web` (also bumped to
+  0.2.0, coordinated for this release — see the status line at the top).
+  The `ashurbanipal` path+version dependency requirement was bumped to
+  `"0.2"` to match. `crates-io-publish` environment's required-reviewer +
+  tag-restriction protection rules are configured for `rust-v*`; `core-v*`
+  and `actix-web-v*` still need adding to that same environment's tag
+  policy before their tags can publish (see gate item 6).
 - **Node** (`implementations/node-express/package.json`) — ~~`"private":
   true` blocks `npm publish`; missing `repository`, `license`,
   `homepage`~~ **closed**: `private` removed, all three fields added.

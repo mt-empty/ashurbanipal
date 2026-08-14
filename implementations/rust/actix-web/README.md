@@ -1,37 +1,13 @@
 # ashurbanipal-actix-web
 
-The Rust/Actix-web adapter of [Ashurbanipal](../../../readme.md), sharing
-the framework-agnostic `ashurbanipal` core crate (`../core/`) with
-[`ashurbanipal-axum`](../axum/README.md) — config, `DbSource` backends, and the
-filter DSL are identical between the two adapters; only the HTTP routing
-layer differs.
-
-Published on [crates.io](https://crates.io/crates/ashurbanipal-actix-web):
+The Rust/Actix-web adapter of [Ashurbanipal](https://github.com/mt-empty/ashurbanipal),
+sharing the framework-agnostic [`ashurbanipal`](../core/README.md) core
+with [`ashurbanipal-axum`](../axum/README.md) — config, `DbSource`
+backends, and the filter DSL are identical between the two adapters; only
+the HTTP routing layer differs.
 
 ```sh
 cargo add ashurbanipal-actix-web
-```
-
-```toml
-[dependencies]
-ashurbanipal-actix-web = "0.1"
-```
-
-## Database support
-
-Same `DbSource` backends as `ashurbanipal-axum`, unchanged — see
-[`../axum/README.md`'s database support table](../axum/README.md#database-support)
-for the full per-backend matrix (Postgres default, MySQL/SQLite behind
-the `mysql`/`sqlite` Cargo features).
-
-```toml
-[dependencies]
-# Postgres only (default):
-ashurbanipal-actix-web = "0.1"
-# To also pull in MySqlSource:
-ashurbanipal-actix-web = { version = "0.1", features = ["mysql"] }
-# To also pull in SqliteSource:
-ashurbanipal-actix-web = { version = "0.1", features = ["sqlite"] }
 ```
 
 ## Usage
@@ -40,22 +16,17 @@ ashurbanipal-actix-web = { version = "0.1", features = ["sqlite"] }
 state once (config, DB source, HTTP client for sibling health checks) as
 a `web::Data<AppState<S>>` — build it *outside* `HttpServer::new`'s
 per-worker closure and `.clone()` the handle into each worker (cheap:
-`web::Data` is internally `Arc`-backed). `ashurbanipal_actix_web::service(state)`
-then builds the route `Scope`, which — unlike axum's `Router<S>` — does
-**not** require any state-type coordination with your own app's state:
-Actix stores `web::Data<T>` in a type-keyed map, not threaded through one
-generic parameter, so your own `web::Data<YourState>` and Ashurbanipal's
-internal `web::Data<AppState<S>>` coexist regardless of registration
-order (verified — no axum-style `.with_state()`-before-`.merge()`
-ordering requirement here).
+`web::Data` is internally `Arc`-backed). Unlike axum's `Router<S>`,
+`ashurbanipal_actix_web::service(state)`'s `Scope` needs no state-type
+coordination with your own app's state — Actix stores `web::Data<T>` in a
+type-keyed map rather than one generic parameter, so your own state and
+Ashurbanipal's coexist regardless of registration order.
 
 ```rust
 use actix_web::{App, HttpServer};
 use ashurbanipal_actix_web::{app_state, service, Config, PgPoolSource};
 
-let toml_str = std::fs::read_to_string("ashurbanipal.toml")?;
-let config = Config::from_toml(&toml_str)?;
-
+let config = Config::from_toml(&std::fs::read_to_string("ashurbanipal.toml")?)?;
 let state = app_state(config, PgPoolSource::new(pool.clone())); // built once
 
 HttpServer::new(move || {
@@ -68,15 +39,6 @@ HttpServer::new(move || {
 .await?;
 ```
 
-Or, with the `mysql`/`sqlite` feature enabled, swap in `MySqlSource`/
-`SqliteSource` — everything else is identical:
-
-```rust
-use ashurbanipal_actix_web::{app_state, MySqlSource};
-
-let state = app_state(config, MySqlSource::new(pool.clone()));
-```
-
 `ashurbanipal.toml` — identical to `ashurbanipal-axum`'s, entirely
 framework-agnostic:
 
@@ -84,6 +46,7 @@ framework-agnostic:
 environment = "dev"
 enabled_for = ["dev", "integration", "staging"]
 
+# optional — these are the defaults, shown explicitly
 [limits]
 default_page_size = 50
 max_page_size = 100
@@ -93,21 +56,22 @@ query_timeout_secs = 5
 name = "billing"
 dbviewer_url = "https://billing.internal.vpn/__ashurbanipal"
 health_path = "/health"
+
+[[siblings]]
+name = "notifications"
+dbviewer_url = "https://notifications.internal.vpn/__ashurbanipal"
+health_path = "/health"
 ```
 
-## Kill switch
+## Database support
 
-`Config::is_enabled()` gates every route identically to the Axum
-adapter — if disabled, `service()` returns a `Scope` with no routes
-registered, so every path under it falls through to the host `App`'s own
-404. Covered by two test suites:
-- `../core/src/config.rs`'s `#[cfg(test)] mod tests` — production-alias
-  rejection at config-parse time (shared with the Axum adapter, since
-  both use the same `Config` unchanged).
-- `src/routes.rs`'s `kill_switch_tests` module — an in-process
-  `actix_web::test` check that a disabled config 404s both the HTML route
-  and an API route.
+Same `DbSource` backends as `ashurbanipal-axum`, unchanged — see
+[its README](../axum/README.md#database-support) for the full matrix.
 
-See `docs/design.md` for the full API contract, filter DSL, and config
-reference. `mise run actix:demo` runs a working example host app against
-the seeded devcontainer database.
+```toml
+[dependencies]
+ashurbanipal-actix-web = { version = "0.2", features = ["mysql"] } # or "sqlite"
+```
+
+Full API/config reference:
+[docs/design.md](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md).

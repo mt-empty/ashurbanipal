@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "ashurbanipal"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "ashurbanipal-actix-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "actix-web",
  "ashurbanipal",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "ashurbanipal-axum"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ashurbanipal",
  "axum",
