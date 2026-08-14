@@ -59,7 +59,7 @@ If your service isn't Rust/Axum/Postgres, you have two options, in this
 order:
 
 1. **Port it.** `PORTING.md` is the full checklist: vendor the released
-   `dbviewer.html`, implement the five API routes per the spec, pass
+   `dbviewer.html`, implement the six API routes per the spec, pass
    conformance. This repo doesn't (and won't try to) ship a first-party
    implementation for every language/framework/DB combination — a port
    for your stack is expected to live in your own service or org, using
