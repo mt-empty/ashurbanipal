@@ -1,15 +1,5 @@
-// Fake backend for the GitHub Pages demo: patches window.fetch to answer
-// dbviewer.html's /api/* calls from demo-fixtures.ts instead of a real
-// server. Bundled separately (build-demo.mjs) and spliced into a copy of
-// dbviewer.html as a classic <script>, before the app's own type="module"
-// script — module scripts are deferred, so this always installs first.
-//
-// Deliberately more "correct" than the real protocol in one place: filter
-// comparisons here use each column's native type (numeric compares
-// numeric, dates compare chronologically), not spec/protocol.md §5.4.2's
-// documented text-cast quirk (lexicographic "10" < "9") — this is a
-// showcase, so a viewer poking at it should see it work, not relive a
-// deliberate v1 wart.
+// Fake backend for the GitHub Pages demo: answers dbviewer.html's /api/*
+// calls from demo-fixtures.ts instead of a real server.
 import { SCHEMAS, SIBLINGS, TABLES, type CellValue, type TableDef } from "./demo-fixtures.js";
 import type { FilterCondition } from "./types.js";
 
@@ -52,6 +42,8 @@ function isNumericType(t: string): boolean {
 function isDateType(t: string): boolean {
   return t.startsWith("timestamp") || t === "date";
 }
+// Compares by native type, not spec/protocol.md §5.4.2's text-cast
+// lexicographic quirk ("10" < "9") — a demo should show filtering work.
 function typedCompare(t: string, a: CellValue, b: CellValue): number {
   if (a === null && b === null) return 0;
   // Nulls compare as greater than any value, matching Postgres's default
@@ -205,6 +197,9 @@ const realFetch = window.fetch.bind(window);
 // project/user-site prefix without hardcoding one.
 const API_BASE = location.pathname.replace(/\/+$/, "") + "/api";
 
+// Runs at top level, not inside a DOMContentLoaded handler: build-demo.mjs
+// splices this in as a classic <script>, which installs before
+// dbviewer.html's own deferred type="module" script ever runs.
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
   const url = new URL(rawUrl, location.href);
