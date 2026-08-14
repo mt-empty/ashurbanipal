@@ -37,7 +37,7 @@ jobs:
     # Configure this GitHub Environment (Settings > Environments) with
     # required reviewers if a manual approval gate before an irreversible
     # (yank-only) publish is wanted — inert with no protection rules set.
-    environment: crates-io-publish-core
+    environment: crates-io-publish
     permissions:
       contents: read
       id-token: write # required to mint the crates.io OIDC token
