@@ -63,7 +63,9 @@ Two components, same as the original concept:
   the release checksum) sees no difference from a hand-edited file; see
   `docs/frontend-style-guide.md` §1 for the source layout.
 - No CDN dependency is wired in. `jsonb` tree rendering (collapsible via
-  native `<details>`/`<summary>`) and per-type coloring (JSON scalars, plus
+  a hand-rolled fold toggle, preserving JSON's actual `{}`/`[]`/`,`/`:`
+  shape rather than a generic tree-widget look) and per-type coloring
+  (JSON scalars, plus
   `uuid`/`boolean`/numeric/date columns) are hand-rolled directly in
   `dbviewer.html` rather than pulled from a CDN — the original
   `@alenaksu/json-viewer`/Prism.js plan was superseded once building a
@@ -74,7 +76,7 @@ Two components, same as the original concept:
 - Embedded into the Rust binary at compile time via `include_str!`, so the
   crate ships as one artifact — no separate static file to build, deploy, or
   whitelist per environment.
-- Served by the backend as the 6th route, gated by the same kill switch as
+- Served by the backend as its own route, gated by the same kill switch as
     the six API routes.
 - Talks to the backend exclusively through the REST endpoints in §4.
 - **Inspection affordances** (native elements, no library):
@@ -117,8 +119,9 @@ Two components, same as the original concept:
     non-goal carve-out, this is two sequential single-table queries, never
     a join.
   - *Filter autocomplete* — the filter input suggests column names via a
-    native `<datalist>` at condition-start boundaries (empty input, or
-    right after `AND `/`OR `/`NOT `). No value- or operator-level
+    hand-rolled, caret-anchored popover that stays open while typing (see
+    `frontend/src/filter-ui.ts`) at condition-start boundaries (empty
+    input, or right after `AND `/`OR `/`NOT `). No value- or operator-level
     autocomplete, and no *as-you-type* parsing of the filter text — both
     would require understanding where the cursor sits in the grammar.
     (The submit-time client-side parser — `spec/filter-dsl.md`,
@@ -216,6 +219,24 @@ its full path space and the host doesn't need to pick a mount point.
 
 Paths below are shorthand for the full routes in §3.3 (e.g. `/tables` means
 `/__ashurbanipal/api/tables`).
+
+### `GET /schemas`
+
+Lists the schema names selectable as the `schema` param on every other
+route — the live allow-list those routes validate an explicit `schema`
+against, and (per `spec/protocol.md` §5.7) exactly the set the implicit
+default-resolution case could ever resolve to, so the two paths never
+diverge on what counts as valid.
+
+```json
+{ "schemas": ["public", "reporting"] }
+```
+
+Excludes Postgres's own system/internal namespaces (`pg_catalog`,
+`information_schema`, `pg_toast`/`pg_temp`) and any schema the connected
+role lacks access to. A single-schema deployment still returns exactly
+one entry — the frontend treats a one-element list the same as "no schema
+selector needed" (see `frontend/src/sidebar.ts`'s `loadSchemas`).
 
 ### `GET /tables`
 
@@ -333,10 +354,10 @@ can't:
    route/type annotations. This makes the drifts-from-its-own-spec
    failure mode a governance property, not a structural one: a spec
    change is one PR touching `spec/protocol.md` + `spec/openapi.yaml` +
-   fixtures together, the same one-PR rule `implementation.md` §6.3
-   already applies to an implementation + its fixtures + the conformance
-   runner, generalized here rather than reinvented. Honest tradeoff this
-   reintroduces: without generation, drift between the hand-written
+   fixtures together, the same one-PR rule `PORTING.md`'s Governance
+   section already applies to an implementation + its fixtures + the
+   conformance runner, generalized here rather than reinvented. Honest
+   tradeoff this reintroduces: without generation, drift between the hand-written
    schema and actual behavior is no longer *prevented by construction* —
    it's *caught after the fact*, by layer 2 below, whenever some
    implementation's CI run first exercises the diverged case. No
@@ -389,7 +410,7 @@ Even all three together don't cover everything a port must get right —
 notably, none of them can prove the *absence* of a SQL-injection vector a
 fixture doesn't happen to exercise, or observe config-time kill-switch
 rejection at all (it's process-startup behavior, not an HTTP response).
-`implementation.md` §5.5 tracks these and other non-automatable
+`PORTING.md`'s hardening checklist tracks these and other non-automatable
 requirements (cast-in-SQL discipline, fail-closed-by-default, vendoring
 integrity, CSP/inline-script) as an explicit reviewer checklist, separate
 from the three CI-automatable layers above — conflating "green CI" with

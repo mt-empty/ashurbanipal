@@ -14,7 +14,7 @@ import javax.sql.DataSource
  * MariaDB implement, but the two forks need different SQL for a per-query
  * timeout (see [timedSelect]). Detected once per [MySqlSource] via
  * [MySqlSource.variant] and cached, not re-checked per request — mirrors
- * `implementations/rust/src/db/mysql.rs`'s `Variant`. `internal`, not
+ * `implementations/rust/core/src/db/mysql.rs`'s `Variant`. `internal`, not
  * `private`: [MySqlSourceTest] drives [timedSelect] directly with a
  * deliberately slow query to prove the timeout mechanism actually aborts
  * execution on a real instance.
@@ -26,7 +26,7 @@ internal enum class Variant { MYSQL, MARIADB }
  * `select`; MariaDB never implemented that hint (silently ignored, not
  * rejected — reusing it there would fail open), so it instead wraps the
  * whole statement in `SET STATEMENT max_statement_time=N FOR ...` (seconds,
- * not ms). Mirrors `implementations/rust/src/db/mysql.rs::timed_select`.
+ * not ms). Mirrors `implementations/rust/core/src/db/mysql.rs::timed_select`.
  * `body` is the SQL text starting right after the `select` keyword this
  * function supplies.
  */
@@ -150,7 +150,7 @@ private data class FkCandidate(val columnName: String, val refSchema: String?, v
 
 /**
  * MySQL/MariaDB [DbSource], opt-in via `ashurbanipal.backend=mysql`. Port of
- * `implementations/rust/src/db/mysql.rs`, mechanism-for-mechanism (variant
+ * `implementations/rust/core/src/db/mysql.rs`, mechanism-for-mechanism (variant
  * detection, per-statement timeout SQL, backtick identifier quoting). Not
  * run through `conformance/runner` (that suite targets Postgres) — see
  * `docs/adapter-decisions.md` for the per-clause decisions this makes where

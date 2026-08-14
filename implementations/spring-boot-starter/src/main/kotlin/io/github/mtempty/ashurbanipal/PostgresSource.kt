@@ -8,12 +8,12 @@ import java.sql.ResultSet
 import javax.sql.DataSource
 
 /**
- * The default/reference [DbSource] — port of `implementations/rust/src/db/postgres.rs`'s
- * SQL, byte-for-byte where possible (implementation.md §5.2). Every query
- * goes through the one [jdbcTemplate], whose `queryTimeout` is set once from
- * `limits.queryTimeoutSecs` at construction — catalog queries included, not
- * just row fetches (implementation.md §5.5 item 1's sibling requirement:
- * every query bounded, no exceptions).
+ * The default/reference [DbSource] — port of
+ * `implementations/rust/core/src/db/postgres.rs`'s SQL, byte-for-byte
+ * where possible. Every query goes through the one [jdbcTemplate], whose
+ * `queryTimeout` is set once from `limits.queryTimeoutSecs` at
+ * construction — catalog queries included, not just row fetches
+ * (spec/protocol.md §6: every query bounded, no exceptions).
  */
 class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val filterValidator: FilterValidator) : DbSource {
     private val jdbcTemplate = JdbcTemplate(dataSource).apply {
@@ -32,7 +32,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
      * `pg_toast%`, `pg_temp_%`) and anything the connected role can't
      * actually use, so a schema only ever appears here if it's both a real
      * user namespace and one this role has `USAGE` on (`spec/protocol.md` §5.7,
-     * mirrors `implementations/rust/src/db/postgres.rs::list_schemas_in_tx`).
+     * mirrors `implementations/rust/core/src/db/postgres.rs::list_schemas_in_tx`).
      */
     override fun listSchemas(): List<String> = listAllowedSchemas()
 

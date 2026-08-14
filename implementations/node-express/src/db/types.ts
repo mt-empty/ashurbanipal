@@ -51,7 +51,7 @@ export interface QueryOpts {
 
 /**
  * The one seam to the database — route handlers never touch a driver
- * directly (mirrors implementations/rust/src/db/mod.rs's `DbSource`
+ * directly (mirrors implementations/rust/core/src/db/mod.rs's `DbSource`
  * trait). One implementation per backend: `PostgresSource` (default),
  * `SqliteSource`, `MySqlSource` — the host explicitly constructs and
  * wires whichever it wants into createRouter, so backend selection is

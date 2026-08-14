@@ -237,15 +237,12 @@ function clamp(value: number, lo: number, hi: number): number {
   return value;
 }
 
-// Parses a query param as an arbitrary-precision integer (via BigInt) and
-// saturates it into [0, Number.MAX_SAFE_INTEGER], mirroring the Rust
-// reference's deserialize_saturating_u32 and the Go port's
-// parseSaturating: spec/protocol.md §5.4 requires limit/offset to be
-// clamped, never rejected, for any out-of-range numeric value. Parsing
-// with BigInt first (rather than Number(), which silently loses precision
-// or produces NaN differently) and saturating sidesteps a native-int
-// range check rejecting the value before this code even runs. Only
-// genuinely non-numeric text ("abc", "1.5", "") still 400s.
+// spec/protocol.md §5.4 requires limit/offset to be clamped, never
+// rejected, for out-of-range values — parsing with BigInt (not Number(),
+// which loses precision silently) and saturating into
+// [0, Number.MAX_SAFE_INTEGER] mirrors deserialize_saturating_u32 in the
+// Rust reference and the Go port's parseSaturating. Only non-numeric text
+// still 400s.
 function parseSaturating(req: Request, key: string): number | undefined {
   const raw = firstQueryValue(req, key)?.trim();
   if (raw === undefined || raw === "") return undefined;

@@ -73,7 +73,7 @@ type QueryOpts struct {
 // PostgresSource (postgres.go, the default), SQLiteSource (sqlite.go,
 // gated behind the `sqlite` build tag), MySQLSource (mysql.go, gated
 // behind the `mysql` build tag) — mirrors the Rust reference's DbSource
-// trait in implementations/rust/src/db/mod.rs. Every query a method issues
+// trait in implementations/rust/core/src/db/mod.rs. Every query a method issues
 // (catalog/metadata included, not just row fetches) must be bounded by the
 // same configured timeout; each implementation owns how it enforces that,
 // since the mechanism differs per engine (see docs/adapter-decisions.md

@@ -4,8 +4,8 @@ Status: the full checklist — what a port is, what it reuses, what it
 implements, what it must not do, how to run conformance, the listing bar,
 and governance — is written below, informed by two actual ports (Spring
 Boot, Go). Sidecar guidance (a non-port alternative for unsupported
-stacks, e.g. pgweb) is deliberately out of scope for this document; see
-`implementation.md` Phase 4.
+stacks, e.g. pgweb) is deliberately out of scope for this document —
+see `readme.md`'s sidecar section instead.
 
 ## What a port is
 
@@ -14,7 +14,7 @@ that:
 
 1. Serves the released `frontend/dbviewer.html` artifact, vendored (see
    below), unmodified.
-2. Implements the five API routes + the HTML route exactly as
+2. Implements the six API routes + the HTML route exactly as
    `spec/protocol.md` and `spec/openapi.yaml` specify them.
 3. Passes both conformance layers (behavior + shape) in its own CI.
 
@@ -110,8 +110,8 @@ by reusing the frontend and fixtures above:
    checklist item 2, and needs its own port-level test — the conformance
    kit can't observe it; see "How to run conformance" below).
 2. **The HTML route** (§5.1) serving the vendored frontend, and **the
-   five API routes** (§5.2–§5.6): `tables`, `table-counts`, `tables/data`,
-   `tables/common-values`, `siblings`. Response shapes exactly as
+   six API routes** (§5.2–§5.7): `tables`, `table-counts`, `tables/data`,
+   `tables/common-values`, `siblings`, `schemas`. Response shapes exactly as
    `spec/openapi.yaml` declares.
 3. **Catalog queries** — table/column introspection, PK/FK metadata with
    composite FKs omitted (§5.4.1), `current_schema()` scoping throughout,
