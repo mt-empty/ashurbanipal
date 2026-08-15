@@ -34,8 +34,8 @@ defaults.
 | Backend | Type | Status |
 |---|---|---|
 | Postgres (`PostgresSource`) | default, always available from the package's main barrel (`ashurbanipal-node-express`) | Conformant — the reference implementation `spec/protocol.md` is written against; covered by the full conformance suite (below) plus a live-Postgres integration suite (`test/schema.integration.test.ts`). |
-| MySQL/MariaDB (`MySqlSource`, [`mysql2`](https://github.com/sidorares/node-mysql2)) | opt-in — import directly from `ashurbanipal-node-express/dist/db/mysql.js` (not re-exported from the main barrel; see "Backend selection" below) | Reviewed and supported, with the same known degraded features as the Rust reference — `common_values` has no reliable cross-version statistics equivalent and is always empty; table counts and comments come from `information_schema`. Detects MySQL vs. MariaDB at runtime (`SELECT VERSION()`, cached) since the two forks need different query-timeout SQL — see `docs/adapter-decisions.md` §6. Not run through `conformance/runner` (that suite targets Postgres); has its own unit test suite instead (`test/db/mysql.test.ts`), requiring live instances via `MYSQL_TEST_URL`/`MARIADB_TEST_URL`. |
-| SQLite (`SqliteSource`, [`sqlite3`](https://github.com/TryGhost/node-sqlite3)) | opt-in — import directly from `ashurbanipal-node-express/dist/db/sqlite.js` | Reviewed and supported, with the same known degraded features as the Rust reference — comments and `common_values` have no SQLite equivalent and degrade to omitted/empty; table counts are always the "no estimate" sentinel. Uses `sqlite3` (mapbox/node-sqlite3), not the built-in `node:sqlite` or `better-sqlite3` — both of those execute fully synchronously with no query-cancellation hook, confirmed empirically (see `docs/adapter-decisions.md` §6). Not run through `conformance/runner`; has its own unit test suite instead (`test/db/sqlite.test.ts`), no external infrastructure needed. |
+| MySQL/MariaDB (`MySqlSource`, [`mysql2`](https://github.com/sidorares/node-mysql2)) | opt-in — import directly from `ashurbanipal-node-express/dist/src/db/mysql.js` (not re-exported from the main barrel; see "Backend selection" below) | Reviewed and supported, with the same known degraded features as the Rust reference — `common_values` has no reliable cross-version statistics equivalent and is always empty; table counts and comments come from `information_schema`. Detects MySQL vs. MariaDB at runtime (`SELECT VERSION()`, cached) since the two forks need different query-timeout SQL — see `docs/adapter-decisions.md` §6. Not run through `conformance/runner` (that suite targets Postgres); has its own unit test suite instead (`test/db/mysql.test.ts`), requiring live instances via `MYSQL_TEST_URL`/`MARIADB_TEST_URL`. |
+| SQLite (`SqliteSource`, [`sqlite3`](https://github.com/TryGhost/node-sqlite3)) | opt-in — import directly from `ashurbanipal-node-express/dist/src/db/sqlite.js` | Reviewed and supported, with the same known degraded features as the Rust reference — comments and `common_values` have no SQLite equivalent and degrade to omitted/empty; table counts are always the "no estimate" sentinel. Uses `sqlite3` (mapbox/node-sqlite3), not the built-in `node:sqlite` or `better-sqlite3` — both of those execute fully synchronously with no query-cancellation hook, confirmed empirically (see `docs/adapter-decisions.md` §6). Not run through `conformance/runner`; has its own unit test suite instead (`test/db/sqlite.test.ts`), no external infrastructure needed. |
 
 ### Backend selection
 
@@ -49,8 +49,8 @@ no direct npm equivalent.
 
 ```ts
 import { createRouter } from "ashurbanipal-node-express";
-import { SqliteSource } from "ashurbanipal-node-express/dist/db/sqlite.js";
-import { MySqlSource } from "ashurbanipal-node-express/dist/db/mysql.js";
+import { SqliteSource } from "ashurbanipal-node-express/dist/src/db/sqlite.js";
+import { MySqlSource } from "ashurbanipal-node-express/dist/src/db/mysql.js";
 import { Database } from "sqlite3";
 import { createPool } from "mysql2/promise";
 
