@@ -333,10 +333,11 @@ on each other.
   POM `licenses`/`developers`/`scm`~~ **closed**: `pom { }` block added to
   the `maven` publication; `generatePomFileForMavenPublication` confirms
   the generated POM carries all of them. Version is still
-  `0.1.0-SNAPSHOT` — left alone deliberately, see gate item 1. The
-  `publishing.repositories` block is still the inert placeholder (no
-  credentials, never run by CI) — untouched, since wiring real Central
-  Portal credentials needs a publish workflow + GPG signing setup first.
+  `0.1.0-SNAPSHOT` — left alone deliberately, see gate item 1; bump when
+  ready to actually cut a `spring-v*` tag. The `publishing.repositories`
+  block is still the inert placeholder — untouched deliberately, since
+  actual publishing goes through nmcp (below), not the `publish`/
+  `PublishToMavenRepository` task the placeholder would feed.
   **Namespace verification for `io.github.mt-empty` is done** — already
   verified on Sonatype Central Portal (note: the group ID was previously
   the wrong, unhyphenated `io.github.mtempty`, which would have silently
@@ -345,9 +346,28 @@ on each other.
   `build.gradle.kts`, matching the verified namespace — the Kotlin
   package names under `io.github.mtempty.ashurbanipal` are unaffected,
   since Java/Kotlin package identifiers can't contain a hyphen and don't
-  need to match the Maven groupId). **Still open**: GPG signing-key setup
-  and wiring real Central Portal publish credentials + a `spring-v*`-gated
-  publish workflow — not done yet.
+  need to match the Maven groupId).
+  **Publish wiring closed**: `com.gradleup.nmcp.settings` (the current
+  community-standard Gradle plugin for Central Portal's Publisher API —
+  the legacy OSSRH staging endpoint is retired) added in
+  `settings.gradle.kts`, `signing` plugin wired in `build.gradle.kts`
+  reading `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE` from env (no-op if absent, so
+  it never affects a non-publish build), `publishingType = "AUTOMATIC"`
+  (Central Portal validates and releases with no second manual step —
+  the GitHub Environment approval below is the one human checkpoint).
+  `spring-boot-starter-publish.yml` now exists (`spring-v*` tags), sharing
+  its build/test gate with `spring-boot-conformance.yml` through the new
+  `_spring-build-test.yml`, gated on a `maven-central-publish` GitHub
+  Environment with a required reviewer before the irreversible
+  `publishAggregationToCentralPortal` step.
+  **Still open — external, user-only steps**: generate a Central Portal
+  user token (account settings at central.sonatype.com) and export the
+  existing GPG key's private key + passphrase, then add all four as
+  GitHub Actions secrets (`MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`,
+  `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`) and configure the
+  `maven-central-publish` Environment's required reviewer. None of this
+  is done yet; the workflow will fail cleanly (missing secrets) until it
+  is.
 - **Go** (`implementations/go-nethttp`) — nothing blocking. The module is
   already well-formed and `implementations/go-nethttp/README.md:9-15`
   already documents the intended `go get ...@vX.Y.Z` usage. The only
@@ -377,8 +397,9 @@ on each other.
    Trusted Publisher for `ashurbanipal-flask` — both are external,
    registry-side steps, not something a workflow file can do.
 4. **Spring Boot starter last** — namespace verification for
-   `io.github.mt-empty` is already done; GPG signing-key setup and a
-   `spring-v*` publish workflow are the remaining slow, least-automatable
-   parts. Start GPG key generation whenever there's a target date, but
-   don't let it block the other three remaining ports' publish jobs from
-   landing.
+   `io.github.mt-empty` is done and `spring-boot-starter-publish.yml` now
+   exists (nmcp + signing wired, `maven-central-publish` Environment
+   gate). **Still open**: the four GitHub secrets (Central Portal token,
+   GPG key) need to be added and the Environment's required reviewer
+   configured — both external, user-only steps — before the first
+   `spring-v*` tag can actually publish.
