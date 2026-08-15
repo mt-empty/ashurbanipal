@@ -27,6 +27,6 @@ export { createRouter } from "./routes.js";
 // load the sqlite3/mysql2 drivers — the Node analog of Rust's Cargo
 // feature-gating would then be defeated by a single barrel export. A host
 // that wants either backend imports it directly:
-// `import { SqliteSource } from "ashurbanipal-node-express/dist/db/sqlite.js"`
+// `import { SqliteSource } from "ashurbanipal-node-express/dist/src/db/sqlite.js"`
 // (or the equivalent relative path to src/db/sqlite.js / src/db/mysql.js)
 // — explicit by construction, never driver auto-detection.

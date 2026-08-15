@@ -300,8 +300,14 @@ on each other.
   and `"files"` never included the compiled `dist/` output — `tsconfig.json`
   had `"declaration": false` — so `npm install ashurbanipal-node-express`
   would have shipped a package with no resolvable entry point at all.
-  Fixed: `"main": "dist/index.js"`, `"types": "dist/index.d.ts"`, `"dist"`
-  added to `files`, `"declaration": true` enabled.
+  Fixed: `"main": "dist/src/index.js"`, `"types": "dist/src/index.d.ts"`
+  (tsconfig's `rootDir: "."` mirrors `src/` under `dist/src/`, not flat
+  into `dist/` — verified by an actual `npm run build` + `node -e
+  "import('./dist/src/index.js')"`, not just reading the config), `"dist"`
+  added to `files`, `"declaration": true` enabled. Also fixed the same
+  wrong `dist/db/...` deep-import path (should be `dist/src/db/...`) in
+  `src/index.ts`'s comment and `README.md`'s MySQL/SQLite rows and
+  "Backend selection" example — a pre-existing doc bug, same root cause.
   `node-express-publish.yml` now exists (`node-vX.Y.Z` tags, npm OIDC
   Trusted Publishing via `id-token: write` + `npm publish --provenance`),
   sharing its build/test gate with `node-conformance.yml` through the new
