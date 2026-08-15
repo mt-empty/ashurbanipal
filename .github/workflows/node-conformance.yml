@@ -25,76 +25,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
-  NODE_VERSION: "26"
-
 jobs:
   build-and-test:
-    name: biome + npm build/typecheck + fixture/kill-switch/schema tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      db:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: ashurbanipal
-          POSTGRES_PASSWORD: ashurbanipal
-          POSTGRES_DB: ashurbanipal
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Apply the conformance seed
-        run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
-
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-        with:
-          version: 11
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: implementations/node-express/pnpm-lock.yaml
-
-      - name: Install
-        working-directory: implementations/node-express
-        run: pnpm install --frozen-lockfile
-
-      # --prod: devDependencies (vitest's toolchain, etc.) never run in the
-      # embedded crate's own process, so a devDependency-only advisory isn't
-      # a real supply-chain risk here — scope the gate to what actually ships.
-      - name: Audit dependencies
-        working-directory: implementations/node-express
-        run: pnpm audit --audit-level=high --prod
-
-      - name: Lint
-        working-directory: implementations/node-express
-        run: pnpm run lint
-
-      - name: Typecheck
-        working-directory: implementations/node-express
-        run: pnpm run typecheck
-
-      - name: Build
-        working-directory: implementations/node-express
-        run: pnpm run build
-
-      # Fixture tests (test/filter-fixture.test.ts) and kill-switch tests
-      # (test/killswitch.test.ts) need no database; test/schema.integration.test.ts
-      # needs DATABASE_URL (set above) and the conformance seed applied.
-      - name: Test
-        working-directory: implementations/node-express
-        run: pnpm test
+    uses: ./.github/workflows/_node-build-test.yml
 
   conformance:
     name: Node/Express — conformance kit (external-URL path)

@@ -6,6 +6,10 @@ the Kotlin/Spring Boot, Go/`net-http`, and Node/Express ports. Ships three
 backends from day one: Postgres (`psycopg`), SQLite (stdlib `sqlite3`),
 and MySQL/MariaDB (`PyMySQL`) — see `ashurbanipal/db/`.
 
+```sh
+uv add ashurbanipal-flask       # or: pip install ashurbanipal-flask
+```
+
 ```python
 from flask import Flask
 from ashurbanipal import Config, router
