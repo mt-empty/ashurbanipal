@@ -4,6 +4,10 @@ A Node.js/TypeScript port of [Ashurbanipal](../../readme.md), targeting
 Express — implements the same `spec/protocol.md` + `spec/openapi.yaml`
 contract as the Rust reference and the Go/Spring Boot ports.
 
+```sh
+npm install ashurbanipal-node-express
+```
+
 ```ts
 import express from "express";
 import { Pool } from "pg";

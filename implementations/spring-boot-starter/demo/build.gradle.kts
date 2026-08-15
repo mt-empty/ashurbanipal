@@ -4,7 +4,7 @@ plugins {
     id("org.springframework.boot") version "4.1.0"
 }
 
-group = "io.github.mtempty.ashurbanipal.demo"
+group = "io.github.mt-empty.ashurbanipal.demo"
 version = "0.0.1"
 
 java {

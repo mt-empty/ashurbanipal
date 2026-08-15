@@ -1,0 +1,88 @@
+name: _flask-build-test
+
+# Shared by flask-conformance.yml and flask-python-publish.yml — same
+# role as _node-build-test.yml has for Node, and _rust-crate-build-test.yml
+# has for the Rust crates.
+
+on:
+  workflow_call:
+
+env:
+  DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build-and-test:
+    name: ruff + fixture/kill-switch/sqlite/postgres tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ashurbanipal
+          POSTGRES_PASSWORD: ashurbanipal
+          POSTGRES_DB: ashurbanipal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply the conformance seed
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+
+      # Unlike Node's npm-script pre-hooks, Python has no equivalent
+      # automatic pre-install/pre-test hook, so this port's ephemeral
+      # frontend copy (gitignored, see PORTING.md's vendoring section)
+      # needs an explicit generation step before anything imports
+      # ashurbanipal.embed.
+      - name: Sync vendored frontend
+        run: tools/sync-ports-frontend.sh
+
+      - name: Install
+        working-directory: implementations/flask-python
+        run: uv sync --extra dev
+
+      # --with runs pip-audit inside the already-synced venv without adding
+      # it to pyproject.toml/uv.lock — a CI-only tool, not a project dep.
+      - name: Audit dependencies
+        working-directory: implementations/flask-python
+        run: uv run --with pip-audit pip-audit
+
+      - name: ruff check
+        working-directory: implementations/flask-python
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        working-directory: implementations/flask-python
+        run: uv run ruff format --check .
+
+      # Re-hash after generation: catches a build pipeline silently
+      # mangling the copy at implementations/flask-python/ashurbanipal/frontend/dbviewer.html
+      # (PORTING.md's vendoring contract, hardening checklist item 3) —
+      # embed.py itself already raises at import time on a mismatch, so
+      # importing it is the check.
+      - name: Verify vendored frontend checksum
+        working-directory: implementations/flask-python
+        run: uv run python -c "import ashurbanipal.embed"
+
+      # test_filter_fixtures.py, test_config.py, test_killswitch.py and
+      # test_sqlite.py need no external service; test_postgres_integration.py
+      # needs DATABASE_URL (set above) and the conformance seed applied;
+      # test_mysql_integration.py skips cleanly without MYSQL_TEST_URL/
+      # MARIADB_TEST_URL (no such service in this job).
+      - name: Test
+        working-directory: implementations/flask-python
+        run: uv run pytest -q

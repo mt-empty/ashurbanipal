@@ -6,7 +6,7 @@ plugins {
     `maven-publish`
 }
 
-group = "io.github.mtempty"
+group = "io.github.mt-empty"
 version = "0.1.0-SNAPSHOT"
 
 // Toolchain pinned to whatever JDK is actually installed in this devcontainer
