@@ -18,6 +18,12 @@ java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
     }
+    // Central requires a -sources.jar and -javadoc.jar alongside the main
+    // jar for every published artifact (placeholder content is fine —
+    // there's no Kotlin source in the standard `javadoc` task's input, so
+    // this produces an empty-but-present javadoc jar rather than a real one).
+    withSourcesJar()
+    withJavadocJar()
 }
 
 kotlin {
@@ -168,12 +174,18 @@ publishing {
                 developers {
                     developer {
                         id.set("mt-empty")
+                        name.set("mt-empty")
+                        // GitHub-provided noreply address (id+username@users.noreply.github.com)
+                        // rather than a real inbox — this is published publicly and
+                        // permanently once released.
+                        email.set("59728838+mt-empty@users.noreply.github.com")
                         url.set("https://github.com/mt-empty")
                     }
                 }
                 scm {
                     url.set("https://github.com/mt-empty/ashurbanipal")
                     connection.set("scm:git:https://github.com/mt-empty/ashurbanipal.git")
+                    developerConnection.set("scm:git:ssh://github.com/mt-empty/ashurbanipal.git")
                 }
             }
         }
