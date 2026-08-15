@@ -331,13 +331,27 @@ on each other.
 - **Spring Boot starter**
   (`implementations/spring-boot-starter/build.gradle.kts`) — ~~missing
   POM `licenses`/`developers`/`scm`~~ **closed**: `pom { }` block added to
-  the `maven` publication; `generatePomFileForMavenPublication` confirms
-  the generated POM carries all of them. Version is still
-  `0.1.0-SNAPSHOT` — left alone deliberately, see gate item 1; bump when
-  ready to actually cut a `spring-v*` tag. The `publishing.repositories`
-  block is still the inert placeholder — untouched deliberately, since
-  actual publishing goes through nmcp (below), not the `publish`/
-  `PublishToMavenRepository` task the placeholder would feed.
+  the `maven` publication. **Re-verified against
+  https://central.sonatype.org/publish/requirements/ directly (not just
+  general knowledge) and found three more gaps the first pass missed**:
+  `<developer>` needs `name`/`email` (Central's actual schema, not just
+  the `id`/`url` first added — `email` set to the GitHub-provided noreply
+  address `59728838+mt-empty@users.noreply.github.com` rather than a real
+  inbox, since it's published publicly and permanently once released;
+  `organization`/`organizationUrl` deliberately omitted, not required and
+  no org exists for this individually-maintained project); `<scm>` needs
+  `developerConnection` (the read/write URL) alongside `connection`/`url`;
+  and every published jar needs a matching `-sources.jar` and
+  `-javadoc.jar` alongside it, which nothing in the build configured —
+  fixed via `java { withSourcesJar(); withJavadocJar() }` (the javadoc jar
+  is an empty placeholder, which Central's own docs say is acceptable,
+  since there's no Java source for the standard `javadoc` task to
+  process). Version is still `0.1.0-SNAPSHOT` — left alone deliberately,
+  see gate item 1; bump when ready to actually cut a `spring-v*` tag. The
+  `publishing.repositories` block is still the inert placeholder —
+  untouched deliberately, since actual publishing goes through nmcp
+  (below), not the `publish`/`PublishToMavenRepository` task the
+  placeholder would feed.
   **Namespace verification for `io.github.mt-empty` is done** — already
   verified on Sonatype Central Portal (note: the group ID was previously
   the wrong, unhyphenated `io.github.mtempty`, which would have silently
