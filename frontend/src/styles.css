@@ -18,6 +18,10 @@
   --backdrop: light-dark(#0006, #0009);
   --gap: .5rem;
   --gap-lg: .75rem;
+  --sidebar-w: 220px;
+  /* min() re-clamps on window shrink alone (no resize listener needed) if
+     a wide persisted width no longer fits. */
+  --sidebar-w-clamped: min(var(--sidebar-w), 60vw);
   /* --type-* (grid/record cells) and --json-* (json tree tokens) share
      values for bool/number/uuid, so a value looks identical whether it's
      a top-level column or nested inside a jsonb blob. */
@@ -32,8 +36,24 @@
 }
 
 /* ==== Layout ==== */
-body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
+body { margin: 0; display: grid; grid-template-columns: var(--sidebar-w-clamped) 1fr; height: 100vh; position: relative; }
 nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
+#sidebar-resize-handle {
+  position: absolute; top: 0; bottom: 0;
+  left: var(--sidebar-w-clamped); width: 9px; margin-left: -4px;
+  cursor: col-resize; touch-action: none; z-index: 1;
+}
+#sidebar-resize-handle:hover, #sidebar-resize-handle.active { background: var(--hover); }
+/* Always-visible grip so the handle reads as draggable before a hover. */
+#sidebar-resize-handle::after {
+  content: ""; position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px; height: 2rem; border-radius: 2px;
+  background: var(--border-strong);
+}
+#sidebar-resize-handle:hover::after, #sidebar-resize-handle.active::after { background: var(--active); }
+body.sidebar-resizing { cursor: col-resize; user-select: none; }
+body.sidebar-resizing #sidebar-resize-handle { background: var(--active); }
 /* No padding here: #toolbar is sticky and must reach main's actual
    edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
 main { overflow: auto; }
@@ -45,8 +65,9 @@ main { overflow: auto; }
    and get dragged along horizontally. */
 #content { padding: 0 var(--gap-lg) var(--gap-lg); width: max-content; min-width: 100%; }
 .nav-header { display: flex; align-items: center; gap: var(--gap); margin: 0 0 var(--gap); }
-h1 { font-size: 1rem; margin: 0; flex: 1; min-width: 0; }
-h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
+h1 { font-size: 1rem; margin: 0; flex: 1; min-width: 0; overflow: hidden; }
+h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em;
+       display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 h1 a:hover { text-decoration-thickness: 2px; }
 
 /* ==== Sidebar table list ==== */

@@ -18,6 +18,13 @@
     if (ashurbanipalTheme === "light" || ashurbanipalTheme === "dark")
       document.documentElement.dataset.theme = ashurbanipalTheme;
   } catch {}
+  try {
+    // Bounds duplicated in sidebar-resize.ts's MIN_W/MAX_W — this script
+    // runs standalone, before the bundled module graph, so it can't import them.
+    var ashurbanipalSidebarW = parseFloat(localStorage.getItem("ashurbanipal_sidebar_w"));
+    if (ashurbanipalSidebarW >= 180 && ashurbanipalSidebarW <= 500)
+      document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+  } catch {}
 </script>
 <style>
 :root {
@@ -40,6 +47,10 @@
   --backdrop: light-dark(#0006, #0009);
   --gap: .5rem;
   --gap-lg: .75rem;
+  --sidebar-w: 220px;
+  /* min() re-clamps on window shrink alone (no resize listener needed) if
+     a wide persisted width no longer fits. */
+  --sidebar-w-clamped: min(var(--sidebar-w), 60vw);
   /* --type-* (grid/record cells) and --json-* (json tree tokens) share
      values for bool/number/uuid, so a value looks identical whether it's
      a top-level column or nested inside a jsonb blob. */
@@ -54,8 +65,24 @@
 }
 
 /* ==== Layout ==== */
-body { margin: 0; display: grid; grid-template-columns: 220px 1fr; height: 100vh; }
+body { margin: 0; display: grid; grid-template-columns: var(--sidebar-w-clamped) 1fr; height: 100vh; position: relative; }
 nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
+#sidebar-resize-handle {
+  position: absolute; top: 0; bottom: 0;
+  left: var(--sidebar-w-clamped); width: 9px; margin-left: -4px;
+  cursor: col-resize; touch-action: none; z-index: 1;
+}
+#sidebar-resize-handle:hover, #sidebar-resize-handle.active { background: var(--hover); }
+/* Always-visible grip so the handle reads as draggable before a hover. */
+#sidebar-resize-handle::after {
+  content: ""; position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px; height: 2rem; border-radius: 2px;
+  background: var(--border-strong);
+}
+#sidebar-resize-handle:hover::after, #sidebar-resize-handle.active::after { background: var(--active); }
+body.sidebar-resizing { cursor: col-resize; user-select: none; }
+body.sidebar-resizing #sidebar-resize-handle { background: var(--active); }
 /* No padding here: #toolbar is sticky and must reach main's actual
    edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
 main { overflow: auto; }
@@ -67,8 +94,9 @@ main { overflow: auto; }
    and get dragged along horizontally. */
 #content { padding: 0 var(--gap-lg) var(--gap-lg); width: max-content; min-width: 100%; }
 .nav-header { display: flex; align-items: center; gap: var(--gap); margin: 0 0 var(--gap); }
-h1 { font-size: 1rem; margin: 0; flex: 1; min-width: 0; }
-h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em; }
+h1 { font-size: 1rem; margin: 0; flex: 1; min-width: 0; overflow: hidden; }
+h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em;
+       display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 h1 a:hover { text-decoration-thickness: 2px; }
 
 /* ==== Sidebar table list ==== */
@@ -390,6 +418,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
     <div id="siblings-list"></div>
   </div>
 </nav>
+<div id="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="resize sidebar" tabindex="-1"></div>
 <main id="main">
   <div id="toolbar">
     <div id="protocol-warning" role="status" hidden>
@@ -402,7 +431,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
       <strong id="current">—</strong>
       <output id="status" aria-live="polite" class="sr-only"></output>
       <form id="filter-form">
-        <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+        <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
         <button id="apply">apply</button>
       </form>
       <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
@@ -1574,6 +1603,39 @@ window.addEventListener("popstate", (ev) => {
     restoringFromHistory = false;
   });
 });
+
+// src/sidebar-resize.ts
+var SIDEBAR_W_KEY = "ashurbanipal_sidebar_w";
+var MIN_W = 180;
+var MAX_W = 500;
+function clamp(w) {
+  return Math.min(MAX_W, Math.max(MIN_W, w));
+}
+var handle = $("sidebar-resize-handle");
+var dragging = false;
+handle.addEventListener("pointerdown", (e) => {
+  dragging = true;
+  handle.setPointerCapture(e.pointerId);
+  document.body.classList.add("sidebar-resizing");
+  handle.classList.add("active");
+});
+handle.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  document.documentElement.style.setProperty("--sidebar-w", `${clamp(e.clientX)}px`);
+});
+function endDrag() {
+  if (!dragging) return;
+  dragging = false;
+  document.body.classList.remove("sidebar-resizing");
+  handle.classList.remove("active");
+  const w = getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w").trim();
+  try {
+    localStorage.setItem(SIDEBAR_W_KEY, w);
+  } catch {
+  }
+}
+handle.addEventListener("pointerup", endDrag);
+handle.addEventListener("pointercancel", endDrag);
 
 // src/siblings.ts
 var siblingsRequestToken = 0;

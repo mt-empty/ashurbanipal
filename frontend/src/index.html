@@ -18,6 +18,13 @@
     if (ashurbanipalTheme === "light" || ashurbanipalTheme === "dark")
       document.documentElement.dataset.theme = ashurbanipalTheme;
   } catch {}
+  try {
+    // Bounds duplicated in sidebar-resize.ts's MIN_W/MAX_W — this script
+    // runs standalone, before the bundled module graph, so it can't import them.
+    var ashurbanipalSidebarW = parseFloat(localStorage.getItem("ashurbanipal_sidebar_w"));
+    if (ashurbanipalSidebarW >= 180 && ashurbanipalSidebarW <= 500)
+      document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+  } catch {}
 </script>
 <style>
 /*ASHURBANIPAL_STYLE*/
@@ -44,6 +51,7 @@
     <div id="siblings-list"></div>
   </div>
 </nav>
+<div id="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="resize sidebar" tabindex="-1"></div>
 <main id="main">
   <div id="toolbar">
     <div id="protocol-warning" role="status" hidden>
@@ -56,7 +64,7 @@
       <strong id="current">—</strong>
       <output id="status" aria-live="polite" class="sr-only"></output>
       <form id="filter-form">
-        <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+        <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
         <button id="apply">apply</button>
       </form>
       <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>

@@ -4,6 +4,7 @@ import { $, setStatus } from "./dom.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "./grid.js";
 import { syncUrl } from "./nav.js";
 import { loadSchemas, loadTables, setRowLoading } from "./sidebar.js";
+import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
 import { getAppliedFilterAst, getLastPayload, setLastPayload, state } from "./state.js";
 import "./theme.js";
