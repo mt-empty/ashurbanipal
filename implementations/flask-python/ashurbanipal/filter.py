@@ -81,7 +81,7 @@ def parse(raw: str) -> list[Condition]:
             raise FilterError(f'condition {i} is missing a string "column"')
 
         op = raw_cond.get("op")
-        if op not in VALID_OPS:
+        if not isinstance(op, str) or op not in VALID_OPS:
             raise FilterError(f"condition {i} has invalid op {op!r}")
 
         value = raw_cond.get("value")
