@@ -4,6 +4,7 @@ plugins {
     kotlin("jvm") version "2.4.10"
     kotlin("plugin.spring") version "2.4.10"
     `maven-publish`
+    signing
 }
 
 group = "io.github.mt-empty"
@@ -178,11 +179,29 @@ publishing {
         }
     }
     // Inert on purpose: shape only, no credentials wired, never executed
-    // by CI in this repo.
+    // by CI in this repo. Actual publishing goes through nmcp (settings.gradle.kts)
+    // instead, which reads the "maven" publication directly rather than via
+    // `publish`/`PublishToMavenRepository` — this placeholder just keeps
+    // the `publishing {}` block's `repositories` non-empty, which Gradle
+    // otherwise warns about.
     repositories {
         maven {
             name = "placeholder"
             url = uri(layout.buildDirectory.dir("repo"))
         }
+    }
+}
+
+// Central Portal rejects unsigned artifacts outright. Signing only needs
+// to resolve when a publish task actually runs — build/test never touch
+// this — so an absent GPG_PRIVATE_KEY/GPG_PASSPHRASE (any non-publish CI
+// job, any local dev build) leaves signing un-configured rather than
+// failing the build.
+val signingKey = providers.environmentVariable("GPG_PRIVATE_KEY").orNull
+val signingPassphrase = providers.environmentVariable("GPG_PASSPHRASE").orNull
+if (signingKey != null && signingPassphrase != null) {
+    signing {
+        useInMemoryPgpKeys(signingKey, signingPassphrase)
+        sign(publishing.publications["maven"])
     }
 }

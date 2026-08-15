@@ -25,9 +25,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
-
 jobs:
   # Submits the resolved Gradle dependency graph to GitHub's native
   # dependency graph — unlike Cargo/Go/npm, GitHub can't parse Gradle
@@ -55,51 +52,7 @@ jobs:
           build-root-directory: implementations/spring-boot-starter
 
   build-and-test:
-    name: gradle build (vendoring hash re-check + fixture/kill-switch/integration tests)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    services:
-      db:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: ashurbanipal
-          POSTGRES_PASSWORD: ashurbanipal
-          POSTGRES_DB: ashurbanipal
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Apply the conformance seed
-        run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
-
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
-
-      # `./gradlew build` runs `vendorFrontend` (implementation.md §5.5 item
-      # 3 / PORTING.md's vendoring contract) on every invocation, re-hashing
-      # frontend/dbviewer.html against the pinned sha256 in build.gradle.kts
-      # — a CI check, not a one-time fact recorded at vendoring time.
-      - name: Build and test (fixture runner, kill-switch, live-DB integration)
-        working-directory: implementations/spring-boot-starter
-        run: ./gradlew build
-
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: spring-boot-test-report
-          path: implementations/spring-boot-starter/build/reports/tests/test/
-          retention-days: 14
+    uses: ./.github/workflows/_spring-build-test.yml
 
   conformance:
     name: Spring Boot — conformance kit (external-URL path, against the Kotlin demo)
