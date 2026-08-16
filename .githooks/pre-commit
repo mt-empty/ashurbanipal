@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Fail fast if commit signing has been disabled locally, instead of finding out at pre-push.
+set -euo pipefail
+
+if [ "$(git config --get commit.gpgsign)" != "true" ]; then
+	echo "pre-commit: commit.gpgsign is not enabled (run: git config --global commit.gpgsign true)" >&2
+	exit 1
+fi
