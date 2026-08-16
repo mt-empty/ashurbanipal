@@ -1,6 +1,6 @@
 [package]
 name = "ashurbanipal-actix-web"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.94"
 description = "Embeddable, read-only database browser for lower environments (Actix-web adapter)"
