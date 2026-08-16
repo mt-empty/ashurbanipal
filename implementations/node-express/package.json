@@ -10,18 +10,17 @@
   },
   "homepage": "https://github.com/mt-empty/ashurbanipal/tree/main/implementations/node-express",
   "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
   "engines": {
     "node": ">=24"
   },
   "files": [
+    "dist",
     "src",
     "demo",
     "frontend/dbviewer.html",
-    "test",
-    "tsconfig.json",
-    "vitest.config.ts",
-    "biome.json",
-    "pnpm-workspace.yaml"
+    "tsconfig.json"
   ],
   "scripts": {
     "sync-frontend": "node -e \"require('fs').mkdirSync('frontend',{recursive:true});require('fs').copyFileSync('../../frontend/dbviewer.html','frontend/dbviewer.html')\"",
@@ -29,7 +28,7 @@
     "prebuild": "npm run sync-frontend",
     "predemo": "npm run sync-frontend",
     "prepack": "npm run sync-frontend",
-    "build": "tsc -p tsconfig.json && node -e \"require('fs').mkdirSync('dist/frontend',{recursive:true});require('fs').copyFileSync('frontend/dbviewer.html','dist/frontend/dbviewer.html')\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').mkdirSync('dist/frontend',{recursive:true});require('fs').copyFileSync('frontend/dbviewer.html','dist/frontend/dbviewer.html')\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
@@ -37,16 +36,26 @@
     "demo": "tsx demo/main.ts"
   },
   "dependencies": {
-    "express": "^5.2.1",
+    "express": "^5.2.1"
+  },
+  "peerDependencies": {
     "mysql2": "^3.23.2",
     "pg": "^8.22.0",
     "sqlite3": "^6.0.1"
+  },
+  "peerDependenciesMeta": {
+    "mysql2": { "optional": true },
+    "pg": { "optional": true },
+    "sqlite3": { "optional": true }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.2",
     "@types/pg": "^8.20.4",
+    "mysql2": "^3.23.2",
+    "pg": "^8.22.0",
+    "sqlite3": "^6.0.1",
     "tsx": "^4.23.5",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

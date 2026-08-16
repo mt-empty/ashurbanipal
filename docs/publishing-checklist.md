@@ -29,8 +29,8 @@ registry. A port can clear the porting bar and still not be publish-ready
 | Rust (`implementations/rust`) | crates.io | `cargo publish` | API token, or crates.io's OIDC trusted-publishing (GitHub Actions) | No — yank only, never deleted |
 | Node (`implementations/node-express`) | npm | `npm publish` | npm token, or npm's GitHub Actions OIDC trusted publishing | No — unpublish is time/dependent-limited |
 | Flask (`implementations/flask-python`) | PyPI | `uv publish` / `twine upload` | PyPI Trusted Publishing (OIDC, no stored token) | No — yank only |
-| Spring Boot starter (`implementations/spring-boot-starter`) | Maven Central (Sonatype Central Portal) | `./gradlew publish` | Central Portal namespace verification for `io.github.mtempty` + GPG artifact signing | No — Central is immutable |
-| Go (`implementations/go-nethttp`) | `pkg.go.dev` / `proxy.golang.org` | `git tag vX.Y.Z && git push --tags` | none — the public repo is the source of truth, proxy indexes on first fetch | Tag can be deleted, but the module proxy's cache is effectively permanent |
+| Spring Boot starter (`implementations/spring-boot-starter`) | Maven Central (Sonatype Central Portal) | `./gradlew publish` | Central Portal namespace verification for `io.github.mt-empty` + GPG artifact signing | No — Central is immutable |
+| Go (`implementations/go-nethttp`) | `pkg.go.dev` / `proxy.golang.org` | `git tag implementations/go-nethttp/vX.Y.Z && git push --tags` | none — the public repo is the source of truth, proxy indexes on first fetch | Tag can be deleted, but the module proxy's cache is effectively permanent |
 
 Go needs no registry integration at all — "publishing" is already fully
 described by the existing tag-triggered `.github/workflows/release.yml`.
@@ -44,8 +44,15 @@ token unless a specific reason rules it out.
 ## Decided: per-port tag scheme
 
 Per-port tag prefixes (`axum-vX.Y.Z`, `node-vX.Y.Z`, `flask-vX.Y.Z`,
-`spring-vX.Y.Z`, `go-vX.Y.Z`), each triggering its own publish job scoped
-to that one port's directory — not the bare `v*` scheme
+`spring-vX.Y.Z`), each triggering its own publish job scoped
+to that one port's directory — not the bare `v*` scheme. **Go is the one
+exception**: its module (`implementations/go-nethttp/go.mod`) doesn't live
+at the repo root, and Go's module tooling requires a subdirectory
+module's version tag to be prefixed with the module's own path within the
+repo (`golang.org/ref/mod#vcs-version`) — so its tag is
+`implementations/go-nethttp/vX.Y.Z`, not a short `go-vX.Y.Z` prefix. A
+`go-v0.1.0` tag would simply never resolve for `go get
+github.com/mt-empty/ashurbanipal/implementations/go-nethttp@v0.1.0`.
 `.github/workflows/release.yml` uses today. Rationale: the five ports are
 independently hand-written implementations of the same spec, not outputs
 of one shared generator (contrast Protocol Buffers, which locksteps every
@@ -145,7 +152,7 @@ on each other.
    path/git-dependency instructions.
 5. **Registry name availability confirmed before committing to it** —
    `ashurbanipal-axum`, `ashurbanipal-flask`, `ashurbanipal-node-express`, the
-   Maven `io.github.mtempty`/`ashurbanipal-spring-boot-starter`
+   Maven `io.github.mt-empty`/`ashurbanipal-spring-boot-starter`
    coordinate, and the Go module path (`go get` needs no reservation,
    it's the repo path) should each be checked for squatting/collisions on
    their respective registry before the first publish, not after a failed
@@ -155,7 +162,34 @@ on each other.
    publishes; `ashurbanipal` and `ashurbanipal-actix-web` are now live,
    `ashurbanipal-axum` still needs its version-bump republish (see
    per-port gaps below). Node, Flask, Spring still pending.
-6. **CI publish job gated on the port's own tag prefix**, using
+6. **Registry-specific manual-approval requirements, keyword/category
+   discoverability fields, and deployment-linked GitHub Environments.**
+   Cross-checked the publish setup directly against
+   [Cargo's](https://doc.rust-lang.org/cargo/reference/publishing.html),
+   [npm's](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages)/
+   [npm's trusted-publishers](https://docs.npmjs.com/trusted-publishers),
+   and [PyPI's](https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/)
+   own publishing docs (not just general knowledge) and found/fixed four
+   gaps: **(a)** PyPI's guide states manual approval on the `pypi`
+   environment isn't optional ("you must require manual approval on each
+   run") — `flask-python-publish.yml`'s comment previously framed it the
+   same take-it-or-leave-it way as the other three registries; reworded
+   to say it's PyPI-mandated. **(b)** All three Rust crates were missing
+   `keywords`/`categories` (Cargo's docs list both as recommended for
+   crates.io discoverability) — added, validated against crates.io's live
+   `/api/v1/categories` list rather than guessed slugs (`database` and
+   `web-programming` confirmed to exist). **(c)** None of the four
+   `environment:` blocks set the optional deployment `url:` GitHub
+   Environments support (PyPI's own example workflow sets one) — added
+   to all four (crates.io ×3, npm, PyPI, Maven Central). **(d)** Verified
+   npm's OIDC trusted-publishing mechanics directly against
+   docs.npmjs.com/trusted-publishers (the scoped-packages guide alone
+   doesn't cover OIDC): `id-token: write` is sufficient with no special
+   flag, npm CLI >=11.5.1 auto-detects the OIDC environment, and
+   provenance attestation is automatic — `--provenance --access public`
+   in `node-express-publish.yml` was unnecessary/redundant, simplified to
+   bare `npm publish`.
+7. **CI publish job gated on the port's own tag prefix**, using
    OIDC trusted publishing where the registry supports it, mirroring
    `release.yml`'s existing `check-branch` job (tag must be on `main`)
    rather than trusting whoever cut the tag. — *Done for Rust*:
@@ -183,7 +217,7 @@ on each other.
    will run with no gate at all. On crates.io's side, all three crates'
    Trusted Publisher config uses the same environment name
    (`crates-io-publish`), just a different workflow filename each.
-7. **Decide whether `frontend/dbviewer.html` needs to be independently
+8. **Decide whether `frontend/dbviewer.html` needs to be independently
    versioned/pinned** for a published artifact the way `PORTING.md`'s
    vendoring contract already expects in spirit (each port re-hashes it
    at build/CI time against a pinned sha256) — today every port pins
@@ -288,29 +322,99 @@ on each other.
   true` blocks `npm publish`; missing `repository`, `license`,
   `homepage`~~ **closed**: `private` removed, all three fields added.
   `author` deliberately left out — no attributable individual/org name is
-  documented elsewhere in the repo to source it from.
+  documented elsewhere in the repo to source it from. **Also found and
+  fixed while wiring the publish workflow**: no `"main"`/`"types"` field
+  and `"files"` never included the compiled `dist/` output — `tsconfig.json`
+  had `"declaration": false` — so `npm install ashurbanipal-node-express`
+  would have shipped a package with no resolvable entry point at all.
+  Fixed: `"main": "dist/src/index.js"`, `"types": "dist/src/index.d.ts"`
+  (tsconfig's `rootDir: "."` mirrors `src/` under `dist/src/`, not flat
+  into `dist/` — verified by an actual `npm run build` + `node -e
+  "import('./dist/src/index.js')"`, not just reading the config), `"dist"`
+  added to `files`, `"declaration": true` enabled. Also fixed the same
+  wrong `dist/db/...` deep-import path (should be `dist/src/db/...`) in
+  `src/index.ts`'s comment and `README.md`'s MySQL/SQLite rows and
+  "Backend selection" example — a pre-existing doc bug, same root cause.
+  `node-express-publish.yml` now exists (`node-vX.Y.Z` tags, npm OIDC
+  Trusted Publishing via `id-token: write` + `npm publish --provenance`),
+  sharing its build/test gate with `node-conformance.yml` through the new
+  `_node-build-test.yml`. **Still open**: npm's Trusted Publisher config
+  needs a package that already exists on the registry (like crates.io),
+  so the first `npm publish` needs a one-time manual bootstrap with a
+  classic token before Trusted Publishing can be attached — not done yet.
 - **Flask** (`implementations/flask-python/pyproject.toml`) — ~~missing
   `license`, `readme`, `authors`, `classifiers`, `[project.urls]`~~
   **closed**: all added (`authors` sourced from the root `LICENSE`'s
-  copyright holder, the only place that name is already on record). `uv
-  build --sdist` confirms the metadata parses and builds.
+  copyright holder, the only place that name is already on record).
+  `flask-python-publish.yml` now exists (`flask-vX.Y.Z` tags, PyPI OIDC
+  Trusted Publishing via `pypa/gh-action-pypi-publish`), sharing its
+  build/test gate with `flask-conformance.yml` through the new
+  `_flask-build-test.yml`. Unlike npm/crates.io, PyPI supports a *pending*
+  Trusted Publisher registered before the project exists — no bootstrap
+  token needed, just registering the pending publisher on pypi.org before
+  the first `flask-v*` tag. **Still open**: that pending-publisher
+  registration itself hasn't been done yet. (`uv build --sdist` already
+  confirmed the metadata parses and builds.)
 - **Spring Boot starter**
   (`implementations/spring-boot-starter/build.gradle.kts`) — ~~missing
   POM `licenses`/`developers`/`scm`~~ **closed**: `pom { }` block added to
-  the `maven` publication; `generatePomFileForMavenPublication` confirms
-  the generated POM carries all of them. Version is still
-  `0.1.0-SNAPSHOT` — left alone deliberately, see gate item 1. The
-  `publishing.repositories` block is still the inert placeholder (no
-  credentials, never run by CI) — untouched, since wiring real Central
-  Portal credentials needs the namespace-verification step (below) to
-  exist first. **Still open and gating everything else for this port**:
-  namespace verification for `io.github.mtempty` (one-time, manual,
-  can take days — start it first if Maven Central is in scope) and a GPG
-  signing-key setup.
+  the `maven` publication. **Re-verified against
+  https://central.sonatype.org/publish/requirements/ directly (not just
+  general knowledge) and found three more gaps the first pass missed**:
+  `<developer>` needs `name`/`email` (Central's actual schema, not just
+  the `id`/`url` first added — `email` set to the GitHub-provided noreply
+  address `59728838+mt-empty@users.noreply.github.com` rather than a real
+  inbox, since it's published publicly and permanently once released;
+  `organization`/`organizationUrl` deliberately omitted, not required and
+  no org exists for this individually-maintained project); `<scm>` needs
+  `developerConnection` (the read/write URL) alongside `connection`/`url`;
+  and every published jar needs a matching `-sources.jar` and
+  `-javadoc.jar` alongside it, which nothing in the build configured —
+  fixed via `java { withSourcesJar(); withJavadocJar() }` (the javadoc jar
+  is an empty placeholder, which Central's own docs say is acceptable,
+  since there's no Java source for the standard `javadoc` task to
+  process). Version bumped to `0.1.0` for the first Maven Central release
+  (see gate item 1 — tag and manifest version must agree). The
+  `publishing.repositories` block is still the inert placeholder —
+  untouched deliberately, since actual publishing goes through nmcp
+  (below), not the `publish`/`PublishToMavenRepository` task the
+  placeholder would feed.
+  **Namespace verification for `io.github.mt-empty` is done** — already
+  verified on Sonatype Central Portal (note: the group ID was previously
+  the wrong, unhyphenated `io.github.mtempty`, which would have silently
+  failed verification since Central checks the namespace against the
+  exact GitHub username; fixed to `io.github.mt-empty` in
+  `build.gradle.kts`, matching the verified namespace — the Kotlin
+  package names under `io.github.mtempty.ashurbanipal` are unaffected,
+  since Java/Kotlin package identifiers can't contain a hyphen and don't
+  need to match the Maven groupId).
+  **Publish wiring closed**: `com.gradleup.nmcp.settings` (the current
+  community-standard Gradle plugin for Central Portal's Publisher API —
+  the legacy OSSRH staging endpoint is retired) added in
+  `settings.gradle.kts`, `signing` plugin wired in `build.gradle.kts`
+  reading `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE` from env (no-op if absent, so
+  it never affects a non-publish build), `publishingType = "AUTOMATIC"`
+  (Central Portal validates and releases with no second manual step —
+  the GitHub Environment approval below is the one human checkpoint).
+  `spring-boot-starter-publish.yml` now exists (`spring-v*` tags), sharing
+  its build/test gate with `spring-boot-conformance.yml` through the new
+  `_spring-build-test.yml`, gated on a `maven-central-publish` GitHub
+  Environment with a required reviewer before the irreversible
+  `publishAggregationToCentralPortal` step.
+  **Still open — external, user-only steps**: generate a Central Portal
+  user token (account settings at central.sonatype.com) and export the
+  existing GPG key's private key + passphrase, then add all four as
+  GitHub Actions secrets (`MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`,
+  `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`) and configure the
+  `maven-central-publish` Environment's required reviewer. None of this
+  is done yet; the workflow will fail cleanly (missing secrets) until it
+  is.
 - **Go** (`implementations/go-nethttp`) — nothing blocking. The module is
   already well-formed and `implementations/go-nethttp/README.md:9-15`
   already documents the intended `go get ...@vX.Y.Z` usage. The only
-  action is cutting a real tag.
+  action is cutting a real tag — and it must be
+  `implementations/go-nethttp/vX.Y.Z`, per the subdirectory-module tag
+  rule noted above, not a short `go-vX.Y.Z` prefix.
 
 ## Suggested rollout order
 
@@ -325,11 +429,18 @@ on each other.
    `ashurbanipal-axum` version bump and the two new crates' GitHub
    environments, both tracked in the per-port gaps above — not new
    pattern validation.
-3. **Node and Flask** — similar complexity to each other (OIDC trusted
-   publishing supported by both registries), can proceed in either order
-   or in parallel; the Rust jobs' pattern is now proven out end-to-end.
-4. **Spring Boot starter last** — namespace verification and GPG signing
-   are the slowest, least automatable parts of this whole effort; start
-   the manual verification step early if there's a target date, but don't
-   let it block the other three remaining ports' publish jobs from
-   landing.
+3. **Node and Flask** — `node-express-publish.yml` and
+   `flask-python-publish.yml` now both exist, mirroring the Rust jobs'
+   pattern end-to-end (shared build/test gate, conformance, OIDC Trusted
+   Publishing). **Still open before either can actually run**: npm's
+   one-time manual-token bootstrap publish (Trusted Publisher config
+   needs the package to exist first) and registering PyPI's pending
+   Trusted Publisher for `ashurbanipal-flask` — both are external,
+   registry-side steps, not something a workflow file can do.
+4. **Spring Boot starter last** — namespace verification for
+   `io.github.mt-empty` is done and `spring-boot-starter-publish.yml` now
+   exists (nmcp + signing wired, `maven-central-publish` Environment
+   gate). **Still open**: the four GitHub secrets (Central Portal token,
+   GPG key) need to be added and the Environment's required reviewer
+   configured — both external, user-only steps — before the first
+   `spring-v*` tag can actually publish.

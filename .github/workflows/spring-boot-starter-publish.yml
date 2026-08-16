@@ -1,0 +1,109 @@
+name: spring-boot-starter-publish
+
+# Publishes implementations/spring-boot-starter to Maven Central as
+# io.github.mt-empty:ashurbanipal-spring-boot-starter, gated on a
+# spring-v* tag (docs/publishing-checklist.md's per-port tag scheme).
+# Shares its build/test gate with spring-boot-conformance.yml via
+# _spring-build-test.yml.
+#
+# Unlike npm/crates.io/PyPI, there's no OIDC trusted-publishing option
+# here — Central Portal auth is a username/password token pair
+# (MAVEN_CENTRAL_USERNAME/MAVEN_CENTRAL_PASSWORD, generated once at
+# https://central.sonatype.com/ account settings) plus a GPG key
+# (GPG_PRIVATE_KEY/GPG_PASSPHRASE) for artifact signing, both stored as
+# GitHub Actions secrets. The `publish` job's `maven-central-publish`
+# GitHub Environment is configured with a required reviewer — Central is
+# fully immutable once released, so this is the one manual approval
+# checkpoint before the irreversible step, matching the crates.io publish
+# jobs' pattern.
+
+on:
+  push:
+    tags: ["spring-v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  verify-version:
+    name: verify tag is on main + matches build.gradle.kts version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need full history for the branch-ancestry check below
+
+      - name: Check that the tagged commit is on main
+        run: |
+          if ! git branch -r --contains "${{ github.sha }}" | grep -q 'origin/main$'; then
+            echo "tag ${{ github.ref_name }} (${{ github.sha }}) is not on main — refusing to publish" >&2
+            exit 1
+          fi
+
+      - name: Compare tag to implementations/spring-boot-starter/build.gradle.kts version
+        run: |
+          tag_version="${GITHUB_REF_NAME#spring-v}"
+          gradle_version=$(sed -n 's/^version = "\(.*\)"/\1/p' implementations/spring-boot-starter/build.gradle.kts)
+          if [ "$tag_version" != "$gradle_version" ]; then
+            echo "tag $GITHUB_REF_NAME implies version $tag_version, but build.gradle.kts has $gradle_version" >&2
+            exit 1
+          fi
+
+  build-and-test:
+    needs: verify-version
+    uses: ./.github/workflows/_spring-build-test.yml
+
+  conformance:
+    name: Spring Boot — conformance kit (external-URL path, against the Kotlin demo)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: java
+      start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
+      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENVIRONMENT=dev ASHURBANIPAL_ENABLED_FOR=dev"
+      health-url: "http://localhost:4100/__ashurbanipal/api/tables"
+      conformance-url: "http://localhost:4100/__ashurbanipal"
+      report-name: spring-boot-starter-publish-conformance-report
+
+  schema-conformance:
+    name: Spring Boot — schema conformance
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-schema.yml
+    with:
+      toolchain: java
+      start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
+      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENVIRONMENT=dev ASHURBANIPAL_ENABLED_FOR=dev"
+      health-url: "http://localhost:4100/__ashurbanipal/api/tables"
+      conformance-url: "http://localhost:4100/__ashurbanipal"
+
+  publish:
+    name: Maven Central publish (Central Portal, GPG-signed)
+    needs: [conformance, schema-conformance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # Central Portal validation can take several minutes
+    # Configure this GitHub Environment (Settings > Environments) with a
+    # required reviewer — Central Portal releases are immutable, so this
+    # is the one human approval before the irreversible step.
+    environment:
+      name: maven-central-publish
+      url: https://central.sonatype.com/artifact/io.github.mt-empty/ashurbanipal-spring-boot-starter
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Publish to Maven Central (Central Portal)
+        working-directory: implementations/spring-boot-starter
+        run: ./gradlew publishAggregationToCentralPortal
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}

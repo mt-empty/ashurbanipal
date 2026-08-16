@@ -1,0 +1,121 @@
+name: node-express-publish
+
+# Publishes implementations/node-express to npm as ashurbanipal-node-express,
+# gated on a node-v* tag (docs/publishing-checklist.md's per-port tag
+# scheme). Shares its build/test gate with node-conformance.yml via
+# _node-build-test.yml.
+#
+# Prerequisite this workflow can't do for you: npm's Trusted Publisher
+# (OIDC) config can only be attached to a package that already exists on
+# the registry, so the very first `npm publish` for a brand-new package
+# has to be done manually, once, with a classic npm token
+# (https://docs.npmjs.com/trusted-publishers) — after that one-time
+# bootstrap, every release flows through this workflow's `publish` job
+# with no stored secret at all.
+#
+# Verified against docs.npmjs.com/trusted-publishers directly: the npm
+# CLI auto-detects the OIDC environment from `id-token: write` alone (no
+# special flag), requires npm CLI >=11.5.1 + Node >=22.14.0 (both well
+# under Node 26 below), and generates provenance attestations
+# automatically — `--provenance` is redundant, not required.
+
+on:
+  push:
+    tags: ["node-v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  verify-version:
+    name: verify tag is on main + matches package.json version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need full history for the branch-ancestry check below
+
+      - name: Check that the tagged commit is on main
+        run: |
+          if ! git branch -r --contains "${{ github.sha }}" | grep -q 'origin/main$'; then
+            echo "tag ${{ github.ref_name }} (${{ github.sha }}) is not on main — refusing to publish" >&2
+            exit 1
+          fi
+
+      - name: Compare tag to implementations/node-express/package.json version
+        run: |
+          tag_version="${GITHUB_REF_NAME#node-v}"
+          pkg_version=$(node -p "require('./implementations/node-express/package.json').version")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "tag $GITHUB_REF_NAME implies version $tag_version, but package.json has $pkg_version" >&2
+            exit 1
+          fi
+
+  build-and-test:
+    needs: verify-version
+    uses: ./.github/workflows/_node-build-test.yml
+
+  conformance:
+    name: Node/Express — conformance kit (external-URL path)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: node
+      node-version: "26"
+      start-command: "cd implementations/node-express && pnpm install --frozen-lockfile && pnpm run demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: node-express-publish-conformance-report
+
+  schema-conformance:
+    name: Node/Express — schema conformance
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-schema.yml
+    with:
+      toolchain: node
+      node-version: "26"
+      start-command: "cd implementations/node-express && pnpm install --frozen-lockfile && pnpm run demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+
+  publish:
+    name: npm publish (Trusted Publishing)
+    needs: [conformance, schema-conformance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Configure this GitHub Environment (Settings > Environments) with
+    # required reviewers if a manual approval gate before an irreversible
+    # (unpublish is time/dependent-limited) publish is wanted — inert with
+    # no protection rules set.
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/ashurbanipal-node-express
+    permissions:
+      contents: read
+      id-token: write # required to mint npm's OIDC token
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: pnpm
+          cache-dependency-path: implementations/node-express/pnpm-lock.yaml
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        working-directory: implementations/node-express
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: implementations/node-express
+        run: pnpm run build
+
+      - name: npm publish
+        working-directory: implementations/node-express
+        run: npm publish

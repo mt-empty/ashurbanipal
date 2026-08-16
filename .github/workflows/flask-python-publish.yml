@@ -1,0 +1,129 @@
+name: flask-python-publish
+
+# Publishes implementations/flask-python to PyPI as ashurbanipal-flask,
+# gated on a flask-v* tag (docs/publishing-checklist.md's per-port tag
+# scheme). Shares its build/test gate with flask-conformance.yml via
+# _flask-build-test.yml.
+#
+# Unlike npm/crates.io, PyPI's Trusted Publisher config supports a
+# "pending publisher" registered before the project exists on the
+# registry (https://docs.pypi.org/trusted-publishers/adding-a-publisher/#configuring-trusted-publishing-for-a-new-project)
+# — the very first push through this workflow can create the project on
+# PyPI directly, no bootstrap token needed.
+
+on:
+  push:
+    tags: ["flask-v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  verify-version:
+    name: verify tag is on main + matches pyproject.toml version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need full history for the branch-ancestry check below
+
+      - name: Check that the tagged commit is on main
+        run: |
+          if ! git branch -r --contains "${{ github.sha }}" | grep -q 'origin/main$'; then
+            echo "tag ${{ github.ref_name }} (${{ github.sha }}) is not on main — refusing to publish" >&2
+            exit 1
+          fi
+
+      - name: Compare tag to implementations/flask-python/pyproject.toml version
+        run: |
+          tag_version="${GITHUB_REF_NAME#flask-v}"
+          pkg_version=$(sed -n 's/^version = "\(.*\)"/\1/p' implementations/flask-python/pyproject.toml)
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "tag $GITHUB_REF_NAME implies version $tag_version, but pyproject.toml has $pkg_version" >&2
+            exit 1
+          fi
+
+  build-and-test:
+    needs: verify-version
+    uses: ./.github/workflows/_flask-build-test.yml
+
+  conformance:
+    name: Flask — conformance kit (external-URL path)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: python
+      python-version: "3.12"
+      start-command: >-
+        tools/sync-ports-frontend.sh &&
+        cd implementations/flask-python &&
+        uv sync --extra postgres &&
+        PORT=4000 uv run python demo/app.py
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: flask-python-publish-conformance-report
+
+  schema-conformance:
+    name: Flask — schema conformance
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-schema.yml
+    with:
+      toolchain: python
+      python-version: "3.12"
+      start-command: >-
+        tools/sync-ports-frontend.sh &&
+        cd implementations/flask-python &&
+        uv sync --extra postgres &&
+        PORT=4000 uv run python demo/app.py
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+
+  build-dist:
+    name: build sdist + wheel
+    needs: [conformance, schema-conformance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Sync vendored frontend
+        run: tools/sync-ports-frontend.sh
+
+      - name: uv build
+        working-directory: implementations/flask-python
+        run: uv build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: flask-python-dist
+          path: implementations/flask-python/dist/
+
+  publish:
+    name: PyPI publish (Trusted Publishing)
+    needs: build-dist
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # PyPI's own Trusted Publishing guide states this isn't optional:
+    # "For security reasons, you must require manual approval on each run
+    # for the `pypi` environment." Configure this GitHub Environment
+    # (Settings > Environments) with a required reviewer — inert with no
+    # protection rules set until that's done.
+    environment:
+      name: pypi-publish
+      url: https://pypi.org/p/ashurbanipal-flask
+    permissions:
+      contents: read
+      id-token: write # required to mint PyPI's OIDC token
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: flask-python-dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0

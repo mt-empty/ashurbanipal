@@ -4,54 +4,36 @@ Kotlin/Spring Boot autoconfiguration starter implementing `spec/protocol.md`
 — see the repo root `readme.md` for what this is and `PORTING.md` for what a
 port implements/reuses.
 
-## Database support
-
-| Backend | Type | Status |
-|---|---|---|
-| Postgres (`PostgresSource`) | default, no config needed | Conformant — covered by the full conformance suite (`spring-boot-conformance.yml`). |
-| MySQL/MariaDB (`MySqlSource`) | opt-in via `ashurbanipal.backend=mysql` (off by default) | Reviewed and supported, with known degraded features — common-values statistics have no reliable cross-version equivalent and degrade to empty. Table counts and comments come from `information_schema`, same as Postgres. Detects MySQL vs. MariaDB at runtime (`SELECT VERSION()`, cached) since the two forks need different query-timeout SQL — see `docs/adapter-decisions.md` §6. Not run through `conformance/runner` (that suite targets Postgres); has its own unit test suite instead, requiring a live instance via `MYSQL_TEST_URL`/`MARIADB_TEST_URL`. |
-| SQLite (`SqliteSource`) | opt-in via `ashurbanipal.backend=sqlite` (off by default) | Reviewed and supported, with known degraded features — comments and common-values statistics have no SQLite equivalent and degrade to empty/omitted; table counts are always the "no estimate" sentinel rather than Postgres's fast planner estimate. The real query-timeout mechanism is Xerial `sqlite-jdbc`'s `org.sqlite.ProgressHandler`, not plain JDBC `Statement.setQueryTimeout` (verified empirically not to cancel a running query on this driver — see `docs/adapter-decisions.md` §6). Not run through `conformance/runner`; has its own unit test suite instead. |
-
-Selecting a backend is always an explicit config property, never inferred
-from which JDBC driver happens to be on the classpath (`PORTING.md`'s
-hardening checklist item 2 — classpath-presence autoconfiguration is this
-project's highest-risk default failure mode). A host opting into
-`mysql`/`sqlite` still supplies its own `DataSource` bean (pointed at that
-engine) exactly as it would for Postgres; this starter never adds a JDBC
-driver dependency of its own (`org.xerial:sqlite-jdbc` is `compileOnly` in
-`build.gradle.kts`, needed only to compile `SqliteSource`'s use of the real
-timeout mechanism — the host's own runtime classpath must provide it if
-`backend=sqlite` is set, which it needs anyway to build a working
-`DataSource`).
+## Usage
 
 ```yaml
 ashurbanipal:
   environment: ${ASHURBANIPAL_ENVIRONMENT:dev}
   enabled-for: ${ASHURBANIPAL_ENABLED_FOR:dev}
   # Defaults to "postgres"; "mysql" (covers MariaDB too) or "sqlite" opt in
-  # to the alternate DbSource implementations above.
+  # to the alternate DbSource implementations below.
   backend: postgres
 ```
 
-See `docs/adapter-decisions.md` for the full per-backend mechanism registry
-(row counts, common-values, text casting, `ILIKE` mapping, schema scoping,
-comments, query timeouts) shared across every implementation in this repo.
+Autoconfigured — no bean wiring needed beyond the host's own `DataSource`.
+Backend selection is always an explicit config property, never inferred
+from which JDBC driver happens to be on the classpath (`PORTING.md`'s
+hardening checklist item 2). Absent config, a non-matching `environment`,
+or a production-like `enabled-for` all disable the starter (no
+`DbViewerController`/`DbSource` bean registered) without failing
+application startup; a production-like value fails startup outright —
+`AshurbanipalKillSwitchTest.kt` is the only evidence of this, since
+conformance can't observe it over HTTP.
 
-## Kill switch
+## Database support
 
-`src/test/kotlin/io/github/mtempty/ashurbanipal/AshurbanipalKillSwitchTest.kt`
-is this port's kill-switch test suite — absent config, a non-matching
-`environment`, and a production-like `enabled-for` value all disable the
-starter (no `DbViewerController`/`DbSource` bean registered) without
-failing application startup; a production-like value fails startup
-outright. Conformance can't observe any of this over HTTP (`PORTING.md`
-hardening checklist item 2), so this file is the only evidence the
-property holds.
+Same per-backend degraded features and mechanisms as the Rust reference
+(comments/common-values unavailable on SQLite and MySQL, MySQL-vs-MariaDB
+runtime detection for the query-timeout mechanism, Xerial `sqlite-jdbc`'s
+`ProgressHandler` instead of JDBC's non-functional `setQueryTimeout`) —
+see `docs/adapter-decisions.md` for the full registry. A host opting into
+`mysql`/`sqlite` still supplies its own `DataSource` bean; this starter
+never adds a JDBC driver dependency of its own.
 
-## CSP note
-
-Per `PORTING.md`, this port takes the same option the Rust reference and
-every other port take: it sets no `Content-Security-Policy` header and
-injects no nonce. A host running under a strict CSP forbidding inline
-scripts must extend it for `${ashurbanipal.base-path}` before the UI's
-inline `<script type="module">` will execute client-side.
+Full API/config reference:
+[docs/design.md](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md).
