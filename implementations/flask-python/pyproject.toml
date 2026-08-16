@@ -48,7 +48,11 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "PTH"]
 
 [build-system]
-requires = ["hatchling"]
+# hatchling 1.32.0 (2026-08-11) bumped its default core metadata version to
+# 2.5, ahead of PyPI/pypa-gh-action-pypi-publish support — pin below it or
+# `uv build` produces a wheel PyPI rejects with "'2.5' is not a valid
+# metadata version".
+requires = ["hatchling<1.32"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
