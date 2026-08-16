@@ -24,6 +24,10 @@ reqwest = { version = "0.13", default-features = false, features = [
 ] }
 
 [features]
+default = ["postgres"]
+# On by default: PgPoolSource is the reference backend. Disable
+# default-features to drop it. See core/Cargo.toml.
+postgres = ["ashurbanipal/postgres"]
 # Off by default: keeps sqlx's sqlite feature out of the default build for
 # hosts that only need Postgres. See docs/adapter-decisions.md for the
 # per-clause decisions SqliteSource makes vs. the Postgres reference.

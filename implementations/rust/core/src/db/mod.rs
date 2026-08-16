@@ -1,11 +1,13 @@
 #[cfg(feature = "mysql")]
 mod mysql;
+#[cfg(feature = "postgres")]
 mod postgres;
 #[cfg(feature = "sqlite")]
 mod sqlite;
 
 #[cfg(feature = "mysql")]
 pub use mysql::MySqlSource;
+#[cfg(feature = "postgres")]
 pub use postgres::PgPoolSource;
 #[cfg(feature = "sqlite")]
 pub use sqlite::SqliteSource;

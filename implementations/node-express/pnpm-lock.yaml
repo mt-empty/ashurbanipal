@@ -11,9 +11,6 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
-      pg:
-        specifier: ^8.22.0
-        version: 8.22.0
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.5.7
@@ -30,6 +27,9 @@ importers:
       mysql2:
         specifier: ^3.23.2
         version: 3.23.2(@types/node@26.1.2)
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
       sqlite3:
         specifier: ^6.0.1
         version: 6.0.1

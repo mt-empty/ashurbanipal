@@ -23,11 +23,11 @@ mod routes;
 
 #[cfg(feature = "mysql")]
 pub use ashurbanipal::MySqlSource;
+#[cfg(feature = "postgres")]
+pub use ashurbanipal::PgPoolSource;
 #[cfg(feature = "sqlite")]
 pub use ashurbanipal::SqliteSource;
-pub use ashurbanipal::{
-    ColumnInfo, DbError, DbSource, PgPoolSource, QueryOpts, TableData, TableInfo,
-};
+pub use ashurbanipal::{ColumnInfo, DbError, DbSource, QueryOpts, TableData, TableInfo};
 pub use ashurbanipal::{Condition, FilterError, FilterOp, Logic};
 pub use ashurbanipal::{Config, ConfigError, Limits, Sibling};
 pub use routes::router;
