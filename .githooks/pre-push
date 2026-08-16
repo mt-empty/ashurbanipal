@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Reject pushing any commit that isn't signed with a valid (good) GPG/SSH signature.
+set -euo pipefail
+
+zero=$(printf '%040d' 0)
+bad_found=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+	[ "$local_sha" = "$zero" ] && continue # deleting a ref, nothing to check
+
+	if [ "$remote_sha" = "$zero" ]; then
+		range="$local_sha"
+	else
+		range="$remote_sha..$local_sha"
+	fi
+
+	while read -r sha status; do
+		case "$status" in
+		G) ;; # good signature
+		*)
+			echo "pre-push: commit $sha ($local_ref) is not validly signed (status: $status)" >&2
+			bad_found=1
+			;;
+		esac
+	done < <(git rev-list "$range" --pretty="format:%H %G?" | grep -v '^commit ')
+done
+
+if [ "$bad_found" -ne 0 ]; then
+	echo "pre-push: aborting — every pushed commit must have a valid signature." >&2
+	exit 1
+fi
