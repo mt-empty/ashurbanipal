@@ -7,6 +7,8 @@ description = "Framework-agnostic core (config, DbSource backends, filter DSL) b
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/mt-empty/ashurbanipal"
+keywords = ["postgres", "sqlite", "mysql", "admin", "database"]
+categories = ["database"]
 
 [dependencies]
 sqlx = { workspace = true }

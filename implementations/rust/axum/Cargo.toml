@@ -7,6 +7,8 @@ description = "Embeddable, read-only database browser for lower environments"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/mt-empty/ashurbanipal"
+keywords = ["axum", "postgres", "admin", "database", "devtools"]
+categories = ["web-programming", "database"]
 
 [dependencies]
 axum = "0.8"

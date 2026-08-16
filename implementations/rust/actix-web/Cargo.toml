@@ -7,6 +7,8 @@ description = "Embeddable, read-only database browser for lower environments (Ac
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/mt-empty/ashurbanipal"
+keywords = ["actix-web", "postgres", "admin", "database", "devtools"]
+categories = ["web-programming", "database"]
 
 [dependencies]
 actix-web = "4"
