@@ -162,7 +162,34 @@ on each other.
    publishes; `ashurbanipal` and `ashurbanipal-actix-web` are now live,
    `ashurbanipal-axum` still needs its version-bump republish (see
    per-port gaps below). Node, Flask, Spring still pending.
-6. **CI publish job gated on the port's own tag prefix**, using
+6. **Registry-specific manual-approval requirements, keyword/category
+   discoverability fields, and deployment-linked GitHub Environments.**
+   Cross-checked the publish setup directly against
+   [Cargo's](https://doc.rust-lang.org/cargo/reference/publishing.html),
+   [npm's](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages)/
+   [npm's trusted-publishers](https://docs.npmjs.com/trusted-publishers),
+   and [PyPI's](https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/)
+   own publishing docs (not just general knowledge) and found/fixed four
+   gaps: **(a)** PyPI's guide states manual approval on the `pypi`
+   environment isn't optional ("you must require manual approval on each
+   run") — `flask-python-publish.yml`'s comment previously framed it the
+   same take-it-or-leave-it way as the other three registries; reworded
+   to say it's PyPI-mandated. **(b)** All three Rust crates were missing
+   `keywords`/`categories` (Cargo's docs list both as recommended for
+   crates.io discoverability) — added, validated against crates.io's live
+   `/api/v1/categories` list rather than guessed slugs (`database` and
+   `web-programming` confirmed to exist). **(c)** None of the four
+   `environment:` blocks set the optional deployment `url:` GitHub
+   Environments support (PyPI's own example workflow sets one) — added
+   to all four (crates.io ×3, npm, PyPI, Maven Central). **(d)** Verified
+   npm's OIDC trusted-publishing mechanics directly against
+   docs.npmjs.com/trusted-publishers (the scoped-packages guide alone
+   doesn't cover OIDC): `id-token: write` is sufficient with no special
+   flag, npm CLI >=11.5.1 auto-detects the OIDC environment, and
+   provenance attestation is automatic — `--provenance --access public`
+   in `node-express-publish.yml` was unnecessary/redundant, simplified to
+   bare `npm publish`.
+7. **CI publish job gated on the port's own tag prefix**, using
    OIDC trusted publishing where the registry supports it, mirroring
    `release.yml`'s existing `check-branch` job (tag must be on `main`)
    rather than trusting whoever cut the tag. — *Done for Rust*:
@@ -190,7 +217,7 @@ on each other.
    will run with no gate at all. On crates.io's side, all three crates'
    Trusted Publisher config uses the same environment name
    (`crates-io-publish`), just a different workflow filename each.
-7. **Decide whether `frontend/dbviewer.html` needs to be independently
+8. **Decide whether `frontend/dbviewer.html` needs to be independently
    versioned/pinned** for a published artifact the way `PORTING.md`'s
    vendoring contract already expects in spirit (each port re-hashes it
    at build/CI time against a pinned sha256) — today every port pins

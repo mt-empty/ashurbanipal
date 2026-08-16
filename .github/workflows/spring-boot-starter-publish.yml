@@ -85,7 +85,9 @@ jobs:
     # Configure this GitHub Environment (Settings > Environments) with a
     # required reviewer — Central Portal releases are immutable, so this
     # is the one human approval before the irreversible step.
-    environment: maven-central-publish
+    environment:
+      name: maven-central-publish
+      url: https://central.sonatype.com/artifact/io.github.mt-empty/ashurbanipal-spring-boot-starter
     permissions:
       contents: read
     steps:

@@ -12,6 +12,12 @@ name: node-express-publish
 # (https://docs.npmjs.com/trusted-publishers) — after that one-time
 # bootstrap, every release flows through this workflow's `publish` job
 # with no stored secret at all.
+#
+# Verified against docs.npmjs.com/trusted-publishers directly: the npm
+# CLI auto-detects the OIDC environment from `id-token: write` alone (no
+# special flag), requires npm CLI >=11.5.1 + Node >=22.14.0 (both well
+# under Node 26 below), and generates provenance attestations
+# automatically — `--provenance` is redundant, not required.
 
 on:
   push:
@@ -82,7 +88,9 @@ jobs:
     # required reviewers if a manual approval gate before an irreversible
     # (unpublish is time/dependent-limited) publish is wanted — inert with
     # no protection rules set.
-    environment: npm-publish
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/ashurbanipal-node-express
     permissions:
       contents: read
       id-token: write # required to mint npm's OIDC token
@@ -110,4 +118,4 @@ jobs:
 
       - name: npm publish
         working-directory: implementations/node-express
-        run: npm publish --provenance --access public
+        run: npm publish

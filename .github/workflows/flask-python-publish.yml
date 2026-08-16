@@ -108,10 +108,14 @@ jobs:
     needs: build-dist
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Configure this GitHub Environment (Settings > Environments) with
-    # required reviewers if a manual approval gate before an irreversible
-    # (yank-only) publish is wanted — inert with no protection rules set.
-    environment: pypi-publish
+    # PyPI's own Trusted Publishing guide states this isn't optional:
+    # "For security reasons, you must require manual approval on each run
+    # for the `pypi` environment." Configure this GitHub Environment
+    # (Settings > Environments) with a required reviewer — inert with no
+    # protection rules set until that's done.
+    environment:
+      name: pypi-publish
+      url: https://pypi.org/p/ashurbanipal-flask
     permissions:
       contents: read
       id-token: write # required to mint PyPI's OIDC token
