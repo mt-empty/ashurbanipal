@@ -10,6 +10,8 @@ npm install ashurbanipal-node-express pg
 
 `pg`/`sqlite3`/`mysql2` are optional peer dependencies — install whichever
 driver(s) your `DbSource` backend needs (see "Database support" below).
+Most hosts only need one backend — if that's not Postgres, skip installing
+`pg`.
 
 ## Usage
 
