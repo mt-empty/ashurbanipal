@@ -21,8 +21,14 @@ include("demo")
 // this extension.
 nmcpSettings {
     centralPortal {
-        username = providers.environmentVariable("MAVEN_CENTRAL_USERNAME")
-        password = providers.environmentVariable("MAVEN_CENTRAL_PASSWORD")
+        // Plain System.getenv() rather than providers.environmentVariable():
+        // the latter's ValueSourceProvider can't be serialized by Gradle
+        // 9.7's settings-level GradleLifecycle isolation, which fails
+        // `./gradlew build` outright (not just the publish task) with
+        // "Failed to isolate 'GradleLifecycle' action: ... not supported
+        // with the configuration cache."
+        username = System.getenv("MAVEN_CENTRAL_USERNAME")
+        password = System.getenv("MAVEN_CENTRAL_PASSWORD")
         // AUTOMATIC: Central validates and releases without a second manual
         // step on the portal UI — the one human checkpoint is the GitHub
         // Environment approval gate in spring-boot-starter-publish.yml,
