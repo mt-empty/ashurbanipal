@@ -27,6 +27,9 @@ Drop Postgres entirely with `default-features = false`:
 ashurbanipal = { version = "0.2", default-features = false, features = ["sqlite"] } # or "mysql"
 ```
 
+Most hosts only need one backend — if that's not Postgres, dropping it
+is recommended.
+
 See either framework adapter's README for a working usage example, or
 [docs/design.md](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md)
 for the full API/config reference.
