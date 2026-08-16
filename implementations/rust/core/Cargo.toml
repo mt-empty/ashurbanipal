@@ -7,6 +7,8 @@ description = "Framework-agnostic core (config, DbSource backends, filter DSL) b
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/mt-empty/ashurbanipal"
+keywords = ["postgres", "sqlite", "mysql", "admin", "database"]
+categories = ["database"]
 
 [dependencies]
 sqlx = { workspace = true }
@@ -15,6 +17,11 @@ serde_json = "1"
 toml = "1"
 
 [features]
+default = ["postgres"]
+# On by default: PgPoolSource is the reference backend. Disable
+# default-features to drop it (e.g. a SQLite-only or MySQL-only build never
+# pulls in sqlx's postgres feature or its driver).
+postgres = ["sqlx/postgres"]
 # Off by default: keeps sqlx's sqlite feature out of the default build for
 # hosts that only need Postgres. See docs/adapter-decisions.md for the
 # per-clause decisions SqliteSource makes vs. the Postgres reference.

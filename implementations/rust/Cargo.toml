@@ -6,7 +6,6 @@ members = ["axum", "core", "actix-web"]
 sqlx = { version = "0.9", default-features = false, features = [
     "runtime-tokio",
     "tls-rustls-ring-webpki",
-    "postgres",
     "uuid",
     "chrono",
     "json",

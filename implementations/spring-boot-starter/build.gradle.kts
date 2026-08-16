@@ -4,10 +4,11 @@ plugins {
     kotlin("jvm") version "2.4.10"
     kotlin("plugin.spring") version "2.4.10"
     `maven-publish`
+    signing
 }
 
-group = "io.github.mtempty"
-version = "0.1.0-SNAPSHOT"
+group = "io.github.mt-empty"
+version = "0.1.0"
 
 // Toolchain pinned to whatever JDK is actually installed in this devcontainer
 // (JDK 21 via mise — no JDK 17 available to auto-detect or download here).
@@ -17,6 +18,12 @@ java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
     }
+    // Central requires a -sources.jar and -javadoc.jar alongside the main
+    // jar for every published artifact (placeholder content is fine —
+    // there's no Kotlin source in the standard `javadoc` task's input, so
+    // this produces an empty-but-present javadoc jar rather than a real one).
+    withSourcesJar()
+    withJavadocJar()
 }
 
 kotlin {
@@ -146,6 +153,14 @@ tasks.named("processResources") {
     dependsOn(vendorFrontend)
 }
 
+// sourcesJar also packages main.resources' srcDirs (including
+// generated-resources), so it needs the same dependency processResources
+// already declares — withSourcesJar() surfaced this as a missing-task-input
+// validation failure that predates it going unnoticed.
+tasks.named("sourcesJar") {
+    dependsOn(vendorFrontend)
+}
+
 publishing {
     publications {
         create<MavenPublication>("maven") {
@@ -167,22 +182,46 @@ publishing {
                 developers {
                     developer {
                         id.set("mt-empty")
+                        name.set("mt-empty")
+                        // GitHub-provided noreply address (id+username@users.noreply.github.com)
+                        // rather than a real inbox — this is published publicly and
+                        // permanently once released.
+                        email.set("59728838+mt-empty@users.noreply.github.com")
                         url.set("https://github.com/mt-empty")
                     }
                 }
                 scm {
                     url.set("https://github.com/mt-empty/ashurbanipal")
                     connection.set("scm:git:https://github.com/mt-empty/ashurbanipal.git")
+                    developerConnection.set("scm:git:ssh://github.com/mt-empty/ashurbanipal.git")
                 }
             }
         }
     }
     // Inert on purpose: shape only, no credentials wired, never executed
-    // by CI in this repo.
+    // by CI in this repo. Actual publishing goes through nmcp (settings.gradle.kts)
+    // instead, which reads the "maven" publication directly rather than via
+    // `publish`/`PublishToMavenRepository` — this placeholder just keeps
+    // the `publishing {}` block's `repositories` non-empty, which Gradle
+    // otherwise warns about.
     repositories {
         maven {
             name = "placeholder"
             url = uri(layout.buildDirectory.dir("repo"))
         }
+    }
+}
+
+// Central Portal rejects unsigned artifacts outright. Signing only needs
+// to resolve when a publish task actually runs — build/test never touch
+// this — so an absent GPG_PRIVATE_KEY/GPG_PASSPHRASE (any non-publish CI
+// job, any local dev build) leaves signing un-configured rather than
+// failing the build.
+val signingKey = providers.environmentVariable("GPG_PRIVATE_KEY").orNull
+val signingPassphrase = providers.environmentVariable("GPG_PASSPHRASE").orNull
+if (signingKey != null && signingPassphrase != null) {
+    signing {
+        useInMemoryPgpKeys(signingKey, signingPassphrase)
+        sign(publishing.publications["maven"])
     }
 }
