@@ -153,6 +153,14 @@ tasks.named("processResources") {
     dependsOn(vendorFrontend)
 }
 
+// sourcesJar also packages main.resources' srcDirs (including
+// generated-resources), so it needs the same dependency processResources
+// already declares — withSourcesJar() surfaced this as a missing-task-input
+// validation failure that predates it going unnoticed.
+tasks.named("sourcesJar") {
+    dependsOn(vendorFrontend)
+}
+
 publishing {
     publications {
         create<MavenPublication>("maven") {
