@@ -2,7 +2,7 @@
 
 <img src="docs/media/icon.svg" alt="" width="66" height="66" align="right">
 
-No-bullshit Database browser for schemaful databases — self-contained, embeddable, read-only. No separate DB client, no extra credentials, no build step.
+No-bullshit Database browser for schemaful databases; self-contained, embeddable, read-only. No separate DB client, no extra credentials, no build step.
 
 ![Ashurbanipal demo](tools/e2e-tests/showcase.gif)
 
@@ -40,50 +40,187 @@ Ashurbanipal lib skips the whole chain by not needing a new connection, it runs 
 
 - In a corporate vpn environment, where engineers have to jump through hoops to get access to the database.
 
-if you have the freedom to run a sidecar container, you can use `pgweb` instead, which is a full-featured DB client.
+If you have the freedom to run a sidecar container, you can use `pgweb` instead, which is a full-featured DB client.
 
-## Usage
+## Quick usage
 
-See each implementation's own README for install and config instructions
-— e.g. `implementations/rust/axum/README.md` for the Rust/Axum crate.
+### Postgres
 
-See `docs/design.md` for the full API contract, filter DSL, and config
-reference.
+<details><summary>Rust / Axum</summary>
+
+```rust
+// cargo add ashurbanipal-axum
+use ashurbanipal_axum::{Config, PgPoolSource};
+app.merge(ashurbanipal_axum::router(config, PgPoolSource::new(pool)));
+```
+</details>
+
+<details><summary>Rust / Actix-web</summary>
+
+```rust
+// cargo add ashurbanipal-actix-web
+use ashurbanipal_actix_web::{app_state, service, Config, PgPoolSource};
+App::new().service(service(app_state(config, PgPoolSource::new(pool))));
+```
+</details>
+
+<details><summary>Spring Boot</summary>
+
+```yaml
+# implementation("io.github.mtempty:ashurbanipal-spring-boot-starter:X.Y.Z")
+ashurbanipal:
+  environment: dev
+  enabled-for: dev
+  # backend: postgres is the default
+```
+</details>
+
+<details><summary>Go / net-http</summary>
+
+```go
+// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
+source := ashurbanipal.NewPostgresSource(db, timeoutSecs)
+viewer, err := ashurbanipal.Router(cfg, source)
+```
+</details>
+
+<details><summary>Node / Express</summary>
+
+```ts
+// pnpm install ashurbanipal-node-express
+import { createRouter, PostgresSource } from "ashurbanipal-node-express";
+const viewer = createRouter(config, new PostgresSource(pool));
+```
+</details>
+
+<details><summary>Python / Flask</summary>
+
+```python
+# uv add ashurbanipal-flask
+from ashurbanipal.db.postgres import PgSource
+app.register_blueprint(router(config, PgSource(dsn=os.environ["DATABASE_URL"])))
+```
+</details>
+
+### MySQL / MariaDB
+
+<details><summary>Rust / Axum</summary>
+
+```rust
+// cargo add ashurbanipal-axum --features mysql
+use ashurbanipal_axum::{Config, MySqlSource};
+app.merge(ashurbanipal_axum::router(config, MySqlSource::new(pool)));
+```
+</details>
+
+<details><summary>Rust / Actix-web</summary>
+
+```rust
+// cargo add ashurbanipal-actix-web --features mysql
+use ashurbanipal_actix_web::{app_state, service, Config, MySqlSource};
+App::new().service(service(app_state(config, MySqlSource::new(pool))));
+```
+</details>
+
+<details><summary>Spring Boot</summary>
+
+```yaml
+# implementation("io.github.mtempty:ashurbanipal-spring-boot-starter:X.Y.Z")
+ashurbanipal:
+  backend: mysql   # covers MariaDB too
+```
+</details>
+
+<details><summary>Go / net-http</summary>
+
+```go
+// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
+// go build -tags mysql
+source := ashurbanipal.NewMySQLSource(db, timeoutSecs)
+viewer, err := ashurbanipal.Router(cfg, source)
+```
+</details>
+
+<details><summary>Node / Express</summary>
+
+```ts
+// pnpm install ashurbanipal-node-express mysql2
+import { createRouter } from "ashurbanipal-node-express";
+import { MySqlSource } from "ashurbanipal-node-express/dist/src/db/mysql.js";
+const viewer = createRouter(config, new MySqlSource(pool));
+```
+</details>
+
+<details><summary>Python / Flask</summary>
+
+```python
+# uv add ashurbanipal-flask PyMySQL
+from ashurbanipal.db.mysql import MySqlSource
+app.register_blueprint(router(config, MySqlSource(...)))
+```
+</details>
+
+### SQLite
+
+<details><summary>Rust / Axum</summary>
+
+```rust
+// cargo add ashurbanipal-axum --features sqlite
+use ashurbanipal_axum::{Config, SqliteSource};
+app.merge(ashurbanipal_axum::router(config, SqliteSource::new(pool)));
+```
+</details>
+
+<details><summary>Rust / Actix-web</summary>
+
+```rust
+// cargo add ashurbanipal-actix-web --features sqlite
+use ashurbanipal_actix_web::{app_state, service, Config, SqliteSource};
+App::new().service(service(app_state(config, SqliteSource::new(pool))));
+```
+</details>
+
+<details><summary>Spring Boot</summary>
+
+```yaml
+# implementation("io.github.mtempty:ashurbanipal-spring-boot-starter:X.Y.Z")
+ashurbanipal:
+  backend: sqlite
+```
+</details>
+
+<details><summary>Go / net-http</summary>
+
+```go
+// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
+// go build -tags sqlite
+source := ashurbanipal.NewSQLiteSource(db, timeoutSecs)
+viewer, err := ashurbanipal.Router(cfg, source)
+```
+</details>
+
+<details><summary>Node / Express</summary>
+
+```ts
+// pnpm install ashurbanipal-node-express sqlite3
+import { createRouter } from "ashurbanipal-node-express";
+import { SqliteSource } from "ashurbanipal-node-express/dist/src/db/sqlite.js";
+const viewer = createRouter(config, new SqliteSource(new Database("app.db")));
+```
+</details>
+
+<details><summary>Python / Flask</summary>
+
+```python
+# uv add ashurbanipal-flask
+from ashurbanipal.db.sqlite import SqliteSource
+app.register_blueprint(router(config, SqliteSource(path="./demo.db")))
+```
+</details>
+
 
 ## Implementations
 
-The canonical artifact of this project isn't any one backend — it's
-`frontend/dbviewer.html` plus the contract it's served against
-(`spec/protocol.md` + `spec/openapi.yaml`). The Rust crate above is the
-reference implementation of that contract, not a privileged one.
-
-If your service isn't Rust/Axum/Postgres, you have two options, in this
-order:
-
-1. **Port it.** `PORTING.md` is the full checklist: vendor the released
-   `dbviewer.html`, implement the six API routes per the spec, pass
-   conformance. This repo doesn't (and won't try to) ship a first-party
-   implementation for every language/framework/DB combination — a port
-   for your stack is expected to live in your own service or org, using
-   the spec and docs as the contract, not as a request against this repo.
-2. **No time to port? Use a sidecar instead**, e.g. `pgweb`
-   (`docker run sosedoff/pgweb --readonly`) pointed at the same DB. It
-   can't join the sibling mesh or share the DSL/UI, and it allows
-   arbitrary `SELECT` rather than the schema-validated subset this
-   project exposes — but it needs zero code. See `PORTING.md` for the
-   fuller comparison.
-
-A first-party port only gets added to the table below once it's actually
-built and passes conformance in its own CI — new-stack requests are
-better spent as a port PR than an issue asking for support.
-
-Every implementation below implements the same `spec/protocol.md` +
-`spec/openapi.yaml` contract and vendors the same `frontend/dbviewer.html`
-(`PORTING.md`); none is structurally privileged over another
-(`docs/design.md` §4.2, `roadmap.md` §2). "Conformant" means both
-conformance layers — the golden-fixture behavior runner and the
-schemathesis/equivalent shape check (`PORTING.md`) — pass in that
-implementation's own CI.
 
 | Implementation | Protocol version | Conformance CI |
 |----------------|-------------------|-----------------|
