@@ -5,8 +5,11 @@ Express — implements the same `spec/protocol.md` + `spec/openapi.yaml`
 contract as the Rust reference and the Go/Spring Boot ports.
 
 ```sh
-npm install ashurbanipal-node-express
+npm install ashurbanipal-node-express pg
 ```
+
+`pg`/`sqlite3`/`mysql2` are optional peer dependencies — install whichever
+driver(s) your `DbSource` backend needs (see "Database support" below).
 
 ## Usage
 

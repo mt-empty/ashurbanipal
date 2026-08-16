@@ -73,5 +73,12 @@ Same `DbSource` backends as `ashurbanipal-axum`, unchanged — see
 ashurbanipal-actix-web = { version = "0.2", features = ["mysql"] } # or "sqlite"
 ```
 
+Drop Postgres entirely with `default-features = false`:
+
+```toml
+[dependencies]
+ashurbanipal-actix-web = { version = "0.2", default-features = false, features = ["sqlite"] } # or "mysql"
+```
+
 Full API/config reference:
 [docs/design.md](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md).
