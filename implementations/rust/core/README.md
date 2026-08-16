@@ -12,12 +12,19 @@ cargo add ashurbanipal
 
 ## Database support
 
-Postgres by default. MySQL/MariaDB and SQLite behind the `mysql`/`sqlite`
-features:
+Postgres by default (the `postgres` feature); MySQL/MariaDB and SQLite
+behind the `mysql`/`sqlite` features:
 
 ```toml
 [dependencies]
 ashurbanipal = { version = "0.2", features = ["mysql"] } # or "sqlite"
+```
+
+Drop Postgres entirely with `default-features = false`:
+
+```toml
+[dependencies]
+ashurbanipal = { version = "0.2", default-features = false, features = ["sqlite"] } # or "mysql"
 ```
 
 See either framework adapter's README for a working usage example, or
