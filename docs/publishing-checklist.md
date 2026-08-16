@@ -373,8 +373,8 @@ on each other.
   fixed via `java { withSourcesJar(); withJavadocJar() }` (the javadoc jar
   is an empty placeholder, which Central's own docs say is acceptable,
   since there's no Java source for the standard `javadoc` task to
-  process). Version is still `0.1.0-SNAPSHOT` — left alone deliberately,
-  see gate item 1; bump when ready to actually cut a `spring-v*` tag. The
+  process). Version bumped to `0.1.0` for the first Maven Central release
+  (see gate item 1 — tag and manifest version must agree). The
   `publishing.repositories` block is still the inert placeholder —
   untouched deliberately, since actual publishing goes through nmcp
   (below), not the `publish`/`PublishToMavenRepository` task the
