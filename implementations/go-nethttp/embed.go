@@ -17,7 +17,7 @@ var frontendFS embed.FS
 // vendoring time. In a real release this would pin a tagged
 // frontend/dbviewer.html release artifact; here it pins this repo's own
 // copy since there is no separate tagged release to vendor from.
-const pinnedFrontendSHA256 = "fb6b6542cf988a112c6f3b9c9181083c09aec555891adcbf63ea43004be3292d"
+const pinnedFrontendSHA256 = "fce34cff7ed15fbddb4da845c5fa95b3b6a1cbcfe52e2ce70555d16dae539fa7"
 
 var dbviewerHTML = mustLoadFrontend()
 
