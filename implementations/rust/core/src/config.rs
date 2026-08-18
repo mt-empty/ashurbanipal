@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Off unless the host sets this explicitly. Ashurbanipal doesn't know
@@ -9,16 +9,6 @@ pub struct Config {
     pub enabled: bool,
     pub limits: Limits,
     pub siblings: Vec<Sibling>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            limits: Limits::default(),
-            siblings: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
