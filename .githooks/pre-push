@@ -24,7 +24,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
 	while read -r sha status; do
 		case "$status" in
-		G) ;; # good signature
+		G | U) ;; # good signature — G trusted, U good but locally-untrusted key (e.g. GitHub's own web-flow key on merge/Dependabot commits)
 		*)
 			echo "pre-push: commit $sha ($local_ref) is not validly signed (status: $status)" >&2
 			bad_found=1
