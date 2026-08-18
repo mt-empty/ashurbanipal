@@ -30,6 +30,24 @@ gets a 404'd viewer, never one silently enabled with defaults. Ashurbanipal
 has zero opinion on what environment it's running in; that's the host's
 call entirely.
 
+The optional fields, shown here at their defaults/example values:
+
+```python
+from ashurbanipal import Config, Limits, Sibling
+
+config = Config(
+    enabled=True,
+    limits=Limits(default_page_size=50, max_page_size=100, query_timeout_secs=5),
+    siblings=[
+        Sibling(
+            name="billing",
+            dbviewer_url="https://billing.internal.vpn/__ashurbanipal",
+            health_path="/health",
+        ),
+    ],
+)
+```
+
 Every backend opens one fresh physical connection per operation (no pool)
 — this trivially satisfies `spec/protocol.md` §1's "resolve the schema
 once per operation" invariant without the explicit transaction-pinning a

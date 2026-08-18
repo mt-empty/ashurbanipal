@@ -170,8 +170,8 @@ observable over HTTP from outside a running, enabled instance. They stay
 implementation-level tests, already covered by `src/config.rs`'s own unit
 tests (`cargo test` in the main crate, not this suite):
 
-- **§4 Kill switch: production-like names rejected at config load.**
-  `config::tests::production_aliases_rejected_at_parse_time`.
+- **§4 Kill switch: absent/malformed config means disabled.**
+  `config::tests::disabled_when_config_absent`.
 - **§4 Kill switch: disabled → all seven routes 404.** No dedicated unit
   test name (the property falls out of `router()` returning
   `Router::new()` when `Config::is_enabled()` is false — see

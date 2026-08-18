@@ -369,11 +369,13 @@ above against the port's actual CI config and served HTML); items 1, 2,
 | `implementations/node-express` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | MT (human review, merged PR #12); Claude (AI-assisted re-verification), 2026-08-04 |
 | `implementations/flask-python` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-08-09 |
 
-Note on the Rust row, item 2: the reference had no test for the specific
-"`enabled_for` key absent from the TOML text entirely" case (only for an
-explicitly empty list, constructed directly in Rust) — added
-`config::tests::disabled_when_enabled_for_absent_from_config` to close
-that gap as part of this sign-off.
+Note on the Rust row, item 2: at the time of this sign-off, the reference
+had no test for the specific "config key absent from the TOML text
+entirely" case (only for an explicitly empty value, constructed directly
+in Rust) — added a test to close that gap. The kill switch was later
+redesigned from an `environment`/`enabled_for` allow-list to a bare
+`enabled: bool` (`spec/protocol.md` §4); the surviving test covering this
+same absent-key case is `config::tests::disabled_when_config_absent`.
 
 These rows are AI-assisted, not a substitute for the human sign-off item
 5 itself calls for — a named human reviewer should still read and run

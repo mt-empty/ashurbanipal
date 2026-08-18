@@ -26,6 +26,21 @@ viewer := ashurbanipal.Router(cfg, source)
 mux.Handle("/", viewer) // or nest it under any net/http-compatible router
 ```
 
+`Config` has no config-file format of its own (`docs/design.md` §7) — the
+host populates the struct however it likes, e.g. env vars or flags. The
+optional fields, shown here at their defaults/example values:
+
+```go
+cfg := ashurbanipal.Config{
+	Enabled:  true,
+	BasePath: "/__ashurbanipal", // empty also means this
+	Limits:   ashurbanipal.Limits{DefaultPageSize: 50, MaxPageSize: 100, QueryTimeoutSecs: 5},
+	Siblings: []ashurbanipal.Sibling{
+		{Name: "billing", DBViewerURL: "https://billing.internal.vpn/__ashurbanipal", HealthPath: "/health"},
+	},
+}
+```
+
 `Config{}` (the zero value) is disabled by construction: `Enabled` is
 `false`. A host that forgets to configure anything gets a 404'd viewer,
 never one silently enabled with defaults. Ashurbanipal has no opinion on

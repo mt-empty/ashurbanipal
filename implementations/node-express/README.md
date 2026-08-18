@@ -35,6 +35,22 @@ environment it's running in — that decision is entirely the host's. A
 host that forgets to configure anything gets a 404'd viewer, never one
 silently enabled with defaults.
 
+The optional fields, shown here at their defaults/example values:
+
+```ts
+const viewer = createRouter(
+  {
+    enabled: true,
+    basePath: "/__ashurbanipal", // undefined also means this
+    limits: { defaultPageSize: 50, maxPageSize: 100, queryTimeoutSecs: 5 },
+    siblings: [
+      { name: "billing", dbviewerUrl: "https://billing.internal.vpn/__ashurbanipal", healthPath: "/health" },
+    ],
+  },
+  new PostgresSource(pool),
+);
+```
+
 Express's `app.get()` alone leaves every other HTTP verb on a registered
 path unmatched (a generic 404, indistinguishable from a nonexistent
 path), so `createRouter` registers each of the six routes with an

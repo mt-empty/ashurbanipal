@@ -12,6 +12,17 @@ ashurbanipal:
   # Defaults to "postgres"; "mysql" (covers MariaDB too) or "sqlite" opt in
   # to the alternate DbSource implementations below.
   backend: postgres
+
+  # optional — these are the defaults/examples, shown explicitly
+  base-path: /__ashurbanipal
+  limits:
+    default-page-size: 50
+    max-page-size: 100
+    query-timeout-secs: 5
+  siblings:
+    - name: billing
+      dbviewer-url: https://billing.internal.vpn/__ashurbanipal
+      health-path: /health
 ```
 
 Autoconfigured — no bean wiring needed beyond the host's own `DataSource`.

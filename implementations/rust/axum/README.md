@@ -32,8 +32,7 @@ let app = Router::new()
 `ashurbanipal.toml`:
 
 ```toml
-environment = "dev"
-enabled_for = ["dev", "integration", "staging"]
+enabled = true
 
 # optional — these are the defaults, shown explicitly
 [limits]
