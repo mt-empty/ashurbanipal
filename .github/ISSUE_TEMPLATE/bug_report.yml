@@ -1,0 +1,97 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Ashurbanipal Bug Report
+        Please limit your report to one issue per submission. Use the search function to check if the issue has already been reported.
+  - type: dropdown
+    id: implementation
+    attributes:
+      label: Implementation
+      options:
+        - Rust / Axum
+        - Rust / Actix-web
+        - Kotlin / Spring Boot
+        - Go / net-http
+        - Node / Express
+        - Python / Flask
+        - Frontend (dbviewer.html)
+        - Other/Not sure
+      description: Which port or component does this affect?
+    validations:
+      required: true
+  - type: dropdown
+    id: db
+    attributes:
+      label: Database backend
+      options:
+        - Postgres
+        - SQLite
+        - MySQL
+        - Not applicable
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: e.g., v0.2.1, or commit hash if built from source
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Relevant config (redact secrets/credentials)
+      placeholder: Paste relevant config here
+    validations:
+      required: false
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is
+      placeholder: What happened? What were you trying to do when it occurred?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Messages/Logs
+      description: Include any error messages, stack traces, or relevant logs
+    validations:
+      required: false
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots (especially useful for frontend/UI bugs)
+    validations:
+      required: false
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: Any other context about the problem
+    validations:
+      required: false
