@@ -52,7 +52,7 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "PTH"]
 # 2.5, ahead of PyPI/pypa-gh-action-pypi-publish support — pin below it or
 # `uv build` produces a wheel PyPI rejects with "'2.5' is not a valid
 # metadata version".
-requires = ["hatchling<1.32"]
+requires = ["hatchling<1.33"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
