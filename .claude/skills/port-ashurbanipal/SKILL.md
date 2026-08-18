@@ -52,10 +52,10 @@ State back to the user, or decide directly if unambiguous:
 
 Mirror the shape of the existing ports, not their exact file names:
 `implementations/<lang>-<framework>/` at the repo root, containing:
-- Config module: fail-closed kill switch (§4 of protocol.md). A
-  production-like `environment`/`enabled_for` value MUST be
-  unrepresentable at config-parse time, not request time. Absent/malformed
-  config MUST mean disabled.
+- Config module: fail-closed kill switch (§4 of protocol.md) — a bare
+  `enabled` boolean, defaulting to `false`. Absent/malformed config MUST
+  mean disabled. This crate has no concept of "environment" and never
+  will; where/whether to enable it is entirely the host's call.
 - The `DbSource`-equivalent seam: one interface/trait/behaviour, one
   Postgres implementation. Route handlers never touch the DB driver
   directly.
