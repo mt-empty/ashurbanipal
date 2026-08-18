@@ -496,13 +496,17 @@ implementation.
 No authentication or authorization inside Ashurbanipal itself. Access is
 controlled entirely by:
 
-1. **Kill switch** — config-driven, keyed by (application, environment).
-   Disabled unless explicitly enabled for a given app + env combination.
-   Environments: `dev`, `integration`, `staging`, `any`. `production` (and
-   recognized variants/aliases — `prod`, `PRODUCTION`, etc.) is rejected at
-   config-parse time: startup fails fast if `enabled_for` contains a
-   production-like value, rather than relying on operators never making the
-   mistake.
+1. **Kill switch** — a bare `enabled` flag, off unless the host sets it
+   explicitly. Ashurbanipal has no concept of "environment": it doesn't
+   read, infer, or validate what the host names its deployment targets.
+   Deciding where to turn `enabled` on — dev only, staging too, never in
+   production — is entirely the host's call, made in the host's own
+   config/env-var layer, the same way any other feature flag would be. An
+   earlier design had this crate read an `environment` string and reject
+   production-like names at parse time; that was dropped because it's not
+   this crate's responsibility to police deployment naming, and it gave a
+   false sense of a guarantee it couldn't actually enforce (a host could
+   always just mislabel its environment).
 2. **Network perimeter** — the host services are only reachable from inside
    the company VPN. There is no additional bearer token, session, or login
    inside Ashurbanipal.
@@ -516,13 +520,8 @@ is a bearer-token check the host app injects, not a rewrite.
 
 ```toml
 [ashurbanipal]
-# the environment this host process is currently running in
-environment = "dev"
-# per (app, environment) kill switch: which environments the browser is
-# enabled for. "production"/"prod" (any casing) is rejected at parse time
-# for either field — see §6. "any" matches every environment except
-# production-like ones.
-enabled_for = ["dev", "integration", "staging"]
+# off unless set to true — see §6. The host decides when/where.
+enabled = true
 
 [ashurbanipal.limits]
 default_page_size = 50

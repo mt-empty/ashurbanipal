@@ -9,8 +9,7 @@
 //! use actix_web::{App, HttpServer};
 //!
 //! let config = ashurbanipal_actix_web::Config::from_toml(r#"
-//!     environment = "dev"
-//!     enabled_for = ["dev", "integration"]
+//!     enabled = true
 //! "#)?;
 //! let state = ashurbanipal_actix_web::app_state(config, ashurbanipal_actix_web::PgPoolSource::new(pool));
 //! HttpServer::new(move || App::new().service(ashurbanipal_actix_web::service(state.clone())))

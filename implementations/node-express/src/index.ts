@@ -1,11 +1,4 @@
-export {
-  type Config,
-  isEnabled,
-  type Limits,
-  ProductionEnabledError,
-  type Sibling,
-  validateConfig,
-} from "./config.js";
+export { type Config, isEnabled, type Limits, type Sibling } from "./config.js";
 export { PostgresSource } from "./db/postgres.js";
 export type {
   ColumnInfo,

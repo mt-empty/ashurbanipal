@@ -20,20 +20,16 @@ go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
 ```go
 import ashurbanipal "github.com/mt-empty/ashurbanipal/implementations/go-nethttp"
 
-cfg := ashurbanipal.Config{Environment: "dev", EnabledFor: []string{"dev"}}
+cfg := ashurbanipal.Config{Enabled: true}
 source := ashurbanipal.NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-viewer, err := ashurbanipal.Router(cfg, source)
-if err != nil {
-	// a production-like EnabledFor value fails here, at construction —
-	// fail-closed, mirroring Config::from_toml in the Rust reference.
-	log.Fatal(err)
-}
+viewer := ashurbanipal.Router(cfg, source)
 mux.Handle("/", viewer) // or nest it under any net/http-compatible router
 ```
 
-`Config{}` (the zero value) is disabled by construction: `EnabledFor` is
-`nil`, so no environment ever matches. A host that forgets to configure
-anything gets a 404'd viewer, never one silently enabled with defaults.
+`Config{}` (the zero value) is disabled by construction: `Enabled` is
+`false`. A host that forgets to configure anything gets a 404'd viewer,
+never one silently enabled with defaults. Ashurbanipal has no opinion on
+which environment it's running in — that's entirely the host's call.
 
 ## Database support
 
@@ -49,7 +45,7 @@ go build -tags sqlite ./...   # or -tags mysql, or -tags sqlite,mysql for both
 
 ```go
 source := ashurbanipal.NewSQLiteSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-viewer, err := ashurbanipal.Router(cfg, source)
+viewer := ashurbanipal.Router(cfg, source)
 ```
 
 Full API/config reference:

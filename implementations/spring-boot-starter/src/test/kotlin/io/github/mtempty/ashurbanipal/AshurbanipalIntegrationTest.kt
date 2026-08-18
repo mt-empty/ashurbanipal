@@ -53,8 +53,7 @@ class AshurbanipalIntegrationTest {
             registry.add("spring.datasource.url") { "jdbc:postgresql://${uri.host}:${uri.port}${uri.path}" }
             registry.add("spring.datasource.username") { user }
             registry.add("spring.datasource.password") { password }
-            registry.add("ashurbanipal.environment") { "dev" }
-            registry.add("ashurbanipal.enabled-for") { "dev" }
+            registry.add("ashurbanipal.enabled") { "true" }
         }
     }
 

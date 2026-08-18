@@ -63,7 +63,7 @@ def main() -> None:
     port = _env_int("PORT", 4000)
     source = _build_source()
 
-    config = Config(environment="dev", enabled_for=["dev"])
+    config = Config(enabled=True)
     sibling_port = os.environ.get("SIBLING_PORT")
     if sibling_port:
         config.siblings = [
@@ -84,10 +84,6 @@ def main() -> None:
     def index():
         return redirect("/__ashurbanipal", code=307)
 
-    # router() raises ProductionEnabledError for a production-like
-    # enabled_for value (spec/protocol.md §4) — let it propagate and
-    # refuse to start, exactly what a real host must do rather than
-    # silently swallowing it.
     app.register_blueprint(router(config, source))
 
     print(f"demo host on http://localhost:{port} — browser at http://localhost:{port}/__ashurbanipal")

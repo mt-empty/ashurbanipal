@@ -22,19 +22,18 @@ import { createRouter, PostgresSource } from "ashurbanipal-node-express";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-// createRouter throws ProductionEnabledError for a production-like
-// enabledFor value (spec/protocol.md §4) — fail-closed, at construction.
-const viewer = createRouter({ environment: "dev", enabledFor: ["dev"] }, new PostgresSource(pool));
+const viewer = createRouter({ enabled: true }, new PostgresSource(pool));
 
 const app = express();
 app.use(viewer); // paths already include the mount (default /__ashurbanipal)
 app.listen(3000);
 ```
 
-An empty/undefined `Config` is disabled by construction: `enabledFor` is
-undefined, so no environment ever matches. A host that forgets to
-configure anything gets a 404'd viewer, never one silently enabled with
-defaults.
+An empty/undefined `Config` is disabled by construction: `enabled` is
+undefined, which means disabled. Ashurbanipal has zero opinion on what
+environment it's running in — that decision is entirely the host's. A
+host that forgets to configure anything gets a 404'd viewer, never one
+silently enabled with defaults.
 
 Express's `app.get()` alone leaves every other HTTP verb on a registered
 path unmatched (a generic 404, indistinguishable from a nonexistent

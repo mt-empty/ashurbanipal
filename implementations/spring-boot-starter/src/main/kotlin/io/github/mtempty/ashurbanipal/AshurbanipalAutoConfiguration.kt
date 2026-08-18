@@ -11,12 +11,9 @@ import java.time.Duration
 import javax.sql.DataSource
 
 /**
- * Fail-closed exactly like the Rust `Config::validate()`/`is_enabled()`
- * pair: [AshurbanipalEnabledCondition] gates this whole class, so a
- * disabled or unconfigured environment registers zero beans —
- * indistinguishable from the starter never being on the classpath — and a
- * production-like `enabled-for` value fails context startup instead of
- * silently disabling at request time.
+ * Fail-closed: [AshurbanipalEnabledCondition] gates this whole class, so
+ * `enabled` defaulting to false or being unset registers zero beans —
+ * indistinguishable from the starter never being on the classpath.
  */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)

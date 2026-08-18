@@ -1,6 +1,6 @@
 # Ashurbanipal Protocol — v1
 
-Status: normative
+Status: normative, but a work in progress — subject to change at any time.
 Companions: `spec/openapi.yaml` (machine-readable shapes),
 `spec/filter-dsl.md` (the frontend's filter grammar), `docs/design.md`
 (rationale and history — non-normative), `docs/adapter-decisions.md`
@@ -75,18 +75,12 @@ interpreted as described in RFC 2119.
 
 ## 4. Kill switch
 
-- Configuration MUST name the environment the host process is running in
-  and an allow-list of environments the viewer is enabled for.
-- **Production-like names** are `production`, `prod`, `prd`, `live`,
-  compared case-insensitively.
-- A production-like name in the allow-list MUST be rejected **at config
-  load** — startup fails, not a runtime 404.
-- When the running environment is production-like, the viewer MUST be
-  disabled regardless of the allow-list (including `any`).
-- The allow-list vocabulary is otherwise **open**: any non-production-like
-  token is a valid environment name (`int`, `uat`, `sit`, ...). The
-  special token `any` matches every environment except production-like
-  ones. Environment matching is case-insensitive.
+- Configuration MUST expose a single on/off switch, and it MUST default to
+  off: absent, empty, or malformed configuration MUST result in disabled,
+  never enabled.
+- An implementation MUST NOT infer or police which environment the host
+  process is running in (by name, hostname, or any other signal). Where
+  and whether to enable the viewer is entirely the host's decision.
 - When disabled, all seven routes MUST behave exactly as if the viewer
   were never mounted: 404, indistinguishable from an absent
   implementation.

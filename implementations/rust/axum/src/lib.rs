@@ -7,17 +7,16 @@
 //! ```no_run
 //! # async fn example(pool: sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
 //! let config = ashurbanipal_axum::Config::from_toml(r#"
-//!     environment = "dev"
-//!     enabled_for = ["dev", "integration"]
+//!     enabled = true
 //! "#)?;
 //! let app: axum::Router = axum::Router::new()
 //!     .merge(ashurbanipal_axum::router(config, ashurbanipal_axum::PgPoolSource::new(pool)));
 //! # Ok(()) }
 //! ```
 //!
-//! Read-only, schema-validated, parameterized; disabled everywhere unless
-//! explicitly enabled, and impossible to enable in production (rejected at
-//! config-parse time). See `docs/design.md` for the full design.
+//! Read-only, schema-validated, parameterized; disabled unless the host
+//! explicitly sets `enabled = true` — this crate has no opinion on which
+//! environment that should be. See `docs/design.md` for the full design.
 
 mod routes;
 

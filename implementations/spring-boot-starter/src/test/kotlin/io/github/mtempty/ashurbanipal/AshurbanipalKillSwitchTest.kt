@@ -16,9 +16,9 @@ class TestDataSourceConfig {
 }
 
 /**
- * Ports the Rust reference's fail-closed guarantees
+ * Ports the Rust reference's fail-closed guarantee
  * (implementations/rust/core/src/config.rs's tests) at the level this port
- * can actually observe them: config-time bean registration, since a Spring
+ * can actually observe it: config-time bean registration, since a Spring
  * context that fails to start is process-startup behavior, not an HTTP
  * response the conformance kit could ever see (PORTING.md hardening item
  * 5). Uses a mock `DataSource` — the enabled-path beans only need one to
@@ -41,9 +41,9 @@ class AshurbanipalKillSwitchTest {
     }
 
     @Test
-    fun `environment not present in enabled-for is disabled`() {
+    fun `enabled=false means disabled`() {
         runner()
-            .withPropertyValues("ashurbanipal.environment=staging", "ashurbanipal.enabled-for=dev")
+            .withPropertyValues("ashurbanipal.enabled=false")
             .run { context ->
                 assertThat(context).hasNotFailed()
                 assertThat(context).doesNotHaveBean(DbViewerController::class.java)
@@ -51,9 +51,9 @@ class AshurbanipalKillSwitchTest {
     }
 
     @Test
-    fun `matching environment registers the routes`() {
+    fun `enabled=true registers the routes`() {
         runner()
-            .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev,integration")
+            .withPropertyValues("ashurbanipal.enabled=true")
             .run { context ->
                 assertThat(context).hasNotFailed()
                 assertThat(context).hasSingleBean(DbViewerController::class.java)
@@ -61,59 +61,22 @@ class AshurbanipalKillSwitchTest {
             }
     }
 
-    @Test
-    fun `any matches every non-production environment`() {
-        runner()
-            .withPropertyValues("ashurbanipal.environment=qa-eu-1", "ashurbanipal.enabled-for=any")
-            .run { context ->
-                assertThat(context).hasNotFailed()
-                assertThat(context).hasSingleBean(DbViewerController::class.java)
-            }
-    }
-
-    /** spec/protocol.md §4: a production-like name in `enabled-for` MUST be rejected at config load — startup fails, not a runtime 404. */
-    @Test
-    fun `production-like enabled-for value fails startup`() {
-        for (alias in listOf("production", "prod", "PROD", "Production", "PRD", "live")) {
-            runner()
-                .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev,$alias")
-                .run { context ->
-                    assertThat(context).hasFailed()
-                    val failure = context.startupFailure
-                    assertThat(failure).hasRootCauseInstanceOf(ProductionEnabledException::class.java)
-                }
-        }
-    }
-
-    /** Running *in* production disables regardless of `enabled-for` (even `any`) — but this is a plain disable, not a startup failure, since `enabled-for` itself names no production-like value here. */
-    @Test
-    fun `running environment itself being production-like disables without failing startup`() {
-        for (prodEnv in listOf("production", "PROD", "live")) {
-            runner()
-                .withPropertyValues("ashurbanipal.environment=$prodEnv", "ashurbanipal.enabled-for=any")
-                .run { context ->
-                    assertThat(context).hasNotFailed()
-                    assertThat(context).doesNotHaveBean(DbViewerController::class.java)
-                }
-        }
-    }
-
     /** No `ashurbanipal.backend` at all MUST mean Postgres (today's only pre-existing behavior), never a startup failure — absent config must not accidentally read as an invalid value. */
     @Test
     fun `no backend configured defaults to postgres`() {
         runner()
-            .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev")
+            .withPropertyValues("ashurbanipal.enabled=true")
             .run { context ->
                 assertThat(context).hasNotFailed()
                 assertThat(context.getBean(DbSource::class.java)).isInstanceOf(PostgresSource::class.java)
             }
     }
 
-    /** An unrecognized `backend` value MUST be rejected at config load, the same fail-fast treatment as a production-like `enabled-for` value — never silently falling back to Postgres. */
+    /** An unrecognized `backend` value MUST be rejected at config load, the same fail-fast treatment as an invalid config value elsewhere — never silently falling back to Postgres. */
     @Test
     fun `unrecognized backend value fails startup`() {
         runner()
-            .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev", "ashurbanipal.backend=oracle")
+            .withPropertyValues("ashurbanipal.enabled=true", "ashurbanipal.backend=oracle")
             .run { context ->
                 assertThat(context).hasFailed()
                 assertThat(context.startupFailure).hasRootCauseInstanceOf(InvalidBackendException::class.java)
@@ -123,7 +86,7 @@ class AshurbanipalKillSwitchTest {
     @Test
     fun `explicit mysql backend constructs MySqlSource`() {
         runner()
-            .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev", "ashurbanipal.backend=mysql")
+            .withPropertyValues("ashurbanipal.enabled=true", "ashurbanipal.backend=mysql")
             .run { context ->
                 assertThat(context).hasNotFailed()
                 assertThat(context.getBean(DbSource::class.java)).isInstanceOf(MySqlSource::class.java)
@@ -133,7 +96,7 @@ class AshurbanipalKillSwitchTest {
     @Test
     fun `explicit sqlite backend constructs SqliteSource`() {
         runner()
-            .withPropertyValues("ashurbanipal.environment=dev", "ashurbanipal.enabled-for=dev", "ashurbanipal.backend=sqlite")
+            .withPropertyValues("ashurbanipal.enabled=true", "ashurbanipal.backend=sqlite")
             .run { context ->
                 assertThat(context).hasNotFailed()
                 assertThat(context.getBean(DbSource::class.java)).isInstanceOf(SqliteSource::class.java)

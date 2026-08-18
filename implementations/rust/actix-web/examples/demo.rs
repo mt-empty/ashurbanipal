@@ -53,8 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_default();
     let config = Config::from_toml(&format!(
         r#"
-        environment = "dev"
-        enabled_for = ["dev"]
+        enabled = true
         {siblings_toml}
         "#
     ))?;

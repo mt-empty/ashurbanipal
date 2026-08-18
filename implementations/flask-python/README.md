@@ -17,8 +17,7 @@ from flask import Flask
 from ashurbanipal import Config, router
 from ashurbanipal.db.postgres import PgSource
 
-# raises ProductionEnabledError for a production-like value
-config = Config(environment="dev", enabled_for=["dev"])
+config = Config(enabled=True)
 source = PgSource(dsn=os.environ["DATABASE_URL"])
 
 app = Flask(__name__)
@@ -26,9 +25,10 @@ app.register_blueprint(router(config, source))
 ```
 
 `Config()` (the zero-argument default) is disabled by construction:
-`enabled_for` is empty, so `is_enabled()` is `False` regardless of
-`environment` — a host that forgets to configure anything gets a 404'd
-viewer, never one silently enabled with defaults.
+`enabled` defaults to `False` — a host that forgets to configure anything
+gets a 404'd viewer, never one silently enabled with defaults. Ashurbanipal
+has zero opinion on what environment it's running in; that's the host's
+call entirely.
 
 Every backend opens one fresh physical connection per operation (no pool)
 — this trivially satisfies `spec/protocol.md` §1's "resolve the schema

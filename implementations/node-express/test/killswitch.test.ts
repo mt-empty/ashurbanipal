@@ -1,15 +1,14 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
-import { describe, expect, it } from "vitest";
-import { ProductionEnabledError } from "../src/config.js";
+import { expect, it } from "vitest";
 import type { DbSource } from "../src/db/types.js";
 import { createRouter } from "../src/routes.js";
 
 // Ports the Rust reference's fail-closed guarantees
 // (implementations/rust/core/src/config.rs's tests) and the Go port's
 // killswitch_test.go at the level a plain library function can observe
-// them directly — createRouter's thrown-or-not behavior is itself the
+// them directly — createRouter's routed-or-404 behavior is itself the
 // whole mechanism here (no DI container, no context-refresh failure to
 // assert against). `null` stands in for a DbSource throughout:
 // createRouter never touches the database at construction time, only
@@ -52,8 +51,8 @@ it("empty config is disabled", async () => {
   });
 });
 
-it("environment not in enabledFor is disabled", async () => {
-  const router = createRouter({ environment: "staging", enabledFor: ["dev"] }, noDbSource);
+it("enabled: false is disabled", async () => {
+  const router = createRouter({ enabled: false }, noDbSource);
   await withServer(router, async (baseUrl) => {
     for (const path of ALL_MOUNT_PATHS) {
       const res = await fetch(`${baseUrl}${path}`);
@@ -62,8 +61,8 @@ it("environment not in enabledFor is disabled", async () => {
   });
 });
 
-it("matching environment enables routes", async () => {
-  const router = createRouter({ environment: "dev", enabledFor: ["dev", "integration"] }, noDbSource);
+it("enabled: true enables routes", async () => {
+  const router = createRouter({ enabled: true }, noDbSource);
   await withServer(router, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/__ashurbanipal`);
     expect(res.status).toBe(200);
@@ -72,45 +71,4 @@ it("matching environment enables routes", async () => {
     // spec/protocol.md §5.1/§7: the UI route carries no protocol header.
     expect(res.headers.get("x-ashurbanipal-protocol")).toBeNull();
   });
-});
-
-// spec/protocol.md §4: "any" matches every environment except
-// production-like ones.
-it("'any' matches every non-production environment", async () => {
-  const router = createRouter({ environment: "qa-eu-1", enabledFor: ["any"] }, noDbSource);
-  await withServer(router, async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/__ashurbanipal`);
-    expect(res.status).toBe(200);
-  });
-});
-
-describe("production-like enabledFor fails to construct", () => {
-  // spec/protocol.md §4: a production-like name in enabledFor MUST be
-  // rejected at config load — createRouter throwing is this port's only
-  // observable form of "startup fails", since there's no separate
-  // config-load step before it.
-  for (const alias of ["production", "prod", "PROD", "Production", "PRD", "live"]) {
-    it(alias, () => {
-      expect(() => createRouter({ environment: "dev", enabledFor: ["dev", alias] }, noDbSource)).toThrow(
-        ProductionEnabledError,
-      );
-    });
-  }
-});
-
-describe("running environment itself production-like disables without failing", () => {
-  // Running *in* production disables regardless of enabledFor (even
-  // "any") — but this is a plain disable, not a construction failure,
-  // since enabledFor itself names no production-like value here.
-  for (const env of ["production", "PROD", "live"]) {
-    it(env, async () => {
-      const router = createRouter({ environment: env, enabledFor: ["any"] }, noDbSource);
-      await withServer(router, async (baseUrl) => {
-        for (const path of ALL_MOUNT_PATHS) {
-          const res = await fetch(`${baseUrl}${path}`);
-          expect(res.status, `GET ${path}`).toBe(404);
-        }
-      });
-    });
-  }
 });

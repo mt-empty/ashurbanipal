@@ -68,7 +68,7 @@ async function main(): Promise<void> {
   const dbSource = buildDbSource(backend);
   const port = envInt("PORT", 4000);
 
-  const config: Config = { environment: "dev", enabledFor: ["dev"] };
+  const config: Config = { enabled: true };
   const siblingPort = process.env.SIBLING_PORT;
   if (siblingPort) {
     config.siblings = [
@@ -80,11 +80,6 @@ async function main(): Promise<void> {
     ];
   }
 
-  // createRouter throws for a production-like enabledFor value
-  // (spec/protocol.md §4) — the fail-closed guarantee is only real if a
-  // host's own startup actually observes and acts on it, so this demo
-  // does exactly what a real host must: let it propagate and refuse to
-  // start, rather than silently swallowing it.
   const viewer = createRouter(config, dbSource);
 
   const app = express();

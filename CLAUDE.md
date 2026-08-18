@@ -185,11 +185,14 @@ demo-deps-stay-dev-dependencies, and the Rust comment-style rule.
   `router()` returns an empty `Router::new()`, so the mounted app 404s
   exactly as if the crate weren't merged in at all. Never add a route that
   bypasses this, and never move the enabled-check to per-request.
-- **Production is unrepresentable, not just discouraged.** `enabled_for`
-  (or `environment`) naming anything in `PRODUCTION_ALIASES` fails at
-  config *parse* time (`Config::from_toml`/`validate`), not at request time.
-  If you touch `config.rs`, preserve this — it's the load-bearing safety
-  property, not incidental validation.
+- **Ashurbanipal has no concept of "environment" and never will.** The kill
+  switch is a bare `enabled: bool`, defaulting to `false`. Where and
+  whether to turn it on is entirely the host's decision — this crate must
+  never read, infer, or validate environment names (a prior design that
+  rejected `enabled_for`/`environment` values naming production was
+  removed; see `spec/protocol.md` §4). If you touch `config.rs`, preserve
+  the fail-closed default (absent/malformed config MUST mean disabled),
+  not any notion of which environment is "safe."
 - **No unvalidated identifier ever reaches SQL text.** Table and column
   names are only ever spliced into a query after being matched exactly
   against a live catalog lookup (`information_schema` for Postgres and
