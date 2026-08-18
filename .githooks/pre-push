@@ -17,9 +17,12 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 	fi
 
 	if [ "$remote_sha" = "$zero" ]; then
-		range="$local_sha"
+		# New branch: only check commits not already reachable from some
+		# known remote-tracking ref (e.g. origin/main), not the full history
+		# back to root — old history may predate the signing requirement.
+		range=("$local_sha" --not --remotes)
 	else
-		range="$remote_sha..$local_sha"
+		range=("$remote_sha..$local_sha")
 	fi
 
 	while read -r sha status; do
@@ -30,7 +33,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 			bad_found=1
 			;;
 		esac
-	done < <(git rev-list "$range" --pretty="format:%H %G?" | grep -v '^commit ')
+	done < <(git rev-list "${range[@]}" --pretty="format:%H %G?" | grep -v '^commit ')
 done
 
 if [ "$bad_found" -ne 0 ]; then
