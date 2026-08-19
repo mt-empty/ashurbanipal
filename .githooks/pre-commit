@@ -1,8 +1,45 @@
 #!/usr/bin/env bash
-# Fail fast if commit signing has been disabled locally, instead of finding out at pre-push.
+# Fail fast if this commit would land unsigned, instead of finding out at pre-push.
+# gpgsign=true alone doesn't guarantee a signature actually gets produced (missing
+# key, locked agent, stale gpg.format) — so this signs a throwaway payload for real.
 set -euo pipefail
 
 if [ "$(git config --get commit.gpgsign)" != "true" ]; then
 	echo "pre-commit: commit.gpgsign is not enabled (run: git config --global commit.gpgsign true)" >&2
 	exit 1
 fi
+
+keyid=$(git config --get user.signingkey || true)
+if [ -z "$keyid" ]; then
+	echo "pre-commit: no user.signingkey configured (run: git config --global user.signingkey <key-id>)" >&2
+	exit 1
+fi
+
+format=$(git config --get gpg.format || echo openpgp)
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+payload="$workdir/payload"
+printf 'ashurbanipal pre-commit signing check' >"$payload"
+
+case "$format" in
+openpgp)
+	program=$(git config --get gpg.program || echo gpg)
+	if ! "$program" --batch --local-user "$keyid" --detach-sign --armor --output /dev/null "$payload" >"$workdir/log" 2>&1; then
+		echo "pre-commit: GPG signing test failed for key $keyid — is the key present and the agent unlocked?" >&2
+		cat "$workdir/log" >&2
+		exit 1
+	fi
+	;;
+ssh)
+	program=$(git config --get gpg.ssh.program || echo ssh-keygen)
+	if ! "$program" -Y sign -n git -f "$keyid" "$payload" >"$workdir/log" 2>&1; then
+		echo "pre-commit: SSH signing test failed for key $keyid — is the key present and the agent unlocked?" >&2
+		cat "$workdir/log" >&2
+		exit 1
+	fi
+	;;
+*)
+	echo "pre-commit: unrecognized gpg.format \"$format\"" >&2
+	exit 1
+	;;
+esac

@@ -103,12 +103,13 @@ Keyed to `spec/protocol.md` section numbers — this is the actual surface
 area, everything else (UI, UX, DSL design, security model) is inherited
 by reusing the frontend and fixtures above:
 
-1. **Config + fail-closed kill switch** (§4). A production-like
-   `environment`/`enabled_for` value MUST be unrepresentable — rejected at
-   config-construction time, not at request time. Absent/malformed config
-   MUST mean disabled, never enabled with defaults (this is hardening
-   checklist item 2, and needs its own port-level test — the conformance
-   kit can't observe it; see "How to run conformance" below).
+1. **Config + fail-closed kill switch** (§4). A bare `enabled` flag,
+   defaulting to off. The port MUST NOT read, infer, or validate what
+   environment the host is running in — that's the host's decision
+   entirely, made outside this crate. Absent/malformed config MUST mean
+   disabled, never enabled with defaults (this is hardening checklist
+   item 2, and needs its own port-level test — the conformance kit can't
+   observe it; see "How to run conformance" below).
 2. **The HTML route** (§5.1) serving the vendored frontend, and **the
    six API routes** (§5.2–§5.7): `tables`, `table-counts`, `tables/data`,
    `tables/common-values`, `siblings`, `schemas`. Response shapes exactly as
@@ -261,10 +262,10 @@ following are true — green CI is necessary, not sufficient:
 1. Public CI runs the golden-fixture behavior runner (above) on every
    commit against a pinned protocol version.
 2. Public CI runs the schemathesis shape check (above) on every commit.
-3. The two requirements neither layer can observe over HTTP — config-time
-   production-alias rejection, and disabled-environment → 404 — are
-   covered by the port's own linked implementation tests (its kill-switch
-   test file), referenced from its README.
+3. The requirement neither layer can observe over HTTP — that
+   absent/malformed config MUST mean disabled, never enabled with
+   defaults — is covered by the port's own linked implementation tests
+   (its kill-switch test file), referenced from its README.
 4. The port ships its own unit and integration test suite (adapter/catalog
    queries, filter-AST validation, config parsing) beyond the conformance
    kit — conformance proves protocol compliance over HTTP, it doesn't prove
@@ -318,8 +319,7 @@ port's source, once per port, before it's added to the registry.
    bias toward "found on the classpath, no explicit config → sensible
    defaults, turned on." That's backwards here: absent or malformed
    kill-switch config MUST result in disabled, never enabled. Verify with
-   a port test asserting the *no-config* case specifically, not just the
-   named-production-alias rejection case.
+   a port test asserting the *no-config* case specifically.
 3. **Vendoring integrity is a per-port CI check, not a one-time release
    fact.** Covered above under "Vendoring the frontend," step 4 — the
    port's own CI must re-hash the file it actually ships on every build,
@@ -329,8 +329,8 @@ port's source, once per port, before it's added to the registry.
    the two options (carve out an exception, or document the requirement)
    it takes.
 5. **Kill-switch verification can't stop at self-certification.** The
-   conformance kit explicitly can't observe config-time rejection over
-   HTTP — it's process-startup behavior, not a response. The port's own
+   conformance kit explicitly can't observe absent-config-means-disabled
+   over HTTP — it's process-startup behavior, not a response. The port's own
    kill-switch test is the only evidence this property holds at all, so
    it needs a named reviewer to have actually read and run that test
    (not just trusted a green checkmark) before a port is listed — the
@@ -369,11 +369,13 @@ above against the port's actual CI config and served HTML); items 1, 2,
 | `implementations/node-express` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | MT (human review, merged PR #12); Claude (AI-assisted re-verification), 2026-08-04 |
 | `implementations/flask-python` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-08-09 |
 
-Note on the Rust row, item 2: the reference had no test for the specific
-"`enabled_for` key absent from the TOML text entirely" case (only for an
-explicitly empty list, constructed directly in Rust) — added
-`config::tests::disabled_when_enabled_for_absent_from_config` to close
-that gap as part of this sign-off.
+Note on the Rust row, item 2: at the time of this sign-off, the reference
+had no test for the specific "config key absent from the TOML text
+entirely" case (only for an explicitly empty value, constructed directly
+in Rust) — added a test to close that gap. The kill switch was later
+redesigned from an `environment`/`enabled_for` allow-list to a bare
+`enabled: bool` (`spec/protocol.md` §4); the surviving test covering this
+same absent-key case is `config::tests::disabled_when_config_absent`.
 
 These rows are AI-assisted, not a substitute for the human sign-off item
 5 itself calls for — a named human reviewer should still read and run

@@ -30,22 +30,13 @@ const (
 // same way implementations/rust/axum/src/routes.rs's router<S: DbSource> takes
 // an already-constructed source rather than a raw connection.
 //
-// Router returns (nil, err) when EnabledFor names a production-like value
-// (spec/protocol.md §4) — fail-closed via the error return, not a panic,
-// so a host's own main() fails to start exactly like the Rust binary does
-// when Config::from_toml rejects it, with no separate validation step to
-// forget to call.
-//
-// When cfg is not enabled for the running environment — including the
-// zero value Config{}, which MUST mean disabled — Router returns a handler
-// that 404s every request, indistinguishable from the viewer never having
-// been mounted at all (spec/protocol.md §4).
-func Router(cfg Config, source DbSource) (http.Handler, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
+// When cfg.Enabled is false — including the zero value Config{}, which
+// MUST mean disabled — Router returns a handler that 404s every request,
+// indistinguishable from the viewer never having been mounted at all
+// (spec/protocol.md §4).
+func Router(cfg Config, source DbSource) http.Handler {
 	if !cfg.IsEnabled() {
-		return http.NotFoundHandler(), nil
+		return http.NotFoundHandler()
 	}
 
 	limits := cfg.Limits.WithDefaults()
@@ -60,7 +51,7 @@ func Router(cfg Config, source DbSource) (http.Handler, error) {
 	mux.Handle("GET "+base+"/api/tables/data", withProtocolHeader(tableDataHandler(source, limits)))
 	mux.Handle("GET "+base+"/api/tables/common-values", withProtocolHeader(commonValuesHandler(source)))
 	mux.Handle("GET "+base+"/api/siblings", withProtocolHeader(siblingsHandler(client, cfg.Siblings)))
-	return mux, nil
+	return mux
 }
 
 // withProtocolHeader stamps every API response, success or error

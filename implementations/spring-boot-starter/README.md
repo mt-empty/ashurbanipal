@@ -8,22 +8,31 @@ port implements/reuses.
 
 ```yaml
 ashurbanipal:
-  environment: ${ASHURBANIPAL_ENVIRONMENT:dev}
-  enabled-for: ${ASHURBANIPAL_ENABLED_FOR:dev}
+  enabled: ${ASHURBANIPAL_ENABLED:false}
   # Defaults to "postgres"; "mysql" (covers MariaDB too) or "sqlite" opt in
   # to the alternate DbSource implementations below.
   backend: postgres
+
+  # optional — these are the defaults/examples, shown explicitly
+  base-path: /__ashurbanipal
+  limits:
+    default-page-size: 50
+    max-page-size: 100
+    query-timeout-secs: 5
+  siblings:
+    - name: billing
+      dbviewer-url: https://billing.internal.vpn/__ashurbanipal
+      health-path: /health
 ```
 
 Autoconfigured — no bean wiring needed beyond the host's own `DataSource`.
 Backend selection is always an explicit config property, never inferred
 from which JDBC driver happens to be on the classpath (`PORTING.md`'s
-hardening checklist item 2). Absent config, a non-matching `environment`,
-or a production-like `enabled-for` all disable the starter (no
-`DbViewerController`/`DbSource` bean registered) without failing
-application startup; a production-like value fails startup outright —
-`AshurbanipalKillSwitchTest.kt` is the only evidence of this, since
-conformance can't observe it over HTTP.
+hardening checklist item 2). This starter has no opinion on which
+environment it's running in — deciding when `enabled` is true is entirely
+up to the host. Absent config means disabled (no `DbViewerController`/
+`DbSource` bean registered), never enabled with defaults.
+
 
 ## Database support
 

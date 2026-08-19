@@ -396,8 +396,7 @@ mod kill_switch_tests {
     async fn disabled_config_404s_html_and_api_routes() {
         let config = Config::from_toml(
             r#"
-            environment = "dev"
-            enabled_for = ["staging"]
+            enabled = false
         "#,
         )
         .unwrap();

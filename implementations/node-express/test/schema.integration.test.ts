@@ -25,7 +25,7 @@ maybeDescribe("multi-schema support (live db)", () => {
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 2 });
-    const router = createRouter({ environment: "dev", enabledFor: ["dev"] }, new PostgresSource(pool));
+    const router = createRouter({ enabled: true }, new PostgresSource(pool));
     const app = express();
     app.use(router);
     server = createServer(app);

@@ -51,36 +51,23 @@ def _client(config: Config):
 
 
 def test_empty_config_is_disabled() -> None:
+    # PORTING.md hardening item 2: absent config must mean disabled, never
+    # "enabled with defaults".
     client = _client(Config())
     for path in ALL_MOUNT_PATHS:
         assert client.get(path).status_code == 404, path
 
 
-def test_environment_not_in_enabled_for_is_disabled() -> None:
-    client = _client(Config(environment="staging", enabled_for=["dev"]))
+def test_enabled_false_is_disabled() -> None:
+    client = _client(Config(enabled=False))
     for path in ALL_MOUNT_PATHS:
         assert client.get(path).status_code == 404, path
 
 
-def test_matching_environment_enables_routes() -> None:
-    client = _client(Config(environment="dev", enabled_for=["dev", "integration"]))
+def test_enabled_true_enables_routes() -> None:
+    client = _client(Config(enabled=True))
     resp = client.get("/__ashurbanipal")
     assert resp.status_code == 200
     assert len(resp.data) > 0
     # spec/protocol.md §5.1/§7: the UI route carries no protocol header.
     assert "x-ashurbanipal-protocol" not in resp.headers
-
-
-def test_any_matches_every_non_production_environment() -> None:
-    client = _client(Config(environment="qa-eu-1", enabled_for=["any"]))
-    assert client.get("/__ashurbanipal").status_code == 200
-
-
-def test_running_environment_itself_production_like_disables_without_raising() -> None:
-    # Running *in* production disables regardless of enabled_for (even
-    # "any") — this is a plain disable, not a construction failure, since
-    # enabled_for itself names no production-like value here.
-    for env in ["production", "PROD", "live"]:
-        client = _client(Config(environment=env, enabled_for=["any"]))
-        for path in ALL_MOUNT_PATHS:
-            assert client.get(path).status_code == 404, f"{env} {path}"

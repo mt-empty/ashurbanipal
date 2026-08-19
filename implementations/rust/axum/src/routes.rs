@@ -25,9 +25,10 @@ pub(crate) struct AppState<S> {
     pub http: reqwest::Client,
 }
 
-/// If the kill switch is off for the current environment, every route
-/// (including the HTML one) 404s — indistinguishable from the crate not
-/// being mounted at all.
+/// If `config.enabled` is false (the default), every route (including the
+/// HTML one) 404s — indistinguishable from the crate not being mounted at
+/// all. The host decides when that's true; this crate has no opinion on
+/// environment names.
 pub fn router<S: DbSource>(config: Config, source: S) -> Router {
     if !config.is_enabled() {
         return Router::new();

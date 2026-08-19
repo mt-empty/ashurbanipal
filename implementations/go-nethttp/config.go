@@ -1,25 +1,5 @@
 package ashurbanipal
 
-import (
-	"fmt"
-	"strings"
-)
-
-// productionAliases are compared case-insensitively; "production" itself is
-// deliberately not representable in EnabledFor — Validate rejects it at
-// config-construction time rather than letting it reach a running server
-// (spec/protocol.md §4).
-var productionAliases = []string{"production", "prod", "prd", "live"}
-
-func isProductionLike(value string) bool {
-	for _, alias := range productionAliases {
-		if strings.EqualFold(value, alias) {
-			return true
-		}
-	}
-	return false
-}
-
 // Limits bounds pagination and query duration. The zero value is not
 // usable directly — Router applies defaultLimits() when a field is zero, so
 // a caller can set only the fields they care about.
@@ -66,16 +46,15 @@ type Sibling struct {
 // config-file format — the host populates it however it likes (env vars,
 // flags, its own config library).
 //
-// The zero value, Config{}, MUST mean disabled: EnabledFor is nil, so
-// IsEnabled reports false regardless of Environment. This is load-bearing
-// (spec/protocol.md §4) — a host that forgets to configure anything gets a
-// 404'd viewer, never one silently enabled with defaults.
+// The zero value, Config{}, MUST mean disabled: Enabled is false, so
+// IsEnabled reports false. This is load-bearing (spec/protocol.md §4) — a
+// host that forgets to configure anything gets a 404'd viewer, never one
+// silently enabled with defaults.
 type Config struct {
-	Environment string
-	// EnabledFor is the allow-list of environments the viewer is enabled
-	// for. Empty means disabled everywhere. The special token "any"
-	// matches every environment except production-like ones.
-	EnabledFor []string
+	// Enabled is off unless the host sets it explicitly. Ashurbanipal
+	// doesn't know or police which environment it's running in — that's
+	// the host's call entirely (spec/protocol.md §4).
+	Enabled bool
 	// BasePath is the mount point; empty means "/__ashurbanipal" (the
 	// reference default, not a requirement — spec/protocol.md §3).
 	BasePath string
@@ -83,42 +62,9 @@ type Config struct {
 	Siblings []Sibling
 }
 
-// ProductionEnabledError is returned by Validate/Router when EnabledFor
-// names a production-like value — config load fails outright rather than
-// silently disabling at request time (spec/protocol.md §4).
-type ProductionEnabledError struct {
-	Value string
-}
-
-func (e *ProductionEnabledError) Error() string {
-	return fmt.Sprintf("ashurbanipal must never be enabled in production: EnabledFor contains %q", e.Value)
-}
-
-// Validate rejects a production-like value in EnabledFor. Router calls this
-// itself; a host constructing Config outside Router (e.g. to inspect
-// IsEnabled before merging routes) should call it too.
-func (c Config) Validate() error {
-	for _, value := range c.EnabledFor {
-		if isProductionLike(value) {
-			return &ProductionEnabledError{Value: value}
-		}
-	}
-	return nil
-}
-
-// IsEnabled reports whether the viewer is enabled for the configured
-// Environment. A production-like Environment is always disabled,
-// regardless of EnabledFor (including "any") — spec/protocol.md §4.
+// IsEnabled reports whether the viewer is enabled.
 func (c Config) IsEnabled() bool {
-	if isProductionLike(c.Environment) {
-		return false
-	}
-	for _, enabled := range c.EnabledFor {
-		if strings.EqualFold(enabled, "any") || strings.EqualFold(enabled, c.Environment) {
-			return true
-		}
-	}
-	return false
+	return c.Enabled
 }
 
 func (c Config) basePath() string {

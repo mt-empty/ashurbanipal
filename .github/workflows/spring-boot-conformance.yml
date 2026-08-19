@@ -61,7 +61,7 @@ jobs:
     with:
       toolchain: java
       start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
-      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENVIRONMENT=dev ASHURBANIPAL_ENABLED_FOR=dev"
+      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENABLED=true"
       health-url: "http://localhost:4100/__ashurbanipal/api/tables"
       conformance-url: "http://localhost:4100/__ashurbanipal"
       report-name: spring-boot-conformance-report
@@ -73,6 +73,6 @@ jobs:
     with:
       toolchain: java
       start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
-      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENVIRONMENT=dev ASHURBANIPAL_ENABLED_FOR=dev"
+      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENABLED=true"
       health-url: "http://localhost:4100/__ashurbanipal/api/tables"
       conformance-url: "http://localhost:4100/__ashurbanipal"

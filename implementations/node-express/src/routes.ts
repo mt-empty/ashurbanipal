@@ -1,5 +1,5 @@
 import express, { type Router as ExpressRouter, type Request, type Response } from "express";
-import { basePath, type Config, isEnabled, type ResolvedLimits, validateConfig, withDefaults } from "./config.js";
+import { basePath, type Config, isEnabled, type ResolvedLimits, withDefaults } from "./config.js";
 import type { DbSource } from "./db/types.js";
 import { dbviewerHtml } from "./embed.js";
 import { FilterError, NotAllowedError } from "./errors.js";
@@ -19,19 +19,12 @@ const PROTOCOL_VERSION = "1";
  * `DbSource` implementation (PostgresSource, SqliteSource, MySqlSource)
  * it wants itself; there is no driver auto-detection.
  *
- * Throws ProductionEnabledError when enabledFor names a production-like
- * value (spec/protocol.md §4) — fail-closed via a thrown error, not a
- * silently-swallowed default, so a host's own startup fails to boot
- * exactly like the Rust binary does when Config::from_toml rejects it.
- *
- * When cfg is not enabled for the running environment — including an
- * empty/undefined Config, which MUST mean disabled — createRouter returns
- * a router that 404s every request under basePath, indistinguishable from
- * the viewer never having been mounted at all (spec/protocol.md §4).
+ * When cfg.enabled is not true — including an empty/undefined Config,
+ * which MUST mean disabled — createRouter returns a router that 404s
+ * every request under basePath, indistinguishable from the viewer never
+ * having been mounted at all (spec/protocol.md §4).
  */
 export function createRouter(config: Config, dbSource: DbSource): ExpressRouter {
-  validateConfig(config);
-
   const router = express.Router();
   if (!isEnabled(config)) {
     // No routes registered under basePath: Express's own 404 handling

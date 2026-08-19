@@ -41,14 +41,9 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "opening database: %v\n", err)
 		os.Exit(1)
 	}
-	cfg := Config{Environment: "dev", EnabledFor: []string{"dev"}}
+	cfg := Config{Enabled: true}
 	source := NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-	handler, err := Router(cfg, source)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Router: %v\n", err)
-		os.Exit(1)
-	}
-	srv := httptest.NewServer(handler)
+	srv := httptest.NewServer(Router(cfg, source))
 	integrationServerURL = srv.URL
 	code := m.Run()
 	srv.Close()

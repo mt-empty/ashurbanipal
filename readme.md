@@ -69,8 +69,7 @@ App::new().service(service(app_state(config, PgPoolSource::new(pool))));
 ```yaml
 # implementation("io.github.mtempty:ashurbanipal-spring-boot-starter:X.Y.Z")
 ashurbanipal:
-  environment: dev
-  enabled-for: dev
+  enabled: true
   # backend: postgres is the default
 ```
 </details>

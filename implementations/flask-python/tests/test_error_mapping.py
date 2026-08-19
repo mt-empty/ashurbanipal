@@ -35,7 +35,7 @@ class _FailingSource(DbSource):
 
 def _client(exc: Exception):
     app = Flask(__name__)
-    config = Config(environment="dev", enabled_for=["dev"])
+    config = Config(enabled=True)
     app.register_blueprint(router(config, _FailingSource(exc)))
     return app.test_client()
 

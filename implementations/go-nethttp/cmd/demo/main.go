@@ -41,8 +41,7 @@ func main() {
 	db.SetMaxOpenConns(5)
 
 	cfg := ashurbanipal.Config{
-		Environment: "dev",
-		EnabledFor:  []string{"dev"},
+		Enabled: true,
 	}
 	if siblingPort, ok := os.LookupEnv("SIBLING_PORT"); ok {
 		cfg.Siblings = []ashurbanipal.Sibling{{
@@ -53,16 +52,7 @@ func main() {
 	}
 
 	source := ashurbanipal.NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-
-	// Router returns a non-nil error for a production-like EnabledFor
-	// value (spec/protocol.md §4) — the fail-closed guarantee is only
-	// real if a host's own startup actually observes and acts on it, so
-	// this demo does exactly what a real host must: check the error and
-	// refuse to start rather than silently swallowing it.
-	viewer, err := ashurbanipal.Router(cfg, source)
-	if err != nil {
-		log.Fatalf("ashurbanipal.Router: %v", err)
-	}
+	viewer := ashurbanipal.Router(cfg, source)
 
 	uiPath := "/__ashurbanipal"
 	mux := http.NewServeMux()

@@ -10,5 +10,4 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD}
 
 ashurbanipal:
-  environment: ${ASHURBANIPAL_ENVIRONMENT:dev}
-  enabled-for: ${ASHURBANIPAL_ENABLED_FOR:dev}
+  enabled: ${ASHURBANIPAL_ENABLED:true}
