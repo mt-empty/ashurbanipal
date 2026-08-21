@@ -1,11 +1,9 @@
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import express from "express";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresSource } from "../src/db/postgres.js";
 import type { QueryOpts } from "../src/db/types.js";
 import { createRouter } from "../src/routes.js";
+import { getJson as sharedGetJson, startServer, type TestServer } from "./helpers.js";
 
 // DB-backed coverage of resolveSchema against the devcontainer's seeded
 // Postgres (schemas: public, other_schema, warehouse — see
@@ -20,30 +18,20 @@ const maybeDescribe = databaseUrl ? describe : describe.skip;
 
 maybeDescribe("multi-schema support (live db)", () => {
   let pool: Pool;
-  let server: Server;
-  let baseUrl: string;
+  let testServer: TestServer;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 2 });
     const router = createRouter({ enabled: true }, [{ name: "default", source: new PostgresSource(pool) }]);
-    const app = express();
-    app.use(router);
-    server = createServer(app);
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const { port } = server.address() as AddressInfo;
-    baseUrl = `http://127.0.0.1:${port}`;
+    testServer = await startServer(router);
   });
 
   afterAll(async () => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await testServer.close();
     await pool.end();
   });
 
-  async function getJson(path: string): Promise<{ status: number; body: unknown }> {
-    const res = await fetch(`${baseUrl}${path}`);
-    const body = res.status === 200 ? await res.json() : await res.text();
-    return { status: res.status, body };
-  }
+  const getJson = (path: string) => sharedGetJson(testServer.baseUrl, path);
 
   it("lists the seed's schemas, excluding system namespaces", async () => {
     const { status, body } = await getJson("/__ashurbanipal/api/schemas");

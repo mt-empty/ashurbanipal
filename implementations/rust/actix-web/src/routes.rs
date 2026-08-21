@@ -7,7 +7,7 @@ use actix_web::{Error, HttpResponse, Scope};
 use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
-use ashurbanipal::{Config, DbError, DbSource, QueryOpts, TableInfo};
+use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, TableInfo};
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
@@ -44,24 +44,6 @@ pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data
         sources,
         http,
     })
-}
-
-/// Resolves the `source` query param against `state.sources` the same way
-/// `schema` resolves against a live catalog list (`spec/protocol.md` §6):
-/// absent means the first-registered default, present means an exact
-/// case-sensitive match or a rejection — never a fallback guess.
-fn resolve_source<'a, S>(
-    sources: &'a [(String, S)],
-    requested: Option<&str>,
-) -> Result<&'a S, DbError> {
-    match requested {
-        None => Ok(&sources[0].1),
-        Some(name) => sources
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, s)| s)
-            .ok_or_else(|| DbError::NotAllowed(format!("source {name:?}"))),
-    }
 }
 
 /// If disabled, no routes are registered — every path under the scope

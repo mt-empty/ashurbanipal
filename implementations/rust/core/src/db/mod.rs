@@ -123,6 +123,27 @@ pub trait DbSource: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = Result<Vec<(String, f32)>, DbError>> + Send;
 }
 
+/// Resolves the `source` query param against a host's registered sources
+/// the same way a schema name resolves against a live catalog list
+/// (`spec/protocol.md` §1/§6): absent means the first-registered default,
+/// present means an exact case-sensitive match or a rejection — never a
+/// fallback guess. Framework-agnostic (no adapter-specific types), so both
+/// `ashurbanipal-axum` and `ashurbanipal-actix-web` share this instead of
+/// each defining their own copy.
+pub fn resolve_source<'a, S>(
+    sources: &'a [(String, S)],
+    requested: Option<&str>,
+) -> Result<&'a S, DbError> {
+    match requested {
+        None => Ok(&sources[0].1),
+        Some(name) => sources
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, s)| s)
+            .ok_or_else(|| DbError::NotAllowed(format!("source {name:?}"))),
+    }
+}
+
 /// Escapes an identifier for splicing into SQL text by doubling embedded
 /// `"` (the standard Postgres/SQLite quoted-identifier escape) — every name
 /// reaching this must already be allow-list-validated against a live
@@ -155,7 +176,7 @@ pub(crate) fn op_sql(op: FilterOp) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::quote_ident;
+    use super::{quote_ident, resolve_source, DbError};
 
     #[test]
     fn quote_ident_doubles_embedded_quotes() {
@@ -167,5 +188,42 @@ mod tests {
             quote_ident("a\"; drop table users; --"),
             "\"a\"\"; drop table users; --\""
         );
+    }
+
+    fn sources(names: &[&'static str]) -> Vec<(String, &'static str)> {
+        names.iter().map(|n| (n.to_string(), *n)).collect()
+    }
+
+    #[test]
+    fn resolve_source_absent_picks_first_registered() {
+        let sources = sources(&["primary", "reporting"]);
+        assert_eq!(resolve_source(&sources, None).unwrap(), &"primary");
+    }
+
+    #[test]
+    fn resolve_source_present_finds_exact_match() {
+        let sources = sources(&["primary", "reporting"]);
+        assert_eq!(
+            resolve_source(&sources, Some("reporting")).unwrap(),
+            &"reporting"
+        );
+    }
+
+    #[test]
+    fn resolve_source_unknown_name_is_rejected() {
+        let sources = sources(&["primary", "reporting"]);
+        assert!(matches!(
+            resolve_source(&sources, Some("bogus")),
+            Err(DbError::NotAllowed(_))
+        ));
+    }
+
+    #[test]
+    fn resolve_source_is_case_sensitive() {
+        let sources = sources(&["primary"]);
+        assert!(matches!(
+            resolve_source(&sources, Some("Primary")),
+            Err(DbError::NotAllowed(_))
+        ));
     }
 }

@@ -10,7 +10,7 @@ use axum::Router;
 use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
-use ashurbanipal::{Config, DbError, DbSource, QueryOpts, TableInfo};
+use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, TableInfo};
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
@@ -67,24 +67,6 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
         .route("/__ashurbanipal", get(serve_html::<S>))
         .merge(api)
         .with_state(state)
-}
-
-/// Resolves the `source` query param against `state.sources` the same way
-/// `schema` resolves against a live catalog list (`spec/protocol.md` §6):
-/// absent means the first-registered default, present means an exact
-/// case-sensitive match or a rejection — never a fallback guess.
-fn resolve_source<'a, S>(
-    sources: &'a [(String, S)],
-    requested: Option<&str>,
-) -> Result<&'a S, DbError> {
-    match requested {
-        None => Ok(&sources[0].1),
-        Some(name) => sources
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, s)| s)
-            .ok_or_else(|| DbError::NotAllowed(format!("source {name:?}"))),
-    }
 }
 
 async fn stamp_protocol_version(mut response: Response) -> Response {
@@ -407,48 +389,9 @@ mod tests {
         assert_eq!(health_url("not-a-url", "/health"), None);
     }
 
-    // resolve_source carries no `S: DbSource` bound, so these run against
-    // plain data — no pool/DB needed, unlike the tests/*.rs integration
-    // suite (which `mise run rust:test`'s `cargo test --lib` deliberately
-    // excludes, per its own doc comment in mise.toml — these inline tests
-    // are this feature's only automated, CI-covered coverage).
-    fn sources(names: &[&'static str]) -> Vec<(String, &'static str)> {
-        names.iter().map(|n| (n.to_string(), *n)).collect()
-    }
-
-    #[test]
-    fn resolve_source_absent_picks_first_registered() {
-        let sources = sources(&["primary", "reporting"]);
-        assert_eq!(resolve_source(&sources, None).unwrap(), &"primary");
-    }
-
-    #[test]
-    fn resolve_source_present_finds_exact_match() {
-        let sources = sources(&["primary", "reporting"]);
-        assert_eq!(
-            resolve_source(&sources, Some("reporting")).unwrap(),
-            &"reporting"
-        );
-    }
-
-    #[test]
-    fn resolve_source_unknown_name_is_rejected() {
-        let sources = sources(&["primary", "reporting"]);
-        assert!(matches!(
-            resolve_source(&sources, Some("bogus")),
-            Err(DbError::NotAllowed(_))
-        ));
-    }
-
-    #[test]
-    fn resolve_source_is_case_sensitive() {
-        let sources = sources(&["primary"]);
-        assert!(matches!(
-            resolve_source(&sources, Some("Primary")),
-            Err(DbError::NotAllowed(_))
-        ));
-    }
-
+    // resolve_source itself now lives in ashurbanipal-core (see its own
+    // tests there) — only the router()-specific behavior below is
+    // axum-adapter-specific and stays here.
     struct NeverQueriedSource;
 
     impl DbSource for NeverQueriedSource {

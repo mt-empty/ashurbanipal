@@ -1,9 +1,7 @@
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import express from "express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CommonValueEntry, CountEntry, DbSource, QueryOpts, TableData, TableInfo } from "../src/db/types.js";
 import { createRouter, type NamedSource } from "../src/routes.js";
+import { getJson as sharedGetJson, startServer, type TestServer } from "./helpers.js";
 
 // A minimal in-memory DbSource, standing in for a real backend the same
 // way killswitch.test.ts's `null` stand-in does for kill-switch tests —
@@ -39,28 +37,17 @@ const alpha: NamedSource = { name: "alpha", source: new FakeDbSource("alpha") };
 const beta: NamedSource = { name: "beta", source: new FakeDbSource("beta") };
 
 describe("multi-source support", () => {
-  let server: Server;
-  let baseUrl: string;
+  let testServer: TestServer;
 
   beforeAll(async () => {
-    const router = createRouter({ enabled: true }, [alpha, beta]);
-    const app = express();
-    app.use(router);
-    server = createServer(app);
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const { port } = server.address() as AddressInfo;
-    baseUrl = `http://127.0.0.1:${port}`;
+    testServer = await startServer(createRouter({ enabled: true }, [alpha, beta]));
   });
 
   afterAll(async () => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await testServer.close();
   });
 
-  async function getJson(path: string): Promise<{ status: number; body: unknown }> {
-    const res = await fetch(`${baseUrl}${path}`);
-    const body = res.status === 200 ? await res.json() : await res.text();
-    return { status: res.status, body };
-  }
+  const getJson = (path: string) => sharedGetJson(testServer.baseUrl, path);
 
   it("lists registered source names in registration order", async () => {
     const { status, body } = await getJson("/__ashurbanipal/api/sources");
