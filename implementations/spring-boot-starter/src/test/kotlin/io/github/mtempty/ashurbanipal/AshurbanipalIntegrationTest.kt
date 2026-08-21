@@ -1,20 +1,13 @@
 package io.github.mtempty.ashurbanipal
 
 import tools.jackson.databind.JsonNode
-import tools.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.springframework.boot.autoconfigure.SpringBootApplication
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.http.HttpStatus
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
 import org.springframework.web.client.HttpClientErrorException
-import org.springframework.web.client.RestTemplate
 import java.net.URI
 
 /**
@@ -25,47 +18,7 @@ import java.net.URI
  * actual conformance bar is the golden-fixture runner and schemathesis run
  * externally against this same app.
  */
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    classes = [AshurbanipalIntegrationTest.TestApp::class],
-)
-class AshurbanipalIntegrationTest {
-
-    // scanBasePackages points at an empty package deliberately: TestApp lives
-    // in the same package as DbViewerController, and @RestController is a
-    // component stereotype — without this, component-scanning would register
-    // a *second* DbViewerController bean alongside the one
-    // AshurbanipalAutoConfiguration's @Bean method creates, both mapping the
-    // same routes ("Ambiguous mapping"). A real host app wouldn't hit this
-    // (its own base package doesn't contain io.github.mtempty.ashurbanipal),
-    // so this is a test-harness-only workaround, not a starter design issue.
-    @SpringBootApplication(scanBasePackages = ["io.github.mtempty.ashurbanipal.testapp"])
-    class TestApp
-
-    companion object {
-        @JvmStatic
-        @DynamicPropertySource
-        fun properties(registry: DynamicPropertyRegistry) {
-            val databaseUrl = System.getenv("DATABASE_URL")
-                ?: error("DATABASE_URL must be set (the devcontainer sets it automatically)")
-            val uri = URI(databaseUrl)
-            val (user, password) = (uri.userInfo ?: ":").split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
-            registry.add("spring.datasource.url") { "jdbc:postgresql://${uri.host}:${uri.port}${uri.path}" }
-            registry.add("spring.datasource.username") { user }
-            registry.add("spring.datasource.password") { password }
-            registry.add("ashurbanipal.enabled") { "true" }
-        }
-    }
-
-    @LocalServerPort
-    private var port: Int = 0
-
-    private val http = RestTemplate()
-    private val mapper = ObjectMapper()
-
-    private fun url(path: String) = "http://localhost:$port/__ashurbanipal$path"
-
-    private fun getJson(path: String): JsonNode = mapper.readTree(http.getForObject(url(path), String::class.java))
+class AshurbanipalIntegrationTest : AshurbanipalHttpTestBase() {
 
     /**
      * `RestTemplate.getForObject(String, ...)` treats a plain `String` URL as
