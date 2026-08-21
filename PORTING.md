@@ -14,7 +14,7 @@ that:
 
 1. Serves the released `frontend/dbviewer.html` artifact, vendored (see
    below), unmodified.
-2. Implements the six API routes + the HTML route exactly as
+2. Implements the seven API routes + the HTML route exactly as
    `spec/protocol.md` and `spec/openapi.yaml` specify them.
 3. Passes both conformance layers (behavior + shape) in its own CI.
 
@@ -111,9 +111,9 @@ by reusing the frontend and fixtures above:
    item 2, and needs its own port-level test — the conformance kit can't
    observe it; see "How to run conformance" below).
 2. **The HTML route** (§5.1) serving the vendored frontend, and **the
-   six API routes** (§5.2–§5.7): `tables`, `table-counts`, `tables/data`,
-   `tables/common-values`, `siblings`, `schemas`. Response shapes exactly as
-   `spec/openapi.yaml` declares.
+   seven API routes** (§5.2–§5.8): `tables`, `table-counts`, `tables/data`,
+   `tables/common-values`, `siblings`, `schemas`, `sources`. Response
+   shapes exactly as `spec/openapi.yaml` declares.
 3. **Catalog queries** — table/column introspection, PK/FK metadata with
    composite FKs omitted (§5.4.1), `current_schema()` scoping throughout,
    `pg_class.reltuples` counts, `pg_stats`-based common values. An endpoint

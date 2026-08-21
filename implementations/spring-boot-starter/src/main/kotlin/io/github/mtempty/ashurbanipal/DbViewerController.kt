@@ -26,6 +26,8 @@ private const val PROTOCOL_HEADER = "x-ashurbanipal-protocol"
 /** Bumped only for non-additive wire changes; additive optional fields keep the same version (spec/protocol.md §7). Value must track implementations/rust/axum/src/routes.rs's PROTOCOL_VERSION constant. */
 private const val PROTOCOL_VERSION = "1"
 
+data class SourceEntry(val name: String)
+data class SourcesResponse(val sources: List<SourceEntry>)
 data class SchemasResponse(val schemas: List<String>)
 data class TablesResponse(val tables: List<TableInfo>)
 data class CountsResponse(val counts: List<CountEntry>)
@@ -53,7 +55,7 @@ data class SiblingsResponse(val siblings: List<SiblingStatus>)
 @RequestMapping("\${ashurbanipal.base-path:/__ashurbanipal}")
 class DbViewerController(
     private val properties: AshurbanipalProperties,
-    private val catalog: DbSource,
+    private val dbSources: Map<String, DbSource>,
     private val filterValidator: FilterValidator,
     private val httpClient: HttpClient,
 ) {
@@ -61,25 +63,41 @@ class DbViewerController(
         ClassPathResource("ashurbanipal/dbviewer.html").inputStream.use { it.readBytes() }
     }
 
+    /** Mirrors the `schema` allow-list pattern: absent means the first-registered default, present means an exact match or rejection (spec/protocol.md §1). */
+    private fun resolveSource(name: String?): DbSource =
+        if (name == null) dbSources.values.first()
+        else dbSources[name] ?: throw NotAllowedException("source \"$name\"")
+
     @GetMapping(produces = [MediaType.TEXT_HTML_VALUE])
     fun serveHtml(): ResponseEntity<ByteArray> =
         ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(dbviewerHtml)
 
+    @GetMapping("/api/sources")
+    fun listSources(): ResponseEntity<SourcesResponse> =
+        apiOk(SourcesResponse(dbSources.keys.map { SourceEntry(it) }))
+
     @GetMapping("/api/schemas")
-    fun listSchemas(): ResponseEntity<SchemasResponse> =
-        apiOk(SchemasResponse(catalog.listSchemas()))
+    fun listSchemas(@RequestParam(required = false) source: String?): ResponseEntity<SchemasResponse> =
+        apiOk(SchemasResponse(resolveSource(source).listSchemas()))
 
     @GetMapping("/api/tables")
-    fun listTables(@RequestParam(required = false) schema: String?): ResponseEntity<TablesResponse> =
-        apiOk(TablesResponse(catalog.listTables(schema)))
+    fun listTables(
+        @RequestParam(required = false) schema: String?,
+        @RequestParam(required = false) source: String?,
+    ): ResponseEntity<TablesResponse> =
+        apiOk(TablesResponse(resolveSource(source).listTables(schema)))
 
     @GetMapping("/api/table-counts")
-    fun tableCounts(@RequestParam(required = false) schema: String?): ResponseEntity<CountsResponse> =
-        apiOk(CountsResponse(catalog.tableCounts(schema)))
+    fun tableCounts(
+        @RequestParam(required = false) schema: String?,
+        @RequestParam(required = false) source: String?,
+    ): ResponseEntity<CountsResponse> =
+        apiOk(CountsResponse(resolveSource(source).tableCounts(schema)))
 
     @GetMapping("/api/tables/data")
     fun tableData(
         @RequestParam(required = false) schema: String?,
+        @RequestParam(required = false) source: String?,
         @RequestParam table: String,
         @RequestParam(required = false) filter: String?,
         @RequestParam(required = false) limit: String?,
@@ -104,7 +122,7 @@ class DbViewerController(
             else -> throw FilterException("invalid order \"$order\" (expected \"asc\" or \"desc\")")
         }
 
-        val data = catalog.queryTable(
+        val data = resolveSource(source).queryTable(
             schema,
             table,
             QueryOpts(
@@ -121,10 +139,11 @@ class DbViewerController(
     @GetMapping("/api/tables/common-values")
     fun commonValues(
         @RequestParam(required = false) schema: String?,
+        @RequestParam(required = false) source: String?,
         @RequestParam table: String,
         @RequestParam column: String,
     ): ResponseEntity<CommonValuesResponse> =
-        apiOk(CommonValuesResponse(catalog.commonValues(schema, table, column)))
+        apiOk(CommonValuesResponse(resolveSource(source).commonValues(schema, table, column)))
 
     @GetMapping("/api/siblings")
     fun siblings(): ResponseEntity<SiblingsResponse> {

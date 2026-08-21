@@ -3,6 +3,7 @@ import type { FilterCondition, TableData } from "./types.js";
 const UI_KEY = "ashurbanipal_ui";
 
 export interface State {
+  source: string | null;
   schema: string | null;
   table: string | null;
   sort: string | null;
@@ -21,12 +22,12 @@ export interface State {
 // click-to-filter action) updates it, so an unfinished edit never gets
 // silently resent by an unrelated sort/page click.
 export const state: State = {
-  schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, filter: "",
+  source: null, schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, filter: "",
 };
 
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-  for (const k of ["schema", "table", "sort", "order", "limit"] as const) {
+  for (const k of ["source", "schema", "table", "sort", "order", "limit"] as const) {
     if (saved[k] !== undefined) (state as unknown as Record<string, unknown>)[k] = saved[k];
   }
   // Keyed by table name so hiding a column on one table never hides a
@@ -46,6 +47,7 @@ try {
 // URL query params win over localStorage: opening a shared/bookmarked link
 // should reproduce that link's view, not the visitor's own saved prefs.
 const urlParams = new URLSearchParams(location.search);
+if (urlParams.has("source")) state.source = urlParams.get("source");
 if (urlParams.has("schema")) state.schema = urlParams.get("schema");
 if (urlParams.has("table")) state.table = urlParams.get("table");
 if (urlParams.has("sort")) state.sort = urlParams.get("sort");
@@ -54,8 +56,8 @@ if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || stat
 if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
 
 export function persist(): void {
-  const { schema, table, sort, order, limit, hiddenColumns } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ schema, table, sort, order, limit, hiddenColumns }));
+  const { source, schema, table, sort, order, limit, hiddenColumns } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, sort, order, limit, hiddenColumns }));
 }
 
 // A stale table key or column name absent from the current table's
@@ -65,11 +67,26 @@ export function hiddenColumnsForTable(): string[] {
   return state.hiddenColumns[state.table ?? ""] ?? [];
 }
 
-// Only set once a multi-schema deployment is confirmed (loadSchemas) — a
-// single-schema deployment never sends this param at all, identical to the
-// wire shape before schema selection existed.
-export function schemaQuery(): string {
-  return state.schema ? "?" + new URLSearchParams({ schema: state.schema }) : "";
+// Only set once a multi-source/multi-schema deployment is confirmed
+// (loadSources/loadSchemas) — a single-source, single-schema deployment
+// never sends either param at all, identical to the wire shape before
+// source/schema selection existed.
+export function applyScopeParams(params: URLSearchParams): void {
+  if (state.source) params.set("source", state.source);
+  if (state.schema) params.set("schema", state.schema);
+}
+
+export function scopeQuery(): string {
+  const params = new URLSearchParams();
+  applyScopeParams(params);
+  return params.size ? "?" + params : "";
+}
+
+// `api/schemas` (spec/protocol.md §5.7) takes `source` but not `schema` —
+// it's what resolves schema in the first place — so it gets its own query
+// builder rather than scopeQuery()'s combined source+schema.
+export function sourceQuery(): string {
+  return state.source ? "?" + new URLSearchParams({ source: state.source }) : "";
 }
 
 // state.filter stays the applied *text*; the AST that actually goes on the

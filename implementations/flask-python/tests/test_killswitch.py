@@ -13,6 +13,7 @@ from ashurbanipal.routes import router
 
 ALL_MOUNT_PATHS = [
     "/__ashurbanipal",
+    "/__ashurbanipal/api/sources",
     "/__ashurbanipal/api/schemas",
     "/__ashurbanipal/api/tables",
     "/__ashurbanipal/api/table-counts",
@@ -46,7 +47,7 @@ class _UnusedSource(DbSource):
 
 def _client(config: Config):
     app = Flask(__name__)
-    app.register_blueprint(router(config, _UnusedSource()))
+    app.register_blueprint(router(config, [("primary", _UnusedSource())]))
     return app.test_client()
 
 

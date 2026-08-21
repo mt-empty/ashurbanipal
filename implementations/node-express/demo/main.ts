@@ -80,7 +80,7 @@ async function main(): Promise<void> {
     ];
   }
 
-  const viewer = createRouter(config, dbSource);
+  const viewer = createRouter(config, [{ name: backend, source: dbSource }]);
 
   const app = express();
   app.get("/health", (_req, res) => res.send("ok"));

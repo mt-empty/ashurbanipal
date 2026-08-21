@@ -13,18 +13,31 @@ const PROTOCOL_HEADER = "x-ashurbanipal-protocol";
 const PROTOCOL_VERSION = "1";
 
 /**
- * Mounts the Ashurbanipal viewer's six routes (the UI plus five API
+ * One registered `DbSource`, named for `source` param resolution
+ * (spec/protocol.md §1's "Resolved source", §5.8) — a live connection
+ * object, never `Config` data (a host constructs these itself, same as
+ * the single-source `DbSource` this replaces).
+ */
+export interface NamedSource {
+  name: string;
+  source: DbSource;
+}
+
+/**
+ * Mounts the Ashurbanipal viewer's seven routes (the UI plus six API
  * routes) at cfg's base path into a plain express.Router — the host does
- * `app.use(createRouter(config, dbSource))`, constructing whichever
- * `DbSource` implementation (PostgresSource, SqliteSource, MySqlSource)
- * it wants itself; there is no driver auto-detection.
+ * `app.use(createRouter(config, sources))`, constructing whichever
+ * `DbSource` implementation(s) (PostgresSource, SqliteSource, MySqlSource)
+ * it wants itself; there is no driver auto-detection. `sources` MUST be
+ * non-empty — a host with nothing to browse should pass `enabled: false`
+ * instead, not an empty list.
  *
  * When cfg.enabled is not true — including an empty/undefined Config,
  * which MUST mean disabled — createRouter returns a router that 404s
  * every request under basePath, indistinguishable from the viewer never
  * having been mounted at all (spec/protocol.md §4).
  */
-export function createRouter(config: Config, dbSource: DbSource): ExpressRouter {
+export function createRouter(config: Config, sources: NamedSource[]): ExpressRouter {
   const router = express.Router();
   if (!isEnabled(config)) {
     // No routes registered under basePath: Express's own 404 handling
@@ -32,27 +45,42 @@ export function createRouter(config: Config, dbSource: DbSource): ExpressRouter 
     // having been mounted.
     return router;
   }
+  if (sources.length === 0) {
+    throw new Error("createRouter requires at least one source");
+  }
 
   const limits = withDefaults(config.limits);
   const timeoutMs = limits.queryTimeoutSecs * 1000;
   const mount = basePath(config);
 
   registerGet(router, mount, serveHtml);
-  registerGet(router, `${mount}/api/schemas`, withProtocolHeader(listSchemasHandler(dbSource, timeoutMs)));
-  registerGet(router, `${mount}/api/tables`, withProtocolHeader(listTablesHandler(dbSource, timeoutMs)));
-  registerGet(router, `${mount}/api/table-counts`, withProtocolHeader(tableCountsHandler(dbSource, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/data`, withProtocolHeader(tableDataHandler(dbSource, limits, timeoutMs)));
-  registerGet(
-    router,
-    `${mount}/api/tables/common-values`,
-    withProtocolHeader(commonValuesHandler(dbSource, timeoutMs)),
-  );
+  registerGet(router, `${mount}/api/sources`, withProtocolHeader(listSourcesHandler(sources)));
+  registerGet(router, `${mount}/api/schemas`, withProtocolHeader(listSchemasHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/tables`, withProtocolHeader(listTablesHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/table-counts`, withProtocolHeader(tableCountsHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/data`, withProtocolHeader(tableDataHandler(sources, limits, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/common-values`, withProtocolHeader(commonValuesHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/siblings`, withProtocolHeader(siblingsHandler(config.siblings ?? [])));
 
   return router;
 }
 
-// spec/protocol.md §2/§5 only ever declares GET on these six paths, but
+/**
+ * Resolves the `source` query param against `sources` the same way
+ * `schema` resolves against a live catalog list (spec/protocol.md §1):
+ * absent means the first-registered default, present means an exact
+ * case-sensitive match or a rejection — never a fallback guess.
+ */
+function resolveSource(sources: NamedSource[], requested: string | undefined): DbSource {
+  if (requested === undefined) return sources[0].source;
+  const found = sources.find((s) => s.name === requested);
+  if (found === undefined) {
+    throw new NotAllowedError(`source ${JSON.stringify(requested)}`);
+  }
+  return found.source;
+}
+
+// spec/protocol.md §2/§5 only ever declares GET on these seven paths, but
 // Express's app.get() leaves every other verb unmatched, falling through
 // to a generic 404 — indistinguishable from a nonexistent path. router.all
 // plus an explicit method check yields 405 for a real path hit with the
@@ -103,31 +131,41 @@ function writeError(res: Response, err: unknown): void {
   httpTextError(res, 500, `database error: ${message}`);
 }
 
-function listSchemasHandler(dbSource: DbSource, timeoutMs: number) {
+function listSourcesHandler(sources: NamedSource[]) {
   return async (_req: Request, res: Response): Promise<void> => {
-    const schemas = await dbSource.listSchemas(timeoutMs);
+    res.json({ sources: sources.map(({ name }) => ({ name })) });
+  };
+}
+
+function listSchemasHandler(sources: NamedSource[], timeoutMs: number) {
+  return async (req: Request, res: Response): Promise<void> => {
+    const source = resolveSource(sources, firstQueryValue(req, "source"));
+    const schemas = await source.listSchemas(timeoutMs);
     res.json({ schemas });
   };
 }
 
-function listTablesHandler(dbSource: DbSource, timeoutMs: number) {
+function listTablesHandler(sources: NamedSource[], timeoutMs: number) {
   return async (req: Request, res: Response): Promise<void> => {
+    const source = resolveSource(sources, firstQueryValue(req, "source"));
     const schema = firstQueryValue(req, "schema");
-    const tables = await dbSource.listTables(schema, timeoutMs);
+    const tables = await source.listTables(schema, timeoutMs);
     res.json({ tables });
   };
 }
 
-function tableCountsHandler(dbSource: DbSource, timeoutMs: number) {
+function tableCountsHandler(sources: NamedSource[], timeoutMs: number) {
   return async (req: Request, res: Response): Promise<void> => {
+    const source = resolveSource(sources, firstQueryValue(req, "source"));
     const schema = firstQueryValue(req, "schema");
-    const counts = await dbSource.tableCounts(schema, timeoutMs);
+    const counts = await source.tableCounts(schema, timeoutMs);
     res.json({ counts });
   };
 }
 
-function tableDataHandler(dbSource: DbSource, limits: ResolvedLimits, timeoutMs: number) {
+function tableDataHandler(sources: NamedSource[], limits: ResolvedLimits, timeoutMs: number) {
   return async (req: Request, res: Response): Promise<void> => {
+    const source = resolveSource(sources, firstQueryValue(req, "source"));
     const schema = firstQueryValue(req, "schema");
     const table = firstQueryValue(req, "table");
     if (table === undefined) {
@@ -180,7 +218,7 @@ function tableDataHandler(dbSource: DbSource, limits: ResolvedLimits, timeoutMs:
       return;
     }
 
-    const data = await dbSource.queryTable(
+    const data = await source.queryTable(
       schema,
       table,
       {
@@ -196,8 +234,9 @@ function tableDataHandler(dbSource: DbSource, limits: ResolvedLimits, timeoutMs:
   };
 }
 
-function commonValuesHandler(dbSource: DbSource, timeoutMs: number) {
+function commonValuesHandler(sources: NamedSource[], timeoutMs: number) {
   return async (req: Request, res: Response): Promise<void> => {
+    const source = resolveSource(sources, firstQueryValue(req, "source"));
     const schema = firstQueryValue(req, "schema");
     const table = firstQueryValue(req, "table");
     const column = firstQueryValue(req, "column");
@@ -205,7 +244,7 @@ function commonValuesHandler(dbSource: DbSource, timeoutMs: number) {
       httpTextError(res, 400, "table and column parameters are required");
       return;
     }
-    const values = await dbSource.commonValues(schema, table, column, timeoutMs);
+    const values = await source.commonValues(schema, table, column, timeoutMs);
     res.json({ values });
   };
 }

@@ -13,7 +13,7 @@ export type {
 } from "./db/types.js";
 export { FilterError, NotAllowedError } from "./errors.js";
 export { buildWhereClause, type Condition, parseFilter } from "./filter.js";
-export { createRouter } from "./routes.js";
+export { createRouter, type NamedSource } from "./routes.js";
 // SqliteSource/MySqlSource are NOT re-exported here: this barrel is the
 // only always-imported module, so pulling them in unconditionally would
 // make every consumer's module graph (even a Postgres-only one) eagerly

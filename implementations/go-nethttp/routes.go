@@ -19,24 +19,39 @@ const (
 	protocolVersion = "1"
 )
 
-// Router mounts the Ashurbanipal viewer's six routes (the UI plus five API
+// NamedSource pairs a DbSource with the name a request's "source" query
+// param selects it by (spec/protocol.md §1's "Resolved source" rules).
+// Order matters: the first entry in the slice passed to Router is the
+// default a request with no "source" param resolves to, and api/sources
+// (§5.8) lists names in that same order.
+type NamedSource struct {
+	Name   string
+	Source DbSource
+}
+
+// Router mounts the Ashurbanipal viewer's seven routes (the UI plus six API
 // routes) at cfg's base path into a plain http.Handler — no framework
 // choice baked in, so it mounts into any net/http-compatible mux (stdlib
 // ServeMux, Chi, or anything else).
 //
-// source is the one seam to the database (see DbSource in db.go) — the
-// caller constructs it (NewPostgresSource, NewSQLiteSource, NewMySQLSource,
-// or a custom implementation) already bound to its own query timeout, the
-// same way implementations/rust/axum/src/routes.rs's router<S: DbSource> takes
-// an already-constructed source rather than a raw connection.
+// sources is the one seam to the database (see DbSource in db.go) — the
+// caller constructs each one (NewPostgresSource, NewSQLiteSource,
+// NewMySQLSource, or a custom implementation) already bound to its own
+// query timeout, the same way implementations/rust/axum/src/routes.rs's
+// router<S: DbSource> takes already-constructed sources rather than raw
+// connections. sources MUST be non-empty — a host with nothing to browse
+// should pass Enabled: false instead of an empty slice.
 //
 // When cfg.Enabled is false — including the zero value Config{}, which
 // MUST mean disabled — Router returns a handler that 404s every request,
 // indistinguishable from the viewer never having been mounted at all
 // (spec/protocol.md §4).
-func Router(cfg Config, source DbSource) http.Handler {
+func Router(cfg Config, sources []NamedSource) http.Handler {
 	if !cfg.IsEnabled() {
 		return http.NotFoundHandler()
+	}
+	if len(sources) == 0 {
+		panic("ashurbanipal.Router: at least one source is required")
 	}
 
 	limits := cfg.Limits.WithDefaults()
@@ -45,13 +60,56 @@ func Router(cfg Config, source DbSource) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+base, serveHTML)
-	mux.Handle("GET "+base+"/api/schemas", withProtocolHeader(listSchemasHandler(source)))
-	mux.Handle("GET "+base+"/api/tables", withProtocolHeader(listTablesHandler(source)))
-	mux.Handle("GET "+base+"/api/table-counts", withProtocolHeader(tableCountsHandler(source)))
-	mux.Handle("GET "+base+"/api/tables/data", withProtocolHeader(tableDataHandler(source, limits)))
-	mux.Handle("GET "+base+"/api/tables/common-values", withProtocolHeader(commonValuesHandler(source)))
+	mux.Handle("GET "+base+"/api/sources", withProtocolHeader(listSourcesHandler(sources)))
+	mux.Handle("GET "+base+"/api/schemas", withProtocolHeader(listSchemasHandler(sources)))
+	mux.Handle("GET "+base+"/api/tables", withProtocolHeader(listTablesHandler(sources)))
+	mux.Handle("GET "+base+"/api/table-counts", withProtocolHeader(tableCountsHandler(sources)))
+	mux.Handle("GET "+base+"/api/tables/data", withProtocolHeader(tableDataHandler(sources, limits)))
+	mux.Handle("GET "+base+"/api/tables/common-values", withProtocolHeader(commonValuesHandler(sources)))
 	mux.Handle("GET "+base+"/api/siblings", withProtocolHeader(siblingsHandler(client, cfg.Siblings)))
 	return mux
+}
+
+// resolveSource resolves the "source" query param against sources the same
+// way a schema name resolves against a live catalog list (spec/protocol.md
+// §1/§6): absent means the first-registered default, present means an
+// exact match or a *NotAllowedError — never a fallback guess.
+func resolveSource(sources []NamedSource, requested *string) (DbSource, error) {
+	if requested == nil {
+		return sources[0].Source, nil
+	}
+	for _, s := range sources {
+		if s.Name == *requested {
+			return s.Source, nil
+		}
+	}
+	return nil, &NotAllowedError{What: fmt.Sprintf("source %q", *requested)}
+}
+
+// querySource returns the "source" query param as a *string, nil when
+// absent — mirrors querySchema.
+func querySource(q url.Values) *string {
+	if !q.Has("source") {
+		return nil
+	}
+	s := q.Get("source")
+	return &s
+}
+
+func listSourcesHandler(sources []NamedSource) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		entries := make([]struct {
+			Name string `json:"name"`
+		}, len(sources))
+		for i, s := range sources {
+			entries[i].Name = s.Name
+		}
+		writeJSON(w, struct {
+			Sources []struct {
+				Name string `json:"name"`
+			} `json:"sources"`
+		}{entries})
+	}
 }
 
 // withProtocolHeader stamps every API response, success or error
@@ -109,8 +167,13 @@ func querySchema(q url.Values) *string {
 	return &s
 }
 
-func listSchemasHandler(c DbSource) http.HandlerFunc {
+func listSchemasHandler(sources []NamedSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		c, err := resolveSource(sources, querySource(r.URL.Query()))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		schemas, err := c.ListSchemas(r.Context())
 		if err != nil {
 			writeError(w, err)
@@ -122,9 +185,15 @@ func listSchemasHandler(c DbSource) http.HandlerFunc {
 	}
 }
 
-func listTablesHandler(c DbSource) http.HandlerFunc {
+func listTablesHandler(sources []NamedSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tables, err := c.ListTables(r.Context(), querySchema(r.URL.Query()))
+		q := r.URL.Query()
+		c, err := resolveSource(sources, querySource(q))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		tables, err := c.ListTables(r.Context(), querySchema(q))
 		if err != nil {
 			writeError(w, err)
 			return
@@ -135,9 +204,15 @@ func listTablesHandler(c DbSource) http.HandlerFunc {
 	}
 }
 
-func tableCountsHandler(c DbSource) http.HandlerFunc {
+func tableCountsHandler(sources []NamedSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		counts, err := c.TableCounts(r.Context(), querySchema(r.URL.Query()))
+		q := r.URL.Query()
+		c, err := resolveSource(sources, querySource(q))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		counts, err := c.TableCounts(r.Context(), querySchema(q))
 		if err != nil {
 			writeError(w, err)
 			return
@@ -148,9 +223,14 @@ func tableCountsHandler(c DbSource) http.HandlerFunc {
 	}
 }
 
-func tableDataHandler(c DbSource, limits Limits) http.HandlerFunc {
+func tableDataHandler(sources []NamedSource, limits Limits) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+		c, err := resolveSource(sources, querySource(q))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		if !q.Has("table") {
 			httpTextError(w, http.StatusBadRequest, "table parameter is required")
 			return
@@ -223,9 +303,14 @@ func tableDataHandler(c DbSource, limits Limits) http.HandlerFunc {
 	}
 }
 
-func commonValuesHandler(c DbSource) http.HandlerFunc {
+func commonValuesHandler(sources []NamedSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+		c, err := resolveSource(sources, querySource(q))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		if !q.Has("table") || !q.Has("column") {
 			httpTextError(w, http.StatusBadRequest, "table and column parameters are required")
 			return

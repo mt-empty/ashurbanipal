@@ -3,10 +3,10 @@ import "./api-reference.js";
 import { $, setStatus } from "./dom.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "./grid.js";
 import { syncUrl } from "./nav.js";
-import { loadSchemas, loadTables, setRowLoading } from "./sidebar.js";
+import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
-import { getAppliedFilterAst, getLastPayload, setLastPayload, state } from "./state.js";
+import { applyScopeParams, getAppliedFilterAst, getLastPayload, setLastPayload, state } from "./state.js";
 import "./theme.js";
 import type { TableData } from "./types.js";
 
@@ -31,7 +31,7 @@ async function fetchTableData(): Promise<TableData> {
     table, limit: String(state.limit), offset: String(state.offset),
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
-  if (state.schema) params.set("schema", state.schema);
+  applyScopeParams(params);
   // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
   // box's DSL text — URLSearchParams handles the URL-encoding.
   if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
@@ -173,9 +173,10 @@ new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${(entry.target as HTMLElement).offsetHeight}px`);
 }).observe($("toolbar"));
 
-// loadSchemas resolves state.schema before loadTables' first request needs
-// it — bootstrap-only ordering; loadTables is safe to call on its own after
-// this (schema switching does exactly that).
-loadSchemas().then(loadTables).catch((e) => { $("error").textContent = e.message; });
+// loadSources resolves state.source before loadSchemas needs it, which in
+// turn resolves state.schema before loadTables' first request needs it —
+// bootstrap-only ordering; loadSchemas/loadTables are safe to call on their
+// own after this (source/schema switching does exactly that).
+loadSources().then(loadSchemas).then(loadTables).catch((e) => { $("error").textContent = e.message; });
 loadSiblings();
 setInterval(loadSiblings, 15_000);

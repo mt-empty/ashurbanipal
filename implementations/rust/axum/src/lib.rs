@@ -10,7 +10,10 @@
 //!     enabled = true
 //! "#)?;
 //! let app: axum::Router = axum::Router::new()
-//!     .merge(ashurbanipal_axum::router(config, ashurbanipal_axum::PgPoolSource::new(pool)));
+//!     .merge(ashurbanipal_axum::router(
+//!         config,
+//!         vec![("default".to_string(), ashurbanipal_axum::PgPoolSource::new(pool))],
+//!     ));
 //! # Ok(()) }
 //! ```
 //!

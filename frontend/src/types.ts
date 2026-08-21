@@ -40,6 +40,10 @@ export interface TableListEntry {
   comment?: string;
 }
 
+export interface SourceEntry {
+  name: string;
+}
+
 export interface Sibling {
   name: string;
   dbviewer_url: string;

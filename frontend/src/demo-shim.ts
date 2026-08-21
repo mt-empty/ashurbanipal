@@ -100,6 +100,12 @@ function allRows(table: TableDef): Record<string, CellValue>[] {
   return Array.from({ length: table.rowCount }, (_, i) => table.row(i));
 }
 
+// Single fake source: the hosted demo has nothing to switch between, so
+// #source-select-wrap stays hidden the same way it would for any real
+// single-source host — see loadSources.
+function handleSources(): Response {
+  return jsonResponse({ sources: [{ name: "demo" }] });
+}
 function handleSchemas(): Response {
   return jsonResponse({ schemas: SCHEMAS });
 }
@@ -207,6 +213,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const path = url.pathname.slice(API_BASE.length);
   const params = url.searchParams;
   switch (path) {
+    case "/sources": return handleSources();
     case "/schemas": return handleSchemas();
     case "/tables": return handleTables(params);
     case "/table-counts": return handleTableCounts(params);

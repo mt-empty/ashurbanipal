@@ -22,10 +22,26 @@ interpreted as described in RFC 2119.
   the routes in §5 under a mount point.
 - **Mount** — the URL path prefix under which an implementation serves the
   UI and API (see §3).
-- **Resolved schema** — the namespace of tables one operation browses, for
-  engines that have a schema concept above a single database. Every
-  route that takes a `schema` parameter (§5.2–§5.5) resolves it the same
+- **Resolved source** — which registered `DbSource` one operation targets,
+  for implementations that register more than one (§5.8). Every route
+  that takes a `source` parameter (§5.2–§5.5, §5.7) resolves it the same
   way:
+  - **Absent** — resolves to the first-registered source, the same order
+    §5.8's list returns.
+  - **Present** — MUST match an entry from §5.8's live list exactly
+    (case-sensitive); otherwise 400. An implementation MUST NOT accept a
+    source name that hasn't been validated against that same live list.
+  All schema/table listing, validation, metadata, and data queries for
+  one operation MUST target that operation's resolved source, never a
+  hardcoded default. An operation that performs multiple queries to
+  produce one response MUST resolve the source once and use that same
+  resolved value — and the same underlying connection — for every query
+  in the operation. Implementations that register exactly one source
+  satisfy this trivially (§5.8 still returns exactly that one entry).
+- **Resolved schema** — the namespace of tables one operation browses,
+  within that operation's resolved source, for engines that have a
+  schema concept above a single database. Every route that takes a
+  `schema` parameter (§5.2–§5.5) resolves it the same way:
   - **Absent** — resolves to the connection's own default (on Postgres:
     `current_schema()`).
   - **Present** — MUST match an entry from §5.7's live list exactly
@@ -56,12 +72,12 @@ interpreted as described in RFC 2119.
   The body is a short human-readable reason. Its exact wording is
   implementation-defined; clients MUST NOT parse it. (A structured error
   envelope would be a protocol v2 change.)
-- Every API response (§5.2–§5.7), success or error, MUST carry the
+- Every API response (§5.2–§5.8), success or error, MUST carry the
   protocol version header (§7).
 
 ## 3. Mount contract
 
-- The UI is served at `{mount}`; the six API routes live at
+- The UI is served at `{mount}`; the seven API routes live at
   `{mount}/api/...`.
 - `{mount}` is implementation-defined. `/__ashurbanipal` is the Rust
   implementation's default, not a requirement.
@@ -81,7 +97,7 @@ interpreted as described in RFC 2119.
 - An implementation MUST NOT infer or police which environment the host
   process is running in (by name, hostname, or any other signal). Where
   and whether to enable the viewer is entirely the host's decision.
-- When disabled, all seven routes MUST behave exactly as if the viewer
+- When disabled, all eight routes MUST behave exactly as if the viewer
   were never mounted: 404, indistinguishable from an absent
   implementation.
   The enabled check is a startup-time decision, not per-request.
@@ -106,6 +122,7 @@ to that same resolved schema.
 
 | Param    | Required | Rules                                             |
 |----------|----------|----------------------------------------------------|
+| `source` | no       | See §1's resolution rules; unrecognized value → 400. |
 | `schema` | no       | See §1's resolution rules; unrecognized value → 400. |
 
 Response:
@@ -131,6 +148,7 @@ Approximate row counts for every table in the resolved schema (§1).
 
 | Param    | Required | Rules                                             |
 |----------|----------|----------------------------------------------------|
+| `source` | no       | See §1's resolution rules; unrecognized value → 400. |
 | `schema` | no       | See §1's resolution rules; unrecognized value → 400. |
 
 Response:
@@ -156,8 +174,9 @@ Paginated, filtered, sorted rows for a single table.
 
 | Param    | Required | Rules                                                         |
 |----------|----------|---------------------------------------------------------------|
+| `source` | no       | See §1's resolution rules; unrecognized value → 400.          |
 | `schema` | no       | See §1's resolution rules; unrecognized value → 400.          |
-| `table`  | yes      | MUST match a table from §5.2 (resolved against the same `schema`) exactly (case-sensitive); otherwise 400. |
+| `table`  | yes      | MUST match a table from §5.2 (resolved against the same `source`/`schema`) exactly (case-sensitive); otherwise 400. |
 | `filter` | no       | URL-encoded JSON AST, see §5.4.2.                             |
 | `limit`  | no       | Clamped, never an error — see below.                          |
 | `offset` | no       | Clamped, never an error — see below.                          |
@@ -332,8 +351,9 @@ Most-common values for one column, from planner statistics.
 
 | Param    | Required | Rules                                             |
 |----------|----------|---------------------------------------------------|
+| `source` | no       | See §1's resolution rules; unrecognized value → 400. |
 | `schema` | no       | See §1's resolution rules; unrecognized value → 400. |
-| `table`  | yes      | Validated against §5.2's list (resolved against the same `schema`); unknown → 400. |
+| `table`  | yes      | Validated against §5.2's list (resolved against the same `source`/`schema`); unknown → 400. |
 | `column` | yes      | Validated against the table's real columns; unknown → 400. |
 
 Response:
@@ -387,7 +407,13 @@ Response:
 
 ### 5.7 `GET {mount}/api/schemas`
 
-Lists the schema names selectable as the `schema` parameter on §5.2–§5.5.
+Lists the schema names selectable as the `schema` parameter on §5.2–§5.5,
+for the resolved source (§1).
+
+| Param    | Required | Rules                                             |
+|----------|----------|----------------------------------------------------|
+| `source` | no       | See §1's resolution rules; unrecognized value → 400. |
+
 This is the live allow-list §1's "present" case validates against.
 
 Response:
@@ -397,9 +423,9 @@ Response:
 ```
 
 - MUST list every schema §1's default-resolution case could ever resolve
-  to, so the implicit and explicit paths never diverge on what counts as
-  valid — an implementation MUST NOT accept, via either path, a schema
-  this list doesn't contain.
+  to for this source, so the implicit and explicit paths never diverge on
+  what counts as valid — an implementation MUST NOT accept, via either
+  path, a schema this list doesn't contain.
 - MUST exclude the engine's own system/internal namespaces (on Postgres:
   `pg_catalog`, `information_schema`, and any `pg_toast`/`pg_temp`
   namespace) — this route lists browsable schemas, not every namespace
@@ -411,6 +437,33 @@ Response:
   MUST return exactly one entry — see `docs/adapter-decisions.md`.
 - Schemas SHOULD be returned in a stable order (the Rust implementation
   sorts by name).
+
+### 5.8 `GET {mount}/api/sources`
+
+Lists the source names selectable as the `source` parameter on
+§5.2–§5.5, §5.7. This is the live allow-list §1's "present" case
+validates against.
+
+Response:
+
+```json
+{ "sources": [{ "name": "primary" }, { "name": "reporting" }] }
+```
+
+- `name` — the source's opaque, implementation-defined identifier. No
+  other field is defined — in particular, responses MUST NOT include
+  which backend engine a source uses; that stays purely a host-side
+  configuration detail with no wire representation.
+- MUST list every source §1's default-resolution case could ever resolve
+  to, so the implicit and explicit paths never diverge on what counts as
+  valid — an implementation MUST NOT accept, via either path, a source
+  this list doesn't contain.
+- Implementations that register exactly one source MUST still return
+  exactly one entry here (mirrors §5.7's single-schema-engine rule) — a
+  single-source deployment is the common case, not a degenerate one.
+- Sources SHOULD be returned in a stable order, and that order MUST be
+  the same order §1's "absent" case resolves against (the first entry is
+  the default).
 
 ## 6. Server invariants
 
@@ -432,6 +485,15 @@ These hold across all routes:
   tables. FK navigation in the UI is two sequential single-table queries.
   Catalog and metadata queries MAY join system catalogs when needed to
   satisfy this protocol.
+- **Source scoping.** Every catalog and data query MUST be scoped to the
+  operation's resolved source (§1), not a hardcoded default, and MUST
+  reject a `source` value that isn't on §5.8's live list before it
+  reaches dispatch — same allow-list-before-use discipline as this
+  section's first bullet, applied to source names. A multi-query
+  operation (§5.4, §5.5) MUST stay on that one resolved source's
+  connection for every query it issues, the same requirement this
+  section already places on schema. Implementations that register
+  exactly one source satisfy this trivially.
 - **Schema scoping.** Every catalog and data query MUST be scoped to the
   operation's resolved schema (§1), not a hardcoded default such as
   `'public'`, and MUST reject a `schema` value that isn't on §5.7's live
@@ -444,7 +506,7 @@ These hold across all routes:
 
 ## 7. Protocol version
 
-- Every API response (§5.2–§5.7) MUST carry the header
+- Every API response (§5.2–§5.8) MUST carry the header
   `x-ashurbanipal-protocol: 1`.
 - **Versioning policy**: adding an optional response field, an optional
   request parameter, or a wholly new route is still the same version —
@@ -454,7 +516,8 @@ These hold across all routes:
   semantics — bumps the version. The policy applies to changes made
   *after* a version ships, measured from this document's shape forward.
   §5.7 and the `schema` parameter on §5.2–§5.5 are the first instance of
-  this: purely additive, so v1 stands.
+  this: purely additive, so v1 stands. §5.8 and the `source` parameter on
+  §5.2–§5.5 and §5.7 are the second instance, for the same reason.
 - **v1 baseline**: v1 is the first protocol version ever emitted; nothing
   shipped a `x-ashurbanipal-protocol` header before it. The pre-spec
   reference's DSL-text `filter` parameter was an implementation detail,

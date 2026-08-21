@@ -22,7 +22,7 @@ import { createRouter, PostgresSource } from "ashurbanipal-node-express";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-const viewer = createRouter({ enabled: true }, new PostgresSource(pool));
+const viewer = createRouter({ enabled: true }, [{ name: "primary", source: new PostgresSource(pool) }]);
 
 const app = express();
 app.use(viewer); // paths already include the mount (default /__ashurbanipal)
@@ -34,6 +34,13 @@ undefined, which means disabled. Ashurbanipal has zero opinion on what
 environment it's running in — that decision is entirely the host's. A
 host that forgets to configure anything gets a 404'd viewer, never one
 silently enabled with defaults.
+
+`createRouter` takes an ordered, non-empty array of named sources rather
+than a single one — a host can register more than one `DbSource` (e.g.
+two Postgres databases) and a request's `source` query param selects
+which one it targets (`spec/protocol.md` §1, §5.8); the first entry is
+the default used when `source` is absent. A single-source deployment
+just registers one entry, as above.
 
 The optional fields, shown here at their defaults/example values:
 
@@ -47,13 +54,13 @@ const viewer = createRouter(
       { name: "billing", dbviewerUrl: "https://billing.internal.vpn/__ashurbanipal", healthPath: "/health" },
     ],
   },
-  new PostgresSource(pool),
+  [{ name: "primary", source: new PostgresSource(pool) }],
 );
 ```
 
 Express's `app.get()` alone leaves every other HTTP verb on a registered
 path unmatched (a generic 404, indistinguishable from a nonexistent
-path), so `createRouter` registers each of the six routes with an
+path), so `createRouter` registers each of the seven routes with an
 explicit method check instead, returning 405 + `Allow: GET, HEAD` for any
 other verb — same behavior the other ports' underlying routers give for
 free by matching path before method.
@@ -73,8 +80,8 @@ import { MySqlSource } from "ashurbanipal-node-express/dist/src/db/mysql.js";
 import { Database } from "sqlite3";
 import { createPool } from "mysql2/promise";
 
-const sqliteViewer = createRouter(config, new SqliteSource(new Database("app.db")));
-const mysqlViewer = createRouter(config, new MySqlSource(createPool(process.env.MYSQL_URL!)));
+const sqliteViewer = createRouter(config, [{ name: "primary", source: new SqliteSource(new Database("app.db")) }]);
+const mysqlViewer = createRouter(config, [{ name: "primary", source: new MySqlSource(createPool(process.env.MYSQL_URL!)) }]);
 ```
 
 `demo/main.ts` demonstrates all three via a `DB_BACKEND=postgres|sqlite|mysql`

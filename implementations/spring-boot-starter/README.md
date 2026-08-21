@@ -9,9 +9,14 @@ port implements/reuses.
 ```yaml
 ashurbanipal:
   enabled: ${ASHURBANIPAL_ENABLED:false}
-  # Defaults to "postgres"; "mysql" (covers MariaDB too) or "sqlite" opt in
-  # to the alternate DbSource implementations below.
-  backend: postgres
+
+  # Optional. Omit entirely for a single-datasource host: it's equivalent
+  # to `sources: [{name: default, backend: postgres}]`, bound to the
+  # primary/only DataSource bean in the context.
+  sources:
+    - name: primary
+      backend: postgres # or "mysql" (covers MariaDB too), "sqlite"
+      # data-source-bean: ordersDataSourceV2  # only needed with >1 DataSource bean
 
   # optional — these are the defaults/examples, shown explicitly
   base-path: /__ashurbanipal
@@ -25,13 +30,18 @@ ashurbanipal:
       health-path: /health
 ```
 
-Autoconfigured — no bean wiring needed beyond the host's own `DataSource`.
-Backend selection is always an explicit config property, never inferred
-from which JDBC driver happens to be on the classpath (`PORTING.md`'s
-hardening checklist item 2). This starter has no opinion on which
-environment it's running in — deciding when `enabled` is true is entirely
-up to the host. Absent config means disabled (no `DbViewerController`/
-`DbSource` bean registered), never enabled with defaults.
+Autoconfigured — no bean wiring needed beyond the host's own `DataSource`
+bean(s). Each `sources` entry gets its own `DbSource`, selectable via the
+`source` query param (`spec/protocol.md` §1, §5.8); the first entry is the
+default used when `source` is absent. `data-source-bean` picks which
+`DataSource` bean an entry binds to — required once the context has more
+than one, since there's no default to fall back on. Backend selection is
+always an explicit config property, never inferred from which JDBC driver
+happens to be on the classpath (`PORTING.md`'s hardening checklist item
+2). This starter has no opinion on which environment it's running in —
+deciding when `enabled` is true is entirely up to the host. Absent config
+means disabled (no `DbViewerController`/`DbSource` bean registered),
+never enabled with defaults.
 
 
 ## Database support

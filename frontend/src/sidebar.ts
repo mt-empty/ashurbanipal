@@ -1,8 +1,8 @@
 import { api } from "./api.js";
 import { $, setStatus } from "./dom.js";
 import { loadData } from "./main.js";
-import { persist, schemaQuery, setAppliedFilterAst, state } from "./state.js";
-import type { TableListEntry } from "./types.js";
+import { persist, scopeQuery, setAppliedFilterAst, sourceQuery, state } from "./state.js";
+import type { SourceEntry, TableListEntry } from "./types.js";
 
 // approx_rows/total_approx is -1 when the backend has no cheap estimate for
 // this table (e.g. Postgres before ANALYZE, or an engine with no such
@@ -47,6 +47,40 @@ function filterTables(): void {
 }
 $<HTMLInputElement>("table-filter").oninput = filterTables;
 
+// ==== Source selector ====
+// Same hide-when-singular shape as the schema selector below it (and drawn
+// above it — source is the outer scope, schema resolves within a source).
+// Switching source resets schema/table/sort/filter too: a different source
+// can have a completely different schema list and table set, so nothing
+// about the previous source's view carries over.
+export async function loadSources(): Promise<void> {
+  let sources: SourceEntry[];
+  try {
+    ({ sources } = await api<{ sources: SourceEntry[] }>("/sources"));
+  } catch {
+    return; // older port without /sources — degrade to single-source behavior
+  }
+  if (sources.length <= 1) { state.source = null; return; }
+  if (!state.source || !sources.some((s) => s.name === state.source)) {
+    state.source = sources[0]!.name;
+  }
+  const select = $<HTMLSelectElement>("source-select");
+  select.replaceChildren(...sources.map((s) => {
+    const opt = document.createElement("option");
+    opt.value = s.name; opt.textContent = s.name;
+    return opt;
+  }));
+  select.value = state.source!;
+  $("source-select-wrap").hidden = false;
+}
+$<HTMLSelectElement>("source-select").onchange = () => {
+  state.source = $<HTMLSelectElement>("source-select").value;
+  state.schema = null; state.table = null; state.sort = null; state.offset = 0;
+  state.filter = ""; setAppliedFilterAst([]); $<HTMLInputElement>("filter").value = "";
+  persist();
+  loadSchemas().then(loadTables).catch((e) => { $("error").textContent = e.message; });
+};
+
 // ==== Schema selector ====
 // Hidden entirely for a single-schema deployment (the overwhelming common
 // case) — no dropdown clutter, and no `schema` param on any request, byte-
@@ -57,11 +91,16 @@ $<HTMLInputElement>("table-filter").oninput = filterTables;
 export async function loadSchemas(): Promise<void> {
   let schemas: string[];
   try {
-    ({ schemas } = await api<{ schemas: string[] }>("/schemas"));
+    ({ schemas } = await api<{ schemas: string[] }>("/schemas" + sourceQuery()));
   } catch {
-    return; // older port without /schemas — degrade to single-schema behavior
+    // older port without /schemas — degrade to single-schema behavior
+    state.schema = null; $("schema-select-wrap").hidden = true; return;
   }
-  if (schemas.length <= 1) { state.schema = null; return; }
+  // Explicitly re-hides even though the element starts hidden in markup:
+  // switching source can re-run this against a source with fewer schemas
+  // than the previously selected one, and without this the wrap would keep
+  // showing the prior source's stale multi-schema dropdown.
+  if (schemas.length <= 1) { state.schema = null; $("schema-select-wrap").hidden = true; return; }
   if (!state.schema || !schemas.includes(state.schema)) {
     state.schema = schemas.includes("public") ? "public" : schemas[0];
   }
@@ -92,8 +131,8 @@ export async function loadTables(): Promise<void> {
   setStatus("loading tables…");
   const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
-    api<{ tables: TableListEntry[] }>("/tables" + schemaQuery()),
-    api<{ counts: { table: string; approx_rows: number }[] }>("/table-counts" + schemaQuery()),
+    api<{ tables: TableListEntry[] }>("/tables" + scopeQuery()),
+    api<{ counts: { table: string; approx_rows: number }[] }>("/table-counts" + scopeQuery()),
   ]);
   if (token !== loadTablesToken) return; // superseded by a newer call
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));

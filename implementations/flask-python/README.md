@@ -21,8 +21,15 @@ config = Config(enabled=True)
 source = PgSource(dsn=os.environ["DATABASE_URL"])
 
 app = Flask(__name__)
-app.register_blueprint(router(config, source))
+app.register_blueprint(router(config, [("primary", source)]))
 ```
+
+`router` takes an ordered, non-empty sequence of named sources rather
+than a single one — a host can register more than one `DbSource` (e.g.
+two Postgres databases) and a request's `source` query param selects
+which one it targets (`spec/protocol.md` §1, §5.8); the first entry is
+the default used when `source` is absent. A single-source deployment
+just registers one entry, as above.
 
 `Config()` (the zero-argument default) is disabled by construction:
 `enabled` defaults to `False` — a host that forgets to configure anything

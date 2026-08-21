@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 	}
 	cfg := Config{Enabled: true}
 	source := NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-	srv := httptest.NewServer(Router(cfg, source))
+	srv := httptest.NewServer(Router(cfg, []NamedSource{{Name: "primary", Source: source}}))
 	integrationServerURL = srv.URL
 	code := m.Run()
 	srv.Close()

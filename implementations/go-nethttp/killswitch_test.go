@@ -24,10 +24,22 @@ func TestEnabledFalseIsDisabled(t *testing.T) {
 }
 
 func TestEnabledTrueEnablesRoutes(t *testing.T) {
-	assertEnabled(t, Router(Config{Enabled: true}, nil))
+	assertEnabled(t, Router(Config{Enabled: true}, []NamedSource{{Name: "primary", Source: nil}}))
 }
 
-// assertDisabled checks that every one of the six mount routes 404s —
+// A host passing zero sources while enabled is a startup-time
+// misconfiguration, not a runtime condition — mirrors the Rust
+// reference's assert!(!sources.is_empty()) in router().
+func TestEnabledTrueWithNoSourcesPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("Router(Config{Enabled: true}, nil) did not panic")
+		}
+	}()
+	Router(Config{Enabled: true}, nil)
+}
+
+// assertDisabled checks that every one of the seven mount routes 404s —
 // indistinguishable from the viewer never having been mounted at all
 // (spec/protocol.md §4) — using the default base path, since a disabled
 // Config{} carries no BasePath override of its own to probe instead.
@@ -35,6 +47,7 @@ func assertDisabled(t *testing.T, handler http.Handler) {
 	t.Helper()
 	for _, path := range []string{
 		"/__ashurbanipal",
+		"/__ashurbanipal/api/sources",
 		"/__ashurbanipal/api/tables",
 		"/__ashurbanipal/api/table-counts",
 		"/__ashurbanipal/api/tables/data",

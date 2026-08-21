@@ -2,9 +2,10 @@ import { $ } from "./dom.js";
 import { loadTables } from "./sidebar.js";
 import { persist, setAppliedFilterAst, state } from "./state.js";
 
-// Back/forward navigation stops at table/schema switches, not every sort/page
-// tweak within the same table — otherwise "back" would undo pagination one
-// row-page at a time instead of returning to the previously viewed table.
+// Back/forward navigation stops at table/schema/source switches, not every
+// sort/page tweak within the same table — otherwise "back" would undo
+// pagination one row-page at a time instead of returning to the previously
+// viewed table.
 // navStack mirrors the browser's own session-history entries we've pushed
 // (their order, not their content) so the in-app buttons know when they're
 // at either end; the entries themselves live in the URL/history.state, never
@@ -14,7 +15,7 @@ let navIndex = -1;
 let restoringFromHistory = false; // true while a popstate-triggered reload is in flight
 
 function navViewKey(): string {
-  return `${state.schema ?? ""} ${state.table ?? ""}`;
+  return `${state.source ?? ""} ${state.schema ?? ""} ${state.table ?? ""}`;
 }
 
 export function updateNavButtons(): void {
@@ -29,6 +30,7 @@ export function syncUrl(): void {
     table: state.table ?? "", limit: String(state.limit), offset: String(state.offset),
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  if (state.source) params.set("source", state.source);
   if (state.schema) params.set("schema", state.schema);
   const qs = "?" + params;
   const key = navViewKey();
@@ -51,6 +53,7 @@ window.addEventListener("popstate", (ev) => {
   if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
   navIndex = navState.navIndex;
   const params = new URLSearchParams(location.search);
+  state.source = params.get("source") || null;
   state.schema = params.get("schema") || null;
   state.table = params.get("table") || null;
   state.sort = params.get("sort") || null;
@@ -60,8 +63,15 @@ window.addEventListener("popstate", (ev) => {
   state.filter = "";
   setAppliedFilterAst([]);
   $<HTMLInputElement>("filter").value = "";
+  const sourceSelect = $<HTMLSelectElement>("source-select");
+  if (sourceSelect) sourceSelect.value = state.source ?? "";
   const schemaSelect = $<HTMLSelectElement>("schema-select");
   if (schemaSelect) schemaSelect.value = state.schema ?? "";
+  // syncUrl() only ever writes `schema` when the source at that history
+  // point had more than one (loadSchemas pins state.schema to a concrete
+  // name only then) — its presence/absence here is a reliable proxy for
+  // this restored source's schema count, without a live re-fetch.
+  $("schema-select-wrap").hidden = !state.schema;
   persist();
   updateNavButtons();
   restoringFromHistory = true;

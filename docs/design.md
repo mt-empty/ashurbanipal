@@ -198,6 +198,7 @@ its full path space and the host doesn't need to pick a mount point.
 | Method | Path                          | Purpose                                              |
 |--------|-------------------------------|-------------------------------------------------------|
 | GET    | `/__ashurbanipal`              | Serves the embedded `dbviewer.html`.                   |
+| GET    | `/__ashurbanipal/api/sources`      | List selectable source names.                          |
 | GET    | `/__ashurbanipal/api/schemas`      | List selectable schema names.                          |
 | GET    | `/__ashurbanipal/api/tables`       | List table names in the resolved schema.               |
 | GET    | `/__ashurbanipal/api/table-counts` | Approximate row counts via `pg_class.reltuples`.       |
@@ -219,6 +220,42 @@ its full path space and the host doesn't need to pick a mount point.
 
 Paths below are shorthand for the full routes in §3.3 (e.g. `/tables` means
 `/__ashurbanipal/api/tables`).
+
+### `GET /sources`
+
+Lists the source names selectable as the `source` param on every other
+route — the same allow-list/default-resolution shape as `/schemas`, one
+level above it: `source` picks which registered `DbSource` (which live
+connection) an operation targets, and `schema` then resolves within
+whichever source that was. A host registers sources by name at
+construction time (a `Vec<(String, DbSource)>` in the Rust reference, not
+a `Config` field — see `implementations/rust/axum/src/routes.rs`'s
+`AppState`), never inferred from the database itself.
+
+```json
+{ "sources": [{ "name": "primary" }, { "name": "reporting" }] }
+```
+
+Deliberately just `{ "name": ... }` — no `backend` field. This round of
+the feature is homogeneous-backend-only: every source registered with one
+`router()` call must be the same concrete `DbSource` implementation,
+because the Rust reference's router stays generic over one type
+(`router<S: DbSource>`, no `dyn`/`async_trait`, per the architecture
+invariants in `CLAUDE.md`) rather than introducing an `AnySource` enum to
+support mixing e.g. Postgres and SQLite sources in one process. That's a
+real but deferred "nice to have," not a wire-contract decision — the JSON
+shape stays open to a future `backend` field if that ever lands, but
+nothing today needs it, and every port would have had to agree on
+disclosing it for consistency regardless of whether its own `DbSource` is
+generically or dynamically dispatched. Tracked as its own backlog item
+(`docs/feature-backlog/18-anysource-cross-backend-mixing.md`), not
+designed or scheduled.
+
+A single-source deployment still returns exactly one entry — same
+degrade-gracefully shape as `/schemas`, and the frontend's source
+selector (`frontend/src/sidebar.ts`'s `loadSources`) hides itself
+entirely in that case, byte-identical wire behavior to before this
+feature existed.
 
 ### `GET /schemas`
 

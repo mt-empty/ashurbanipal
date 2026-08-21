@@ -2,7 +2,7 @@ import { api } from "./api.js";
 import { $ } from "./dom.js";
 import { parseFilterDsl, quoteFilterValue } from "./filter-dsl.js";
 import { loadData } from "./main.js";
-import { getLastPayload, setAppliedFilterAst, state } from "./state.js";
+import { applyScopeParams, getLastPayload, setAppliedFilterAst, state } from "./state.js";
 import type { CommonValue, FilterCondition } from "./types.js";
 
 export function submitFilter(text: string): void {
@@ -222,7 +222,7 @@ export async function showCommonValues(e: MouseEvent, column: string): Promise<v
   // actually showing.
   const token = ++cvRequestToken;
   const params = new URLSearchParams({ table: state.table ?? "", column });
-  if (state.schema) params.set("schema", state.schema);
+  applyScopeParams(params);
   let values: CommonValue[];
   try {
     ({ values } = await api<{ values: CommonValue[] }>("/tables/common-values?" + params));

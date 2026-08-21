@@ -22,9 +22,16 @@ import ashurbanipal "github.com/mt-empty/ashurbanipal/implementations/go-nethttp
 
 cfg := ashurbanipal.Config{Enabled: true}
 source := ashurbanipal.NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-viewer := ashurbanipal.Router(cfg, source)
+viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
 mux.Handle("/", viewer) // or nest it under any net/http-compatible router
 ```
+
+`Router` takes an ordered, non-empty list of named sources rather than a
+single one — a host can register more than one `DbSource` (e.g. two
+Postgres databases) and a request's `source` query param selects which one
+it targets (`spec/protocol.md` §1, §5.8); the first entry is the default
+used when `source` is absent. A single-source deployment just registers
+one entry, as above.
 
 `Config` has no config-file format of its own (`docs/design.md` §7) — the
 host populates the struct however it likes, e.g. env vars or flags. The
@@ -60,7 +67,7 @@ go build -tags sqlite ./...   # or -tags mysql, or -tags sqlite,mysql for both
 
 ```go
 source := ashurbanipal.NewSQLiteSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-viewer := ashurbanipal.Router(cfg, source)
+viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
 ```
 
 Full API/config reference:
