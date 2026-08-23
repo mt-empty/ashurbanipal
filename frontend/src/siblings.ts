@@ -11,7 +11,7 @@ export async function loadSiblings(): Promise<void> {
   let siblings: Sibling[] = [];
   try { ({ siblings } = await api<{ siblings: Sibling[] }>("/siblings")); } catch { /* leave empty */ }
   if (token !== siblingsRequestToken) return; // superseded by a newer poll
-  $("siblings-heading").hidden = siblings.length === 0;
+  $("siblings").hidden = siblings.length === 0;
   const div = $("siblings-list");
   div.replaceChildren(...siblings.map((s) => {
     const p = document.createElement("div");

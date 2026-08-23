@@ -424,7 +424,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
   </search>
   <ul id="tables"></ul>
   <p id="tables-empty" hidden>no matching tables</p>
-  <div id="siblings">
+  <div id="siblings" hidden>
     <h2 id="siblings-heading" class="section-label" hidden>siblings microservices</h2>
     <div id="siblings-list"></div>
   </div>
@@ -1715,7 +1715,7 @@ async function loadSiblings() {
   } catch {
   }
   if (token !== siblingsRequestToken) return;
-  $("siblings-heading").hidden = siblings.length === 0;
+  $("siblings").hidden = siblings.length === 0;
   const div = $("siblings-list");
   div.replaceChildren(...siblings.map((s) => {
     const p = document.createElement("div");
