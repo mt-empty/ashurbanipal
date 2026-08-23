@@ -153,7 +153,7 @@ li button.loading .row-spinner { visibility: visible; animation: spin .6s linear
    the collapsed border seams in Chromium. */
 table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: var(--gap); }
 th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
-th { cursor: pointer; user-select: none; }
+th { cursor: pointer; user-select: none; white-space: nowrap; }
 /* z-index is load-bearing: td has position:relative (for the copy
    button), and since tbody follows thead in DOM order, its positioned
    <td>s paint over a sticky <th> with the default stacking order unless
@@ -1391,7 +1391,7 @@ function renderHeader(columns) {
       icon.className = "key-icon";
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
-      icon.textContent = col.key === "pk" ? "\u{1F511}" : "\u2192";
+      icon.textContent = col.key === "pk" ? "\u{1F511}" : "\u{1F517}";
       th.append(icon, label);
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
