@@ -16,16 +16,6 @@
 // from which env vars happen to be set (spec/protocol.md's "explicit, not
 // implicit" principle, per PORTING.md's hardening checklist).
 import express from "express";
-import { createPool as createMysqlPool } from "mysql2/promise";
-import { Pool } from "pg";
-// Default import + property access, not `import { Database } from "sqlite3"`:
-// sqlite3 is CommonJS, and Node's native ESM loader's static export
-// detection (cjs-module-lexer) doesn't always see its named exports —
-// confirmed at runtime (`tsx demo/main.ts` threw "does not provide an
-// export named 'Database'" with the named-import form even though it
-// type-checks fine, since TS's own module resolution is more lenient
-// than Node's actual runtime interop).
-import sqlite3 from "sqlite3";
 import { MySqlSource } from "../src/db/mysql.js";
 import { PostgresSource } from "../src/db/postgres.js";
 import { SqliteSource } from "../src/db/sqlite.js";
@@ -50,14 +40,48 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function buildDbSource(backend: string): DbSource {
+// Turns a missing-module or failed-to-load driver into an actionable error
+// instead of a raw stack trace (same idea as Knex's per-dialect require()
+// wrapping) — covers both "never installed" and "installed but broken",
+// e.g. a native addon whose prebuilt binary doesn't match the host's glibc.
+async function loadDriver<T>(pkg: string, importer: () => Promise<T>): Promise<T> {
+  try {
+    return await importer();
+  } catch (cause) {
+    throw new Error(
+      `DB_BACKEND driver "${pkg}" isn't usable — run \`pnpm add ${pkg}\`, or if it's already installed, check it's compatible with this environment (native-addon ABI, glibc version, etc.)`,
+      { cause },
+    );
+  }
+}
+
+// Each driver is imported only inside its own case, not at module scope:
+// all three are optional peerDependencies, and pg/mysql2/sqlite3 loading
+// unconditionally at startup means every backend pays for all three —
+// harmlessly for the pure-JS pg/mysql2, but sqlite3 ships a native addon
+// that dlopen()s on import, so an environment where its prebuilt binary
+// doesn't match the system's glibc breaks postgres/mysql demo runs too.
+async function buildDbSource(backend: string): Promise<DbSource> {
   switch (backend) {
-    case "postgres":
+    case "postgres": {
+      const { Pool } = await loadDriver("pg", () => import("pg"));
       return new PostgresSource(new Pool({ connectionString: requireEnv("DATABASE_URL"), max: 5 }));
-    case "sqlite":
+    }
+    case "sqlite": {
+      // Default import + property access, not `import { Database } from "sqlite3"`:
+      // sqlite3 is CommonJS, and Node's native ESM loader's static export
+      // detection (cjs-module-lexer) doesn't always see its named exports —
+      // confirmed at runtime (`tsx demo/main.ts` threw "does not provide an
+      // export named 'Database'" with the named-import form even though it
+      // type-checks fine, since TS's own module resolution is more lenient
+      // than Node's actual runtime interop).
+      const { default: sqlite3 } = await loadDriver("sqlite3", () => import("sqlite3"));
       return new SqliteSource(new sqlite3.Database(requireEnv("SQLITE_PATH")));
-    case "mysql":
-      return new MySqlSource(createMysqlPool(requireEnv("MYSQL_URL")));
+    }
+    case "mysql": {
+      const { createPool } = await loadDriver("mysql2", () => import("mysql2/promise"));
+      return new MySqlSource(createPool(requireEnv("MYSQL_URL")));
+    }
     default:
       throw new Error(`unknown DB_BACKEND "${backend}" (expected "postgres", "sqlite", or "mysql")`);
   }
@@ -65,7 +89,7 @@ function buildDbSource(backend: string): DbSource {
 
 async function main(): Promise<void> {
   const backend = process.env.DB_BACKEND ?? "postgres";
-  const dbSource = buildDbSource(backend);
+  const dbSource = await buildDbSource(backend);
   const port = envInt("PORT", 4000);
 
   const config: Config = { enabled: true };
