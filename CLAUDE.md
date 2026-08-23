@@ -110,6 +110,11 @@ mise run rust:fmt-check
 mise run rust:demo                       # host demo app at http://localhost:4000/__ashurbanipal
 mise run rust:demo-sibling               # second instance, to demo sibling health-poll
 mise run rust:dev                        # demo app, auto-rebuild/restart on implementations/rust/{axum/src,core/src}/ or frontend/dbviewer.html changes (watchexec)
+mise run actix:demo / actix:dev          # same pair, for the actix-web adapter
+mise run go:demo / go:dev                # same pair, for go-nethttp
+mise run node:demo / node:dev            # same pair, for node-express
+mise run flask:demo / flask:dev          # same pair, for flask-python
+mise run spring:demo / spring:dev        # same pair, for spring-boot-starter (port 4100, not 4000)
 
 mise run conformance:seed-gen            # regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql
 mise run conformance:seed-check          # verify both seed files still match tools/seed-gen's output
@@ -147,11 +152,18 @@ ashurbanipal-actix-web` explicitly (unnecessary, but harmless, when run
 from inside that member's own directory, where it already resolves
 unambiguously).
 
-`mise run rust:demo` against the devcontainer's `DATABASE_URL` gives a
-working browser on the seed db in one command — treat that as the
-acceptance bar for any change to the Rust implementation specifically;
-other ports have their own demo command for the same purpose (e.g. `mise
-run flask:demo`, or that port's README).
+`mise run rust:dev` against the devcontainer's `DATABASE_URL` gives a
+working, auto-restarting browser on the seed db in one command — treat
+that as the acceptance bar for any change to the Rust implementation
+specifically, not the plain `rust:demo` (which doesn't rebuild/restart on
+further edits, so it goes stale the moment you touch a file again); every
+other port has its own `<port>:dev` task for the same purpose (`go:dev`,
+`node:dev`, `flask:dev`, `spring:dev`) — use that one, not `<port>:demo`,
+for the same reason. Start it as a backgrounded shell
+command so it stays harness-tracked — visible and stoppable via the
+session's own task list — rather than a bare `&`/`nohup` that falls off
+the radar for both you and the person watching the session; stop it once
+verification is done instead of leaving it running unattended.
 
 `tools/seed-gen` is a standalone dev-only crate (uses `fake`) — deliberately
 not a dependency of the Rust crate, and not part of the workspace resolved
