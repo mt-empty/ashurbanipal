@@ -94,7 +94,7 @@ implementation/area has its own umbrella task that fans out to namespaced
 
 ```sh
 mise run check                       # everything CI would run, across every implementation
-mise run rust                        # rust:fmt-check + rust:lint + rust:test
+mise run rust                        # rust:fmt-check + rust:lint + rust:test + rust:integration-test
 mise run spring                      # spring gradle build + test
 mise run go                          # go build/vet/fmt-check + test (go-nethttp)
 mise run node                        # node lint + typecheck + build + test (node-express)
@@ -105,6 +105,7 @@ mise run conformance                 # seed sync check + conformance:test + conf
 mise run rust:build
 mise run rust:test                       # unit tests live inline (#[cfg(test)] mod tests in config.rs, routes.rs)
 mise run rust:test config::tests::name   # run a single test (extra args pass through)
+mise run rust:integration-test           # axum's Postgres-backed tests/*.rs (schema_isolation, multi_source) — needs DATABASE_URL
 mise run rust:lint                       # cargo clippy -- -D warnings
 mise run rust:fmt-check
 mise run rust:demo                       # host demo app at http://localhost:4000/__ashurbanipal
