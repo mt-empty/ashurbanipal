@@ -52,6 +52,21 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: conformance-report-actix-web
 
+  # Same suite, run again (not instead) against a demo started with a
+  # second source registered — see rust-axum-conformance.yml's identical
+  # job for the rationale (conformance/runner/two_source.rs).
+  two-source-conformance:
+    name: Rust actix-web — conformance kit (two-source round-trip)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: rust
+      start-command: "cargo run -p ashurbanipal-actix-web --manifest-path implementations/rust/actix-web/Cargo.toml --example demo"
+      start-env: "CONFORMANCE_SECOND_SOURCE=1"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: conformance-two-source-report-actix-web
+
   schema-conformance:
     name: Rust actix-web — schema conformance
     needs: build-and-test

@@ -14,6 +14,12 @@
 //! ```sh
 //! PORT=4001 SIBLING_PORT=4000 cargo run --example demo
 //! ```
+//!
+//! `CONFORMANCE_SECOND_SOURCE=1` registers a second source for
+//! `conformance/runner/two_source.rs`: the same connection, pinned to
+//! `other_schema` (already part of `conformance/seed/seed.sql`) — no
+//! second database, zero new CI infrastructure. See that file's module
+//! doc; every port's own demo understands this env var the same way.
 
 use actix_web::{web, App, HttpResponse, HttpServer};
 use ashurbanipal_actix_web::{app_state, service, Config, PgPoolSource};
@@ -58,10 +64,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "#
     ))?;
 
-    let state = app_state(
-        config,
-        vec![("primary".to_string(), PgPoolSource::new(pool))],
-    );
+    let mut sources = vec![("primary".to_string(), PgPoolSource::new(pool))];
+    if std::env::var("CONFORMANCE_SECOND_SOURCE").is_ok() {
+        let pinned_pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    sqlx::Executor::execute(conn, "set search_path = other_schema").await?;
+                    Ok(())
+                })
+            })
+            .connect(&database_url)
+            .await?;
+        sources.push(("other_schema".to_string(), PgPoolSource::new(pinned_pool)));
+    }
+    let state = app_state(config, sources);
     let ui_path = format!("{}/__ashurbanipal", mount_prefix.as_deref().unwrap_or(""));
 
     println!("demo host on http://localhost:{port} — browser at http://localhost:{port}{ui_path}");

@@ -156,9 +156,9 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 
 | ID | Requirement | Test |
 |---|---|---|
-| `P5.8-LISTS-REGISTERED-SOURCES` | Lists every source §1's default-resolution case could resolve to; exactly one entry for a single-source deployment | `sources::lists_exactly_the_one_registered_source` (single-source case only — see [Known gaps](#known-gaps) for the >1-source case) |
+| `P5.8-LISTS-REGISTERED-SOURCES` | Lists every source §1's default-resolution case could resolve to; exactly one entry for a single-source deployment | `sources::lists_exactly_the_one_registered_source` (single-source case); `two_source::second_source_is_scoped_to_other_schema_and_differs_from_the_default` (>1-source case — self-skips unless the target was started with `CONFORMANCE_SECOND_SOURCE=1`, see that file's module doc) |
 | `P5.8-NO-BACKEND-FIELD` | MUST NOT disclose which backend engine a source uses | `sources::lists_exactly_the_one_registered_source` |
-| `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER` | Stable order, same order the absent-`source` case resolves against | not independently observable with only one registered source — see [Known gaps](#known-gaps) |
+| `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER` | Stable order, same order the absent-`source` case resolves against | `two_source::api_sources_order_matches_default_resolution_order` (self-skips without a second source — same caveat as above) |
 | `P5.8-HEADER` | Carries the protocol version header | `sources::every_sources_response_carries_the_protocol_version_header` |
 
 ## §6 Server invariants
@@ -211,17 +211,20 @@ to trigger deterministically):
   Postgres level but fails Rust's UTF-8 text decode, which isn't
   something a portable `seed.sql` can reliably encode across
   implementations.
-- **§5.8/§1 true two-source round-trip (`P5.8-LISTS-REGISTERED-SOURCES`
-  beyond the single-entry case, `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER`,
-  `P1-SOURCE-RESOLVED-ONCE`).** Unlike the sibling-health gap below, this
-  one genuinely is observable over black-box HTTP — it just needs a demo
-  spawned with a second, distinctly-seeded source (the axum reference's
-  `SECOND_SOURCE=1`, `.devcontainer/db/init/02-reporting-seed.sql`) rather
-  than `TestServer::spawn()`'s current single-source default, plus a CI
-  Postgres service that provisions that second database and a workflow
-  path-filter update to trigger on it. Deferred as its own follow-up
-  rather than folded into the initial multi-source rollout — tracked in
-  `docs/feature-backlog/19-two-source-conformance-round-trip.md`.
+- **§1 a source is resolved once per operation, never drifting mid-request
+  across a multi-query response (`P1-SOURCE-RESOLVED-ONCE`).** `two_source.rs`
+  (see above) closed the rest of this entry — `P5.8-LISTS-REGISTERED-SOURCES`
+  beyond the single-entry case and `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER` are
+  both covered now, against any target started with `CONFORMANCE_SECOND_SOURCE=1`
+  (`docs/feature-backlog/19-two-source-conformance-round-trip.md`). What's
+  still open is the drift property itself — proving a single response never
+  mixes data from two sources under concurrent load, the way
+  `schema_isolation.rs` proves for `schema` at the Rust `DbSource` level.
+  That's an implementation-internal connection-pinning property, not
+  reliably provokable from outside over black-box HTTP across five
+  different languages' own pooling — left as a per-port unit/integration
+  test concern (Rust's own version: `implementations/rust/axum/tests/multi_source.rs`),
+  not this suite.
 - **§5.6 sibling health semantics beyond the empty-config case
   (`P5.6-2XX-ONLY`, `P5.6-PARALLEL-TIMEOUT-BOUND`).** `healthy` reflecting
   a real 2xx/non-2xx/timeout/unreachable outcome, and the parallel +
