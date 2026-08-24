@@ -52,7 +52,7 @@ func main() {
 	}
 
 	source := ashurbanipal.NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-	viewer := ashurbanipal.Router(cfg, source)
+	viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
 
 	uiPath := "/__ashurbanipal"
 	mux := http.NewServeMux()

@@ -31,7 +31,7 @@ export function renderHeader(columns: Column[]): void {
       icon.className = "key-icon";
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
-      icon.textContent = col.key === "pk" ? "🔑" : "→";
+      icon.textContent = col.key === "pk" ? "🔑" : "🔗";
       th.append(icon, label);
       // Layers onto the accessible name rather than replacing the key
       // description — the icon keeps its own `title` above.

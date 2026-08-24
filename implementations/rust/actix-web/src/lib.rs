@@ -11,7 +11,10 @@
 //! let config = ashurbanipal_actix_web::Config::from_toml(r#"
 //!     enabled = true
 //! "#)?;
-//! let state = ashurbanipal_actix_web::app_state(config, ashurbanipal_actix_web::PgPoolSource::new(pool));
+//! let state = ashurbanipal_actix_web::app_state(
+//!     config,
+//!     vec![("default".to_string(), ashurbanipal_actix_web::PgPoolSource::new(pool))],
+//! );
 //! HttpServer::new(move || App::new().service(ashurbanipal_actix_web::service(state.clone())))
 //!     .bind(("0.0.0.0", 4000))?
 //!     .run()

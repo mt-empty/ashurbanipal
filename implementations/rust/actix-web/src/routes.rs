@@ -7,7 +7,7 @@ use actix_web::{Error, HttpResponse, Scope};
 use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
-use ashurbanipal::{Config, DbError, DbSource, QueryOpts, TableInfo};
+use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, TableInfo};
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
@@ -18,20 +18,30 @@ const PROTOCOL_VERSION: &str = "1";
 
 pub struct AppState<S> {
     pub config: Config,
-    pub source: S,
+    /// Ordered `(name, source)` pairs; the first entry is the default a
+    /// request with no `source` param resolves to (mirrors `api/sources`'
+    /// listing order, which callers can rely on for the same reason).
+    pub sources: Vec<(String, S)>,
     pub http: reqwest::Client,
 }
 
 /// Built once, not per worker — cheap to share via `web::Data`'s `Arc`,
 /// unlike [`service`]'s route tree, which Actix rebuilds per worker anyway.
-pub fn app_state<S: DbSource>(config: Config, source: S) -> Data<AppState<S>> {
+///
+/// `sources` MUST be non-empty — a host with nothing to browse should pass
+/// `enabled = false` instead, not an empty list.
+pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data<AppState<S>> {
+    assert!(
+        !sources.is_empty(),
+        "app_state() requires at least one source"
+    );
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
         .expect("reqwest client construction only fails on TLS backend misconfiguration");
     Data::new(AppState {
         config,
-        source,
+        sources,
         http,
     })
 }
@@ -50,6 +60,7 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
         .service(
             web::scope("/api")
                 .wrap(from_fn(stamp_protocol_version))
+                .service(web::resource("/sources").route(web::get().to(list_sources::<S>)))
                 .service(web::resource("/schemas").route(web::get().to(list_schemas::<S>)))
                 .service(web::resource("/tables").route(web::get().to(list_tables::<S>)))
                 .service(web::resource("/table-counts").route(web::get().to(table_counts::<S>)))
@@ -75,17 +86,50 @@ async fn stamp_protocol_version(
 
 const TEXT_PLAIN: &str = "text/plain; charset=utf-8";
 
-fn error_response(err: DbError) -> HttpResponse {
-    match err {
-        DbError::NotAllowed(what) => HttpResponse::BadRequest()
+/// Bridges `ashurbanipal-core`'s framework-agnostic `DbError` (and this
+/// crate's own bad-request cases, e.g. an invalid `order` value) into
+/// Actix's `?`-operator error handling via `ResponseError`. A wrapper, not
+/// a direct `impl ResponseError for DbError`, because neither `DbError`
+/// nor `ResponseError` is defined in this crate — the orphan rule forbids
+/// that impl here.
+#[derive(Debug)]
+enum ApiError {
+    Db(DbError),
+    BadRequest(String),
+}
+
+impl From<DbError> for ApiError {
+    fn from(e: DbError) -> Self {
+        ApiError::Db(e)
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApiError::BadRequest(msg) => write!(f, "{msg}"),
+            ApiError::Db(DbError::NotAllowed(what)) => write!(f, "not allowed: {what}"),
+            ApiError::Db(DbError::FilterParse(reason)) => write!(f, "invalid filter: {reason}"),
+            ApiError::Db(DbError::Sqlx(e)) => write!(f, "database error: {e}"),
+        }
+    }
+}
+
+impl actix_web::ResponseError for ApiError {
+    fn status_code(&self) -> actix_web::http::StatusCode {
+        match self {
+            ApiError::BadRequest(_)
+            | ApiError::Db(DbError::NotAllowed(_) | DbError::FilterParse(_)) => {
+                actix_web::http::StatusCode::BAD_REQUEST
+            }
+            ApiError::Db(DbError::Sqlx(_)) => actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code())
             .content_type(TEXT_PLAIN)
-            .body(format!("not allowed: {what}")),
-        DbError::FilterParse(reason) => HttpResponse::BadRequest()
-            .content_type(TEXT_PLAIN)
-            .body(format!("invalid filter: {reason}")),
-        DbError::Sqlx(e) => HttpResponse::InternalServerError()
-            .content_type(TEXT_PLAIN)
-            .body(format!("database error: {e}")),
+            .body(self.to_string())
     }
 }
 
@@ -96,20 +140,49 @@ async fn serve_html() -> HttpResponse {
 }
 
 #[derive(Serialize)]
+struct SourceEntry {
+    name: String,
+}
+
+#[derive(Serialize)]
+struct SourcesResponse {
+    sources: Vec<SourceEntry>,
+}
+
+/// Never fails: `sources` is always non-empty (`app_state()` asserts it), so
+/// there's no allow-list to check against — this route *is* the allow-list.
+async fn list_sources<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
+    let sources = state
+        .sources
+        .iter()
+        .map(|(name, _)| SourceEntry { name: name.clone() })
+        .collect();
+    HttpResponse::Ok().json(SourcesResponse { sources })
+}
+
+#[derive(Serialize)]
 struct SchemasResponse {
     schemas: Vec<String>,
 }
 
-async fn list_schemas<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
-    match state.source.list_schemas().await {
-        Ok(schemas) => HttpResponse::Ok().json(SchemasResponse { schemas }),
-        Err(e) => error_response(e),
-    }
+#[derive(Deserialize)]
+struct SourceParams {
+    source: Option<String>,
+}
+
+async fn list_schemas<S: DbSource>(
+    state: Data<AppState<S>>,
+    params: web::Query<SourceParams>,
+) -> Result<HttpResponse, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let schemas = source.list_schemas().await?;
+    Ok(HttpResponse::Ok().json(SchemasResponse { schemas }))
 }
 
 #[derive(Deserialize)]
 struct SchemaParams {
     schema: Option<String>,
+    source: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -120,11 +193,10 @@ struct TablesResponse {
 async fn list_tables<S: DbSource>(
     state: Data<AppState<S>>,
     params: web::Query<SchemaParams>,
-) -> HttpResponse {
-    match state.source.list_tables(params.schema.as_deref()).await {
-        Ok(tables) => HttpResponse::Ok().json(TablesResponse { tables }),
-        Err(e) => error_response(e),
-    }
+) -> Result<HttpResponse, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let tables = source.list_tables(params.schema.as_deref()).await?;
+    Ok(HttpResponse::Ok().json(TablesResponse { tables }))
 }
 
 #[derive(Serialize)]
@@ -141,21 +213,21 @@ struct CountsResponse {
 async fn table_counts<S: DbSource>(
     state: Data<AppState<S>>,
     params: web::Query<SchemaParams>,
-) -> HttpResponse {
-    match state.source.table_counts(params.schema.as_deref()).await {
-        Ok(counts) => HttpResponse::Ok().json(CountsResponse {
-            counts: counts
-                .into_iter()
-                .map(|(table, approx_rows)| CountEntry { table, approx_rows })
-                .collect(),
-        }),
-        Err(e) => error_response(e),
-    }
+) -> Result<HttpResponse, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let counts = source.table_counts(params.schema.as_deref()).await?;
+    Ok(HttpResponse::Ok().json(CountsResponse {
+        counts: counts
+            .into_iter()
+            .map(|(table, approx_rows)| CountEntry { table, approx_rows })
+            .collect(),
+    }))
 }
 
 #[derive(Deserialize)]
 struct DataParams {
     schema: Option<String>,
+    source: Option<String>,
     table: String,
     filter: Option<String>,
     #[serde(default, deserialize_with = "deserialize_saturating_u32")]
@@ -188,8 +260,9 @@ where
 async fn table_data<S: DbSource>(
     state: Data<AppState<S>>,
     params: web::Query<DataParams>,
-) -> HttpResponse {
+) -> Result<HttpResponse, ApiError> {
     let params = params.into_inner();
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
     // An empty (or whitespace-only) filter param means "no filter", not a
     // deserialization target; a valid-but-empty JSON array means the same
     // (spec/protocol.md §5.4.2).
@@ -197,7 +270,7 @@ async fn table_data<S: DbSource>(
         Some(raw) if !raw.trim().is_empty() => match filter::parse(raw) {
             Ok(conditions) if conditions.is_empty() => None,
             Ok(conditions) => Some(conditions),
-            Err(e) => return error_response(DbError::FilterParse(e.to_string())),
+            Err(e) => return Err(DbError::FilterParse(e.to_string()).into()),
         },
         _ => None,
     };
@@ -211,11 +284,9 @@ async fn table_data<S: DbSource>(
         None | Some("asc") => false,
         Some("desc") => true,
         Some(other) => {
-            return HttpResponse::BadRequest()
-                .content_type(TEXT_PLAIN)
-                .body(format!(
-                    "invalid order {other:?} (expected \"asc\" or \"desc\")"
-                ))
+            return Err(ApiError::BadRequest(format!(
+                "invalid order {other:?} (expected \"asc\" or \"desc\")"
+            )))
         }
     };
 
@@ -227,19 +298,16 @@ async fn table_data<S: DbSource>(
         timeout_secs: limits.query_timeout_secs,
         filter: parsed_filter,
     };
-    match state
-        .source
+    let data = source
         .query_table(params.schema.as_deref(), &params.table, opts)
-        .await
-    {
-        Ok(data) => HttpResponse::Ok().json(data),
-        Err(e) => error_response(e),
-    }
+        .await?;
+    Ok(HttpResponse::Ok().json(data))
 }
 
 #[derive(Deserialize)]
 struct CommonValuesParams {
     schema: Option<String>,
+    source: Option<String>,
     table: String,
     column: String,
 }
@@ -258,20 +326,17 @@ struct CommonValuesResponse {
 async fn common_values<S: DbSource>(
     state: Data<AppState<S>>,
     params: web::Query<CommonValuesParams>,
-) -> HttpResponse {
-    match state
-        .source
+) -> Result<HttpResponse, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let values = source
         .common_values(params.schema.as_deref(), &params.table, &params.column)
-        .await
-    {
-        Ok(values) => HttpResponse::Ok().json(CommonValuesResponse {
-            values: values
-                .into_iter()
-                .map(|(value, freq)| CommonValueEntry { value, freq })
-                .collect(),
-        }),
-        Err(e) => error_response(e),
-    }
+        .await?;
+    Ok(HttpResponse::Ok().json(CommonValuesResponse {
+        values: values
+            .into_iter()
+            .map(|(value, freq)| CommonValueEntry { value, freq })
+            .collect(),
+    }))
 }
 
 #[derive(Serialize)]
@@ -400,7 +465,7 @@ mod kill_switch_tests {
         "#,
         )
         .unwrap();
-        let state = app_state(config, NeverQueried);
+        let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
         let app = test::init_service(App::new().service(service(state))).await;
 
         let html = test::call_service(

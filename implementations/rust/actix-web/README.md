@@ -12,8 +12,8 @@ cargo add ashurbanipal-actix-web
 
 ## Usage
 
-`ashurbanipal_actix_web::app_state(config, source)` builds the shared
-state once (config, DB source, HTTP client for sibling health checks) as
+`ashurbanipal_actix_web::app_state(config, sources)` builds the shared
+state once (config, DB sources, HTTP client for sibling health checks) as
 a `web::Data<AppState<S>>` — build it *outside* `HttpServer::new`'s
 per-worker closure and `.clone()` the handle into each worker (cheap:
 `web::Data` is internally `Arc`-backed). Unlike axum's `Router<S>`,
@@ -27,7 +27,7 @@ use actix_web::{App, HttpServer};
 use ashurbanipal_actix_web::{app_state, service, Config, PgPoolSource};
 
 let config = Config::from_toml(&std::fs::read_to_string("ashurbanipal.toml")?)?;
-let state = app_state(config, PgPoolSource::new(pool.clone())); // built once
+let state = app_state(config, vec![("primary".to_string(), PgPoolSource::new(pool.clone()))]); // built once
 
 HttpServer::new(move || {
     App::new()
@@ -38,6 +38,13 @@ HttpServer::new(move || {
 .run()
 .await?;
 ```
+
+`app_state` takes an ordered, non-empty list of named sources rather than
+a single one — a host can register more than one `DbSource` (e.g. two
+Postgres databases) and a request's `source` query param selects which one
+it targets (`spec/protocol.md` §1, §5.8); the first entry is the default
+used when `source` is absent. A single-source deployment just registers
+one entry, as above.
 
 `ashurbanipal.toml` — identical to `ashurbanipal-axum`'s, entirely
 framework-agnostic:

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit, urlunsplit
 
@@ -31,7 +32,9 @@ _SIBLING_HEALTH_TIMEOUT_SECS = 3
 _MAX_I64 = 2**63 - 1
 
 
-def router(config: Config, source: DbSource, mount: str = "/__ashurbanipal") -> Blueprint:
+def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str = "/__ashurbanipal") -> Blueprint:
+    assert sources, "router() requires at least one source"
+
     bp = Blueprint("ashurbanipal", __name__, url_prefix=mount)
     if not config.is_enabled():
         return bp  # zero routes registered — 404 on every path under `mount`
@@ -49,6 +52,16 @@ def router(config: Config, source: DbSource, mount: str = "/__ashurbanipal") -> 
             response.headers[PROTOCOL_HEADER] = PROTOCOL_VERSION
         return response
 
+    def resolve_source(name: str | None) -> DbSource:
+        # Absent -> first-registered default; present -> exact match or
+        # rejection, never a fallback guess (spec/protocol.md §1).
+        if name is None:
+            return sources[0][1]
+        for n, s in sources:
+            if n == name:
+                return s
+        raise NotAllowed(f'source "{name}"')
+
     def _error_response(err: DbError) -> Response:
         if isinstance(err, NotAllowed):
             return Response(f"not allowed: {err}", status=400, mimetype="text/plain")
@@ -64,24 +77,32 @@ def router(config: Config, source: DbSource, mount: str = "/__ashurbanipal") -> 
     def serve_html() -> Response:
         return Response(DBVIEWER_HTML, mimetype="text/html")
 
+    @bp.get("/api/sources")
+    def list_sources() -> Response:
+        return jsonify({"sources": [{"name": n} for n, _ in sources]})
+
     @bp.get("/api/schemas")
     def list_schemas() -> Response:
+        source = resolve_source(request.args.get("source"))
         return jsonify({"schemas": source.list_schemas()})
 
     @bp.get("/api/tables")
     def list_tables() -> Response:
+        source = resolve_source(request.args.get("source"))
         schema = request.args.get("schema")
         tables = source.list_tables(schema)
         return jsonify({"tables": [_table_to_dict(t) for t in tables]})
 
     @bp.get("/api/table-counts")
     def table_counts() -> Response:
+        source = resolve_source(request.args.get("source"))
         schema = request.args.get("schema")
         counts = source.table_counts(schema)
         return jsonify({"counts": [{"table": table, "approx_rows": count} for table, count in counts]})
 
     @bp.get("/api/tables/data")
     def table_data() -> Response:
+        source = resolve_source(request.args.get("source"))
         schema = request.args.get("schema")
         table = request.args.get("table")
         if table is None:
@@ -134,6 +155,7 @@ def router(config: Config, source: DbSource, mount: str = "/__ashurbanipal") -> 
 
     @bp.get("/api/tables/common-values")
     def common_values() -> Response:
+        source = resolve_source(request.args.get("source"))
         schema = request.args.get("schema")
         table = request.args.get("table")
         column = request.args.get("column")

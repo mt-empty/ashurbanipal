@@ -26,8 +26,18 @@ let config = Config::from_toml(&std::fs::read_to_string("ashurbanipal.toml")?)?;
 let app = Router::new()
     // ... your existing routes ...
     .with_state(app_state) // resolves Router<AppState> to Router<()> before merging
-    .merge(ashurbanipal_axum::router(config, PgPoolSource::new(pool.clone())));
+    .merge(ashurbanipal_axum::router(
+        config,
+        vec![("primary".to_string(), PgPoolSource::new(pool.clone()))],
+    ));
 ```
+
+`router` takes an ordered, non-empty list of named sources rather than a
+single one — a host can register more than one `DbSource` (e.g. two
+Postgres databases) and a request's `source` query param selects which one
+it targets (`spec/protocol.md` §1, §5.8); the first entry is the default
+used when `source` is absent. A single-source deployment just registers
+one entry, as above.
 
 `ashurbanipal.toml`:
 

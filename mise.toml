@@ -17,8 +17,8 @@ description = "everything CI would run, across every implementation: rust, sprin
 depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance"]
 
 [tasks.rust]
-description = "rust implementation checks: fmt-check, lint, test"
-depends = ["rust:fmt-check", "rust:lint", "rust:test"]
+description = "rust implementation checks: fmt-check, lint, test, integration-test"
+depends = ["rust:fmt-check", "rust:lint", "rust:test", "rust:integration-test"]
 
 [tasks.spring]
 description = "spring-boot-starter implementation checks: build, test"
@@ -123,6 +123,17 @@ description = "cargo test --lib: the crate's own inline unit tests (pass a path 
 run = "cargo test --lib"
 dir = "implementations/rust"
 
+[tasks."rust:integration-test"]
+description = "cargo test --test schema_isolation --test multi_source: axum's own Postgres-backed integration tests (needs DATABASE_URL)"
+# Separate from rust:test (--lib) for the same reason that task excludes
+# the conformance target: these open their own DB pools and would add
+# concurrent connection pressure if run alongside conformance:test.
+# Excludes schema_isolation_mysql.rs on purpose — that file requires the
+# mysql feature + MYSQL_TEST_URL and documents itself as not run in CI
+# (see its own module doc comment), same as the rest of the mysql feature.
+run = "cargo test --test schema_isolation --test multi_source"
+dir = "implementations/rust/axum"
+
 [tasks."rust:lint"]
 description = "cargo clippy, denying warnings"
 run = "cargo clippy -- -D warnings"
@@ -196,6 +207,20 @@ dir = "implementations/spring-boot-starter"
 description = "gradle build + test"
 depends = ["spring:build", "spring:test"]
 
+[tasks."spring:demo"]
+description = "host demo app at http://localhost:4100/__ashurbanipal"
+run = "./gradlew :demo:bootRun"
+dir = "implementations/spring-boot-starter"
+# Host is "db", matching DATABASE_URL's host in the devcontainer (set in
+# .devcontainer/devcontainer.json) — Spring's demo module takes its own
+# JDBC-shaped datasource vars instead of parsing DATABASE_URL.
+env = { SPRING_DATASOURCE_URL = "jdbc:postgresql://db:5432/ashurbanipal", SPRING_DATASOURCE_USERNAME = "ashurbanipal", SPRING_DATASOURCE_PASSWORD = "ashurbanipal", ASHURBANIPAL_ENABLED = "true" }
+sources = ["src/main/kotlin/**/*.kt", "demo/src/**/*", "../../frontend/dbviewer.html"]
+
+[tasks."spring:dev"]
+description = "run the demo host app, auto-restarting on implementations/spring-boot-starter/{src,demo} or frontend/dbviewer.html changes"
+run = "mise watch spring:demo --restart"
+
 # ---- go:* -----------------------------------------------------------------
 
 [tasks."go:build"]
@@ -230,6 +255,16 @@ description = "go test -race ./... (integration_test.go needs DATABASE_URL + the
 run = "go test -race ./..."
 dir = "implementations/go-nethttp"
 
+[tasks."go:demo"]
+description = "run the demo host app at http://localhost:4000/__ashurbanipal"
+run = "go run ./cmd/demo"
+dir = "implementations/go-nethttp"
+sources = ["*.go", "cmd/demo/**/*.go", "frontend/dbviewer.html"]
+
+[tasks."go:dev"]
+description = "run the demo host app, auto-rebuilding and restarting on implementations/go-nethttp/{*.go,cmd/demo} or frontend/dbviewer.html changes"
+run = "mise watch go:demo --restart"
+
 # ---- node:* ---------------------------------------------------------------
 
 [tasks."node:install"]
@@ -261,6 +296,17 @@ run = "pnpm test"
 dir = "implementations/node-express"
 depends = ["node:install"]
 
+[tasks."node:demo"]
+description = "host demo app at http://localhost:4000/__ashurbanipal (DB_BACKEND selects postgres|sqlite|mysql)"
+run = "pnpm run demo"
+dir = "implementations/node-express"
+depends = ["node:install"]
+sources = ["src/**/*.ts", "demo/**/*.ts", "frontend/dbviewer.html"]
+
+[tasks."node:dev"]
+description = "run the demo host app, auto-restarting on implementations/node-express/{src,demo} or frontend/dbviewer.html changes"
+run = "mise watch node:demo --restart"
+
 # ---- flask:* --------------------------------------------------------------
 
 [tasks."flask:install"]
@@ -291,6 +337,11 @@ description = "host demo app at http://localhost:4000/__ashurbanipal (ASHURBANIP
 run = "uv run python demo/app.py"
 dir = "implementations/flask-python"
 depends = ["flask:install"]
+sources = ["ashurbanipal/**/*.py", "demo/**/*.py", "ashurbanipal/frontend/dbviewer.html"]
+
+[tasks."flask:dev"]
+description = "run the demo host app, auto-restarting on implementations/flask-python/{ashurbanipal,demo} or vendored frontend/dbviewer.html changes"
+run = "mise watch flask:demo --restart"
 
 # ---- frontend:* ---------------------------------------------------------
 

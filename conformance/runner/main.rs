@@ -11,5 +11,6 @@ mod filter_dsl;
 mod html_and_siblings;
 mod protocol;
 mod schemas;
+mod sources;
 mod table_data;
 mod tables;

@@ -98,6 +98,13 @@ li button.loading .row-spinner { visibility: visible; animation: spin .6s linear
   li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
 }
 
+/* ==== Source selector ==== */
+/* hidden by default (single-source deployments never show this — see
+   loadSources); same margin as #schema-select-wrap below it, so hiding/
+   showing either never shifts the other's position. */
+#source-select-wrap { margin-bottom: var(--gap-lg); }
+#source-select { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
+
 /* ==== Schema selector ==== */
 /* hidden by default (single-schema deployments never show this — see
    loadSchemas); margin matches #table-search's so hiding/showing it
@@ -117,7 +124,7 @@ li button.loading .row-spinner { visibility: visible; animation: spin .6s linear
    the collapsed border seams in Chromium. */
 table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: var(--gap); }
 th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
-th { cursor: pointer; user-select: none; }
+th { cursor: pointer; user-select: none; white-space: nowrap; }
 /* z-index is load-bearing: td has position:relative (for the copy
    button), and since tbody follows thead in DOM order, its positioned
    <td>s paint over a sticky <th> with the default stacking order unless

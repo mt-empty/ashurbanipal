@@ -84,7 +84,7 @@ def main() -> None:
     def index():
         return redirect("/__ashurbanipal", code=307)
 
-    app.register_blueprint(router(config, source))
+    app.register_blueprint(router(config, [("primary", source)]))
 
     print(f"demo host on http://localhost:{port} — browser at http://localhost:{port}/__ashurbanipal")
     app.run(host="0.0.0.0", port=port)

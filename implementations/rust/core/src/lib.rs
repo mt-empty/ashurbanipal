@@ -14,7 +14,7 @@ pub use db::MySqlSource;
 pub use db::PgPoolSource;
 #[cfg(feature = "sqlite")]
 pub use db::SqliteSource;
-pub use db::{ColumnInfo, DbError, DbSource, QueryOpts, TableData, TableInfo};
+pub use db::{resolve_source, ColumnInfo, DbError, DbSource, QueryOpts, TableData, TableInfo};
 pub use filter::{Condition, FilterError, FilterOp, Logic};
 
 #[cfg(not(any(feature = "postgres", feature = "sqlite", feature = "mysql")))]

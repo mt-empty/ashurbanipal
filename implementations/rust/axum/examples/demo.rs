@@ -16,6 +16,14 @@
 //! ```sh
 //! PORT=4001 SIBLING_PORT=4000 cargo run -p ashurbanipal-axum --example demo
 //! ```
+//!
+//! To demo multi-source browsing (a second, distinctly-seeded database —
+//! `.devcontainer/db/init/02-reporting-seed.sql` — registered as a
+//! `reporting` source alongside `primary`):
+//!
+//! ```sh
+//! SECOND_SOURCE=1 cargo run -p ashurbanipal-axum --example demo
+//! ```
 
 use ashurbanipal_axum::{Config, PgPoolSource};
 use axum::routing::get;
@@ -61,7 +69,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "#
     ))?;
 
-    let ashurbanipal = ashurbanipal_axum::router(config, PgPoolSource::new(pool));
+    // SECOND_SOURCE demos the multi-source router end-to-end with real
+    // second storage: "reporting" is its own database on the same Postgres
+    // server (.devcontainer/db/init/02-reporting-seed.sql), not just a
+    // second name for the same pool — so switching sources in the UI shows
+    // genuinely different tables/data, not the same rows twice.
+    let mut sources = vec![("primary".to_string(), PgPoolSource::new(pool))];
+    if std::env::var("SECOND_SOURCE").is_ok() {
+        let reporting_url = std::env::var("REPORTING_DATABASE_URL").unwrap_or_else(|_| {
+            let (prefix, _) = database_url
+                .rsplit_once('/')
+                .expect("DATABASE_URL has a /dbname path segment");
+            format!("{prefix}/ashurbanipal_reporting")
+        });
+        let reporting_pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&reporting_url)
+            .await?;
+        sources.push(("reporting".to_string(), PgPoolSource::new(reporting_pool)));
+    }
+    let ashurbanipal = ashurbanipal_axum::router(config, sources);
     // MOUNT_PREFIX (e.g. "/svc") simulates a reverse proxy that serves the
     // host under a path prefix, to exercise the frontend's mount-point
     // agnosticism; unset means the plain one-line merge as before.

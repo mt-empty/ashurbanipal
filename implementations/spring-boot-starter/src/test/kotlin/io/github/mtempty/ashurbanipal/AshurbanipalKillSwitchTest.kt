@@ -36,7 +36,7 @@ class AshurbanipalKillSwitchTest {
         runner().run { context ->
             assertThat(context).hasNotFailed()
             assertThat(context).doesNotHaveBean(DbViewerController::class.java)
-            assertThat(context).doesNotHaveBean(DbSource::class.java)
+            assertThat(context).doesNotHaveBean("ashurbanipalDbSources")
         }
     }
 
@@ -57,18 +57,22 @@ class AshurbanipalKillSwitchTest {
             .run { context ->
                 assertThat(context).hasNotFailed()
                 assertThat(context).hasSingleBean(DbViewerController::class.java)
-                assertThat(context).hasSingleBean(DbSource::class.java)
+                assertThat(context).hasBean("ashurbanipalDbSources")
             }
     }
 
-    /** No `ashurbanipal.backend` at all MUST mean Postgres (today's only pre-existing behavior), never a startup failure — absent config must not accidentally read as an invalid value. */
+    @Suppress("UNCHECKED_CAST")
+    private fun dbSourcesBean(context: org.springframework.context.ApplicationContext): Map<String, DbSource> =
+        context.getBean("ashurbanipalDbSources") as Map<String, DbSource>
+
+    /** No `ashurbanipal.sources` at all MUST mean one implicit `default` source on Postgres (today's only pre-existing behavior), never a startup failure — absent config must not accidentally read as an invalid value. */
     @Test
     fun `no backend configured defaults to postgres`() {
         runner()
             .withPropertyValues("ashurbanipal.enabled=true")
             .run { context ->
                 assertThat(context).hasNotFailed()
-                assertThat(context.getBean(DbSource::class.java)).isInstanceOf(PostgresSource::class.java)
+                assertThat(dbSourcesBean(context)["default"]).isInstanceOf(PostgresSource::class.java)
             }
     }
 
@@ -76,7 +80,11 @@ class AshurbanipalKillSwitchTest {
     @Test
     fun `unrecognized backend value fails startup`() {
         runner()
-            .withPropertyValues("ashurbanipal.enabled=true", "ashurbanipal.backend=oracle")
+            .withPropertyValues(
+                "ashurbanipal.enabled=true",
+                "ashurbanipal.sources[0].name=default",
+                "ashurbanipal.sources[0].backend=oracle",
+            )
             .run { context ->
                 assertThat(context).hasFailed()
                 assertThat(context.startupFailure).hasRootCauseInstanceOf(InvalidBackendException::class.java)
@@ -86,20 +94,28 @@ class AshurbanipalKillSwitchTest {
     @Test
     fun `explicit mysql backend constructs MySqlSource`() {
         runner()
-            .withPropertyValues("ashurbanipal.enabled=true", "ashurbanipal.backend=mysql")
+            .withPropertyValues(
+                "ashurbanipal.enabled=true",
+                "ashurbanipal.sources[0].name=default",
+                "ashurbanipal.sources[0].backend=mysql",
+            )
             .run { context ->
                 assertThat(context).hasNotFailed()
-                assertThat(context.getBean(DbSource::class.java)).isInstanceOf(MySqlSource::class.java)
+                assertThat(dbSourcesBean(context)["default"]).isInstanceOf(MySqlSource::class.java)
             }
     }
 
     @Test
     fun `explicit sqlite backend constructs SqliteSource`() {
         runner()
-            .withPropertyValues("ashurbanipal.enabled=true", "ashurbanipal.backend=sqlite")
+            .withPropertyValues(
+                "ashurbanipal.enabled=true",
+                "ashurbanipal.sources[0].name=default",
+                "ashurbanipal.sources[0].backend=sqlite",
+            )
             .run { context ->
                 assertThat(context).hasNotFailed()
-                assertThat(context.getBean(DbSource::class.java)).isInstanceOf(SqliteSource::class.java)
+                assertThat(dbSourcesBean(context)["default"]).isInstanceOf(SqliteSource::class.java)
             }
     }
 }

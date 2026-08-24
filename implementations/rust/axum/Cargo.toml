@@ -42,6 +42,7 @@ tracing-subscriber = "0.3"
 dotenvy = "0.15"
 escargot = "0.5.15"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
+tower = { version = "0.5", features = ["util"] }
 
 [[example]]
 name = "demo"

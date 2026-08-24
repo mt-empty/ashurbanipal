@@ -58,7 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "#
     ))?;
 
-    let state = app_state(config, PgPoolSource::new(pool));
+    let state = app_state(
+        config,
+        vec![("primary".to_string(), PgPoolSource::new(pool))],
+    );
     let ui_path = format!("{}/__ashurbanipal", mount_prefix.as_deref().unwrap_or(""));
 
     println!("demo host on http://localhost:{port} — browser at http://localhost:{port}{ui_path}");

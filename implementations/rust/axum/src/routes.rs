@@ -10,7 +10,7 @@ use axum::Router;
 use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
-use ashurbanipal::{Config, DbError, DbSource, QueryOpts, TableInfo};
+use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, TableInfo};
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
@@ -21,7 +21,10 @@ const PROTOCOL_VERSION: &str = "1";
 
 pub(crate) struct AppState<S> {
     pub config: Config,
-    pub source: S,
+    /// Ordered `(name, source)` pairs; the first entry is the default a
+    /// request with no `source` param resolves to (mirrors `api/sources`'
+    /// listing order, which callers can rely on for the same reason).
+    pub sources: Vec<(String, S)>,
     pub http: reqwest::Client,
 }
 
@@ -29,22 +32,27 @@ pub(crate) struct AppState<S> {
 /// HTML one) 404s — indistinguishable from the crate not being mounted at
 /// all. The host decides when that's true; this crate has no opinion on
 /// environment names.
-pub fn router<S: DbSource>(config: Config, source: S) -> Router {
+///
+/// `sources` MUST be non-empty — a host with nothing to browse should pass
+/// `enabled = false` instead, not an empty list.
+pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router {
     if !config.is_enabled() {
         return Router::new();
     }
+    assert!(!sources.is_empty(), "router() requires at least one source");
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
         .expect("reqwest client construction only fails on TLS backend misconfiguration");
     let state = Arc::new(AppState {
         config,
-        source,
+        sources,
         http,
     });
     // The version header goes on every API response (errors included) but
     // not the HTML route, hence the separate layered sub-router.
     let api = Router::new()
+        .route("/__ashurbanipal/api/sources", get(list_sources::<S>))
         .route("/__ashurbanipal/api/schemas", get(list_schemas::<S>))
         .route("/__ashurbanipal/api/tables", get(list_tables::<S>))
         .route("/__ashurbanipal/api/table-counts", get(table_counts::<S>))
@@ -68,19 +76,38 @@ async fn stamp_protocol_version(mut response: Response) -> Response {
     response
 }
 
-fn error_response(err: DbError) -> Response {
-    match err {
-        DbError::NotAllowed(what) => {
-            (StatusCode::BAD_REQUEST, format!("not allowed: {what}")).into_response()
+/// Bridges `ashurbanipal-core`'s framework-agnostic `DbError` (and this
+/// crate's own bad-request cases, e.g. an invalid `order` value) into
+/// `axum::IntoResponse`. A wrapper, not a direct `impl IntoResponse for
+/// DbError`, because neither `DbError` nor `IntoResponse` is defined in
+/// this crate — the orphan rule forbids that impl here.
+enum ApiError {
+    Db(DbError),
+    BadRequest(String),
+}
+
+impl From<DbError> for ApiError {
+    fn from(e: DbError) -> Self {
+        ApiError::Db(e)
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        match self {
+            ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
+            ApiError::Db(DbError::NotAllowed(what)) => {
+                (StatusCode::BAD_REQUEST, format!("not allowed: {what}")).into_response()
+            }
+            ApiError::Db(DbError::FilterParse(reason)) => {
+                (StatusCode::BAD_REQUEST, format!("invalid filter: {reason}")).into_response()
+            }
+            ApiError::Db(DbError::Sqlx(e)) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("database error: {e}"),
+            )
+                .into_response(),
         }
-        DbError::FilterParse(reason) => {
-            (StatusCode::BAD_REQUEST, format!("invalid filter: {reason}")).into_response()
-        }
-        DbError::Sqlx(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("database error: {e}"),
-        )
-            .into_response(),
     }
 }
 
@@ -89,20 +116,49 @@ async fn serve_html<S: DbSource>(State(_): State<Arc<AppState<S>>>) -> Html<&'st
 }
 
 #[derive(Serialize)]
+struct SourceEntry {
+    name: String,
+}
+
+#[derive(Serialize)]
+struct SourcesResponse {
+    sources: Vec<SourceEntry>,
+}
+
+/// Never fails: `sources` is always non-empty (`router()` asserts it), so
+/// there's no allow-list to check against — this route *is* the allow-list.
+async fn list_sources<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Response {
+    let sources = state
+        .sources
+        .iter()
+        .map(|(name, _)| SourceEntry { name: name.clone() })
+        .collect();
+    Json(SourcesResponse { sources }).into_response()
+}
+
+#[derive(Serialize)]
 struct SchemasResponse {
     schemas: Vec<String>,
 }
 
-async fn list_schemas<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Response {
-    match state.source.list_schemas().await {
-        Ok(schemas) => Json(SchemasResponse { schemas }).into_response(),
-        Err(e) => error_response(e),
-    }
+#[derive(Deserialize)]
+struct SourceParams {
+    source: Option<String>,
+}
+
+async fn list_schemas<S: DbSource>(
+    State(state): State<Arc<AppState<S>>>,
+    Query(params): Query<SourceParams>,
+) -> Result<Json<SchemasResponse>, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let schemas = source.list_schemas().await?;
+    Ok(Json(SchemasResponse { schemas }))
 }
 
 #[derive(Deserialize)]
 struct SchemaParams {
     schema: Option<String>,
+    source: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -113,11 +169,10 @@ struct TablesResponse {
 async fn list_tables<S: DbSource>(
     State(state): State<Arc<AppState<S>>>,
     Query(params): Query<SchemaParams>,
-) -> Response {
-    match state.source.list_tables(params.schema.as_deref()).await {
-        Ok(tables) => Json(TablesResponse { tables }).into_response(),
-        Err(e) => error_response(e),
-    }
+) -> Result<Json<TablesResponse>, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let tables = source.list_tables(params.schema.as_deref()).await?;
+    Ok(Json(TablesResponse { tables }))
 }
 
 #[derive(Serialize)]
@@ -134,22 +189,21 @@ struct CountsResponse {
 async fn table_counts<S: DbSource>(
     State(state): State<Arc<AppState<S>>>,
     Query(params): Query<SchemaParams>,
-) -> Response {
-    match state.source.table_counts(params.schema.as_deref()).await {
-        Ok(counts) => Json(CountsResponse {
-            counts: counts
-                .into_iter()
-                .map(|(table, approx_rows)| CountEntry { table, approx_rows })
-                .collect(),
-        })
-        .into_response(),
-        Err(e) => error_response(e),
-    }
+) -> Result<Json<CountsResponse>, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let counts = source.table_counts(params.schema.as_deref()).await?;
+    Ok(Json(CountsResponse {
+        counts: counts
+            .into_iter()
+            .map(|(table, approx_rows)| CountEntry { table, approx_rows })
+            .collect(),
+    }))
 }
 
 #[derive(Deserialize)]
 struct DataParams {
     schema: Option<String>,
+    source: Option<String>,
     table: String,
     filter: Option<String>,
     #[serde(default, deserialize_with = "deserialize_saturating_u32")]
@@ -182,7 +236,8 @@ where
 async fn table_data<S: DbSource>(
     State(state): State<Arc<AppState<S>>>,
     Query(params): Query<DataParams>,
-) -> Response {
+) -> Result<Response, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
     // An empty (or whitespace-only) filter param means "no filter", not a
     // deserialization target; a valid-but-empty JSON array means the same
     // (spec/protocol.md §5.4.2).
@@ -190,7 +245,7 @@ async fn table_data<S: DbSource>(
         Some(raw) if !raw.trim().is_empty() => match filter::parse(raw) {
             Ok(conditions) if conditions.is_empty() => None,
             Ok(conditions) => Some(conditions),
-            Err(e) => return error_response(DbError::FilterParse(e.to_string())),
+            Err(e) => return Err(DbError::FilterParse(e.to_string()).into()),
         },
         _ => None,
     };
@@ -204,11 +259,9 @@ async fn table_data<S: DbSource>(
         None | Some("asc") => false,
         Some("desc") => true,
         Some(other) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                format!("invalid order {other:?} (expected \"asc\" or \"desc\")"),
-            )
-                .into_response()
+            return Err(ApiError::BadRequest(format!(
+                "invalid order {other:?} (expected \"asc\" or \"desc\")"
+            )))
         }
     };
 
@@ -220,19 +273,16 @@ async fn table_data<S: DbSource>(
         timeout_secs: limits.query_timeout_secs,
         filter: parsed_filter,
     };
-    match state
-        .source
+    let data = source
         .query_table(params.schema.as_deref(), &params.table, opts)
-        .await
-    {
-        Ok(data) => Json(data).into_response(),
-        Err(e) => error_response(e),
-    }
+        .await?;
+    Ok(Json(data).into_response())
 }
 
 #[derive(Deserialize)]
 struct CommonValuesParams {
     schema: Option<String>,
+    source: Option<String>,
     table: String,
     column: String,
 }
@@ -251,21 +301,17 @@ struct CommonValuesResponse {
 async fn common_values<S: DbSource>(
     State(state): State<Arc<AppState<S>>>,
     Query(params): Query<CommonValuesParams>,
-) -> Response {
-    match state
-        .source
+) -> Result<Json<CommonValuesResponse>, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let values = source
         .common_values(params.schema.as_deref(), &params.table, &params.column)
-        .await
-    {
-        Ok(values) => Json(CommonValuesResponse {
-            values: values
-                .into_iter()
-                .map(|(value, freq)| CommonValueEntry { value, freq })
-                .collect(),
-        })
-        .into_response(),
-        Err(e) => error_response(e),
-    }
+        .await?;
+    Ok(Json(CommonValuesResponse {
+        values: values
+            .into_iter()
+            .map(|(value, freq)| CommonValueEntry { value, freq })
+            .collect(),
+    }))
 }
 
 #[derive(Serialize)]
@@ -341,5 +387,53 @@ mod tests {
             Some("http://localhost:4001/healthz".to_string())
         );
         assert_eq!(health_url("not-a-url", "/health"), None);
+    }
+
+    // resolve_source itself now lives in ashurbanipal-core (see its own
+    // tests there) — only the router()-specific behavior below is
+    // axum-adapter-specific and stays here.
+    struct NeverQueriedSource;
+
+    impl DbSource for NeverQueriedSource {
+        async fn list_schemas(&self) -> Result<Vec<String>, DbError> {
+            unreachable!("router() must panic on empty sources before any query runs")
+        }
+        async fn list_tables(&self, _schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
+            unreachable!()
+        }
+        async fn table_counts(&self, _schema: Option<&str>) -> Result<Vec<(String, i64)>, DbError> {
+            unreachable!()
+        }
+        async fn query_table(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+            _opts: QueryOpts,
+        ) -> Result<ashurbanipal::TableData, DbError> {
+            unreachable!()
+        }
+        async fn common_values(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+            _column: &str,
+        ) -> Result<Vec<(String, f32)>, DbError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "router() requires at least one source")]
+    fn router_panics_on_empty_sources_when_enabled() {
+        let config = Config::from_toml("enabled = true").unwrap();
+        let _ = router::<NeverQueriedSource>(config, Vec::new());
+    }
+
+    #[test]
+    fn router_disabled_never_reaches_the_empty_sources_check() {
+        // Fail-closed takes priority: a disabled host with no sources
+        // configured must 404 quietly, not panic at startup.
+        let config = Config::default();
+        let _ = router::<NeverQueriedSource>(config, Vec::new());
     }
 }

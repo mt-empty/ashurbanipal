@@ -25,28 +25,37 @@ class AshurbanipalAutoConfiguration {
     fun ashurbanipalFilterValidator(): FilterValidator = FilterValidator()
 
     /**
-     * Which [DbSource] gets constructed is chosen by [AshurbanipalProperties.backend]
-     * alone — an explicit opt-in property, never classpath/driver detection
-     * (`PORTING.md`'s hardening checklist item 2). [AshurbanipalProperties]'s
-     * own init block already rejects an unrecognized value at config-parse
-     * time, so the `else` branch below is unreachable, not a silent fallback.
+     * One [DbSource] per [AshurbanipalProperties.resolvedSources] entry, keyed
+     * by its `name` — which concrete implementation gets constructed for each
+     * is chosen by that entry's own `backend` alone, an explicit opt-in
+     * property, never classpath/driver detection (`PORTING.md`'s hardening
+     * checklist item 2). [AshurbanipalProperties]'s own init block already
+     * rejects an unrecognized backend value or a duplicate/blank name at
+     * config-parse time, so the `else` branch below is unreachable, not a
+     * silent fallback. `LinkedHashMap` preserves config order, since that
+     * order is also `api/sources`' listing order and `source`-param-absent's
+     * default (`DbViewerController.resolveSource`).
      */
     @Bean
-    fun ashurbanipalDbSource(
+    fun ashurbanipalDbSources(
         properties: AshurbanipalProperties,
         applicationContext: ApplicationContext,
         filterValidator: FilterValidator,
-    ): DbSource {
-        val dataSource = properties.dataSourceBean
-            ?.let { applicationContext.getBean(it, DataSource::class.java) }
-            ?: applicationContext.getBean(DataSource::class.java)
+    ): Map<String, DbSource> {
         val queryTimeoutSecs = properties.limits.queryTimeoutSecs
-        return when (properties.backend.lowercase()) {
-            "postgres" -> PostgresSource(dataSource, queryTimeoutSecs, filterValidator)
-            "mysql" -> MySqlSource(dataSource, queryTimeoutSecs)
-            "sqlite" -> SqliteSource(dataSource, queryTimeoutSecs)
-            else -> error("unreachable: AshurbanipalProperties validates backend at construction")
+        val result = LinkedHashMap<String, DbSource>()
+        for (source in properties.resolvedSources) {
+            val dataSource = source.dataSourceBean
+                ?.let { applicationContext.getBean(it, DataSource::class.java) }
+                ?: applicationContext.getBean(DataSource::class.java)
+            result[source.name] = when (source.backend.lowercase()) {
+                "postgres" -> PostgresSource(dataSource, queryTimeoutSecs, filterValidator)
+                "mysql" -> MySqlSource(dataSource, queryTimeoutSecs)
+                "sqlite" -> SqliteSource(dataSource, queryTimeoutSecs)
+                else -> error("unreachable: AshurbanipalProperties validates backend at construction")
+            }
         }
+        return result
     }
 
     @Bean
@@ -56,8 +65,8 @@ class AshurbanipalAutoConfiguration {
     @Bean
     fun ashurbanipalDbViewerController(
         properties: AshurbanipalProperties,
-        dbSource: DbSource,
+        dbSources: Map<String, DbSource>,
         filterValidator: FilterValidator,
         httpClient: HttpClient,
-    ): DbViewerController = DbViewerController(properties, dbSource, filterValidator, httpClient)
+    ): DbViewerController = DbViewerController(properties, dbSources, filterValidator, httpClient)
 }

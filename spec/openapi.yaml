@@ -20,10 +20,33 @@ servers:
         description: Implementation-defined mount point.
 
 paths:
+  /sources:
+    get:
+      operationId: listSources
+      summary: List source names selectable as the `source` param elsewhere.
+      responses:
+        "200":
+          description: >
+            Live allow-list for the `source` param on /schemas, /tables,
+            /table-counts, /tables/data, and /tables/common-values
+            (spec/protocol.md §5.8). Exactly one entry for a
+            single-source deployment.
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourcesResponse"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
   /schemas:
     get:
       operationId: listSchemas
       summary: List schema names selectable as the `schema` param elsewhere.
+      parameters:
+        - $ref: "#/components/parameters/Source"
       responses:
         "200":
           description: >
@@ -37,6 +60,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SchemasResponse"
+        "400":
+          $ref: "#/components/responses/ClientError"
         "500":
           $ref: "#/components/responses/ServerError"
 
@@ -45,6 +70,7 @@ paths:
       operationId: listTables
       summary: List base tables of the resolved schema.
       parameters:
+        - $ref: "#/components/parameters/Source"
         - $ref: "#/components/parameters/Schema"
       responses:
         "200":
@@ -72,6 +98,7 @@ paths:
       operationId: tableCounts
       summary: Approximate row counts from pg_class.reltuples.
       parameters:
+        - $ref: "#/components/parameters/Source"
         - $ref: "#/components/parameters/Schema"
       responses:
         "200":
@@ -93,6 +120,7 @@ paths:
       operationId: tableData
       summary: Paginated, filtered, sorted rows for a single table.
       parameters:
+        - $ref: "#/components/parameters/Source"
         - $ref: "#/components/parameters/Schema"
         - name: table
           in: query
@@ -209,6 +237,7 @@ paths:
       operationId: commonValues
       summary: Most-common values for one column, from pg_stats.
       parameters:
+        - $ref: "#/components/parameters/Source"
         - $ref: "#/components/parameters/Schema"
         - name: table
           in: query
@@ -270,6 +299,18 @@ paths:
 
 components:
   parameters:
+    Source:
+      name: source
+      in: query
+      required: false
+      description: >
+        Selects which registered DbSource this operation targets
+        (spec/protocol.md §1). Absent resolves to the first-registered
+        source. Present must exactly match (case-sensitive) an entry
+        from GET /sources; otherwise 400.
+      schema:
+        type: string
+
     Schema:
       name: schema
       in: query
@@ -314,6 +355,30 @@ components:
             type: string
 
   schemas:
+    SourceEntry:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: >
+            Opaque, implementation-defined identifier. No other field is
+            defined — a source's backend engine has no wire
+            representation, it's a host-side configuration detail only.
+
+    SourcesResponse:
+      type: object
+      required: [sources]
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceEntry"
+          description: >
+            Selectable sources, in the same order the `source` param's
+            absent case resolves against (first entry is the default).
+            Exactly one entry for a single-source deployment.
+
     SchemasResponse:
       type: object
       required: [schemas]
