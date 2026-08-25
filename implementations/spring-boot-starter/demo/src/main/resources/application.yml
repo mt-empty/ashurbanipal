@@ -11,3 +11,20 @@ spring:
 
 ashurbanipal:
   enabled: ${ASHURBANIPAL_ENABLED:true}
+
+---
+# conformance/runner/two_source.rs's target — activate with
+# SPRING_PROFILES_ACTIVE=conformance-second-source. Redeclares
+# ashurbanipal.sources in full (Spring profile documents replace list
+# properties, not merge them) so the implicit single "default" source
+# from the base document above still exists alongside the second one.
+spring:
+  config:
+    activate:
+      on-profile: conformance-second-source
+
+ashurbanipal:
+  sources:
+    - name: default
+    - name: other_schema
+      data-source-bean: otherSchemaDataSource

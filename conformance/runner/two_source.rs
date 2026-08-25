@@ -4,9 +4,11 @@
 //! self-skips (prints a message, returns) against a demo that only
 //! registers one source, so this file runs safely as part of the same
 //! unconditional suite `sources.rs` lives in — it only asserts anything
-//! when the target was actually started in two-source mode
-//! (`CONFORMANCE_SECOND_SOURCE=1`, one env var every port's own demo
-//! entrypoint understands the same way).
+//! when the target was actually started in two-source mode. Each port
+//! wires that up its own idiomatic way (Go/Node/Flask/Rust use a
+//! `CONFORMANCE_SECOND_SOURCE=1` env var; Spring activates a
+//! `conformance-second-source` profile instead) — this file never checks
+//! *how* the target got there, only that `api/sources` says >= 2.
 //!
 //! The second source is deliberately *not* a second database: it's the
 //! same connection, pinned to `other_schema` — already part of

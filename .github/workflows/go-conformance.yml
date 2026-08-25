@@ -102,6 +102,23 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: go-nethttp-conformance-report
 
+  # Same suite, run again (not instead) against a demo started with a
+  # second source registered — conformance/runner/two_source.rs is the
+  # only thing this proves beyond the job above; every other test
+  # self-skips identically either way (see sources.rs/two_source.rs).
+  two-source-conformance:
+    name: Go — conformance kit (two-source round-trip)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: go
+      go-version-file: implementations/go-nethttp/go.mod
+      start-command: "cd implementations/go-nethttp && go run ./cmd/demo"
+      start-env: "CONFORMANCE_SECOND_SOURCE=1"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: go-nethttp-conformance-two-source-report
+
   schema-conformance:
     name: Go — schema conformance
     needs: build-and-test
