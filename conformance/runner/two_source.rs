@@ -25,8 +25,10 @@ use crate::common::TestServer;
 
 /// `None` (with an explanatory message) when the target wasn't started
 /// with a second source — the signal every test below uses to skip
-/// itself rather than fail.
-async fn second_source_name(srv: &TestServer) -> Option<String> {
+/// itself rather than fail. Returns the whole parsed array (not just the
+/// second name) so a caller that also needs e.g. the first entry doesn't
+/// have to issue its own separate `GET /api/sources`.
+async fn sources_if_two_or_more(srv: &TestServer) -> Option<Vec<serde_json::Value>> {
     let body: serde_json::Value = srv
         .client()
         .get(srv.url("/api/sources"))
@@ -36,7 +38,7 @@ async fn second_source_name(srv: &TestServer) -> Option<String> {
         .json()
         .await
         .unwrap();
-    let sources = body["sources"].as_array().unwrap();
+    let sources = body["sources"].as_array().unwrap().clone();
     if sources.len() < 2 {
         eprintln!(
             "two_source: skipping — target registered {} source(s), need >= 2 \
@@ -45,18 +47,21 @@ async fn second_source_name(srv: &TestServer) -> Option<String> {
         );
         return None;
     }
-    Some(sources[1]["name"].as_str().unwrap().to_string())
+    Some(sources)
 }
 
 /// `source: None` omits the query param entirely (the default-resolution
 /// path), never an empty string (which is itself a rejected value).
-async fn table_names(srv: &TestServer, source: Option<&str>) -> Vec<String> {
+async fn fetch_tables(srv: &TestServer, source: Option<&str>) -> serde_json::Value {
     let mut req = srv.client().get(srv.url("/api/tables"));
     if let Some(source) = source {
         req = req.query(&[("source", source)]);
     }
-    let body: serde_json::Value = req.send().await.unwrap().json().await.unwrap();
-    body["tables"]
+    req.send().await.unwrap().json().await.unwrap()
+}
+
+async fn table_names(srv: &TestServer, source: Option<&str>) -> Vec<String> {
+    fetch_tables(srv, source).await["tables"]
         .as_array()
         .unwrap()
         .iter()
@@ -67,12 +72,13 @@ async fn table_names(srv: &TestServer, source: Option<&str>) -> Vec<String> {
 #[tokio::test]
 async fn second_source_is_scoped_to_other_schema_and_differs_from_the_default() {
     let srv = TestServer::spawn().await;
-    let Some(second) = second_source_name(&srv).await else {
+    let Some(sources) = sources_if_two_or_more(&srv).await else {
         return;
     };
+    let second = sources[1]["name"].as_str().unwrap();
 
-    let default_tables = table_names(&srv, None).await;
-    let second_tables = table_names(&srv, Some(&second)).await;
+    let (default_tables, second_tables) =
+        tokio::join!(table_names(&srv, None), table_names(&srv, Some(second)));
 
     assert_exact(
         second_tables,
@@ -88,40 +94,15 @@ async fn second_source_is_scoped_to_other_schema_and_differs_from_the_default() 
 #[tokio::test]
 async fn api_sources_order_matches_default_resolution_order() {
     let srv = TestServer::spawn().await;
-    let Some(_second) = second_source_name(&srv).await else {
+    let Some(sources) = sources_if_two_or_more(&srv).await else {
         return;
     };
+    let first_listed = sources[0]["name"].as_str().unwrap();
 
-    let body: serde_json::Value = srv
-        .client()
-        .get(srv.url("/api/sources"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let first_listed = body["sources"][0]["name"].as_str().unwrap().to_string();
-
-    let default_tables: serde_json::Value = srv
-        .client()
-        .get(srv.url("/api/tables"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let explicit_first_tables: serde_json::Value = srv
-        .client()
-        .get(srv.url("/api/tables"))
-        .query(&[("source", first_listed.as_str())])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let (default_tables, explicit_first_tables) = tokio::join!(
+        fetch_tables(&srv, None),
+        fetch_tables(&srv, Some(first_listed))
+    );
     assert_exact(
         explicit_first_tables,
         default_tables,

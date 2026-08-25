@@ -64,6 +64,14 @@ async fn build_pinned_source(
     PgPoolSource::new(pool)
 }
 
+async fn connect_plain_pool(database_url: &str) -> sqlx::PgPool {
+    PgPoolOptions::new()
+        .max_connections(1)
+        .connect(database_url)
+        .await
+        .expect("connect source pool")
+}
+
 async fn teardown_schemas(database_url: &str, schemas: &[&str]) {
     let admin = PgPoolOptions::new()
         .max_connections(1)
@@ -85,8 +93,10 @@ async fn omitting_source_resolves_to_first_registered_and_explicit_source_reache
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
 
-    let alpha = build_pinned_source(&database_url, SOURCE_SCHEMA_ALPHA, "ALPHA").await;
-    let beta = build_pinned_source(&database_url, SOURCE_SCHEMA_BETA, "BETA").await;
+    let (alpha, beta) = tokio::join!(
+        build_pinned_source(&database_url, SOURCE_SCHEMA_ALPHA, "ALPHA"),
+        build_pinned_source(&database_url, SOURCE_SCHEMA_BETA, "BETA"),
+    );
     let config = Config::from_toml("enabled = true").unwrap();
     let state = app_state(
         config,
@@ -94,36 +104,41 @@ async fn omitting_source_resolves_to_first_registered_and_explicit_source_reache
     );
     let app = init_service(App::new().service(service(state))).await;
 
-    let default_data: serde_json::Value = read_body_json(
-        call_service(
-            &app,
-            TestRequest::get()
-                .uri("/__ashurbanipal/api/tables/data?table=probe_multi_source")
-                .to_request(),
-        )
-        .await,
-    )
-    .await;
-    let alpha_data: serde_json::Value = read_body_json(
-        call_service(
-            &app,
-            TestRequest::get()
-                .uri("/__ashurbanipal/api/tables/data?table=probe_multi_source&source=alpha")
-                .to_request(),
-        )
-        .await,
-    )
-    .await;
-    let beta_data: serde_json::Value = read_body_json(
-        call_service(
-            &app,
-            TestRequest::get()
-                .uri("/__ashurbanipal/api/tables/data?table=probe_multi_source&source=beta")
-                .to_request(),
-        )
-        .await,
-    )
-    .await;
+    const BASE: &str = "/__ashurbanipal/api/tables/data?table=probe_multi_source";
+    let (default_data, alpha_data, beta_data): (
+        serde_json::Value,
+        serde_json::Value,
+        serde_json::Value,
+    ) = tokio::join!(
+        async {
+            read_body_json(call_service(&app, TestRequest::get().uri(BASE).to_request()).await)
+                .await
+        },
+        async {
+            read_body_json(
+                call_service(
+                    &app,
+                    TestRequest::get()
+                        .uri(&format!("{BASE}&source=alpha"))
+                        .to_request(),
+                )
+                .await,
+            )
+            .await
+        },
+        async {
+            read_body_json(
+                call_service(
+                    &app,
+                    TestRequest::get()
+                        .uri(&format!("{BASE}&source=beta"))
+                        .to_request(),
+                )
+                .await,
+            )
+            .await
+        },
+    );
 
     assert_eq!(
         default_data, alpha_data,
@@ -143,11 +158,7 @@ async fn unknown_source_is_rejected_with_400_on_every_source_aware_route() {
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
     // resolve_source rejects the unknown name before any table/column is
     // ever touched, so a single plain pool (no schema fixture) is enough.
-    let pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&database_url)
-        .await
-        .expect("connect source pool");
+    let pool = connect_plain_pool(&database_url).await;
     let config = Config::from_toml("enabled = true").unwrap();
     let state = app_state(config, vec![("alpha".to_string(), PgPoolSource::new(pool))]);
     let app = init_service(App::new().service(service(state))).await;
@@ -168,11 +179,7 @@ async fn unknown_source_is_rejected_with_400_on_every_source_aware_route() {
 async fn api_sources_lists_registered_names_in_registration_order_with_no_backend_field() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
-    let pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&database_url)
-        .await
-        .expect("connect source pool");
+    let pool = connect_plain_pool(&database_url).await;
     let config = Config::from_toml("enabled = true").unwrap();
     // Registered "second" before "first" — proves /api/sources preserves
     // registration order rather than sorting alphabetically.

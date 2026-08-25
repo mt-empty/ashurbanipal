@@ -1,7 +1,6 @@
 package io.github.mtempty.ashurbanipal.demo
 
-import org.springframework.beans.factory.annotation.Value
-import org.springframework.boot.jdbc.DataSourceBuilder
+import org.springframework.boot.jdbc.autoconfigure.DataSourceProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Primary
@@ -27,6 +26,12 @@ import javax.sql.DataSource
  * auto-configured primary bean was never created at all, and the "default"
  * source (`dataSourceBean: null` → the one unqualified `DataSource` bean)
  * silently resolved to the *other_schema*-pinned pool for both entries.
+ * Built from the injected [DataSourceProperties] (still registered here —
+ * its own `@EnableConfigurationProperties` isn't gated on a missing
+ * `DataSource`) rather than hand-wired `@Value` fields, so it stays the
+ * same construction path Boot's own auto-configuration would have used —
+ * any future `spring.datasource.*`/Hikari tuning in `application.yml`
+ * keeps applying here too, instead of silently diverging.
  */
 @Configuration
 @Profile("conformance-second-source")
@@ -34,28 +39,15 @@ class ConformanceSecondSourceConfig {
 
     @Bean
     @Primary
-    fun primaryDataSource(
-        @Value("\${spring.datasource.url}") url: String,
-        @Value("\${spring.datasource.username}") username: String,
-        @Value("\${spring.datasource.password}") password: String,
-    ): DataSource =
-        DataSourceBuilder.create()
-            .url(url)
-            .username(username)
-            .password(password)
-            .build()
+    fun primaryDataSource(properties: DataSourceProperties): DataSource =
+        properties.initializeDataSourceBuilder().build()
 
     @Bean(name = ["otherSchemaDataSource"])
-    fun otherSchemaDataSource(
-        @Value("\${spring.datasource.url}") url: String,
-        @Value("\${spring.datasource.username}") username: String,
-        @Value("\${spring.datasource.password}") password: String,
-    ): DataSource {
+    fun otherSchemaDataSource(properties: DataSourceProperties): DataSource {
+        val url = requireNotNull(properties.url) { "spring.datasource.url must be set" }
         val separator = if (url.contains("?")) "&" else "?"
-        return DataSourceBuilder.create()
+        return properties.initializeDataSourceBuilder()
             .url("$url${separator}currentSchema=other_schema")
-            .username(username)
-            .password(password)
             .build()
     }
 }

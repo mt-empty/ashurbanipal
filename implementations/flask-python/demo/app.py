@@ -41,14 +41,18 @@ def _env_int(name: str, fallback: int) -> int:
     return int(raw)
 
 
+def _postgres_dsn() -> str:
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        raise RuntimeError("DATABASE_URL must be set (the devcontainer sets it automatically)")
+    return dsn
+
+
 def _build_source(backend: str):
     if backend == "postgres":
         from ashurbanipal.db.postgres import PgSource
 
-        dsn = os.environ.get("DATABASE_URL")
-        if not dsn:
-            raise RuntimeError("DATABASE_URL must be set (the devcontainer sets it automatically)")
-        return PgSource(dsn)
+        return PgSource(_postgres_dsn())
     if backend == "sqlite":
         from ashurbanipal.db.sqlite import SqliteSource
 
@@ -76,9 +80,7 @@ def _conformance_second_source(backend: str):
         return None
     from ashurbanipal.db.postgres import PgSource
 
-    dsn = os.environ.get("DATABASE_URL")
-    if not dsn:
-        raise RuntimeError("DATABASE_URL must be set (the devcontainer sets it automatically)")
+    dsn = _postgres_dsn()
     # libpq's "options" DSN param sends `-c search_path=...` at connection
     # start, so every fresh per-operation connection (PgSource opens no
     # pool) resolves against other_schema without touching PgSource itself.
