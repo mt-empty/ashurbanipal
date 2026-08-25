@@ -18,7 +18,7 @@ depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance"]
 
 [tasks.rust]
 description = "rust implementation checks: fmt-check, lint, test, integration-test"
-depends = ["rust:fmt-check", "rust:lint", "rust:test", "rust:integration-test"]
+depends = ["rust:fmt-check", "rust:lint", "rust:test", "rust:integration-test", "rust:integration-test-actix"]
 
 [tasks.spring]
 description = "spring-boot-starter implementation checks: build, test"
@@ -133,6 +133,16 @@ description = "cargo test --test schema_isolation --test multi_source: axum's ow
 # (see its own module doc comment), same as the rest of the mysql feature.
 run = "cargo test --test schema_isolation --test multi_source"
 dir = "implementations/rust/axum"
+
+[tasks."rust:integration-test-actix"]
+description = "cargo test --test multi_source: actix-web's own Postgres-backed integration tests (needs DATABASE_URL)"
+# actix-web/tests/ has no schema_isolation.rs equivalent — that file tests
+# core::PgPoolSource directly, already covered once via axum's copy; no
+# need to duplicate it per adapter. multi_source.rs is adapter-specific
+# (drives the actual actix Service, not shareable with axum's oneshot-based
+# version), same rationale as rust:integration-test above.
+run = "cargo test --test multi_source"
+dir = "implementations/rust/actix-web"
 
 [tasks."rust:lint"]
 description = "cargo clippy, denying warnings"
