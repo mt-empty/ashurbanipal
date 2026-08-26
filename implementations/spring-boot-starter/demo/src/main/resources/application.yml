@@ -14,10 +14,12 @@ ashurbanipal:
 
 ---
 # conformance/runner/two_source.rs's target — activate with
-# SPRING_PROFILES_ACTIVE=conformance-second-source. Redeclares
-# ashurbanipal.sources in full (Spring profile documents replace list
-# properties, not merge them) so the implicit single "default" source
-# from the base document above still exists alongside the second one.
+# SPRING_PROFILES_ACTIVE=conformance-second-source. The base document
+# above never sets ashurbanipal.sources at all — AshurbanipalProperties.
+# resolvedSources only synthesizes the implicit single "default" entry
+# when the config'd list is empty, so the moment *anything* is configured
+# here, that fallback no longer applies and both entries need to be
+# spelled out explicitly, not just the new one.
 spring:
   config:
     activate:

@@ -232,6 +232,15 @@ to trigger deterministically):
   test concern (Rust's own version: `implementations/rust/axum/tests/multi_source.rs`
   and `implementations/rust/actix-web/tests/multi_source.rs`), not this
   suite.
+- **Exact source count/identity for a deliberately multi-source target is
+  a per-port concern, not this runner's.** `sources.rs`'s single-entry
+  check self-skips whenever `api/sources` reports more than one — over
+  black-box HTTP, "2 sources by design" and "2 sources by bug" look
+  identical, so that intent check is left to each port's own white-box
+  test, which builds the router itself and so already knows: Rust's
+  `tests/multi_source.rs` (axum and actix-web), Go's
+  `source_integration_test.go`, Node's `test/sources.test.ts`, Flask's
+  `tests/test_sources.py`, Spring's `MultiSourceTest.kt`.
 - **§5.6 sibling health semantics beyond the empty-config case
   (`P5.6-2XX-ONLY`, `P5.6-PARALLEL-TIMEOUT-BOUND`).** `healthy` reflecting
   a real 2xx/non-2xx/timeout/unreachable outcome, and the parallel +

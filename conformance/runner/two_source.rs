@@ -75,7 +75,10 @@ async fn second_source_is_scoped_to_other_schema_and_differs_from_the_default() 
     let Some(sources) = sources_if_two_or_more(&srv).await else {
         return;
     };
-    let second = sources[1]["name"].as_str().unwrap();
+    // .last(), not [1]: a local run stacking SECOND_SOURCE and
+    // CONFORMANCE_SECOND_SOURCE together registers 3 sources, pushing this
+    // one to [2].
+    let second = sources.last().unwrap()["name"].as_str().unwrap();
 
     let (default_tables, second_tables) =
         tokio::join!(table_names(&srv, None), table_names(&srv, Some(second)));

@@ -23,26 +23,32 @@ async fn lists_exactly_the_one_registered_source() {
         .await
         .unwrap();
     let sources = body["sources"].as_array().unwrap();
-    // A target started with CONFORMANCE_SECOND_SOURCE=1 (two_source.rs's
-    // target, run as a separate CI job against the *same* unfiltered
-    // suite) genuinely has 2 sources — that's not this test's concern, so
-    // it skips rather than treating the other job's target as a failure.
+    // Self-skips like two_source.rs, not an env var: 2-by-design and
+    // 2-by-bug look identical over black-box HTTP, so exact-count intent
+    // is left to each port's own white-box test (COVERAGE.md's Known gaps).
     if sources.len() != 1 {
         eprintln!(
-            "sources: skipping lists_exactly_the_one_registered_source — target registered \
-             {} source(s), this test only applies to a single-source deployment",
+            "sources: skipping the exact-one-entry check — target registered {} source(s) \
+             (a two-source-conformance target; see two_source.rs for its own checks)",
             sources.len()
         );
-        return;
+    } else {
+        assert_exact(
+            sources.len(),
+            1,
+            "a single-source deployment must list exactly one entry (spec/protocol.md §5.8)",
+        );
     }
-    assert!(
-        sources[0]["name"].is_string(),
-        "each entry must carry a `name`: {sources:?}"
-    );
-    assert!(
-        sources[0].get("backend").is_none(),
-        "api/sources must never disclose a backend engine (spec/protocol.md §5.8): {sources:?}"
-    );
+    for source in sources {
+        assert!(
+            source["name"].is_string(),
+            "each entry must carry a `name`: {sources:?}"
+        );
+        assert!(
+            source.get("backend").is_none(),
+            "api/sources must never disclose a backend engine (spec/protocol.md §5.8): {sources:?}"
+        );
+    }
 }
 
 #[tokio::test]
