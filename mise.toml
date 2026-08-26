@@ -136,11 +136,8 @@ dir = "implementations/rust/axum"
 
 [tasks."rust:integration-test-actix"]
 description = "cargo test --test multi_source: actix-web's own Postgres-backed integration tests (needs DATABASE_URL)"
-# actix-web/tests/ has no schema_isolation.rs equivalent — that file tests
-# core::PgPoolSource directly, already covered once via axum's copy; no
-# need to duplicate it per adapter. multi_source.rs is adapter-specific
-# (drives the actual actix Service, not shareable with axum's oneshot-based
-# version), same rationale as rust:integration-test above.
+# No schema_isolation.rs equivalent here — that tests core::PgPoolSource
+# directly, already covered once via axum's copy.
 run = "cargo test --test multi_source"
 dir = "implementations/rust/actix-web"
 

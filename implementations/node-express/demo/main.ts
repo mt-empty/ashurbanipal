@@ -17,11 +17,8 @@
 // implicit" principle, per PORTING.md's hardening checklist).
 //
 // CONFORMANCE_SECOND_SOURCE=1 (postgres backend only) registers a second
-// source for conformance/runner/two_source.rs: no second database, just
-// the same connection pinned to `other_schema` (already part of
-// conformance/seed/seed.sql) — zero new CI infrastructure. Every port's
-// own demo understands this env var the same way; see
-// implementations/rust/axum/examples/demo.rs's module doc.
+// source, pinned to `other_schema`, for conformance/runner/two_source.rs
+// — see that file's module doc.
 import express from "express";
 import { MySqlSource } from "../src/db/mysql.js";
 import { PostgresSource } from "../src/db/postgres.js";
@@ -114,11 +111,9 @@ async function main(): Promise<void> {
   const sources = [{ name: backend, source: dbSource }];
   if (process.env.CONFORMANCE_SECOND_SOURCE && backend === "postgres") {
     const { Pool } = await loadDriver("pg", () => import("pg"));
-    // onConnect is awaited by pg-pool before a new connection is handed
-    // out (unlike the 'connect' event, which fires fire-and-forget and
-    // could race a query against this SET on the same physical
-    // connection) — the same guarantee sqlx's after_connect gives the
-    // Rust ports.
+    // onConnect is awaited before a connection is handed out — unlike the
+    // 'connect' event (fire-and-forget), which could race a query against
+    // this SET on the same physical connection.
     const pinnedPool = new Pool({
       connectionString: requireEnv("DATABASE_URL"),
       max: 5,

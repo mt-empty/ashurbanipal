@@ -1,17 +1,14 @@
 # True two-source round-trip in CI conformance
 
 **Status:** resolved 2026-08-25. `conformance/runner/two_source.rs`
-covers the properties below across all five ports — Go, Node/Express,
-Flask, and Spring Boot each grew their own two-source demo mode alongside
-the already-landed Rust ones (axum + actix-web), and each port's own
-`<port>-conformance.yml` runs a second `two-source-conformance` job for
-it, alongside (not instead of) the existing single-source pass. It took
-the cheaper of the two mechanisms discussed below — schema-pinning within
-the existing database, not a real second one — see "Constraints / open
-questions" for why, and `conformance/runner/COVERAGE.md`'s Known gaps for
-what's still open (the mid-request drift property, left to each port's
-own unit/integration tests). The rest of this document is kept as-written
-for the design history/rationale.
+covers the properties below across all five ports, each with its own
+two-source demo mode and a second `two-source-conformance` CI job (see
+each `<port>-conformance.yml`), alongside the existing single-source
+pass. It took the cheaper of the two mechanisms discussed below —
+schema-pinning within the existing database, not a real second one — see
+"Constraints / open questions" for why. `conformance/runner/COVERAGE.md`'s
+Known gaps has what's still open. Rest of this document kept as-written
+for the design history.
 
 **Original status (2026-08-20):** discussed during the multi-source
 support rollout. Deliberately deferred, not designed — capturing the

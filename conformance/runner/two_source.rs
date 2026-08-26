@@ -1,33 +1,24 @@
-//! `spec/protocol.md` §1/§5.8 — the true two-source round-trip
-//! `sources.rs` can't reach with a single-source demo (see its own module
-//! doc and `COVERAGE.md`'s former Known gaps entry). Every test here
-//! self-skips (prints a message, returns) against a demo that only
-//! registers one source, so this file runs safely as part of the same
-//! unconditional suite `sources.rs` lives in — it only asserts anything
-//! when the target was actually started in two-source mode. Each port
-//! wires that up its own idiomatic way (Go/Node/Flask/Rust use a
-//! `CONFORMANCE_SECOND_SOURCE=1` env var; Spring activates a
-//! `conformance-second-source` profile instead) — this file never checks
-//! *how* the target got there, only that `api/sources` says >= 2.
+//! `spec/protocol.md` §1/§5.8 — the true two-source round-trip a
+//! single-source demo can't reach. Every test here self-skips against a
+//! target with only one registered source, so this file runs safely
+//! alongside `sources.rs` unconditionally; it never checks *how* a target
+//! got a second source (each port wires that its own way), only that
+//! `api/sources` says >= 2.
 //!
 //! The second source is deliberately *not* a second database: it's the
-//! same connection, pinned to `other_schema` — already part of
-//! `conformance/seed/seed.sql` (`other_schema.decoy_items`, one table),
-//! so this needs zero new CI infrastructure. That trades off proving
-//! genuinely separate storage for proving genuine per-request dispatch —
-//! see `docs/feature-backlog/19-two-source-conformance-round-trip.md`'s
-//! "Constraints / open questions" for why that tradeoff was chosen. A
-//! port is free to name its second source anything; this file discovers
+//! same connection, pinned to `other_schema` (already seeded with one
+//! table, `decoy_items`), trading genuinely separate storage for zero new
+//! CI infrastructure — see `docs/feature-backlog/19-two-source-conformance-round-trip.md`.
+//! A port is free to name its second source anything; this file discovers
 //! the name from `api/sources` rather than assuming one.
 
 use crate::assert::assert_exact;
 use crate::common::TestServer;
 
-/// `None` (with an explanatory message) when the target wasn't started
-/// with a second source — the signal every test below uses to skip
-/// itself rather than fail. Returns the whole parsed array (not just the
-/// second name) so a caller that also needs e.g. the first entry doesn't
-/// have to issue its own separate `GET /api/sources`.
+/// `None` when the target wasn't started with a second source — every
+/// test below uses this to skip itself rather than fail. Returns the
+/// whole array, not just the second name, so a caller needing the first
+/// entry too doesn't issue its own separate `GET /api/sources`.
 async fn sources_if_two_or_more(srv: &TestServer) -> Option<Vec<serde_json::Value>> {
     let body: serde_json::Value = srv
         .client()

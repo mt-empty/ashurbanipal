@@ -156,9 +156,9 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 
 | ID | Requirement | Test |
 |---|---|---|
-| `P5.8-LISTS-REGISTERED-SOURCES` | Lists every source §1's default-resolution case could resolve to; exactly one entry for a single-source deployment | `sources::lists_exactly_the_one_registered_source` (single-source case); `two_source::second_source_is_scoped_to_other_schema_and_differs_from_the_default` (>1-source case — self-skips unless the target was started in its own two-source demo mode, see that file's module doc) |
+| `P5.8-LISTS-REGISTERED-SOURCES` | Lists every source §1's default-resolution case could resolve to; exactly one entry for a single-source deployment | `sources::lists_exactly_the_one_registered_source` (single-source); `two_source::second_source_is_scoped_to_other_schema_and_differs_from_the_default` (>1-source, self-skips otherwise) |
 | `P5.8-NO-BACKEND-FIELD` | MUST NOT disclose which backend engine a source uses | `sources::lists_exactly_the_one_registered_source` |
-| `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER` | Stable order, same order the absent-`source` case resolves against | `two_source::api_sources_order_matches_default_resolution_order` (self-skips without a second source — same caveat as above) |
+| `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER` | Stable order, same order the absent-`source` case resolves against | `two_source::api_sources_order_matches_default_resolution_order` (self-skips without a second source) |
 | `P5.8-HEADER` | Carries the protocol version header | `sources::every_sources_response_carries_the_protocol_version_header` |
 
 ## §6 Server invariants
@@ -213,34 +213,24 @@ to trigger deterministically):
   implementations.
 - **§1 a source is resolved once per operation, never drifting mid-request
   across a multi-query response (`P1-SOURCE-RESOLVED-ONCE`).** `two_source.rs`
-  (see above) closed the rest of this entry — `P5.8-LISTS-REGISTERED-SOURCES`
-  beyond the single-entry case and `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER` are
-  both covered now, against every port's own two-source demo mode (each
-  port's own `<port>-conformance.yml` runs a second `two-source-conformance`
-  job for this — see `docs/feature-backlog/19-two-source-conformance-round-trip.md`,
-  now resolved). Each port's trigger is its own idiom, not a shared literal
-  value: `CONFORMANCE_SECOND_SOURCE=1` for Go/Node/Flask/Rust
-  (axum + actix-web), `SPRING_PROFILES_ACTIVE=conformance-second-source`
-  for Spring — `two_source.rs` discovers the second source's name from
-  `api/sources` itself, so it never needed to care which. What's still
-  open is the drift property itself — proving a single response never
-  mixes data from two sources under concurrent load, the way
-  `schema_isolation.rs` proves for `schema` at the Rust `DbSource` level.
-  That's an implementation-internal connection-pinning property, not
-  reliably provokable from outside over black-box HTTP across five
-  different languages' own pooling — left as a per-port unit/integration
-  test concern (Rust's own version: `implementations/rust/axum/tests/multi_source.rs`
-  and `implementations/rust/actix-web/tests/multi_source.rs`), not this
-  suite.
+  closed `P5.8-LISTS-REGISTERED-SOURCES` beyond the single-entry case and
+  `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER`, run against each port's own
+  two-source CI job (`docs/feature-backlog/19-two-source-conformance-round-trip.md`).
+  Still open: the drift property itself — a single response never mixing
+  data from two sources under concurrent load, the way `schema_isolation.rs`
+  proves for `schema`. That's an implementation-internal connection-pinning
+  property, not provokable over black-box HTTP — left to each port's own
+  unit/integration tests (Rust's: `tests/multi_source.rs`, axum and
+  actix-web).
 - **Exact source count/identity for a deliberately multi-source target is
   a per-port concern, not this runner's.** `sources.rs`'s single-entry
   check self-skips whenever `api/sources` reports more than one — over
   black-box HTTP, "2 sources by design" and "2 sources by bug" look
   identical, so that intent check is left to each port's own white-box
-  test, which builds the router itself and so already knows: Rust's
-  `tests/multi_source.rs` (axum and actix-web), Go's
-  `source_integration_test.go`, Node's `test/sources.test.ts`, Flask's
-  `tests/test_sources.py`, Spring's `MultiSourceTest.kt`.
+  test, which builds the router itself and so already knows (Rust's
+  `tests/multi_source.rs`, Go's `source_integration_test.go`, Node's
+  `test/sources.test.ts`, Flask's `tests/test_sources.py`, Spring's
+  `MultiSourceTest.kt`).
 - **§5.6 sibling health semantics beyond the empty-config case
   (`P5.6-2XX-ONLY`, `P5.6-PARALLEL-TIMEOUT-BOUND`).** `healthy` reflecting
   a real 2xx/non-2xx/timeout/unreachable outcome, and the parallel +

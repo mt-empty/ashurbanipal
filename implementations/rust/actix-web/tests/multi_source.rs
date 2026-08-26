@@ -1,16 +1,15 @@
 //! Router-level coverage for multi-source dispatch (spec/protocol.md §1,
 //! §5.8) — the Actix-web analog of `ashurbanipal-axum`'s own
-//! `tests/multi_source.rs`. `resolve_source` itself is unit-tested in
-//! `ashurbanipal-core`; this file is what actually drives two real sources
-//! through the live Actix `service()`, proving the wiring (not just the
-//! resolution logic) for this adapter specifically — `actix_web::test`'s
-//! in-process harness has no equivalent to axum's `tower::ServiceExt::oneshot`,
-//! so it can't be shared verbatim between the two adapters.
+//! `tests/multi_source.rs`; `resolve_source` itself is unit-tested in
+//! `ashurbanipal-core`. This drives two real sources through the live
+//! Actix `service()` to prove the wiring, not just the resolution logic —
+//! rewritten rather than shared, since `actix_web::test` has no equivalent
+//! to axum's `tower::ServiceExt::oneshot`.
 //!
 //! Each "source" is a distinct connection pool pinned (via `after_connect`)
-//! to its own schema, the same stand-in-for-a-second-database trick
-//! `schema_isolation.rs` (and axum's `multi_source.rs`) use — a real second
-//! Postgres instance isn't available in this environment (PORTING.md).
+//! to its own schema — the same stand-in-for-a-second-database trick
+//! `schema_isolation.rs` uses, since a real second Postgres instance isn't
+//! available here (PORTING.md).
 
 use actix_web::test::{call_service, init_service, read_body_json, TestRequest};
 use actix_web::App;

@@ -12,13 +12,9 @@
 //
 //	PORT=4001 SIBLING_PORT=4000 go run ./cmd/demo
 //
-// CONFORMANCE_SECOND_SOURCE=1 registers a second source for
-// conformance/runner/two_source.rs: no second database, just the same
-// DATABASE_URL pinned to the other_schema schema (already part of
-// conformance/seed/seed.sql) via an AfterConnect hook — zero new CI
-// infrastructure. Every port's own demo understands this env var the same
-// way; see implementations/go-nethttp/source_integration_test.go for the
-// mechanism this mirrors.
+// CONFORMANCE_SECOND_SOURCE=1 registers a second source, pinned to the
+// other_schema schema via an AfterConnect hook, for
+// conformance/runner/two_source.rs — see that file's module doc.
 package main
 
 import (

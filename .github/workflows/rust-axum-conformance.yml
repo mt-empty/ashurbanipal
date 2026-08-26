@@ -66,8 +66,7 @@ jobs:
 
   # Same suite, run again (not instead) against a demo started with a
   # second source registered — conformance/runner/two_source.rs is the
-  # only thing this proves beyond the job above; every other test
-  # self-skips identically either way (see sources.rs/two_source.rs).
+  # only thing this proves beyond the job above.
   two-source-conformance:
     name: Rust — conformance kit (two-source round-trip)
     needs: build-and-test

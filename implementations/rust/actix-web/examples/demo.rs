@@ -15,11 +15,9 @@
 //! PORT=4001 SIBLING_PORT=4000 cargo run --example demo
 //! ```
 //!
-//! `CONFORMANCE_SECOND_SOURCE=1` registers a second source for
-//! `conformance/runner/two_source.rs`: the same connection, pinned to
-//! `other_schema` (already part of `conformance/seed/seed.sql`) — no
-//! second database, zero new CI infrastructure. See that file's module
-//! doc; every port's own demo understands this env var the same way.
+//! `CONFORMANCE_SECOND_SOURCE=1` registers a second source, pinned to
+//! `other_schema`, for `conformance/runner/two_source.rs` — see that
+//! file's module doc.
 
 use actix_web::{web, App, HttpResponse, HttpServer};
 use ashurbanipal_actix_web::{app_state, service, Config, PgPoolSource};

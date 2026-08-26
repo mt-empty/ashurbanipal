@@ -25,12 +25,9 @@
 //! SECOND_SOURCE=1 cargo run -p ashurbanipal-axum --example demo
 //! ```
 //!
-//! `CONFORMANCE_SECOND_SOURCE=1` is the same idea in miniature, for
-//! `conformance/runner/two_source.rs`: no second database, just the same
-//! connection pinned to `other_schema` (already part of
-//! `conformance/seed/seed.sql`) — zero new CI infrastructure. Every port's
-//! own demo understands this env var the same way; see that file's module
-//! doc.
+//! `CONFORMANCE_SECOND_SOURCE=1` registers a second source, pinned to
+//! `other_schema`, for `conformance/runner/two_source.rs` — see that
+//! file's module doc.
 
 use ashurbanipal_axum::{Config, PgPoolSource};
 use axum::routing::get;

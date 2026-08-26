@@ -68,10 +68,8 @@ jobs:
 
   # Same suite, run again (not instead) against a demo started with a
   # second source registered — see rust-axum-conformance.yml's identical
-  # job for the rationale (conformance/runner/two_source.rs). Spring's own
-  # idiom for the trigger is a profile, not the CONFORMANCE_SECOND_SOURCE
-  # env var the other ports use — two_source.rs discovers the second
-  # source dynamically either way, so this doesn't need to match them.
+  # job for the rationale. Spring's own idiom for the trigger is a
+  # profile, not the CONFORMANCE_SECOND_SOURCE env var other ports use.
   two-source-conformance:
     name: Spring Boot — conformance kit (two-source round-trip)
     needs: build-and-test

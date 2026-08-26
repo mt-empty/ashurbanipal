@@ -103,9 +103,8 @@ jobs:
       report-name: go-nethttp-conformance-report
 
   # Same suite, run again (not instead) against a demo started with a
-  # second source registered — conformance/runner/two_source.rs is the
-  # only thing this proves beyond the job above; every other test
-  # self-skips identically either way (see sources.rs/two_source.rs).
+  # second source registered — see rust-axum-conformance.yml's identical
+  # job for the rationale.
   two-source-conformance:
     name: Go — conformance kit (two-source round-trip)
     needs: build-and-test
