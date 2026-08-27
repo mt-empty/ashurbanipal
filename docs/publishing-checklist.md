@@ -61,22 +61,20 @@ subdirectory-module path prefix — a short `go-v*` tag would never resolve for
 git tag implementations/go-nethttp/vX.Y.Z && git push --tags
 ```
 
-`proxy.golang.org` indexes on the first `go get`. Then replace the `@vX.Y.Z`
-placeholders in `implementations/go-nethttp/README.md` and `readme.md` with the
-real version.
+`proxy.golang.org` indexes on the first `go get`. Keep the `@vX.Y.Z` references
+in `implementations/go-nethttp/README.md` and `readme.md` in sync with the tag on
+each bump.
 
 ## Open items
 
-- **Frontend artifact — not released standalone.** `dbviewer.html` ships only
-  embedded in a port. Each port pins the canonical `frontend/dbviewer.html` at a
-  commit and re-hashes its vendored copy in its own CI (`PORTING.md` vendoring
-  section); there is no separate GitHub Release or `frontend-v*` tag.
-- **`readme.md` drift.** The Spring coordinate there reads `io.github.mtempty`
-  (missing hyphen — the published groupId is `io.github.mt-empty`) and shows an
-  `X.Y.Z` placeholder; update both to the real coordinate and version.
 - **Stale tag.** `rust-v0.1.0` predates the `rust-v*` → `axum-v*` rename; delete it.
 
 ## Conventions
+
+- **The frontend is not released standalone.** `dbviewer.html` ships only embedded
+  in a port. Each port pins the canonical `frontend/dbviewer.html` at a commit and
+  re-hashes its vendored copy in its own CI (`PORTING.md` vendoring section); there
+  is no separate GitHub Release or `frontend-v*` tag.
 
 - **Independent per-port (and per-Rust-crate) tags**, each scoped to its own
   directory — not a shared `v*`. The ports are hand-written implementations of one
