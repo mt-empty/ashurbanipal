@@ -244,8 +244,8 @@ demo-deps-stay-dev-dependencies, and the Rust comment-style rule.
   template, bundled with esbuild and inlined back into a single file —
   never hand-edited directly, and never split into separate `.css`/`.js`
   files in the *served* artifact. That single-file shape is load-bearing
-  for every port's vendoring/CSP story (`PORTING.md`) and the release
-  checksum pipeline; changing it is a `spec/protocol.md`-governance change,
+  for every port's vendoring/CSP story (`PORTING.md`) and each port's
+  vendoring checksum check; changing it is a `spec/protocol.md`-governance change,
   not a frontend refactor. `frontend/dbviewer.html` stays committed —
   CI (`frontend:build-check`) fails if it drifts from what `frontend/src/`
   currently builds.
