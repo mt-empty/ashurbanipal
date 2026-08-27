@@ -24,8 +24,8 @@ export interface NamedSource {
 }
 
 /**
- * Mounts the Ashurbanipal viewer's seven routes (the UI plus six API
- * routes) at cfg's base path into a plain express.Router — the host does
+ * Mounts the Ashurbanipal viewer's routes (the UI plus the API routes)
+ * at cfg's base path into a plain express.Router — the host does
  * `app.use(createRouter(config, sources))`, constructing whichever
  * `DbSource` implementation(s) (PostgresSource, SqliteSource, MySqlSource)
  * it wants itself; there is no driver auto-detection. `sources` MUST be

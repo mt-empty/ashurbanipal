@@ -29,7 +29,7 @@ type NamedSource struct {
 	Source DbSource
 }
 
-// Router mounts the Ashurbanipal viewer's seven routes (the UI plus six API
+// Router mounts the Ashurbanipal viewer's routes (the UI plus the API
 // routes) at cfg's base path into a plain http.Handler — no framework
 // choice baked in, so it mounts into any net/http-compatible mux (stdlib
 // ServeMux, Chi, or anything else).

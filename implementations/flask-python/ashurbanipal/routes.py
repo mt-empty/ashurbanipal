@@ -1,4 +1,4 @@
-"""The Flask `Blueprint` + the six API handlers + the HTML route
+"""The Flask `Blueprint` + the API handlers + the HTML route
 (`spec/protocol.md` §5). Mirrors `implementations/rust/src/routes.rs`.
 
 Kill switch: `router()` mirrors the Rust reference's `router()` — a

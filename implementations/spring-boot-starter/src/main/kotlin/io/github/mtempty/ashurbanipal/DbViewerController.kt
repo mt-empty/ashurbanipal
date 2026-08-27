@@ -43,7 +43,7 @@ data class SiblingsResponse(val siblings: List<SiblingStatus>)
 /**
  * `@RestController` on `${ashurbanipal.base-path:/__ashurbanipal}`: the HTML
  * route (classpath resource, `text/html`, no protocol header — spec/protocol.md
- * §5.1/§7 only require the header on the five API routes) plus the five API
+ * §5.1/§7 only require the header on the API routes) plus the API
  * routes, response shapes from `spec/openapi.yaml`. The
  * `":/__ashurbanipal"` default here intentionally duplicates
  * [AshurbanipalProperties]'s own default of the same value — a `@Bean`-built

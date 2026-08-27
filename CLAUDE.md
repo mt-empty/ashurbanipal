@@ -18,8 +18,8 @@ native `<datalist>`."
 Ashurbanipal is a read-only web UI for browsing a host service's own
 database tables (Postgres, SQLite, or MySQL) — no separate DB client, no
 extra credentials, no build step. A host embeds it by mounting a router
-under a fixed `/__ashurbanipal` prefix and gets seven routes — six API
-routes plus the UI itself. `spec/protocol.md` + `spec/openapi.yaml` are
+under a fixed `/__ashurbanipal` prefix and gets every route under that
+prefix — the API routes plus the UI itself. `spec/protocol.md` + `spec/openapi.yaml` are
 the normative contract. The Rust crate at `implementations/rust/` is one
 of **five peer language implementations**, all passing their own
 conformance CI (table in `readme.md`): the others are Kotlin/Spring Boot
@@ -195,7 +195,7 @@ demo-deps-stay-dev-dependencies, and the Rust comment-style rule.
   differences belong in `docs/adapter-decisions.md`, not in a
   `dyn`/`async_trait` escape hatch.
 - **Kill switch is fail-closed and checked once, at router construction.**
-  `Config::is_enabled()` gates all seven routes identically — if disabled,
+  `Config::is_enabled()` gates every route identically — if disabled,
   `router()` returns an empty `Router::new()`, so the mounted app 404s
   exactly as if the crate weren't merged in at all. Never add a route that
   bypasses this, and never move the enabled-check to per-request.

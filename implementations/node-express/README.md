@@ -60,8 +60,8 @@ const viewer = createRouter(
 
 Express's `app.get()` alone leaves every other HTTP verb on a registered
 path unmatched (a generic 404, indistinguishable from a nonexistent
-path), so `createRouter` registers each of the seven routes with an
-explicit method check instead, returning 405 + `Allow: GET, HEAD` for any
+path), so `createRouter` registers each route with an explicit method
+check instead, returning 405 + `Allow: GET, HEAD` for any
 other verb — same behavior the other ports' underlying routers give for
 free by matching path before method.
 

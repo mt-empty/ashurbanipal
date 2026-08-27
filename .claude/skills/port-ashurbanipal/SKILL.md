@@ -59,7 +59,7 @@ Mirror the shape of the existing ports, not their exact file names:
 - The `DbSource`-equivalent seam: one interface/trait/behaviour, one
   Postgres implementation. Route handlers never touch the DB driver
   directly.
-- Route handlers for all 6 routes (§5.1–§5.6 of protocol.md).
+- Route handlers for every route in `spec/protocol.md` §5.
 - Vendored `frontend/dbviewer.html` (see step 4).
 - Conformance CI workflow copied from `go-conformance.yml` or
   `spring-boot-conformance.yml`, adapted to your toolchain/start-command.
@@ -82,7 +82,7 @@ Mirror the shape of the existing ports, not their exact file names:
 ## 4. What you implement — keyed to protocol.md §5
 
 1. Config + fail-closed kill switch (§4).
-2. HTML route (§5.1, vendored frontend) + five API routes (§5.2–§5.6),
+2. HTML route (§5.1, vendored frontend) + the API routes (§5.2 onward),
    response shapes exactly per `spec/openapi.yaml`.
 3. Catalog queries — table/column introspection, PK/FK metadata
    (composite FKs omitted, §5.4.1), schema scoping throughout (§1),

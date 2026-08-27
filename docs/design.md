@@ -77,7 +77,7 @@ Two components, same as the original concept:
   crate ships as one artifact — no separate static file to build, deploy, or
   whitelist per environment.
 - Served by the backend as its own route, gated by the same kill switch as
-    the six API routes.
+    the API routes.
 - Talks to the backend exclusively through the REST endpoints in §4.
 - **Inspection affordances** (native elements, no library):
   - *Raw payload viewer* — a "payload" button opens a native `<dialog>`

@@ -189,7 +189,7 @@ tests (`cargo test` in the main crate, not this suite):
 
 - **§4 Kill switch: absent/malformed config means disabled.**
   `config::tests::disabled_when_config_absent`.
-- **§4 Kill switch: disabled → all seven routes 404.** No dedicated unit
+- **§4 Kill switch: disabled → every route 404s.** No dedicated unit
   test name (the property falls out of `router()` returning
   `Router::new()` when `Config::is_enabled()` is false — see
   `src/routes.rs`'s `router()` doc comment); nothing to observe from

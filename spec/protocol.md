@@ -97,7 +97,7 @@ interpreted as described in RFC 2119.
 - An implementation MUST NOT infer or police which environment the host
   process is running in (by name, hostname, or any other signal). Where
   and whether to enable the viewer is entirely the host's decision.
-- When disabled, all eight routes MUST behave exactly as if the viewer
+- When disabled, every route MUST behave exactly as if the viewer
   were never mounted: 404, indistinguishable from an absent
   implementation.
   The enabled check is a startup-time decision, not per-request.
