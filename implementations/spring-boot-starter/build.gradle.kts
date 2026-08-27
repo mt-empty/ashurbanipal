@@ -171,7 +171,7 @@ publishing {
             // verification + signing setup (docs/publishing-checklist.md).
             pom {
                 name.set("Ashurbanipal Spring Boot Starter")
-                description.set("Kotlin/Spring Boot autoconfiguration starter implementing spec/protocol.md — embeddable, read-only database browser for lower environments.")
+                description.set("Kotlin/Spring Boot autoconfiguration starter implementing spec/protocol.md — an embeddable, read-only web UI for browsing a service's own database tables.")
                 url.set("https://github.com/mt-empty/ashurbanipal/tree/main/implementations/spring-boot-starter")
                 licenses {
                     license {

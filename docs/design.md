@@ -1,7 +1,10 @@
 # Ashurbanipal — Design Doc
 
-Status: draft
-Scope: v1 (Rust / Axum / Postgres)
+Status: living
+Scope: the Rust/Axum reference implementation. `spec/protocol.md` +
+`spec/openapi.yaml` are the cross-port contract; `PORTING.md` covers the
+four other language ports. Postgres by default; opt-in SQLite and MySQL
+backends (`docs/adapter-decisions.md`).
 
 ## 1. Summary
 
@@ -10,8 +13,10 @@ development, integration, and staging environments. A service embeds the
 Ashurbanipal crate, mounts its routes, and gets a web UI for browsing its own
 database tables — no separate DB client, no extra credentials, no build step.
 
-v1 targets Rust services built on Axum, backed by Postgres. A second
-framework adapter, `ashurbanipal-actix-web` (`implementations/rust/actix-web/`),
+This document is written against the Rust reference — Axum, and Postgres
+by default (SQLite and MySQL are opt-in backends, see
+`docs/adapter-decisions.md`). A second framework adapter,
+`ashurbanipal-actix-web` (`implementations/rust/actix-web/`),
 exists alongside the Axum one — everywhere this document describes
 framework-coupled behavior (the router/handler layer), it's describing
 Axum specifically; config, `DbSource`, the filter DSL, and the kill
@@ -507,15 +512,14 @@ pub trait DbSource: Send + Sync + 'static {
 ```
 
 Native async-fn-in-trait — no `async_trait` macro. The router is generic
-over `S: DbSource` (no `dyn`), which is all v1 needs with a single
-implementation.
+over `S: DbSource` (no `dyn`), one concrete `DbSource` per `router()` call.
 
-- v1 ships exactly one implementation: `PgPoolSource(sqlx::PgPool)`.
-- The trait boundary exists so a `deadpool-postgres` or `tokio-postgres`
-  adapter can be added later without touching route handlers — this is
-  intentionally the only piece of the crate designed for a hypothetical
-  future backend; everything else stays concrete to v1's scope.
-- `schema: None` resolves to `current_schema()`; an explicit value is
+- Three implementations ship: `PgPoolSource(sqlx::PgPool)` (default),
+  `SqliteSource` (`sqlite` feature), and `MySqlSource` (`mysql` feature);
+  `docs/adapter-decisions.md` records where each diverges from Postgres. A
+  `deadpool-postgres`/`tokio-postgres` adapter could be added the same way
+  without touching route handlers.
+- On Postgres, `schema: None` resolves to `current_schema()`; an explicit value is
   checked against the same live `pg_namespace` allow-list (excluding
   catalog/toast/temp schemas and anything the connected role lacks `USAGE`
   on) that the implicit path is also checked against, so neither path can

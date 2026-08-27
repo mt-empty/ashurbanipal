@@ -2,7 +2,8 @@
 
 A `net/http`-native Go port of [Ashurbanipal](../../readme.md) — implements
 the same `spec/protocol.md` + `spec/openapi.yaml` contract as the Rust
-reference and the Kotlin/Spring Boot starter, targeting the standard
+reference and the Kotlin/Spring Boot, Node/Express, and Flask ports,
+targeting the standard
 library's `http.Handler` directly rather than any specific router, so it
 mounts into a plain `net/http.ServeMux`, Chi, or anything else that speaks
 `http.Handler`.

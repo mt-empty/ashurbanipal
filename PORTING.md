@@ -2,8 +2,8 @@
 
 Status: the full checklist — what a port is, what it reuses, what it
 implements, what it must not do, how to run conformance, the listing bar,
-and governance — is written below, informed by two actual ports (Spring
-Boot, Go). Sidecar guidance (a non-port alternative for unsupported
+and governance — is written below, informed by four actual ports (Spring
+Boot, Go, Node/Express, Flask). Sidecar guidance (a non-port alternative for unsupported
 stacks, e.g. pgweb) is deliberately out of scope for this document —
 see `readme.md`'s sidecar section instead.
 
@@ -164,7 +164,7 @@ too, not just ports:
    response matches `spec/openapi.yaml`'s declared types, nullability,
    and status codes. This is language-agnostic on the target side —
    schemathesis only speaks HTTP — so every current implementation
-   (Rust, Spring Boot, Go) reuses the same script rather than each
+   reuses the same script rather than each
    wiring its own OpenAPI-validation tool; a port in an environment where
    installing Python/schemathesis is genuinely impractical may substitute
    an equivalent tool, but reusing `schema-check.sh` as-is is the default,

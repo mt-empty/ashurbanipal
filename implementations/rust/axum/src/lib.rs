@@ -1,8 +1,7 @@
-//! Ashurbanipal — a self-contained, embeddable, read-only database browser
-//! for development, integration, and staging environments.
+//! Ashurbanipal — a self-contained, embeddable, read-only database browser.
 //!
 //! A host service embeds this crate, merges its [`router`] into its own Axum
-//! app, and gets a web UI for browsing its own Postgres tables:
+//! app, and gets a web UI for browsing its own database tables:
 //!
 //! ```no_run
 //! # async fn example(pool: sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
