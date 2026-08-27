@@ -55,7 +55,7 @@ private class AlternatingSchemaDataSource(
  * Regression test for the "connection pool sessions with different
  * search_path settings must not let a request's schema resolution drift
  * mid-flight" guarantee — Kotlin equivalent of
- * `implementations/rust/tests/schema_isolation.rs`'s
+ * `implementations/rust/axum/tests/schema_isolation.rs`'s
  * `query_table_never_mixes_schemas_across_pooled_connections`.
  *
  * Runs directly against [PostgresSource] (not the full Spring app

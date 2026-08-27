@@ -1,4 +1,4 @@
-"""SQLite `DbSource`. Ported against `implementations/rust/src/db/sqlite.rs`
+"""SQLite `DbSource`. Ported against `implementations/rust/core/src/db/sqlite.rs`
 — see `docs/adapter-decisions.md` for the per-clause relaxations this makes
 (always-`-1` row counts, always-empty common-values, no comments, `ILIKE`
 folded to plain `LIKE`).

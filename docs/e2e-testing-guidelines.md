@@ -44,12 +44,13 @@ outlives that specific bug: any page with its own async bootstrapping
 needs a helper that waits for it, not an assumption that `goto()` was
 enough.
 
-## 4. A visual-regression baseline must be visually verified once, by a human, before it's trusted
+## 4. (Historical) Screenshot baselines were dropped for flakiness
 
-A screenshot baseline was captured mid-race (before the loadData staleness
-guard existed) and never actually looked at after generating it — so it
-silently baked in a broken render. `--update-snapshots` produces a file
-that *matches itself* by construction; it says nothing about whether what
-it captured was correct. Look at a new or regenerated baseline before
-committing it, don't just trust that the diff tool will catch it on some
-later run.
+The suite has no visual-regression assertions — they were removed
+project-wide (commit `157fc12`; see `CLAUDE.md`). Kept here as the reason
+why: a baseline was once captured mid-race (before the `loadData`
+staleness guard existed) and never actually looked at after generating
+it, so it silently baked in a broken render. `--update-snapshots`
+produces a file that *matches itself* by construction; it says nothing
+about whether what it captured was correct. If screenshot tests are ever
+reintroduced, a human must eyeball each new baseline before it lands.

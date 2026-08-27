@@ -1,7 +1,7 @@
 """Fixture-driven filter tests against `spec/fixtures/filter-builder-tests.json`
 — the same file every port's runner consumes (`spec/fixtures/README.md`).
 Exercises `filter.parse` + `db.postgres._build_where_clause` together,
-mirroring `implementations/rust/src/db/postgres.rs`'s `filter_builder_fixtures`
+mirroring `implementations/rust/core/src/db/postgres.rs`'s `filter_builder_fixtures`
 test (the one backend the Rust reference runs the shared fixture file
 against directly; `sqlite.rs`/`mysql.rs` get their own hand-written tests
 instead, and this port follows the same split — see

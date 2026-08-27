@@ -1,5 +1,5 @@
 """Postgres `DbSource`, the reference/default backend. Ported line-for-line
-against `implementations/rust/src/db/postgres.rs`'s catalog SQL — see that
+against `implementations/rust/core/src/db/postgres.rs`'s catalog SQL — see that
 file and `docs/adapter-decisions.md` for the mechanism notes (`reltuples`
 row counts, `pg_stats` common values, `col_description`/`obj_description`
 comments, `::text` cast).

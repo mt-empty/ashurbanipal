@@ -127,7 +127,7 @@ impl PgPoolSource {
     /// statement in `tx`, and every later query in the same transaction
     /// reuses this value — since a `Transaction` stays pinned to one
     /// physical connection for its whole lifetime, this is immune to the
-    /// pool session drift `tests/schema_isolation.rs` guards against. An
+    /// pool session drift `axum/tests/schema_isolation.rs` guards against. An
     /// explicit request and an absent one (resolved via `current_schema()`)
     /// both go through the same `list_schemas_in_tx` allow-list, so neither
     /// path can reach a schema the other would reject.

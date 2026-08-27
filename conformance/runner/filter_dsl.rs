@@ -11,8 +11,9 @@
 //! `spec/fixtures/README.md`) is JSON-encoded into a real `filter` param
 //! exactly as the frontend would send it, and asserted 200 (valid AST) or
 //! 400 (structural violation / allow-list rejection). The same file drives
-//! `src/db.rs`'s unit runner, which additionally pins the exact WHERE
-//! fragment + bind values — over HTTP only acceptance is observable, so
+//! `core/src/db/postgres.rs`'s `filter_builder_fixtures` unit runner, which
+//! additionally pins the exact WHERE fragment + bind values — over HTTP
+//! only acceptance is observable, so
 //! the named tests below add row-content assertions (against the
 //! deterministic seed — `tools/seed-gen`, fixed RNG) for the semantics
 //! that matter: equality narrowing, AND-tighter-than-OR precedence, NOT

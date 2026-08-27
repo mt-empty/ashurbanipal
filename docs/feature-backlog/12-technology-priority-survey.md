@@ -1,9 +1,14 @@
 # Prioritize new ports/backends by 2025 Stack Overflow survey usage
 
+**Status:** 2026-08 snapshot. Since written, the Flask port and a
+MySQL/MariaDB backend (all ports) have shipped; the rankings below are
+kept as the dated survey data they are.
+
 **Ask:** rank candidate new language ports and DB backends by actual
 developer usage share (not guesswork) against what this project already
-ships (Rust/Axum, Kotlin/Spring Boot, Go/net-http, Node/Express; Postgres
-default + Rust-only opt-in SQLite), so backlog effort goes where it
+ships (Rust/Axum + Actix-web, Kotlin/Spring Boot, Go/net-http,
+Node/Express, Flask; Postgres default, with opt-in SQLite and
+MySQL/MariaDB across all ports), so backlog effort goes where it
 reaches the most real users for the least speculative work. Source: 2025
 Stack Overflow Developer Survey,
 [survey.stackoverflow.co/2025/technology](https://survey.stackoverflow.co/2025/technology/)
@@ -22,12 +27,11 @@ Stack Overflow Developer Survey,
   (have, opt-in), SQL Server 30.1%, Redis 28%, MongoDB 24%, MariaDB
   22.5%, Oracle 10.6%, DuckDB 3.3%.
 
-**In-flight, not a gap:** a MySQL `DbSource` backend already exists,
-uncommitted (`implementations/rust/src/db/mysql.rs`,
-`implementations/rust/tests/schema_isolation_mysql.rs`, the `mysql`
-Cargo feature, new rows in `docs/adapter-decisions.md`). At 40.5% it
-would otherwise top the backend ranking below — omitted because the work
-is already done, not overlooked. MariaDB (22.5%) rides the same
+**Shipped, not a gap:** a MySQL/MariaDB `DbSource` backend is merged
+(`implementations/rust/core/src/db/mysql.rs`, the `mysql` Cargo feature,
+rows in `docs/adapter-decisions.md`), and every other port has one too.
+At 40.5% it would otherwise top the backend ranking below — omitted
+because the work is done, not overlooked. MariaDB (22.5%) rides the same
 `sqlx/mysql` driver, so it isn't a separate line item either.
 
 **Recommendation — language/framework ports, ranked:**

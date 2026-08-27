@@ -13,8 +13,8 @@ diff on the pretty-printed value, not structural JSON diff.
 ## Candidates evaluated
 
 Constraint for all three: framework-agnostic, loadable via a
-`<script>`/ESM CDN tag, no build step — per the single-file frontend
-property in `design.md`.
+`<script>`/ESM CDN tag, no bundler added to the shipped `dbviewer.html` —
+per the single-file frontend property in `design.md`.
 
 **Monaco diff editor (default plan).** Framework-agnostic (AMD-loaded via
 `loader.js` from CDN), mature, MIT-licensed, actively maintained by

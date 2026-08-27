@@ -173,11 +173,10 @@ detects which one it's talking to at runtime rather than requiring the
 host to declare it. Neither adapter is run through `conformance/runner`
 (that suite targets Postgres); each has its own unit test suite instead —
 SQLite's needs no external infrastructure (`sqlite::memory:`), while
-MySQL/MariaDB's needs a live instance reachable via `MYSQL_TEST_URL` (the
-devcontainer's `mysql` service, or any MariaDB instance pointed at by the
-same variable when verifying that path — there is no separate MariaDB
-devcontainer service or CI job; this mirrors the same "no CI coverage"
-gap already accepted for `mysql`/`sqlite` generally). The rows above
+MySQL/MariaDB's needs a live instance reachable via `MYSQL_TEST_URL` or
+`MARIADB_TEST_URL` (the devcontainer runs permanent `mysql` and `mariadb`
+services for exactly this — but neither has a dedicated CI job, the same
+"no CI coverage" gap already accepted for `mysql`/`sqlite` generally). The rows above
 describe the per-clause decisions each makes to satisfy
 `spec/protocol.md`'s properties without Postgres's catalog/stats
 mechanisms — most notably SQLite's exact-`COUNT(*)`-turned-`-1` and live-

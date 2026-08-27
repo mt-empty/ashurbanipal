@@ -7,8 +7,8 @@ satisfy when converting the `#filter` box's text into the JSON filter AST
 reference or port — parses DSL text; the backend contract is the AST, and
 everything a server must do with it (column allow-listing, operator
 mapping, value binding, limits) lives in `spec/protocol.md`.
-History: the grammar was originally implemented server-side
-(`src/filter.rs`) against this same document and its test table; the
+History: the grammar was originally implemented server-side (in the Rust
+crate's `filter.rs`) against this same document and its test table; the
 parsing obligation moved to the frontend when the wire format became the
 AST.
 
@@ -217,11 +217,10 @@ parser can neither perform nor bypass.
 
 ## 6. Frontend consumers (composition, not parsing)
 
-Three `dbviewer.html` features already generate clauses against this exact
-grammar, ahead of the client-side parser that will read them:
-click-to-filter (a
-per-cell button), FK cell navigation, and the common-values header dropdown
-(all in `docs/client-enhancements.md`). All three funnel through one
+Three `dbviewer.html` features generate clauses against this exact
+grammar that the client-side parser then reads back: click-to-filter (a
+per-cell button), FK cell navigation, and the common-values header
+dropdown. All three funnel through one
 function, `quoteFilterValue()`/`applyFilterClause()`, which implements §2's
 quoting notes — bare when safe, single-quoted with `''`-escaping otherwise,
 exact-match `AND`/`OR`/`NOT` forced to quote. All three only ever compose
@@ -235,9 +234,9 @@ This is clause *composition*, not the parser `frontend-style-guide.md` §7
 keeps client-side: it never parses or judges arbitrary user-typed text, only
 formats a known column/value pair it already has from the server. So it's
 not the thing that rule warns against — but its quoting output still has to
-agree with this document, and nothing currently checks that automatically.
-When the parser lands, verify `quoteFilterValue()`'s output round-trips
-correctly, in particular the shapes behind V9 (`''`-doubling), V12 (exact
-`AND`/`OR` as a value), V15 (empty string), and V21 (exact `NOT` as a value)
-— those are the cases most likely to silently diverge if the two are ever
-edited independently.
+agree with this document. `tools/e2e-tests/tests/filter-parser.spec.ts`
+checks that `quoteFilterValue()`'s output round-trips through the parser
+unchanged, covering in particular the shapes behind V9 (`''`-doubling),
+V12 (exact `AND`/`OR` as a value), V15 (empty string), and V21 (exact
+`NOT` as a value) — the cases most likely to silently diverge if the two
+are ever edited independently.

@@ -16,7 +16,7 @@ const PORTS = { chromium: 4310, firefox: 4311, webkit: 4312 };
 const SHOWCASE_IGNORE = /showcase\.spec\.ts/;
 const CHROMIUM_ONLY_IGNORE = [SHOWCASE_IGNORE, /inspection-affordances\.spec\.ts/];
 
-// This suite is a frontend UI-regression suite (implementation.md §2.3), not
+// This suite is a frontend UI-regression suite, not
 // part of the protocol conformance kit (conformance/runner) — but it's
 // useful for a port to run the same shared-frontend smoke against its own
 // instance, so PLAYWRIGHT_BASE_URL lets it skip spawning `examples/demo`

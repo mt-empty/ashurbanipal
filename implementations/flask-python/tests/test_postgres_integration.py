@@ -1,6 +1,6 @@
 """PgSource integration tests against the devcontainer's seeded Postgres
 (`DATABASE_URL`, `conformance/seed/seed.sql`). Skips cleanly if unset —
-mirrors `implementations/rust/tests/schema_isolation.rs`'s DATABASE_URL
+mirrors `implementations/rust/axum/tests/schema_isolation.rs`'s DATABASE_URL
 gating.
 """
 

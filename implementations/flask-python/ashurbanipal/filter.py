@@ -3,7 +3,7 @@
 frontend-only (`spec/filter-dsl.md`); this module never sees DSL text,
 never produces SQL, and never validates a column against the schema —
 that's each `db/*.py` module's job. Mirrors
-`implementations/rust/src/filter.rs`.
+`implementations/rust/core/src/filter.rs`.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-# Derived by measurement (implementations/rust/src/filter.rs), not picked
+# Derived by measurement (implementations/rust/core/src/filter.rs), not picked
 # fresh here: over the valid cases in spec/fixtures/parser-tests.json the
 # worst JSON-over-DSL inflation is 5.67x, so the DSL era's 1024 bytes needs
 # ~5803 JSON bytes; 8192 is the nearest clean power of two above.

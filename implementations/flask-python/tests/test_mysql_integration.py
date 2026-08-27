@@ -1,5 +1,5 @@
 """MySqlSource integration tests, mirroring
-`implementations/rust/src/db/mysql.rs`'s `#[cfg(test)] mod tests`. Runs
+`implementations/rust/core/src/db/mysql.rs`'s `#[cfg(test)] mod tests`. Runs
 against both `MYSQL_TEST_URL` and `MARIADB_TEST_URL` when set (the
 devcontainer's `mysql`/`mariadb` services) — each test gets its own
 throwaway, nanosecond-suffixed database (mirroring `seeded_db()` in

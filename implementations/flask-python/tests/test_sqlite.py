@@ -1,5 +1,5 @@
 """SqliteSource tests, mirroring
-`implementations/rust/src/db/sqlite.rs`'s `#[cfg(test)] mod tests`. No
+`implementations/rust/core/src/db/sqlite.rs`'s `#[cfg(test)] mod tests`. No
 external service needed — every test uses a temp file (not `:memory:`:
 `SqliteSource` opens a fresh connection per operation, and SQLite's
 `:memory:` database is private per-connection unless using a shared-cache

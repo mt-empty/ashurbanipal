@@ -20,7 +20,7 @@ output exactly.
 | `P1-SOURCE-VALIDATED` | Present `source` MUST match a live §5.8 entry exactly; else 400 | `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |
 | `P1-SCHEMA-DEFAULT` | Absent `schema` resolves to the connection's own default | `schemas::explicit_schema_public_matches_the_implicit_default` |
 | `P1-SCHEMA-VALIDATED` | Present `schema` MUST match a live §5.7 entry exactly; else 400 | `schemas::unrecognized_schema_values_are_rejected_cleanly_on_every_route` |
-| `P1-SCHEMA-RESOLVED-ONCE` | One operation resolves the schema once, reuses it for every query in that operation | not independently observable over black-box HTTP beyond internal consistency of one response's shape — covered at the implementation level by `implementations/rust/tests/schema_isolation.rs` (Postgres-specific: pool sessions with divergent `search_path`) |
+| `P1-SCHEMA-RESOLVED-ONCE` | One operation resolves the schema once, reuses it for every query in that operation | not independently observable over black-box HTTP beyond internal consistency of one response's shape — covered at the implementation level by `implementations/rust/axum/tests/schema_isolation.rs` (Postgres-specific: pool sessions with divergent `search_path`) |
 
 ## §2 Transport
 
@@ -139,7 +139,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | ID | Requirement | Test |
 |---|---|---|
 | `P5.6-EMPTY-CONFIG` | Empty config → `{"siblings": []}` | `html_and_siblings::siblings_endpoint_returns_empty_list_by_default` |
-| `P5.6-ORIGIN-RESOLUTION` | Health resolved against origin, not `dbviewer_url` path | covered at the unit level only, not by this HTTP suite — `src/routes.rs`'s `health_url_resolves_against_origin` (pure function, no live sibling needed) |
+| `P5.6-ORIGIN-RESOLUTION` | Health resolved against origin, not `dbviewer_url` path | covered at the unit level only, not by this HTTP suite — `implementations/rust/axum/src/routes.rs`'s `health_url_resolves_against_origin` (pure function, no live sibling needed) |
 | `P5.6-2XX-ONLY` | `healthy` true iff 2xx; any failure → false, never an error response | **gap** — see [Known gaps](#known-gaps) |
 | `P5.6-PARALLEL-TIMEOUT-BOUND` | Checks SHOULD run in parallel, MUST be individually timeout-bounded | **gap** — see [Known gaps](#known-gaps) |
 
@@ -182,21 +182,21 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 
 ## Explicitly out of scope for this runner
 
-Per `implementation.md` §2.2: these are process-startup behaviors, not
-observable over HTTP from outside a running, enabled instance. They stay
-implementation-level tests, already covered by `src/config.rs`'s own unit
-tests (`cargo test` in the main crate, not this suite):
+These are process-startup behaviors, not observable over HTTP from
+outside a running, enabled instance. They stay implementation-level
+tests, already covered by `implementations/rust/core/src/config.rs`'s own
+unit tests (`cargo test` in that crate, not this suite):
 
 - **§4 Kill switch: absent/malformed config means disabled.**
   `config::tests::disabled_when_config_absent`.
 - **§4 Kill switch: disabled → every route 404s.** No dedicated unit
   test name (the property falls out of `router()` returning
   `Router::new()` when `Config::is_enabled()` is false — see
-  `src/routes.rs`'s `router()` doc comment); nothing to observe from
+  `implementations/rust/axum/src/routes.rs`'s `router()` doc comment); nothing to observe from
   outside a process that made the opposite choice.
 
 A port's own test suite is expected to carry an equivalent — see
-`PORTING.md` (Phase 6.1, not built in this task).
+`PORTING.md`'s Listing bar, item 3.
 
 ## Known gaps
 
@@ -252,6 +252,6 @@ to trigger deterministically):
   this class of property as outside all three automatable layers).
 
 None of these gate a "conformant" listing on their own (per
-`docs/design.md` §4.2, that requires all three layers plus the
-Phase 5.5 manual checklist) — they're recorded here so the checklist
+`docs/design.md` §4.2, that requires all three layers plus `PORTING.md`'s
+cross-port hardening checklist) — they're recorded here so the checklist
 doesn't silently assume HTTP conformance covers them.

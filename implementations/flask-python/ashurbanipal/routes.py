@@ -1,5 +1,5 @@
 """The Flask `Blueprint` + the API handlers + the HTML route
-(`spec/protocol.md` §5). Mirrors `implementations/rust/src/routes.rs`.
+(`spec/protocol.md` §5). Mirrors `implementations/rust/axum/src/routes.rs`.
 
 Kill switch: `router()` mirrors the Rust reference's `router()` — a
 disabled `Config` yields a `Blueprint` with zero routes registered on it,

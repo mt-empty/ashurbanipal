@@ -2,9 +2,11 @@
 
 **Status:** discussed 2026-08-10, alongside the Rust crate rename
 `ashurbanipal` → `ashurbanipal-axum` (`docs/publishing-checklist.md`'s
-"Decided: no bare `ashurbanipal` package name" section). Not designed,
-not scheduled — capturing the shape of the idea and the per-language
-feasibility check before it's picked up.
+"Decided: no bare `ashurbanipal` package name" section). The Rust split
+has since shipped — a framework-agnostic `ashurbanipal` core crate plus
+`ashurbanipal-axum` and `ashurbanipal-actix-web` adapters
+(`implementations/rust/`). The other ports remain single-framework; the
+per-language feasibility notes below are unchanged.
 
 **Ask:** if a port ever needs to support a second web framework in the
 same language (Actix alongside Axum, FastAPI alongside Flask, Fastify

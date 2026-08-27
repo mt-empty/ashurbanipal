@@ -31,8 +31,9 @@ Exactly one of `expect`/`expect_error` is present.
 
 ## `filter-builder-tests.json` — backend AST validation + WHERE building
 
-Consumed by every backend's fixture runner (reference: `src/db.rs` tests)
-and, over HTTP, by the black-box suite (`tests/black_box/filter_dsl.rs`),
+Consumed by every backend's fixture runner (reference:
+`implementations/rust/core/src/db/postgres.rs`'s `filter_builder_fixtures`)
+and, over HTTP, by the black-box suite (`conformance/runner/filter_dsl.rs`),
 which JSON-encodes each case into a real `filter` query param.
 
 Each entry in `cases`:

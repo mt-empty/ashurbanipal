@@ -1,5 +1,5 @@
 """MySQL/MariaDB `DbSource`. Ported against
-`implementations/rust/src/db/mysql.rs` — see `docs/adapter-decisions.md`
+`implementations/rust/core/src/db/mysql.rs` — see `docs/adapter-decisions.md`
 for the per-clause mechanism notes this shares with the Rust reference
 (`table_rows` row counts, always-empty common-values, `LOWER(...) LIKE
 LOWER(...)` for `ILIKE`, per-fork timeout mechanism).

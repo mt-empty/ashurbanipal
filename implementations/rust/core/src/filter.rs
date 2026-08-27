@@ -2,7 +2,7 @@
 //! (`spec/protocol.md` §5.4.2). Grammar parsing (DSL text → AST) is a
 //! frontend-only concern (`spec/filter-dsl.md`); this module never sees DSL
 //! text, never produces SQL, and never validates a column against the
-//! schema — that's `db.rs`'s job.
+//! schema — each backend's query builder in `db/` does that.
 
 /// Derived by measurement, not the DSL-era 1024 carried forward: over the
 /// valid cases in `spec/fixtures/parser-tests.json` the worst JSON-over-DSL

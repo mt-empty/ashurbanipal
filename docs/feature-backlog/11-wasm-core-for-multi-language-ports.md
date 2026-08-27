@@ -1,16 +1,17 @@
 # Shared WASM core for the filter/response logic across language ports
 
 **Ask:** instead of every `implementations/*` port hand-reimplementing the
-filter-DSL compiler and response/metadata shaping, compile that logic once
+filter AST validation + operator→SQL mapping and response/metadata shaping, compile that logic once
 and embed it via a WASM runtime (e.g. wasmtime/wasmer bindings) in each host
 language, so a bug fix or new operator lands everywhere on one version bump
 instead of N synced PRs.
 
 **Impact / constraints:**
 - Scope would be narrow, not a rewrite of `DbSource`: only the pure,
-  I/O-free logic is a good WASM candidate — the filter AST
-  validation/operator-to-SQL-fragment compiler (`implementations/rust/core/src/filter.rs`,
-  tested against `spec/filter-dsl.md`'s table) and the
+  I/O-free logic is a good WASM candidate — the filter AST structural
+  validator (`implementations/rust/core/src/filter.rs`) plus each
+  backend's operator→SQL-fragment mapping (`db/*.rs`, verified against
+  `spec/fixtures/filter-builder-tests.json`), and the
   `spec/protocol.md`-shaped response/metadata JSON envelope. Everything
   else stays native per port: DB connection/pool/query execution, HTTP
   routing into the host framework, and config/kill-switch loading all

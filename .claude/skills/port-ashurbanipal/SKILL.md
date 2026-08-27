@@ -24,7 +24,8 @@ replacement.
   common-values, text casting, ILIKE mapping, schema scoping).
 - Skim (don't exhaustively read) one or two existing implementations as
   worked examples of file layout and the `DbSource`-equivalent seam:
-  `implementations/rust/src/db/postgres.rs` (the trait + reference impl),
+  `implementations/rust/core/src/db/` (`mod.rs` for the trait, `postgres.rs`
+  for the reference impl),
   `implementations/go-nethttp/` (`catalog.go`, `filter.go`, `routes.go`,
   `embed.go`), `implementations/spring-boot-starter/src`. Note how each
   embeds `frontend/dbviewer.html` and wires its conformance CI

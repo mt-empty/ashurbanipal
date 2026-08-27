@@ -101,8 +101,8 @@ Two components, same as the original concept:
   - *API reference for AI agents* — a fixed "?" button in the corner opens
     a native `<dialog>` (same chrome as the payload viewer) showing a
     static, hand-maintained JSON document describing every route in §4
-    (method, params, an example request/response) plus the filter DSL
-    grammar (including its 10-condition/1024-byte limits), with a copy
+    (method, params, an example request/response) plus the filter AST
+    wire format (including its 10-condition / 8192-byte limits), with a copy
     button. Deliberately not its own endpoint — the
     doc doesn't vary per request, so it's meant for a human to copy and
     paste into an agent's context, not to be machine-fetched. Lives in the
@@ -374,7 +374,8 @@ parser dependency) and is a **frontend** concern: `dbviewer.html` parses
 the DSL text client-side and submits the resulting JSON AST as the
 `filter` param; the server contract is defined purely in terms of that
 AST (`spec/protocol.md` §5.4.2). (Historically the parser was built
-server-side, in `src/filter.rs`, last in the server build order.)
+server-side, in the Rust crate's `filter.rs`, last in the server build
+order.)
 
 Example:
 
@@ -463,7 +464,7 @@ from the schema unnoticed; (2) without (3) lets a port satisfy every type
 and status code while getting the actual query logic wrong; (3) without
 (1)/(2) only covers whatever cases someone thought to write down by hand.
 A "conformant" listing in `PORTING.md` requires a green run of all three,
-not just the behavioral suite Phase 2 already plans.
+not just the behavioral suite.
 
 ### `GET /tables/common-values`
 
@@ -526,7 +527,7 @@ over `S: DbSource` (no `dyn`), one concrete `DbSource` per `router()` call.
   reach a schema the other would reject. Resolved once per operation, as
   the first statement in that operation's transaction, so every later
   query in the same transaction reuses the same value even under pool
-  session drift (`tests/schema_isolation.rs`).
+  session drift (`implementations/rust/axum/tests/schema_isolation.rs`).
 - `TableInfo` (§4's `/tables` shape: `name` + optional `comment`) and
   `common_values` (§4's `/tables/common-values`) both read schema catalogs
   (`pg_description`/`pg_stats`), never table data beyond what `query_table`

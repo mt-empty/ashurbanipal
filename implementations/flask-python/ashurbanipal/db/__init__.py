@@ -1,6 +1,6 @@
 """The one seam to a database. Route handlers (`routes.py`) only ever call
 through the `DbSource` interface below, never a driver directly — mirrors
-`implementations/rust/src/db/mod.rs`'s `DbSource` trait.
+`implementations/rust/core/src/db/mod.rs`'s `DbSource` trait.
 
 One implementation per backend: `postgres.PgSource`, `sqlite.SqliteSource`,
 `mysql.MySqlSource`. Each opens one fresh physical connection per operation
@@ -138,7 +138,7 @@ class DbSource(abc.ABC):
 # §5.4.2) shared by every backend that maps a wire op straight to a
 # keyword; ILIKE has no entry here since no backend maps it that simply —
 # see each backend's own build_where_clause (mirrors
-# implementations/rust/src/db/mod.rs::op_sql).
+# implementations/rust/core/src/db/mod.rs::op_sql).
 OP_SQL: dict[str, str] = {
     "=": "=",
     "!=": "!=",

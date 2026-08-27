@@ -92,7 +92,7 @@ maybeDescribe("multi-schema support (live db)", () => {
   // Regression test for the "connection pool sessions with different
   // search_path settings must not let a request's schema resolution drift
   // mid-flight" guarantee (spec/protocol.md §1, §5) — Node equivalent of
-  // implementations/rust/tests/schema_isolation.rs's
+  // implementations/rust/axum/tests/schema_isolation.rs's
   // query_table_never_mixes_schemas_across_pooled_connections.
   //
   // Builds its own 2-connection pool (separate from the beforeAll pool

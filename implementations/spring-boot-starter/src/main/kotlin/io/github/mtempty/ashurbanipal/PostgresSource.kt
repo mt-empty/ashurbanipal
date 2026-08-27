@@ -57,7 +57,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
      * [inReadOnlyTransaction] block, which pins the whole operation to one
      * physical connection — immune to pool sessions with divergent
      * `search_path`, same reasoning as
-     * `implementations/rust/tests/schema_isolation.rs`.
+     * `implementations/rust/axum/tests/schema_isolation.rs`.
      */
     private fun resolveSchema(requested: String?): String {
         val schemas = listAllowedSchemas()
