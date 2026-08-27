@@ -67,7 +67,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), PgPool
 <details><summary>Spring Boot</summary>
 
 ```yaml
-# implementation("io.github.mtempty:ashurbanipal-spring-boot-starter:X.Y.Z")
+# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.1.1")
 ashurbanipal:
   enabled: true
   # backend: postgres is the default
@@ -77,7 +77,7 @@ ashurbanipal:
 <details><summary>Go / net-http</summary>
 
 ```go
-// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
+// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@v0.1.0
 source := ashurbanipal.NewPostgresSource(db, timeoutSecs)
 viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
 ```
@@ -124,7 +124,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), MySqlS
 <details><summary>Spring Boot</summary>
 
 ```yaml
-# implementation("io.github.mtempty:ashurbanipal-spring-boot-starter:X.Y.Z")
+# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.1.1")
 ashurbanipal:
   backend: mysql   # covers MariaDB too
 ```
@@ -133,7 +133,7 @@ ashurbanipal:
 <details><summary>Go / net-http</summary>
 
 ```go
-// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
+// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@v0.1.0
 // go build -tags mysql
 source := ashurbanipal.NewMySQLSource(db, timeoutSecs)
 viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
@@ -182,7 +182,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), Sqlite
 <details><summary>Spring Boot</summary>
 
 ```yaml
-# implementation("io.github.mtempty:ashurbanipal-spring-boot-starter:X.Y.Z")
+# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.1.1")
 ashurbanipal:
   backend: sqlite
 ```
@@ -191,7 +191,7 @@ ashurbanipal:
 <details><summary>Go / net-http</summary>
 
 ```go
-// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
+// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@v0.1.0
 // go build -tags sqlite
 source := ashurbanipal.NewSQLiteSource(db, timeoutSecs)
 viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})

@@ -65,7 +65,7 @@ Two components, same as the original concept:
   Generated (`mise run frontend:build`) from TypeScript/CSS sources in
   `frontend/src/`, bundled with esbuild and inlined back into one file —
   the shipped artifact and everything downstream of it (vendoring, CSP,
-  the release checksum) sees no difference from a hand-edited file; see
+  each port's vendoring checksum) sees no difference from a hand-edited file; see
   `docs/frontend-style-guide.md` §1 for the source layout.
 - No CDN dependency is wired in. `jsonb` tree rendering (collapsible via
   a hand-rolled fold toggle, preserving JSON's actual `{}`/`[]`/`,`/`:`

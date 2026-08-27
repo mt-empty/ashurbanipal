@@ -12,7 +12,7 @@ see `readme.md`'s sidecar section instead.
 An implementation of `spec/protocol.md` at a specific protocol version,
 that:
 
-1. Serves the released `frontend/dbviewer.html` artifact, vendored (see
+1. Serves the canonical `frontend/dbviewer.html` artifact, vendored (see
    below), unmodified.
 2. Implements the seven API routes + the HTML route exactly as
    `spec/protocol.md` and `spec/openapi.yaml` specify them.
@@ -23,8 +23,8 @@ a port is a peer, not a lesser copy.
 
 ## What you reuse
 
-- **The frontend artifact** — `frontend/dbviewer.html`, pinned by release
-  tag + sha256 + `NOTICE` (see "Vendoring the frontend" below). This also
+- **The frontend artifact** — `frontend/dbviewer.html`, pinned by commit
+  + sha256 + `NOTICE` (see "Vendoring the frontend" below). This also
   means reusing the one and only filter-grammar parser implementation;
   no port writes its own.
 - **The filter fixtures** — `spec/fixtures/filter-builder-tests.json` (the
@@ -38,13 +38,13 @@ a port is a peer, not a lesser copy.
 
 ## Vendoring the frontend
 
-`frontend/dbviewer.html` is released as a versioned artifact attached to
-each tagged GitHub Release, alongside `LICENSE` and a `dbviewer.html.sha256`
-checksum. An implementation that serves the UI vendors this file rather
-than writing its own:
+`frontend/dbviewer.html` at the repo root is the single canonical copy —
+there is no separately published frontend artifact. An implementation that
+serves the UI vendors this file rather than writing its own:
 
-1. Pin a specific release tag — don't track a branch or `main`.
-2. Record the `dbviewer.html.sha256` value for the tag you vendor.
+1. Pin a specific commit of this repo — don't track a branch or `main`.
+   Bump to a newer commit deliberately, the same as a protocol-version bump.
+2. Record the `sha256sum` of the file at the commit you vendor.
 3. Ship `NOTICE` alongside your vendored copy (provenance + the MIT license
    text) if the file is vendored outside a clone of this repository and so
    wouldn't otherwise carry `LICENSE` with it.
@@ -146,9 +146,9 @@ by reusing the frontend and fixtures above:
   a `spec/protocol.md` proposal (one PR touching spec + fixtures +
   implementations + runner together — see Governance below), not a
   port-specific extension living only in one language.
-- **Fork the frontend.** Vendor the released artifact as-is; UI changes go
-  upstream into `frontend/dbviewer.html` and flow back down through the
-  next release tag.
+- **Fork the frontend.** Vendor the canonical file as-is; UI changes go
+  upstream into `frontend/dbviewer.html` and flow back down when you
+  re-sync your vendored copy to a newer commit.
 
 ## Conformance is two layers, both required
 

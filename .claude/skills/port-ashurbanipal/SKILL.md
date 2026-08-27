@@ -76,7 +76,7 @@ Mirror the shape of the existing ports, not their exact file names:
 - `conformance/seed/seed.sql` and `conformance/runner` — apply/invoke as-is,
   don't rewrite.
 - `frontend/dbviewer.html` itself, vendored per PORTING.md's "Vendoring
-  the frontend" section: pin a release tag, record its sha256, ship
+  the frontend" section: pin a commit, record its sha256, ship
   `NOTICE` if vendored standalone, re-verify the hash in your own CI on
   every build (not just once).
 
