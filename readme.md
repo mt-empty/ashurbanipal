@@ -51,7 +51,7 @@ If you have the freedom to run a sidecar container, you can use `pgweb` instead,
 ```rust
 // cargo add ashurbanipal-axum
 use ashurbanipal_axum::{Config, PgPoolSource};
-app.merge(ashurbanipal_axum::router(config, PgPoolSource::new(pool)));
+app.merge(ashurbanipal_axum::router(config, vec![("primary".to_string(), PgPoolSource::new(pool))]));
 ```
 </details>
 
@@ -60,7 +60,7 @@ app.merge(ashurbanipal_axum::router(config, PgPoolSource::new(pool)));
 ```rust
 // cargo add ashurbanipal-actix-web
 use ashurbanipal_actix_web::{app_state, service, Config, PgPoolSource};
-App::new().service(service(app_state(config, PgPoolSource::new(pool))));
+App::new().service(service(app_state(config, vec![("primary".to_string(), PgPoolSource::new(pool))])));
 ```
 </details>
 
@@ -79,7 +79,7 @@ ashurbanipal:
 ```go
 // go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
 source := ashurbanipal.NewPostgresSource(db, timeoutSecs)
-viewer, err := ashurbanipal.Router(cfg, source)
+viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
 ```
 </details>
 
@@ -88,7 +88,7 @@ viewer, err := ashurbanipal.Router(cfg, source)
 ```ts
 // pnpm install ashurbanipal-node-express
 import { createRouter, PostgresSource } from "ashurbanipal-node-express";
-const viewer = createRouter(config, new PostgresSource(pool));
+const viewer = createRouter(config, [{ name: "primary", source: new PostgresSource(pool) }]);
 ```
 </details>
 
@@ -97,7 +97,7 @@ const viewer = createRouter(config, new PostgresSource(pool));
 ```python
 # uv add ashurbanipal-flask
 from ashurbanipal.db.postgres import PgSource
-app.register_blueprint(router(config, PgSource(dsn=os.environ["DATABASE_URL"])))
+app.register_blueprint(router(config, [("primary", PgSource(dsn=os.environ["DATABASE_URL"]))]))
 ```
 </details>
 
@@ -108,7 +108,7 @@ app.register_blueprint(router(config, PgSource(dsn=os.environ["DATABASE_URL"])))
 ```rust
 // cargo add ashurbanipal-axum --features mysql
 use ashurbanipal_axum::{Config, MySqlSource};
-app.merge(ashurbanipal_axum::router(config, MySqlSource::new(pool)));
+app.merge(ashurbanipal_axum::router(config, vec![("primary".to_string(), MySqlSource::new(pool))]));
 ```
 </details>
 
@@ -117,7 +117,7 @@ app.merge(ashurbanipal_axum::router(config, MySqlSource::new(pool)));
 ```rust
 // cargo add ashurbanipal-actix-web --features mysql
 use ashurbanipal_actix_web::{app_state, service, Config, MySqlSource};
-App::new().service(service(app_state(config, MySqlSource::new(pool))));
+App::new().service(service(app_state(config, vec![("primary".to_string(), MySqlSource::new(pool))])));
 ```
 </details>
 
@@ -136,7 +136,7 @@ ashurbanipal:
 // go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
 // go build -tags mysql
 source := ashurbanipal.NewMySQLSource(db, timeoutSecs)
-viewer, err := ashurbanipal.Router(cfg, source)
+viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
 ```
 </details>
 
@@ -146,7 +146,7 @@ viewer, err := ashurbanipal.Router(cfg, source)
 // pnpm install ashurbanipal-node-express mysql2
 import { createRouter } from "ashurbanipal-node-express";
 import { MySqlSource } from "ashurbanipal-node-express/dist/src/db/mysql.js";
-const viewer = createRouter(config, new MySqlSource(pool));
+const viewer = createRouter(config, [{ name: "primary", source: new MySqlSource(pool) }]);
 ```
 </details>
 
@@ -155,7 +155,7 @@ const viewer = createRouter(config, new MySqlSource(pool));
 ```python
 # uv add ashurbanipal-flask PyMySQL
 from ashurbanipal.db.mysql import MySqlSource
-app.register_blueprint(router(config, MySqlSource(...)))
+app.register_blueprint(router(config, [("primary", MySqlSource(...))]))
 ```
 </details>
 
@@ -166,7 +166,7 @@ app.register_blueprint(router(config, MySqlSource(...)))
 ```rust
 // cargo add ashurbanipal-axum --features sqlite
 use ashurbanipal_axum::{Config, SqliteSource};
-app.merge(ashurbanipal_axum::router(config, SqliteSource::new(pool)));
+app.merge(ashurbanipal_axum::router(config, vec![("primary".to_string(), SqliteSource::new(pool))]));
 ```
 </details>
 
@@ -175,7 +175,7 @@ app.merge(ashurbanipal_axum::router(config, SqliteSource::new(pool)));
 ```rust
 // cargo add ashurbanipal-actix-web --features sqlite
 use ashurbanipal_actix_web::{app_state, service, Config, SqliteSource};
-App::new().service(service(app_state(config, SqliteSource::new(pool))));
+App::new().service(service(app_state(config, vec![("primary".to_string(), SqliteSource::new(pool))])));
 ```
 </details>
 
@@ -194,7 +194,7 @@ ashurbanipal:
 // go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
 // go build -tags sqlite
 source := ashurbanipal.NewSQLiteSource(db, timeoutSecs)
-viewer, err := ashurbanipal.Router(cfg, source)
+viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
 ```
 </details>
 
@@ -204,7 +204,7 @@ viewer, err := ashurbanipal.Router(cfg, source)
 // pnpm install ashurbanipal-node-express sqlite3
 import { createRouter } from "ashurbanipal-node-express";
 import { SqliteSource } from "ashurbanipal-node-express/dist/src/db/sqlite.js";
-const viewer = createRouter(config, new SqliteSource(new Database("app.db")));
+const viewer = createRouter(config, [{ name: "primary", source: new SqliteSource(new Database("app.db")) }]);
 ```
 </details>
 
@@ -213,7 +213,7 @@ const viewer = createRouter(config, new SqliteSource(new Database("app.db")));
 ```python
 # uv add ashurbanipal-flask
 from ashurbanipal.db.sqlite import SqliteSource
-app.register_blueprint(router(config, SqliteSource(path="./demo.db")))
+app.register_blueprint(router(config, [("primary", SqliteSource(path="./demo.db"))]))
 ```
 </details>
 

@@ -3,19 +3,19 @@ import { $, copyText } from "./dom.js";
 
 // ---- API reference: static, hand-maintained description of every route,
 // for copy-pasting to an AI agent. Not its own endpoint — the doc never
-// changes per-request, so a route would just be a 7th thing to keep in
-// sync for no benefit. ----
+// changes per-request, so a route would just be one more thing to keep
+// in sync for no benefit. ----
 function buildApiReference() {
   const base = new URL(API, location.href).toString().replace(/\/$/, "");
   const exampleFilter = encodeURIComponent(JSON.stringify([{ column: "status", op: "=", value: "active" }]));
   return {
-    description: "Read-only REST API for browsing this service's Postgres tables. Every endpoint is GET and returns JSON. Table/column names are data-dependent — call GET /tables first to discover real names before calling anything else.",
+    description: "Read-only REST API for browsing this service's database tables. Every endpoint is GET and returns JSON. Table/column names are data-dependent — call GET /tables first to discover real names before calling anything else.",
     base_url: base,
     endpoints: [
       {
         method: "GET",
         path: `${base}/schemas`,
-        summary: "List selectable Postgres schema names for this connection (excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). Not every implementation/port has this route yet — treat its absence as \"single schema only\", not an error.",
+        summary: "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry.",
         params: [],
         example_response: { schemas: ["public"] },
       },
@@ -31,7 +31,7 @@ function buildApiReference() {
       {
         method: "GET",
         path: `${base}/table-counts`,
-        summary: "Approximate row count per table (pg_class.reltuples, not COUNT(*)).",
+        summary: "Approximate row count per table — a cheap engine estimate, never a live COUNT(*); may be -1 when the engine exposes no estimate.",
         params: [
           { name: "schema", required: false, notes: "same as GET /tables" },
         ],
@@ -60,7 +60,7 @@ function buildApiReference() {
       {
         method: "GET",
         path: `${base}/tables/common-values`,
-        summary: "Most frequent values for one column (pg_stats — approximate; empty if the column has no planner statistics yet).",
+        summary: "Most frequent values for one column — approximate, from engine statistics; empty when the engine keeps no such statistics for the column.",
         params: [
           { name: "schema", required: false, notes: "same as GET /tables" },
           { name: "table", required: true },
