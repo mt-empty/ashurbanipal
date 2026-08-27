@@ -66,6 +66,22 @@ jobs:
       conformance-url: "http://localhost:4100/__ashurbanipal"
       report-name: spring-boot-conformance-report
 
+  # Same suite, run again (not instead) against a demo started with a
+  # second source registered — see rust-axum-conformance.yml's identical
+  # job for the rationale. Spring's own idiom for the trigger is a
+  # profile, not the CONFORMANCE_SECOND_SOURCE env var other ports use.
+  two-source-conformance:
+    name: Spring Boot — conformance kit (two-source round-trip)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: java
+      start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
+      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENABLED=true SPRING_PROFILES_ACTIVE=conformance-second-source"
+      health-url: "http://localhost:4100/__ashurbanipal/api/tables"
+      conformance-url: "http://localhost:4100/__ashurbanipal"
+      report-name: spring-boot-two-source-conformance-report
+
   schema-conformance:
     name: Spring Boot — schema conformance
     needs: build-and-test

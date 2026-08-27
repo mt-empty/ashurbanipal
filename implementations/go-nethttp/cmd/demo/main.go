@@ -11,9 +11,14 @@
 // To demo sibling health-polling, run a second instance:
 //
 //	PORT=4001 SIBLING_PORT=4000 go run ./cmd/demo
+//
+// CONFORMANCE_SECOND_SOURCE=1 registers a second source, pinned to the
+// other_schema schema via an AfterConnect hook, for
+// conformance/runner/two_source.rs — see that file's module doc.
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -21,7 +26,9 @@ import (
 	"os"
 	"strconv"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	ashurbanipal "github.com/mt-empty/ashurbanipal/implementations/go-nethttp"
 )
@@ -51,8 +58,33 @@ func main() {
 		}}
 	}
 
-	source := ashurbanipal.NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-	viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
+	timeout := cfg.Limits.WithDefaults().QueryTimeoutSecs
+	source := ashurbanipal.NewPostgresSource(db, timeout)
+	sources := []ashurbanipal.NamedSource{{Name: "primary", Source: source}}
+
+	if os.Getenv("CONFORMANCE_SECOND_SOURCE") != "" {
+		connConfig, err := pgx.ParseConfig(databaseURL)
+		if err != nil {
+			log.Fatalf("parsing DATABASE_URL: %v", err)
+		}
+		connConfig.AfterConnect = func(ctx context.Context, pc *pgconn.PgConn) error {
+			_, err := pc.Exec(ctx, "set search_path = other_schema").ReadAll()
+			return err
+		}
+		connStr := stdlib.RegisterConnConfig(connConfig)
+		secondaryDB, err := sql.Open("pgx", connStr)
+		if err != nil {
+			log.Fatalf("opening secondary database: %v", err)
+		}
+		defer secondaryDB.Close()
+		secondaryDB.SetMaxOpenConns(5)
+		sources = append(sources, ashurbanipal.NamedSource{
+			Name:   "other_schema",
+			Source: ashurbanipal.NewPostgresSource(secondaryDB, timeout),
+		})
+	}
+
+	viewer := ashurbanipal.Router(cfg, sources)
 
 	uiPath := "/__ashurbanipal"
 	mux := http.NewServeMux()

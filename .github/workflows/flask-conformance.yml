@@ -45,6 +45,26 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: flask-python-conformance-report
 
+  # Same suite, run again (not instead) against a demo started with a
+  # second source registered — see rust-axum-conformance.yml's identical
+  # job for the rationale.
+  two-source-conformance:
+    name: Flask — conformance kit (two-source round-trip)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: python
+      python-version: "3.12"
+      start-command: >-
+        tools/sync-ports-frontend.sh &&
+        cd implementations/flask-python &&
+        uv sync --extra postgres &&
+        PORT=4000 uv run python demo/app.py
+      start-env: "CONFORMANCE_SECOND_SOURCE=1"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: flask-python-conformance-two-source-report
+
   schema-conformance:
     name: Flask — schema conformance
     needs: build-and-test

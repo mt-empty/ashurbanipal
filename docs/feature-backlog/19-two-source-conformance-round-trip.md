@@ -1,12 +1,22 @@
 # True two-source round-trip in CI conformance
 
-**Status:** discussed 2026-08-20, during the multi-source support rollout.
-Deliberately deferred, not designed — capturing the shape of the gap
-between what `conformance/runner/sources.rs` covers today and what a real
-two-source fixture would need, per `conformance/runner/COVERAGE.md`'s
-Known gaps entry for `P5.8-LISTS-REGISTERED-SOURCES` (beyond the
-single-entry case), `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER`, and
-`P1-SOURCE-RESOLVED-ONCE`.
+**Status:** resolved 2026-08-25. `conformance/runner/two_source.rs`
+covers the properties below across all five ports, each with its own
+two-source demo mode and a second `two-source-conformance` CI job (see
+each `<port>-conformance.yml`), alongside the existing single-source
+pass. It took the cheaper of the two mechanisms discussed below —
+schema-pinning within the existing database, not a real second one — see
+"Constraints / open questions" for why. `conformance/runner/COVERAGE.md`'s
+Known gaps has what's still open. Rest of this document kept as-written
+for the design history.
+
+**Original status (2026-08-20):** discussed during the multi-source
+support rollout. Deliberately deferred, not designed — capturing the
+shape of the gap between what `conformance/runner/sources.rs` covers
+today and what a real two-source fixture would need, per
+`conformance/runner/COVERAGE.md`'s Known gaps entry for
+`P5.8-LISTS-REGISTERED-SOURCES` (beyond the single-entry case),
+`P5.8-STABLE-ORDER-IS-DEFAULT-ORDER`, and `P1-SOURCE-RESOLVED-ONCE`.
 
 **Ask:** `conformance/runner/sources.rs` only proves the *shape* of the
 `source`/`api/sources` feature against a single-source demo — that a

@@ -1,11 +1,11 @@
 //! `spec/protocol.md` §5.8 and the `source` param on §5.2–§5.5, §5.7 —
-//! minimal single-source-demo coverage only. `TestServer::spawn()` (this
-//! runner's only spawn model, `conformance/runner/common.rs`) starts the
-//! demo without `SECOND_SOURCE=1`, so a true two-source round-trip isn't
-//! exercisable here yet — see `COVERAGE.md`'s Known gaps. What this file
-//! does cover: the wire shape is additive and doesn't disturb the existing
-//! single-source behavior, which is the regression this feature must never
-//! break.
+//! coverage that only needs a single-source demo (the default `TestServer::
+//! spawn()` target): the wire shape is additive and doesn't disturb the
+//! existing single-source behavior, which is the regression this feature
+//! must never break. The true two-source round-trip (does an explicit
+//! `source` actually reach different data, does `api/sources`' order match
+//! default resolution) lives in `two_source.rs` instead, since it needs a
+//! target started with a second source registered.
 
 use crate::assert::{assert_exact, assert_status};
 use crate::common::TestServer;
@@ -23,19 +23,32 @@ async fn lists_exactly_the_one_registered_source() {
         .await
         .unwrap();
     let sources = body["sources"].as_array().unwrap();
-    assert_exact(
-        sources.len(),
-        1,
-        "a single-source deployment must list exactly one entry (spec/protocol.md §5.8)",
-    );
-    assert!(
-        sources[0]["name"].is_string(),
-        "each entry must carry a `name`: {sources:?}"
-    );
-    assert!(
-        sources[0].get("backend").is_none(),
-        "api/sources must never disclose a backend engine (spec/protocol.md §5.8): {sources:?}"
-    );
+    // Self-skips like two_source.rs, not an env var: 2-by-design and
+    // 2-by-bug look identical over black-box HTTP, so exact-count intent
+    // is left to each port's own white-box test (COVERAGE.md's Known gaps).
+    if sources.len() != 1 {
+        eprintln!(
+            "sources: skipping the exact-one-entry check — target registered {} source(s) \
+             (a two-source-conformance target; see two_source.rs for its own checks)",
+            sources.len()
+        );
+    } else {
+        assert_exact(
+            sources.len(),
+            1,
+            "a single-source deployment must list exactly one entry (spec/protocol.md §5.8)",
+        );
+    }
+    for source in sources {
+        assert!(
+            source["name"].is_string(),
+            "each entry must carry a `name`: {sources:?}"
+        );
+        assert!(
+            source.get("backend").is_none(),
+            "api/sources must never disclose a backend engine (spec/protocol.md §5.8): {sources:?}"
+        );
+    }
 }
 
 #[tokio::test]

@@ -24,6 +24,10 @@
 //! ```sh
 //! SECOND_SOURCE=1 cargo run -p ashurbanipal-axum --example demo
 //! ```
+//!
+//! `CONFORMANCE_SECOND_SOURCE=1` registers a second source, pinned to
+//! `other_schema`, for `conformance/runner/two_source.rs` — see that
+//! file's module doc.
 
 use ashurbanipal_axum::{Config, PgPoolSource};
 use axum::routing::get;
@@ -87,6 +91,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .connect(&reporting_url)
             .await?;
         sources.push(("reporting".to_string(), PgPoolSource::new(reporting_pool)));
+    }
+    if std::env::var("CONFORMANCE_SECOND_SOURCE").is_ok() {
+        let pinned_pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    sqlx::Executor::execute(conn, "set search_path = other_schema").await?;
+                    Ok(())
+                })
+            })
+            .connect(&database_url)
+            .await?;
+        sources.push(("other_schema".to_string(), PgPoolSource::new(pinned_pool)));
     }
     let ashurbanipal = ashurbanipal_axum::router(config, sources);
     // MOUNT_PREFIX (e.g. "/svc") simulates a reverse proxy that serves the

@@ -15,6 +15,10 @@
 // sqlite, or mysql/mariadb — always an explicit choice, never inferred
 // from which env vars happen to be set (spec/protocol.md's "explicit, not
 // implicit" principle, per PORTING.md's hardening checklist).
+//
+// CONFORMANCE_SECOND_SOURCE=1 (postgres backend only) registers a second
+// source, pinned to `other_schema`, for conformance/runner/two_source.rs
+// — see that file's module doc.
 import express from "express";
 import { MySqlSource } from "../src/db/mysql.js";
 import { PostgresSource } from "../src/db/postgres.js";
@@ -104,7 +108,21 @@ async function main(): Promise<void> {
     ];
   }
 
-  const viewer = createRouter(config, [{ name: backend, source: dbSource }]);
+  const sources = [{ name: backend, source: dbSource }];
+  if (process.env.CONFORMANCE_SECOND_SOURCE && backend === "postgres") {
+    const { Pool } = await loadDriver("pg", () => import("pg"));
+    // onConnect is awaited before a connection is handed out — unlike the
+    // 'connect' event (fire-and-forget), which could race a query against
+    // this SET on the same physical connection.
+    const pinnedPool = new Pool({
+      connectionString: requireEnv("DATABASE_URL"),
+      max: 5,
+      onConnect: (client) => client.query("SET search_path = other_schema"),
+    });
+    sources.push({ name: "other_schema", source: new PostgresSource(pinnedPool) });
+  }
+
+  const viewer = createRouter(config, sources);
 
   const app = express();
   app.get("/health", (_req, res) => res.send("ok"));

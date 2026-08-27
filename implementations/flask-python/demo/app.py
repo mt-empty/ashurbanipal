@@ -13,6 +13,10 @@ Then open http://localhost:4000/__ashurbanipal. To demo sibling
 health-polling, run a second instance:
 
     PORT=4001 SIBLING_PORT=4000 python demo/app.py
+
+`CONFORMANCE_SECOND_SOURCE=1` (postgres backend only) registers a second
+source, pinned to `other_schema`, for `conformance/runner/two_source.rs`
+— see that file's module doc.
 """
 
 from __future__ import annotations
@@ -35,15 +39,18 @@ def _env_int(name: str, fallback: int) -> int:
     return int(raw)
 
 
-def _build_source():
-    backend = os.environ.get("ASHURBANIPAL_BACKEND", "postgres")
+def _postgres_dsn() -> str:
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        raise RuntimeError("DATABASE_URL must be set (the devcontainer sets it automatically)")
+    return dsn
+
+
+def _build_source(backend: str):
     if backend == "postgres":
         from ashurbanipal.db.postgres import PgSource
 
-        dsn = os.environ.get("DATABASE_URL")
-        if not dsn:
-            raise RuntimeError("DATABASE_URL must be set (the devcontainer sets it automatically)")
-        return PgSource(dsn)
+        return PgSource(_postgres_dsn())
     if backend == "sqlite":
         from ashurbanipal.db.sqlite import SqliteSource
 
@@ -59,9 +66,28 @@ def _build_source():
     raise RuntimeError(f"unknown ASHURBANIPAL_BACKEND {backend!r} (expected postgres|sqlite|mysql)")
 
 
+def _conformance_second_source(backend: str):
+    """Pins a second connection to `other_schema` for
+    conformance/runner/two_source.rs. Postgres-only (sqlite/mysql seeds have
+    no `other_schema`); a no-op unless CONFORMANCE_SECOND_SOURCE is set.
+    """
+    if backend != "postgres" or not os.environ.get("CONFORMANCE_SECOND_SOURCE"):
+        return None
+    from ashurbanipal.db.postgres import PgSource
+
+    dsn = _postgres_dsn()
+    # libpq's "options" DSN param sends `-c search_path=...` at connection
+    # start, so this needs no change to PgSource itself (it opens no pool,
+    # just a fresh connection per operation).
+    sep = "&" if "?" in dsn else "?"
+    pinned_dsn = f"{dsn}{sep}options=-c%20search_path%3Dother_schema"
+    return ("other_schema", PgSource(pinned_dsn))
+
+
 def main() -> None:
     port = _env_int("PORT", 4000)
-    source = _build_source()
+    backend = os.environ.get("ASHURBANIPAL_BACKEND", "postgres")
+    source = _build_source(backend)
 
     config = Config(enabled=True)
     sibling_port = os.environ.get("SIBLING_PORT")
@@ -84,7 +110,11 @@ def main() -> None:
     def index():
         return redirect("/__ashurbanipal", code=307)
 
-    app.register_blueprint(router(config, [("primary", source)]))
+    sources = [("primary", source)]
+    second = _conformance_second_source(backend)
+    if second is not None:
+        sources.append(second)
+    app.register_blueprint(router(config, sources))
 
     print(f"demo host on http://localhost:{port} — browser at http://localhost:{port}/__ashurbanipal")
     app.run(host="0.0.0.0", port=port)
