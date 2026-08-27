@@ -67,7 +67,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), PgPool
 <details><summary>Spring Boot</summary>
 
 ```yaml
-# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.1.1")
+# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.3.0")
 ashurbanipal:
   enabled: true
   # backend: postgres is the default
@@ -124,7 +124,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), MySqlS
 <details><summary>Spring Boot</summary>
 
 ```yaml
-# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.1.1")
+# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.3.0")
 ashurbanipal:
   backend: mysql   # covers MariaDB too
 ```
@@ -182,7 +182,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), Sqlite
 <details><summary>Spring Boot</summary>
 
 ```yaml
-# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.1.1")
+# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.3.0")
 ashurbanipal:
   backend: sqlite
 ```
