@@ -8,12 +8,11 @@ library's `http.Handler` directly rather than any specific router, so it
 mounts into a plain `net/http.ServeMux`, Chi, or anything else that speaks
 `http.Handler`.
 
-Not tagged/released — this module is only "published" in the sense of
-being a well-formed Go module in this repository. Once a release tag
-exists, the intended usage is:
+Released via a subdirectory-module tag (`implementations/go-nethttp/vX.Y.Z`);
+`proxy.golang.org` serves it, no registry account involved. Install:
 
 ```sh
-go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@vX.Y.Z
+go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@v0.1.0
 ```
 
 ## Usage
