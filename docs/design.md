@@ -8,10 +8,10 @@ backends (`docs/adapter-decisions.md`).
 
 ## 1. Summary
 
-Ashurbanipal is a self-contained, embeddable, read-only database browser for
-development, integration, and staging environments. A service embeds the
-Ashurbanipal crate, mounts its routes, and gets a web UI for browsing its own
-database tables — no separate DB client, no extra credentials, no build step.
+Ashurbanipal is a self-contained, embeddable, read-only database browser.
+A service embeds the Ashurbanipal crate, mounts its routes, and gets a
+web UI for browsing its own database tables — no separate DB client, no
+extra credentials, no build step.
 
 This document is written against the Rust reference — Axum, and Postgres
 by default (SQLite and MySQL are opt-in backends, see
