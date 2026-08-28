@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import { assertSafeTimeoutMs, NotAllowedError, quoteIdent } from "../errors.js";
+import { assertSafeTimeoutMs, mapSelectDenied, NotAllowedError, quoteIdent } from "../errors.js";
 import { buildWhereClause } from "../filter.js";
 import {
   type ColumnInfo,
@@ -88,10 +88,15 @@ export class PostgresSource implements DbSource {
     return real;
   }
 
+  // has_table_privilege narrows information_schema.tables (which lists a
+  // table on *any* privilege) to just the SELECT-able ones, so this
+  // allow-list can't admit a table a later SELECT would be denied on —
+  // keeping it in lockstep with listTables.
   private async allowedTables(client: PoolClient, schema: string): Promise<string[]> {
     const { rows } = await client.query<{ table_name: string }>(
       `select table_name from information_schema.tables
        where table_schema = $1 and table_type = 'BASE TABLE'
+         and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT')
        order by table_name`,
       [schema],
     );
@@ -194,11 +199,15 @@ export class PostgresSource implements DbSource {
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
+      // has_table_privilege keeps this listing equal to the allow-list
+      // allowedTables enforces — a table the role can't SELECT is never
+      // offered as a row it would then have to reject.
       const { rows } = await client.query<{ relname: string; comment: string | null }>(
         `select c.relname::text, obj_description(c.oid, 'pg_class') as comment
          from pg_class c
          join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = $1 and c.relkind = 'r'
+           and has_table_privilege(c.oid, 'SELECT')
          order by c.relname`,
         [realSchema],
       );
@@ -213,11 +222,14 @@ export class PostgresSource implements DbSource {
   async tableCounts(schema: string | undefined, timeoutMs: number): Promise<CountEntry[]> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
+      // Same has_table_privilege filter as listTables, so the count column
+      // never names a table the sidebar won't show.
       const { rows } = await client.query<{ relname: string; reltuples: string }>(
         `select c.relname::text, c.reltuples::bigint::text as reltuples
          from pg_class c
          join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = $1 and c.relkind = 'r'
+           and has_table_privilege(c.oid, 'SELECT')
          order by c.relname`,
         [realSchema],
       );
@@ -313,7 +325,9 @@ export class PostgresSource implements DbSource {
       const query = `select ${selectList} from ${quoteIdent(realSchema)}.${quoteIdent(realTable)}${whereClause}${orderClause} limit $1 offset $2`;
       const args: unknown[] = [opts.limit, opts.offset, ...filterValues];
 
-      const { rows: dataRows } = await client.query(query, args);
+      const { rows: dataRows } = await client.query(query, args).catch((err: unknown) => {
+        throw mapSelectDenied(err, realTable);
+      });
       const outRows: Record<string, string | null>[] = dataRows.map((row: Record<string, unknown>) => {
         const out: Record<string, string | null> = {};
         for (const col of columns) {

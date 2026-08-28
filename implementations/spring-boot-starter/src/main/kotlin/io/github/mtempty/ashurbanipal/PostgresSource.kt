@@ -1,10 +1,12 @@
 package io.github.mtempty.ashurbanipal
 
+import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.sql.ResultSet
+import java.sql.SQLException
 import javax.sql.DataSource
 
 /**
@@ -68,11 +70,15 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     override fun listTables(schema: String?): List<TableInfo> {
         val realSchema = resolveSchema(schema)
+        // has_table_privilege keeps this listing equal to the allow-list
+        // [requireTable] enforces — a table the role can't SELECT is never
+        // offered as a row it would then have to reject.
         return jdbcTemplate.query(
             "select c.relname::text, obj_description(c.oid, 'pg_class') " +
                 "from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
                 "where n.nspname = ? and c.relkind = 'r' " +
+                "  and has_table_privilege(c.oid, 'SELECT') " +
                 "order by c.relname",
             RowMapper { rs, _ -> TableInfo(rs.getString(1), rs.getString(2)) },
             realSchema,
@@ -81,21 +87,29 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     override fun tableCounts(schema: String?): List<CountEntry> {
         val realSchema = resolveSchema(schema)
+        // Same has_table_privilege filter as [listTables], so the count
+        // column never names a table the sidebar won't show.
         return jdbcTemplate.query(
             "select c.relname::text, c.reltuples::bigint " +
                 "from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
                 "where n.nspname = ? and c.relkind = 'r' " +
+                "  and has_table_privilege(c.oid, 'SELECT') " +
                 "order by c.relname",
             RowMapper { rs, _ -> CountEntry(rs.getString(1), rs.getLong(2)) },
             realSchema,
         )
     }
 
+    // has_table_privilege narrows information_schema.tables (which lists a
+    // table on *any* privilege) to just the SELECT-able ones, so this
+    // allow-list can't admit a table a later SELECT would be denied on —
+    // keeping it in lockstep with [listTables].
     private fun allowedTables(schema: String): List<String> =
         jdbcTemplate.queryForList(
             "select table_name from information_schema.tables " +
                 "where table_schema = ? and table_type = 'BASE TABLE' " +
+                "  and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT') " +
                 "order by table_name",
             String::class.java,
             schema,
@@ -275,7 +289,17 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         bindArgs.add(opts.limit)
         bindArgs.add(opts.offset)
 
-        val rows = jdbcTemplate.query(sql, RowMapper { rs, _ -> rowToJson(rs, columns) }, *bindArgs.toTypedArray())
+        val rows = try {
+            jdbcTemplate.query(sql, RowMapper { rs, _ -> rowToJson(rs, columns) }, *bindArgs.toTypedArray())
+        } catch (e: DataAccessException) {
+            // The allow-list already rejects tables the role can't SELECT, so a
+            // permission denied (SQLSTATE 42501) reaching the row fetch is a
+            // residual edge; report it as NotAllowed (400), not a driver 500.
+            if ((e.mostSpecificCause as? SQLException)?.sqlState == "42501") {
+                throw NotAllowedException("not allowed: table $realTable")
+            }
+            throw e
+        }
 
         val totalApprox = jdbcTemplate.queryForObject(
             "select reltuples::bigint from pg_class c " +

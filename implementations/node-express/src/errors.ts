@@ -36,3 +36,16 @@ export class FilterError extends Error {
     this.name = "FilterError";
   }
 }
+
+/**
+ * The allow-list already rejects tables the role can't SELECT, so a
+ * `permission denied` (SQLSTATE 42501) reaching the row fetch is a
+ * residual edge; report it as NotAllowedError (→ 400) rather than letting
+ * the raw driver error surface as a 500.
+ */
+export function mapSelectDenied(err: unknown, table: string): unknown {
+  if (typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === "42501") {
+    return new NotAllowedError(`table "${table}"`);
+  }
+  return err;
+}

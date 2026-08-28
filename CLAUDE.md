@@ -217,7 +217,10 @@ demo-deps-stay-dev-dependencies, and the Rust comment-style rule.
   own `build_where_clause`): each condition's column is matched against the
   live allow-list before being spliced in, exactly like `sort` — the parsed
   column name from `implementations/rust/core/src/filter.rs` is never trusted
-  directly.
+  directly. On Postgres the table allow-list (and `list_tables` /
+  `table_counts`) is additionally gated by `has_table_privilege(…,
+  'SELECT')`, so the listing and the gate stay in lockstep and a table the
+  role can't read is never offered or accepted.
 - **Multi-schema queries pin one connection per operation.** `schema: None`
   resolves to the connection's default schema; an explicit value is
   allow-list-checked the same way. That resolution happens once, as the

@@ -129,9 +129,14 @@ class PgSource(DbSource):
         return resolved
 
     def _allowed_tables(self, cur: psycopg.Cursor, schema: str) -> list[str]:
+        # has_table_privilege narrows information_schema.tables (which lists
+        # a table on *any* privilege) to just the SELECT-able ones, so this
+        # allow-list can't admit a table a later SELECT would be denied on —
+        # keeping it in lockstep with list_tables.
         cur.execute(
             "select table_name from information_schema.tables "
             "where table_schema = %s and table_type = 'BASE TABLE' "
+            "  and has_table_privilege(format('%%I.%%I', table_schema, table_name), 'SELECT') "
             "order by table_name",
             (schema,),
         )
@@ -207,11 +212,15 @@ class PgSource(DbSource):
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved = self._resolve_schema(cur, schema)
+            # has_table_privilege keeps this listing equal to the allow-list
+            # _allowed_tables enforces — a table the role can't SELECT is
+            # never offered as a row it would then have to reject.
             cur.execute(
                 "select c.relname::text, obj_description(c.oid, 'pg_class') "
                 "from pg_class c "
                 "join pg_namespace n on n.oid = c.relnamespace "
                 "where n.nspname = %s and c.relkind = 'r' "
+                "  and has_table_privilege(c.oid, 'SELECT') "
                 "order by c.relname",
                 (resolved,),
             )
@@ -222,11 +231,14 @@ class PgSource(DbSource):
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved = self._resolve_schema(cur, schema)
+            # Same has_table_privilege filter as list_tables, so the count
+            # column never names a table the sidebar won't show.
             cur.execute(
                 "select c.relname::text, c.reltuples::bigint "
                 "from pg_class c "
                 "join pg_namespace n on n.oid = c.relnamespace "
                 "where n.nspname = %s and c.relkind = 'r' "
+                "  and has_table_privilege(c.oid, 'SELECT') "
                 "order by c.relname",
                 (resolved,),
             )
@@ -304,7 +316,13 @@ class PgSource(DbSource):
                     f"select {select_list} from {quote_ident(resolved_schema)}.{quote_ident(table)}"
                     f"{where_clause}{order_clause} limit %s offset %s"
                 )
-                cur.execute(query, (*filter_values, opts.limit, opts.offset))
+                try:
+                    cur.execute(query, (*filter_values, opts.limit, opts.offset))
+                except psycopg.errors.InsufficientPrivilege as exc:
+                    # The allow-list already rejects tables the role can't
+                    # SELECT, so a permission denied here is a residual edge;
+                    # report it as NotAllowed (400), not a driver 500.
+                    raise NotAllowed(f"table {table!r}") from exc
                 pg_rows = cur.fetchall()
                 rows = [
                     {

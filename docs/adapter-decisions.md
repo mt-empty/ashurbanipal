@@ -115,6 +115,19 @@ role can't access.
 | MySQL    | `information_schema.schemata`, filtered to exclude `mysql`, `information_schema`, `performance_schema`, `sys` | MUST clause satisfied. The SHOULD clause (excluding schemas the connected role can't access) is a documented, accepted gap: MySQL has no single boolean-returning function equivalent to Postgres's `has_schema_privilege` — the nearest analog (`information_schema.schema_privileges`/`user_privileges`) is materially more awkward to apply correctly, and this was deliberately not attempted for a first cut. |
 | SQLite   | Fixed single-element list (`["main"]`) | No live catalog to query — trivially satisfied the same way §1's resolution is. |
 
+## §5.2 / §5.3 — table listing & the `table` allow-list
+
+Protocol property: `GET /api/tables` *is* the allow-list every other
+route validates a `table` param against (§5.2), and SHOULD exclude any
+table the connected role can't `SELECT`; `/api/table-counts` covers the
+same set.
+
+| Backend  | Mechanism | Notes |
+|----------|-----------|-------|
+| Postgres | `list_tables`/`table_counts` (`pg_class`, `relkind = 'r'`) and the allow-list (`information_schema.tables`, `BASE TABLE`) are each gated by `has_table_privilege(…, 'SELECT')` | `information_schema.tables` on its own lists a table on *any* privilege (INSERT, REFERENCES, …), not `SELECT` — so without this filter an `INSERT`-only table cleared the allow-list and then failed the row fetch with a raw `permission denied` 500. The `has_table_privilege` gate keeps the listing, the counts, and the allow-list in lockstep, all on "the role can actually read it". A residual 42501 at the row fetch is still mapped to `NotAllowed` (→ 400) at the fetch site. Implemented in all five ports' Postgres sources; each has a port-local integration test (`table_listing_privileges` / `TableListingPrivilegesTest`). |
+| MySQL    | `list_tables`/`table_counts`/allow-list all from `information_schema.tables` (`BASE TABLE`); no per-table privilege gate yet | The listing and the allow-list already share one catalog source, so they can't diverge the way Postgres's two queries could. Excluding tables the role can't read is the same documented, accepted gap as the §5.7 schema case — MySQL has no `has_table_privilege` analog that's clean to apply — to be revisited alongside that one. |
+| SQLite   | `sqlite_master` / `pragma_table_info`; no privilege model | SQLite has no per-table access control, so "exclude what the role can't read" is vacuous — every table in the file is readable. |
+
 ## §5.2 — table/column comments
 
 Protocol property: `comment` fields are sourced from catalog comments,

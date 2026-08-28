@@ -156,9 +156,14 @@ impl PgPoolSource {
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
     ) -> Result<Vec<String>, DbError> {
+        // `has_table_privilege` narrows `information_schema.tables` (which
+        // lists a table on *any* privilege) to just the SELECT-able ones, so
+        // this allow-list can't admit a table a later `SELECT` would then be
+        // denied on — keeping it in lockstep with `list_tables`.
         let rows = sqlx::query_scalar::<_, String>(
             "select table_name from information_schema.tables \
              where table_schema = $1 and table_type = 'BASE TABLE' \
+               and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT') \
              order by table_name",
         )
         .bind(schema)
@@ -287,6 +292,19 @@ impl PgPoolSource {
     }
 }
 
+/// The allow-list already rejects tables the role can't `SELECT`, so a
+/// `permission denied` (SQLSTATE 42501) reaching the row fetch is a
+/// residual edge; report it as `NotAllowed` (→ 400) rather than letting
+/// the raw driver error surface as a 500.
+fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
+    match &e {
+        sqlx::Error::Database(db) if db.code().as_deref() == Some("42501") => {
+            DbError::NotAllowed(format!("table {table:?}"))
+        }
+        _ => DbError::Sqlx(e),
+    }
+}
+
 fn row_to_json(row: &PgRow, columns: &[ColumnInfo]) -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::with_capacity(columns.len());
     for (i, col) in columns.iter().enumerate() {
@@ -311,11 +329,15 @@ impl DbSource for PgPoolSource {
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
+        // `has_table_privilege` keeps this listing equal to the allow-list
+        // `allowed_tables_in_tx` enforces — a table the role can't SELECT is
+        // never offered as a row it would then have to reject.
         let rows = sqlx::query_as::<_, (String, Option<String>)>(
             "select c.relname::text, obj_description(c.oid, 'pg_class') \
              from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
              where n.nspname = $1 and c.relkind = 'r' \
+               and has_table_privilege(c.oid, 'SELECT') \
              order by c.relname",
         )
         .bind(&schema)
@@ -331,11 +353,14 @@ impl DbSource for PgPoolSource {
     async fn table_counts(&self, schema: Option<&str>) -> Result<Vec<(String, i64)>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
+        // Same `has_table_privilege` filter as `list_tables`, so the count
+        // column never names a table the sidebar won't show.
         let rows = sqlx::query_as::<_, (String, i64)>(
             "select c.relname::text, c.reltuples::bigint \
              from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
              where n.nspname = $1 and c.relkind = 'r' \
+               and has_table_privilege(c.oid, 'SELECT') \
              order by c.relname",
         )
         .bind(&schema)
@@ -460,7 +485,10 @@ impl DbSource for PgPoolSource {
         for value in filter_values {
             query = query.bind(value);
         }
-        let pg_rows = query.fetch_all(&mut *tx).await?;
+        let pg_rows = query
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| map_select_denied(e, &table))?;
         let total_approx = sqlx::query_scalar::<_, i64>(
             "select reltuples::bigint from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
