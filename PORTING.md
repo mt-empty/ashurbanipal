@@ -149,6 +149,19 @@ by reusing the frontend and fixtures above:
 - **Fork the frontend.** Vendor the canonical file as-is; UI changes go
   upstream into `frontend/dbviewer.html` and flow back down when you
   re-sync your vendored copy to a newer commit.
+- **Install anything host-global.** Every route, middleware/filter,
+  exception handler, error-page mapping, and response-header rule a port
+  adds MUST be scoped to the `{mount}` subtree. Never register an
+  application-wide exception handler, servlet filter, fallback/`default`
+  route, or framework interceptor that can observe or alter a request the
+  host serves outside `{mount}` — mounting the router must stay
+  indistinguishable from not mounting it for every other path (the same
+  guarantee §4's kill switch gives for the disabled case, and the CSP
+  section gives for response headers). One consequence to design around
+  rather than fight: a request the framework's own server layer rejects
+  *before* dispatch — an over-long request line, a malformed URI — is
+  answered by that server's default error, carrying none of the port's
+  handling; see "Request-boundary rejections" below.
 
 ## Conformance is two layers, both required
 
@@ -253,6 +266,39 @@ port that serves the HTML route hits it identically:
   itself before the UI will execute client-side. This matches the Rust
   reference's behavior (also no CSP handling) — consistent across ports,
   not a Spring-specific gap.
+
+## Request-boundary rejections
+
+Some ports bundle an HTTP server whose own defaults reject a request
+*before* it reaches the port's handlers. The port's error mapping,
+response-header stamping, and the `x-ashurbanipal-protocol` header all run
+inside request dispatch, so a pre-dispatch rejection carries none of them —
+the client gets the server's stock error page instead. A port MUST NOT
+"fix" this: intercepting it means a host-global error handler or a
+server-level valve/filter, which the section above forbids. The honest
+handling mirrors CSP:
+
+1. **Do not reach below the framework's request-dispatch layer** to
+   re-wrap these responses.
+2. **Where a server default rejects input the protocol considers valid,
+   document it here** as a known per-port deviation, with the host-side
+   setting that lifts it.
+
+Known deviation — **Spring Boot / embedded Tomcat, request header size.**
+Tomcat's default `server.max-http-request-header-size` is 8 KiB, and that
+budget covers the whole request line. `spec/protocol.md` §5.4.2 caps the
+`filter` param at 8192 URL-*decoded* bytes; URL-encoding inflates a dense
+filter's on-the-wire form well past that (measured worst case ~14.6x, for a
+many-short-conditions filter at the frontend's own 1024-byte DSL limit), so
+a filter the spec accepts can overrun Tomcat's request-line budget and draw
+Tomcat's stock `text/html` 400 — no protocol header — instead of the spec's
+`text/plain` "filter too long" 400. The other four ports' server layers
+(hyper, `net/http`, llhttp, Werkzeug) sit far above this limit and are
+unaffected. A Spring host that needs full filter-size conformance raises
+`server.max-http-request-header-size`; the starter and its demo app do not
+ship that setting, since it changes the host's Tomcat connector globally —
+the schema-conformance CI job sets it via an env var for the fuzzer's
+benefit only (`spring-boot-conformance.yml`).
 
 ## Listing bar
 

@@ -89,6 +89,11 @@ jobs:
     with:
       toolchain: java
       start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
-      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENABLED=true"
+      # SERVER_MAX_HTTP_REQUEST_HEADER_SIZE: schemathesis generates filter
+      # params that URL-encode past Tomcat's 8 KiB request-header default,
+      # which then draws Tomcat's own 400 instead of the app's — a known
+      # deviation (PORTING.md, "Request-boundary rejections"), lifted here
+      # for the fuzzer rather than in any shipped config a host would copy.
+      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=ashurbanipal SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENABLED=true SERVER_MAX_HTTP_REQUEST_HEADER_SIZE=65536"
       health-url: "http://localhost:4100/__ashurbanipal/api/tables"
       conformance-url: "http://localhost:4100/__ashurbanipal"

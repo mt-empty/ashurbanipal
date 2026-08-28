@@ -1,6 +1,6 @@
 [package]
 name = "ashurbanipal-actix-web"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.94"
 description = "Embeddable, read-only web UI for browsing a service's own database tables (Actix-web adapter)"
@@ -12,7 +12,7 @@ categories = ["web-programming", "database"]
 
 [dependencies]
 actix-web = "4"
-ashurbanipal = { version = "0.2", path = "../core" }
+ashurbanipal = { version = "0.3", path = "../core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.13", default-features = false, features = [

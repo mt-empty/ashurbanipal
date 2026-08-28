@@ -1,7 +1,7 @@
 # Publishing checklist
 
-Status (2026-08-27): all six packaged ports are live on their registries.
-**Go is the only port not yet published** — it needs its first tag (see below).
+Status (2026-08-27): all six packaged ports are live on their registries and,
+as of the 0.3.0 reset, share one `major.minor` version line.
 
 This doc governs *distribution* — whether a port's artifact can leave this repo
 and install from a public registry. `PORTING.md` governs *correctness*
@@ -12,13 +12,17 @@ separate gates.
 
 | Port | Package / coordinate | Registry | Latest | Tag prefix | Publish workflow |
 |---|---|---|---|---|---|
-| Rust core | `ashurbanipal` | crates.io | 0.2.1 | `core-v*` | `rust-core-publish.yml` |
-| Rust / Axum | `ashurbanipal-axum` | crates.io | 0.2.1 | `axum-v*` | `rust-axum-publish.yml` |
-| Rust / Actix-web | `ashurbanipal-actix-web` | crates.io | 0.2.1 | `actix-web-v*` | `rust-actix-web-publish.yml` |
-| Node / Express | `ashurbanipal-node-express` | npm | 0.1.1 | `node-v*` | `node-express-publish.yml` |
-| Python / Flask | `ashurbanipal-flask` | PyPI | 0.1.1 | `flask-v*` | `flask-python-publish.yml` |
-| Spring Boot | `io.github.mt-empty:ashurbanipal-spring-boot-starter` | Maven Central | 0.1.1 | `spring-v*` | `spring-boot-starter-publish.yml` |
-| Go / net-http | `github.com/mt-empty/ashurbanipal/implementations/go-nethttp` | proxy.golang.org | — (unpublished) | `implementations/go-nethttp/v*` | none — tag only |
+| Rust core | `ashurbanipal` | crates.io | 0.3.0 | `core-v*` | `rust-core-publish.yml` |
+| Rust / Axum | `ashurbanipal-axum` | crates.io | 0.3.0 | `axum-v*` | `rust-axum-publish.yml` |
+| Rust / Actix-web | `ashurbanipal-actix-web` | crates.io | 0.3.0 | `actix-web-v*` | `rust-actix-web-publish.yml` |
+| Node / Express | `ashurbanipal-node-express` | npm | 0.3.0 | `node-v*` | `node-express-publish.yml` |
+| Python / Flask | `ashurbanipal-flask` | PyPI | 0.3.0 | `flask-v*` | `flask-python-publish.yml` |
+| Spring Boot | `io.github.mt-empty:ashurbanipal-spring-boot-starter` | Maven Central | 0.3.0 | `spring-v*` | `spring-boot-starter-publish.yml` |
+| Go / net-http | `github.com/mt-empty/ashurbanipal/implementations/go-nethttp` | proxy.golang.org | 0.3.0 | `implementations/go-nethttp/v*` | none — tag only |
+
+Latest reflects the 0.3.0 reset once its tags are pushed (Rust was at 0.2.1,
+the others at 0.1.1, Go at its initial 0.1.0 — a publish-history artifact, not a
+signal).
 
 Auth is fully configured for all six:
 
@@ -33,27 +37,31 @@ Maven Central is fully immutable. Treat a pushed release tag as final.
 
 ## Cutting a release
 
-Versions are per-port and independent — there is no repo-wide version. For each
-port:
+**Feature release** — anything behavioral or shape-changing (it lands across every
+port in one PR): bump the shared `major.minor` for all six ports to the same
+`X.Y.0`, one commit, then tag each port. **Patch release** — a port-local fix (a
+dependency bump, a language-idiom bugfix, a published-README correction): bump
+only that port's patch component and tag only that port; the others don't move.
+The next feature release re-aligns everyone at `.0`.
+
+Per port, given the target version:
 
 1. Bump `version` in the port's manifest, on `main`:
-   - Rust: `implementations/rust/<crate>/Cargo.toml` (+ `Cargo.lock`)
+   - Rust: `implementations/rust/<crate>/Cargo.toml` (+ `Cargo.lock`) — and each
+     adapter's `ashurbanipal = { version = "X.Y" }` bound moves with the core
    - Node: `implementations/node-express/package.json`
    - Flask: `implementations/flask-python/pyproject.toml`
    - Spring: `implementations/spring-boot-starter/build.gradle.kts`
+   - Go: no manifest — the tag is the version
 2. Commit to `main`.
 3. Tag that commit `<prefix>-vX.Y.Z`, matching the manifest version exactly.
 4. Push the tag. The publish workflow runs build + test + conformance, asserts
-   the tag is on `main` and equals the manifest version, then publishes.
+   the tag is on `main` and equals the manifest version, then publishes. (Go has
+   no workflow — the pushed tag is the release.)
 
-The three Rust crates version independently but have moved in lockstep so far
-(`ashurbanipal-axum` 0.1.0 was published pre-core-extraction and can't reuse that
-number, which forced the shared 0.2.x line). Keep bumping them together unless one
-genuinely needs to move alone.
+## Go — release mechanics
 
-## Go — first publish
-
-No registry integration needed; "publishing" is just the tag. Note the
+No registry integration; "publishing" is just the tag. It needs the
 subdirectory-module path prefix — a short `go-v*` tag would never resolve for
 `go get`:
 
@@ -63,23 +71,24 @@ git tag implementations/go-nethttp/vX.Y.Z && git push --tags
 
 `proxy.golang.org` indexes on the first `go get`. Keep the `@vX.Y.Z` references
 in `implementations/go-nethttp/README.md` and `readme.md` in sync with the tag on
-each bump.
-
-## Open items
-
-- **Stale tag.** `rust-v0.1.0` predates the `rust-v*` → `axum-v*` rename; delete it.
+each bump. (`v0.1.0` was the initial tag, before the 0.3.0 reset aligned every
+port.)
 
 ## Conventions
 
+- **Shared `major.minor`, independent patch.** Every port carries the same `X.Y`
+  and bumps it together for any feature or behavioral change — they're one spec at
+  one protocol version, and features land across all ports in one PR. The patch
+  component is per-port: a port takes a solo `X.Y.Z+1` for an out-of-band fix
+  without moving the others. The protocol version (`spec/CHANGELOG.md`, `readme.md`
+  table) stays the hard compatibility signal, independent of the package number.
+- **Tags stay per-port**, each scoped to its own directory — there is no shared
+  `v*` tag. Each registry needs its own publish trigger, and Go's tag needs its
+  module-path prefix. Independent tags, shared version number.
 - **The frontend is not released standalone.** `dbviewer.html` ships only embedded
   in a port. Each port pins the canonical `frontend/dbviewer.html` at a commit and
   re-hashes its vendored copy in its own CI (`PORTING.md` vendoring section); there
   is no separate GitHub Release or `frontend-v*` tag.
-
-- **Independent per-port (and per-Rust-crate) tags**, each scoped to its own
-  directory — not a shared `v*`. The ports are hand-written implementations of one
-  spec, not generated from a shared core, so they version like an independent
-  polyglot monorepo (dependabot already bumps each port on its own schedule).
 - **Framework-suffixed package names** — `ashurbanipal-axum`, `-actix-web`,
   `-node-express`, `-flask`, `-spring-boot-starter`. A framework changes the mount
   function's return type, so it's one published artifact per framework, not a
