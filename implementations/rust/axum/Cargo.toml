@@ -14,10 +14,8 @@ categories = ["web-programming", "database"]
 axum = "0.8"
 ashurbanipal = { version = "0.3", path = "../core" }
 sqlx = { workspace = true }
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "1"
 reqwest = { version = "0.13", default-features = false, features = [
     "rustls",
     "json",
@@ -42,6 +40,7 @@ tracing-subscriber = "0.3"
 dotenvy = "0.15"
 escargot = "0.5.15"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
+serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
 
 [[example]]
