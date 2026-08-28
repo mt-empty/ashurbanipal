@@ -44,6 +44,13 @@ dependency bump, a language-idiom bugfix, a published-README correction): bump
 only that port's patch component and tag only that port; the others don't move.
 The next feature release re-aligns everyone at `.0`.
 
+Before tagging anything, in the same release commit: set the **Latest** column
+of the "What's published" table above to the target version, run
+`mise run docs:check-versions --fix` to propagate it into the hardcoded version
+strings in `readme.md`, and commit the result. A human miss then fails CI on the
+next PR — `tools/check-doc-versions.sh` (in `mise run check`) diffs the table
+against those strings and against the highest matching git tag.
+
 Per port, given the target version:
 
 1. Bump `version` in the port's manifest, on `main`:
@@ -69,10 +76,10 @@ subdirectory-module path prefix — a short `go-v*` tag would never resolve for
 git tag implementations/go-nethttp/vX.Y.Z && git push --tags
 ```
 
-`proxy.golang.org` indexes on the first `go get`. Keep the `@vX.Y.Z` references
-in `implementations/go-nethttp/README.md` and `readme.md` in sync with the tag on
-each bump. (`v0.1.0` was the initial tag, before the 0.3.0 reset aligned every
-port.)
+`proxy.golang.org` indexes on the first `go get`. The install snippets in
+`implementations/go-nethttp/README.md` and `readme.md` use `@latest`, so no
+per-bump edit there — the pinned version lives only in the table above.
+(`v0.1.0` was the initial tag, before the 0.3.0 reset aligned every port.)
 
 ## Conventions
 

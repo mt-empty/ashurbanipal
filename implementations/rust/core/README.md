@@ -15,16 +15,14 @@ cargo add ashurbanipal
 Postgres by default (the `postgres` feature); MySQL/MariaDB and SQLite
 behind the `mysql`/`sqlite` features:
 
-```toml
-[dependencies]
-ashurbanipal = { version = "0.2", features = ["mysql"] } # or "sqlite"
+```sh
+cargo add ashurbanipal --features mysql   # or --features sqlite
 ```
 
-Drop Postgres entirely with `default-features = false`:
+Drop Postgres entirely with `--no-default-features`:
 
-```toml
-[dependencies]
-ashurbanipal = { version = "0.2", default-features = false, features = ["sqlite"] } # or "mysql"
+```sh
+cargo add ashurbanipal --no-default-features --features sqlite   # or --features mysql
 ```
 
 Most hosts only need one backend — if that's not Postgres, dropping it

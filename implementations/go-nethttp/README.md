@@ -12,7 +12,7 @@ Released via a subdirectory-module tag (`implementations/go-nethttp/vX.Y.Z`);
 `proxy.golang.org` serves it, no registry account involved. Install:
 
 ```sh
-go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@v0.3.0
+go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@latest
 ```
 
 ## Usage

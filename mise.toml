@@ -13,8 +13,8 @@ uv = "latest"
 # `<layer>:*` subtasks below.
 
 [tasks.check]
-description = "everything CI would run, across every implementation: rust, spring, go, node, flask, frontend, conformance"
-depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance"]
+description = "everything CI would run, across every implementation: rust, spring, go, node, flask, frontend, conformance, docs"
+depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance", "docs"]
 
 [tasks.rust]
 description = "rust implementation checks: fmt-check, lint, test, integration-test"
@@ -39,6 +39,14 @@ depends = ["flask:lint", "flask:fmt-check", "flask:test"]
 [tasks.frontend]
 description = "frontend checks: typecheck, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
 depends = ["frontend:typecheck", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
+
+[tasks.docs]
+description = "docs checks: hardcoded version strings in sync with docs/publishing-checklist.md"
+depends = ["docs:check-versions"]
+
+[tasks."docs:check-versions"]
+description = "verify readme.md's Spring coordinate matches the publishing-checklist ledger (and the ledger matches the highest spring-v* tag); --fix rewrites readme.md"
+run = "tools/check-doc-versions.sh"
 
 [tasks."frontend:install"]
 description = "pnpm install --frozen-lockfile"

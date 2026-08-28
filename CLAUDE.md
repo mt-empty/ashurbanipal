@@ -101,6 +101,7 @@ mise run node                        # node lint + typecheck + build + test (nod
 mise run flask                       # flask lint + fmt-check + test (flask-python, ruff + pytest via uv)
 mise run frontend                    # frontend typecheck + build-check + ports-sync check + demo-sync check + Playwright e2e suite
 mise run conformance                 # seed sync check + conformance:test + conformance:schema-test
+mise run docs                        # docs:check-versions — readme.md version strings vs. the publishing-checklist ledger
 
 mise run rust:build
 mise run rust:test                       # unit tests live inline (#[cfg(test)] mod tests in config.rs, routes.rs)

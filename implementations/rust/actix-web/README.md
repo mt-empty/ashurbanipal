@@ -74,16 +74,14 @@ health_path = "/health"
 Same `DbSource` backends as `ashurbanipal-axum`, unchanged — see
 [its README](../axum/README.md#database-support) for the full matrix.
 
-```toml
-[dependencies]
-ashurbanipal-actix-web = { version = "0.2", features = ["mysql"] } # or "sqlite"
+```sh
+cargo add ashurbanipal-actix-web --features mysql   # or --features sqlite
 ```
 
-Drop Postgres entirely with `default-features = false`:
+Drop Postgres entirely with `--no-default-features`:
 
-```toml
-[dependencies]
-ashurbanipal-actix-web = { version = "0.2", default-features = false, features = ["sqlite"] } # or "mysql"
+```sh
+cargo add ashurbanipal-actix-web --no-default-features --features sqlite   # or --features mysql
 ```
 
 Full API/config reference:

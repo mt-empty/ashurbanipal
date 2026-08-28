@@ -68,16 +68,14 @@ Postgres by default. MySQL/MariaDB and SQLite are supported behind the
 degrade to empty on those backends) — swap in `MySqlSource`/`SqliteSource`
 in place of `PgPoolSource`, everything else stays the same:
 
-```toml
-[dependencies]
-ashurbanipal-axum = { version = "0.2", features = ["mysql"] } # or "sqlite"
+```sh
+cargo add ashurbanipal-axum --features mysql   # or --features sqlite
 ```
 
-Drop Postgres entirely with `default-features = false`:
+Drop Postgres entirely with `--no-default-features`:
 
-```toml
-[dependencies]
-ashurbanipal-axum = { version = "0.2", default-features = false, features = ["sqlite"] } # or "mysql"
+```sh
+cargo add ashurbanipal-axum --no-default-features --features sqlite   # or --features mysql
 ```
 
 Most hosts only need one backend — if that's not Postgres, dropping it

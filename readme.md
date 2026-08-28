@@ -77,7 +77,7 @@ ashurbanipal:
 <details><summary>Go / net-http</summary>
 
 ```go
-// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@v0.3.0
+// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@latest
 source := ashurbanipal.NewPostgresSource(db, timeoutSecs)
 viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
 ```
@@ -133,7 +133,7 @@ ashurbanipal:
 <details><summary>Go / net-http</summary>
 
 ```go
-// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@v0.3.0
+// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@latest
 // go build -tags mysql
 source := ashurbanipal.NewMySQLSource(db, timeoutSecs)
 viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
@@ -191,7 +191,7 @@ ashurbanipal:
 <details><summary>Go / net-http</summary>
 
 ```go
-// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@v0.3.0
+// go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@latest
 // go build -tags sqlite
 source := ashurbanipal.NewSQLiteSource(db, timeoutSecs)
 viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
