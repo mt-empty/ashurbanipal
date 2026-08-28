@@ -141,10 +141,16 @@ Response:
   the table has none.
 - Tables SHOULD be returned in a stable order (the Rust implementation
   sorts by name).
+- SHOULD exclude any table the connected role cannot read, so nothing
+  listed here would be rejected by §5.4's table check — or fail mid-query
+  — for lack of privilege. On an engine that can't cheaply express this
+  (see `docs/adapter-decisions.md`), the listing and the §5.2 allow-list
+  MUST still agree with each other.
 
 ### 5.3 `GET {mount}/api/table-counts`
 
-Approximate row counts for every table in the resolved schema (§1).
+Approximate row counts for the same set of tables §5.2 lists for the
+resolved schema (§1).
 
 | Param    | Required | Rules                                             |
 |----------|----------|----------------------------------------------------|
