@@ -1,12 +1,14 @@
 name: rust-core-publish
 
 # Publishes implementations/rust/core to crates.io as `ashurbanipal`,
-# gated on a core-v* tag (see docs/publishing-checklist.md's per-port tag
-# scheme — this crate's tags never share rust-axum-publish.yml's axum-v*
-# or rust-actix-web-publish.yml's actix-web-v*). Tag/version verification
-# and build+dry-run-package are shared with those two workflows via
-# _rust-crate-publish-check.yml — see that file's header for the Trusted
-# Publishing bootstrap caveat.
+# gated on an ashurbanipal-v* tag (see docs/publishing-checklist.md's per-port
+# tag scheme — this crate's tags never share rust-axum-publish.yml's
+# ashurbanipal-axum-v* or rust-actix-web-publish.yml's
+# ashurbanipal-actix-web-v*; the ashurbanipal-v* glob does not match those
+# longer prefixes). Tag/version verification and build+dry-run-package are
+# shared with those two workflows via _rust-crate-publish-check.yml — see that
+# file's header for the Trusted Publishing bootstrap caveat. The post-release
+# job then creates the GitHub Release with git-cliff-generated notes.
 #
 # `ashurbanipal` has no HTTP surface of its own (framework-agnostic config,
 # DbSource backends, filter DSL only), so unlike the axum/actix-web publish
@@ -16,7 +18,7 @@ name: rust-core-publish
 
 on:
   push:
-    tags: ["core-v*"]
+    tags: ["ashurbanipal-v*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -25,7 +27,7 @@ jobs:
   verify-and-build:
     uses: ./.github/workflows/_rust-crate-publish-check.yml
     with:
-      tag-prefix: "core-v"
+      tag-prefix: "ashurbanipal-v"
       crate-name: "ashurbanipal"
       crate-dir: "implementations/rust/core"
 
@@ -57,3 +59,15 @@ jobs:
         run: cargo publish -p ashurbanipal
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  # A Release hiccup must never wedge the already-completed, irreversible
+  # crates.io publish in `needs: publish` — hence a separate job + continue-on-error.
+  post-release:
+    needs: publish
+    permissions:
+      contents: write
+    continue-on-error: true
+    uses: ./.github/workflows/_post-release.yml
+    with:
+      tag-pattern: '^ashurbanipal-v'
+      include-paths: 'implementations/rust/core/** frontend/** spec/**'

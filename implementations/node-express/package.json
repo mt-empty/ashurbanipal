@@ -20,7 +20,8 @@
     "src",
     "demo",
     "frontend/dbviewer.html",
-    "tsconfig.json"
+    "tsconfig.json",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "sync-frontend": "node -e \"require('fs').mkdirSync('frontend',{recursive:true});require('fs').copyFileSync('../../frontend/dbviewer.html','frontend/dbviewer.html')\"",

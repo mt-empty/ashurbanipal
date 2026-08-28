@@ -1,9 +1,10 @@
 name: flask-python-publish
 
 # Publishes implementations/flask-python to PyPI as ashurbanipal-flask,
-# gated on a flask-v* tag (docs/publishing-checklist.md's per-port tag
-# scheme). Shares its build/test gate with flask-conformance.yml via
-# _flask-build-test.yml.
+# gated on an ashurbanipal-flask-v* tag (docs/publishing-checklist.md's
+# per-port tag scheme). Shares its build/test gate with flask-conformance.yml
+# via _flask-build-test.yml. The post-release job then creates the GitHub
+# Release with git-cliff-generated notes.
 #
 # Unlike npm/crates.io, PyPI's Trusted Publisher config supports a
 # "pending publisher" registered before the project exists on the
@@ -13,7 +14,7 @@ name: flask-python-publish
 
 on:
   push:
-    tags: ["flask-v*"]
+    tags: ["ashurbanipal-flask-v*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,7 +38,7 @@ jobs:
 
       - name: Compare tag to implementations/flask-python/pyproject.toml version
         run: |
-          tag_version="${GITHUB_REF_NAME#flask-v}"
+          tag_version="${GITHUB_REF_NAME#ashurbanipal-flask-v}"
           pkg_version=$(sed -n 's/^version = "\(.*\)"/\1/p' implementations/flask-python/pyproject.toml)
           if [ "$tag_version" != "$pkg_version" ]; then
             echo "tag $GITHUB_REF_NAME implies version $tag_version, but pyproject.toml has $pkg_version" >&2
@@ -127,3 +128,15 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  # A Release hiccup must never wedge the already-completed, irreversible
+  # PyPI publish in `needs: publish` — hence a separate job + continue-on-error.
+  post-release:
+    needs: publish
+    permissions:
+      contents: write
+    continue-on-error: true
+    uses: ./.github/workflows/_post-release.yml
+    with:
+      tag-pattern: '^ashurbanipal-flask-v'
+      include-paths: 'implementations/flask-python/** frontend/** spec/**'

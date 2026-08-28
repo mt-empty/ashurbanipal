@@ -1,0 +1,29 @@
+name: reject-legacy-tags
+
+# The per-port publish tags were renamed to ashurbanipal-<name>-v* (see
+# docs/publishing-checklist.md). The old short prefixes (core-v*, axum-v*,
+# actix-web-v*, node-v*, flask-v*, spring-v*) no longer trigger any publish
+# workflow — a tag pushed with one would silently do nothing. This job makes
+# that loud instead. (implementations/go-nethttp/v* is NOT legacy — Go keeps
+# the module-path prefix.)
+
+on:
+  push:
+    tags:
+      - "core-v*"
+      - "axum-v*"
+      - "actix-web-v*"
+      - "node-v*"
+      - "flask-v*"
+      - "spring-v*"
+      - "rust-v*"
+
+jobs:
+  reject:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: |
+          echo "::error::Tag ${GITHUB_REF_NAME} uses a retired prefix. Publish tags are now" \
+               "ashurbanipal-<name>-v* (e.g. ashurbanipal-axum-v0.4.0). See docs/publishing-checklist.md." >&2
+          exit 1

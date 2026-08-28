@@ -1,5 +1,8 @@
 # Protocol changelog
 
+This file tracks the wire-contract version only. Implementation-level changes
+per published port live in each port's own `implementations/<port>/CHANGELOG.md`.
+
 Versioning policy (`PORTING.md`'s Governance section): additive-optional
 changes keep the same major version; anything behavioral or
 shape-changing bumps the version and gets an entry here.

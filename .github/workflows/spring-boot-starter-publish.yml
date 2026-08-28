@@ -1,10 +1,11 @@
 name: spring-boot-starter-publish
 
 # Publishes implementations/spring-boot-starter to Maven Central as
-# io.github.mt-empty:ashurbanipal-spring-boot-starter, gated on a
-# spring-v* tag (docs/publishing-checklist.md's per-port tag scheme).
-# Shares its build/test gate with spring-boot-conformance.yml via
-# _spring-build-test.yml.
+# io.github.mt-empty:ashurbanipal-spring-boot-starter, gated on an
+# ashurbanipal-spring-boot-starter-v* tag (docs/publishing-checklist.md's
+# per-port tag scheme). Shares its build/test gate with
+# spring-boot-conformance.yml via _spring-build-test.yml. The post-release job
+# then creates the GitHub Release with git-cliff-generated notes.
 #
 # Unlike npm/crates.io/PyPI, there's no OIDC trusted-publishing option
 # here — Central Portal auth is a username/password token pair
@@ -19,7 +20,7 @@ name: spring-boot-starter-publish
 
 on:
   push:
-    tags: ["spring-v*"]
+    tags: ["ashurbanipal-spring-boot-starter-v*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -43,7 +44,7 @@ jobs:
 
       - name: Compare tag to implementations/spring-boot-starter/build.gradle.kts version
         run: |
-          tag_version="${GITHUB_REF_NAME#spring-v}"
+          tag_version="${GITHUB_REF_NAME#ashurbanipal-spring-boot-starter-v}"
           gradle_version=$(sed -n 's/^version = "\(.*\)"/\1/p' implementations/spring-boot-starter/build.gradle.kts)
           if [ "$tag_version" != "$gradle_version" ]; then
             echo "tag $GITHUB_REF_NAME implies version $tag_version, but build.gradle.kts has $gradle_version" >&2
@@ -107,3 +108,15 @@ jobs:
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+  # A Release hiccup must never wedge the already-completed, immutable Maven
+  # Central publish in `needs: publish` — hence a separate job + continue-on-error.
+  post-release:
+    needs: publish
+    permissions:
+      contents: write
+    continue-on-error: true
+    uses: ./.github/workflows/_post-release.yml
+    with:
+      tag-pattern: '^ashurbanipal-spring-boot-starter-v'
+      include-paths: 'implementations/spring-boot-starter/** frontend/** spec/**'

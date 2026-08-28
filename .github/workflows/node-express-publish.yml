@@ -1,9 +1,10 @@
 name: node-express-publish
 
 # Publishes implementations/node-express to npm as ashurbanipal-node-express,
-# gated on a node-v* tag (docs/publishing-checklist.md's per-port tag
-# scheme). Shares its build/test gate with node-conformance.yml via
-# _node-build-test.yml.
+# gated on an ashurbanipal-node-express-v* tag (docs/publishing-checklist.md's
+# per-port tag scheme). Shares its build/test gate with node-conformance.yml
+# via _node-build-test.yml. The post-release job then creates the GitHub
+# Release with git-cliff-generated notes.
 #
 # Prerequisite this workflow can't do for you: npm's Trusted Publisher
 # (OIDC) config can only be attached to a package that already exists on
@@ -21,7 +22,7 @@ name: node-express-publish
 
 on:
   push:
-    tags: ["node-v*"]
+    tags: ["ashurbanipal-node-express-v*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -45,7 +46,7 @@ jobs:
 
       - name: Compare tag to implementations/node-express/package.json version
         run: |
-          tag_version="${GITHUB_REF_NAME#node-v}"
+          tag_version="${GITHUB_REF_NAME#ashurbanipal-node-express-v}"
           pkg_version=$(node -p "require('./implementations/node-express/package.json').version")
           if [ "$tag_version" != "$pkg_version" ]; then
             echo "tag $GITHUB_REF_NAME implies version $tag_version, but package.json has $pkg_version" >&2
@@ -119,3 +120,15 @@ jobs:
       - name: npm publish
         working-directory: implementations/node-express
         run: npm publish
+
+  # A Release hiccup must never wedge the already-completed, irreversible
+  # npm publish in `needs: publish` — hence a separate job + continue-on-error.
+  post-release:
+    needs: publish
+    permissions:
+      contents: write
+    continue-on-error: true
+    uses: ./.github/workflows/_post-release.yml
+    with:
+      tag-pattern: '^ashurbanipal-node-express-v'
+      include-paths: 'implementations/node-express/** frontend/** spec/**'
