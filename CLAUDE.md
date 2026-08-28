@@ -13,6 +13,14 @@ the code as it is now, not a rejected alternative or its history — say
 what a widget *is* (e.g. "a caret-anchored popover"), not that it's "not a
 native `<datalist>`."
 
+**Every commit subject MUST be a Conventional Commit** — `type(scope):
+summary`, types `feat fix docs style refactor perf test build ci chore
+revert security`, optional `!` for breaking. git-cliff builds each port's
+`implementations/*/CHANGELOG.md` from these subjects, so a non-conforming
+one is dropped from the generated notes. `.githooks/commit-msg` enforces
+it locally and `pr-title-lint.yml` enforces the squash-merge title; run
+`git config core.hooksPath .githooks` once per clone so the hooks fire.
+
 ## What this is
 
 Ashurbanipal is a read-only web UI for browsing a host service's own

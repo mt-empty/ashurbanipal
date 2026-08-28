@@ -5,6 +5,7 @@ pnpm = "latest"
 go = "1.25.3"
 java = "temurin-21"
 uv = "latest"
+"aqua:orhun/git-cliff" = "2"
 
 # ---- top-level umbrella tasks -----------------------------------------
 # `mise run check` is everything CI runs, across every implementation.
@@ -13,8 +14,8 @@ uv = "latest"
 # `<layer>:*` subtasks below.
 
 [tasks.check]
-description = "everything CI would run, across every implementation: rust, spring, go, node, flask, frontend, conformance, docs"
-depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance", "docs"]
+description = "everything CI would run, across every implementation: rust, spring, go, node, flask, frontend, conformance, docs, changelog"
+depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance", "docs", "changelog"]
 
 [tasks.rust]
 description = "rust implementation checks: fmt-check, lint, test, integration-test"
@@ -45,8 +46,52 @@ description = "docs checks: hardcoded version strings in sync with docs/publishi
 depends = ["docs:check-versions"]
 
 [tasks."docs:check-versions"]
-description = "verify readme.md's Spring coordinate matches the publishing-checklist ledger (and the ledger matches the highest spring-v* tag); --fix rewrites readme.md"
+description = "verify readme.md's Spring coordinate matches the publishing-checklist ledger (and the ledger matches the highest Spring release tag); --fix rewrites readme.md"
 run = "tools/check-doc-versions.sh"
+
+# ---- changelog:* ------------------------------------------------------
+# One implementations/<port>/CHANGELOG.md per published port. The 0.3.0
+# floor is hand-written; git-cliff only ever generates > 0.3.0.
+# `changelog:<port>` prints the not-yet-released section — at release time
+# paste it under a new `## [X.Y.Z]` heading (docs/publishing-checklist.md).
+# The publish workflows generate the same notes with `git cliff --current`.
+# Each --tag-pattern is a single prefix (git-cliff --current errors on '^(a|b)').
+
+[tasks.changelog]
+description = "changelog checks: each port's CHANGELOG.md top section matches its manifest version"
+depends = ["changelog:check"]
+
+[tasks."changelog:check"]
+description = "verify each implementations/<port>/CHANGELOG.md top section matches that port's manifest version (offline; no git-cliff)"
+run = "tools/check-changelogs.sh"
+
+[tasks."changelog:rust-core"]
+description = "print the unreleased CHANGELOG section for the ashurbanipal core crate"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-v' --include-path 'implementations/rust/core/**' 'spec/**'"
+
+[tasks."changelog:rust-axum"]
+description = "print the unreleased CHANGELOG section for ashurbanipal-axum"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-axum-v' --include-path 'implementations/rust/axum/**' 'implementations/rust/core/**' 'frontend/**' 'spec/**'"
+
+[tasks."changelog:rust-actix-web"]
+description = "print the unreleased CHANGELOG section for ashurbanipal-actix-web"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-actix-web-v' --include-path 'implementations/rust/actix-web/**' 'implementations/rust/core/**' 'frontend/**' 'spec/**'"
+
+[tasks."changelog:node-express"]
+description = "print the unreleased CHANGELOG section for ashurbanipal-node-express"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-node-express-v' --include-path 'implementations/node-express/**' 'frontend/**' 'spec/**'"
+
+[tasks."changelog:flask-python"]
+description = "print the unreleased CHANGELOG section for ashurbanipal-flask"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-flask-v' --include-path 'implementations/flask-python/**' 'frontend/**' 'spec/**'"
+
+[tasks."changelog:spring-boot-starter"]
+description = "print the unreleased CHANGELOG section for the Spring Boot starter"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-spring-boot-starter-v' --include-path 'implementations/spring-boot-starter/**' 'frontend/**' 'spec/**'"
+
+[tasks."changelog:go-nethttp"]
+description = "print the unreleased CHANGELOG section for the Go/net-http port"
+run = "git-cliff --unreleased --strip header --tag-pattern '^implementations/go-nethttp/v' --include-path 'implementations/go-nethttp/**' 'frontend/**' 'spec/**'"
 
 [tasks."frontend:install"]
 description = "pnpm install --frozen-lockfile"

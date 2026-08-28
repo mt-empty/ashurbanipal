@@ -48,14 +48,17 @@ for v in $found; do
 done
 
 # The ledger itself can't silently lie: its number must equal the highest
-# pushed spring-v* release tag. Skipped (not failed) when no such tag is
-# reachable — e.g. a CI checkout that didn't fetch tags.
+# pushed Spring release tag. The prefix moved from spring-v* to
+# ashurbanipal-spring-boot-starter-v* (docs/publishing-checklist.md); match
+# both while old tags are still around. Skipped (not failed) when no such tag
+# is reachable — e.g. a CI checkout that didn't fetch tags.
 if command -v git >/dev/null 2>&1 && git -C "$root" rev-parse --git-dir >/dev/null 2>&1; then
-    highest=$(git -C "$root" tag -l 'spring-v*' | sed 's/^spring-v//' | sort -V | tail -1)
+    highest=$(git -C "$root" tag -l 'ashurbanipal-spring-boot-starter-v*' 'spring-v*' \
+        | sed 's/^ashurbanipal-spring-boot-starter-v//; s/^spring-v//' | sort -V | tail -1)
     if [ -z "$highest" ]; then
-        printf '%s\n' "note: no spring-v* tags reachable; skipping ledger-vs-tag check" >&2
+        printf '%s\n' "note: no Spring release tags reachable; skipping ledger-vs-tag check" >&2
     elif [ "$highest" != "$expected" ]; then
-        printf '%s\n' "ledger says Spring $expected, highest spring-v* tag is $highest; update $ledger" >&2
+        printf '%s\n' "ledger says Spring $expected, highest Spring tag is $highest; update $ledger" >&2
         fail=1
     fi
 else

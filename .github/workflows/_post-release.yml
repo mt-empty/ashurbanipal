@@ -1,0 +1,79 @@
+name: _post-release
+
+# Shared by every port's *-publish.yml (and go-nethttp-publish.yml): after the
+# registry publish succeeds, generate the release notes for the pushed tag with
+# git-cliff and create/update the GitHub Release. Kept a separate reusable
+# workflow, and a separate job in the caller (needs: publish), so a Release
+# hiccup can never wedge the already-completed, irreversible registry publish —
+# callers run it with continue-on-error: true.
+#
+# Version for the Release title is `${GITHUB_REF_NAME##*v}` — strips every port
+# prefix (ashurbanipal-axum-v0.3.0, implementations/go-nethttp/v0.3.0, …) down
+# to the bare semver, since no prefix segment or semver contains a lone 'v'.
+
+on:
+  workflow_call:
+    inputs:
+      tag-pattern:
+        description: 'Single-prefix git-cliff --tag-pattern regex, e.g. ^ashurbanipal-axum-v (never an alternation — git-cliff --current errors on those)'
+        required: true
+        type: string
+      include-paths:
+        description: 'Space-separated git-cliff --include-path globs for this port'
+        required: true
+        type: string
+      title-prefix:
+        description: 'Optional text before the version in the Release title (Go uses "go/net-http ")'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # create/edit the Release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git-cliff needs full history + all tags to bound the release
+          fetch-tags: true
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+        with:
+          # Same identifier mise.toml pins under, so the pinned "2" is what installs.
+          install_args: aqua:orhun/git-cliff # only this tool, not the whole mise.toml toolchain
+
+      - name: Generate notes and create/update the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -f # keep the --include-path globs literal (no shell pathname expansion)
+
+          # First tag under a freshly renamed prefix has no predecessor to bound
+          # against, so `git-cliff --current` ranges from repo root and lists every
+          # Conventional-Commit commit since CC adoption — overlapping the
+          # hand-written 0.3.0 floor. Warn loudly so the notes get hand-trimmed.
+          prior_tags=$(git tag --list | grep -cE '${{ inputs.tag-pattern }}' || true)
+          if [ "$prior_tags" -le 1 ]; then
+            echo "::warning::No prior tag matches '${{ inputs.tag-pattern }}' — release notes range from repo root; hand-trim NOTES.md / the CHANGELOG to the 0.3.0 floor."
+            echo "⚠️ First release under \`${{ inputs.tag-pattern }}\`: notes generated from repo root, hand-trim the Release body and CHANGELOG." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # continue-on-error at the caller keeps a notes failure from wedging the
+          # done, irreversible registry publish — but that also greens the run, so
+          # make the gap loud instead of aborting silently before gh release.
+          if ! git-cliff --current --strip header \
+            --tag-pattern '${{ inputs.tag-pattern }}' \
+            --include-path ${{ inputs.include-paths }} \
+            > NOTES.md; then
+            echo "::error::git-cliff failed for $GITHUB_REF_NAME — no GitHub Release created. Registry publish already completed; create the Release by hand."
+            echo "❌ git-cliff failed for \`$GITHUB_REF_NAME\` — GitHub Release NOT created (registry publish already done)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          version="${GITHUB_REF_NAME##*v}"
+          title="${{ inputs.title-prefix }}${version}"
+          gh release create "$GITHUB_REF_NAME" --notes-file NOTES.md --title "$title" --verify-tag \
+            || gh release edit "$GITHUB_REF_NAME" --notes-file NOTES.md --title "$title"

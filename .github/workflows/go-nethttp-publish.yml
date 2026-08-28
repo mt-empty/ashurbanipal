@@ -1,0 +1,127 @@
+name: go-nethttp-publish
+
+# "Publishing" the Go port is just the tag — proxy.golang.org indexes
+# github.com/mt-empty/ashurbanipal/implementations/go-nethttp on the first
+# `go get`, so there is no registry step. This workflow re-runs the build +
+# conformance gate on the tagged commit (parity with the other ports' publish
+# workflows) and then creates the GitHub Release with git-cliff-generated
+# notes. The tag needs the module-path prefix — a short ashurbanipal-go-v*
+# tag would never resolve for `go get` — so this one keeps
+# implementations/go-nethttp/v* while the other ports moved to
+# ashurbanipal-<name>-v* (docs/publishing-checklist.md).
+
+on:
+  push:
+    tags: ["implementations/go-nethttp/v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+env:
+  DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
+
+jobs:
+  verify-tag:
+    name: verify tag is on main
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need full history for the branch-ancestry check
+
+      - name: Check that the tagged commit is on main
+        run: |
+          if ! git branch -r --contains "${{ github.sha }}" | grep -q 'origin/main$'; then
+            echo "tag ${{ github.ref_name }} (${{ github.sha }}) is not on main — refusing to release" >&2
+            exit 1
+          fi
+
+  build-and-test:
+    name: go build/vet/fmt + fixture/kill-switch/integration tests
+    needs: verify-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ashurbanipal
+          POSTGRES_PASSWORD: ashurbanipal
+          POSTGRES_DB: ashurbanipal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply the conformance seed
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: implementations/go-nethttp/go.mod
+
+      - name: Build
+        working-directory: implementations/go-nethttp
+        run: go build ./...
+
+      - name: gofmt check
+        working-directory: implementations/go-nethttp
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would reformat:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: implementations/go-nethttp
+        run: go vet ./...
+
+      - name: Test
+        working-directory: implementations/go-nethttp
+        run: go test -race ./...
+
+  conformance:
+    name: Go — conformance kit (external-URL path)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: go
+      go-version-file: implementations/go-nethttp/go.mod
+      start-command: "cd implementations/go-nethttp && go run ./cmd/demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: go-nethttp-publish-conformance-report
+
+  schema-conformance:
+    name: Go — schema conformance
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-schema.yml
+    with:
+      toolchain: go
+      go-version-file: implementations/go-nethttp/go.mod
+      start-command: "cd implementations/go-nethttp && go run ./cmd/demo"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+
+  # Matches the other ports: a Release-creation hiccup is recoverable by hand
+  # and must not fail the workflow. The tag itself is already the release.
+  post-release:
+    needs: [conformance, schema-conformance]
+    permissions:
+      contents: write
+    continue-on-error: true
+    uses: ./.github/workflows/_post-release.yml
+    with:
+      tag-pattern: '^implementations/go-nethttp/v'
+      include-paths: 'implementations/go-nethttp/** frontend/** spec/**'
+      title-prefix: 'go/net-http '

@@ -1,0 +1,76 @@
+# git-cliff configuration — generates the per-port implementations/*/CHANGELOG.md
+# and the GitHub Release notes. Invoked per port with --tag-pattern +
+# --include-path (see mise.toml's changelog:* tasks). No [remote] section: keep
+# generation fully offline so `mise run check` never needs the network.
+#
+# Each --tag-pattern is a single prefix (e.g. '^ashurbanipal-axum-v'), never an
+# alternation — `git-cliff --current` errors on '^(a|b)' patterns. The retired
+# short-prefix tags (axum-v*, …) are simply invisible to the new patterns; that
+# is harmless because filter_unconventional below drops every pre-Conventional-
+# Commits commit anyway, so there is no real history to "orphan".
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this port are documented here. Format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the shared protocol
+version is tracked separately in `spec/CHANGELOG.md`.
+
+Entries below 0.3.0 are not tracked here — see the git history.
+"""
+body = """
+{% if version %}\
+    ## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits %}
+        - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+            {% if commit.breaking %}[**breaking**] {% endif %}\
+            {{ commit.message | upper_first }}\
+    {% endfor %}
+{% endfor %}\n
+"""
+trim = true
+render_always = true
+postprocessors = [
+    # Tags are port-prefixed (axum-v0.3.0, ashurbanipal-flask-v0.3.0,
+    # implementations/go-nethttp/v0.3.0). Strip everything up to and including
+    # the v before the semver so headings read "## [0.3.0]".
+    { pattern = '## \[[^\]]*?v([0-9]+\.[0-9]+\.[0-9]+)\]', replace = '## [${1}]' },
+]
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+require_conventional = false
+split_commits = false
+protect_breaking_commits = true
+commit_parsers = [
+    # Security is matched before feat/fix: the change is usually typed feat:/fix:
+    # and git-cliff assigns each commit to the first matching parser only.
+    { message = "^security", group = "<!-- 2 -->Security" },
+    { body = ".*security", group = "<!-- 2 -->Security" },
+    { footer = ".*security", group = "<!-- 2 -->Security" },
+    { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+    { message = "^perf", group = "<!-- 3 -->Performance" },
+    { message = "^refactor", group = "<!-- 4 -->Refactor" },
+    { message = "^docs?", group = "<!-- 5 -->Documentation" },
+    { message = "^revert", group = "<!-- 6 -->Revert" },
+    # chore/ci/build/style/test/refactor(deps) etc. are not consumer-facing —
+    # a per-port CHANGELOG.md is "for humans" (Keep a Changelog), so drop them.
+    { message = "^chore|^ci|^build|^style|^test", skip = true },
+    # This repo's pre-Conventional-Commits history uses "Area: summary", which
+    # the CC parser reads as type=Area — drop anything that isn't a real CC type
+    # rather than let those become junk groups.
+    { message = ".*", skip = true },
+]
+filter_commits = false
+fail_on_unmatched_commit = false
+use_branch_tags = false
+topo_order = false
+sort_commits = "oldest"
