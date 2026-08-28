@@ -58,7 +58,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.2-STABLE-ORDER` | Stable (name) order | `tables::lists_exactly_the_seeded_tables_in_alphabetical_order` |
 | `P5.2-SCHEMA-PARAM` | `schema` selects the resolved schema (§1) | `schemas::explicit_other_schema_selects_only_its_own_table`, `schemas::explicit_schema_public_matches_the_implicit_default` |
 | `P5.2-SOURCE-PARAM` | `source` selects the resolved source (§1); unrecognized → 400 | `sources::explicit_default_source_matches_the_implicit_default`, `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |
-| `P5.2-SELECT-PRIVILEGE` | Listing and the `table` allow-list both exclude tables the role can't `SELECT` (Postgres) | not exercised by the shared suite (runs as a fully-privileged role) — covered at the implementation level by `implementations/rust/axum/tests/table_listing_privileges.rs` |
+| `P5.2-SELECT-PRIVILEGE` | Listing and the `table` allow-list both exclude tables the role can't `SELECT` (Postgres) | not exercised by the shared suite (runs as a fully-privileged role) — covered by each port's own port-local integration test (e.g. `implementations/rust/axum/tests/table_listing_privileges.rs`, `TableListingPrivilegesTest` in Spring) |
 
 ## §5.3 `GET /api/table-counts`
 

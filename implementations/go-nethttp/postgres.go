@@ -3,8 +3,11 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // PostgresSource is the default/reference DbSource implementation — ported
@@ -100,9 +103,14 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 func (c *PostgresSource) allowedTables(ctx context.Context, db queryer, schema string) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
+	// has_table_privilege narrows information_schema.tables (which lists a
+	// table on *any* privilege) to just the SELECT-able ones, so this
+	// allow-list can't admit a table a later SELECT would be denied on —
+	// keeping it in lockstep with ListTables.
 	rows, err := db.QueryContext(ctx,
 		`select table_name from information_schema.tables
 		 where table_schema = $1 and table_type = 'BASE TABLE'
+		   and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT')
 		 order by table_name`, schema)
 	if err != nil {
 		return nil, err
@@ -256,11 +264,15 @@ func (c *PostgresSource) ListTables(ctx context.Context, schema *string) ([]Tabl
 
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
+	// has_table_privilege keeps this listing equal to the allow-list
+	// allowedTables enforces — a table the role can't SELECT is never
+	// offered as a row it would then have to reject.
 	rows, err := tx.QueryContext(ctx,
 		`select c.relname::text, obj_description(c.oid, 'pg_class')
 		 from pg_class c
 		 join pg_namespace n on n.oid = c.relnamespace
 		 where n.nspname = $1 and c.relkind = 'r'
+		   and has_table_privilege(c.oid, 'SELECT')
 		 order by c.relname`, realSchema)
 	if err != nil {
 		return nil, err
@@ -305,11 +317,14 @@ func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]Cou
 
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
+	// Same has_table_privilege filter as ListTables, so the count column
+	// never names a table the sidebar won't show.
 	rows, err := tx.QueryContext(ctx,
 		`select c.relname::text, c.reltuples::bigint
 		 from pg_class c
 		 join pg_namespace n on n.oid = c.relnamespace
 		 where n.nspname = $1 and c.relkind = 'r'
+		   and has_table_privilege(c.oid, 'SELECT')
 		 order by c.relname`, realSchema)
 	if err != nil {
 		return nil, err
@@ -332,6 +347,18 @@ func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]Cou
 		out = []CountEntry{}
 	}
 	return out, tx.Commit()
+}
+
+// mapSelectDenied turns a residual "permission denied" (SQLSTATE 42501) at
+// the row fetch into a NotAllowedError (400). The allow-list already
+// rejects tables the role can't SELECT, so this only catches the edge —
+// keeping the raw driver error off the wire.
+func mapSelectDenied(err error, table string) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42501" {
+		return &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+	}
+	return err
 }
 
 // QueryTable serves GET /api/tables/data: validates schema/table/sort/
@@ -504,7 +531,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, query, args...)
 	if err != nil {
-		return TableData{}, err
+		return TableData{}, mapSelectDenied(err, realTable)
 	}
 	defer rows.Close()
 
