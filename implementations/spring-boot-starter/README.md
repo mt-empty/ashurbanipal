@@ -44,6 +44,23 @@ means disabled (no `DbViewerController`/`DbSource` bean registered),
 never enabled with defaults.
 
 
+## Integration requirements
+
+Two host-side settings this starter deliberately does not apply for you,
+since both would change host-global behavior (`PORTING.md`):
+
+- **Strict CSP** — the vendored `dbviewer.html` runs an inline
+  `<script type="module">`. A host whose `Content-Security-Policy` forbids
+  inline scripts must extend `script-src` for `${ashurbanipal.base-path}`
+  or the UI renders but never loads data. This starter sets no CSP header
+  of its own (`PORTING.md`, "CSP and inline scripts").
+- **Large filters** — a `filter` query param near `spec/protocol.md`
+  §5.4.2's 8192-byte cap can overrun embedded Tomcat's default 8 KiB
+  `server.max-http-request-header-size` once URL-encoded, yielding
+  Tomcat's own 400 page instead of the protocol's. Raise
+  `server.max-http-request-header-size` (e.g. `64KB`) if your users build
+  filters that large (`PORTING.md`, "Request-boundary rejections").
+
 ## Database support
 
 Same per-backend degraded features and mechanisms as the Rust reference
