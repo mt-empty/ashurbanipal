@@ -5,10 +5,13 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 // mysqlVariant distinguishes the two forks the go-sql-driver/mysql driver
@@ -488,6 +491,19 @@ func (c *MySQLSource) TableCounts(ctx context.Context, schema *string) ([]CountE
 	return out, tx.Commit()
 }
 
+// mapSelectDeniedMySQL turns a residual ER_TABLEACCESS_DENIED_ERROR (1142,
+// on both MySQL and MariaDB) at the row fetch into a NotAllowedError (400).
+// information_schema.tables lists a table the role holds *any* privilege
+// on, not just SELECT, and there's no has_table_privilege analog to gate
+// the listing on — see docs/adapter-decisions.md §5.2/§5.3.
+func mapSelectDeniedMySQL(err error, table string) error {
+	var myErr *mysql.MySQLError
+	if errors.As(err, &myErr) && myErr.Number == 1142 {
+		return &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+	}
+	return err
+}
+
 func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table string, opts QueryOpts) (TableData, error) {
 	variant, err := c.variantOf(ctx)
 	if err != nil {
@@ -629,7 +645,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, query, args...)
 	if err != nil {
-		return TableData{}, err
+		return TableData{}, mapSelectDeniedMySQL(err, realTable)
 	}
 	defer rows.Close()
 

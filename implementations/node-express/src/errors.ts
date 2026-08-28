@@ -49,3 +49,18 @@ export function mapSelectDenied(err: unknown, table: string): unknown {
   }
   return err;
 }
+
+/**
+ * MySQL/MariaDB analog of {@link mapSelectDenied}: information_schema.tables
+ * lists a table the role holds *any* privilege on, not just SELECT, and
+ * there is no has_table_privilege function to gate the listing on (see
+ * docs/adapter-decisions.md §5.2/§5.3). A residual
+ * ER_TABLEACCESS_DENIED_ERROR (errno 1142, both engines) at the row fetch
+ * becomes NotAllowedError (→ 400) instead of a raw 500.
+ */
+export function mapSelectDeniedMysql(err: unknown, table: string): unknown {
+  if (typeof err === "object" && err !== null && "errno" in err && (err as { errno?: unknown }).errno === 1142) {
+    return new NotAllowedError(`table "${table}"`);
+  }
+  return err;
+}

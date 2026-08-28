@@ -1,5 +1,5 @@
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
-import { assertSafeTimeoutMs, FilterError, NotAllowedError } from "../errors.js";
+import { assertSafeTimeoutMs, FilterError, mapSelectDeniedMysql, NotAllowedError } from "../errors.js";
 import type { Condition } from "../filter.js";
 import {
   type ColumnInfo,
@@ -463,7 +463,11 @@ export class MySqlSource implements DbSource {
         timeoutMs,
         `${selectList} from ${quoteIdentMysql(realSchema)}.${quoteIdentMysql(realTable)}${whereClause}${orderClause} limit ? offset ?`,
       );
-      const dataRows = await queryRows(conn, dataSql, [...filterValues, opts.limit, opts.offset]);
+      const dataRows = await queryRows(conn, dataSql, [...filterValues, opts.limit, opts.offset]).catch(
+        (err: unknown) => {
+          throw mapSelectDeniedMysql(err, realTable);
+        },
+      );
       const outRows: Record<string, string | null>[] = dataRows.map((row) => {
         const out: Record<string, string | null> = {};
         for (const col of columns) {

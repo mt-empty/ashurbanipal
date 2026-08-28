@@ -398,6 +398,16 @@ class MySqlSource(DbSource):
                 try:
                     cur.execute(sql, (*filter_values, opts.limit, opts.offset))
                     mysql_rows = cur.fetchall()
+                except pymysql.Error as exc:
+                    # information_schema.tables lists a table the role holds
+                    # *any* privilege on, not just SELECT, and there's no
+                    # has_table_privilege analog to gate the listing on (see
+                    # docs/adapter-decisions.md §5.2/§5.3). Map the residual
+                    # ER_TABLEACCESS_DENIED_ERROR (1142, both engines) to
+                    # NotAllowed (400) instead of a raw 500.
+                    if exc.args and exc.args[0] == 1142:
+                        raise NotAllowed(f"table {table!r}") from exc
+                    raise
                 finally:
                     conn.use_unicode = True
                 rows = [

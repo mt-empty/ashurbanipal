@@ -220,7 +220,10 @@ demo-deps-stay-dev-dependencies, and the Rust comment-style rule.
   directly. On Postgres the table allow-list (and `list_tables` /
   `table_counts`) is additionally gated by `has_table_privilege(…,
   'SELECT')`, so the listing and the gate stay in lockstep and a table the
-  role can't read is never offered or accepted.
+  role can't read is never offered or accepted. MySQL/MariaDB have no such
+  function and the listing is left un-gated (see `docs/adapter-decisions.md`
+  §5.2/§5.3); a residual `permission denied` (error 1142) at the row fetch
+  is mapped to the same `NotAllowed` rejection instead.
 - **Multi-schema queries pin one connection per operation.** `schema: None`
   resolves to the connection's default schema; an explicit value is
   allow-list-checked the same way. That resolution happens once, as the
