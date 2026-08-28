@@ -42,17 +42,37 @@ jobs:
 
       - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
         with:
-          install_args: git-cliff # only this tool, not the whole mise.toml toolchain
+          # Same identifier mise.toml pins under, so the pinned "2" is what installs.
+          install_args: aqua:orhun/git-cliff # only this tool, not the whole mise.toml toolchain
 
       - name: Generate notes and create/update the Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -f # keep the --include-path globs literal (no shell pathname expansion)
-          git-cliff --current --strip header \
+
+          # First tag under a freshly renamed prefix has no predecessor to bound
+          # against, so `git-cliff --current` ranges from repo root and lists every
+          # Conventional-Commit commit since CC adoption — overlapping the
+          # hand-written 0.3.0 floor. Warn loudly so the notes get hand-trimmed.
+          prior_tags=$(git tag --list | grep -cE '${{ inputs.tag-pattern }}' || true)
+          if [ "$prior_tags" -le 1 ]; then
+            echo "::warning::No prior tag matches '${{ inputs.tag-pattern }}' — release notes range from repo root; hand-trim NOTES.md / the CHANGELOG to the 0.3.0 floor."
+            echo "⚠️ First release under \`${{ inputs.tag-pattern }}\`: notes generated from repo root, hand-trim the Release body and CHANGELOG." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # continue-on-error at the caller keeps a notes failure from wedging the
+          # done, irreversible registry publish — but that also greens the run, so
+          # make the gap loud instead of aborting silently before gh release.
+          if ! git-cliff --current --strip header \
             --tag-pattern '${{ inputs.tag-pattern }}' \
             --include-path ${{ inputs.include-paths }} \
-            > NOTES.md
+            > NOTES.md; then
+            echo "::error::git-cliff failed for $GITHUB_REF_NAME — no GitHub Release created. Registry publish already completed; create the Release by hand."
+            echo "❌ git-cliff failed for \`$GITHUB_REF_NAME\` — GitHub Release NOT created (registry publish already done)." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
           version="${GITHUB_REF_NAME##*v}"
           title="${{ inputs.title-prefix }}${version}"
           gh release create "$GITHUB_REF_NAME" --notes-file NOTES.md --title "$title" --verify-tag \

@@ -67,7 +67,7 @@ run = "tools/check-changelogs.sh"
 
 [tasks."changelog:rust-core"]
 description = "print the unreleased CHANGELOG section for the ashurbanipal core crate"
-run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-v' --include-path 'implementations/rust/core/**' 'frontend/**' 'spec/**'"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-v' --include-path 'implementations/rust/core/**' 'spec/**'"
 
 [tasks."changelog:rust-axum"]
 description = "print the unreleased CHANGELOG section for ashurbanipal-axum"

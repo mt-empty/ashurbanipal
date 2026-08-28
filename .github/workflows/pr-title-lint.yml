@@ -22,12 +22,12 @@ jobs:
         env:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
-          pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: .+'
+          pattern='^((feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|security)(\([a-z0-9-]+\))?!?: .+|Revert ".+")'
           if printf '%s\n' "$TITLE" | grep -qE "$pattern"; then
             echo "OK: $TITLE"
           else
             echo "::error::PR title is not a Conventional Commit: \"$TITLE\"" >&2
             echo "Expected e.g. 'feat(axum): add multi-source mounting' or 'fix: reject unvalidated schema names'." >&2
-            echo "Types: feat fix docs style refactor perf test build ci chore revert (optional (scope), optional ! for breaking)." >&2
+            echo "Types: feat fix docs style refactor perf test build ci chore revert security (optional (scope), optional ! for breaking)." >&2
             exit 1
           fi

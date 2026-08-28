@@ -50,9 +50,13 @@ require_conventional = false
 split_commits = false
 protect_breaking_commits = true
 commit_parsers = [
+    # Security is matched before feat/fix: the change is usually typed feat:/fix:
+    # and git-cliff assigns each commit to the first matching parser only.
+    { message = "^security", group = "<!-- 2 -->Security" },
+    { body = ".*security", group = "<!-- 2 -->Security" },
+    { footer = ".*security", group = "<!-- 2 -->Security" },
     { message = "^feat", group = "<!-- 0 -->Features" },
     { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
-    { body = ".*security", group = "<!-- 2 -->Security" },
     { message = "^perf", group = "<!-- 3 -->Performance" },
     { message = "^refactor", group = "<!-- 4 -->Refactor" },
     { message = "^docs?", group = "<!-- 5 -->Documentation" },

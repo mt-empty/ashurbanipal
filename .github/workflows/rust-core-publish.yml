@@ -70,4 +70,4 @@ jobs:
     uses: ./.github/workflows/_post-release.yml
     with:
       tag-pattern: '^ashurbanipal-v'
-      include-paths: 'implementations/rust/core/** frontend/** spec/**'
+      include-paths: 'implementations/rust/core/** spec/**'
