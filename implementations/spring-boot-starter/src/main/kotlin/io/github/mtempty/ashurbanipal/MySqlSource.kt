@@ -5,6 +5,7 @@ import org.springframework.jdbc.datasource.DataSourceUtils
 import org.springframework.transaction.support.TransactionTemplate
 import java.sql.PreparedStatement
 import java.sql.ResultSet
+import java.sql.SQLException
 import java.sql.Types
 import java.util.concurrent.atomic.AtomicReference
 import javax.sql.DataSource
@@ -401,7 +402,19 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         bindArgs.add(opts.limit)
         bindArgs.add(opts.offset)
 
-        val rows = query(dataSource, sql, bindArgs) { rs -> rowToJson(rs, columns) }
+        val rows = try {
+            query(dataSource, sql, bindArgs) { rs -> rowToJson(rs, columns) }
+        } catch (e: SQLException) {
+            // information_schema.tables lists a table the role holds *any*
+            // privilege on, not just SELECT, and there's no has_table_privilege
+            // analog to gate the listing (docs/adapter-decisions.md §5.2/§5.3).
+            // Map the residual ER_TABLEACCESS_DENIED_ERROR (1142, both engines)
+            // to NotAllowed (400), not a driver 500.
+            if (e.errorCode == 1142) {
+                throw NotAllowedException("not allowed: table $realTable")
+            }
+            throw e
+        }
 
         val totalApprox = query(
             dataSource,

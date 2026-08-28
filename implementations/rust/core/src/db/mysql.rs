@@ -363,6 +363,25 @@ impl MySqlSource {
     }
 }
 
+/// `information_schema.tables` lists a table the role holds *any* privilege
+/// on, and neither engine has a `has_table_privilege` analog to narrow the
+/// listing to `SELECT` (`docs/adapter-decisions.md` §5.2/§5.3) — so an
+/// INSERT-only table can clear the allow-list and then fail the row fetch.
+/// Map that residual `ER_TABLEACCESS_DENIED_ERROR` (1142) to `NotAllowed`
+/// (→ 400), not a raw 500; its SQLSTATE (`42000`) is too broad to match on.
+fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
+    match &e {
+        sqlx::Error::Database(db)
+            if db
+                .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
+                .is_some_and(|m| m.number() == 1142) =>
+        {
+            DbError::NotAllowed(format!("table {table:?}"))
+        }
+        _ => DbError::Sqlx(e),
+    }
+}
+
 fn row_to_json(
     row: &MySqlRow,
     columns: &[ColumnInfo],
@@ -568,7 +587,10 @@ impl DbSource for MySqlSource {
             query = query.bind(value);
         }
         query = query.bind(opts.limit as i64).bind(opts.offset as i64);
-        let mysql_rows = query.fetch_all(&mut *tx).await?;
+        let mysql_rows = query
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| map_select_denied(e, &table))?;
         let rows = mysql_rows
             .iter()
             .map(|r| row_to_json(r, &columns))
