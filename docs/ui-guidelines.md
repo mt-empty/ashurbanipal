@@ -128,3 +128,12 @@ should block on.
   `fetchTableData` chrome, with the new-row count also announced via
   `#status` (R9, no carve-out). *(Derives from: recognition rather than
   recall, visibility of system status.)*
+- **R11 — Sort is remembered per table.** `sort` + `order` persist keyed by
+  table name (like hidden columns), so returning to a table restores the
+  sort last chosen there — which is what lets R10's refresh surface new
+  rows without re-sorting every visit. A restored sort column the backend
+  rejects (400 — the schema changed, or storage carried over from another
+  database) is dropped and the view retried unsorted (R5); the retry only
+  fires when sort was the sole stale-risk input (no filter on the request).
+  Sort is never carried across tables — a column name is table-specific.
+  *(Derives from: recognition rather than recall.)*

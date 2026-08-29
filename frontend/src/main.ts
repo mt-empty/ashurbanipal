@@ -6,7 +6,7 @@ import { syncUrl } from "./nav.js";
 import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
-import { applyScopeParams, getAppliedFilterAst, getLastPayload, getLastScopeKey, rowKey, scopeKey, setLastPayload, setLastScopeKey, state } from "./state.js";
+import { applyScopeParams, dropStoredSort, getAppliedFilterAst, getLastPayload, getLastScopeKey, isStoredSortUnverified, markStoredSortVerified, rowKey, scopeKey, setLastPayload, setLastScopeKey, state } from "./state.js";
 import "./theme.js";
 import type { TableData } from "./types.js";
 
@@ -122,10 +122,18 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   try { data = await fetchTableData(); }
   catch (e) {
     if (token !== loadDataToken) return; // superseded by a newer request
+    // A restored per-table sort can name a column that no longer exists
+    // (schema changed since the last visit). When it's the only stale-risk
+    // input on this request — no filter — drop it and retry unsorted once.
+    if (isStoredSortUnverified() && state.table && !state.filter) {
+      dropStoredSort(state.table);
+      return loadData({ resetScroll, highlightNew });
+    }
     $("error").textContent = (e as Error).message;
     return;
   }
   if (token !== loadDataToken) return; // superseded by a newer request
+  markStoredSortVerified();
   updateActiveTableChrome();
 
   // Rows present now but absent from the previous fetch of this same view.

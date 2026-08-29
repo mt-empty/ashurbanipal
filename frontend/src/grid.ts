@@ -4,7 +4,7 @@ import { renderJsonTree, type JsonValue } from "./json-tree.js";
 import { loadData } from "./main.js";
 import { openRecordView } from "./record-view.js";
 import { APPROX_COUNT_TITLE, formatApproxCount, loadTables } from "./sidebar.js";
-import { hiddenColumnsForTable, persist, rowKey, state } from "./state.js";
+import { applyStoredSort, hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
@@ -45,7 +45,7 @@ export function renderHeader(columns: Column[]): void {
       : "none");
     th.onclick = () => {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
-      state.sort = col.name; state.offset = 0; persist(); loadData({ resetScroll: false });
+      state.sort = col.name; state.offset = 0; rememberSort(); loadData({ resetScroll: false });
     };
     // A focusable control nested in the sortable th — stopPropagation so
     // opening it doesn't also toggle sort.
@@ -164,8 +164,8 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
   filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
   if (col.references) {
     // In-app navigation: switch to the referenced table and seed a filter
-    // for the referenced row. Reset sort first — the current sort column
-    // belongs to this table and may not exist on the target one.
+    // for the referenced row, restoring that table's own remembered sort —
+    // the current one belongs to this table.
     cellText.classList.add("fk-cell");
     const refLabel = col.references.schema
       ? `${col.references.schema}.${col.references.table}`
@@ -174,7 +174,7 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
     cellText.onclick = () => {
       const references = col.references!;
       state.table = references.table;
-      state.sort = null;
+      applyStoredSort(references.table);
       // `references.schema` is only present when it differs from the
       // current schema (a cross-schema FK) — switch the selector too,
       // mirroring #schema-select's onchange, before navigating so the

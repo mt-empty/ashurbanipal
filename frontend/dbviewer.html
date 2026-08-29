@@ -820,11 +820,12 @@ var state = {
   limit: 50,
   offset: 0,
   hiddenColumns: {},
+  sortByTable: {},
   filter: ""
 };
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-  for (const k of ["source", "schema", "table", "sort", "order", "limit"]) {
+  for (const k of ["source", "schema", "table", "limit"]) {
     if (saved[k] !== void 0) state[k] = saved[k];
   }
   if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
@@ -832,6 +833,14 @@ try {
       if (!Array.isArray(cols)) continue;
       const clean = cols.filter((c) => typeof c === "string");
       if (clean.length) state.hiddenColumns[table] = clean;
+    }
+  }
+  if (saved.sortByTable && typeof saved.sortByTable === "object" && !Array.isArray(saved.sortByTable)) {
+    for (const [table, v] of Object.entries(saved.sortByTable)) {
+      if (v && typeof v === "object" && typeof v.col === "string") {
+        const { col, order } = v;
+        state.sortByTable[table] = { col, order: order === "desc" ? "desc" : "asc" };
+      }
     }
   }
 } catch {
@@ -846,11 +855,38 @@ if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "d
 if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
 if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
 function persist() {
-  const { source, schema, table, sort, order, limit, hiddenColumns } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, sort, order, limit, hiddenColumns }));
+  const { source, schema, table, limit, hiddenColumns, sortByTable } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable }));
 }
 function hiddenColumnsForTable() {
   return state.hiddenColumns[state.table ?? ""] ?? [];
+}
+var storedSortUnverified = false;
+function isStoredSortUnverified() {
+  return storedSortUnverified;
+}
+function markStoredSortVerified() {
+  storedSortUnverified = false;
+}
+function rememberSort() {
+  if (!state.table) return;
+  if (state.sort) state.sortByTable[state.table] = { col: state.sort, order: state.order };
+  else delete state.sortByTable[state.table];
+  storedSortUnverified = false;
+  persist();
+}
+function applyStoredSort(table) {
+  const stored = table ? state.sortByTable[table] : void 0;
+  state.sort = stored?.col ?? null;
+  state.order = stored?.order ?? "asc";
+  storedSortUnverified = state.sort !== null;
+}
+function dropStoredSort(table) {
+  if (table) delete state.sortByTable[table];
+  state.sort = null;
+  state.order = "asc";
+  storedSortUnverified = false;
+  persist();
 }
 function applyScopeParams(params) {
   if (state.source) params.set("source", state.source);
@@ -1385,7 +1421,7 @@ async function loadTables() {
     btn.onclick = () => {
       state.table = t.name;
       state.offset = 0;
-      state.sort = null;
+      applyStoredSort(t.name);
       state.filter = "";
       setAppliedFilterAst([]);
       $("filter").value = "";
@@ -1399,6 +1435,7 @@ async function loadTables() {
   filterTables();
   const tableNames = tables.map((t) => t.name);
   if (!tableNames.includes(state.table ?? "")) state.table = tableNames[0] ?? null;
+  if (state.table && state.sort === null) applyStoredSort(state.table);
   if (state.table) await loadData();
   else setStatus("");
 }
@@ -1436,7 +1473,7 @@ function renderHeader(columns) {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
       state.sort = col.name;
       state.offset = 0;
-      persist();
+      rememberSort();
       loadData({ resetScroll: false });
     };
     const cvBtn = document.createElement("button");
@@ -1550,7 +1587,7 @@ function buildCell(col, raw) {
     cellText.onclick = () => {
       const references = col.references;
       state.table = references.table;
-      state.sort = null;
+      applyStoredSort(references.table);
       if (references.schema && references.schema !== state.schema) {
         state.schema = references.schema;
         $("schema-select").value = state.schema;
@@ -1869,10 +1906,15 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
     data = await fetchTableData();
   } catch (e) {
     if (token !== loadDataToken) return;
+    if (isStoredSortUnverified() && state.table && !state.filter) {
+      dropStoredSort(state.table);
+      return loadData({ resetScroll, highlightNew });
+    }
     $("error").textContent = e.message;
     return;
   }
   if (token !== loadDataToken) return;
+  markStoredSortVerified();
   updateActiveTableChrome();
   let newRowKeys;
   const prev = getLastPayload();
