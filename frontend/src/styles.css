@@ -99,6 +99,14 @@ li button.loading .row-spinner { visibility: visible; animation: spin .6s linear
 @media (prefers-reduced-motion: reduce) {
   li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
 }
+/* One rotation per click, always run to completion (JS drops .spinning on a
+   timer) so a sub-100ms re-fetch still acknowledges the click, separately
+   from #status/aria-busy. inline-block so the rotate applies. */
+#refresh-icon { display: inline-block; }
+#refresh.spinning #refresh-icon { animation: spin .5s linear; }
+@media (prefers-reduced-motion: reduce) {
+  #refresh.spinning #refresh-icon { animation: none; }
+}
 
 /* ==== Source selector ==== */
 /* hidden by default (single-source deployments never show this — see

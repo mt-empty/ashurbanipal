@@ -182,7 +182,17 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   updatePager(data);
   // Sighted users see the tint; announce the count for everyone else. The
   // next loadData clears #status the same way it clears "loading…".
-  if (newRowKeys?.size) setStatus(`${newRowKeys.size} new`);
+  if (newRowKeys?.size) {
+    setStatus(`${newRowKeys.size} new`);
+  } else if (highlightNew && newRowKeys) {
+    // A refresh that found nothing new: the row tint won't fire, so the
+    // button gets its own "done, unchanged" cue — a ✓ glyph swap mirroring
+    // the copy buttons, plus the sr-only #status line.
+    setStatus("no changes");
+    const icon = $("refresh-icon");
+    icon.textContent = "✓";
+    setTimeout(() => { icon.textContent = "⟳"; }, 1000);
+  }
   // Default true: table switch and filter submit jump to a new row 0, so
   // snapping to the top orients the user. Sort and prev/next explicitly
   // pass resetScroll: false — they're in-place operations on the current
@@ -197,7 +207,14 @@ $<HTMLButtonElement>("nav-back").onclick = () => history.back();
 $<HTMLButtonElement>("nav-forward").onclick = () => history.forward();
 // resetScroll: false — an in-place re-fetch of the current view; highlightNew
 // tints any row that wasn't in the previous result.
-$<HTMLButtonElement>("refresh").onclick = () => loadData({ resetScroll: false, highlightNew: true });
+$<HTMLButtonElement>("refresh").onclick = () => {
+  const btn = $<HTMLButtonElement>("refresh");
+  // Guaranteed one rotation even on a few-ms fetch; the timer (not
+  // animationend, which never fires under prefers-reduced-motion) clears it.
+  btn.classList.add("spinning");
+  setTimeout(() => btn.classList.remove("spinning"), 500);
+  loadData({ resetScroll: false, highlightNew: true });
+};
 
 // Feeds --toolbar-h (thead th's sticky `top`) — #toolbar's height isn't
 // static (flex-wrap, #error appearing/disappearing).

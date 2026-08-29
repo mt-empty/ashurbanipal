@@ -20,17 +20,19 @@ export const APP_PATH = "/__ashurbanipal";
  * helper hang on an unrelated stuck spinner from an earlier action rather
  * than the settle condition this helper actually exists to check.
  *
- * Excludes .row-new (the 3s new-row wash after a manual refresh) for the
- * same reason: it's a post-settle decoration, not part of the render, and
- * counting it would add ~3s to every wait after a highlighted refresh. */
+ * Excludes .row-new (the 3s new-row wash after a manual refresh) and
+ * #refresh-icon (its ~0.5s click-acknowledge spin) for the same reason:
+ * both are post-settle decorations, not part of the render, and counting
+ * them would add their duration to every wait after a highlighted refresh. */
 export async function waitForIdle(page: Page) {
   await expect(page.locator("table")).not.toHaveAttribute("aria-busy", "true");
   await expect
     .poll(() =>
       page.evaluate(() =>
         document.getAnimations().filter((a) => {
-          const cls = (a.effect as KeyframeEffect)?.target?.classList;
-          return !cls?.contains("row-spinner") && !cls?.contains("row-new");
+          const target = (a.effect as KeyframeEffect)?.target as Element | undefined;
+          const cls = target?.classList;
+          return target?.id !== "refresh-icon" && !cls?.contains("row-spinner") && !cls?.contains("row-new");
         }).length,
       ),
     )

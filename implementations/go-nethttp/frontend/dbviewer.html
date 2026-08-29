@@ -128,6 +128,14 @@ li button.loading .row-spinner { visibility: visible; animation: spin .6s linear
 @media (prefers-reduced-motion: reduce) {
   li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
 }
+/* One rotation per click, always run to completion (JS drops .spinning on a
+   timer) so a sub-100ms re-fetch still acknowledges the click, separately
+   from #status/aria-busy. inline-block so the rotate applies. */
+#refresh-icon { display: inline-block; }
+#refresh.spinning #refresh-icon { animation: spin .5s linear; }
+@media (prefers-reduced-motion: reduce) {
+  #refresh.spinning #refresh-icon { animation: none; }
+}
 
 /* ==== Source selector ==== */
 /* hidden by default (single-source deployments never show this — see
@@ -457,7 +465,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
       </form>
       <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
       <button id="payload" disabled title="raw JSON response for the current view">payload</button>
-      <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh">⟳ refresh</button>
+      <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
     </search>
     <div id="error" role="alert"></div>
   </div>
@@ -1948,7 +1956,16 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
     renderTable();
   }
   updatePager(data);
-  if (newRowKeys?.size) setStatus(`${newRowKeys.size} new`);
+  if (newRowKeys?.size) {
+    setStatus(`${newRowKeys.size} new`);
+  } else if (highlightNew && newRowKeys) {
+    setStatus("no changes");
+    const icon = $("refresh-icon");
+    icon.textContent = "\u2713";
+    setTimeout(() => {
+      icon.textContent = "\u27F3";
+    }, 1e3);
+  }
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
 $("prev").onclick = () => {
@@ -1961,7 +1978,12 @@ $("next").onclick = () => {
 };
 $("nav-back").onclick = () => history.back();
 $("nav-forward").onclick = () => history.forward();
-$("refresh").onclick = () => loadData({ resetScroll: false, highlightNew: true });
+$("refresh").onclick = () => {
+  const btn = $("refresh");
+  btn.classList.add("spinning");
+  setTimeout(() => btn.classList.remove("spinning"), 500);
+  loadData({ resetScroll: false, highlightNew: true });
+};
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
 }).observe($("toolbar"));
