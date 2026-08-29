@@ -117,3 +117,14 @@ should block on.
   a per-row spinner in the sidebar, and `aria-busy` on the table cover
   loading; `#error` covers failure). *(Derives from: visibility of system
   status — heuristic #1, given full weight above.)*
+- **R10 — The `refresh` button and its new-row tint are the sanctioned
+  "what changed" affordance.** A user-clicked re-fetch of the current view;
+  rows absent from the previous same-scope response briefly wash
+  (`--row-new-bg`, faded/static per `prefers-reduced-motion`). Constraints:
+  it is manual only (no polling timer — that fights R9 and heuristic #7);
+  row identity is the primary key, so a PK-less table gets no tint rather
+  than a guessed one; the previous row set lives in memory only and is
+  never persisted (R6); and the fetch itself reports through the normal
+  `fetchTableData` chrome, with the new-row count also announced via
+  `#status` (R9, no carve-out). *(Derives from: recognition rather than
+  recall, visibility of system status.)*

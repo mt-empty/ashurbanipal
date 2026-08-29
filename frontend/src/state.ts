@@ -1,4 +1,4 @@
-import type { FilterCondition, TableData } from "./types.js";
+import type { FilterCondition, Row, TableData } from "./types.js";
 
 const UI_KEY = "ashurbanipal_ui";
 
@@ -106,4 +106,32 @@ export function getLastPayload(): TableData | null {
 }
 export function setLastPayload(data: TableData | null): void {
   lastPayload = data;
+}
+
+// Row identity for the "new since last refresh" highlight (grid.ts's
+// row-new class). PK-only: a caller passes [] for a PK-less table and
+// skips the diff, since hashing whole rows would flag an edited row as new
+// and collide on duplicates. JSON.stringify of the PK value array is an
+// injective, delimiter-free key. Held in memory only, never persisted — a
+// PK value can be a data value (R6).
+export function rowKey(pkNames: string[], row: Row): string {
+  return JSON.stringify(pkNames.map((n) => row[n]));
+}
+
+// Identifies "the same view" between two fetches. A sort/filter/page/scope
+// change makes every row look new, so the highlight only fires when this
+// is unchanged from the fetch it's being diffed against.
+export function scopeKey(): string {
+  return JSON.stringify([
+    state.source, state.schema, state.table, state.sort, state.order,
+    state.offset, state.limit, appliedFilterAst,
+  ]);
+}
+
+let lastScopeKey: string | null = null;
+export function getLastScopeKey(): string | null {
+  return lastScopeKey;
+}
+export function setLastScopeKey(key: string | null): void {
+  lastScopeKey = key;
 }

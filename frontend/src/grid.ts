@@ -4,7 +4,7 @@ import { renderJsonTree, type JsonValue } from "./json-tree.js";
 import { loadData } from "./main.js";
 import { openRecordView } from "./record-view.js";
 import { APPROX_COUNT_TITLE, formatApproxCount, loadTables } from "./sidebar.js";
-import { hiddenColumnsForTable, persist, state } from "./state.js";
+import { hiddenColumnsForTable, persist, rowKey, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
@@ -248,7 +248,9 @@ function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
   return td;
 }
 
-export function renderRows(data: TableData): void {
+// newRowKeys (rowKey values absent from the previous same-scope fetch,
+// passed only on an explicit refresh) tint those rows via .row-new.
+export function renderRows(data: TableData, newRowKeys?: Set<string>): void {
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
     // hidden columns (display:none) aren't counted.
@@ -258,8 +260,10 @@ export function renderRows(data: TableData): void {
     return;
   }
   const tbody = $("tbody");
+  const pkNames = newRowKeys ? data.columns.filter((c) => c.key === "pk").map((c) => c.name) : [];
   tbody.replaceChildren(...data.rows.map((row) => {
     const tr = document.createElement("tr");
+    if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
     tr.appendChild(buildRowActionCell(data.columns, row));
     for (const col of data.columns) {
       tr.appendChild(buildCell(col, row[col.name]));

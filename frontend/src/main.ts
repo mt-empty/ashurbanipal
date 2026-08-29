@@ -6,7 +6,7 @@ import { syncUrl } from "./nav.js";
 import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
-import { applyScopeParams, getAppliedFilterAst, getLastPayload, setLastPayload, state } from "./state.js";
+import { applyScopeParams, getAppliedFilterAst, getLastPayload, getLastScopeKey, rowKey, scopeKey, setLastPayload, setLastScopeKey, state } from "./state.js";
 import "./theme.js";
 import type { TableData } from "./types.js";
 
@@ -114,7 +114,7 @@ function updateActiveTableChrome(): void {
 // Same shape of fix as showCommonValues's cvRequestToken.
 let loadDataToken = 0;
 
-export async function loadData({ resetScroll = true }: { resetScroll?: boolean } = {}): Promise<void> {
+export async function loadData({ resetScroll = true, highlightNew = false }: { resetScroll?: boolean; highlightNew?: boolean } = {}): Promise<void> {
   $("error").textContent = "";
   if (!state.table) { updateActiveTableChrome(); setStatus(""); return; }
   const token = ++loadDataToken;
@@ -127,15 +127,33 @@ export async function loadData({ resetScroll = true }: { resetScroll?: boolean }
   }
   if (token !== loadDataToken) return; // superseded by a newer request
   updateActiveTableChrome();
+
+  // Rows present now but absent from the previous fetch of this same view.
+  // Only computed on an explicit refresh (highlightNew), only when the
+  // scope is unchanged (a sort/filter/page change makes every row "new"),
+  // and only for a table with a PK to identify rows by.
+  let newRowKeys: Set<string> | undefined;
+  const prev = getLastPayload();
+  const nowScope = scopeKey();
+  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+    const pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    if (pkNames.length) {
+      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
+      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
+    }
+  }
   setLastPayload(data);
+  setLastScopeKey(nowScope);
+
   $<HTMLButtonElement>("payload").disabled = false;
   $<HTMLButtonElement>("columns-btn").disabled = false;
+  $<HTMLButtonElement>("refresh").disabled = false;
   updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
-    renderRows(data);
+    renderRows(data, newRowKeys);
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
@@ -154,6 +172,9 @@ export async function loadData({ resetScroll = true }: { resetScroll?: boolean }
     renderTable();
   }
   updatePager(data);
+  // Sighted users see the tint; announce the count for everyone else. The
+  // next loadData clears #status the same way it clears "loading…".
+  if (newRowKeys?.size) setStatus(`${newRowKeys.size} new`);
   // Default true: table switch and filter submit jump to a new row 0, so
   // snapping to the top orients the user. Sort and prev/next explicitly
   // pass resetScroll: false — they're in-place operations on the current
@@ -166,6 +187,9 @@ $<HTMLButtonElement>("prev").onclick = () => { state.offset = Math.max(0, state.
 $<HTMLButtonElement>("next").onclick = () => { state.offset += state.limit; loadData({ resetScroll: false }); };
 $<HTMLButtonElement>("nav-back").onclick = () => history.back();
 $<HTMLButtonElement>("nav-forward").onclick = () => history.forward();
+// resetScroll: false — an in-place re-fetch of the current view; highlightNew
+// tints any row that wasn't in the previous result.
+$<HTMLButtonElement>("refresh").onclick = () => loadData({ resetScroll: false, highlightNew: true });
 
 // Feeds --toolbar-h (thead th's sticky `top`) — #toolbar's height isn't
 // static (flex-wrap, #error appearing/disappearing).

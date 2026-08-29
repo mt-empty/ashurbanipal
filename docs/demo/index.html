@@ -532,6 +532,8 @@
   --type-bool: var(--json-bool);
   --type-number: var(--json-number);
   --type-date: light-dark(#2a6, #6db);
+  /* Transient wash on rows added since the last manual refresh. */
+  --row-new-bg: light-dark(#e3f6e6, #1f3a26);
 }
 
 /* ==== Layout ==== */
@@ -671,6 +673,14 @@ td.expandable .cell-text { cursor: zoom-in; }
 .filter-eq.only-action { right: .15rem; }
 td:hover .copy, td:hover .filter-eq, .copy:focus-visible, .filter-eq:focus-visible { opacity: .7; }
 .copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+/* Fades out over 3s after a manual refresh; static under reduced motion,
+   cleared by the next re-render (a fresh <tr> without the class). td has no
+   background of its own, so the tr wash shows through. */
+tbody tr.row-new { animation: row-new-fade 3s ease-out; }
+@keyframes row-new-fade { from { background: var(--row-new-bg); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  tbody tr.row-new { animation: none; background: var(--row-new-bg); }
+}
 
 /* ==== Controls / status ==== */
 /* Pinned in both axes (unlike thead th, top:0 only — header cells must
@@ -917,6 +927,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
       </form>
       <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
       <button id="payload" disabled title="raw JSON response for the current view">payload</button>
+      <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh">⟳ refresh</button>
     </search>
     <div id="error" role="alert"></div>
   </div>
@@ -1336,6 +1347,28 @@ function getLastPayload() {
 }
 function setLastPayload(data) {
   lastPayload = data;
+}
+function rowKey(pkNames, row) {
+  return JSON.stringify(pkNames.map((n) => row[n]));
+}
+function scopeKey() {
+  return JSON.stringify([
+    state.source,
+    state.schema,
+    state.table,
+    state.sort,
+    state.order,
+    state.offset,
+    state.limit,
+    appliedFilterAst
+  ]);
+}
+var lastScopeKey = null;
+function getLastScopeKey() {
+  return lastScopeKey;
+}
+function setLastScopeKey(key) {
+  lastScopeKey = key;
 }
 
 // src/filter-ui.ts
@@ -2041,7 +2074,7 @@ function buildRowActionCell(columns, row) {
   td.querySelector(".record-btn").onclick = () => openRecordView(columns, row);
   return td;
 }
-function renderRows(data) {
+function renderRows(data, newRowKeys) {
   if (data.rows.length === 0) {
     const hidden = hiddenColumnsForTable();
     const visible = data.columns.filter((c) => !hidden.includes(c.name)).length;
@@ -2049,8 +2082,10 @@ function renderRows(data) {
     return;
   }
   const tbody = $("tbody");
+  const pkNames = newRowKeys ? data.columns.filter((c) => c.key === "pk").map((c) => c.name) : [];
   tbody.replaceChildren(...data.rows.map((row) => {
     const tr = document.createElement("tr");
+    if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
     tr.appendChild(buildRowActionCell(data.columns, row));
     for (const col of data.columns) {
       tr.appendChild(buildCell(col, row[col.name]));
@@ -2291,7 +2326,7 @@ function updateActiveTableChrome() {
   document.title = state.table ? `${state.table} \u2014 Ashurbanipal` : "Ashurbanipal";
 }
 var loadDataToken = 0;
-async function loadData({ resetScroll = true } = {}) {
+async function loadData({ resetScroll = true, highlightNew = false } = {}) {
   $("error").textContent = "";
   if (!state.table) {
     updateActiveTableChrome();
@@ -2309,15 +2344,27 @@ async function loadData({ resetScroll = true } = {}) {
   }
   if (token !== loadDataToken) return;
   updateActiveTableChrome();
+  let newRowKeys;
+  const prev = getLastPayload();
+  const nowScope = scopeKey();
+  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+    const pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    if (pkNames.length) {
+      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
+      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
+    }
+  }
   setLastPayload(data);
+  setLastScopeKey(nowScope);
   $("payload").disabled = false;
   $("columns-btn").disabled = false;
+  $("refresh").disabled = false;
   updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
-    renderRows(data);
+    renderRows(data, newRowKeys);
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
@@ -2329,6 +2376,7 @@ async function loadData({ resetScroll = true } = {}) {
     renderTable();
   }
   updatePager(data);
+  if (newRowKeys?.size) setStatus(`${newRowKeys.size} new`);
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
 $("prev").onclick = () => {
@@ -2341,6 +2389,7 @@ $("next").onclick = () => {
 };
 $("nav-back").onclick = () => history.back();
 $("nav-forward").onclick = () => history.forward();
+$("refresh").onclick = () => loadData({ resetScroll: false, highlightNew: true });
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
 }).observe($("toolbar"));

@@ -18,17 +18,20 @@ export const APP_PATH = "/__ashurbanipal";
  * mid-flight — fixed by capturing `table` into a local const, see
  * loadDataToken in dbviewer.html). Counting it here would make this
  * helper hang on an unrelated stuck spinner from an earlier action rather
- * than the settle condition this helper actually exists to check. */
+ * than the settle condition this helper actually exists to check.
+ *
+ * Excludes .row-new (the 3s new-row wash after a manual refresh) for the
+ * same reason: it's a post-settle decoration, not part of the render, and
+ * counting it would add ~3s to every wait after a highlighted refresh. */
 export async function waitForIdle(page: Page) {
   await expect(page.locator("table")).not.toHaveAttribute("aria-busy", "true");
   await expect
     .poll(() =>
-      page.evaluate(
-        () =>
-          document
-            .getAnimations()
-            .filter((a) => !(a.effect as KeyframeEffect)?.target?.classList?.contains("row-spinner"))
-            .length,
+      page.evaluate(() =>
+        document.getAnimations().filter((a) => {
+          const cls = (a.effect as KeyframeEffect)?.target?.classList;
+          return !cls?.contains("row-spinner") && !cls?.contains("row-new");
+        }).length,
       ),
     )
     .toBe(0);
