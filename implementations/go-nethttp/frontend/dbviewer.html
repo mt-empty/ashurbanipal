@@ -1595,7 +1595,7 @@ function buildCell(col, raw) {
     cellText.onclick = () => {
       const references = col.references;
       state.table = references.table;
-      applyStoredSort(references.table);
+      state.sort = null;
       if (references.schema && references.schema !== state.schema) {
         state.schema = references.schema;
         $("schema-select").value = state.schema;
@@ -1649,7 +1649,7 @@ function buildRowActionCell(columns, row) {
   td.querySelector(".record-btn").onclick = () => openRecordView(columns, row);
   return td;
 }
-function renderRows(data, newRowKeys) {
+function renderRows(data, newRowKeys, pkNames = []) {
   if (data.rows.length === 0) {
     const hidden = hiddenColumnsForTable();
     const visible = data.columns.filter((c) => !hidden.includes(c.name)).length;
@@ -1657,7 +1657,6 @@ function renderRows(data, newRowKeys) {
     return;
   }
   const tbody = $("tbody");
-  const pkNames = newRowKeys ? data.columns.filter((c) => c.key === "pk").map((c) => c.name) : [];
   tbody.replaceChildren(...data.rows.map((row) => {
     const tr = document.createElement("tr");
     if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
@@ -1925,10 +1924,11 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
   markStoredSortVerified();
   updateActiveTableChrome();
   let newRowKeys;
+  let pkNames = [];
   const prev = getLastPayload();
   const nowScope = scopeKey();
   if (highlightNew && prev && getLastScopeKey() === nowScope) {
-    const pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
     if (pkNames.length) {
       const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
       newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
@@ -1944,7 +1944,7 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
   const renderTable = () => {
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
-    renderRows(data, newRowKeys);
+    renderRows(data, newRowKeys, pkNames);
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
@@ -1955,6 +1955,7 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
   } else {
     renderTable();
   }
+  if (token !== loadDataToken) return;
   updatePager(data);
   if (newRowKeys?.size) {
     setStatus(`${newRowKeys.size} new`);

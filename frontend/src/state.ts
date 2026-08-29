@@ -160,12 +160,9 @@ export function setLastPayload(data: TableData | null): void {
   lastPayload = data;
 }
 
-// Row identity for the "new since last refresh" highlight (grid.ts's
-// row-new class). PK-only: a caller passes [] for a PK-less table and
-// skips the diff, since hashing whole rows would flag an edited row as new
-// and collide on duplicates. JSON.stringify of the PK value array is an
-// injective, delimiter-free key. Held in memory only, never persisted — a
-// PK value can be a data value (R6).
+// Row identity for the new-since-refresh highlight. PK-only: whole-row
+// hashing would mark an edited row as new and collide on duplicates. Never
+// persisted — a PK value can be a data value (R6).
 export function rowKey(pkNames: string[], row: Row): string {
   return JSON.stringify(pkNames.map((n) => row[n]));
 }

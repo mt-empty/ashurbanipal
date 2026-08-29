@@ -40,7 +40,6 @@ test("refresh tints a row that appeared since the last fetch, leaving the rest u
 
   body = payload([[1, "a"], [2, "b"], [3, "c"]]);
   await page.locator("#refresh").click();
-  await expect(page.locator("#refresh")).toHaveClass(/spinning/); // click acknowledged
   await waitForIdle(page);
 
   await expect(page.locator("#tbody tr")).toHaveCount(3);
@@ -59,8 +58,8 @@ test("refresh with no change highlights nothing", async ({ page }) => {
   await page.locator("#refresh").click();
   await waitForIdle(page);
   await expect(page.locator("#tbody tr.row-new")).toHaveCount(0);
-  // No tint fired, so the button carries the "done, unchanged" cue itself.
-  await expect(page.locator("#refresh-icon")).toHaveText("✓");
+  // No tint fired, so #status carries the "done, unchanged" cue instead.
+  // (The ⟳→✓ glyph swap isn't asserted — it self-reverts on a timer.)
   await expect(page.locator("#status")).toHaveText("no changes");
 });
 

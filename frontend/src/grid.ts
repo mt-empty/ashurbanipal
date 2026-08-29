@@ -4,7 +4,7 @@ import { renderJsonTree, type JsonValue } from "./json-tree.js";
 import { loadData } from "./main.js";
 import { openRecordView } from "./record-view.js";
 import { APPROX_COUNT_TITLE, formatApproxCount, loadTables } from "./sidebar.js";
-import { applyStoredSort, hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
+import { hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
@@ -164,8 +164,9 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
   filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
   if (col.references) {
     // In-app navigation: switch to the referenced table and seed a filter
-    // for the referenced row, restoring that table's own remembered sort —
-    // the current one belongs to this table.
+    // for the referenced row. Clear sort rather than restore the target's
+    // remembered one — this path submits a filter in the same fetch, which
+    // would defeat loadData's drop-and-retry if that stored column is stale.
     cellText.classList.add("fk-cell");
     const refLabel = col.references.schema
       ? `${col.references.schema}.${col.references.table}`
@@ -174,7 +175,7 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
     cellText.onclick = () => {
       const references = col.references!;
       state.table = references.table;
-      applyStoredSort(references.table);
+      state.sort = null;
       // `references.schema` is only present when it differs from the
       // current schema (a cross-schema FK) — switch the selector too,
       // mirroring #schema-select's onchange, before navigating so the
@@ -249,8 +250,9 @@ function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
 }
 
 // newRowKeys (rowKey values absent from the previous same-scope fetch,
-// passed only on an explicit refresh) tint those rows via .row-new.
-export function renderRows(data: TableData, newRowKeys?: Set<string>): void {
+// passed only on an explicit refresh) tint those rows via .row-new;
+// pkNames is the matching PK column list, computed once by the caller.
+export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
     // hidden columns (display:none) aren't counted.
@@ -260,7 +262,6 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>): void {
     return;
   }
   const tbody = $("tbody");
-  const pkNames = newRowKeys ? data.columns.filter((c) => c.key === "pk").map((c) => c.name) : [];
   tbody.replaceChildren(...data.rows.map((row) => {
     const tr = document.createElement("tr");
     if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");

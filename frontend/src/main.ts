@@ -141,10 +141,11 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   // scope is unchanged (a sort/filter/page change makes every row "new"),
   // and only for a table with a PK to identify rows by.
   let newRowKeys: Set<string> | undefined;
+  let pkNames: string[] = [];
   const prev = getLastPayload();
   const nowScope = scopeKey();
   if (highlightNew && prev && getLastScopeKey() === nowScope) {
-    const pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
     if (pkNames.length) {
       const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
       newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
@@ -161,7 +162,7 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   const renderTable = () => {
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
-    renderRows(data, newRowKeys);
+    renderRows(data, newRowKeys, pkNames);
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
@@ -179,6 +180,9 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   } else {
     renderTable();
   }
+  // The await above yields; a table switch during the transition supersedes
+  // this load, and its pager/#status must not overwrite the newer one's.
+  if (token !== loadDataToken) return;
   updatePager(data);
   // Sighted users see the tint; announce the count for everyone else. The
   // next loadData clears #status the same way it clears "loading…".
