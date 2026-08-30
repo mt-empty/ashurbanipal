@@ -34,7 +34,7 @@ class AshurbanipalAutoConfiguration {
      * config-parse time, so the `else` branch below is unreachable, not a
      * silent fallback. `LinkedHashMap` preserves config order, since that
      * order is also `api/sources`' listing order and `source`-param-absent's
-     * default (`DbViewerController.resolveSource`).
+     * default (`AshurbanipalController.resolveSource`).
      */
     @Bean
     fun ashurbanipalDbSources(
@@ -63,10 +63,10 @@ class AshurbanipalAutoConfiguration {
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build()
 
     @Bean
-    fun ashurbanipalDbViewerController(
+    fun ashurbanipalController(
         properties: AshurbanipalProperties,
         dbSources: Map<String, DbSource>,
         filterValidator: FilterValidator,
         httpClient: HttpClient,
-    ): DbViewerController = DbViewerController(properties, dbSources, filterValidator, httpClient)
+    ): AshurbanipalController = AshurbanipalController(properties, dbSources, filterValidator, httpClient)
 }

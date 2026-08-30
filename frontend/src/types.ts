@@ -46,6 +46,6 @@ export interface SourceEntry {
 
 export interface Sibling {
   name: string;
-  dbviewer_url: string;
+  base_url: string;
   healthy: boolean;
 }

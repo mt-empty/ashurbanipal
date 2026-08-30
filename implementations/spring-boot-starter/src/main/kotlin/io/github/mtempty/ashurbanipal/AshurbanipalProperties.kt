@@ -77,6 +77,6 @@ data class Limits(
 
 data class Sibling(
     val name: String = "",
-    val dbviewerUrl: String = "",
+    val baseUrl: String = "",
     val healthPath: String = "",
 )

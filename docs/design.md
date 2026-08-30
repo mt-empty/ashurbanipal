@@ -488,8 +488,8 @@ dropdown.
 ```json
 {
   "siblings": [
-    { "name": "billing", "dbviewer_url": "https://billing.internal.vpn/__ashurbanipal", "healthy": true },
-    { "name": "notifications", "dbviewer_url": "https://notifications.internal.vpn/__ashurbanipal", "healthy": false }
+    { "name": "billing", "base_url": "https://billing.internal.vpn/__ashurbanipal", "healthy": true },
+    { "name": "notifications", "base_url": "https://notifications.internal.vpn/__ashurbanipal", "healthy": false }
   ]
 }
 ```
@@ -572,17 +572,18 @@ query_timeout_secs = 5
 
 [[ashurbanipal.siblings]]
 name = "billing"
-dbviewer_url = "https://billing.internal.vpn/__ashurbanipal"
+base_url = "https://billing.internal.vpn/__ashurbanipal"
 health_path = "/health"
 
 [[ashurbanipal.siblings]]
 name = "notifications"
-dbviewer_url = "https://notifications.internal.vpn/__ashurbanipal"
+base_url = "https://notifications.internal.vpn/__ashurbanipal"
 health_path = "/health"
 ```
 
-- `health_path` is resolved against the sibling's own base URL (not the
-  `dbviewer_url` path) to hit its conventional health endpoint.
+- `health_path` is resolved against the sibling's origin (scheme + host +
+  port of `base_url`), not the `base_url` path, to hit its conventional
+  health endpoint.
 - Config is loaded once at startup; sibling list is static for v1 (no
   service-registry integration).
 

@@ -342,7 +342,7 @@ async fn common_values<S: DbSource>(
 #[derive(Serialize)]
 struct SiblingStatus {
     name: String,
-    dbviewer_url: String,
+    base_url: String,
     healthy: bool,
 }
 
@@ -355,7 +355,7 @@ async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
     let checks = state.config.siblings.iter().cloned().map(|sibling| {
         let http = state.http.clone();
         async move {
-            let health_url = health_url(&sibling.dbviewer_url, &sibling.health_path);
+            let health_url = health_url(&sibling.base_url, &sibling.health_path);
             let healthy = match health_url {
                 Some(url) => matches!(
                     http.get(url).send().await,
@@ -365,7 +365,7 @@ async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
             };
             SiblingStatus {
                 name: sibling.name,
-                dbviewer_url: sibling.dbviewer_url,
+                base_url: sibling.base_url,
                 healthy,
             }
         }
@@ -374,14 +374,14 @@ async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
     HttpResponse::Ok().json(SiblingsResponse { siblings })
 }
 
-/// Resolves against the sibling's origin, not the dbviewer path.
-fn health_url(dbviewer_url: &str, health_path: &str) -> Option<String> {
-    let scheme_end = dbviewer_url.find("://")? + 3;
-    let host_end = dbviewer_url[scheme_end..]
+/// Resolves against the sibling's origin, not its path.
+fn health_url(base_url: &str, health_path: &str) -> Option<String> {
+    let scheme_end = base_url.find("://")? + 3;
+    let host_end = base_url[scheme_end..]
         .find('/')
         .map(|i| scheme_end + i)
-        .unwrap_or(dbviewer_url.len());
-    Some(format!("{}{}", &dbviewer_url[..host_end], health_path))
+        .unwrap_or(base_url.len());
+    Some(format!("{}{}", &base_url[..host_end], health_path))
 }
 
 /// Uses Actix's own runtime spawn (not `tokio::spawn` directly) so the

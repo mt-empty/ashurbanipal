@@ -37,7 +37,7 @@ data class TableDataResponse(
     @JsonProperty("total_approx") val totalApprox: Long,
 )
 data class CommonValuesResponse(val values: List<CommonValueEntry>)
-data class SiblingStatus(val name: String, @JsonProperty("dbviewer_url") val dbviewerUrl: String, val healthy: Boolean)
+data class SiblingStatus(val name: String, @JsonProperty("base_url") val baseUrl: String, val healthy: Boolean)
 data class SiblingsResponse(val siblings: List<SiblingStatus>)
 
 /**
@@ -53,7 +53,7 @@ data class SiblingsResponse(val siblings: List<SiblingStatus>)
  */
 @RestController
 @RequestMapping("\${ashurbanipal.base-path:/__ashurbanipal}")
-class DbViewerController(
+class AshurbanipalController(
     private val properties: AshurbanipalProperties,
     private val dbSources: Map<String, DbSource>,
     private val filterValidator: FilterValidator,
@@ -157,15 +157,15 @@ class DbViewerController(
     }
 
     private fun checkHealth(sibling: Sibling): CompletableFuture<SiblingStatus> {
-        val healthUrl = healthUrl(sibling.dbviewerUrl, sibling.healthPath)
-            ?: return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.dbviewerUrl, false))
+        val healthUrl = healthUrl(sibling.baseUrl, sibling.healthPath)
+            ?: return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.baseUrl, false))
         val request = try {
             HttpRequest.newBuilder(URI(healthUrl)).timeout(Duration.ofSeconds(3)).GET().build()
         } catch (e: Exception) {
-            return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.dbviewerUrl, false))
+            return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.baseUrl, false))
         }
         return httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-            .handle { response, _ -> SiblingStatus(sibling.name, sibling.dbviewerUrl, response != null && response.statusCode() in 200..299) }
+            .handle { response, _ -> SiblingStatus(sibling.name, sibling.baseUrl, response != null && response.statusCode() in 200..299) }
     }
 
     // ==================== plumbing ====================
@@ -233,10 +233,10 @@ private fun parseSaturating(raw: String?): Long? {
     return big.coerceIn(BigInteger.ZERO, BigInteger.valueOf(Long.MAX_VALUE)).toLong()
 }
 
-/** Resolves against the sibling's origin, not the dbviewer path (spec/protocol.md §5.6). */
-internal fun healthUrl(dbviewerUrl: String, healthPath: String): String? {
+/** Resolves against the sibling's origin, not its path (spec/protocol.md §5.6). */
+internal fun healthUrl(baseUrl: String, healthPath: String): String? {
     return try {
-        val uri = URI(dbviewerUrl)
+        val uri = URI(baseUrl)
         val scheme = uri.scheme ?: return null
         val host = uri.host ?: return null
         val portPart = if (uri.port != -1) ":${uri.port}" else ""

@@ -43,7 +43,7 @@ cfg := ashurbanipal.Config{
 	BasePath: "/__ashurbanipal", // empty also means this
 	Limits:   ashurbanipal.Limits{DefaultPageSize: 50, MaxPageSize: 100, QueryTimeoutSecs: 5},
 	Siblings: []ashurbanipal.Sibling{
-		{Name: "billing", DBViewerURL: "https://billing.internal.vpn/__ashurbanipal", HealthPath: "/health"},
+		{Name: "billing", BaseURL: "https://billing.internal.vpn/__ashurbanipal", HealthPath: "/health"},
 	},
 }
 ```

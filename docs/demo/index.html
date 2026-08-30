@@ -235,8 +235,8 @@
   ];
   var SCHEMAS = ["public", "reporting"];
   var SIBLINGS = [
-    { name: "billing (demo)", dbviewer_url: "https://billing.example.com/__ashurbanipal", healthy: true },
-    { name: "notifications (demo)", dbviewer_url: "https://notifications.example.com/__ashurbanipal", healthy: false }
+    { name: "billing (demo)", base_url: "https://billing.example.com/__ashurbanipal", healthy: true },
+    { name: "notifications (demo)", base_url: "https://notifications.example.com/__ashurbanipal", healthy: false }
   ];
 
   // src/demo-shim.ts
@@ -1101,7 +1101,7 @@ function buildApiReference() {
         path: `${base}/siblings`,
         summary: "Other related services configured for this instance, with live health status.",
         params: [],
-        example_response: { siblings: [{ name: "billing", dbviewer_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] }
+        example_response: { siblings: [{ name: "billing", base_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] }
       }
     ],
     filter: {
@@ -2273,7 +2273,7 @@ async function loadSiblings() {
     dot.setAttribute("role", "img");
     dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
     const a = document.createElement("a");
-    a.href = s.dbviewer_url;
+    a.href = s.base_url;
     a.textContent = s.name;
     a.target = "_blank";
     a.rel = "noopener";

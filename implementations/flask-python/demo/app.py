@@ -95,7 +95,7 @@ def main() -> None:
         config.siblings = [
             Sibling(
                 name=f"demo-{sibling_port}",
-                dbviewer_url=f"http://localhost:{sibling_port}/__ashurbanipal",
+                base_url=f"http://localhost:{sibling_port}/__ashurbanipal",
                 health_path="/health",
             )
         ]

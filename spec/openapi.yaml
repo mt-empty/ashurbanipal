@@ -513,11 +513,11 @@ components:
           type: array
           items:
             type: object
-            required: [name, dbviewer_url, healthy]
+            required: [name, base_url, healthy]
             properties:
               name:
                 type: string
-              dbviewer_url:
+              base_url:
                 type: string
               healthy:
                 type: boolean

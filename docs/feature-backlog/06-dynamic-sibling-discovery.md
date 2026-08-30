@@ -3,7 +3,7 @@
 **Where logged:** `design.md` §2 (non-goal), §9 (deferred).
 
 **What it is:** siblings are a static, hand-maintained TOML list
-(`name`/`dbviewer_url`/`health_path`); no service-registry or k8s-based
+(`name`/`base_url`/`health_path`); no service-registry or k8s-based
 auto-discovery of sibling services.
 
 **Tidbits:** the backend-config-side version of the same limitation

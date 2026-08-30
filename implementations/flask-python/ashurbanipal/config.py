@@ -20,7 +20,7 @@ class Limits:
 @dataclass
 class Sibling:
     name: str
-    dbviewer_url: str
+    base_url: str
     health_path: str
 
 

@@ -6,15 +6,15 @@ const SIBLING_TIMEOUT_MS = 3000;
 
 export interface SiblingStatus {
   name: string;
-  dbviewer_url: string;
+  base_url: string;
   healthy: boolean;
 }
 
-// Resolves healthPath against dbviewerUrl's origin (scheme + host + port),
+// Resolves healthPath against baseUrl's origin (scheme + host + port),
 // not its path — spec/protocol.md §5.6.
-function siblingHealthUrl(dbviewerUrl: string, healthPath: string): string | undefined {
+function siblingHealthUrl(baseUrl: string, healthPath: string): string | undefined {
   try {
-    const parsed = new URL(dbviewerUrl);
+    const parsed = new URL(baseUrl);
     return new URL(healthPath, parsed.origin).toString();
   } catch {
     return undefined;
@@ -32,10 +32,10 @@ export async function checkSiblings(siblings: Sibling[]): Promise<SiblingStatus[
     siblings.map(async (sibling): Promise<SiblingStatus> => {
       const status: SiblingStatus = {
         name: sibling.name,
-        dbviewer_url: sibling.dbviewerUrl,
+        base_url: sibling.baseUrl,
         healthy: false,
       };
-      const healthUrl = siblingHealthUrl(sibling.dbviewerUrl, sibling.healthPath);
+      const healthUrl = siblingHealthUrl(sibling.baseUrl, sibling.healthPath);
       if (!healthUrl) return status;
 
       const controller = new AbortController();

@@ -10,7 +10,7 @@ No-bullshit database browser for schemaful databases; self-contained, embeddable
 
 ## Why
 
-90% of engineers just want to browse their database. Having such functionality in a corporate environment currently means:
+Most engineers just want to browse their database. Having such functionality in a corporate environment currently means:
 
 - Did you request AWS access? Wait for approval.
 - Approved? Now add your username and SSH key to a repo nobody's heard of, and wait for *that* owner to approve you too.
@@ -236,7 +236,7 @@ Once mounted, the viewer is served under `/__ashurbanipal` (the default mount pa
 | `limits.default_page_size` | `50` | Rows per page when the request doesn't specify. |
 | `limits.max_page_size` | `100` | Hard, server-enforced page-size cap. |
 | `limits.query_timeout_secs` | `5` | Per-query timeout. |
-| `siblings` | none | Other instances to show reachability for; each has `name`, `dbviewer_url`, `health_path`. |
+| `siblings` | none | Other instances to show reachability for; each has `name`, `base_url`, `health_path`. |
 
 ## Implementations
 
