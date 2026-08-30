@@ -61,6 +61,20 @@ dbviewer_url = "https://notifications.internal.vpn/__ashurbanipal"
 health_path = "/health"
 ```
 
+## Mount path
+
+Routes are fixed under `/__ashurbanipal`. To serve them under an extra
+prefix, call `.nest(prefix, ...)` in place of `.merge(...)` above:
+
+```rust
+.nest("/svc", ashurbanipal_axum::router(config, sources)) // viewer now at /svc/__ashurbanipal
+```
+
+The frontend reads its API base from its own URL, so it adapts with no
+extra config. If a reverse proxy strips the prefix before the request
+reaches your process, keep `.merge(...)` as-is: the app sees plain
+`/__ashurbanipal` and it just works.
+
 ## Database support
 
 Postgres by default. MySQL/MariaDB and SQLite are supported behind the

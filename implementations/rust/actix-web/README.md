@@ -69,6 +69,20 @@ dbviewer_url = "https://notifications.internal.vpn/__ashurbanipal"
 health_path = "/health"
 ```
 
+## Mount path
+
+Routes are fixed under `/__ashurbanipal`. To serve them under an extra
+prefix, wrap the scope:
+
+```rust
+.service(web::scope("/svc").service(service(state.clone()))) // viewer at /svc/__ashurbanipal
+```
+
+The frontend reads its API base from its own URL, so it adapts with no
+extra config. If a reverse proxy strips the prefix before the request
+reaches your process, register `service(state.clone())` directly and it
+just works.
+
 ## Database support
 
 Same `DbSource` backends as `ashurbanipal-axum`, unchanged — see
