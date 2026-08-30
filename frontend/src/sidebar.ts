@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { $, setStatus } from "./dom.js";
 import { loadData } from "./main.js";
-import { persist, scopeQuery, setAppliedFilterAst, sourceQuery, state } from "./state.js";
+import { applyStoredSort, persist, scopeQuery, setAppliedFilterAst, sourceQuery, state } from "./state.js";
 import type { SourceEntry, TableListEntry } from "./types.js";
 
 // approx_rows/total_approx is -1 when the backend has no cheap estimate for
@@ -151,10 +151,10 @@ export async function loadTables(): Promise<void> {
     // Always set, not just when commented: long names get CSS-truncated
     // (see .row-name), so the title tooltip is the escape hatch.
     btn.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
-    // A filter clause is written against this table's columns, so it
-    // resets on table switch the same way sort already does.
+    // The filter is written against this table's columns, so it clears on
+    // switch; the sort is restored to whatever was last used on this table.
     btn.onclick = () => {
-      state.table = t.name; state.offset = 0; state.sort = null;
+      state.table = t.name; state.offset = 0; applyStoredSort(t.name);
       state.filter = ""; setAppliedFilterAst([]);
       $<HTMLInputElement>("filter").value = "";
       persist(); loadData();
@@ -167,6 +167,9 @@ export async function loadTables(): Promise<void> {
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
   if (!tableNames.includes(state.table ?? "")) state.table = tableNames[0] ?? null;
+  // Restore this table's remembered sort unless one is already set — a
+  // shared link's ?sort= or a history entry takes precedence.
+  if (state.table && state.sort === null) applyStoredSort(state.table);
   // Awaited (not fire-and-forget): callers like nav.ts's popstate handler
   // reset restoringFromHistory once this promise settles, and that flag
   // must still be true when loadData()'s syncUrl() call runs, or a

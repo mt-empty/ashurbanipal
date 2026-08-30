@@ -6,7 +6,7 @@ import { syncUrl } from "./nav.js";
 import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
-import { applyScopeParams, getAppliedFilterAst, getLastPayload, setLastPayload, state } from "./state.js";
+import { applyScopeParams, dropStoredSort, getAppliedFilterAst, getLastPayload, getLastScopeKey, isStoredSortUnverified, markStoredSortVerified, rowKey, scopeKey, setLastPayload, setLastScopeKey, state } from "./state.js";
 import "./theme.js";
 import type { TableData } from "./types.js";
 
@@ -114,7 +114,7 @@ function updateActiveTableChrome(): void {
 // Same shape of fix as showCommonValues's cvRequestToken.
 let loadDataToken = 0;
 
-export async function loadData({ resetScroll = true }: { resetScroll?: boolean } = {}): Promise<void> {
+export async function loadData({ resetScroll = true, highlightNew = false }: { resetScroll?: boolean; highlightNew?: boolean } = {}): Promise<void> {
   $("error").textContent = "";
   if (!state.table) { updateActiveTableChrome(); setStatus(""); return; }
   const token = ++loadDataToken;
@@ -122,20 +122,47 @@ export async function loadData({ resetScroll = true }: { resetScroll?: boolean }
   try { data = await fetchTableData(); }
   catch (e) {
     if (token !== loadDataToken) return; // superseded by a newer request
+    // A restored per-table sort can name a column that no longer exists
+    // (schema changed since the last visit). When it's the only stale-risk
+    // input on this request — no filter — drop it and retry unsorted once.
+    if (isStoredSortUnverified() && state.table && !state.filter) {
+      dropStoredSort(state.table);
+      return loadData({ resetScroll, highlightNew });
+    }
     $("error").textContent = (e as Error).message;
     return;
   }
   if (token !== loadDataToken) return; // superseded by a newer request
+  markStoredSortVerified();
   updateActiveTableChrome();
+
+  // Rows present now but absent from the previous fetch of this same view.
+  // Only computed on an explicit refresh (highlightNew), only when the
+  // scope is unchanged (a sort/filter/page change makes every row "new"),
+  // and only for a table with a PK to identify rows by.
+  let newRowKeys: Set<string> | undefined;
+  let pkNames: string[] = [];
+  const prev = getLastPayload();
+  const nowScope = scopeKey();
+  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    if (pkNames.length) {
+      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
+      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
+    }
+  }
   setLastPayload(data);
+  setLastScopeKey(nowScope);
+
   $<HTMLButtonElement>("payload").disabled = false;
   $<HTMLButtonElement>("columns-btn").disabled = false;
+  $<HTMLButtonElement>("refresh").disabled = false;
   updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
-    renderRows(data);
+    renderRows(data, newRowKeys, pkNames);
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
@@ -153,7 +180,23 @@ export async function loadData({ resetScroll = true }: { resetScroll?: boolean }
   } else {
     renderTable();
   }
+  // The await above yields; a table switch during the transition supersedes
+  // this load, and its pager/#status must not overwrite the newer one's.
+  if (token !== loadDataToken) return;
   updatePager(data);
+  // Sighted users see the tint; announce the count for everyone else. The
+  // next loadData clears #status the same way it clears "loading…".
+  if (newRowKeys?.size) {
+    setStatus(`${newRowKeys.size} new`);
+  } else if (highlightNew && newRowKeys) {
+    // A refresh that found nothing new: the row tint won't fire, so the
+    // button gets its own "done, unchanged" cue — a ✓ glyph swap mirroring
+    // the copy buttons, plus the sr-only #status line.
+    setStatus("no changes");
+    const icon = $("refresh-icon");
+    icon.textContent = "✓";
+    setTimeout(() => { icon.textContent = "⟳"; }, 1000);
+  }
   // Default true: table switch and filter submit jump to a new row 0, so
   // snapping to the top orients the user. Sort and prev/next explicitly
   // pass resetScroll: false — they're in-place operations on the current
@@ -166,6 +209,16 @@ $<HTMLButtonElement>("prev").onclick = () => { state.offset = Math.max(0, state.
 $<HTMLButtonElement>("next").onclick = () => { state.offset += state.limit; loadData({ resetScroll: false }); };
 $<HTMLButtonElement>("nav-back").onclick = () => history.back();
 $<HTMLButtonElement>("nav-forward").onclick = () => history.forward();
+// resetScroll: false — an in-place re-fetch of the current view; highlightNew
+// tints any row that wasn't in the previous result.
+$<HTMLButtonElement>("refresh").onclick = () => {
+  const btn = $<HTMLButtonElement>("refresh");
+  // Guaranteed one rotation even on a few-ms fetch; the timer (not
+  // animationend, which never fires under prefers-reduced-motion) clears it.
+  btn.classList.add("spinning");
+  setTimeout(() => btn.classList.remove("spinning"), 500);
+  loadData({ resetScroll: false, highlightNew: true });
+};
 
 // Feeds --toolbar-h (thead th's sticky `top`) — #toolbar's height isn't
 // static (flex-wrap, #error appearing/disappearing).

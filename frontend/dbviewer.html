@@ -62,6 +62,8 @@
   --type-bool: var(--json-bool);
   --type-number: var(--json-number);
   --type-date: light-dark(#2a6, #6db);
+  /* Transient wash on rows added since the last manual refresh. */
+  --row-new-bg: light-dark(#e3f6e6, #1f3a26);
 }
 
 /* ==== Layout ==== */
@@ -125,6 +127,14 @@ li button.loading .row-spinner { visibility: visible; animation: spin .6s linear
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
+}
+/* One rotation per click, always run to completion (JS drops .spinning on a
+   timer) so a sub-100ms re-fetch still acknowledges the click, separately
+   from #status/aria-busy. inline-block so the rotate applies. */
+#refresh-icon { display: inline-block; }
+#refresh.spinning #refresh-icon { animation: spin .5s linear; }
+@media (prefers-reduced-motion: reduce) {
+  #refresh.spinning #refresh-icon { animation: none; }
 }
 
 /* ==== Source selector ==== */
@@ -201,6 +211,14 @@ td.expandable .cell-text { cursor: zoom-in; }
 .filter-eq.only-action { right: .15rem; }
 td:hover .copy, td:hover .filter-eq, .copy:focus-visible, .filter-eq:focus-visible { opacity: .7; }
 .copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+/* Fades out over 3s after a manual refresh; static under reduced motion,
+   cleared by the next re-render (a fresh <tr> without the class). td has no
+   background of its own, so the tr wash shows through. */
+tbody tr.row-new { animation: row-new-fade 3s ease-out; }
+@keyframes row-new-fade { from { background: var(--row-new-bg); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  tbody tr.row-new { animation: none; background: var(--row-new-bg); }
+}
 
 /* ==== Controls / status ==== */
 /* Pinned in both axes (unlike thead th, top:0 only — header cells must
@@ -447,6 +465,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
       </form>
       <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
       <button id="payload" disabled title="raw JSON response for the current view">payload</button>
+      <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
     </search>
     <div id="error" role="alert"></div>
   </div>
@@ -809,11 +828,12 @@ var state = {
   limit: 50,
   offset: 0,
   hiddenColumns: {},
+  sortByTable: {},
   filter: ""
 };
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-  for (const k of ["source", "schema", "table", "sort", "order", "limit"]) {
+  for (const k of ["source", "schema", "table", "limit"]) {
     if (saved[k] !== void 0) state[k] = saved[k];
   }
   if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
@@ -821,6 +841,14 @@ try {
       if (!Array.isArray(cols)) continue;
       const clean = cols.filter((c) => typeof c === "string");
       if (clean.length) state.hiddenColumns[table] = clean;
+    }
+  }
+  if (saved.sortByTable && typeof saved.sortByTable === "object" && !Array.isArray(saved.sortByTable)) {
+    for (const [table, v] of Object.entries(saved.sortByTable)) {
+      if (v && typeof v === "object" && typeof v.col === "string") {
+        const { col, order } = v;
+        state.sortByTable[table] = { col, order: order === "desc" ? "desc" : "asc" };
+      }
     }
   }
 } catch {
@@ -835,11 +863,38 @@ if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "d
 if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
 if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
 function persist() {
-  const { source, schema, table, sort, order, limit, hiddenColumns } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, sort, order, limit, hiddenColumns }));
+  const { source, schema, table, limit, hiddenColumns, sortByTable } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable }));
 }
 function hiddenColumnsForTable() {
   return state.hiddenColumns[state.table ?? ""] ?? [];
+}
+var storedSortUnverified = false;
+function isStoredSortUnverified() {
+  return storedSortUnverified;
+}
+function markStoredSortVerified() {
+  storedSortUnverified = false;
+}
+function rememberSort() {
+  if (!state.table) return;
+  if (state.sort) state.sortByTable[state.table] = { col: state.sort, order: state.order };
+  else delete state.sortByTable[state.table];
+  storedSortUnverified = false;
+  persist();
+}
+function applyStoredSort(table) {
+  const stored = table ? state.sortByTable[table] : void 0;
+  state.sort = stored?.col ?? null;
+  state.order = stored?.order ?? "asc";
+  storedSortUnverified = state.sort !== null;
+}
+function dropStoredSort(table) {
+  if (table) delete state.sortByTable[table];
+  state.sort = null;
+  state.order = "asc";
+  storedSortUnverified = false;
+  persist();
 }
 function applyScopeParams(params) {
   if (state.source) params.set("source", state.source);
@@ -866,6 +921,28 @@ function getLastPayload() {
 }
 function setLastPayload(data) {
   lastPayload = data;
+}
+function rowKey(pkNames, row) {
+  return JSON.stringify(pkNames.map((n) => row[n]));
+}
+function scopeKey() {
+  return JSON.stringify([
+    state.source,
+    state.schema,
+    state.table,
+    state.sort,
+    state.order,
+    state.offset,
+    state.limit,
+    appliedFilterAst
+  ]);
+}
+var lastScopeKey = null;
+function getLastScopeKey() {
+  return lastScopeKey;
+}
+function setLastScopeKey(key) {
+  lastScopeKey = key;
 }
 
 // src/filter-ui.ts
@@ -1352,7 +1429,7 @@ async function loadTables() {
     btn.onclick = () => {
       state.table = t.name;
       state.offset = 0;
-      state.sort = null;
+      applyStoredSort(t.name);
       state.filter = "";
       setAppliedFilterAst([]);
       $("filter").value = "";
@@ -1366,6 +1443,7 @@ async function loadTables() {
   filterTables();
   const tableNames = tables.map((t) => t.name);
   if (!tableNames.includes(state.table ?? "")) state.table = tableNames[0] ?? null;
+  if (state.table && state.sort === null) applyStoredSort(state.table);
   if (state.table) await loadData();
   else setStatus("");
 }
@@ -1403,7 +1481,7 @@ function renderHeader(columns) {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
       state.sort = col.name;
       state.offset = 0;
-      persist();
+      rememberSort();
       loadData({ resetScroll: false });
     };
     const cvBtn = document.createElement("button");
@@ -1571,7 +1649,7 @@ function buildRowActionCell(columns, row) {
   td.querySelector(".record-btn").onclick = () => openRecordView(columns, row);
   return td;
 }
-function renderRows(data) {
+function renderRows(data, newRowKeys, pkNames = []) {
   if (data.rows.length === 0) {
     const hidden = hiddenColumnsForTable();
     const visible = data.columns.filter((c) => !hidden.includes(c.name)).length;
@@ -1581,6 +1659,7 @@ function renderRows(data) {
   const tbody = $("tbody");
   tbody.replaceChildren(...data.rows.map((row) => {
     const tr = document.createElement("tr");
+    if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
     tr.appendChild(buildRowActionCell(data.columns, row));
     for (const col of data.columns) {
       tr.appendChild(buildCell(col, row[col.name]));
@@ -1821,7 +1900,7 @@ function updateActiveTableChrome() {
   document.title = state.table ? `${state.table} \u2014 Ashurbanipal` : "Ashurbanipal";
 }
 var loadDataToken = 0;
-async function loadData({ resetScroll = true } = {}) {
+async function loadData({ resetScroll = true, highlightNew = false } = {}) {
   $("error").textContent = "";
   if (!state.table) {
     updateActiveTableChrome();
@@ -1834,20 +1913,38 @@ async function loadData({ resetScroll = true } = {}) {
     data = await fetchTableData();
   } catch (e) {
     if (token !== loadDataToken) return;
+    if (isStoredSortUnverified() && state.table && !state.filter) {
+      dropStoredSort(state.table);
+      return loadData({ resetScroll, highlightNew });
+    }
     $("error").textContent = e.message;
     return;
   }
   if (token !== loadDataToken) return;
+  markStoredSortVerified();
   updateActiveTableChrome();
+  let newRowKeys;
+  let pkNames = [];
+  const prev = getLastPayload();
+  const nowScope = scopeKey();
+  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    if (pkNames.length) {
+      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
+      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
+    }
+  }
   setLastPayload(data);
+  setLastScopeKey(nowScope);
   $("payload").disabled = false;
   $("columns-btn").disabled = false;
+  $("refresh").disabled = false;
   updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
-    renderRows(data);
+    renderRows(data, newRowKeys, pkNames);
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
@@ -1858,7 +1955,18 @@ async function loadData({ resetScroll = true } = {}) {
   } else {
     renderTable();
   }
+  if (token !== loadDataToken) return;
   updatePager(data);
+  if (newRowKeys?.size) {
+    setStatus(`${newRowKeys.size} new`);
+  } else if (highlightNew && newRowKeys) {
+    setStatus("no changes");
+    const icon = $("refresh-icon");
+    icon.textContent = "\u2713";
+    setTimeout(() => {
+      icon.textContent = "\u27F3";
+    }, 1e3);
+  }
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
 $("prev").onclick = () => {
@@ -1871,6 +1979,12 @@ $("next").onclick = () => {
 };
 $("nav-back").onclick = () => history.back();
 $("nav-forward").onclick = () => history.forward();
+$("refresh").onclick = () => {
+  const btn = $("refresh");
+  btn.classList.add("spinning");
+  setTimeout(() => btn.classList.remove("spinning"), 500);
+  loadData({ resetScroll: false, highlightNew: true });
+};
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
 }).observe($("toolbar"));

@@ -49,6 +49,11 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: implementations/rust
+          # RUSTSEC-2026-0258 (h2 unbounded empty DATA frames, low-severity
+          # DoS): reached only transitively via actix-http -> actix-web, which
+          # still pins h2 0.3.x — no patched actix-http or h2 0.3.x release
+          # exists yet. Drop this once actix-web ships an h2 0.4.16+ dep.
+          ignore: RUSTSEC-2026-0258
 
   build-and-test:
     uses: ./.github/workflows/_rust-crate-build-test.yml

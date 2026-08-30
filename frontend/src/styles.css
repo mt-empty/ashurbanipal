@@ -33,6 +33,8 @@
   --type-bool: var(--json-bool);
   --type-number: var(--json-number);
   --type-date: light-dark(#2a6, #6db);
+  /* Transient wash on rows added since the last manual refresh. */
+  --row-new-bg: light-dark(#e3f6e6, #1f3a26);
 }
 
 /* ==== Layout ==== */
@@ -96,6 +98,14 @@ li button.loading .row-spinner { visibility: visible; animation: spin .6s linear
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
+}
+/* One rotation per click, always run to completion (JS drops .spinning on a
+   timer) so a sub-100ms re-fetch still acknowledges the click, separately
+   from #status/aria-busy. inline-block so the rotate applies. */
+#refresh-icon { display: inline-block; }
+#refresh.spinning #refresh-icon { animation: spin .5s linear; }
+@media (prefers-reduced-motion: reduce) {
+  #refresh.spinning #refresh-icon { animation: none; }
 }
 
 /* ==== Source selector ==== */
@@ -172,6 +182,14 @@ td.expandable .cell-text { cursor: zoom-in; }
 .filter-eq.only-action { right: .15rem; }
 td:hover .copy, td:hover .filter-eq, .copy:focus-visible, .filter-eq:focus-visible { opacity: .7; }
 .copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+/* Fades out over 3s after a manual refresh; static under reduced motion,
+   cleared by the next re-render (a fresh <tr> without the class). td has no
+   background of its own, so the tr wash shows through. */
+tbody tr.row-new { animation: row-new-fade 3s ease-out; }
+@keyframes row-new-fade { from { background: var(--row-new-bg); } to { background: transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  tbody tr.row-new { animation: none; background: var(--row-new-bg); }
+}
 
 /* ==== Controls / status ==== */
 /* Pinned in both axes (unlike thead th, top:0 only — header cells must

@@ -4,7 +4,7 @@ import { renderJsonTree, type JsonValue } from "./json-tree.js";
 import { loadData } from "./main.js";
 import { openRecordView } from "./record-view.js";
 import { APPROX_COUNT_TITLE, formatApproxCount, loadTables } from "./sidebar.js";
-import { hiddenColumnsForTable, persist, state } from "./state.js";
+import { hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
@@ -45,7 +45,7 @@ export function renderHeader(columns: Column[]): void {
       : "none");
     th.onclick = () => {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
-      state.sort = col.name; state.offset = 0; persist(); loadData({ resetScroll: false });
+      state.sort = col.name; state.offset = 0; rememberSort(); loadData({ resetScroll: false });
     };
     // A focusable control nested in the sortable th — stopPropagation so
     // opening it doesn't also toggle sort.
@@ -164,8 +164,9 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
   filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
   if (col.references) {
     // In-app navigation: switch to the referenced table and seed a filter
-    // for the referenced row. Reset sort first — the current sort column
-    // belongs to this table and may not exist on the target one.
+    // for the referenced row. Clear sort rather than restore the target's
+    // remembered one — this path submits a filter in the same fetch, which
+    // would defeat loadData's drop-and-retry if that stored column is stale.
     cellText.classList.add("fk-cell");
     const refLabel = col.references.schema
       ? `${col.references.schema}.${col.references.table}`
@@ -248,7 +249,10 @@ function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
   return td;
 }
 
-export function renderRows(data: TableData): void {
+// newRowKeys (rowKey values absent from the previous same-scope fetch,
+// passed only on an explicit refresh) tint those rows via .row-new;
+// pkNames is the matching PK column list, computed once by the caller.
+export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
     // hidden columns (display:none) aren't counted.
@@ -260,6 +264,7 @@ export function renderRows(data: TableData): void {
   const tbody = $("tbody");
   tbody.replaceChildren(...data.rows.map((row) => {
     const tr = document.createElement("tr");
+    if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
     tr.appendChild(buildRowActionCell(data.columns, row));
     for (const col of data.columns) {
       tr.appendChild(buildCell(col, row[col.name]));

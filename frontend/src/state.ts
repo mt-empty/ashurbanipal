@@ -1,4 +1,4 @@
-import type { FilterCondition, TableData } from "./types.js";
+import type { FilterCondition, Row, TableData } from "./types.js";
 
 const UI_KEY = "ashurbanipal_ui";
 
@@ -11,23 +11,27 @@ export interface State {
   limit: number;
   offset: number;
   hiddenColumns: Record<string, string[]>;
+  // sort/order remembered per table, so returning to a table restores the
+  // sort last chosen there (what lets the refresh button surface new rows
+  // without re-sorting each visit — ui-guidelines R10/R11).
+  sortByTable: Record<string, { col: string; order: "asc" | "desc" }>;
   filter: string;
 }
 
-// Persisted to localStorage and mirrored to the URL: table/sort/order/
-// limit/offset only — never filter. A filter can contain data values, and
-// a URL is even more exposed than localStorage (history, access logs,
-// Referer headers). state.filter is the *applied* filter, decoupled from
-// the live #filter input text — only committing (submit, or a
-// click-to-filter action) updates it, so an unfinished edit never gets
-// silently resent by an unrelated sort/page click.
+// Persisted to localStorage and mirrored to the URL: table/limit/offset
+// directly, sort/order keyed per table — never filter. A filter can
+// contain data values, and a URL is even more exposed than localStorage
+// (history, access logs, Referer headers). state.filter is the *applied*
+// filter, decoupled from the live #filter input text — only committing
+// (submit, or a click-to-filter action) updates it, so an unfinished edit
+// never gets silently resent by an unrelated sort/page click.
 export const state: State = {
-  source: null, schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, filter: "",
+  source: null, schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, sortByTable: {}, filter: "",
 };
 
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-  for (const k of ["source", "schema", "table", "sort", "order", "limit"] as const) {
+  for (const k of ["source", "schema", "table", "limit"] as const) {
     if (saved[k] !== undefined) (state as unknown as Record<string, unknown>)[k] = saved[k];
   }
   // Keyed by table name so hiding a column on one table never hides a
@@ -39,6 +43,15 @@ try {
       if (!Array.isArray(cols)) continue;
       const clean = cols.filter((c) => typeof c === "string");
       if (clean.length) state.hiddenColumns[table] = clean;
+    }
+  }
+  // Same per-table keying and discard-if-malformed rule as hiddenColumns.
+  if (saved.sortByTable && typeof saved.sortByTable === "object" && !Array.isArray(saved.sortByTable)) {
+    for (const [table, v] of Object.entries(saved.sortByTable)) {
+      if (v && typeof v === "object" && typeof (v as { col?: unknown }).col === "string") {
+        const { col, order } = v as { col: string; order?: unknown };
+        state.sortByTable[table] = { col, order: order === "desc" ? "desc" : "asc" };
+      }
     }
   }
 } catch {
@@ -56,8 +69,8 @@ if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || stat
 if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
 
 export function persist(): void {
-  const { source, schema, table, sort, order, limit, hiddenColumns } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, sort, order, limit, hiddenColumns }));
+  const { source, schema, table, limit, hiddenColumns, sortByTable } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable }));
 }
 
 // A stale table key or column name absent from the current table's
@@ -65,6 +78,45 @@ export function persist(): void {
 // validation pass is needed here.
 export function hiddenColumnsForTable(): string[] {
   return state.hiddenColumns[state.table ?? ""] ?? [];
+}
+
+// True only between applyStoredSort() restoring a sort and that sort's
+// first fetch returning — the one window where a 400 might be the restored
+// sort column's fault (schema drift, or storage from another database).
+let storedSortUnverified = false;
+export function isStoredSortUnverified(): boolean {
+  return storedSortUnverified;
+}
+export function markStoredSortVerified(): void {
+  storedSortUnverified = false;
+}
+
+// sort + order are remembered per table (like hiddenColumns): a column
+// name is table-specific, so this never carries a sort across tables.
+export function rememberSort(): void {
+  if (!state.table) return;
+  if (state.sort) state.sortByTable[state.table] = { col: state.sort, order: state.order };
+  else delete state.sortByTable[state.table];
+  storedSortUnverified = false; // came from a click on a live header
+  persist();
+}
+
+// Sets the active sort from what's stored for `table` (or clears it).
+export function applyStoredSort(table: string | null): void {
+  const stored = table ? state.sortByTable[table] : undefined;
+  state.sort = stored?.col ?? null;
+  state.order = stored?.order ?? "asc";
+  storedSortUnverified = state.sort !== null;
+}
+
+// The backend rejected a restored sort column (400). Drop it so the caller
+// can retry unsorted (ui-guidelines R5).
+export function dropStoredSort(table: string | null): void {
+  if (table) delete state.sortByTable[table];
+  state.sort = null;
+  state.order = "asc";
+  storedSortUnverified = false;
+  persist();
 }
 
 // Only set once a multi-source/multi-schema deployment is confirmed
@@ -106,4 +158,29 @@ export function getLastPayload(): TableData | null {
 }
 export function setLastPayload(data: TableData | null): void {
   lastPayload = data;
+}
+
+// Row identity for the new-since-refresh highlight. PK-only: whole-row
+// hashing would mark an edited row as new and collide on duplicates. Never
+// persisted — a PK value can be a data value (R6).
+export function rowKey(pkNames: string[], row: Row): string {
+  return JSON.stringify(pkNames.map((n) => row[n]));
+}
+
+// Identifies "the same view" between two fetches. A sort/filter/page/scope
+// change makes every row look new, so the highlight only fires when this
+// is unchanged from the fetch it's being diffed against.
+export function scopeKey(): string {
+  return JSON.stringify([
+    state.source, state.schema, state.table, state.sort, state.order,
+    state.offset, state.limit, appliedFilterAst,
+  ]);
+}
+
+let lastScopeKey: string | null = null;
+export function getLastScopeKey(): string | null {
+  return lastScopeKey;
+}
+export function setLastScopeKey(key: string | null): void {
+  lastScopeKey = key;
 }

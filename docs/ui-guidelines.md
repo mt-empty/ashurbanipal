@@ -117,3 +117,23 @@ should block on.
   a per-row spinner in the sidebar, and `aria-busy` on the table cover
   loading; `#error` covers failure). *(Derives from: visibility of system
   status — heuristic #1, given full weight above.)*
+- **R10 — The `refresh` button and its new-row tint are the sanctioned
+  "what changed" affordance.** A user-clicked re-fetch of the current view;
+  rows absent from the previous same-scope response briefly wash
+  (`--row-new-bg`, faded/static per `prefers-reduced-motion`). Constraints:
+  it is manual only (no polling timer — that fights R9 and heuristic #7);
+  row identity is the primary key, so a PK-less table gets no tint rather
+  than a guessed one; the previous row set lives in memory only and is
+  never persisted (R6); and the fetch itself reports through the normal
+  `fetchTableData` chrome, with the new-row count also announced via
+  `#status` (R9, no carve-out). *(Derives from: recognition rather than
+  recall, visibility of system status.)*
+- **R11 — Sort is remembered per table.** `sort` + `order` persist keyed by
+  table name (like hidden columns), so returning to a table restores the
+  sort last chosen there — which is what lets R10's refresh surface new
+  rows without re-sorting every visit. A restored sort column the backend
+  rejects (400 — the schema changed, or storage carried over from another
+  database) is dropped and the view retried unsorted (R5); the retry only
+  fires when sort was the sole stale-risk input (no filter on the request).
+  Sort is never carried across tables — a column name is table-specific.
+  *(Derives from: recognition rather than recall.)*
