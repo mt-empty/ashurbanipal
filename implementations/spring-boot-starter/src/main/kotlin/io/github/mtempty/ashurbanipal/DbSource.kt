@@ -56,7 +56,7 @@ data class QueryOpts(
  * Backend-selection seam: one implementation per supported database engine —
  * [PostgresSource] (default), [MySqlSource] (MySQL/MariaDB, opt-in via
  * `ashurbanipal.backend=mysql`), [SqliteSource] (opt-in via
- * `ashurbanipal.backend=sqlite`). Route handlers ([DbViewerController]) only
+ * `ashurbanipal.backend=sqlite`). Route handlers ([AshurbanipalController]) only
  * ever see this interface, never a concrete implementation or a raw
  * `DataSource`/JDBC type. Mirrors `implementations/rust/core/src/db/mod.rs`'s
  * `DbSource` trait; which implementation gets constructed is chosen by

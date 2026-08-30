@@ -35,7 +35,7 @@ class AshurbanipalKillSwitchTest {
     fun `no config at all means disabled`() {
         runner().run { context ->
             assertThat(context).hasNotFailed()
-            assertThat(context).doesNotHaveBean(DbViewerController::class.java)
+            assertThat(context).doesNotHaveBean(AshurbanipalController::class.java)
             assertThat(context).doesNotHaveBean("ashurbanipalDbSources")
         }
     }
@@ -46,7 +46,7 @@ class AshurbanipalKillSwitchTest {
             .withPropertyValues("ashurbanipal.enabled=false")
             .run { context ->
                 assertThat(context).hasNotFailed()
-                assertThat(context).doesNotHaveBean(DbViewerController::class.java)
+                assertThat(context).doesNotHaveBean(AshurbanipalController::class.java)
             }
     }
 
@@ -56,7 +56,7 @@ class AshurbanipalKillSwitchTest {
             .withPropertyValues("ashurbanipal.enabled=true")
             .run { context ->
                 assertThat(context).hasNotFailed()
-                assertThat(context).hasSingleBean(DbViewerController::class.java)
+                assertThat(context).hasSingleBean(AshurbanipalController::class.java)
                 assertThat(context).hasBean("ashurbanipalDbSources")
             }
     }

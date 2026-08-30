@@ -140,7 +140,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | ID | Requirement | Test |
 |---|---|---|
 | `P5.6-EMPTY-CONFIG` | Empty config → `{"siblings": []}` | `html_and_siblings::siblings_endpoint_returns_empty_list_by_default` |
-| `P5.6-ORIGIN-RESOLUTION` | Health resolved against origin, not `dbviewer_url` path | covered at the unit level only, not by this HTTP suite — `implementations/rust/axum/src/routes.rs`'s `health_url_resolves_against_origin` (pure function, no live sibling needed) |
+| `P5.6-ORIGIN-RESOLUTION` | Health resolved against origin, not `base_url` path | covered at the unit level only, not by this HTTP suite — `implementations/rust/axum/src/routes.rs`'s `health_url_resolves_against_origin` (pure function, no live sibling needed) |
 | `P5.6-2XX-ONLY` | `healthy` true iff 2xx; any failure → false, never an error response | **gap** — see [Known gaps](#known-gaps) |
 | `P5.6-PARALLEL-TIMEOUT-BOUND` | Checks SHOULD run in parallel, MUST be individually timeout-bounded | **gap** — see [Known gaps](#known-gaps) |
 

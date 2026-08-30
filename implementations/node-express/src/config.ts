@@ -35,7 +35,7 @@ export function withDefaults(limits: Limits | undefined): ResolvedLimits {
 
 export interface Sibling {
   name: string;
-  dbviewerUrl: string;
+  baseUrl: string;
   healthPath: string;
 }
 

@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 r#"
                 [[siblings]]
                 name = "demo-{p}"
-                dbviewer_url = "http://localhost:{p}/__ashurbanipal"
+                base_url = "http://localhost:{p}/__ashurbanipal"
                 health_path = "/health"
                 "#
             )

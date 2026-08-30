@@ -243,6 +243,6 @@ export const TABLES: TableDef[] = [
 export const SCHEMAS = ["public", "reporting"];
 
 export const SIBLINGS = [
-  { name: "billing (demo)", dbviewer_url: "https://billing.example.com/__ashurbanipal", healthy: true },
-  { name: "notifications (demo)", dbviewer_url: "https://notifications.example.com/__ashurbanipal", healthy: false },
+  { name: "billing (demo)", base_url: "https://billing.example.com/__ashurbanipal", healthy: true },
+  { name: "notifications (demo)", base_url: "https://notifications.example.com/__ashurbanipal", healthy: false },
 ];

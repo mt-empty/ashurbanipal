@@ -20,7 +20,7 @@ export async function loadSiblings(): Promise<void> {
     dot.setAttribute("role", "img");
     dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
     const a = document.createElement("a");
-    a.href = s.dbviewer_url; a.textContent = s.name;
+    a.href = s.base_url; a.textContent = s.name;
     a.target = "_blank"; a.rel = "noopener";
     a.title = s.name; // truncation escape hatch
     p.className = "sibling-row";

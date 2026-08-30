@@ -26,9 +26,9 @@ import java.net.URI
 abstract class AshurbanipalHttpTestBase {
 
     // scanBasePackages points at an empty package deliberately: TestApp lives
-    // in the same package as DbViewerController, and @RestController is a
+    // in the same package as AshurbanipalController, and @RestController is a
     // component stereotype — without this, component-scanning would register
-    // a *second* DbViewerController bean alongside the one
+    // a *second* AshurbanipalController bean alongside the one
     // AshurbanipalAutoConfiguration's @Bean method creates, both mapping the
     // same routes ("Ambiguous mapping"). A real host app wouldn't hit this
     // (its own base package doesn't contain io.github.mtempty.ashurbanipal),

@@ -393,8 +393,8 @@ Response:
 ```json
 {
   "siblings": [
-    { "name": "billing", "dbviewer_url": "https://billing.internal.vpn/__ashurbanipal", "healthy": true },
-    { "name": "notifications", "dbviewer_url": "https://notifications.internal.vpn/__ashurbanipal", "healthy": false }
+    { "name": "billing", "base_url": "https://billing.internal.vpn/__ashurbanipal", "healthy": true },
+    { "name": "notifications", "base_url": "https://notifications.internal.vpn/__ashurbanipal", "healthy": false }
   ]
 }
 ```
@@ -403,8 +403,8 @@ Response:
   `{"siblings": []}`.
 - Health checks are performed synchronously per request: an HTTP GET to
   each sibling's configured health path, resolved against the sibling's
-  **origin** (scheme + host + port of `dbviewer_url`), not against the
-  `dbviewer_url` path.
+  **origin** (scheme + host + port of `base_url`), not against the
+  `base_url` path.
 - `healthy` is `true` iff the check returned a 2xx status. Any failure —
   non-2xx, network error, timeout, unresolvable URL — is `false`, never
   an error response.

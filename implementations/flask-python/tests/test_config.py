@@ -36,7 +36,7 @@ def test_parses_full_config() -> None:
 
         [[siblings]]
         name = "billing"
-        dbviewer_url = "https://billing.internal.vpn/__ashurbanipal"
+        base_url = "https://billing.internal.vpn/__ashurbanipal"
         health_path = "/health"
         """
     )

@@ -52,9 +52,9 @@ func main() {
 	}
 	if siblingPort, ok := os.LookupEnv("SIBLING_PORT"); ok {
 		cfg.Siblings = []ashurbanipal.Sibling{{
-			Name:        fmt.Sprintf("demo-%s", siblingPort),
-			DBViewerURL: fmt.Sprintf("http://localhost:%s/__ashurbanipal", siblingPort),
-			HealthPath:  "/health",
+			Name:       fmt.Sprintf("demo-%s", siblingPort),
+			BaseURL:    fmt.Sprintf("http://localhost:%s/__ashurbanipal", siblingPort),
+			HealthPath: "/health",
 		}}
 	}
 

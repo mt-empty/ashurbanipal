@@ -73,7 +73,7 @@ function buildApiReference() {
         path: `${base}/siblings`,
         summary: "Other related services configured for this instance, with live health status.",
         params: [],
-        example_response: { siblings: [{ name: "billing", dbviewer_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] },
+        example_response: { siblings: [{ name: "billing", base_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] },
       },
     ],
     filter: {

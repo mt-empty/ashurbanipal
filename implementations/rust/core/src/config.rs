@@ -32,7 +32,7 @@ impl Default for Limits {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Sibling {
     pub name: String,
-    pub dbviewer_url: String,
+    pub base_url: String,
     pub health_path: String,
 }
 
@@ -97,7 +97,7 @@ mod tests {
 
             [[siblings]]
             name = "billing"
-            dbviewer_url = "https://billing.internal.vpn/__ashurbanipal"
+            base_url = "https://billing.internal.vpn/__ashurbanipal"
             health_path = "/health"
             "#,
         )

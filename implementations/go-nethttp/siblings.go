@@ -15,9 +15,9 @@ const siblingTimeout = 3 * time.Second
 
 // SiblingStatus is one entry of GET {mount}/api/siblings.
 type SiblingStatus struct {
-	Name        string `json:"name"`
-	DBViewerURL string `json:"dbviewer_url"`
-	Healthy     bool   `json:"healthy"`
+	Name    string `json:"name"`
+	BaseURL string `json:"base_url"`
+	Healthy bool   `json:"healthy"`
 }
 
 // checkSiblings fans health checks out in parallel via errgroup, one GET
@@ -31,8 +31,8 @@ func checkSiblings(ctx context.Context, client *http.Client, siblings []Sibling)
 	for i, sibling := range siblings {
 		i, sibling := i, sibling
 		g.Go(func() error {
-			statuses[i] = SiblingStatus{Name: sibling.Name, DBViewerURL: sibling.DBViewerURL}
-			healthURL, ok := siblingHealthURL(sibling.DBViewerURL, sibling.HealthPath)
+			statuses[i] = SiblingStatus{Name: sibling.Name, BaseURL: sibling.BaseURL}
+			healthURL, ok := siblingHealthURL(sibling.BaseURL, sibling.HealthPath)
 			if !ok {
 				return nil
 			}
@@ -55,10 +55,10 @@ func checkSiblings(ctx context.Context, client *http.Client, siblings []Sibling)
 	return statuses
 }
 
-// siblingHealthURL resolves healthPath against dbviewerURL's origin
+// siblingHealthURL resolves healthPath against baseURL's origin
 // (scheme + host + port), not its path — spec/protocol.md §5.6.
-func siblingHealthURL(dbviewerURL, healthPath string) (string, bool) {
-	u, err := url.Parse(dbviewerURL)
+func siblingHealthURL(baseURL, healthPath string) (string, bool) {
+	u, err := url.Parse(baseURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return "", false
 	}

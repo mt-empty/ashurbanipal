@@ -115,14 +115,14 @@ tasks.withType<Test> {
 // copy since there is no separate tagged release to vendor from.
 val repoRoot = rootDir.parentFile.parentFile
 val frontendSource = repoRoot.resolve("frontend/dbviewer.html")
-val pinnedFrontendSha256 = "3a1ab8819583eb6f0f4469d866c5a3b1b31e64cb5606dd9741735de6b3956ffb"
+val pinnedFrontendSha256 = "f37670eec7d1863df71804f578888b79e1da4c91ce8531cd0a071851f17448c8"
 
 val vendorFrontend = tasks.register("vendorFrontend") {
     description = "Copies frontend/dbviewer.html into generated resources, re-verifying its sha256."
     // Resource root added to the main source set below is
     // "generated-resources" (no "/ashurbanipal" suffix) — the classpath
     // resource path is "ashurbanipal/dbviewer.html", matching
-    // ClassPathResource("ashurbanipal/dbviewer.html") in DbViewerController.
+    // ClassPathResource("ashurbanipal/dbviewer.html") in AshurbanipalController.
     val outputDir = layout.buildDirectory.dir("generated-resources")
     inputs.file(frontendSource)
     outputs.dir(outputDir)

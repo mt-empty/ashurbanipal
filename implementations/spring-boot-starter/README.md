@@ -26,7 +26,7 @@ ashurbanipal:
     query-timeout-secs: 5
   siblings:
     - name: billing
-      dbviewer-url: https://billing.internal.vpn/__ashurbanipal
+      base-url: https://billing.internal.vpn/__ashurbanipal
       health-path: /health
 ```
 
@@ -40,7 +40,7 @@ always an explicit config property, never inferred from which JDBC driver
 happens to be on the classpath (`PORTING.md`'s hardening checklist item
 2). This starter has no opinion on which environment it's running in —
 deciding when `enabled` is true is entirely up to the host. Absent config
-means disabled (no `DbViewerController`/`DbSource` bean registered),
+means disabled (no `AshurbanipalController`/`DbSource` bean registered),
 never enabled with defaults.
 
 

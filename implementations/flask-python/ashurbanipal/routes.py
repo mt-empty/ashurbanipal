@@ -207,18 +207,18 @@ def _clamp_int(raw, *, default: int, lo: int, hi: int):
     return max(lo, min(hi, value))
 
 
-def _health_url(dbviewer_url: str, health_path: str):
+def _health_url(base_url: str, health_path: str):
     """Resolves against the sibling's origin (scheme + host + port), not
-    the dbviewer_url's own path.
+    the base_url's own path.
     """
-    parts = urlsplit(dbviewer_url)
+    parts = urlsplit(base_url)
     if not parts.scheme or not parts.netloc:
         return None
     return urlunsplit((parts.scheme, parts.netloc, health_path, "", ""))
 
 
 def _check_one_sibling(sibling) -> dict:
-    url = _health_url(sibling.dbviewer_url, sibling.health_path)
+    url = _health_url(sibling.base_url, sibling.health_path)
     healthy = False
     if url is not None:
         try:
@@ -226,7 +226,7 @@ def _check_one_sibling(sibling) -> dict:
                 healthy = 200 <= resp.status < 300
         except (urllib.error.URLError, OSError, ValueError):
             healthy = False
-    return {"name": sibling.name, "dbviewer_url": sibling.dbviewer_url, "healthy": healthy}
+    return {"name": sibling.name, "base_url": sibling.base_url, "healthy": healthy}
 
 
 def _check_siblings(siblings: list) -> list[dict]:

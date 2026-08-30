@@ -102,7 +102,7 @@ async function main(): Promise<void> {
     config.siblings = [
       {
         name: `demo-${siblingPort}`,
-        dbviewerUrl: `http://localhost:${siblingPort}/__ashurbanipal`,
+        baseUrl: `http://localhost:${siblingPort}/__ashurbanipal`,
         healthPath: "/health",
       },
     ];

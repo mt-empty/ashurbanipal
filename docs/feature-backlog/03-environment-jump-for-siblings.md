@@ -6,7 +6,7 @@ different sibling services.
 **Impact / constraints:**
 - No existing config models this. `config.rs`'s `siblings` list
   (`design.md` §7) represents *other services* — each with its own
-  independent `dbviewer_url`, `name`, `health_path` — not other environments
+  independent `base_url`, `name`, `health_path` — not other environments
   of *this* service. There's no field anywhere for "this app's URL in
   staging" vs. "this app's URL in dev."
 - Also brushes against the kill-switch design: `Config::is_enabled()`

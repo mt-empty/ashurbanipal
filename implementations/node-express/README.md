@@ -52,7 +52,7 @@ const viewer = createRouter(
     basePath: "/__ashurbanipal", // undefined also means this
     limits: { defaultPageSize: 50, maxPageSize: 100, queryTimeoutSecs: 5 },
     siblings: [
-      { name: "billing", dbviewerUrl: "https://billing.internal.vpn/__ashurbanipal", healthPath: "/health" },
+      { name: "billing", baseUrl: "https://billing.internal.vpn/__ashurbanipal", healthPath: "/health" },
     ],
   },
   [{ name: "primary", source: new PostgresSource(pool) }],

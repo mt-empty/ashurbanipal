@@ -52,12 +52,12 @@ query_timeout_secs = 5
 
 [[siblings]]
 name = "billing"
-dbviewer_url = "https://billing.internal.vpn/__ashurbanipal"
+base_url = "https://billing.internal.vpn/__ashurbanipal"
 health_path = "/health"
 
 [[siblings]]
 name = "notifications"
-dbviewer_url = "https://notifications.internal.vpn/__ashurbanipal"
+base_url = "https://notifications.internal.vpn/__ashurbanipal"
 health_path = "/health"
 ```
 

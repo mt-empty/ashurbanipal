@@ -48,7 +48,7 @@ config = Config(
     siblings=[
         Sibling(
             name="billing",
-            dbviewer_url="https://billing.internal.vpn/__ashurbanipal",
+            base_url="https://billing.internal.vpn/__ashurbanipal",
             health_path="/health",
         ),
     ],

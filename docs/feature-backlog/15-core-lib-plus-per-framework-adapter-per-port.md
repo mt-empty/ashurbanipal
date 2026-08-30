@@ -51,7 +51,7 @@ each language's own normal tooling.
   `org.springframework.jdbc.core.JdbcTemplate`/`RowMapper` and
   `org.springframework.transaction.support.TransactionTemplate` — Spring's
   JDBC convenience layer is baked into the DB-backend implementations
-  themselves, not just `DbViewerController.kt`/`AshurbanipalAutoConfiguration.kt`.
+  themselves, not just `AshurbanipalController.kt`/`AshurbanipalAutoConfiguration.kt`.
   A hypothetical Ktor adapter either drops to raw JDBC in a genuinely
   framework-agnostic core (real rewrite of the DB layer, not just moving
   files) or a "core" module still carries a Spring dependency, defeating

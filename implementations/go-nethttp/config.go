@@ -36,9 +36,9 @@ func (l Limits) WithDefaults() Limits {
 // Sibling is one entry in Config.Siblings — another Ashurbanipal instance
 // whose health is polled live by GET {mount}/api/siblings.
 type Sibling struct {
-	Name        string
-	DBViewerURL string
-	HealthPath  string
+	Name       string
+	BaseURL    string
+	HealthPath string
 }
 
 // Config mirrors the Rust reference's TOML config 1:1 (docs/design.md §7),
