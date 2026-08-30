@@ -139,3 +139,4 @@ jobs:
     with:
       tag-pattern: '^ashurbanipal-flask-v'
       include-paths: 'implementations/flask-python/** frontend/** spec/**'
+      title-prefix: 'ashurbanipal-flask '

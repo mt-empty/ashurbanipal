@@ -85,3 +85,4 @@ jobs:
     with:
       tag-pattern: '^ashurbanipal-actix-web-v'
       include-paths: 'implementations/rust/actix-web/** implementations/rust/core/** frontend/** spec/**'
+      title-prefix: 'ashurbanipal-actix-web '

@@ -131,3 +131,4 @@ jobs:
     with:
       tag-pattern: '^ashurbanipal-node-express-v'
       include-paths: 'implementations/node-express/** frontend/** spec/**'
+      title-prefix: 'ashurbanipal-node-express '

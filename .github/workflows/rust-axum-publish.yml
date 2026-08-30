@@ -84,3 +84,4 @@ jobs:
     with:
       tag-pattern: '^ashurbanipal-axum-v'
       include-paths: 'implementations/rust/axum/** implementations/rust/core/** frontend/** spec/**'
+      title-prefix: 'ashurbanipal-axum '

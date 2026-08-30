@@ -70,3 +70,4 @@ jobs:
     with:
       tag-pattern: '^ashurbanipal-v'
       include-paths: 'implementations/rust/core/** spec/**'
+      title-prefix: 'ashurbanipal '

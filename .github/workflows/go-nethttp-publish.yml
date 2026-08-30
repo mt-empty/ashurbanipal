@@ -123,4 +123,4 @@ jobs:
     with:
       tag-pattern: '^implementations/go-nethttp/v'
       include-paths: 'implementations/go-nethttp/** frontend/** spec/**'
-      title-prefix: 'go/net-http '
+      title-prefix: 'ashurbanipal-go-nethttp '
