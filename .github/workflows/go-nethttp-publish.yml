@@ -119,7 +119,6 @@ jobs:
     needs: [conformance, schema-conformance]
     permissions:
       contents: write
-    continue-on-error: true
     uses: ./.github/workflows/_post-release.yml
     with:
       tag-pattern: '^implementations/go-nethttp/v'

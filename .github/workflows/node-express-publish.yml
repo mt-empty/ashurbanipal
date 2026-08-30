@@ -127,7 +127,6 @@ jobs:
     needs: publish
     permissions:
       contents: write
-    continue-on-error: true
     uses: ./.github/workflows/_post-release.yml
     with:
       tag-pattern: '^ashurbanipal-node-express-v'
