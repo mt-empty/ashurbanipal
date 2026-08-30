@@ -111,7 +111,12 @@ commit and creates the GitHub Release; it does not touch any registry.
   `ashurbanipal-node-express-v*`, …; Go keeps `implementations/go-nethttp/v*`).
   There is no shared `v*` tag. Each registry needs its own publish trigger; the
   package-name prefix also lets a consumer's Dependabot attach the right port's
-  GitHub Release. Independent tags, shared version number.
+  GitHub Release (Dependabot matches on the tag, not the Release title).
+  Independent tags, shared version number.
+- **Release titles are `<package> <version>`** — every `*-publish.yml` passes its
+  package name as `_post-release.yml`'s `title-prefix` (e.g. `ashurbanipal-axum
+  0.4.0`), so seven same-version Releases stay distinguishable in the list. The
+  seven 0.4.0 Releases predate this and were retitled by hand.
 - **Per-port changelog.** Each port has `implementations/<port>/CHANGELOG.md`
   (Keep a Changelog format), generated forward-only from Conventional-Commit
   subjects by `git-cliff` (`cliff.toml`, `mise run changelog:<port>`). The 0.3.0
