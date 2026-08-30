@@ -1,7 +1,7 @@
 # Publishing checklist
 
-Status (2026-08-27): all six packaged ports are live on their registries and,
-as of the 0.3.0 reset, share one `major.minor` version line.
+Status (2026-08-30): all six packaged ports are live on their registries and,
+as of the 0.3.0 reset, share one `major.minor` version line — now 0.4.0.
 
 This doc governs *distribution* — whether a port's artifact can leave this repo
 and install from a public registry. `PORTING.md` governs *correctness*
@@ -12,13 +12,13 @@ separate gates.
 
 | Port | Package / coordinate | Registry | Latest | Tag prefix | Publish workflow |
 |---|---|---|---|---|---|
-| Rust core | `ashurbanipal` | crates.io | 0.3.0 | `ashurbanipal-v*` | `rust-core-publish.yml` |
-| Rust / Axum | `ashurbanipal-axum` | crates.io | 0.3.0 | `ashurbanipal-axum-v*` | `rust-axum-publish.yml` |
-| Rust / Actix-web | `ashurbanipal-actix-web` | crates.io | 0.3.0 | `ashurbanipal-actix-web-v*` | `rust-actix-web-publish.yml` |
-| Node / Express | `ashurbanipal-node-express` | npm | 0.3.0 | `ashurbanipal-node-express-v*` | `node-express-publish.yml` |
-| Python / Flask | `ashurbanipal-flask` | PyPI | 0.3.0 | `ashurbanipal-flask-v*` | `flask-python-publish.yml` |
-| Spring Boot | `io.github.mt-empty:ashurbanipal-spring-boot-starter` | Maven Central | 0.3.0 | `ashurbanipal-spring-boot-starter-v*` | `spring-boot-starter-publish.yml` |
-| Go / net-http | `github.com/mt-empty/ashurbanipal/implementations/go-nethttp` | proxy.golang.org | 0.3.0 | `implementations/go-nethttp/v*` | `go-nethttp-publish.yml` |
+| Rust core | `ashurbanipal` | crates.io | 0.4.0 | `ashurbanipal-v*` | `rust-core-publish.yml` |
+| Rust / Axum | `ashurbanipal-axum` | crates.io | 0.4.0 | `ashurbanipal-axum-v*` | `rust-axum-publish.yml` |
+| Rust / Actix-web | `ashurbanipal-actix-web` | crates.io | 0.4.0 | `ashurbanipal-actix-web-v*` | `rust-actix-web-publish.yml` |
+| Node / Express | `ashurbanipal-node-express` | npm | 0.4.0 | `ashurbanipal-node-express-v*` | `node-express-publish.yml` |
+| Python / Flask | `ashurbanipal-flask` | PyPI | 0.4.0 | `ashurbanipal-flask-v*` | `flask-python-publish.yml` |
+| Spring Boot | `io.github.mt-empty:ashurbanipal-spring-boot-starter` | Maven Central | 0.4.0 | `ashurbanipal-spring-boot-starter-v*` | `spring-boot-starter-publish.yml` |
+| Go / net-http | `github.com/mt-empty/ashurbanipal/implementations/go-nethttp` | proxy.golang.org | 0.4.0 | `implementations/go-nethttp/v*` | `go-nethttp-publish.yml` |
 
 Latest reflects the 0.3.0 reset once its tags are pushed (Rust was at 0.2.1,
 the others at 0.1.1, Go at its initial 0.1.0 — a publish-history artifact, not a

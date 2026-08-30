@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "io.github.mt-empty"
-version = "0.3.0"
+version = "0.4.0"
 
 // Toolchain pinned to whatever JDK is actually installed in this devcontainer
 // (JDK 21 via mise — no JDK 17 available to auto-detect or download here).

@@ -5,6 +5,16 @@ Notable changes to the `ashurbanipal` core crate (framework-agnostic config, `Db
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.4.0] - 2026-08-30
+
+### Security
+
+- Per-port changelogs and GitHub Releases via git-cliff (#70)
+
+### Refactor
+
+- Replace legacy "dbviewer" naming in the siblings interface (#74)
+
 ## [0.3.0] - 2026-08-28
 
 First release with a tracked changelog. Implements protocol v1.
