@@ -186,12 +186,8 @@ func TestSQLiteCommonValuesIsAlwaysEmpty(t *testing.T) {
 // slowQueryIsAbortedNotLeftToRun is the empirical proof this port's brief
 // asked for: a real SQLite file, a real slow query, a real timeout — not
 // an inference from modernc.org/sqlite's documentation. Uses its own
-// single-connection *sql.DB (not seededDB's schema) so the follow-up probe
-// query is forced onto the exact same physical connection the slow query
-// ran on; if the driver only abandoned *waiting* rather than actually
-// interrupting execution (the failure mode the Rust reference's own
-// progress-handler mechanism exists to avoid), that connection would still
-// be busy and the probe would stall too.
+// single-connection *sql.DB so the probe shares the slow query's physical
+// connection. A mere wait cancellation would leave it busy and stall the probe.
 func TestSQLiteSlowQueryIsAbortedNotLeftToRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "slow.db")
 	db, err := sql.Open("sqlite", path)

@@ -13,9 +13,7 @@ import (
 
 const (
 	protocolHeader = "x-ashurbanipal-protocol"
-	// protocolVersion is bumped only for non-additive wire changes; must
-	// track implementations/rust/axum/src/routes.rs's PROTOCOL_VERSION and the
-	// Spring Boot starter's own constant (spec/protocol.md §7).
+	// protocolVersion is bumped only for non-additive wire changes (spec/protocol.md §7).
 	protocolVersion = "1"
 )
 
@@ -34,13 +32,9 @@ type NamedSource struct {
 // choice baked in, so it mounts into any net/http-compatible mux (stdlib
 // ServeMux, Chi, or anything else).
 //
-// sources is the one seam to the database (see DbSource in db.go) — the
-// caller constructs each one (NewPostgresSource, NewSQLiteSource,
-// NewMySQLSource, or a custom implementation) already bound to its own
-// query timeout, the same way implementations/rust/axum/src/routes.rs's
-// router<S: DbSource> takes already-constructed sources rather than raw
-// connections. sources MUST be non-empty — a host with nothing to browse
-// should pass Enabled: false instead of an empty slice.
+// sources is the one seam to the database (see DbSource in db.go); hosts
+// construct them before routing. sources MUST be non-empty — a host with
+// nothing to browse should pass Enabled: false instead of an empty slice.
 //
 // When cfg.Enabled is false — including the zero value Config{}, which
 // MUST mean disabled — Router returns a handler that 404s every request,

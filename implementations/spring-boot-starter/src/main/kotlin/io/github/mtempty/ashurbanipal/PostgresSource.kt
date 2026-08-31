@@ -9,14 +9,7 @@ import java.sql.ResultSet
 import java.sql.SQLException
 import javax.sql.DataSource
 
-/**
- * The default/reference [DbSource] — port of
- * `implementations/rust/core/src/db/postgres.rs`'s SQL, byte-for-byte
- * where possible. Every query goes through the one [jdbcTemplate], whose
- * `queryTimeout` is set once from `limits.queryTimeoutSecs` at
- * construction — catalog queries included, not just row fetches
- * (spec/protocol.md §6: every query bounded, no exceptions).
- */
+/** Postgres [DbSource]; queryTimeout bounds catalog and data operations (`spec/protocol.md` §6). */
 class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val filterValidator: FilterValidator) : DbSource {
     private val jdbcTemplate = JdbcTemplate(dataSource).apply {
         queryTimeout = queryTimeoutSecs
@@ -29,13 +22,6 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         transactionTemplate.execute { action() }
             ?: throw IllegalStateException("read-only transaction did not produce a result")
 
-    /**
-     * Excludes the catalogs themselves (`pg_catalog`, `information_schema`,
-     * `pg_toast%`, `pg_temp_%`) and anything the connected role can't
-     * actually use, so a schema only ever appears here if it's both a real
-     * user namespace and one this role has `USAGE` on (`spec/protocol.md` §5.7,
-     * mirrors `implementations/rust/core/src/db/postgres.rs::list_schemas_in_tx`).
-     */
     override fun listSchemas(): List<String> = listAllowedSchemas()
 
     private fun listAllowedSchemas(): List<String> =
@@ -49,18 +35,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             String::class.java,
         ).filterNotNull()
 
-    /**
-     * Resolves the schema for one operation exactly once: an explicit
-     * request and an absent one (resolved via `current_schema()`) both go
-     * through the same allow-list, so neither path can reach a schema the
-     * other would reject (`docs/adapter-decisions.md` §1). Callers that run
-     * more than one query per operation ([queryTableInTransaction],
-     * [commonValuesInTransaction]) call this once inside their
-     * [inReadOnlyTransaction] block, which pins the whole operation to one
-     * physical connection — immune to pool sessions with divergent
-     * `search_path`, same reasoning as
-     * `implementations/rust/axum/tests/schema_isolation.rs`.
-     */
+    /** Resolve inside the operation transaction to prevent pool-session drift (`spec/protocol.md` §5). */
     private fun resolveSchema(requested: String?): String {
         val schemas = listAllowedSchemas()
         val resolved = requested
@@ -70,9 +45,6 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     override fun listTables(schema: String?): List<TableInfo> {
         val realSchema = resolveSchema(schema)
-        // has_table_privilege keeps this listing equal to the allow-list
-        // [requireTable] enforces — a table the role can't SELECT is never
-        // offered as a row it would then have to reject.
         return jdbcTemplate.query(
             "select c.relname::text, obj_description(c.oid, 'pg_class') " +
                 "from pg_class c " +
@@ -87,8 +59,6 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     override fun tableCounts(schema: String?): List<CountEntry> {
         val realSchema = resolveSchema(schema)
-        // Same has_table_privilege filter as [listTables], so the count
-        // column never names a table the sidebar won't show.
         return jdbcTemplate.query(
             "select c.relname::text, c.reltuples::bigint " +
                 "from pg_class c " +
@@ -101,10 +71,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         )
     }
 
-    // has_table_privilege narrows information_schema.tables (which lists a
-    // table on *any* privilege) to just the SELECT-able ones, so this
-    // allow-list can't admit a table a later SELECT would be denied on —
-    // keeping it in lockstep with [listTables].
+    // Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
     private fun allowedTables(schema: String): List<String> =
         jdbcTemplate.queryForList(
             "select table_name from information_schema.tables " +
@@ -144,17 +111,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val refColumn: String?,
     )
 
-    /**
-     * Composite FKs are dropped rather than risk mislabeling which referencing column pairs with which referenced column (`spec/protocol.md` §5.4.1). Composite *primary* keys are NOT dropped this way — every PK column still gets `key: "pk"` regardless of how many columns are in the PK.
-     *
-     * The `ccu` join matches on `ccu.constraint_schema` (the schema the
-     * constraint itself lives in, always equal to `tc.table_schema`), not
-     * `ccu.table_schema` (the schema of the table constraint_column_usage is
-     * describing — for a FOREIGN KEY row that's the *referenced* table's
-     * schema, which for a cross-schema FK differs from the constraining
-     * table's schema). Joining on `ccu.table_schema` instead silently drops
-     * every cross-schema FK's metadata (the LEFT JOIN just never matches).
-     */
+    /** Use constraint_schema for cross-schema FKs; omit composites (`spec/protocol.md` §5.4.1). */
     private fun keyMetadata(schema: String, table: String): Pair<Set<String>, Map<String, ColumnRef>> {
         val rows = jdbcTemplate.query(
             "select tc.constraint_name, tc.constraint_type, kcu.column_name, " +
@@ -202,9 +159,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             val refTable = first.refTable
             val refColumn = first.refColumn
             if (refSchema != null && refTable != null && refColumn != null) {
-                // Same-schema is the overwhelming common case; omitting
-                // `schema` there keeps the wire payload byte-identical to
-                // before this field existed.
+                // Same-schema references omit schema on the wire (spec/protocol.md §5.4.1).
                 val fkSchema = if (refSchema != schema) refSchema else null
                 fkColumns[first.columnName] = ColumnRef(refTable, refColumn, fkSchema)
             }
@@ -235,9 +190,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             realSchema,
             realTable,
         )
-        // Joins through pg_attribute/pg_class directly: col_description is keyed
-        // by attnum, which can diverge from ordinal_position once a column has
-        // been dropped.
+        // attnum survives dropped columns; ordinal_position does not.
         val columnComments = jdbcTemplate.query(
             "select a.attname::text, col_description(a.attrelid, a.attnum::int) " +
                 "from pg_attribute a " +
@@ -272,12 +225,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         }
 
         val selectList = columns.joinToString(", ") { "${quoteIdent(it.name)}::text" }
-        // Table-qualified by relation name, not schema — a FROM item's
-        // correlation name is its own relation name regardless of whether
-        // FROM itself is schema-qualified. An unqualified `order by "col"`
-        // would resolve to the ::text-cast output column instead of the
-        // source column, sorting lexicographically instead of by the real
-        // typed value.
+        // Qualify the source column so ORDER BY keeps its native type.
         val orderClause = sort?.let {
             " order by ${quoteIdent(realTable)}.${quoteIdent(it)} ${if (opts.descending) "desc" else "asc"}"
         } ?: ""
@@ -292,9 +240,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val rows = try {
             jdbcTemplate.query(sql, RowMapper { rs, _ -> rowToJson(rs, columns) }, *bindArgs.toTypedArray())
         } catch (e: DataAccessException) {
-            // The allow-list already rejects tables the role can't SELECT, so a
-            // permission denied (SQLSTATE 42501) reaching the row fetch is a
-            // residual edge; report it as NotAllowed (400), not a driver 500.
+            // Map residual SELECT-denied errors to NotAllowed (spec/protocol.md §2).
             if ((e.mostSpecificCause as? SQLException)?.sqlState == "42501") {
                 throw NotAllowedException("not allowed: table $realTable")
             }

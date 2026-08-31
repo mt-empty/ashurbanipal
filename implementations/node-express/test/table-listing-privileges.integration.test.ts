@@ -5,10 +5,8 @@ import type { QueryOpts } from "../src/db/types.js";
 import { NotAllowedError } from "../src/errors.js";
 
 // The table listing, the counts, and the `table` allow-list must all
-// exclude tables the connected role can't SELECT (spec/protocol.md §5.2),
-// and an INSERT-only table must throw NotAllowedError, never surface a raw
-// permission-denied 500 — Node equivalent of
-// implementations/rust/axum/tests/table_listing_privileges.rs.
+// Excludes non-selectable tables and maps residual SELECT denial to NotAllowed
+// (spec/protocol.md §5.2).
 const databaseUrl = process.env.DATABASE_URL;
 const maybeDescribe = databaseUrl ? describe : describe.skip;
 

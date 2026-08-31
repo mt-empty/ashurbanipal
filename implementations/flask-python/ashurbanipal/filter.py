@@ -1,25 +1,14 @@
-"""Deserialization + structural validation of the filter AST wire format
-(`spec/protocol.md` §5.4.2). Grammar parsing (DSL text -> AST) is
-frontend-only (`spec/filter-dsl.md`); this module never sees DSL text,
-never produces SQL, and never validates a column against the schema —
-that's each `db/*.py` module's job. Mirrors
-`implementations/rust/core/src/filter.rs`.
-"""
+"""Validates filter JSON AST (`spec/protocol.md` §5.4.2); frontend parses DSL text (`spec/filter-dsl.md`)."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 
-# Derived by measurement (implementations/rust/core/src/filter.rs), not picked
-# fresh here: over the valid cases in spec/fixtures/parser-tests.json the
-# worst JSON-over-DSL inflation is 5.67x, so the DSL era's 1024 bytes needs
-# ~5803 JSON bytes; 8192 is the nearest clean power of two above.
 MAX_FILTER_BYTES = 8192
 MAX_CONDITIONS = 10
 
-# Exactly the §5.4.2 wire spellings — client text is never used as an
-# operator except through this set.
+# Wire operators must come from this allow-list before reaching SQL (spec/protocol.md §5.4.2).
 VALID_OPS = {"=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"}
 NO_VALUE_OPS = {"IS NULL", "IS NOT NULL"}
 VALID_LOGIC = {"AND", "OR"}
@@ -40,10 +29,6 @@ class FilterError(Exception):
 
 
 def parse(raw: str) -> list[Condition]:
-    """Parses and structurally validates the URL-decoded `filter` param. An
-    empty array is legal and means "no filter" (§5.4.2) — callers treat an
-    empty result accordingly.
-    """
     if len(raw.encode("utf-8")) > MAX_FILTER_BYTES:
         raise FilterError(f"filter too long: {len(raw.encode('utf-8'))} bytes (max {MAX_FILTER_BYTES})")
 

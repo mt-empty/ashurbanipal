@@ -1,22 +1,6 @@
-"""SQLite `DbSource`. Ported against `implementations/rust/core/src/db/sqlite.rs`
-— see `docs/adapter-decisions.md` for the per-clause relaxations this makes
-(always-`-1` row counts, always-empty common-values, no comments, `ILIKE`
-folded to plain `LIKE`).
+"""SQLite `DbSource`; see `docs/adapter-decisions.md` for protocol differences.
 
-Uses stdlib `sqlite3`, not an ORM. One fresh connection per operation
-(`sqlite3.connect(...)`, closed at the end) — see `db/__init__.py`'s
-docstring for why this trivially satisfies the "pin one connection per
-operation" invariant.
-
-Timeout mechanism: unlike the task brief's assumption, Python's stdlib
-`sqlite3` *does* expose a real per-query interrupt hook —
-`Connection.set_progress_handler(handler, n)` mirrors the C-level
-`sqlite3_progress_handler` the Rust reference uses (`sqlite.rs::bounded`)
-almost exactly: `handler` is invoked every `n` VM opcodes, and a truthy
-return value aborts the currently executing statement immediately, on the
-same thread. Verified empirically in
-`tests/test_sqlite_timeout.py::test_slow_query_is_aborted_by_progress_handler`
-with a real `WITH RECURSIVE` query, not just from documentation.
+`Connection.set_progress_handler` interrupts running queries.
 """
 
 from __future__ import annotations
@@ -55,8 +39,7 @@ _KEYWORD = {"ILIKE": "LIKE"}
 def _lenient_text_factory(data: bytes) -> str:
     """stdlib sqlite3's default text_factory raises UnicodeDecodeError on
     invalid UTF-8; substitute the protocol's sentinel instead
-    (spec/protocol.md §5.4.3), mirroring sqlite.rs's per-cell
-    `Err(_) => "<undecodable>"`.
+    (spec/protocol.md §5.4.3).
     """
     try:
         return data.decode("utf-8")
@@ -106,11 +89,7 @@ class SqliteSource(DbSource):
         return conn
 
     def _bounded(self, conn: sqlite3.Connection, timeout_secs: int) -> None:
-        """Must be cleared (see callers) before the connection is discarded
-        — harmless here since each connection is closed right after its one
-        operation, but kept explicit to mirror `sqlite.rs::bounded`'s
-        contract in case a future caller starts reusing connections.
-        """
+        """Installs the per-query timeout interrupt."""
         deadline = time.monotonic() + timeout_secs
 
         def handler() -> int:
@@ -130,10 +109,7 @@ class SqliteSource(DbSource):
         return [row[0] for row in cur.fetchall()]
 
     def _allowed_columns(self, cur: sqlite3.Cursor, table: str) -> list[str]:
-        # `table` is validated against _allowed_tables by every caller
-        # first — PRAGMA table-valued functions don't take a bound
-        # parameter for the table name, so this is the one identifier
-        # spliced rather than bound (mirrors sqlite.rs::allowed_columns).
+        # PRAGMA cannot bind table names; callers supply an allow-listed table.
         cur.execute(f"select cid, name from pragma_table_info({quote_ident(table)}) order by cid")
         return [row[1] for row in cur.fetchall()]
 

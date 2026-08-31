@@ -14,8 +14,6 @@ import (
 	"time"
 )
 
-// Go analog of implementations/rust/axum/tests/table_listing_privileges_mysql.rs.
-//
 // MySQL/MariaDB have no has_table_privilege function and no cheap role-aware
 // way to narrow information_schema.tables to SELECT-able tables, so the
 // listing is deliberately NOT gated (an INSERT-only table still shows up).

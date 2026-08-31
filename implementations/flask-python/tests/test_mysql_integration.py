@@ -1,10 +1,6 @@
-"""MySqlSource integration tests, mirroring
-`implementations/rust/core/src/db/mysql.rs`'s `#[cfg(test)] mod tests`. Runs
-against both `MYSQL_TEST_URL` and `MARIADB_TEST_URL` when set (the
-devcontainer's `mysql`/`mariadb` services) — each test gets its own
-throwaway, nanosecond-suffixed database (mirroring `seeded_db()` in
-`mysql.rs`), since neither engine has a `sqlite::memory:`-style disposable
-instance. Skips cleanly per URL that isn't set.
+"""MySqlSource integration tests against the devcontainer's MySQL and MariaDB.
+
+Each test uses an isolated throwaway database and skips unavailable services.
 """
 
 from __future__ import annotations

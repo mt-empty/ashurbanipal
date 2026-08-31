@@ -7,9 +7,7 @@ import { type Condition, parseFilter } from "./filter.js";
 import { checkSiblings } from "./siblings.js";
 
 const PROTOCOL_HEADER = "x-ashurbanipal-protocol";
-// Bumped only for non-additive wire changes; must track the Rust
-// reference's PROTOCOL_VERSION and every other port's own constant
-// (spec/protocol.md §7).
+// Bumped only for non-additive wire changes (spec/protocol.md §7).
 const PROTOCOL_VERSION = "1";
 
 /**
@@ -80,13 +78,7 @@ function resolveSource(sources: NamedSource[], requested: string | undefined): D
   return found.source;
 }
 
-// spec/protocol.md §2/§5 only ever declares GET on these seven paths, but
-// Express's app.get() leaves every other verb unmatched, falling through
-// to a generic 404 — indistinguishable from a nonexistent path. router.all
-// plus an explicit method check yields 405 for a real path hit with the
-// wrong verb, which is what every path already registered under `{mount}`
-// should return (RFC 9110), and what the Rust/Go routers' underlying
-// method-aware routers do automatically by matching path before method.
+// Return 405 for non-GET methods on an existing protocol path.
 function registerGet(router: ExpressRouter, path: string, handler: (req: Request, res: Response) => void): void {
   router.all(path, (req, res) => {
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -269,12 +261,8 @@ function clamp(value: number, lo: number, hi: number): number {
   return value;
 }
 
-// spec/protocol.md §5.4 requires limit/offset to be clamped, never
-// rejected, for out-of-range values — parsing with BigInt (not Number(),
-// which loses precision silently) and saturating into
-// [0, Number.MAX_SAFE_INTEGER] mirrors deserialize_saturating_u32 in the
-// Rust reference and the Go port's parseSaturating. Only non-numeric text
-// still 400s.
+// Clamp numeric limit/offset without precision loss; reject only non-numeric text
+// (spec/protocol.md §5.4).
 function parseSaturating(req: Request, key: string): number | undefined {
   const raw = firstQueryValue(req, key)?.trim();
   if (raw === undefined || raw === "") return undefined;

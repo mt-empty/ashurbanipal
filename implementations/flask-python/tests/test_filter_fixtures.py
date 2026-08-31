@@ -1,17 +1,6 @@
-"""Fixture-driven filter tests against `spec/fixtures/filter-builder-tests.json`
-— the same file every port's runner consumes (`spec/fixtures/README.md`).
-Exercises `filter.parse` + `db.postgres._build_where_clause` together,
-mirroring `implementations/rust/core/src/db/postgres.rs`'s `filter_builder_fixtures`
-test (the one backend the Rust reference runs the shared fixture file
-against directly; `sqlite.rs`/`mysql.rs` get their own hand-written tests
-instead, and this port follows the same split — see
-`test_sqlite.py`/`test_mysql_integration.py`).
+"""Fixture-driven Postgres filter tests (`spec/fixtures/README.md`).
 
-The fixture's expected `where` text uses Postgres's native `$1`/`$2`
-placeholders; this port's Postgres backend uses psycopg's `%s` paramstyle
-instead (positional, not numbered) — `_normalize` strips that numbering
-difference before comparing, since bind *order* is what matters, not the
-placeholder spelling.
+Fixtures use `$N` placeholders; psycopg uses `%s`, so `_normalize` compares bind order.
 """
 
 from __future__ import annotations

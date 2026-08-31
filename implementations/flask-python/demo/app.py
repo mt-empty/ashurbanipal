@@ -1,7 +1,4 @@
-"""The living usage example and conformance harness for the Flask port —
-the host service embedding Ashurbanipal, mirroring
-`implementations/rust/examples/demo.rs` and the Go/Node ports' `cmd/demo`/
-`demo/main.ts`.
+"""Host-service usage example and conformance harness.
 
 Backend selection via `ASHURBANIPAL_BACKEND` (default `postgres`):
 

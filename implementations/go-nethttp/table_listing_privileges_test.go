@@ -19,10 +19,8 @@ const (
 )
 
 // The table listing, the counts, and the `table` allow-list must all
-// exclude tables the connected role can't SELECT (spec/protocol.md §5.2),
-// and an INSERT-only table must come back as a NotAllowedError, never a
-// raw permission-denied 500 — Go equivalent of
-// implementations/rust/axum/tests/table_listing_privileges.rs.
+// Excludes non-selectable tables and maps residual SELECT denial to NotAllowed
+// (spec/protocol.md §5.2).
 func TestListingAndAllowListExcludeNonSelectableTables(t *testing.T) {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {

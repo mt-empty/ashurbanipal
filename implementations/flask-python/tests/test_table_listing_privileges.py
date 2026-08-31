@@ -1,9 +1,7 @@
-"""Table listing / allow-list privilege gate against the seeded Postgres
-(`DATABASE_URL`). The listing, the counts, and the `table` allow-list must
-all exclude tables the connected role can't SELECT (spec/protocol.md
-§5.2), and an INSERT-only table must raise NotAllowed, never a raw
-permission-denied 500 — Python equivalent of
-`implementations/rust/axum/tests/table_listing_privileges.rs`.
+"""Table listing / allow-list privilege gate against seeded Postgres.
+
+Non-selectable tables are excluded and residual SELECT denial maps to NotAllowed
+(`spec/protocol.md` §5.2).
 """
 
 from __future__ import annotations

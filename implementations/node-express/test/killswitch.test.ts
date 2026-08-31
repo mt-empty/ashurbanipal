@@ -5,12 +5,7 @@ import { expect, it } from "vitest";
 import type { DbSource } from "../src/db/types.js";
 import { createRouter, type NamedSource } from "../src/routes.js";
 
-// Ports the Rust reference's fail-closed guarantees
-// (implementations/rust/core/src/config.rs's tests) and the Go port's
-// killswitch_test.go at the level a plain library function can observe
-// them directly — createRouter's routed-or-404 behavior is itself the
-// whole mechanism here (no DI container, no context-refresh failure to
-// assert against). `null` stands in for a DbSource throughout:
+// Tests createRouter's fail-closed behavior directly. `null` stands in for a DbSource:
 // createRouter never touches the database at construction time, only
 // per-request, and none of these tests issue a request that would reach
 // the database.

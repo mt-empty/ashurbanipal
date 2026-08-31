@@ -9,17 +9,10 @@ use super::{
 };
 use crate::filter::{Condition, Logic};
 
-/// Catalog/metadata queries have no per-request timeout knob, but must
-/// still be bounded — same value as `Limits::query_timeout_secs`'s default.
+/// Bounds catalog queries (`spec/protocol.md` §6).
 const CATALOG_TIMEOUT_SECS: u32 = 5;
 
-/// Parameter numbering continues after `$1` (limit) and `$2` (offset), so
-/// the first filter value is `$3`. Every column is matched against
-/// `allowed_columns` before being spliced in. Conditions are joined with
-/// their own `logic` tokens, relying on SQL's native AND-tighter-than-OR
-/// precedence — no grouping exists in the AST. Postgres-specific:
-/// `::text` cast syntax and `$N` placeholders are not portable to other
-/// backends — see `sqlite::build_where_clause` for the SQLite equivalent.
+/// Validates filter columns before SQL interpolation (`spec/protocol.md` §5.4.2).
 fn build_where_clause(
     conditions: &[Condition],
     column_names: &[String],
@@ -37,9 +30,7 @@ fn build_where_clause(
             .find(|c| c.as_str() == condition.column)
             .ok_or_else(|| DbError::NotAllowed(format!("column {:?}", condition.column)))?;
 
-        // filter::parse already enforced these structurally; re-checking
-        // here keeps build_where_clause safe on any input path (tests,
-        // future callers) instead of trusting its caller.
+        // Defend the SQL boundary if a caller bypasses filter::parse.
         let inner = if condition.op.takes_value() {
             let value = condition.value.clone().ok_or_else(|| {
                 DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
@@ -85,9 +76,7 @@ impl PgPoolSource {
         Self { pool }
     }
 
-    /// Every query runs through one of these so nothing can hold a
-    /// connection unbounded: `SET LOCAL statement_timeout` only lasts for
-    /// the enclosing transaction.
+    /// `SET LOCAL` scopes the query bound to this transaction (`spec/protocol.md` §6).
     async fn bounded_tx(
         &self,
         timeout_secs: u32,
@@ -102,10 +91,6 @@ impl PgPoolSource {
         Ok(tx)
     }
 
-    /// Excludes the catalogs themselves (`pg_catalog`, `information_schema`,
-    /// `pg_toast%`, `pg_temp_%`) and anything the connected role can't
-    /// actually use, so a schema only ever appears here if it's both a real
-    /// user namespace and one this role has `USAGE` on.
     async fn list_schemas_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -123,14 +108,8 @@ impl PgPoolSource {
         Ok(rows)
     }
 
-    /// Resolves the schema for this operation exactly once, as the first
-    /// statement in `tx`, and every later query in the same transaction
-    /// reuses this value — since a `Transaction` stays pinned to one
-    /// physical connection for its whole lifetime, this is immune to the
-    /// pool session drift `axum/tests/schema_isolation.rs` guards against. An
-    /// explicit request and an absent one (resolved via `current_schema()`)
-    /// both go through the same `list_schemas_in_tx` allow-list, so neither
-    /// path can reach a schema the other would reject.
+    /// Resolve inside the operation transaction to prevent pool-session drift
+    /// (`spec/protocol.md` §5).
     async fn resolve_schema_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -156,10 +135,7 @@ impl PgPoolSource {
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
     ) -> Result<Vec<String>, DbError> {
-        // `has_table_privilege` narrows `information_schema.tables` (which
-        // lists a table on *any* privilege) to just the SELECT-able ones, so
-        // this allow-list can't admit a table a later `SELECT` would then be
-        // denied on — keeping it in lockstep with `list_tables`.
+        // Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
         let rows = sqlx::query_scalar::<_, String>(
             "select table_name from information_schema.tables \
              where table_schema = $1 and table_type = 'BASE TABLE' \
@@ -190,18 +166,8 @@ impl PgPoolSource {
         Ok(rows)
     }
 
-    /// Composite FKs are dropped rather than risk mislabeling which
-    /// referencing column pairs with which referenced column.
-    ///
-    /// The `ccu` join must match on `ccu.constraint_schema` (the schema the
-    /// constraint itself lives in, always equal to `tc.table_schema`), not
-    /// `ccu.table_schema` (the schema of the table constraint_column_usage
-    /// is describing — for a FOREIGN KEY row that's the *referenced*
-    /// table's schema, which for a cross-schema FK differs from the
-    /// constraining table's schema). Joining on `ccu.table_schema` instead
-    /// silently drops every cross-schema FK's metadata (the LEFT JOIN just
-    /// never matches), which is the bug this comment is guarding against
-    /// regressing to.
+    /// Use `ccu.constraint_schema` for cross-schema FKs; omit composites
+    /// (`spec/protocol.md` §5.4.1).
     async fn key_metadata_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -274,9 +240,7 @@ impl PgPoolSource {
             if let Some((column_name, Some(ref_schema), Some(ref_table), Some(ref_column))) =
                 members.into_iter().next()
             {
-                // Same-schema is the overwhelming common case; omitting
-                // `schema` there keeps the wire payload byte-identical to
-                // before this field existed.
+                // Same-schema references omit `schema` on the wire (spec/protocol.md §5.4.1).
                 let schema = (ref_schema != schema).then_some(ref_schema);
                 fk_columns.insert(
                     column_name,
@@ -292,10 +256,7 @@ impl PgPoolSource {
     }
 }
 
-/// The allow-list already rejects tables the role can't `SELECT`, so a
-/// `permission denied` (SQLSTATE 42501) reaching the row fetch is a
-/// residual edge; report it as `NotAllowed` (→ 400) rather than letting
-/// the raw driver error surface as a 500.
+/// Maps residual SELECT-denied errors to `NotAllowed` (`spec/protocol.md` §2).
 fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
     match &e {
         sqlx::Error::Database(db) if db.code().as_deref() == Some("42501") => {

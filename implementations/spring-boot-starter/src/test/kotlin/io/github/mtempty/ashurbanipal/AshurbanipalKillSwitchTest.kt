@@ -15,16 +15,7 @@ class TestDataSourceConfig {
     fun dataSource(): DataSource = Mockito.mock(DataSource::class.java)
 }
 
-/**
- * Ports the Rust reference's fail-closed guarantee
- * (implementations/rust/core/src/config.rs's tests) at the level this port
- * can actually observe it: config-time bean registration, since a Spring
- * context that fails to start is process-startup behavior, not an HTTP
- * response the conformance kit could ever see (PORTING.md hardening item
- * 5). Uses a mock `DataSource` — the enabled-path beans only need one to
- * construct a `JdbcTemplate`, never to actually connect, so no live
- * database is needed for these tests.
- */
+/** Tests fail-closed configuration through bean registration without a live database. */
 class AshurbanipalKillSwitchTest {
     private fun runner(): WebApplicationContextRunner =
         WebApplicationContextRunner()

@@ -1,8 +1,4 @@
-"""Fail-closed kill switch config (`spec/protocol.md` §4). Mirrors
-`implementations/rust/core/src/config.rs`: `Config()`'s own default
-(`enabled=False`) MUST be disabled — ashurbanipal has zero opinion on what
-environment it's running in, that's entirely the host's call.
-"""
+"""Fail-closed configuration (`spec/protocol.md` §4)."""
 
 from __future__ import annotations
 
@@ -26,11 +22,6 @@ class Sibling:
 
 @dataclass
 class Config:
-    """The zero-argument `Config()` is disabled by construction: a host
-    that forgets to configure anything gets a 404'd viewer, never one
-    silently enabled with defaults.
-    """
-
     enabled: bool = False
     limits: Limits = field(default_factory=Limits)
     siblings: list[Sibling] = field(default_factory=list)

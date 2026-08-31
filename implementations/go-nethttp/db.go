@@ -68,16 +68,9 @@ type QueryOpts struct {
 	Filter     []Condition
 }
 
-// DbSource is the one seam to the database — route handlers (routes.go)
-// never touch *sql.DB/*sql.Tx directly. One implementation per backend:
-// PostgresSource (postgres.go, the default), SQLiteSource (sqlite.go,
-// gated behind the `sqlite` build tag), MySQLSource (mysql.go, gated
-// behind the `mysql` build tag) — mirrors the Rust reference's DbSource
-// trait in implementations/rust/core/src/db/mod.rs. Every query a method issues
-// (catalog/metadata included, not just row fetches) must be bounded by the
-// same configured timeout; each implementation owns how it enforces that,
-// since the mechanism differs per engine (see docs/adapter-decisions.md
-// §6).
+// DbSource is the database seam; routes never touch drivers directly.
+// Every query is timeout-bounded, with enforcement varying by engine
+// (spec/protocol.md §1; docs/adapter-decisions.md §6).
 type DbSource interface {
 	ListSchemas(ctx context.Context) ([]string, error)
 	ListTables(ctx context.Context, schema *string) ([]TableInfo, error)
@@ -104,14 +97,8 @@ func findExact(haystack []string, needle string) (string, bool) {
 	return "", false
 }
 
-// cellValue is a database/sql.Scanner that never fails: since every
-// SELECTed column is already cast to text in the query text itself (never
-// decoded into a native type and reformatted in Go — spec/protocol.md
-// §5.4.3's cast-in-SQL requirement), the driver always hands back a
-// string, []byte, or nil. Falling back to the sentinel on any other shape
-// (rather than returning an error and aborting the whole row's Scan)
-// mirrors the Rust reference's per-column row_to_json fallback. Shared
-// across every backend — the contract doesn't vary by SQL dialect.
+// cellValue accepts the text-cast values required by spec/protocol.md §5.4.3
+// without aborting a row for an unexpected driver value.
 type cellValue struct {
 	null bool
 	str  string

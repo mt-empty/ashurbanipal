@@ -23,7 +23,7 @@ import java.util.concurrent.CompletableFuture
 
 private const val PROTOCOL_HEADER = "x-ashurbanipal-protocol"
 
-/** Bumped only for non-additive wire changes; additive optional fields keep the same version (spec/protocol.md §7). Value must track implementations/rust/axum/src/routes.rs's PROTOCOL_VERSION constant. */
+/** Bumped only for non-additive wire changes (spec/protocol.md §7). */
 private const val PROTOCOL_VERSION = "1"
 
 data class SourceEntry(val name: String)
@@ -63,7 +63,7 @@ class AshurbanipalController(
         ClassPathResource("ashurbanipal/dbviewer.html").inputStream.use { it.readBytes() }
     }
 
-    /** Mirrors the `schema` allow-list pattern: absent means the first-registered default, present means an exact match or rejection (spec/protocol.md §1). */
+    /** Absent means the first-registered default; present requires an exact match (spec/protocol.md §1). */
     private fun resolveSource(name: String?): DbSource =
         if (name == null) dbSources.values.first()
         else dbSources[name] ?: throw NotAllowedException("source \"$name\"")
@@ -213,15 +213,7 @@ class AshurbanipalController(
         errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, e.message ?: "internal error")
 }
 
-/**
- * `spec/protocol.md` §5.4 requires `limit`/`offset` to be clamped, never
- * rejected, for out-of-range values — binding as `Int?`/`Long?`
- * `@RequestParam`s would let Spring's own type conversion 400 first, the
- * same trap `deserialize_saturating_u32` in the Rust reference's
- * `routes.rs` avoids. Binding as raw `String?` and parsing with
- * `BigInteger` sidesteps it: only non-numeric text 400s, everything else
- * saturates into `[0, Long.MAX_VALUE]` and gets clamped by the caller.
- */
+/** Saturates numeric values before clamping; only non-numeric text is rejected (`spec/protocol.md` §5.4). */
 private fun parseSaturating(raw: String?): Long? {
     if (raw == null) return null
     val trimmed = raw.trim()

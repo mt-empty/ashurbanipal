@@ -15,11 +15,8 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// testURL reads MYSQL_TEST_URL, mirroring
-// implementations/rust/core/src/db/mysql.rs's own test_url() — the devcontainer
-// sets this to a long-lived shared `mysql` service; MARIADB_TEST_URL (same
-// shape, pointed at the `mariadb` service) exercises the same tests against
-// the other fork via TestMySQLAgainstMariaDB below.
+// testURL reads the devcontainer's shared MySQL service; MARIADB_TEST_URL
+// exercises the same tests against the other fork.
 func testURL(t *testing.T) string {
 	t.Helper()
 	url := os.Getenv("MYSQL_TEST_URL")
@@ -31,10 +28,7 @@ func testURL(t *testing.T) string {
 
 var seededDBCounter int64
 
-// seededMySQLDB creates its own uniquely-named throwaway database against
-// the shared instance baseURL points at (mirrors mysql.rs's seeded_db()) —
-// there's no sqlite::memory:-style disposable instance for MySQL, so each
-// test gets isolation this way instead of for free.
+// seededMySQLDB creates an isolated throwaway database on the shared instance.
 func seededMySQLDB(t *testing.T, baseURL string) *sql.DB {
 	t.Helper()
 	admin, err := sql.Open("mysql", stripScheme(baseURL))

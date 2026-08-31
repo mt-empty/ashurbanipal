@@ -9,29 +9,18 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
-/// Catalog/metadata queries have no per-request timeout knob, but must
-/// still be bounded — same value as `Limits::query_timeout_secs`'s default
-/// (mirrors `postgres::CATALOG_TIMEOUT_SECS`/`sqlite::CATALOG_TIMEOUT_SECS`).
+/// Bounds catalog queries (`spec/protocol.md` §6).
 const CATALOG_TIMEOUT_SECS: u32 = 5;
 
-/// `sqlx`'s `mysql` driver speaks the wire protocol both engines
-/// implement, but the two forks need different SQL for the one thing this
-/// crate relies on: a per-query timeout (see `timed_select`). Detected
-/// once per `MySqlSource` via `variant()` and cached, not re-checked per
-/// request.
+/// Selects fork-specific query timeout syntax (`spec/protocol.md` §6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Variant {
     MySql,
     MariaDb,
 }
 
-/// MySQL's `MAX_EXECUTION_TIME` hint must sit inline right after `select`.
-/// MariaDB never implemented it, and silently ignores unrecognized
-/// `/*+ ... */` hints rather than rejecting them — reusing MySQL's hint
-/// there would fail open, silently not enforcing the timeout at all — so
-/// MariaDB instead gets `SET STATEMENT max_statement_time=N FOR ...`
-/// (whole-statement wrap, plain seconds). `body` is the SQL text starting
-/// right after the `select` keyword this function supplies.
+/// MariaDB ignores MySQL timeout hints, so it needs a statement wrapper
+/// (`spec/protocol.md` §6).
 fn timed_select(variant: Variant, timeout_secs: u32, body: &str) -> String {
     match variant {
         Variant::MySql => format!(
@@ -44,26 +33,13 @@ fn timed_select(variant: Variant, timeout_secs: u32, body: &str) -> String {
     }
 }
 
-/// MySQL's default identifier quote is the backtick, not `"` — double-quote
-/// identifier quoting only works under session-wide `ANSI_QUOTES`, which
-/// this crate has no business forcing on a host's connection. The shared
-/// `quote_ident` in `db/mod.rs` is documented as Postgres/SQLite-specific
-/// and isn't reused here; doubling an embedded backtick is MySQL's own
-/// documented escape, the same doubling *strategy* `quote_ident` uses for
-/// `"`, just a different character.
+/// Backtick-escape live-catalog identifiers for MySQL (`spec/protocol.md` §5).
 fn quote_ident_mysql(ident: &str) -> String {
     format!("`{}`", ident.replace('`', "``"))
 }
 
-/// MySQL equivalent of `postgres::build_where_clause`/
-/// `sqlite::build_where_clause`: `?` placeholders (positional, like
-/// SQLite, not `$N`), `CAST(col AS CHAR)` instead of `::text`/
-/// `CAST(col AS TEXT)` (MySQL has no `::` operator and no `TEXT` cast
-/// target), and `ILIKE` mapped to `LOWER(...) LIKE LOWER(?)` rather than a
-/// bare keyword swap — unlike SQLite, whose plain `LIKE` is unconditionally
-/// ASCII case-insensitive, MySQL's `LIKE` case-sensitivity depends on the
-/// column's collation, which this crate has no control over. See
-/// `docs/adapter-decisions.md` §5.4.2.
+/// Builds MySQL filter SQL; map ILIKE through LOWER for collation independence
+/// (`spec/protocol.md` §5.4.2).
 fn build_where_clause(
     conditions: &[Condition],
     column_names: &[String],
@@ -116,10 +92,7 @@ fn build_where_clause(
     Ok((format!(" where {clause}"), values))
 }
 
-/// Reviewed and supported, gated behind the `mysql` feature (off by
-/// default). Not run through `conformance/runner` — see
-/// `docs/adapter-decisions.md` for the per-clause decisions this makes
-/// where Postgres-specific catalog/stats mechanisms have no equivalent.
+/// MySQL backend (`spec/protocol.md` §5).
 #[derive(Clone)]
 pub struct MySqlSource {
     pool: MySqlPool,
@@ -134,13 +107,8 @@ impl MySqlSource {
         }
     }
 
-    /// `SELECT VERSION()` returns a string containing `MariaDB` on that
-    /// fork (e.g. `10.11.6-MariaDB-1:10.11.6+maria~ubu2004`) and just a
-    /// bare version like `8.0.35` on real MySQL — the standard sniff other
-    /// drivers use, since there's no dedicated boolean-returning function
-    /// for it. Cached in `Arc<OnceLock<_>>` so clones of this `MySqlSource`
-    /// share one detection; a lost race between concurrent first calls is
-    /// harmless since both would detect the same value.
+    /// `SELECT VERSION()` contains `MariaDB` on that fork; cache the result
+    /// (`spec/protocol.md` §6).
     async fn variant(&self) -> Result<Variant, DbError> {
         if let Some(v) = self.variant.get() {
             return Ok(*v);
@@ -158,22 +126,11 @@ impl MySqlSource {
         Ok(detected)
     }
 
-    /// Schema pinning only. A `Transaction` stays bound to one physical
-    /// connection for its whole lifetime, so resolving the schema once as
-    /// the first statement and reusing it for the rest of the operation is
-    /// immune to pool session drift, mirroring
-    /// `postgres::PgPoolSource::bounded_tx` — but unlike that method, this
-    /// sets no session/transaction-scoped timeout, since the timeout
-    /// mechanism (`timed_select`) is applied per-query instead.
+    /// Pins schema resolution to one connection (`spec/protocol.md` §5).
     async fn pinned_tx(&self) -> Result<Transaction<'static, MySql>, DbError> {
         Ok(self.pool.begin().await?)
     }
 
-    /// Excludes MySQL's own internal schemas. There is no single
-    /// boolean-returning privilege-check function equivalent to Postgres's
-    /// `has_schema_privilege` — accepted as a documented gap in
-    /// `docs/adapter-decisions.md` (§5.7's exclusion is a SHOULD, not a
-    /// MUST).
     async fn list_schemas_in_tx(
         &self,
         tx: &mut Transaction<'_, MySql>,
@@ -192,10 +149,7 @@ impl MySqlSource {
         Ok(rows)
     }
 
-    /// Resolves the schema for this operation exactly once, as the first
-    /// statement in `tx` — see `pinned_tx`. `current_schema()` has no MySQL
-    /// equivalent; `select database()` is the analogous "connection's own
-    /// default" read.
+    /// Resolve schema in the operation transaction (`spec/protocol.md` §5).
     async fn resolve_schema_in_tx(
         &self,
         tx: &mut Transaction<'_, MySql>,
@@ -264,17 +218,8 @@ impl MySqlSource {
         Ok(rows)
     }
 
-    /// Composite FKs are dropped rather than risk mislabeling which
-    /// referencing column pairs with which referenced column, mirroring
-    /// `postgres::PgPoolSource::key_metadata_in_tx`/
-    /// `sqlite::SqliteSource::key_metadata`.
-    ///
-    /// The join includes `kcu.table_name = tc.table_name`, not just
-    /// `constraint_name` — unlike Postgres's auto-generated,
-    /// schema-unique constraint names, MySQL's primary-key constraint is
-    /// *always* literally named `"PRIMARY"` on every table, so joining on
-    /// `constraint_name` alone would match every other table's
-    /// primary-key columns in the same schema.
+    /// MySQL's `PRIMARY` name repeats, so join on table name; omit composite
+    /// FKs (`spec/protocol.md` §5.4.1).
     async fn key_metadata_in_tx(
         &self,
         tx: &mut Transaction<'_, MySql>,
@@ -363,12 +308,8 @@ impl MySqlSource {
     }
 }
 
-/// `information_schema.tables` lists a table the role holds *any* privilege
-/// on, and neither engine has a `has_table_privilege` analog to narrow the
-/// listing to `SELECT` (`docs/adapter-decisions.md` §5.2/§5.3) — so an
-/// INSERT-only table can clear the allow-list and then fail the row fetch.
-/// Map that residual `ER_TABLEACCESS_DENIED_ERROR` (1142) to `NotAllowed`
-/// (→ 400), not a raw 500; its SQLSTATE (`42000`) is too broad to match on.
+/// MySQL has no SELECT privilege gate; map residual error 1142 to `NotAllowed`
+/// (`spec/protocol.md` §2).
 fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
     match &e {
         sqlx::Error::Database(db)
@@ -415,8 +356,6 @@ impl DbSource for MySqlSource {
         let schema = self
             .resolve_schema_in_tx(&mut tx, variant, schema, CATALOG_TIMEOUT_SECS)
             .await?;
-        // TABLE_COMMENT sits as a plain column here — no obj_description-
-        // style function call needed, unlike Postgres.
         let rows = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(timed_select(
             variant,
             CATALOG_TIMEOUT_SECS,
@@ -432,8 +371,7 @@ impl DbSource for MySqlSource {
             .into_iter()
             .map(|(name, comment)| TableInfo {
                 name,
-                // Empty string means "no comment"; MUST be omitted, not
-                // emitted as "" (spec/protocol.md §5.2).
+                // Empty comments are omitted (`spec/protocol.md` §5.2).
                 comment: (!comment.is_empty()).then_some(comment),
             })
             .collect())
@@ -445,10 +383,7 @@ impl DbSource for MySqlSource {
         let schema = self
             .resolve_schema_in_tx(&mut tx, variant, schema, CATALOG_TIMEOUT_SECS)
             .await?;
-        // TABLE_ROWS is an InnoDB-statistics estimate (reltuples-equivalent,
-        // may be stale, refreshed by ANALYZE TABLE) — never COUNT(*). CAST
-        // to SIGNED so it decodes as i64 the same way on every MySQL
-        // version regardless of the catalog's exact unsigned width.
+        // TABLE_ROWS is a potentially stale InnoDB estimate (`spec/protocol.md` §5.3).
         let rows = sqlx::query_as::<_, (String, Option<i64>)>(sqlx::AssertSqlSafe(timed_select(
             variant,
             CATALOG_TIMEOUT_SECS,
@@ -460,11 +395,7 @@ impl DbSource for MySqlSource {
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
-        // TABLE_ROWS is NULL before InnoDB has gathered any statistics for
-        // a freshly created table — -1 is the same "no estimate yet"
-        // sentinel Postgres uses before a table's first ANALYZE/VACUUM
-        // (spec/protocol.md §5.3), not the "no mechanism at all" case
-        // SQLite uses unconditionally.
+        // NULL means no estimate yet: emit -1 (`spec/protocol.md` §5.3).
         Ok(rows
             .into_iter()
             .map(|(name, count)| (name, count.unwrap_or(-1)))
@@ -644,13 +575,7 @@ impl DbSource for MySqlSource {
             .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?;
         tx.commit().await?;
 
-        // No pg_stats equivalent. MySQL 8's information_schema.
-        // COLUMN_STATISTICS histogram needs an explicit
-        // `ANALYZE TABLE ... UPDATE HISTOGRAM` to populate and doesn't
-        // exist at all on MariaDB/MySQL 5.7 — an empty list is the
-        // documented "no statistics available" answer (spec/protocol.md
-        // §5.5), mirroring SQLite's same deliberate choice, not a live
-        // scan. See docs/adapter-decisions.md.
+        // MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
         Ok(Vec::new())
     }
 }

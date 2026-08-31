@@ -45,13 +45,7 @@ private class SetRoleDataSource(
     override fun isWrapperFor(iface: Class<*>?): Boolean = false
 }
 
-/**
- * The table listing, the counts, and the `table` allow-list must all
- * exclude tables the connected role can't `SELECT` (spec/protocol.md
- * §5.2), and an `INSERT`-only table must come back as a clean
- * `NotAllowedException`, never a raw `permission denied` 500 — Kotlin
- * equivalent of `implementations/rust/axum/tests/table_listing_privileges.rs`.
- */
+/** Excludes non-selectable tables and maps residual SELECT denial to NotAllowed (spec/protocol.md §5.2). */
 class TableListingPrivilegesTest {
     @Test
     fun `listing and allow-list exclude non-selectable tables`() {

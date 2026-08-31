@@ -6,10 +6,7 @@ import (
 	"testing"
 )
 
-// Ports the Rust reference's fail-closed guarantees
-// (implementations/rust/core/src/config.rs's tests) and the Spring Boot
-// starter's AshurbanipalKillSwitchTest.kt at the level a plain library
-// function can observe them directly. A nil *sql.DB is safe throughout:
+// Tests fail-closed router behavior directly. A nil *sql.DB is safe throughout:
 // Router never touches the database at construction time, only
 // per-request.
 
@@ -27,9 +24,7 @@ func TestEnabledTrueEnablesRoutes(t *testing.T) {
 	assertEnabled(t, Router(Config{Enabled: true}, []NamedSource{{Name: "primary", Source: nil}}))
 }
 
-// A host passing zero sources while enabled is a startup-time
-// misconfiguration, not a runtime condition — mirrors the Rust
-// reference's assert!(!sources.is_empty()) in router().
+// Enabled hosts must register at least one source.
 func TestEnabledTrueWithNoSourcesPanics(t *testing.T) {
 	defer func() {
 		if recover() == nil {

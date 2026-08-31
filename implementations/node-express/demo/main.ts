@@ -1,6 +1,4 @@
-// The living usage example and conformance harness for the node-express
-// port — the host service embedding Ashurbanipal, mirroring
-// implementations/rust/examples/demo.rs and the Go port's cmd/demo/main.go.
+// The living host-service usage example and conformance harness.
 //
 // Run against the devcontainer's seeded Postgres:
 //

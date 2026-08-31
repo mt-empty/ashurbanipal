@@ -1,25 +1,19 @@
 import { FilterError, NotAllowedError, quoteIdent } from "./errors.js";
 
-// MaxFilterBytes bounds the URL-decoded JSON text of the filter param.
-// Derived by measurement, not an arbitrary round number: over the valid
-// cases in spec/fixtures/parser-tests.json the worst JSON-over-DSL
-// inflation is 5.67x, so the DSL era's 1024 bytes needs ~5803 JSON bytes;
-// 8192 is the nearest clean power of two above (spec/protocol.md §5.4.2).
+/** Maximum URL-decoded filter JSON bytes (spec/protocol.md §5.4.2). */
 export const MAX_FILTER_BYTES = 8192;
 
-// MaxConditions bounds the filter array's length (spec/protocol.md §5.4.2).
+/** Maximum conditions per filter request (spec/protocol.md §5.4.2). */
 export const MAX_CONDITIONS = 10;
 
-// The hardcoded wire-op allow-list (spec/protocol.md §5.4.2) — client
-// text is only ever compared against this set, never used as an operator
-// directly.
+// Wire operators must come from this allow-list before reaching SQL (spec/protocol.md §5.4.2).
 const VALID_OPS = new Set(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
 
 function opTakesValue(op: string): boolean {
   return op !== "IS NULL" && op !== "IS NOT NULL";
 }
 
-/** One element of the filter AST (spec/protocol.md §5.4.2). `column` is exactly as received on the wire. */
+/** Untrusted filter input; buildWhereClause validates `column` before SQL (spec/protocol.md §5.4.2). */
 export interface Condition {
   logic?: "AND" | "OR";
   not?: boolean;
@@ -28,13 +22,7 @@ export interface Condition {
   value?: string;
 }
 
-/**
- * Deserializes and structurally validates the URL-decoded filter query
- * param (spec/protocol.md §5.4.2). Grammar parsing (DSL text -> AST) is a
- * frontend-only concern (spec/filter-dsl.md); this function never sees
- * DSL text and never validates a column against the schema — that's
- * buildWhereClause's job. An empty array is legal and means "no filter".
- */
+/** Validates JSON ASTs (spec/protocol.md §5.4.2); the frontend parses DSL text (spec/filter-dsl.md). */
 export function parseFilter(raw: string): Condition[] {
   const byteLength = Buffer.byteLength(raw, "utf8");
   if (byteLength > MAX_FILTER_BYTES) {
@@ -83,10 +71,7 @@ export function parseFilter(raw: string): Condition[] {
   return conditions;
 }
 
-// Validates only the JSON *shape* (unknown fields, wrong types) into a
-// Condition — the semantic rules (logic-required-except-first, op
-// allow-list, value presence) are re-checked over the whole array by
-// parseFilter, since some of them are positional.
+// Positional validation stays in parseFilter because it sees the full array.
 function validateConditionShape(raw: unknown, index: number): Condition {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new FilterError(`condition ${index} must be a JSON object`);
@@ -122,10 +107,7 @@ function validateConditionShape(raw: unknown, index: number): Condition {
   };
 }
 
-// The hardcoded operator -> SQL-fragment table (spec/protocol.md §5.4.2).
-// Every wire spelling happens to equal its SQL fragment, but this function
-// still switches on explicit literals (never `return op` directly) so an
-// op that slipped past VALID_OPS can't reach SQL text unchanged.
+// opSql returns a literal allow-listed SQL fragment, never wire text (spec/protocol.md §5.4.2).
 function opSql(op: string): string {
   switch (op) {
     case "=":

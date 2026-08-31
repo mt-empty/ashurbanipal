@@ -1,8 +1,4 @@
-"""PgSource integration tests against the devcontainer's seeded Postgres
-(`DATABASE_URL`, `conformance/seed/seed.sql`). Skips cleanly if unset —
-mirrors `implementations/rust/axum/tests/schema_isolation.rs`'s DATABASE_URL
-gating.
-"""
+"""PgSource integration tests against seeded Postgres; skips when `DATABASE_URL` is unset."""
 
 from __future__ import annotations
 

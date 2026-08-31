@@ -5,24 +5,19 @@ import tools.jackson.databind.ObjectMapper
 import tools.jackson.module.kotlin.jacksonMapperBuilder
 import tools.jackson.module.kotlin.readValue
 
-/**
- * `spec/protocol.md` §5.4.2's byte bound on the URL-decoded `filter` JSON
- * text. Not the DSL-era 1024: measured JSON-over-DSL inflation (worst case
- * 5.67x, per `implementations/rust/core/src/filter.rs`), 8192 is the nearest
- * clean power of two with margin.
- */
+/** URL-decoded filter JSON bound (`spec/protocol.md` §5.4.2). */
 const val MAX_FILTER_BYTES = 8192
 const val MAX_CONDITIONS = 10
 
 private val VALID_OPS = setOf("=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL")
 
-/** Shared with each backend's own `buildWhereClause` (mirrors `implementations/rust/core/src/filter.rs::FilterOp::takes_value`). */
+/** Operators that do not take a value (`spec/protocol.md` §5.4.2). */
 internal val OPS_WITHOUT_VALUE = setOf("IS NULL", "IS NOT NULL")
 
-/** Thrown for any structural/allow-list violation; the controller maps every instance to 400 plain text (`spec/protocol.md` §2 — wording is implementation-defined). */
+/** Invalid filter input (`spec/protocol.md` §2). */
 class FilterException(message: String) : RuntimeException(message)
 
-/** `column` is exactly as received on the wire; only a [DbSource] implementation checks it against the live schema before it reaches SQL. */
+/** Untrusted filter input; [DbSource] validates columns before SQL (`spec/protocol.md` §5.4.2). */
 data class Condition(
     val logic: String? = null,
     val not: Boolean = false,
@@ -33,32 +28,18 @@ data class Condition(
 
 data class WhereClause(val sql: String, val values: List<String>)
 
-/**
- * Deserializes and structurally validates the `filter` query param
- * (`spec/protocol.md` §5.4.2) — [parse] is shared by every backend. No DSL
- * text is ever understood here — grammar parsing (DSL text -> AST) is
- * frontend-only (`spec/filter-dsl.md`); this class only ever sees the JSON
- * AST. [buildWhereClause] renders the WHERE fragment in Postgres's own
- * dialect (`::text` cast, native `ILIKE`); `MySqlSource`/`SqliteSource` have
- * their own `buildWhereClause` for their dialects, mirroring
- * `implementations/rust/core/src/db/postgres.rs`/`mysql.rs`/`sqlite.rs` each
- * having their own.
- */
+/** Validates filter JSON ASTs (`spec/protocol.md` §5.4.2); the frontend parses DSL text (`spec/filter-dsl.md`). */
 class FilterValidator {
     private val mapper: ObjectMapper = jacksonMapperBuilder()
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .build()
 
-    /** An empty array is legal and means "no filter" (§5.4.2) — callers get back an empty list. */
     fun parse(raw: String): List<Condition> {
         val byteLength = raw.toByteArray(Charsets.UTF_8).size
         if (byteLength > MAX_FILTER_BYTES) {
             throw FilterException("filter too long: $byteLength bytes (max $MAX_FILTER_BYTES)")
         }
-        // Jackson/jackson-module-kotlin enforces non-null on constructor params it
-        // fills in, but not on a collection's element type, so `List<Condition>`
-        // can come back holding a runtime null despite the compile-time type —
-        // checked and rejected explicitly below before anything dereferences it.
+        // Jackson can deserialize null collection elements despite the Kotlin type.
         val conditions: List<Condition?> = try {
             mapper.readValue(raw)
         } catch (e: Exception) {
@@ -92,13 +73,7 @@ class FilterValidator {
         }
     }
 
-    /**
-     * Every column is matched against [columnNames] (the live
-     * `information_schema` allow-list, from [PostgresSource]) before it's
-     * spliced into SQL — the same discipline `sort` gets. Conditions are joined by
-     * their own `logic` tokens, relying on SQL's native AND-tighter-than-OR
-     * precedence; there is no grouping/nesting in the AST.
-     */
+    /** Validates live-schema columns before SQL interpolation (`spec/protocol.md` §5.4.2). */
     fun buildWhereClause(conditions: List<Condition>, columnNames: List<String>): WhereClause {
         if (conditions.isEmpty()) {
             return WhereClause("", emptyList())
@@ -130,15 +105,7 @@ class FilterValidator {
     private fun opSql(op: String): String = opSqlKeyword(op)
 }
 
-/**
- * The hardcoded operator -> SQL-keyword table (`spec/protocol.md` §5.4.2) —
- * wire text is never used as an operator except through this match. Shared
- * across backends (mirrors `implementations/rust/core/src/db/mod.rs::op_sql`);
- * the *fragment* built around the keyword (cast syntax, placeholder style,
- * `ILIKE`'s per-engine remapping) is each backend's own concern — see
- * [PostgresSource]'s use via [FilterValidator.buildWhereClause],
- * `MySqlSource.buildWhereClause`, and `SqliteSource.buildWhereClause`.
- */
+/** Maps allow-listed operators to SQL keywords, never passing through wire text (`spec/protocol.md` §5.4.2). */
 internal fun opSqlKeyword(op: String): String = when (op) {
     "=" -> "="
     "!=" -> "!="
