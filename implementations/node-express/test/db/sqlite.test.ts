@@ -4,8 +4,7 @@ import { SqliteSource } from "../../src/db/sqlite.js";
 import type { QueryOpts } from "../../src/db/types.js";
 import { NotAllowedError } from "../../src/errors.js";
 
-// No external infrastructure needed (":memory:"), mirroring
-// implementations/rust/core/src/db/sqlite.rs's own #[cfg(test)] suite.
+// No external infrastructure is needed (":memory:").
 
 function seededDb(): Promise<Database> {
   return new Promise((resolve, reject) => {

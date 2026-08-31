@@ -1,26 +1,4 @@
-"""Postgres `DbSource`, the reference/default backend. Ported line-for-line
-against `implementations/rust/core/src/db/postgres.rs`'s catalog SQL — see that
-file and `docs/adapter-decisions.md` for the mechanism notes (`reltuples`
-row counts, `pg_stats` common values, `col_description`/`obj_description`
-comments, `::text` cast).
-
-Uses `psycopg` (v3), not an ORM: every selected column is cast to text in
-the query itself (`PORTING.md` hardening item 1), and every identifier is
-quoted via `db/__init__.py::quote_ident` (double-quote doubling), which
-only ever wraps a name already matched against a live catalog lookup — it
-makes splicing syntactically safe, it does not itself validate. Manual
-string building rather than `psycopg.sql` deliberately, so this stays
-structurally comparable to `sqlite.py`/`mysql.py` and to the Rust
-reference's own `format!`-based query construction (`PORTING.md` hardening
-item 7: catalog SQL diffed against `db.rs`).
-
-One fresh physical connection per operation (`psycopg.connect(...)` used as
-a context manager, closed at the end) — no pool. `spec/protocol.md` §1
-requires one operation to resolve its schema once and reuse that same
-connection for every later query; a fresh connection per operation
-satisfies this trivially, since there is no pooled session to drift out
-from under it between queries.
-"""
+"""Postgres DbSource implementation (`spec/protocol.md` §5)."""
 
 from __future__ import annotations
 
@@ -42,17 +20,12 @@ from . import (
     wrap_driver_errors,
 )
 
-# Catalog/metadata queries have no per-request timeout knob, but must still
-# be bounded — same default as Limits.query_timeout_secs.
+# Bounds catalog queries (`spec/protocol.md` §6).
 CATALOG_TIMEOUT_SECS = 5
 
 
 class _LenientTextLoader(TextLoader):
-    """psycopg's stock text loader raises UnicodeDecodeError on invalid
-    bytes for the connection's encoding; substitute the protocol's
-    sentinel instead (spec/protocol.md §5.4.3), mirroring postgres.rs's
-    per-cell `Err(_) => "<undecodable>"`.
-    """
+    """Use the protocol sentinel when psycopg cannot decode text."""
 
     def load(self, data):
         try:
@@ -62,14 +35,7 @@ class _LenientTextLoader(TextLoader):
 
 
 def _build_where_clause(conditions: list[Condition], column_names: list[str]) -> tuple[str, list[str]]:
-    """Postgres equivalent of `postgres.rs::build_where_clause`: `%s`
-    placeholders (psycopg's paramstyle), `::text` cast, native `ILIKE`
-    keyword (Postgres supports every §5.4.2 wire operator unchanged — no
-    operator-mapping table needed here, contrast `sqlite.py`/`mysql.py`).
-    Each condition's column is matched against the live `column_names`
-    allow-list before being spliced in — never trusted from the wire
-    directly.
-    """
+    """Validate filter columns before SQL interpolation (`spec/protocol.md` §5.4.2)."""
     if not conditions:
         return "", []
 
@@ -103,10 +69,6 @@ class PgSource(DbSource):
         return psycopg.connect(self._dsn)
 
     def _list_schemas(self, cur: psycopg.Cursor) -> list[str]:
-        """Excludes the catalogs themselves and anything the connected role
-        can't actually use, so a schema only appears here if it's both a
-        real user namespace and one this role has USAGE on.
-        """
         cur.execute(
             "select nspname from pg_namespace "
             "where nspname not in ('pg_catalog', 'information_schema') "
@@ -129,10 +91,7 @@ class PgSource(DbSource):
         return resolved
 
     def _allowed_tables(self, cur: psycopg.Cursor, schema: str) -> list[str]:
-        # has_table_privilege narrows information_schema.tables (which lists
-        # a table on *any* privilege) to just the SELECT-able ones, so this
-        # allow-list can't admit a table a later SELECT would be denied on —
-        # keeping it in lockstep with list_tables.
+        # Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
         cur.execute(
             "select table_name from information_schema.tables "
             "where table_schema = %s and table_type = 'BASE TABLE' "
@@ -152,13 +111,7 @@ class PgSource(DbSource):
         return [row[0] for row in cur.fetchall()]
 
     def _key_metadata(self, cur: psycopg.Cursor, schema: str, table: str) -> tuple[set[str], dict[str, ColumnRef]]:
-        """Composite FKs are dropped rather than risk mislabeling which
-        referencing column pairs with which referenced column. The `ccu`
-        join matches on `ccu.constraint_schema` (always the constraining
-        table's own schema), not `ccu.table_schema` (the *referenced*
-        table's schema for a FK row) — joining on the latter silently drops
-        every cross-schema FK's metadata.
-        """
+        """Use constraint_schema for cross-schema FKs; omit composites (`spec/protocol.md` §5.4.1)."""
         cur.execute(
             "select tc.constraint_name, tc.constraint_type, kcu.column_name, "
             "       ccu.table_schema as ref_schema, ccu.table_name as ref_table, "
@@ -212,9 +165,6 @@ class PgSource(DbSource):
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved = self._resolve_schema(cur, schema)
-            # has_table_privilege keeps this listing equal to the allow-list
-            # _allowed_tables enforces — a table the role can't SELECT is
-            # never offered as a row it would then have to reject.
             cur.execute(
                 "select c.relname::text, obj_description(c.oid, 'pg_class') "
                 "from pg_class c "
@@ -231,8 +181,6 @@ class PgSource(DbSource):
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved = self._resolve_schema(cur, schema)
-            # Same has_table_privilege filter as list_tables, so the count
-            # column never names a table the sidebar won't show.
             cur.execute(
                 "select c.relname::text, c.reltuples::bigint "
                 "from pg_class c "
@@ -247,9 +195,7 @@ class PgSource(DbSource):
     @wrap_driver_errors(psycopg.Error)
     def query_table(self, schema: str | None, table: str, opts: QueryOpts) -> TableData:
         with self._connect() as conn:
-            # Cursor.__init__ snapshots conn.adapters at creation time (copy-
-            # on-write, not a live view) — this must run before conn.cursor()
-            # or the registration silently never takes effect.
+            # psycopg snapshots adapters when the cursor is created.
             conn.adapters.register_loader("text", _LenientTextLoader)
             with conn.cursor() as cur:
                 cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
@@ -276,10 +222,7 @@ class PgSource(DbSource):
                 )
                 column_types = list(cur.fetchall())
 
-                # col_description is keyed by attnum, which can diverge from
-                # ordinal_position once a column has been dropped — join
-                # through pg_attribute directly rather than trust ordinal
-                # position to line up.
+                # attnum survives dropped columns; ordinal_position does not.
                 cur.execute(
                     "select a.attname::text, col_description(a.attrelid, a.attnum::int) "
                     "from pg_attribute a "
@@ -306,10 +249,7 @@ class PgSource(DbSource):
                 select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
                 order_clause = ""
                 if sort is not None:
-                    # Table-qualified: an unqualified `order by "col"` would
-                    # resolve to the ::text-cast output column in select_list,
-                    # sorting lexicographically instead of by the real typed
-                    # value (mirrors postgres.rs's same comment).
+                    # Qualify the source column to avoid ordering the text-cast output.
                     direction = "desc" if opts.descending else "asc"
                     order_clause = f" order by {quote_ident(table)}.{quote_ident(sort)} {direction}"
                 query = (

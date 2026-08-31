@@ -6,19 +6,13 @@ import (
 	"strings"
 )
 
-// MaxFilterBytes bounds the URL-decoded JSON text of the filter param.
-// Derived by measurement, not the DSL-era 1024 carried forward: over the
-// valid cases in spec/fixtures/parser-tests.json the worst JSON-over-DSL
-// inflation is 5.67x, so 1024 DSL-equivalent bytes need ~5803 JSON bytes;
-// 8192 covers that with margin (spec/protocol.md §5.4.2).
+// MaxFilterBytes bounds the URL-decoded filter JSON (spec/protocol.md §5.4.2).
 const MaxFilterBytes = 8192
 
-// MaxConditions bounds the filter array's length (spec/protocol.md §5.4.2).
+// MaxConditions caps conditions per request (spec/protocol.md §5.4.2).
 const MaxConditions = 10
 
-// validOps is the hardcoded wire-op allow-list (spec/protocol.md §5.4.2) —
-// client-supplied text is only ever compared against this set, never used
-// as an operator directly.
+// Wire operators must come from this allow-list before reaching SQL (spec/protocol.md §5.4.2).
 var validOps = map[string]bool{
 	"=": true, "!=": true, ">": true, "<": true, ">=": true, "<=": true,
 	"LIKE": true, "ILIKE": true, "IS NULL": true, "IS NOT NULL": true,
@@ -28,10 +22,8 @@ func opTakesValue(op string) bool {
 	return op != "IS NULL" && op != "IS NOT NULL"
 }
 
-// Condition is one element of the filter AST (spec/protocol.md §5.4.2).
-// Column is exactly as received on the wire — BuildWhereClause matches it
-// against the live schema allow-list before it ever reaches SQL text; this
-// type never validates a column itself.
+// Condition holds untrusted filter input; BuildWhereClause validates Column
+// against the live schema before SQL (spec/protocol.md §5.4.2).
 type Condition struct {
 	Logic  *string `json:"logic,omitempty"`
 	Not    bool    `json:"not,omitempty"`
@@ -40,9 +32,6 @@ type Condition struct {
 	Value  *string `json:"value,omitempty"`
 }
 
-// FilterError is returned for any structural violation of the filter AST
-// (spec/protocol.md §5.4.2) — the handler maps every instance to 400 plain
-// text (spec/protocol.md §2: wording is implementation-defined).
 type FilterError struct {
 	Reason string
 }
@@ -53,12 +42,8 @@ func filterErr(format string, args ...interface{}) *FilterError {
 	return &FilterError{Reason: fmt.Sprintf(format, args...)}
 }
 
-// ParseFilter deserializes and structurally validates the URL-decoded
-// filter query param (spec/protocol.md §5.4.2). Grammar parsing (DSL text
-// -> AST) is a frontend-only concern (spec/filter-dsl.md); this function
-// never sees DSL text and never validates a column against the schema —
-// that's BuildWhereClause's job. An empty array is legal and means "no
-// filter"; callers get back a zero-length, non-nil slice.
+// ParseFilter validates the JSON AST (spec/protocol.md §5.4.2); the frontend
+// parses DSL text (spec/filter-dsl.md).
 func ParseFilter(raw string) ([]Condition, error) {
 	if len(raw) > MaxFilterBytes {
 		return nil, filterErr("filter too long: %d bytes (max %d)", len(raw), MaxFilterBytes)
@@ -102,17 +87,7 @@ func ParseFilter(raw string) ([]Condition, error) {
 	return conditions, nil
 }
 
-// opSQL is the hardcoded operator -> SQL-fragment table (spec/protocol.md
-// §5.4.2) — wire text is never used as an operator except through this
-// match. The wire spellings and the SQL fragments happen to be identical
-// strings, but returning op itself (rather than a literal per case) would
-// let an op that BuildWhereClause failed to reject reach SQL text
-// unchanged; the explicit per-case literals plus BuildWhereClause's own
-// validOps re-check (belt-and-suspenders: this function is never called
-// on an op that check didn't already accept) are what make this
-// hardcoding real rather than decorative. Go's plain `string` Condition.Op
-// has no enum to make an invalid op unrepresentable the way the Rust
-// reference's FilterOp does, so this can't rely on the type system alone.
+// opSQL returns a literal allow-listed SQL fragment, never wire text (spec/protocol.md §5.4.2).
 func opSQL(op string) string {
 	switch op {
 	case "=":

@@ -9,10 +9,7 @@ import (
 	"time"
 )
 
-// onlySchema is the only name ListSchemas ever returns — SQLite has no
-// schema namespace above a single database file, mirroring how a bare
-// ATTACH-less connection exposes its one implicit "main" schema
-// (implementations/rust/core/src/db/sqlite.rs::ONLY_SCHEMA).
+// onlySchema is the only name ListSchemas returns for a single SQLite database.
 const onlySchema = "main"
 
 // checkSchema rejects any requested schema other than onlySchema with the
@@ -26,19 +23,8 @@ func checkSchema(schema *string) error {
 	return &NotAllowedError{What: fmt.Sprintf("schema %q", *schema)}
 }
 
-// SQLiteSource is gated behind the `sqlite` build tag (opt-in, mirroring
-// the Rust reference's `sqlite` Cargo feature) — see
-// docs/adapter-decisions.md for the per-clause decisions this makes where
-// Postgres-specific catalog/stats mechanisms have no SQLite equivalent.
-//
-// Unlike PostgresSource, catalog lookups here don't pin one *sql.Tx per
-// operation: SQLite has no per-session state (no search_path/USE-database
-// analog) that could drift between pooled connections, so the
-// cross-connection consistency problem resolveSchema's transaction-pinning
-// solves on Postgres/MySQL simply doesn't exist here — this matches the
-// Rust reference's own choice (sqlite.rs's query_table acquires a fresh
-// pooled connection per catalog call, not one held for the whole
-// operation).
+// SQLiteSource is optional; SQLite has no per-session schema state, so its
+// operations need no schema-pinning transaction (docs/adapter-decisions.md).
 type SQLiteSource struct {
 	db      *sql.DB
 	timeout time.Duration
@@ -53,18 +39,7 @@ func NewSQLiteSource(db *sql.DB, queryTimeoutSecs int) *SQLiteSource {
 
 var _ DbSource = (*SQLiteSource)(nil)
 
-// bounded wraps every query in a context deadline. Verified empirically
-// (not inferred from documentation, per this port's brief) against a real
-// SQLite file with a single-connection pool: a slow recursive-CTE query
-// canceled by ctx returns in ~1s (not the tens of seconds the full scan
-// would take), and a query issued immediately afterward on the same
-// physical connection completes without delay — proving modernc.org/sqlite
-// actually aborts execution on cancellation rather than just abandoning
-// the wait while the query keeps running server-side. Unlike the Rust
-// reference (whose sqlx driver needed sqlite3_progress_handler because
-// context cancellation there only stopped waiting, not the blocking C
-// call), plain database/sql context cancellation is sufficient here — and
-// unlike that progress handler, nothing needs clearing afterward.
+// bounded relies on modernc.org/sqlite honoring database/sql context cancellation.
 func (c *SQLiteSource) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, c.timeout)
 }
@@ -91,11 +66,8 @@ func (c *SQLiteSource) allowedTables(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
-// allowedColumns' table argument must already be validated against
-// allowedTables — pragma_table_info is a table-valued function that takes
-// its argument as spliced SQL text, not a bound parameter, so this is the
-// one identifier per query that's escaped rather than bound (mirrors
-// sqlite.rs::allowed_columns).
+// allowedColumns requires an allow-listed table: pragma_table_info cannot bind
+// its identifier argument (spec/protocol.md §6).
 func (c *SQLiteSource) allowedColumns(ctx context.Context, table string) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
@@ -117,9 +89,7 @@ func (c *SQLiteSource) allowedColumns(ctx context.Context, table string) ([]stri
 	return out, rows.Err()
 }
 
-// keyMetadata mirrors postgres.go's keyMetadata: composite FKs are dropped
-// entirely rather than risk mislabeling which referencing column pairs
-// with which referenced column (spec/protocol.md §5.4.1).
+// Composite FKs are omitted rather than risk mislabeling columns (spec/protocol.md §5.4.1).
 func (c *SQLiteSource) keyMetadata(ctx context.Context, table string) (map[string]bool, map[string]ColumnRef, error) {
 	quoted := quoteIdent(table)
 	ctx, cancel := c.bounded(ctx)

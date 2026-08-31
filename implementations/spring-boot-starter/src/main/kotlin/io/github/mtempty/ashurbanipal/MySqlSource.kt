@@ -10,49 +10,19 @@ import java.sql.Types
 import java.util.concurrent.atomic.AtomicReference
 import javax.sql.DataSource
 
-/**
- * The one MySQL/Connector-J driver speaks the wire protocol both MySQL and
- * MariaDB implement, but the two forks need different SQL for a per-query
- * timeout (see [timedSelect]). Detected once per [MySqlSource] via
- * [MySqlSource.variant] and cached, not re-checked per request — mirrors
- * `implementations/rust/core/src/db/mysql.rs`'s `Variant`. `internal`, not
- * `private`: [MySqlSourceTest] drives [timedSelect] directly with a
- * deliberately slow query to prove the timeout mechanism actually aborts
- * execution on a real instance.
- */
+/** Selects fork-specific query timeout syntax (`spec/protocol.md` §6). */
 internal enum class Variant { MYSQL, MARIADB }
 
-/**
- * MySQL's `MAX_EXECUTION_TIME` optimizer hint is spliced right after
- * `select`; MariaDB never implemented that hint (silently ignored, not
- * rejected — reusing it there would fail open), so it instead wraps the
- * whole statement in `SET STATEMENT max_statement_time=N FOR ...` (seconds,
- * not ms). Mirrors `implementations/rust/core/src/db/mysql.rs::timed_select`.
- * `body` is the SQL text starting right after the `select` keyword this
- * function supplies.
- */
+/** MariaDB ignores MySQL timeout hints, so it needs a statement wrapper (`spec/protocol.md` §6). */
 internal fun timedSelect(variant: Variant, timeoutSecs: Int, body: String): String = when (variant) {
     Variant.MYSQL -> "select /*+ MAX_EXECUTION_TIME(${timeoutSecs.toLong() * 1000}) */ $body"
     Variant.MARIADB -> "set statement max_statement_time=$timeoutSecs for select $body"
 }
 
-/**
- * MySQL's default identifier quote is the backtick, not `"` — double-quote
- * quoting only works under session-wide `ANSI_QUOTES`, which this starter
- * has no business forcing on a host's connection. Doubling an embedded
- * backtick is MySQL's own documented escape, the same doubling *strategy*
- * the shared [quoteIdent] uses for `"`, just a different character.
- */
+/** Backtick-escape live-catalog identifiers for MySQL (`spec/protocol.md` §5). */
 private fun quoteIdentMysql(ident: String): String = "`" + ident.replace("`", "``") + "`"
 
-/**
- * MySQL equivalent of [FilterValidator.buildWhereClause]: `?` placeholders,
- * `CAST(col AS CHAR)` instead of `::text` (MySQL has no `::` operator and no
- * `TEXT` cast target), and `ILIKE` mapped to `LOWER(...) LIKE LOWER(?)`
- * rather than a bare keyword swap — MySQL's plain `LIKE` case-sensitivity
- * depends on the column's collation, unlike SQLite's unconditionally
- * case-insensitive `LIKE`. See `docs/adapter-decisions.md` §5.4.2.
- */
+/** Maps ILIKE through LOWER for collation independence (`spec/protocol.md` §5.4.2). */
 private fun buildWhereClauseMysql(conditions: List<Condition>, columnNames: List<String>): WhereClause {
     if (conditions.isEmpty()) {
         return WhereClause("", emptyList())
@@ -97,32 +67,14 @@ private fun bindParams(ps: PreparedStatement, params: List<Any?>) {
     }
 }
 
-/**
- * Connector/J's `PreparedStatement.executeQuery()` rejects any SQL that
- * doesn't textually begin with a recognized query keyword — MariaDB's `SET
- * STATEMENT ... FOR SELECT ...` wrapping (see [timedSelect]) trips this
- * client-side check even though the server would return a result set for
- * it (verified empirically: `Statement.executeQuery() cannot issue
- * statements that do not produce result sets"`). `execute()` +
- * `getResultSet()` has no such restriction, so every query in this file
- * goes through this helper rather than `JdbcTemplate`'s `executeQuery`-based
- * convenience methods. See `docs/adapter-decisions.md` §6.
- *
- * Uses [DataSourceUtils] (not a raw `dataSource.connection`) so this
- * participates in the ambient Spring transaction the same way
- * `JdbcTemplate` would — connection pinning across the several catalog
- * queries one operation issues is unaffected by this change.
- */
+/** Connector/J rejects MariaDB's wrapper in executeQuery; use execute instead (`spec/protocol.md` §6). */
 private fun <T> query(dataSource: DataSource, sql: String, params: List<Any?> = emptyList(), mapper: (ResultSet) -> T): List<T> {
     val conn = DataSourceUtils.getConnection(dataSource)
     try {
         conn.prepareStatement(sql).use { ps ->
             bindParams(ps, params)
             ps.execute()
-            // getResultSet() is nullable per the JDBC spec when the last-executed
-            // SQL was an update rather than a query — every call site here only
-            // ever routes SELECT-shaped SQL through this helper, but check
-            // explicitly rather than let a future caller hit a bare NPE.
+            // getResultSet is nullable after non-SELECT statements.
             val rs: ResultSet? = ps.resultSet
             checkNotNull(rs) { "query produced no result set: $sql" }
             rs.use {
@@ -149,14 +101,7 @@ private data class ConstraintRow(
 
 private data class FkCandidate(val columnName: String, val refSchema: String?, val refTable: String?, val refColumn: String?)
 
-/**
- * MySQL/MariaDB [DbSource], opt-in via `ashurbanipal.backend=mysql`. Port of
- * `implementations/rust/core/src/db/mysql.rs`, mechanism-for-mechanism (variant
- * detection, per-statement timeout SQL, backtick identifier quoting). Not
- * run through `conformance/runner` (that suite targets Postgres) — see
- * `docs/adapter-decisions.md` for the per-clause decisions this makes where
- * Postgres-specific catalog/stats mechanisms have no equivalent.
- */
+/** MySQL/MariaDB [DbSource] (`spec/protocol.md` §5). */
 class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
     private val transactionTemplate = TransactionTemplate(DataSourceTransactionManager(dataSource)).apply {
         isReadOnly = true
@@ -167,13 +112,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         transactionTemplate.execute { action() }
             ?: throw IllegalStateException("read-only transaction did not produce a result")
 
-    /**
-     * `SELECT VERSION()` returns a string containing `MariaDB` on that fork
-     * (e.g. `10.11.6-MariaDB-1:10.11.6+maria~ubu2004`) and just a bare
-     * version like `8.0.35` on real MySQL — the standard sniff other
-     * drivers use. Cached in an [AtomicReference]; a lost race between
-     * concurrent first calls is harmless since both detect the same value.
-     */
+    /** Cache whether SELECT VERSION() contains MariaDB (`spec/protocol.md` §6). */
     internal fun variant(): Variant {
         variantRef.get()?.let { return it }
         val version = query(dataSource, "select version()") { rs -> rs.getString(1) }.first()
@@ -182,12 +121,6 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         return variantRef.get()!!
     }
 
-    /**
-     * Excludes MySQL's own internal schemas. There is no single
-     * boolean-returning privilege-check function equivalent to Postgres's
-     * `has_schema_privilege` — accepted as a documented gap in
-     * `docs/adapter-decisions.md` (§5.7's exclusion is a SHOULD, not a MUST).
-     */
     private fun listAllowedSchemas(variant: Variant): List<String> =
         query(
             dataSource,
@@ -200,13 +133,10 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             ),
         ) { rs -> rs.getString(1) }
 
-    /** `current_schema()` has no MySQL equivalent; `select database()` is the analogous "connection's own default" read. */
+    /** Reads MySQL's default database (`spec/protocol.md` §5). */
     private fun resolveSchema(variant: Variant, requested: String?): String {
         val schemas = listAllowedSchemas(variant)
-        // `getString(1)` is a Java platform type (String!) — explicitly typing the
-        // query as String? here, rather than letting it infer non-null, is what
-        // makes the null case below reachable instead of silently interpolating
-        // "null" into a confusing "not allowed: schema null" message.
+        // Preserve null from database() for a clear rejection.
         val resolved = requested ?: query<String?>(
             dataSource,
             timedSelect(variant, queryTimeoutSecs, "database()"),
@@ -244,14 +174,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     private fun requireTable(variant: Variant, schema: String, table: String): String =
         allowedTables(variant, schema).find { it == table } ?: throw NotAllowedException("not allowed: table $table")
 
-    /**
-     * Composite FKs are dropped, mirroring [PostgresSource]. The join adds
-     * `kcu.table_name = tc.table_name` — unlike Postgres's auto-generated,
-     * schema-unique constraint names, MySQL's primary-key constraint is
-     * *always* literally named `"PRIMARY"` on every table, so joining on
-     * `constraint_name` alone would match every other table's primary-key
-     * columns in the same schema.
-     */
+    /** Join MySQL's repeating PRIMARY name on table name; omit composite FKs (`spec/protocol.md` §5.4.1). */
     private fun keyMetadata(variant: Variant, schema: String, table: String): Pair<Set<String>, Map<String, ColumnRef>> {
         val rows = query(
             dataSource,
@@ -306,8 +229,6 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     override fun listTables(schema: String?): List<TableInfo> = inReadOnlyTransaction {
         val variant = variant()
         val realSchema = resolveSchema(variant, schema)
-        // TABLE_COMMENT sits as a plain column here — no obj_description-style
-        // function call needed, unlike Postgres.
         query(
             dataSource,
             timedSelect(
@@ -324,11 +245,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     override fun tableCounts(schema: String?): List<CountEntry> = inReadOnlyTransaction {
         val variant = variant()
         val realSchema = resolveSchema(variant, schema)
-        // TABLE_ROWS is an InnoDB-statistics estimate (reltuples-equivalent,
-        // MAY be stale, refreshed by ANALYZE TABLE) — never COUNT(*). NULL
-        // before InnoDB has gathered any statistics for a freshly created
-        // table maps to the same -1 "no estimate yet" sentinel Postgres uses
-        // before ANALYZE/VACUUM.
+        // TABLE_ROWS may be stale; NULL means no estimate yet (-1) (`spec/protocol.md` §5.3).
         query(
             dataSource,
             timedSelect(
@@ -360,9 +277,6 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
 
         val whereClause = opts.filter?.let { buildWhereClauseMysql(it, columnNames) } ?: WhereClause("", emptyList())
 
-        // DATA_TYPE and COLUMN_COMMENT both sit as plain columns on
-        // information_schema.columns — unlike Postgres, no separate
-        // pg_attribute join is needed for comments.
         val columnMeta = query(
             dataSource,
             timedSelect(
@@ -405,11 +319,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val rows = try {
             query(dataSource, sql, bindArgs) { rs -> rowToJson(rs, columns) }
         } catch (e: SQLException) {
-            // information_schema.tables lists a table the role holds *any*
-            // privilege on, not just SELECT, and there's no has_table_privilege
-            // analog to gate the listing (docs/adapter-decisions.md §5.2/§5.3).
-            // Map the residual ER_TABLEACCESS_DENIED_ERROR (1142, both engines)
-            // to NotAllowed (400), not a driver 500.
+            // MySQL has no SELECT privilege gate; map residual 1142 to NotAllowed.
             if (e.errorCode == 1142) {
                 throw NotAllowedException("not allowed: table $realTable")
             }
@@ -445,17 +355,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         return map
     }
 
-    /**
-     * No `pg_stats` analog exists on MySQL. MySQL 8's
-     * `information_schema.column_statistics` histogram needs an explicit
-     * `ANALYZE TABLE ... UPDATE HISTOGRAM` to populate, has a structurally
-     * different shape (equi-height buckets, not a flat most-common-values
-     * array), and doesn't exist at all on MariaDB or MySQL 5.7 — an
-     * unconditional empty list is the protocol's own "no statistics
-     * available" answer (spec/protocol.md §5.5), not a live scan, mirroring
-     * SQLite's identical choice. Table/column are still validated against
-     * the live allow-list first.
-     */
+    /** MySQL has no portable common-value statistics (`spec/protocol.md` §5.5). */
     override fun commonValues(schema: String?, table: String, column: String): List<CommonValueEntry> = inReadOnlyTransaction {
         val variant = variant()
         val realSchema = resolveSchema(variant, schema)

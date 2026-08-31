@@ -4,12 +4,7 @@ import { MySqlSource, timedSelect, type Variant } from "../../src/db/mysql.js";
 import type { QueryOpts } from "../../src/db/types.js";
 import { NotAllowedError } from "../../src/errors.js";
 
-// Live-instance coverage, mirroring implementations/rust/core/src/db/mysql.rs's
-// #[cfg(test)] suite — run against the devcontainer's real `mysql` and
-// `mariadb` services (MYSQL_TEST_URL / MARIADB_TEST_URL), each variant its
-// own describe block so the MariaDB path is verified against a real
-// MariaDB server, not just assumed API-symmetric with MySQL. Skips
-// cleanly (no failure) when its own env var is absent.
+// Live-instance coverage against the devcontainer's MySQL and MariaDB services.
 
 // No live instance needed — a fake pool proves variant() retries after a
 // transient failure instead of pinning every future call to one stale

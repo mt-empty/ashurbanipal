@@ -16,12 +16,7 @@ import {
   type TableInfo,
 } from "./types.js";
 
-/**
- * SQLite has no schema namespace above a single database file — this is
- * the only name listSchemas ever returns, mirroring how a bare
- * ATTACH-less connection exposes its one implicit `main` schema
- * (implementations/rust/core/src/db/sqlite.rs::ONLY_SCHEMA).
- */
+/** SQLite's only schema for a single database file. */
 const ONLY_SCHEMA = "main";
 
 function checkSchema(schema: string | undefined): void {
@@ -39,29 +34,7 @@ function dbAll<T extends Record<string, unknown>>(db: Database, sql: string, par
   });
 }
 
-/**
- * `sqlite3` (mapbox/node-sqlite3, not the built-in `node:sqlite`) is the
- * deliberate driver choice: it dispatches each query to a libuv
- * threadpool worker and exposes `Database.prototype.interrupt()`
- * (`sqlite3_interrupt()`), safely callable from the JS main thread while
- * a query runs in the background. `node:sqlite` and `better-sqlite3` were
- * rejected after checking empirically — both execute fully synchronously
- * with no interrupt/cancellation hook, so a slow query would block the
- * whole process with no way to abort it short of a worker-thread rewrite.
- * Verified against a real slow recursive-CTE query (see the "aborted"
- * unit test below) that `interrupt()` stops execution within
- * milliseconds and leaves the connection usable afterward.
- *
- * Unlike `sqlite3_progress_handler` (checked synchronously inside the
- * running query itself), `interrupt()` here fires from a JS timer in a
- * different event-loop turn than the query's own completion — and
- * calling it on an already-idle connection was confirmed (empirically)
- * to poison the *next* query, not no-op. The `settled` guard closes that
- * window except for the vanishingly narrow case where the timer matures
- * in the exact same event-loop tick as the query's own completion; that
- * residual race is an accepted gap, documented in
- * docs/adapter-decisions.md §6 rather than shipped silently.
- */
+/** sqlite3 interrupt runs from another event-loop turn; `settled` avoids interrupting the next query. */
 function bounded<T>(db: Database, timeoutMs: number, fn: () => Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -93,10 +66,8 @@ async function allowedTables(db: Database, timeoutMs: number): Promise<string[]>
   return rows.map((r) => r.name);
 }
 
-// `table` must already be validated against allowedTables by every caller
-// before reaching here — PRAGMA doesn't accept bound parameters for the
-// table name, so this is the one identifier spliced into a PRAGMA string
-// rather than bound (mirrors sqlite.rs::allowed_columns).
+// PRAGMA cannot bind table names; callers supply an allow-listed table
+// (spec/protocol.md §6).
 async function allowedColumns(db: Database, table: string, timeoutMs: number): Promise<string[]> {
   const quoted = quoteIdent(table);
   const rows = await bounded(db, timeoutMs, () =>
@@ -105,9 +76,7 @@ async function allowedColumns(db: Database, table: string, timeoutMs: number): P
   return rows.map((r) => r.name);
 }
 
-// Composite FKs are dropped rather than risk mislabeling which
-// referencing column pairs with which referenced column, mirroring
-// sqlite.rs::key_metadata.
+// Composite FKs are omitted rather than risk mislabeling columns (spec/protocol.md §5.4.1).
 async function keyMetadata(
   db: Database,
   table: string,
@@ -150,13 +119,7 @@ async function keyMetadata(
   return { pkColumns, fkColumns };
 }
 
-/**
- * SQLite equivalent of the Postgres/MySQL buildWhereClause: `?`
- * placeholders instead of `$N`, `CAST(col AS TEXT)` instead of `::text`,
- * and `ILIKE` mapped to plain `LIKE` since SQLite's `LIKE` is already
- * ASCII case-insensitive by default — there's no separate keyword to map
- * to. Mirrors sqlite.rs::build_where_clause.
- */
+/** SQLite filter SQL uses `?`, `CAST(... AS TEXT)`, and `LIKE` for `ILIKE`. */
 function buildWhereClauseSqlite(conditions: Condition[], columnNames: string[]): { where: string; values: string[] } {
   if (conditions.length === 0) {
     return { where: "", values: [] };
@@ -197,17 +160,7 @@ function buildWhereClauseSqlite(conditions: Condition[], columnNames: string[]):
   return { where: ` where ${clause}`, values };
 }
 
-/**
- * The SQLite `DbSource`, ported against
- * implementations/rust/core/src/db/sqlite.rs. Not run through
- * conformance/runner (that suite targets Postgres) — see
- * docs/adapter-decisions.md for the per-clause decisions this makes where
- * Postgres-specific catalog/stats mechanisms have no equivalent. Uses a
- * single shared connection (unlike Rust's SqlitePool) — SQLite's default
- * "serialized" threading mode makes concurrent access to one connection
- * safe, and there's no schema/search_path drift risk to guard against the
- * way a genuine connection pool would need to (see docs/adapter-decisions.md §1).
- */
+/** SQLite implementation; see docs/adapter-decisions.md for protocol differences. */
 export class SqliteSource implements DbSource {
   constructor(private readonly db: Database) {}
 

@@ -11,15 +11,7 @@ import java.sql.DriverManager
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.system.measureTimeMillis
 
-/**
- * Port of `implementations/rust/core/src/db/mysql.rs`'s test suite. Runs against
- * whichever of `MYSQL_TEST_URL`/`MARIADB_TEST_URL` is set (the devcontainer's
- * `mysql`/`mariadb` services) — each test method is parameterized so both
- * forks get the same coverage, including the fork-specific timeout SQL
- * branch (`docs/adapter-decisions.md` §6). Skips cleanly (JUnit5
- * `@EnabledIfEnvironmentVariable`) rather than failing when neither is
- * reachable, matching `implementations/rust/core/src/db/mysql.rs`'s tests.
- */
+/** Runs the shared MySQL/MariaDB cases against available devcontainer services. */
 class MySqlSourceTest {
     companion object {
         private val counter = AtomicLong(0)

@@ -16,24 +16,10 @@ import {
   type TableInfo,
 } from "./types.js";
 
-/**
- * `mysql2` speaks the wire protocol both MySQL and MariaDB implement, but
- * the two forks need different SQL for the one thing this port relies on:
- * a per-query timeout (see timedSelect). Detected once per MySqlSource via
- * variant() and cached, not re-checked per request — mirrors
- * implementations/rust/core/src/db/mysql.rs's `Variant`.
- */
+/** Selects fork-specific query timeout syntax (`spec/protocol.md` §6). */
 export type Variant = "mysql" | "mariadb";
 
-/**
- * MySQL's `MAX_EXECUTION_TIME` hint must sit inline right after `select`.
- * MariaDB never implemented it and silently ignores unrecognized
- * `/*+ ... *\/` hints rather than rejecting them — reusing MySQL's hint
- * there would fail open, silently not enforcing the timeout at all — so
- * MariaDB instead gets `SET STATEMENT max_statement_time=N FOR ...`
- * (whole-statement wrap, plain seconds). `body` is the SQL text starting
- * right after the `select` keyword this function supplies.
- */
+/** MariaDB ignores MySQL timeout hints, so it needs a statement wrapper (`spec/protocol.md` §6). */
 export function timedSelect(variant: Variant, timeoutMs: number, body: string): string {
   assertSafeTimeoutMs(timeoutMs);
   if (variant === "mysql") {
@@ -42,26 +28,12 @@ export function timedSelect(variant: Variant, timeoutMs: number, body: string): 
   return `set statement max_statement_time=${timeoutMs / 1000} for select ${body}`;
 }
 
-/**
- * MySQL's default identifier quote is the backtick, not `"` — double-quote
- * identifier quoting only works under session-wide `ANSI_QUOTES`, which
- * this crate has no business forcing on a host's connection. Doubling an
- * embedded backtick is MySQL's own documented escape.
- */
+/** Backtick-escape live-catalog identifiers for MySQL (`spec/protocol.md` §5). */
 export function quoteIdentMysql(ident: string): string {
   return `\`${ident.replace(/`/g, "``")}\``;
 }
 
-/**
- * MySQL equivalent of the Postgres/SQLite buildWhereClause: `?`
- * placeholders (positional), `CAST(col AS CHAR)` instead of `::text`
- * (MySQL has no `::` operator and no `TEXT` cast target), and `ILIKE`
- * mapped to `LOWER(...) LIKE LOWER(?)` rather than a bare keyword swap —
- * unlike SQLite, whose plain `LIKE` is unconditionally ASCII
- * case-insensitive, MySQL's `LIKE` case-sensitivity depends on the
- * column's collation, which this crate has no control over. See
- * docs/adapter-decisions.md §5.4.2.
- */
+/** Builds MySQL filter SQL; map ILIKE through LOWER for collation independence (`spec/protocol.md` §5.4.2). */
 export function buildWhereClauseMysql(
   conditions: Condition[],
   columnNames: string[],
@@ -119,37 +91,15 @@ async function queryRows(
   return rows;
 }
 
-// MySQL 8 echoes back an un-aliased information_schema column using its
-// catalog-defined case (e.g. `SCHEMA_NAME`, not the lowercase `schema_name`
-// written in the query text) — MariaDB doesn't, which is exactly the kind
-// of silent cross-fork divergence this port must not assume symmetry on
-// (confirmed empirically against both live services). Every raw
-// information_schema/CAST column reference below carries an explicit
-// lowercase alias so the row-object key this port reads by name is
-// deterministic on both forks.
+// Explicit aliases keep row keys stable across MySQL and MariaDB.
 
-/**
- * The MySQL/MariaDB `DbSource`, ported against
- * implementations/rust/core/src/db/mysql.rs. Not run through
- * conformance/runner (that suite targets Postgres) — see
- * docs/adapter-decisions.md for the per-clause decisions this makes where
- * Postgres-specific catalog/stats mechanisms have no equivalent.
- */
+/** MySQL/MariaDB `DbSource` (`spec/protocol.md` §5). */
 export class MySqlSource implements DbSource {
   private variantPromise: Promise<Variant> | undefined;
 
   constructor(private readonly pool: Pool) {}
 
-  // `SELECT VERSION()` returns a string containing `MariaDB` on that fork
-  // (e.g. `10.11.6-MariaDB-1:10.11.6+maria~ubu2004`) and just a bare
-  // version like `8.0.35` on real MySQL — the standard sniff other
-  // drivers use, since there's no dedicated boolean-returning function
-  // for it. Cached in a memoized promise so concurrent first calls share
-  // one detection; a lost race between concurrent callers is harmless
-  // since both would detect the same value. On failure the cached promise
-  // is cleared so the next call retries, instead of pinning every future
-  // request to one transient blip forever (mirrors mysql.rs's OnceLock,
-  // which is only .set() after a successful query).
+  // Cache whether SELECT VERSION() contains MariaDB (`spec/protocol.md` §6).
   private async variant(): Promise<Variant> {
     if (this.variantPromise === undefined) {
       const detect = (async (): Promise<Variant> => {
@@ -167,11 +117,7 @@ export class MySqlSource implements DbSource {
     return this.variantPromise;
   }
 
-  // Runs `fn` inside a transaction pinned to one physical connection for
-  // the whole operation — immune to pool sessions with divergent default
-  // database, mirroring postgres.ts's withTimeout / mysql.rs's
-  // pinned_tx. Unlike Postgres, no session/transaction-scoped timeout is
-  // set here; the timeout mechanism (timedSelect) is applied per-query.
+  // Keep schema resolution on one connection (`spec/protocol.md` §5).
   private async withTx<T>(fn: (conn: PoolConnection, variant: Variant) => Promise<T>): Promise<T> {
     const variant = await this.variant();
     const conn = await this.pool.getConnection();
@@ -188,10 +134,6 @@ export class MySqlSource implements DbSource {
     }
   }
 
-  // Excludes MySQL's own internal schemas. There is no single
-  // boolean-returning privilege-check function equivalent to Postgres's
-  // has_schema_privilege — accepted as a documented gap in
-  // docs/adapter-decisions.md (§5.7's exclusion is a SHOULD, not a MUST).
   private async listSchemasInTx(conn: PoolConnection, variant: Variant, timeoutMs: number): Promise<string[]> {
     const sql = timedSelect(
       variant,
@@ -204,10 +146,7 @@ export class MySqlSource implements DbSource {
     return rows.map((r) => r.schema_name as string);
   }
 
-  // Resolves the schema for this operation exactly once, as the first
-  // statement in the transaction. current_schema() has no MySQL
-  // equivalent; `select database()` is the analogous "connection's own
-  // default" read.
+  // Read MySQL's default database in the operation transaction (`spec/protocol.md` §5).
   private async resolveSchemaInTx(
     conn: PoolConnection,
     variant: Variant,
@@ -220,10 +159,7 @@ export class MySqlSource implements DbSource {
       resolved = requested;
     } else {
       const rows = await queryRows(conn, timedSelect(variant, timeoutMs, "database() as db"));
-      // database() returns SQL NULL for a connection with no default
-      // database — surface a clear error rather than letting the `as
-      // string` cast paper over it and produce a confusing
-      // `not allowed: schema "null"` message below.
+      // Reject a missing default database instead of casting it to "null".
       const defaultDatabase = rows[0]?.db as string | null | undefined;
       if (defaultDatabase === null || defaultDatabase === undefined) {
         throw new NotAllowedError("no schema requested and this connection has no default database");
@@ -270,16 +206,8 @@ export class MySqlSource implements DbSource {
     return rows.map((r) => r.column_name as string);
   }
 
-  // Composite FKs are dropped rather than risk mislabeling which
-  // referencing column pairs with which referenced column, mirroring
-  // postgres.ts's keyMetadata / mysql.rs's key_metadata_in_tx.
-  //
-  // The join includes `kcu.table_name = tc.table_name`, not just
-  // `constraint_name` — unlike Postgres's auto-generated, schema-unique
-  // constraint names, MySQL's primary-key constraint is always literally
-  // named "PRIMARY" on every table, so joining on constraint_name alone
-  // would match every other table's primary-key columns in the same
-  // schema.
+  // MySQL's PRIMARY name repeats, so join on table name; omit composite FKs
+  // (`spec/protocol.md` §5.4.1).
   private async keyMetadataInTx(
     conn: PoolConnection,
     variant: Variant,
@@ -349,8 +277,6 @@ export class MySqlSource implements DbSource {
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {
     return this.withTx(async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
-      // TABLE_COMMENT sits as a plain column here — no obj_description-
-      // style function call needed, unlike Postgres.
       const sql = timedSelect(
         variant,
         timeoutMs,
@@ -361,8 +287,7 @@ export class MySqlSource implements DbSource {
       return rows.map((r) => {
         const t: TableInfo = { name: r.table_name as string };
         const comment = r.table_comment as string;
-        // Empty string means "no comment"; MUST be omitted, not emitted
-        // as "" (spec/protocol.md §5.2).
+        // Empty comments are omitted (`spec/protocol.md` §5.2).
         if (comment.length > 0) t.comment = comment;
         return t;
       });
@@ -372,9 +297,7 @@ export class MySqlSource implements DbSource {
   async tableCounts(schema: string | undefined, timeoutMs: number): Promise<CountEntry[]> {
     return this.withTx(async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
-      // TABLE_ROWS is an InnoDB-statistics estimate (reltuples-
-      // equivalent, may be stale, refreshed by ANALYZE TABLE) — never
-      // COUNT(*).
+      // TABLE_ROWS is a potentially stale InnoDB estimate (`spec/protocol.md` §5.3).
       const sql = timedSelect(
         variant,
         timeoutMs,
@@ -382,10 +305,7 @@ export class MySqlSource implements DbSource {
           "where table_schema = ? and table_type = 'BASE TABLE' order by table_name",
       );
       const rows = await queryRows(conn, sql, [realSchema]);
-      // TABLE_ROWS is NULL before InnoDB has gathered any statistics for
-      // a freshly created table — -1 is the same "no estimate yet"
-      // sentinel Postgres uses before a table's first ANALYZE/VACUUM
-      // (spec/protocol.md §5.3), not SQLite's "no mechanism at all" case.
+      // NULL means no estimate yet: emit -1 (`spec/protocol.md` §5.3).
       return rows.map((r) => ({
         table: r.table_name as string,
         approx_rows: r.table_rows === null ? -1 : Number(r.table_rows),
@@ -413,10 +333,6 @@ export class MySqlSource implements DbSource {
 
       const { where: whereClause, values: filterValues } = buildWhereClauseMysql(opts.filter, columnNames);
 
-      // DATA_TYPE and COLUMN_COMMENT both sit as plain columns on
-      // information_schema.columns — unlike Postgres, no separate
-      // pg_attribute join is needed, and no ordinal-position-vs-attnum
-      // drift is possible.
       const metaSql = timedSelect(
         variant,
         timeoutMs,
@@ -442,18 +358,11 @@ export class MySqlSource implements DbSource {
         return col;
       });
 
-      // Aliased back to the real column name: an un-aliased CAST(...)
-      // expression's result-set label is the literal expression text, not
-      // the source column name, on both MySQL and MariaDB — row access by
-      // name below (cellToJson via col.name) would otherwise silently
-      // read undefined for every cell.
+      // Alias CAST results to the column names expected by cellToJson.
       const selectList = columns
         .map((c) => `CAST(${quoteIdentMysql(c.name)} AS CHAR) AS ${quoteIdentMysql(c.name)}`)
         .join(", ");
-      // Table-qualified, same reason as postgres.ts/sqlite.ts: an
-      // unqualified `order by` would resolve to the CAST-output column in
-      // selectList, sorting lexicographically instead of by the real
-      // typed value.
+      // Qualify the source column so ORDER BY keeps its native type.
       const orderClause =
         sort !== undefined
           ? ` order by ${quoteIdentMysql(realTable)}.${quoteIdentMysql(sort)} ${opts.descending ? "desc" : "asc"}`
@@ -507,12 +416,7 @@ export class MySqlSource implements DbSource {
       if (!findExact(columnNames, column)) {
         throw new NotAllowedError(`column "${column}"`);
       }
-      // No pg_stats equivalent. MySQL 8's information_schema.
-      // COLUMN_STATISTICS histogram needs an explicit `ANALYZE TABLE ...
-      // UPDATE HISTOGRAM` to populate and doesn't exist at all on
-      // MariaDB/MySQL 5.7 — an empty list is the documented "no
-      // statistics available" answer (spec/protocol.md §5.5), mirroring
-      // SQLite's same deliberate choice, not a live scan.
+      // MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
       return [];
     });
   }

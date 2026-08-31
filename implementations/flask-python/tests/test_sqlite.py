@@ -1,9 +1,6 @@
-"""SqliteSource tests, mirroring
-`implementations/rust/core/src/db/sqlite.rs`'s `#[cfg(test)] mod tests`. No
-external service needed — every test uses a temp file (not `:memory:`:
-`SqliteSource` opens a fresh connection per operation, and SQLite's
-`:memory:` database is private per-connection unless using a shared-cache
-URI, so a real file is what makes state persist across operations here).
+"""SqliteSource tests using a temporary file.
+
+The source opens one connection per operation, so `:memory:` would not persist state.
 """
 
 from __future__ import annotations

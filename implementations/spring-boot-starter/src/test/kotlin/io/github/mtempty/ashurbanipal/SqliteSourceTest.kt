@@ -11,14 +11,7 @@ import java.io.File
 import java.sql.DriverManager
 import kotlin.system.measureTimeMillis
 
-/**
- * Port of `implementations/rust/core/src/db/sqlite.rs`'s test suite. Uses a real
- * on-disk file (not `sqlite::memory:`) since the query-timeout test needs a
- * connection Xerial's `sqlite-jdbc` driver can actually interrupt — verified
- * empirically here (a real slow query, timing-based proof of abortion), not
- * just trusted from the JDBC API's documented intent, per PORTING.md's
- * per-backend review bar.
- */
+/** Uses an on-disk SQLite file so Xerial's driver can interrupt a real slow query. */
 class SqliteSourceTest {
     private val dbFile = File.createTempFile("ashurbanipal-sqlite-test", ".db")
 

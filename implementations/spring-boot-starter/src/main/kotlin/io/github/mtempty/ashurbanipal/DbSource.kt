@@ -11,9 +11,8 @@ class NotAllowedException(message: String) : RuntimeException(message)
  * (the standard Postgres/SQLite quoted-identifier escape) — every name
  * reaching this must already be allow-list-validated against a live catalog
  * lookup; this only makes a validated name syntactically safe to splice, it
- * is not itself a validation step (`spec/protocol.md` §6, mirrors
- * `implementations/rust/core/src/db/mod.rs::quote_ident`). MySQL's default quote
- * character is the backtick, not `"` — [MySqlSource] has its own
+ * is not itself a validation step (`spec/protocol.md` §6). MySQL's default
+ * quote character is the backtick, not `"` — [MySqlSource] has its own
  * `quoteIdentMysql` rather than reusing this.
  */
 internal fun quoteIdent(ident: String): String = "\"" + ident.replace("\"", "\"\"") + "\""
@@ -52,19 +51,7 @@ data class QueryOpts(
     val filter: List<Condition>?,
 )
 
-/**
- * Backend-selection seam: one implementation per supported database engine —
- * [PostgresSource] (default), [MySqlSource] (MySQL/MariaDB, opt-in via
- * `ashurbanipal.backend=mysql`), [SqliteSource] (opt-in via
- * `ashurbanipal.backend=sqlite`). Route handlers ([AshurbanipalController]) only
- * ever see this interface, never a concrete implementation or a raw
- * `DataSource`/JDBC type. Mirrors `implementations/rust/core/src/db/mod.rs`'s
- * `DbSource` trait; which implementation gets constructed is chosen by
- * [AshurbanipalAutoConfiguration] from explicit config, never by
- * classpath/driver detection (`PORTING.md`'s hardening checklist item 2 —
- * "found on the classpath -> sensible defaults -> turned on" is backwards
- * for this crate).
- */
+/** Backend-selection seam; route handlers never access a concrete driver. */
 interface DbSource {
     fun listSchemas(): List<String>
     fun listTables(schema: String?): List<TableInfo>

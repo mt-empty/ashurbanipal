@@ -1,7 +1,4 @@
-// Command demo is the living usage example and conformance harness for
-// the go-nethttp port — the host service embedding Ashurbanipal, mirroring
-// implementations/rust/examples/demo.rs and the Spring Boot starter's
-// integration test app.
+// Command demo is the host-service usage example and conformance harness.
 //
 // Run against the devcontainer's seeded Postgres:
 //

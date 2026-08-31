@@ -14,10 +14,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-// mysqlVariant distinguishes the two forks the go-sql-driver/mysql driver
-// serves over the same wire protocol — sqlx's mysql driver, and this one,
-// speak both, but the two forks need different SQL for the one thing this
-// backend relies on: a per-query timeout (see timedSelect).
+// mysqlVariant selects fork-specific query timeout syntax (`spec/protocol.md` §6).
 type mysqlVariant int
 
 const (
@@ -25,13 +22,8 @@ const (
 	variantMariaDB
 )
 
-// timedSelect wraps a `select`-less query body with the fork-appropriate
-// timeout mechanism. MySQL's MAX_EXECUTION_TIME hint must sit inline right
-// after `select`. MariaDB never implemented it and silently ignores
-// unrecognized /*+ ... */ hints rather than rejecting them — reusing
-// MySQL's hint there would fail open, silently not enforcing the timeout
-// at all — so MariaDB instead gets `SET STATEMENT max_statement_time=N
-// FOR ...` (whole-statement wrap, plain seconds).
+// MariaDB ignores MySQL timeout hints, so it needs a statement wrapper
+// (`spec/protocol.md` §6).
 func timedSelect(variant mysqlVariant, timeoutSecs int, body string) string {
 	if variant == variantMariaDB {
 		return fmt.Sprintf("set statement max_statement_time=%d for select %s", timeoutSecs, body)
@@ -39,27 +31,13 @@ func timedSelect(variant mysqlVariant, timeoutSecs int, body string) string {
 	return fmt.Sprintf("select /*+ MAX_EXECUTION_TIME(%d) */ %s", timeoutSecs*1000, body)
 }
 
-// quoteIdentMySQL escapes an identifier for splicing into SQL text the
-// MySQL way: backtick-doubling, not the shared quoteIdent's double-quote
-// convention. MySQL's default identifier quote is the backtick — double-
-// quote identifier quoting only works under session-wide ANSI_QUOTES,
-// which this crate has no business forcing on a host's connection. Callers
-// must only pass a value already exact-matched against a live
-// schema-catalog lookup (spec/protocol.md §6); this function does no
-// validation of its own.
+// quoteIdentMySQL backtick-escapes live-catalog identifiers (`spec/protocol.md` §5).
 func quoteIdentMySQL(s string) string {
 	return "`" + strings.ReplaceAll(s, "`", "``") + "`"
 }
 
-// mysqlBuildWhereClause is the MySQL equivalent of postgres.go's
-// BuildWhereClause/sqlite.go's sqliteBuildWhereClause: `?` placeholders
-// (positional, like SQLite, not `$N`), `CAST(col AS CHAR)` instead of
-// `::text`/`CAST(col AS TEXT)` (MySQL has no `::` operator and no `TEXT`
-// cast target), and ILIKE mapped to `LOWER(...) LIKE LOWER(?)` rather than
-// a bare keyword swap — unlike SQLite, whose plain LIKE is unconditionally
-// ASCII case-insensitive, MySQL's LIKE case-sensitivity depends on the
-// column's collation, which this crate has no control over
-// (docs/adapter-decisions.md §5.4.2).
+// mysqlBuildWhereClause maps ILIKE through LOWER for collation independence
+// (`spec/protocol.md` §5.4.2).
 func mysqlBuildWhereClause(conditions []Condition, columnNames []string) (string, []string, error) {
 	if len(conditions) == 0 {
 		return "", nil, nil
@@ -117,13 +95,7 @@ func mysqlBuildWhereClause(conditions []Condition, columnNames []string) (string
 	return " where " + string(clause), values, nil
 }
 
-// MySQLSource is gated behind the `mysql` build tag (opt-in, mirroring the
-// Rust reference's `mysql` Cargo feature) — see docs/adapter-decisions.md
-// for the per-clause decisions this makes where Postgres-specific
-// catalog/stats mechanisms have no MySQL equivalent. One driver
-// (go-sql-driver/mysql) serves both MySQL and MariaDB; the two forks
-// diverge only on the query-timeout mechanism (timedSelect), detected once
-// per MySQLSource and cached.
+// MySQLSource implements the MySQL backend (`spec/protocol.md` §5).
 type MySQLSource struct {
 	db         *sql.DB
 	timeoutSec int
@@ -133,10 +105,7 @@ type MySQLSource struct {
 	variant *mysqlVariant // nil until successfully detected
 }
 
-// NewMySQLSource builds a DbSource backed by db, bounding every query
-// (catalog and data alike) by queryTimeoutSecs. db must already be opened
-// with the go-sql-driver/mysql driver, against either a MySQL or MariaDB
-// server — the variant is detected at first use, not by the caller.
+// NewMySQLSource bounds catalog and data queries (`spec/protocol.md` §6).
 func NewMySQLSource(db *sql.DB, queryTimeoutSecs int) *MySQLSource {
 	return &MySQLSource{
 		db:         db,
@@ -151,15 +120,7 @@ func (c *MySQLSource) bounded(ctx context.Context) (context.Context, context.Can
 	return context.WithTimeout(ctx, c.timeout)
 }
 
-// variantOf detects MySQL vs. MariaDB once and caches the result — a
-// transient failure isn't cached, so a later call can still retry, unlike
-// a sync.Once (mirrors the Rust reference's OnceLock, which is likewise
-// only ever set on success: `let _ = self.variant.set(detected)` never
-// runs on the error path). SELECT VERSION() returns a string containing
-// "MariaDB" on that fork (e.g. "10.11.6-MariaDB-1:10.11.6+maria~ubu2004")
-// and just a bare version like "8.0.35" on real MySQL — the standard
-// sniff other drivers use, since there's no dedicated boolean-returning
-// function for it.
+// variantOf caches whether SELECT VERSION() contains MariaDB (`spec/protocol.md` §6).
 func (c *MySQLSource) variantOf(ctx context.Context) (mysqlVariant, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -180,22 +141,11 @@ func (c *MySQLSource) variantOf(ctx context.Context) (mysqlVariant, error) {
 	return v, nil
 }
 
-// pinnedTx pins one physical connection for the whole operation, the same
-// way postgres.go's ListTables/TableCounts/QueryTable/CommonValues do —
-// resolving the schema once as the first statement and reusing it for
-// every later query in the same transaction is immune to pool sessions
-// with a divergent default database (MySQL resolves unqualified table
-// names against the connection's own default database, architecturally
-// like Postgres's search_path, not SQLite's single-file degenerate case —
-// docs/adapter-decisions.md §1).
+// pinnedTx keeps schema resolution on one connection (`spec/protocol.md` §5).
 func (c *MySQLSource) pinnedTx(ctx context.Context) (*sql.Tx, error) {
 	return c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 }
 
-// allowedSchemasInTx excludes MySQL's own internal schemas. There is no
-// single boolean-returning privilege-check function equivalent to
-// Postgres's has_schema_privilege — accepted as a documented gap in
-// docs/adapter-decisions.md (§5.7's exclusion is a SHOULD, not a MUST).
 func (c *MySQLSource) allowedSchemasInTx(ctx context.Context, tx queryer, variant mysqlVariant) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
@@ -218,9 +168,7 @@ func (c *MySQLSource) allowedSchemasInTx(ctx context.Context, tx queryer, varian
 	return out, rows.Err()
 }
 
-// resolveSchemaInTx mirrors postgres.go's resolveSchema. current_schema()
-// has no MySQL equivalent; `select database()` is the analogous
-// "connection's own default" read.
+// resolveSchemaInTx reads the connection's default database (`spec/protocol.md` §5).
 func (c *MySQLSource) resolveSchemaInTx(ctx context.Context, tx queryer, variant mysqlVariant, requested *string) (string, error) {
 	schemas, err := c.allowedSchemasInTx(ctx, tx, variant)
 	if err != nil {
@@ -292,15 +240,8 @@ type mysqlFKCandidate struct {
 	refSchema, refTable, refColumn sql.NullString
 }
 
-// keyMetadataInTx mirrors postgres.go's keyMetadata: composite FKs are
-// dropped entirely rather than risk mislabeling which referencing column
-// pairs with which referenced column (spec/protocol.md §5.4.1).
-//
-// The join includes kcu.table_name = tc.table_name, not just
-// constraint_name — unlike Postgres's auto-generated, schema-unique
-// constraint names, MySQL's primary-key constraint is always literally
-// named "PRIMARY" on every table, so joining on constraint_name alone
-// would match every other table's primary-key columns in the same schema.
+// keyMetadataInTx joins MySQL's repeating PRIMARY name on table name and
+// omits composite FKs (`spec/protocol.md` §5.4.1).
 func (c *MySQLSource) keyMetadataInTx(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (map[string]bool, map[string]ColumnRef, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
@@ -399,8 +340,6 @@ func (c *MySQLSource) ListTables(ctx context.Context, schema *string) ([]TableIn
 
 	qctx, cancel := c.bounded(ctx)
 	defer cancel()
-	// table_comment sits as a plain column here — no obj_description-style
-	// function call needed, unlike Postgres.
 	rows, err := tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
 		`table_name, table_comment from information_schema.tables
 		 where table_schema = ? and table_type = 'BASE TABLE'
@@ -416,8 +355,7 @@ func (c *MySQLSource) ListTables(ctx context.Context, schema *string) ([]TableIn
 			return nil, err
 		}
 		t := TableInfo{Name: name}
-		// Empty string means "no comment"; MUST be omitted, not emitted as
-		// "" (spec/protocol.md §5.2).
+		// Empty comments are omitted (`spec/protocol.md` §5.2).
 		if comment != "" {
 			t.Comment = &comment
 		}
@@ -451,10 +389,7 @@ func (c *MySQLSource) TableCounts(ctx context.Context, schema *string) ([]CountE
 
 	qctx, cancel := c.bounded(ctx)
 	defer cancel()
-	// table_rows is an InnoDB-statistics estimate (reltuples-equivalent,
-	// may be stale, refreshed by ANALYZE TABLE) — never COUNT(*). Cast to
-	// signed so it decodes the same way regardless of the catalog's exact
-	// unsigned width.
+	// table_rows is a potentially stale InnoDB estimate (`spec/protocol.md` §5.3).
 	rows, err := tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
 		`table_name, cast(table_rows as signed) from information_schema.tables
 		 where table_schema = ? and table_type = 'BASE TABLE'
@@ -471,10 +406,7 @@ func (c *MySQLSource) TableCounts(ctx context.Context, schema *string) ([]CountE
 			return nil, err
 		}
 		entry := CountEntry{Table: name, ApproxRows: -1}
-		// table_rows is NULL before InnoDB has gathered any statistics for
-		// a freshly created table — -1 is the same "no estimate yet"
-		// sentinel Postgres uses before a table's first ANALYZE/VACUUM
-		// (spec/protocol.md §5.3), not SQLite's "no mechanism at all" case.
+		// NULL means no estimate yet: emit -1 (`spec/protocol.md` §5.3).
 		if count.Valid {
 			entry.ApproxRows = count.Int64
 		}
@@ -491,11 +423,8 @@ func (c *MySQLSource) TableCounts(ctx context.Context, schema *string) ([]CountE
 	return out, tx.Commit()
 }
 
-// mapSelectDeniedMySQL turns a residual ER_TABLEACCESS_DENIED_ERROR (1142,
-// on both MySQL and MariaDB) at the row fetch into a NotAllowedError (400).
-// information_schema.tables lists a table the role holds *any* privilege
-// on, not just SELECT, and there's no has_table_privilege analog to gate
-// the listing on — see docs/adapter-decisions.md §5.2/§5.3.
+// mapSelectDeniedMySQL maps residual error 1142 to NotAllowed: MySQL has no
+// SELECT privilege gate (`spec/protocol.md` §2).
 func mapSelectDeniedMySQL(err error, table string) error {
 	var myErr *mysql.MySQLError
 	if errors.As(err, &myErr) && myErr.Number == 1142 {
@@ -722,12 +651,6 @@ func (c *MySQLSource) CommonValues(ctx context.Context, schema *string, table, c
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	// No pg_stats equivalent. MySQL 8's information_schema.
-	// COLUMN_STATISTICS histogram needs an explicit
-	// ANALYZE TABLE ... UPDATE HISTOGRAM to populate and doesn't exist at
-	// all on MariaDB/MySQL 5.7 — an empty list is the documented "no
-	// statistics available" answer (spec/protocol.md §5.5), mirroring
-	// SQLite's same deliberate choice, not a live scan. See
-	// docs/adapter-decisions.md.
+	// MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
 	return []CommonValueEntry{}, nil
 }

@@ -3,9 +3,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Off unless the host sets this explicitly. Ashurbanipal doesn't know
-    /// or police which environment it's running in — that's the host's
-    /// call entirely; see `docs/design.md` §6.
+    /// Fail-closed: disabled unless the host enables it (`spec/protocol.md` §4).
     pub enabled: bool,
     pub limits: Limits,
     pub siblings: Vec<Sibling>,
@@ -72,8 +70,7 @@ mod tests {
 
     #[test]
     fn disabled_when_config_absent() {
-        // Malformed/incomplete config (no `enabled` key at all) must fail
-        // closed, not silently enable via some other default.
+        // Absent config stays disabled (`spec/protocol.md` §4).
         let config = Config::from_toml("").unwrap();
         assert!(!config.is_enabled());
     }

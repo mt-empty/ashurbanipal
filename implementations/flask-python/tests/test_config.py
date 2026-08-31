@@ -1,8 +1,6 @@
-"""Ports `implementations/rust/core/src/config.rs`'s test suite. The
-no-config (`Config()`) and enabled-absent-from-TOML cases specifically
-cover `PORTING.md` hardening item 2 — conformance can't observe either
-over HTTP, so this is the only evidence for the "absent config MUST mean
-disabled" property.
+"""Verifies configuration defaults fail closed.
+
+Conformance cannot observe absent configuration over HTTP.
 """
 
 from ashurbanipal.config import Config

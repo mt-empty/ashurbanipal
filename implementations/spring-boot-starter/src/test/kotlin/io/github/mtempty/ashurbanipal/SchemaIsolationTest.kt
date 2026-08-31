@@ -51,21 +51,7 @@ private class AlternatingSchemaDataSource(
     override fun isWrapperFor(iface: Class<*>?): Boolean = false
 }
 
-/**
- * Regression test for the "connection pool sessions with different
- * search_path settings must not let a request's schema resolution drift
- * mid-flight" guarantee — Kotlin equivalent of
- * `implementations/rust/axum/tests/schema_isolation.rs`'s
- * `query_table_never_mixes_schemas_across_pooled_connections`.
- *
- * Runs directly against [PostgresSource] (not the full Spring app
- * [AshurbanipalIntegrationTest] boots) so the pool under test can be built
- * by hand. `PostgresSource.queryTable` resolves+validates the schema and
- * later selects columns from it inside one read-only transaction — pinned
- * to one physical connection — so if those steps could ever land on different pooled
- * connections, a response would mix shapes/values across schemas or fail
- * outright.
- */
+/** Pool sessions with different search_path values must not drift mid-operation (spec/protocol.md §1, §5). */
 class SchemaIsolationTest {
     @Test
     fun `query_table never mixes schemas across pooled connections`() {

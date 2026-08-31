@@ -10,27 +10,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// PostgresSource is the default/reference DbSource implementation — ported
-// line-for-line against implementations/rust/core/src/db/postgres.rs's
-// catalog SQL (PORTING.md hardening item 7). Every query (catalog/metadata
-// included, not just row fetches) is bounded by the same configured
-// timeout.
-//
-// Deliberate deviation from the Rust reference: postgres.rs hardcodes a
-// separate CATALOG_TIMEOUT_SECS=5 for catalog/metadata queries, distinct
-// from the main row-fetch query's configured limit. spec/protocol.md §6
-// only requires every query be bounded by *a* timeout, not a
-// separately-hardcoded one for catalog queries — this port applies the
-// one configured value uniformly, matching the Spring Boot port's single
-// JdbcTemplate.queryTimeout.
+// PostgresSource implements the Postgres backend (`spec/protocol.md` §5).
 type PostgresSource struct {
 	db      *sql.DB
 	timeout time.Duration
 }
 
-// NewPostgresSource builds a DbSource backed by db, bounding every query
-// (catalog and data alike) by queryTimeoutSecs. db must already be opened
-// with a Postgres driver (e.g. github.com/jackc/pgx/v5/stdlib).
+// NewPostgresSource bounds catalog and data queries (`spec/protocol.md` §6).
 func NewPostgresSource(db *sql.DB, queryTimeoutSecs int) *PostgresSource {
 	return &PostgresSource{db: db, timeout: time.Duration(queryTimeoutSecs) * time.Second}
 }
@@ -41,11 +27,6 @@ func (c *PostgresSource) bounded(ctx context.Context) (context.Context, context.
 	return context.WithTimeout(ctx, c.timeout)
 }
 
-// allowedSchemas excludes the catalogs themselves (`pg_catalog`,
-// `information_schema`, `pg_toast%`, `pg_temp_%`) and anything the
-// connected role can't actually use, so a schema only ever appears here if
-// it's both a real user namespace and one this role has USAGE on
-// (spec/protocol.md §5.7).
 func (c *PostgresSource) allowedSchemas(ctx context.Context, db queryer) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
@@ -71,13 +52,8 @@ func (c *PostgresSource) allowedSchemas(ctx context.Context, db queryer) ([]stri
 	return out, rows.Err()
 }
 
-// resolveSchema resolves the schema for one operation exactly once: an
-// explicit request and an absent one (resolved via current_schema()) both
-// go through the same allow-list, so neither path can reach a schema the
-// other would reject (docs/adapter-decisions.md §1). Callers run this
-// against the operation's own transaction, which pins the whole operation
-// to one physical connection — immune to pool sessions with divergent
-// search_path.
+// resolveSchema runs in the operation transaction to prevent pool-session drift
+// (`spec/protocol.md` §5).
 func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requested *string) (string, error) {
 	schemas, err := c.allowedSchemas(ctx, db)
 	if err != nil {
@@ -103,10 +79,7 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 func (c *PostgresSource) allowedTables(ctx context.Context, db queryer, schema string) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	// has_table_privilege narrows information_schema.tables (which lists a
-	// table on *any* privilege) to just the SELECT-able ones, so this
-	// allow-list can't admit a table a later SELECT would be denied on —
-	// keeping it in lockstep with ListTables.
+	// Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
 	rows, err := db.QueryContext(ctx,
 		`select table_name from information_schema.tables
 		 where table_schema = $1 and table_type = 'BASE TABLE'
@@ -156,20 +129,8 @@ type fkCandidate struct {
 	refColumn sql.NullString
 }
 
-// keyMetadata returns the set of primary-key columns and a column ->
-// ColumnRef map for single-column foreign keys. Composite FKs are dropped
-// entirely rather than risk mislabeling which referencing column pairs
-// with which referenced column (spec/protocol.md §5.4.1). Composite
-// *primary* keys are NOT dropped this way — every PK column still gets
-// key="pk" regardless of how many columns are in the PK.
-//
-// The `ccu` join must match on `ccu.constraint_schema` (the schema the
-// constraint itself lives in, always equal to `tc.table_schema`), not
-// `ccu.table_schema` (the schema of the table constraint_column_usage is
-// describing — for a FOREIGN KEY row that's the *referenced* table's
-// schema, which for a cross-schema FK differs from the constraining
-// table's schema). Joining on `ccu.table_schema` instead silently drops
-// every cross-schema FK's metadata (the LEFT JOIN just never matches).
+// keyMetadata uses constraint_schema for cross-schema FKs and omits composites
+// (`spec/protocol.md` §5.4.1).
 func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, table string) (map[string]bool, map[string]ColumnRef, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
@@ -225,9 +186,7 @@ func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, ta
 		first := members[0]
 		if first.refSchema.Valid && first.refTable.Valid && first.refColumn.Valid {
 			ref := ColumnRef{Table: first.refTable.String, Column: first.refColumn.String}
-			// Same-schema is the overwhelming common case; omitting Schema
-			// there keeps the wire payload byte-identical to before this
-			// field existed.
+			// Same-schema references omit Schema on the wire (spec/protocol.md §5.4.1).
 			if first.refSchema.String != schema {
 				ref.Schema = first.refSchema.String
 			}
@@ -237,7 +196,6 @@ func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, ta
 	return pkColumns, fkColumns, nil
 }
 
-// ListSchemas serves GET /api/schemas.
 func (c *PostgresSource) ListSchemas(ctx context.Context) ([]string, error) {
 	schemas, err := c.allowedSchemas(ctx, c.db)
 	if err != nil {
@@ -249,7 +207,6 @@ func (c *PostgresSource) ListSchemas(ctx context.Context) ([]string, error) {
 	return schemas, nil
 }
 
-// ListTables serves GET /api/tables.
 func (c *PostgresSource) ListTables(ctx context.Context, schema *string) ([]TableInfo, error) {
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -264,9 +221,6 @@ func (c *PostgresSource) ListTables(ctx context.Context, schema *string) ([]Tabl
 
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	// has_table_privilege keeps this listing equal to the allow-list
-	// allowedTables enforces — a table the role can't SELECT is never
-	// offered as a row it would then have to reject.
 	rows, err := tx.QueryContext(ctx,
 		`select c.relname::text, obj_description(c.oid, 'pg_class')
 		 from pg_class c

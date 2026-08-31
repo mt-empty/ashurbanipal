@@ -49,22 +49,7 @@ export interface QueryOpts {
   filter: Condition[];
 }
 
-/**
- * The one seam to the database — route handlers never touch a driver
- * directly (mirrors implementations/rust/core/src/db/mod.rs's `DbSource`
- * trait). One implementation per backend: `PostgresSource` (default),
- * `SqliteSource`, `MySqlSource` — the host explicitly constructs and
- * wires whichever it wants into createRouter, so backend selection is
- * always explicit code, never driver auto-detection.
- *
- * `timeoutMs` is threaded per-call rather than baked into the instance:
- * every call, catalog/metadata queries included, must be bounded
- * (spec/protocol.md §6), and Node's Catalog historically applied one
- * configured value uniformly to everything (unlike the Rust reference's
- * separate hardcoded CATALOG_TIMEOUT_SECS) — threading it per-call keeps
- * that behavior while letting one DbSource instance serve requests
- * carrying different configured timeouts without mutable instance state.
- */
+/** Database seam; every call is timeout-bounded (`spec/protocol.md` §1, §6). */
 export interface DbSource {
   listSchemas(timeoutMs: number): Promise<string[]>;
   listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]>;

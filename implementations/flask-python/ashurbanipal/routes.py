@@ -1,11 +1,6 @@
-"""The Flask `Blueprint` + the API handlers + the HTML route
-(`spec/protocol.md` §5). Mirrors `implementations/rust/axum/src/routes.rs`.
+"""Flask Blueprint routes for `spec/protocol.md` §5.
 
-Kill switch: `router()` mirrors the Rust reference's `router()` — a
-disabled `Config` yields a `Blueprint` with zero routes registered on it,
-so merging it into a host `Flask` app via `app.register_blueprint(...)`
-contributes nothing, and every mount path 404s exactly as if the crate
-were never merged in at all (`spec/protocol.md` §4).
+A disabled Config registers no routes (`spec/protocol.md` §4).
 """
 
 from __future__ import annotations
@@ -43,11 +38,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.after_request
     def _stamp_protocol_version(response: Response) -> Response:
-        # Every API response carries the version header (§7); the HTML
-        # route (registered at exactly `mount`, no trailing segment) must
-        # not — gated on path rather than a second blueprint so one
-        # Blueprint stays the single object router() returns, mirroring
-        # the Rust reference's one merged Router.
+        # HTML has no protocol header; API responses do (spec/protocol.md §7).
         if request.path.startswith(api_prefix):
             response.headers[PROTOCOL_HEADER] = PROTOCOL_VERSION
         return response

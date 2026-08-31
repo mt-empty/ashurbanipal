@@ -137,11 +137,8 @@ func mustExecIsolation(t *testing.T, db *sql.DB, stmt string) {
 	}
 }
 
-// Regression test for the "connection pool sessions with different
-// search_path settings must not let a request's schema resolution drift
-// mid-flight" guarantee (spec/protocol.md §1, §5) — Go equivalent of
-// implementations/rust/axum/tests/schema_isolation.rs's
-// query_table_never_mixes_schemas_across_pooled_connections.
+// Pool sessions with different search_path values must not drift mid-operation
+// (spec/protocol.md §1, §5).
 //
 // Builds its own 2-connection pool (separate from TestMain's shared one)
 // whose physical connections alternate search_path between two schemas

@@ -10,20 +10,13 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
-/// Catalog/metadata queries have no per-request timeout knob, but must
-/// still be bounded — same value as `Limits::query_timeout_secs`'s default
-/// (mirrors `postgres::CATALOG_TIMEOUT_SECS`).
+/// Catalog/metadata queries need a fixed bounded timeout.
 const CATALOG_TIMEOUT_SECS: u32 = 5;
 
-/// SQLite has no schema namespace above a single database file — this is
-/// the only name `list_schemas` ever returns, mirroring how a bare
-/// `ATTACH`-less connection exposes its one implicit `main` schema.
+/// SQLite's only schema for a single database file.
 const ONLY_SCHEMA: &str = "main";
 
-/// A request naming any schema other than `ONLY_SCHEMA` is asking for
-/// something that doesn't exist on this backend — same `NotAllowed` shape
-/// Postgres returns for a schema absent from its live allow-list, so
-/// callers don't need to special-case which backend rejected it.
+/// Rejects schema names this backend does not expose.
 fn check_schema(schema: Option<&str>) -> Result<(), DbError> {
     match schema {
         None | Some(ONLY_SCHEMA) => Ok(()),
@@ -31,10 +24,7 @@ fn check_schema(schema: Option<&str>) -> Result<(), DbError> {
     }
 }
 
-/// Reviewed and supported, gated behind the `sqlite` feature (off by
-/// default). Not run through `conformance/runner` — see
-/// `docs/adapter-decisions.md` for the per-clause decisions this makes
-/// where Postgres-specific catalog/stats mechanisms have no equivalent.
+/// SQLite backend; see `docs/adapter-decisions.md` for protocol differences.
 #[derive(Clone)]
 pub struct SqliteSource {
     pool: SqlitePool,
@@ -45,12 +35,7 @@ impl SqliteSource {
         Self { pool }
     }
 
-    /// SQLite has no `SET LOCAL statement_timeout` equivalent, and
-    /// `tokio::time::timeout` wouldn't work either — each connection runs on
-    /// its own blocking worker thread, so it would abandon waiting without
-    /// stopping the call. `sqlite3_progress_handler` (`set_progress_handler`)
-    /// is the real interrupt: polled during execution, and returning `false`
-    /// aborts the query in place — mirrors `postgres::PgPoolSource::bounded_tx`.
+    /// SQLite progress handlers interrupt running queries; async timeouts only stop waiting.
     async fn bounded<T>(
         &self,
         timeout_secs: u32,

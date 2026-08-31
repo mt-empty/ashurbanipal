@@ -9,12 +9,7 @@ export function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-/**
- * Guards a value about to be spliced into SQL text as a raw integer (SET LOCAL /
- * query-hint syntax that Postgres/MySQL don't accept bound parameters for).
- * Mirrors the guarantee Rust gets for free from timeout_secs: u32 — TS's
- * `number` type doesn't survive to runtime, so this is the runtime equivalent.
- */
+/** Guards a timeout interpolated into SQL syntax that cannot use bound parameters. */
 export function assertSafeTimeoutMs(timeoutMs: number): void {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 3_600_000) {
     throw new Error(`invalid timeoutMs: ${timeoutMs}`);

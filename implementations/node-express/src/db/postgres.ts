@@ -14,23 +14,11 @@ import {
   type TableInfo,
 } from "./types.js";
 
-/**
- * The default/reference `DbSource` — ported against
- * implementations/rust/core/src/db/postgres.rs (also cross-checked against
- * implementations/go-nethttp/postgres.go). Every query (catalog/metadata
- * included, not just row fetches) is bounded by the caller-supplied
- * timeoutMs, applied per-connection via `SET LOCAL statement_timeout`
- * inside a transaction so it never leaks onto a pooled connection reused
- * by another request.
- */
+/** Postgres `DbSource`; `SET LOCAL` scopes query timeouts (`spec/protocol.md` §6). */
 export class PostgresSource implements DbSource {
   constructor(private readonly pool: Pool) {}
 
-  // Runs `fn` against a client with statement_timeout bounded for the
-  // duration of this one query, inside its own transaction — SET LOCAL is
-  // transaction-scoped, so this is the only way to bound a timeout
-  // per-query without mutating the pooled connection's session state for
-  // whichever request borrows it next.
+  // `SET LOCAL` prevents timeout settings leaking through the connection pool.
   private async withTimeout<T>(timeoutMs: number, fn: (client: PoolClient) => Promise<T>): Promise<T> {
     assertSafeTimeoutMs(timeoutMs);
     const client = await this.pool.connect();
@@ -48,10 +36,6 @@ export class PostgresSource implements DbSource {
     }
   }
 
-  // Excludes the catalogs themselves (`pg_catalog`, `information_schema`,
-  // `pg_toast%`, `pg_temp_%`) and anything the connected role can't
-  // actually use, so a schema only ever appears here if it's both a real
-  // user namespace and one this role has USAGE on.
   private async allowedSchemas(client: PoolClient): Promise<string[]> {
     const { rows } = await client.query<{ nspname: string }>(
       `select nspname from pg_namespace
@@ -64,14 +48,8 @@ export class PostgresSource implements DbSource {
     return rows.map((r) => r.nspname);
   }
 
-  // Resolves the schema for one operation exactly once: an explicit
-  // request and an absent one (resolved via current_schema()) both go
-  // through the same allow-list, so neither path can reach a schema the
-  // other would reject (docs/adapter-decisions.md §1). Callers that run
-  // more than one query per operation call this once inside their
-  // withTimeout transaction, which pins the whole operation to one
-  // physical connection — immune to pool sessions with divergent
-  // search_path.
+  // Resolve inside the operation transaction to prevent pool-session drift
+  // (spec/protocol.md §5).
   private async resolveSchema(client: PoolClient, requested: string | undefined): Promise<string> {
     const schemas = await this.allowedSchemas(client);
     let resolved: string;
@@ -88,10 +66,7 @@ export class PostgresSource implements DbSource {
     return real;
   }
 
-  // has_table_privilege narrows information_schema.tables (which lists a
-  // table on *any* privilege) to just the SELECT-able ones, so this
-  // allow-list can't admit a table a later SELECT would be denied on —
-  // keeping it in lockstep with listTables.
+  // Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
   private async allowedTables(client: PoolClient, schema: string): Promise<string[]> {
     const { rows } = await client.query<{ table_name: string }>(
       `select table_name from information_schema.tables
@@ -113,19 +88,8 @@ export class PostgresSource implements DbSource {
     return rows.map((r) => r.column_name);
   }
 
-  // Returns the set of primary-key columns and a column -> ColumnRef map
-  // for single-column foreign keys. Composite FKs are dropped entirely
-  // rather than risk mislabeling which referencing column pairs with which
-  // referenced column (spec/protocol.md §5.4.1); composite *primary* keys
-  // are NOT dropped this way — every PK column still gets key="pk".
-  //
-  // The `ccu` join must match on `ccu.constraint_schema` (the schema the
-  // constraint itself lives in, always equal to `tc.table_schema`), not
-  // `ccu.table_schema` (the schema of the table constraint_column_usage is
-  // describing — for a FOREIGN KEY row that's the *referenced* table's
-  // schema, which for a cross-schema FK differs from the constraining
-  // table's schema). Joining on `ccu.table_schema` instead silently drops
-  // every cross-schema FK's metadata (the LEFT JOIN just never matches).
+  // Use constraint_schema for cross-schema FKs; omit composites
+  // (spec/protocol.md §5.4.1).
   private async keyMetadata(
     client: PoolClient,
     schema: string,
@@ -181,9 +145,7 @@ export class PostgresSource implements DbSource {
       if (distinctColumns.size !== 1) continue; // composite FK: omit entirely
       const first = members[0];
       if (first.refSchema && first.refTable && first.refColumn) {
-        // Same-schema is the overwhelming common case; omitting `schema`
-        // there keeps the wire payload byte-identical to before this field
-        // existed.
+        // Same-schema references omit `schema` on the wire (spec/protocol.md §5.4.1).
         const ref: ColumnRef = { table: first.refTable, column: first.refColumn };
         if (first.refSchema !== schema) ref.schema = first.refSchema;
         fkColumns.set(first.column, ref);
@@ -199,9 +161,6 @@ export class PostgresSource implements DbSource {
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-      // has_table_privilege keeps this listing equal to the allow-list
-      // allowedTables enforces — a table the role can't SELECT is never
-      // offered as a row it would then have to reject.
       const { rows } = await client.query<{ relname: string; comment: string | null }>(
         `select c.relname::text, obj_description(c.oid, 'pg_class') as comment
          from pg_class c
@@ -222,8 +181,6 @@ export class PostgresSource implements DbSource {
   async tableCounts(schema: string | undefined, timeoutMs: number): Promise<CountEntry[]> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-      // Same has_table_privilege filter as listTables, so the count column
-      // never names a table the sidebar won't show.
       const { rows } = await client.query<{ relname: string; reltuples: string }>(
         `select c.relname::text, c.reltuples::bigint::text as reltuples
          from pg_class c
@@ -271,9 +228,7 @@ export class PostgresSource implements DbSource {
         [realSchema, realTable],
       );
 
-      // Joins through pg_attribute/pg_class directly: col_description is
-      // keyed by attnum, which can diverge from ordinal_position once a
-      // column has been dropped.
+      // attnum survives dropped columns; ordinal_position does not.
       const { rows: commentRows } = await client.query<{ attname: string; comment: string | null }>(
         `select a.attname::text, col_description(a.attrelid, a.attnum::int) as comment
          from pg_attribute a

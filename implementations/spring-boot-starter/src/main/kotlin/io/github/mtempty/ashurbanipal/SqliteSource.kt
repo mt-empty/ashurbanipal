@@ -15,12 +15,7 @@ private fun checkSchema(schema: String?) {
     }
 }
 
-/**
- * SQLite equivalent of [FilterValidator.buildWhereClause]: `CAST(col AS
- * TEXT)` instead of `::text`, and `ILIKE` mapped to plain `LIKE` since
- * SQLite's `LIKE` is already ASCII case-insensitive by default. Mirrors
- * `implementations/rust/core/src/db/sqlite.rs::build_where_clause`.
- */
+/** SQLite filters use `CAST(... AS TEXT)` and `LIKE` for `ILIKE`. */
 private fun buildWhereClauseSqlite(conditions: List<Condition>, columnNames: List<String>): WhereClause {
     if (conditions.isEmpty()) {
         return WhereClause("", emptyList())
@@ -75,27 +70,10 @@ private fun <T> query(conn: Connection, sql: String, params: List<Any?> = emptyL
     }
 }
 
-/**
- * SQLite [DbSource], opt-in via `ashurbanipal.backend=sqlite`. Port of
- * `implementations/rust/core/src/db/sqlite.rs`, mechanism-for-mechanism: the real
- * interrupt is `sqlite3_progress_handler` (Xerial's `org.sqlite.ProgressHandler`),
- * checked every 1000 VM opcodes, not `Statement.setQueryTimeout` — verified
- * empirically that the latter does *not* abort a running query on this
- * driver (it only maps to `SQLiteConnection.setBusyTimeout`, which bounds
- * waiting for a file lock, not query execution — see `docs/adapter-decisions.md`
- * §6). Not run through `conformance/runner` (that suite targets Postgres).
- */
+/** SQLite source uses a progress handler, not `Statement.setQueryTimeout`, to interrupt running queries. */
 class SqliteSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
 
-    /**
-     * Mirrors `implementations/rust/core/src/db/sqlite.rs::SqliteSource::bounded`:
-     * registers a real progress-handler interrupt for [block]'s duration,
-     * always clearing it before the connection returns to the pool — an
-     * uncleared handler would abort the next borrower's first query
-     * instantly, inheriting an already-elapsed deadline. `internal`, not
-     * `private`, so [SqliteSourceTest] can drive this exact mechanism
-     * directly with a deliberately slow query.
-     */
+    /** Clears the progress handler before pool reuse so it cannot abort the next query. */
     internal fun <T> bounded(timeoutSecs: Int, block: (Connection) -> T): T {
         dataSource.connection.use { conn ->
             // A pooled connection (e.g. HikariCP) hands back a proxy that

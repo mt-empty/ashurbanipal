@@ -1,31 +1,4 @@
-"""MySQL/MariaDB `DbSource`. Ported against
-`implementations/rust/core/src/db/mysql.rs` — see `docs/adapter-decisions.md`
-for the per-clause mechanism notes this shares with the Rust reference
-(`table_rows` row counts, always-empty common-values, `LOWER(...) LIKE
-LOWER(...)` for `ILIKE`, per-fork timeout mechanism).
-
-Uses `PyMySQL` (pure Python, no system client library needed — avoids
-imposing a `libmysqlclient`/`mariadb-connector-c` dependency on the host),
-not an ORM. One fresh connection per operation, mirroring `postgres.py`/
-`sqlite.py` — see `db/__init__.py`'s docstring for why this trivially
-satisfies the "pin one connection per operation" invariant.
-
-Timeout mechanism (the one piece every port must replicate
-mechanism-for-mechanism, per the porting brief): MySQL's `SET LOCAL` is a
-plain synonym for `SET SESSION`, not transaction-scoped, so Postgres's
-`SET LOCAL statement_timeout` pattern would leak onto the pooled
-connection's next reuse. Both forks instead offer a self-resetting
-per-statement mechanism, but not the same one — detected once per
-`MySqlSource` via `SELECT VERSION()` and cached:
-
-- MySQL: `MAX_EXECUTION_TIME(ms)` optimizer hint spliced right after
-  `select`.
-- MariaDB: never implemented that hint at all — an unrecognized
-  `/*+ ... */` comment is silently ignored rather than rejected, so
-  reusing MySQL's hint there would fail open (query runs unbounded, no
-  error). MariaDB instead wraps the *whole* statement in `SET STATEMENT
-  max_statement_time=N FOR ...` (seconds, not ms).
-"""
+"""MySQL/MariaDB DbSource; use fork-specific query timeouts (`spec/protocol.md` §6)."""
 
 from __future__ import annotations
 
@@ -70,34 +43,19 @@ def connect_kwargs_from_url(url: str) -> dict:
 
 
 def _quote_ident(ident: str) -> str:
-    """MySQL's default identifier quote is the backtick, not `"` —
-    `db/__init__.py::quote_ident` is documented Postgres/SQLite-specific
-    and isn't reused here. Doubling an embedded backtick is MySQL's own
-    documented escape.
-    """
+    """Backtick-escape live-catalog identifiers for MySQL (`spec/protocol.md` §5)."""
     return "`" + ident.replace("`", "``") + "`"
 
 
 def _timed_select(variant: str, timeout_secs: int, body: str) -> str:
-    """`body` is the SQL text starting right after the `select` keyword
-    this function supplies. Both mechanisms are self-resetting — nothing
-    needs clearing before the connection is discarded, unlike SQLite's
-    progress handler.
-    """
+    """MariaDB ignores MySQL timeout hints, so it needs a statement wrapper (`spec/protocol.md` §6)."""
     if variant == _MYSQL:
         return f"select /*+ MAX_EXECUTION_TIME({int(timeout_secs) * 1000}) */ {body}"
     return f"set statement max_statement_time={int(timeout_secs)} for select {body}"
 
 
 def _decode_cell(value: bytes | None, encoding: str) -> str | None:
-    """PyMySQL's default row decoding raises UnicodeDecodeError on invalid
-    bytes for the connection's charset, aborting the whole result set —
-    there's no per-cell hook to intercept mid-decode. Callers instead read
-    rows with `conn.use_unicode = False` (raw bytes, no auto-decode) and
-    decode here per cell, substituting the protocol's sentinel on failure
-    (spec/protocol.md §5.4.3), mirroring mysql.rs's `Err(_) =>
-    "<undecodable>"`.
-    """
+    """Decode per cell so invalid bytes do not abort results (`spec/protocol.md` §5.4.3)."""
     if value is None:
         return None
     try:
@@ -107,13 +65,7 @@ def _decode_cell(value: bytes | None, encoding: str) -> str | None:
 
 
 def _build_where_clause(conditions: list[Condition], column_names: list[str]) -> tuple[str, list[str]]:
-    """`?`-free positional `%s` placeholders (PyMySQL's paramstyle),
-    `CAST(col AS CHAR)` (MySQL has no `::` operator or `TEXT` cast
-    target), and `ILIKE` mapped to `LOWER(...) LIKE LOWER(...)` rather
-    than a bare keyword swap — unlike SQLite, MySQL's plain `LIKE`
-    case-sensitivity depends on the column's collation, which this port
-    has no control over (`docs/adapter-decisions.md` §5.4.2).
-    """
+    """Map ILIKE through LOWER for collation independence (`spec/protocol.md` §5.4.2)."""
     if not conditions:
         return "", []
 
@@ -152,11 +104,7 @@ class MySqlSource(DbSource):
         return pymysql.connect(**self._connect_kwargs)
 
     def _variant_of(self, conn: pymysql.connections.Connection) -> str:
-        """`SELECT VERSION()` contains "MariaDB" on that fork (e.g.
-        `10.11.6-MariaDB-1:...`) and just a bare version like `8.0.35` on
-        real MySQL — the standard sniff other drivers use. Cached on this
-        `MySqlSource` instance so repeated operations don't re-detect.
-        """
+        """Cache whether SELECT VERSION() contains MariaDB (`spec/protocol.md` §6)."""
         if self._variant is not None:
             return self._variant
         with conn.cursor() as cur:
@@ -217,13 +165,7 @@ class MySqlSource(DbSource):
     def _key_metadata(
         self, cur, variant: str, schema: str, table: str, timeout_secs: int
     ) -> tuple[set[str], dict[str, ColumnRef]]:
-        """The join includes `kcu.table_name = tc.table_name`, not just
-        `constraint_name` — MySQL's primary-key constraint is *always*
-        literally named "PRIMARY" on every table (unlike Postgres's
-        auto-generated, schema-unique names), so joining on
-        `constraint_name` alone would match every other table's
-        primary-key columns in the same schema.
-        """
+        """Join MySQL's repeating PRIMARY name on table name (`spec/protocol.md` §5.4.1)."""
         cur.execute(
             _timed_select(
                 variant,
@@ -284,8 +226,6 @@ class MySqlSource(DbSource):
             variant = self._variant_of(conn)
             with conn.cursor() as cur:
                 resolved = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
-                # TABLE_COMMENT sits as a plain column — no obj_description-
-                # style function call needed, unlike Postgres.
                 cur.execute(
                     _timed_select(
                         variant,
@@ -298,8 +238,7 @@ class MySqlSource(DbSource):
                 )
                 rows = cur.fetchall()
             conn.commit()
-            # Empty string means "no comment"; MUST be omitted, not emitted
-            # as "" (spec/protocol.md §5.2).
+            # Empty comments are omitted (`spec/protocol.md` §5.2).
             return [TableInfo(name=name, comment=(comment or None)) for name, comment in rows]
         finally:
             conn.close()
@@ -311,8 +250,7 @@ class MySqlSource(DbSource):
             variant = self._variant_of(conn)
             with conn.cursor() as cur:
                 resolved = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
-                # TABLE_ROWS is an InnoDB-statistics estimate (reltuples-
-                # equivalent, may be stale) — never COUNT(*).
+                # TABLE_ROWS is a potentially stale InnoDB estimate (`spec/protocol.md` §5.3).
                 cur.execute(
                     _timed_select(
                         variant,
@@ -325,9 +263,7 @@ class MySqlSource(DbSource):
                 )
                 rows = cur.fetchall()
             conn.commit()
-            # NULL before InnoDB has gathered stats for a freshly created
-            # table — -1 is the same "no estimate yet" sentinel Postgres
-            # uses before ANALYZE/VACUUM (spec/protocol.md §5.3).
+            # NULL means no estimate yet: emit -1 (`spec/protocol.md` §5.3).
             return [(name, count if count is not None else -1) for name, count in rows]
         finally:
             conn.close()
@@ -353,9 +289,6 @@ class MySqlSource(DbSource):
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
-                # DATA_TYPE and COLUMN_COMMENT both sit as plain columns —
-                # unlike Postgres, no separate pg_attribute join needed, and
-                # no ordinal-position-vs-attnum drift is possible.
                 cur.execute(
                     _timed_select(
                         variant,
@@ -399,12 +332,7 @@ class MySqlSource(DbSource):
                     cur.execute(sql, (*filter_values, opts.limit, opts.offset))
                     mysql_rows = cur.fetchall()
                 except pymysql.Error as exc:
-                    # information_schema.tables lists a table the role holds
-                    # *any* privilege on, not just SELECT, and there's no
-                    # has_table_privilege analog to gate the listing on (see
-                    # docs/adapter-decisions.md §5.2/§5.3). Map the residual
-                    # ER_TABLEACCESS_DENIED_ERROR (1142, both engines) to
-                    # NotAllowed (400) instead of a raw 500.
+                    # MySQL has no SELECT privilege gate; map residual 1142 to NotAllowed.
                     if exc.args and exc.args[0] == 1142:
                         raise NotAllowed(f"table {table!r}") from exc
                     raise
@@ -445,11 +373,7 @@ class MySqlSource(DbSource):
                 if column not in columns:
                     raise NotAllowed(f"column {column!r}")
             conn.commit()
-            # No pg_stats equivalent — MySQL 8's information_schema.
-            # COLUMN_STATISTICS histogram needs an explicit ANALYZE TABLE
-            # ... UPDATE HISTOGRAM to populate and doesn't exist at all on
-            # MariaDB/MySQL 5.7 — an empty list is the documented "no
-            # statistics available" answer, mirroring SQLite's choice.
+            # MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
             return []
         finally:
             conn.close()

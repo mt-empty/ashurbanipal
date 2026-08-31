@@ -1,14 +1,6 @@
-//! Deserialization + structural validation of the filter AST wire format
-//! (`spec/protocol.md` §5.4.2). Grammar parsing (DSL text → AST) is a
-//! frontend-only concern (`spec/filter-dsl.md`); this module never sees DSL
-//! text, never produces SQL, and never validates a column against the
-//! schema — each backend's query builder in `db/` does that.
+//! Validates filter JSON ASTs (`spec/protocol.md` §5.4.2); DSL text parsing
+//! remains frontend-only (`spec/filter-dsl.md`).
 
-/// Derived by measurement, not the DSL-era 1024 carried forward: over the
-/// valid cases in `spec/fixtures/parser-tests.json` the worst JSON-over-DSL
-/// inflation is 5.67x (V13 — tiny conditions inflate the most), so 1024
-/// DSL-equivalent bytes need ~5803 JSON bytes; 8192 covers that with
-/// margin. Applies to the URL-decoded JSON text of the `filter` param.
 pub const MAX_FILTER_BYTES: usize = 8192;
 pub const MAX_CONDITIONS: usize = 10;
 
@@ -49,7 +41,6 @@ impl FilterOp {
         !matches!(self, Self::IsNull | Self::IsNotNull)
     }
 
-    /// The exact §5.4.2 wire spelling, for error messages.
     pub fn as_wire(self) -> &'static str {
         match self {
             Self::Eq => "=",
@@ -66,8 +57,7 @@ impl FilterOp {
     }
 }
 
-/// `column` is exactly as received on the wire — the query builder matches
-/// it against the live schema allow-list before it ever reaches SQL text.
+/// Query builders validate `column` before SQL (`spec/protocol.md` §5.4.2).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Condition {
@@ -94,9 +84,6 @@ fn err(message: impl Into<String>) -> FilterError {
     FilterError(message.into())
 }
 
-/// Deserializes and structurally validates the URL-decoded `filter` param.
-/// An empty array is legal and means "no filter" (§5.4.2) — callers treat
-/// `Ok(vec![])` accordingly.
 pub fn parse(raw: &str) -> Result<Vec<Condition>, FilterError> {
     if raw.len() > MAX_FILTER_BYTES {
         return Err(err(format!(
