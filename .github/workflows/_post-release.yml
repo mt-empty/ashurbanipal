@@ -23,7 +23,7 @@ on:
         required: true
         type: string
       title-prefix:
-        description: 'Optional text before the version in the Release title (Go uses "go/net-http ")'
+        description: 'Text before the version in the Release title — every caller passes its package name plus a trailing space, e.g. "ashurbanipal-axum ", so the title reads "ashurbanipal-axum 0.4.0" and the Releases list stays scannable'
         required: false
         type: string
         default: ''

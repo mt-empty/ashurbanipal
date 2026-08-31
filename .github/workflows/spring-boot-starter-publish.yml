@@ -119,3 +119,4 @@ jobs:
     with:
       tag-pattern: '^ashurbanipal-spring-boot-starter-v'
       include-paths: 'implementations/spring-boot-starter/** frontend/** spec/**'
+      title-prefix: 'ashurbanipal-spring-boot-starter '
