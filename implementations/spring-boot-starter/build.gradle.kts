@@ -39,7 +39,7 @@ dependencyLocking {
 }
 
 dependencies {
-    val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.1.0")
+    val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.1.1")
     implementation(springBootBom)
     compileOnly(springBootBom)
 

@@ -1,7 +1,7 @@
 plugins {
     kotlin("jvm") version "2.4.10"
     kotlin("plugin.spring") version "2.4.10"
-    id("org.springframework.boot") version "4.1.0"
+    id("org.springframework.boot") version "4.1.1"
 }
 
 group = "io.github.mt-empty.ashurbanipal.demo"
@@ -26,7 +26,7 @@ dependencyLocking {
 }
 
 dependencies {
-    implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.0"))
+    implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.1"))
 
     implementation(project(":"))
     implementation("org.springframework.boot:spring-boot-starter-web")
