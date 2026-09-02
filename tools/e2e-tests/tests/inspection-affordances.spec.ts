@@ -117,16 +117,15 @@ test("record view's INSERT copy button copies the row as a SQL INSERT", async ({
     .toContain("INSERT INTO ");
   const sql = await page.evaluate(() => navigator.clipboard.readText());
 
-  // schema-qualified when the deployment has more than one schema (the e2e
-  // demo does), bare table name otherwise.
+  // The e2e demo has multiple schemas, so the table name is schema-qualified.
   expect(sql).toMatch(
     /^INSERT INTO (public\.)?orders \(id, user_id, status, total_cents, discount_pct, tags, line_items, created_at\)\nVALUES \(/,
   );
-  expect(sql).toContain(`'${id}'`); // uuid quoted
-  expect(sql).toContain(`'${status}'`); // enum quoted
-  expect(sql).toContain(`, ${totalCents}, `); // integer bare, not quoted
+  expect(sql).toContain(`'${id}'`);
+  expect(sql).toContain(`'${status}'`);
+  expect(sql).toContain(`, ${totalCents}, `);
   expect(sql).not.toContain(`'${totalCents}'`);
-  if (discountPct === "∅") expect(sql).toContain(", NULL, "); // null → bare NULL
+  if (discountPct === "∅") expect(sql).toContain(", NULL, ");
   expect(sql.endsWith(");")).toBe(true);
 });
 

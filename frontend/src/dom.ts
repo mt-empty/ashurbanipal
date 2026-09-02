@@ -8,9 +8,8 @@ export function setStatus(text: string): void {
 
 // ---- per-cell copy (Clipboard API) ----
 export async function copyText(text: string, btn: HTMLElement): Promise<void> {
-  // Flip only the glyph on labelled buttons; icon-only ones flip themselves.
   const mark = btn.querySelector<HTMLElement>(".copy-icon") ?? btn;
-  // Saved once — a re-click mid-flash would else capture the ✓/✗ as resting.
+  // Saved once so a re-click mid-flash can't capture the ✓/✗ as the resting glyph.
   if (mark.dataset.rest === undefined) mark.dataset.rest = mark.textContent ?? "";
   const resting = mark.dataset.rest;
   try {

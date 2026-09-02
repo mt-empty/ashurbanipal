@@ -47,8 +47,8 @@ function recordAsJson(columns: Column[], row: Row): string {
   return JSON.stringify(obj, null, 2);
 }
 
-// Loose: the three backends spell numeric types differently. A stray
-// match (e.g. "point" contains "int") is filtered by the value check below.
+// Deliberately loose — the three backends spell numeric types differently;
+// a stray hit (e.g. "point" matches "int") is caught by the value check below.
 const NUMERIC_TYPE_RE = /int|serial|numeric|decimal|real|double|float|^number/i;
 
 function recordAsInsert(columns: Column[], row: Row): string {
@@ -59,8 +59,8 @@ function recordAsInsert(columns: Column[], row: Row): string {
   return `INSERT INTO ${target} (${cols})\nVALUES (${vals});`;
 }
 
-// Unquoted only for a clean number in a numeric column; anything else
-// (booleans included — they text-cast differently per engine) is quoted.
+// No boolean branch: bools text-cast as true/false on Postgres but 1/0 on
+// MySQL/SQLite, and a quoted string inserts fine into a bool column on all three.
 function sqlLiteral(col: Column, raw: string | null): string {
   if (raw == null) return "NULL";
   if (NUMERIC_TYPE_RE.test(col.type) && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
