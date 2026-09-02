@@ -39,7 +39,7 @@ dependencyLocking {
 }
 
 dependencies {
-    val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.1.0")
+    val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.1.1")
     implementation(springBootBom)
     compileOnly(springBootBom)
 
@@ -65,7 +65,7 @@ dependencies {
     // spring-webmvc above: a host opting into ashurbanipal.backend=sqlite
     // already needs this driver on its own runtime classpath to build a
     // working SQLite DataSource in the first place.
-    compileOnly("org.xerial:sqlite-jdbc:3.53.2.1")
+    compileOnly("org.xerial:sqlite-jdbc:3.53.4.0")
 
     // Test-only: a host app's web stack, JDBC driver, and JSON-Kotlin glue
     // to actually boot the starter against a live database.
@@ -81,7 +81,7 @@ dependencies {
     // dependency of this starter (mirrors the Rust crate's mysql/sqlite
     // Cargo features being opt-in, not always-linked).
     testImplementation("com.mysql:mysql-connector-j:26.7.0")
-    testImplementation("org.xerial:sqlite-jdbc:3.53.2.1")
+    testImplementation("org.xerial:sqlite-jdbc:3.53.4.0")
     // Gradle's own test worker bundles an older junit-platform-launcher than
     // Spring Boot's BOM-managed junit-jupiter needs; without this explicit
     // version-aligned one, test discovery fails with an
