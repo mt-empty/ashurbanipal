@@ -91,14 +91,24 @@ $<HTMLSelectElement>("source-select").onchange = () => {
 // second schema is confirmed, state.schema is pinned to a concrete name
 // (never left as "no explicit choice") so every subsequent request is
 // unambiguous about which schema it means.
+// Same supersession guard as loadTables: a slow /schemas from an earlier
+// source switch resolving after a faster later one would otherwise clobber
+// state.schema (and the selector) with the wrong source's schema set —
+// worse now that #source-select restores a remembered schema rather than
+// always resetting to a safe null.
+let loadSchemasToken = 0;
+
 export async function loadSchemas(): Promise<void> {
+  const token = ++loadSchemasToken;
   let schemas: string[];
   try {
     ({ schemas } = await api<{ schemas: string[] }>("/schemas" + sourceQuery()));
   } catch {
+    if (token !== loadSchemasToken) return;
     // older port without /schemas — degrade to single-schema behavior
     state.schema = null; $("schema-select-wrap").hidden = true; return;
   }
+  if (token !== loadSchemasToken) return; // superseded by a newer source switch
   // Explicitly re-hides even though the element starts hidden in markup:
   // switching source can re-run this against a source with fewer schemas
   // than the previously selected one, and without this the wrap would keep

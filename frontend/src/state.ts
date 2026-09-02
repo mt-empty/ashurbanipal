@@ -131,10 +131,11 @@ export function dropStoredSort(table: string | null): void {
 
 // Records the active schema against the current source (ui-guidelines R12),
 // so #source-select's onchange can restore it instead of resetting to
-// `public`. A single-schema source leaves state.schema null and so never
-// writes an entry.
+// `public`. Only keyed when there's a source to switch between — a
+// single-source deployment still persists state.schema via persist(), it
+// just has no per-source map to populate.
 export function rememberSchema(): void {
-  if (state.schema) state.schemaBySource[state.source ?? ""] = state.schema;
+  if (state.source && state.schema) state.schemaBySource[state.source] = state.schema;
   persist();
 }
 

@@ -903,7 +903,7 @@ function dropStoredSort(table) {
   persist();
 }
 function rememberSchema() {
-  if (state.schema) state.schemaBySource[state.source ?? ""] = state.schema;
+  if (state.source && state.schema) state.schemaBySource[state.source] = state.schema;
   persist();
 }
 function applyScopeParams(params) {
@@ -1373,15 +1373,19 @@ $("source-select").onchange = () => {
     $("error").textContent = e.message;
   });
 };
+var loadSchemasToken = 0;
 async function loadSchemas() {
+  const token = ++loadSchemasToken;
   let schemas;
   try {
     ({ schemas } = await api("/schemas" + sourceQuery()));
   } catch {
+    if (token !== loadSchemasToken) return;
     state.schema = null;
     $("schema-select-wrap").hidden = true;
     return;
   }
+  if (token !== loadSchemasToken) return;
   if (schemas.length <= 1) {
     state.schema = null;
     $("schema-select-wrap").hidden = true;

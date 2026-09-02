@@ -11,10 +11,12 @@ import { waitForIdle } from "./support/helpers";
 const APP = "/__ashurbanipal";
 
 /** Picks an <option> and waits for the table-data refetch its onchange
- * kicks off to land, then for the view-transition to settle. */
-async function selectAndSettle(page: Page, selector: string, value: string) {
+ * kicks off to land, then for the view-transition to settle. `scopeParam`
+ * (e.g. "schema=warehouse") pins the wait to *this* navigation's request,
+ * not a stale in-flight one from the previous step. */
+async function selectAndSettle(page: Page, selector: string, value: string, scopeParam: string) {
   const dataLoaded = page.waitForResponse(
-    (r) => r.url().includes("/api/tables/data") && r.ok(),
+    (r) => r.url().includes("/api/tables/data") && r.url().includes(scopeParam) && r.ok(),
   );
   await page.locator(selector).selectOption(value);
   await dataLoaded;
@@ -36,9 +38,9 @@ test("schema is remembered per source across a source switch", async ({ page }) 
 
     // Choose a non-default schema on `primary`, then bounce through the
     // other source and back.
-    await selectAndSettle(page, "#schema-select", "warehouse");
-    await selectAndSettle(page, "#source-select", "other_schema");
-    await selectAndSettle(page, "#source-select", "primary");
+    await selectAndSettle(page, "#schema-select", "warehouse", "schema=warehouse");
+    await selectAndSettle(page, "#source-select", "other_schema", "source=other_schema");
+    await selectAndSettle(page, "#source-select", "primary", "source=primary");
 
     // Restored, not reset to `public` (the pre-R12 behaviour).
     await expect(page.locator("#schema-select")).toHaveValue("warehouse");
