@@ -209,6 +209,11 @@ description = "cargo test --features mysql --test schema_isolation_mysql --test 
 run = "cargo test --features mysql --test schema_isolation_mysql --test table_listing_privileges_mysql"
 dir = "implementations/rust/axum"
 
+[tasks."rust:integration-test-sqlite"]
+description = "cargo test --features sqlite --test multi_source_sqlite: axum's SQLite router-level integration test (in-memory, no service)"
+run = "cargo test --features sqlite --test multi_source_sqlite"
+dir = "implementations/rust/axum"
+
 [tasks."rust:lint"]
 description = "cargo clippy, denying warnings"
 run = "cargo clippy -- -D warnings"

@@ -28,6 +28,11 @@
 //! `CONFORMANCE_SECOND_SOURCE=1` registers a second source, pinned to
 //! `other_schema`, for `conformance/runner/two_source.rs` — see that
 //! file's module doc.
+//!
+//! `DB_BACKEND` selects the backend: `postgres` (default, from
+//! `DATABASE_URL`), `sqlite` (from `SQLITE_PATH`, needs `--features sqlite`),
+//! or `mysql` (from `DATABASE_URL`, needs `--features mysql`). The
+//! `SECOND_SOURCE` / `CONFORMANCE_SECOND_SOURCE` extras are Postgres-only.
 
 use ashurbanipal_axum::{Config, PgPoolSource};
 use axum::routing::get;
@@ -38,8 +43,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
 
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
@@ -48,11 +51,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|p| p.parse().ok());
     let mount_prefix: Option<String> = std::env::var("MOUNT_PREFIX").ok().filter(|p| !p.is_empty());
-
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?;
 
     let siblings_toml = sibling_port
         .map(|p| {
@@ -72,6 +70,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         {siblings_toml}
         "#
     ))?;
+
+    let db_backend = std::env::var("DB_BACKEND").unwrap_or_else(|_| "postgres".to_string());
+    let ashurbanipal = match db_backend.as_str() {
+        "postgres" => build_postgres_router(config).await?,
+        #[cfg(feature = "sqlite")]
+        "sqlite" => {
+            use std::str::FromStr;
+            let path = std::env::var("SQLITE_PATH")
+                .expect("SQLITE_PATH must be set when DB_BACKEND=sqlite");
+            let opts = sqlx::sqlite::SqliteConnectOptions::from_str(&path)?.create_if_missing(true);
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(5)
+                .connect_with(opts)
+                .await?;
+            let source = ashurbanipal_axum::SqliteSource::new(pool);
+            ashurbanipal_axum::router(config, vec![("primary".to_string(), source)])
+        }
+        #[cfg(feature = "mysql")]
+        "mysql" => {
+            let database_url = std::env::var("DATABASE_URL")
+                .expect("DATABASE_URL must be set when DB_BACKEND=mysql");
+            let pool = sqlx::mysql::MySqlPoolOptions::new()
+                .max_connections(5)
+                .connect(&database_url)
+                .await?;
+            let source = ashurbanipal_axum::MySqlSource::new(pool);
+            ashurbanipal_axum::router(config, vec![("primary".to_string(), source)])
+        }
+        other => {
+            return Err(format!(
+                "unknown DB_BACKEND {other:?} (or its Cargo feature is not compiled in — \
+                 rebuild with `--features sqlite` / `--features mysql`)"
+            )
+            .into())
+        }
+    };
+    // MOUNT_PREFIX (e.g. "/svc") simulates a reverse proxy that serves the
+    // host under a path prefix, to exercise the frontend's mount-point
+    // agnosticism; unset means the plain one-line merge as before.
+    let ashurbanipal = match &mount_prefix {
+        Some(prefix) => Router::new().nest(prefix, ashurbanipal),
+        None => ashurbanipal,
+    };
+    let ui_path = format!("{}/__ashurbanipal", mount_prefix.as_deref().unwrap_or(""));
+
+    // The host app: its own routes, plus the one-line Ashurbanipal merge.
+    // The root redirect is demo-only convenience; a real host has its own "/".
+    let redirect_to = ui_path.clone();
+    let app = Router::new()
+        .route("/health", get(|| async { "ok" }))
+        .route(
+            "/",
+            get(move || async move { axum::response::Redirect::temporary(&redirect_to) }),
+        )
+        .merge(ashurbanipal);
+
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
+    println!("demo host on http://localhost:{port} — browser at http://localhost:{port}{ui_path}");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+/// The default Postgres path, including the `SECOND_SOURCE` /
+/// `CONFORMANCE_SECOND_SOURCE` extras (both Postgres-only).
+async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::error::Error>> {
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await?;
 
     // SECOND_SOURCE demos the multi-source router end-to-end with real
     // second storage: "reporting" is its own database on the same Postgres
@@ -105,29 +174,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
         sources.push(("other_schema".to_string(), PgPoolSource::new(pinned_pool)));
     }
-    let ashurbanipal = ashurbanipal_axum::router(config, sources);
-    // MOUNT_PREFIX (e.g. "/svc") simulates a reverse proxy that serves the
-    // host under a path prefix, to exercise the frontend's mount-point
-    // agnosticism; unset means the plain one-line merge as before.
-    let ashurbanipal = match &mount_prefix {
-        Some(prefix) => Router::new().nest(prefix, ashurbanipal),
-        None => ashurbanipal,
-    };
-    let ui_path = format!("{}/__ashurbanipal", mount_prefix.as_deref().unwrap_or(""));
-
-    // The host app: its own routes, plus the one-line Ashurbanipal merge.
-    // The root redirect is demo-only convenience; a real host has its own "/".
-    let redirect_to = ui_path.clone();
-    let app = Router::new()
-        .route("/health", get(|| async { "ok" }))
-        .route(
-            "/",
-            get(move || async move { axum::response::Redirect::temporary(&redirect_to) }),
-        )
-        .merge(ashurbanipal);
-
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
-    println!("demo host on http://localhost:{port} — browser at http://localhost:{port}{ui_path}");
-    axum::serve(listener, app).await?;
-    Ok(())
+    Ok(ashurbanipal_axum::router(config, sources))
 }
