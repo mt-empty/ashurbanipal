@@ -176,6 +176,16 @@ description = "cargo test --lib: the crate's own inline unit tests (pass a path 
 run = "cargo test --lib"
 dir = "implementations/rust"
 
+[tasks."rust:test-sqlite"]
+description = "cargo test --lib --features sqlite: the sqlite-feature inline unit tests (core/src/db/sqlite.rs; sqlite::memory:, no service)"
+run = "cargo test --lib --features sqlite"
+dir = "implementations/rust"
+
+[tasks."rust:test-mysql"]
+description = "cargo test --lib --features mysql: the mysql-feature inline unit tests (core/src/db/mysql.rs; needs MYSQL_TEST_URL, MARIADB_TEST_URL)"
+run = "cargo test --lib --features mysql"
+dir = "implementations/rust"
+
 [tasks."rust:integration-test"]
 description = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges: axum's own Postgres-backed integration tests (needs DATABASE_URL)"
 # Separate from rust:test (--lib) for the same reason that task excludes
@@ -194,9 +204,19 @@ description = "cargo test --test multi_source: actix-web's own Postgres-backed i
 run = "cargo test --test multi_source"
 dir = "implementations/rust/actix-web"
 
+[tasks."rust:integration-test-mysql"]
+description = "cargo test --features mysql --test schema_isolation_mysql --test table_listing_privileges_mysql: axum's MySQL/MariaDB integration tests (needs MYSQL_TEST_URL, MARIADB_TEST_URL)"
+run = "cargo test --features mysql --test schema_isolation_mysql --test table_listing_privileges_mysql"
+dir = "implementations/rust/axum"
+
 [tasks."rust:lint"]
 description = "cargo clippy, denying warnings"
 run = "cargo clippy -- -D warnings"
+dir = "implementations/rust"
+
+[tasks."rust:lint-all-features"]
+description = "cargo clippy --features sqlite,mysql, denying warnings: covers the sqlite/mysql DbSource impls the default lint never compiles"
+run = "cargo clippy --features sqlite,mysql -- -D warnings"
 dir = "implementations/rust"
 
 [tasks."rust:fmt"]
