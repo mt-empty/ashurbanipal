@@ -4,7 +4,7 @@ import { renderJsonTree, type JsonValue } from "./json-tree.js";
 import { loadData } from "./main.js";
 import { openRecordView } from "./record-view.js";
 import { APPROX_COUNT_TITLE, formatApproxCount, loadTables } from "./sidebar.js";
-import { hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
+import { hiddenColumnsForTable, persist, rememberSchema, rememberSort, rowKey, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
@@ -187,7 +187,7 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
       if (references.schema && references.schema !== state.schema) {
         state.schema = references.schema;
         $<HTMLSelectElement>("schema-select").value = state.schema;
-        persist();
+        rememberSchema();
         loadTables()
           .then(() => applyFilterClause(references.column, "=", raw))
           .catch((e) => { $("error").textContent = e.message; });

@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { $, setStatus } from "./dom.js";
 import { loadData } from "./main.js";
-import { applyStoredSort, persist, scopeQuery, setAppliedFilterAst, sourceQuery, state } from "./state.js";
+import { applyStoredSort, persist, rememberSchema, scopeQuery, setAppliedFilterAst, sourceQuery, state } from "./state.js";
 import type { SourceEntry, TableListEntry } from "./types.js";
 
 // approx_rows/total_approx is -1 when the backend has no cheap estimate for
@@ -75,7 +75,10 @@ export async function loadSources(): Promise<void> {
 }
 $<HTMLSelectElement>("source-select").onchange = () => {
   state.source = $<HTMLSelectElement>("source-select").value;
-  state.schema = null; state.table = null; state.sort = null; state.offset = 0;
+  // Restore the schema last used on this source rather than resetting;
+  // loadSchemas() still validates it and falls back if it's gone (R5/R12).
+  state.schema = state.schemaBySource[state.source ?? ""] ?? null;
+  state.table = null; state.sort = null; state.offset = 0;
   state.filter = ""; setAppliedFilterAst([]); $<HTMLInputElement>("filter").value = "";
   persist();
   loadSchemas().then(loadTables).catch((e) => { $("error").textContent = e.message; });
@@ -117,7 +120,7 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
   state.schema = $<HTMLSelectElement>("schema-select").value;
   state.table = null; state.sort = null; state.offset = 0;
   state.filter = ""; setAppliedFilterAst([]); $<HTMLInputElement>("filter").value = "";
-  persist();
+  rememberSchema();
   loadTables().catch((e) => { $("error").textContent = e.message; });
 };
 

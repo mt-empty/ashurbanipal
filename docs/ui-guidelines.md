@@ -137,3 +137,12 @@ should block on.
   fires when sort was the sole stale-risk input (no filter on the request).
   Sort is never carried across tables — a column name is table-specific.
   *(Derives from: recognition rather than recall.)*
+- **R12 — Schema is remembered per source.** The selected schema persists
+  keyed by source name (like R11's sort keyed by table), so switching
+  source and back restores the schema last used there instead of resetting
+  to `public`. A remembered schema that no longer exists on that source
+  degrades silently to the default via the same validation `loadSchemas()`
+  already does (R5); a single-schema source never records an entry. Not
+  mirrored to the URL — a shared link's explicit `?schema=` still wins on
+  load; the per-source memory only fills in on an in-app source switch.
+  *(Derives from: recognition rather than recall.)*

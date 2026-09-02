@@ -15,6 +15,9 @@ export interface State {
   // sort last chosen there (what lets the refresh button surface new rows
   // without re-sorting each visit — ui-guidelines R10/R11).
   sortByTable: Record<string, { col: string; order: "asc" | "desc" }>;
+  // Schema is query scope like sort is, remembered per source so flipping
+  // sources and back doesn't drop you into `public` again (ui-guidelines R12).
+  schemaBySource: Record<string, string>;
   filter: string;
 }
 
@@ -26,7 +29,7 @@ export interface State {
 // (submit, or a click-to-filter action) updates it, so an unfinished edit
 // never gets silently resent by an unrelated sort/page click.
 export const state: State = {
-  source: null, schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, sortByTable: {}, filter: "",
+  source: null, schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, sortByTable: {}, schemaBySource: {}, filter: "",
 };
 
 try {
@@ -54,6 +57,13 @@ try {
       }
     }
   }
+  // Same discard-if-malformed rule; keyed by source name, values are plain
+  // schema-name strings.
+  if (saved.schemaBySource && typeof saved.schemaBySource === "object" && !Array.isArray(saved.schemaBySource)) {
+    for (const [source, schema] of Object.entries(saved.schemaBySource)) {
+      if (typeof schema === "string") state.schemaBySource[source] = schema;
+    }
+  }
 } catch {
   localStorage.removeItem(UI_KEY);
 }
@@ -69,8 +79,8 @@ if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || stat
 if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
 
 export function persist(): void {
-  const { source, schema, table, limit, hiddenColumns, sortByTable } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable }));
+  const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
 }
 
 // A stale table key or column name absent from the current table's
@@ -116,6 +126,15 @@ export function dropStoredSort(table: string | null): void {
   state.sort = null;
   state.order = "asc";
   storedSortUnverified = false;
+  persist();
+}
+
+// Records the active schema against the current source (ui-guidelines R12),
+// so #source-select's onchange can restore it instead of resetting to
+// `public`. A single-schema source leaves state.schema null and so never
+// writes an entry.
+export function rememberSchema(): void {
+  if (state.schema) state.schemaBySource[state.source ?? ""] = state.schema;
   persist();
 }
 

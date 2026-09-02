@@ -29,14 +29,18 @@ export interface SpawnedDemo {
 }
 
 /** Spawns another `demo` example process, mirroring `mise run rust:demo-sibling`
- * (PORT/SIBLING_PORT env vars) — only siblings.spec.ts and
- * mount-prefix.spec.ts need this (a second instance / a MOUNT_PREFIX one);
- * every other spec shares the one server Playwright's webServer config
- * starts (see playwright.config.ts and the design doc §3 for why). */
+ * (PORT/SIBLING_PORT env vars) — only siblings.spec.ts, mount-prefix.spec.ts
+ * and schema-memory.spec.ts need this (a second instance, a MOUNT_PREFIX one,
+ * a multi-source one); every other spec shares the one server Playwright's
+ * webServer config starts (see playwright.config.ts and the design doc §3). */
 export async function spawnDemo(opts: {
   port: number;
   siblingPort?: number;
   mountPrefix?: string;
+  /** CONFORMANCE_SECOND_SOURCE=1: adds an `other_schema` source against the
+   * same DB, so the source selector renders (the shared seed already has
+   * three schemas for the `primary` source's schema selector). */
+  conformanceSecondSource?: boolean;
 }): Promise<SpawnedDemo> {
   const baseUrl = `http://localhost:${opts.port}`;
   const child: ChildProcess = spawn(
@@ -49,6 +53,9 @@ export async function spawnDemo(opts: {
         PORT: String(opts.port),
         SIBLING_PORT: opts.siblingPort ? String(opts.siblingPort) : "",
         MOUNT_PREFIX: opts.mountPrefix ?? "",
+        // demo.rs gates on var().is_ok(), so an empty string would still
+        // enable it — only pass the key when actually wanted.
+        ...(opts.conformanceSecondSource ? { CONFORMANCE_SECOND_SOURCE: "1" } : {}),
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
