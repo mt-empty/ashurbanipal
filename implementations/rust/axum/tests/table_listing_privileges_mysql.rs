@@ -17,6 +17,9 @@ use ashurbanipal_axum::{DbError, DbSource, MySqlSource, QueryOpts};
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::{Executor, MySqlPool};
 
+mod common;
+use common::MysqlCleanup;
+
 const SCHEMA: &str = "ashb_test_table_privileges";
 const USER: &str = "ashb_test_table_privileges_user";
 const PASSWORD: &str = "ashb_test_pw";
@@ -61,17 +64,15 @@ async fn setup(admin_url: &str) -> MySqlPool {
     pool
 }
 
-async fn teardown(pool: &MySqlPool) {
-    for stmt in [
-        format!("drop database if exists {SCHEMA}"),
-        format!("drop user if exists '{USER}'@'%'"),
-    ] {
-        pool.execute(sqlx::AssertSqlSafe(stmt)).await.ok();
-    }
-}
-
 async fn run(admin_url: &str) {
-    let admin_pool = setup(admin_url).await;
+    setup(admin_url).await;
+    let _cleanup = MysqlCleanup {
+        url: admin_url.to_string(),
+        statements: vec![
+            format!("drop database if exists {SCHEMA}"),
+            format!("drop user if exists '{USER}'@'%'"),
+        ],
+    };
 
     let pool = MySqlPoolOptions::new()
         .max_connections(2)
@@ -131,8 +132,6 @@ async fn run(admin_url: &str) {
         ),
         "a table absent from the allow-list must be rejected as NotAllowed"
     );
-
-    teardown(&admin_pool).await;
 }
 
 #[tokio::test]
