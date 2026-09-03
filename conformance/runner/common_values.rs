@@ -1,4 +1,5 @@
-use crate::assert::{assert_freq, assert_status};
+use crate::assert::{assert_exact, assert_freq, assert_status};
+use crate::backend::{Backend, CommonValues};
 use crate::common::TestServer;
 
 #[tokio::test]
@@ -16,35 +17,44 @@ async fn returns_value_freq_pairs_with_booleans_as_text_not_pg_array_literals() 
         .unwrap();
 
     let values = body["values"].as_array().unwrap();
-    assert!(!values.is_empty());
-    let mut prev_freq = f64::INFINITY;
-    for entry in values {
-        assert!(entry["value"].is_string());
-        assert_freq(&entry["freq"], "users.is_active common-value freq");
-        // spec/protocol.md §5.5: "most frequent first".
-        let freq = entry["freq"].as_f64().unwrap();
-        assert!(
-            freq <= prev_freq,
-            "common-values must be sorted most-frequent-first: {values:?}"
-        );
-        prev_freq = freq;
+    match Backend::current().common_values() {
+        // MySQL / SQLite have no most-common-values catalog
+        // (docs/adapter-decisions.md §5.5) — the only claim is "empty".
+        CommonValues::AlwaysEmpty => {
+            assert_exact(values.len(), 0, "no-stats backend common-values list")
+        }
+        CommonValues::Sampled => {
+            assert!(!values.is_empty());
+            let mut prev_freq = f64::INFINITY;
+            for entry in values {
+                assert!(entry["value"].is_string());
+                assert_freq(&entry["freq"], "users.is_active common-value freq");
+                // spec/protocol.md §5.5: "most frequent first".
+                let freq = entry["freq"].as_f64().unwrap();
+                assert!(
+                    freq <= prev_freq,
+                    "common-values must be sorted most-frequent-first: {values:?}"
+                );
+                prev_freq = freq;
+            }
+            let rendered: Vec<&str> = values
+                .iter()
+                .map(|v| v["value"].as_str().unwrap())
+                .collect();
+            // `users.is_active` is seeded with random_bool(0.85) over 50
+            // rows, so both outcomes are present; the point of this
+            // assertion is that they render as "true"/"false", not
+            // Postgres's abbreviated `t`/`f` array literal form.
+            assert!(
+                rendered.contains(&"true") && rendered.contains(&"false"),
+                "expected both true and false, got {rendered:?}"
+            );
+            assert!(
+                !rendered.iter().any(|v| *v == "t" || *v == "f"),
+                "boolean values should not be Postgres's abbreviated array literal form: {rendered:?}"
+            );
+        }
     }
-    let rendered: Vec<&str> = values
-        .iter()
-        .map(|v| v["value"].as_str().unwrap())
-        .collect();
-    // `users.is_active` is seeded with random_bool(0.85) over 50 rows, so
-    // both outcomes are present; the point of this assertion is that they
-    // render as "true"/"false", not Postgres's abbreviated `t`/`f` array
-    // literal form.
-    assert!(
-        rendered.contains(&"true") && rendered.contains(&"false"),
-        "expected both true and false, got {rendered:?}"
-    );
-    assert!(
-        !rendered.iter().any(|v| *v == "t" || *v == "f"),
-        "boolean values should not be Postgres's abbreviated array literal form: {rendered:?}"
-    );
 }
 
 /// spec/protocol.md §5.5: a column with no planner statistics MUST yield an

@@ -165,16 +165,17 @@ impl Drop for TestServer {
 
 /// If `ASHURBANIPAL_CONFORMANCE_SEED_DSN` is set, applies
 /// `conformance/seed/seed.sql` directly (idempotent — drops and recreates
-/// its own tables). Otherwise, verifies the target already carries this
-/// seed via the ordinary protocol itself — `_conformance_meta` is an
-/// unprivileged base table, so `GET /api/tables/data?table=_conformance_meta`
-/// works identically for a spawned reference and an external port, with no
-/// separate DB credential needed for the common case.
+/// its own tables). Either way, then reads the `_conformance_meta` sentinel
+/// back over the ordinary protocol — an unprivileged base table, so
+/// `GET /api/tables/data?table=_conformance_meta` works identically for a
+/// spawned reference and an external port with no separate DB credential —
+/// to confirm the seed version and record the SQL dialect it declares
+/// (`crate::backend`).
 async fn ensure_seed(http: &reqwest::Client, mount_root: &str) {
-    match std::env::var("ASHURBANIPAL_CONFORMANCE_SEED_DSN") {
-        Ok(dsn) => apply_seed(&dsn),
-        Err(_) => verify_seed_sentinel(http, mount_root).await,
+    if let Ok(dsn) = std::env::var("ASHURBANIPAL_CONFORMANCE_SEED_DSN") {
+        apply_seed(&dsn);
     }
+    verify_seed_sentinel(http, mount_root).await;
 }
 
 fn apply_seed(dsn: &str) {
@@ -227,5 +228,21 @@ async fn verify_seed_sentinel(http: &reqwest::Client, mount_root: &str) {
              expected {expected:?} (conformance/seed/VERSION) — its seed is stale. Reapply \
              conformance/seed/seed.sql."
         );
+    }
+
+    // `dialect` (added in seed_version 4) tells the backend-aware
+    // assertions which engine's expectations to hold. A seed without it
+    // leaves `ASHURBANIPAL_CONFORMANCE_BACKEND` (or the Postgres default)
+    // in play; if both are set they must agree.
+    if let Some(dialect) = body["rows"][0]["dialect"].as_str() {
+        if let Ok(env_backend) = std::env::var("ASHURBANIPAL_CONFORMANCE_BACKEND") {
+            assert!(
+                env_backend.eq_ignore_ascii_case(dialect)
+                    || (dialect == "mysql" && env_backend.eq_ignore_ascii_case("mariadb")),
+                "ASHURBANIPAL_CONFORMANCE_BACKEND={env_backend:?} disagrees with the loaded \
+                 seed's dialect {dialect:?} — the target isn't seeded with what the env var claims"
+            );
+        }
+        crate::backend::Backend::record_from_seed(dialect);
     }
 }

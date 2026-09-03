@@ -88,6 +88,18 @@ case-sensitive `LIKE`, for every implementation.
 | MySQL    | `LOWER(...) LIKE LOWER(?)` | Unlike SQLite, MySQL's plain `LIKE` case-sensitivity depends on the column's/comparison's *collation* — a `_ci`-collation column is already case-insensitive, a `_bin`/`_cs` one isn't, and this crate has no control over a host table's collation. A bare keyword swap to `LIKE` (SQLite's approach) can't reliably hold the case-insensitive guarantee `ILIKE` promises, so `mysql.rs::build_where_clause` wraps both sides in `LOWER(...)` instead. Plain `LIKE` (non-`ILIKE`) is left alone, so its case-sensitivity still depends on the column's collation exactly as MySQL's native `LIKE` always has. |
 | SQLite   | Mapped to plain `LIKE` | SQLite's `LIKE` is already ASCII case-insensitive by default, so there's no separate keyword to map to — `ILIKE` and `LIKE` compile to the same SQL fragment (`sqlite.rs::build_where_clause`). The *observable* behavior (case-insensitive match) still holds; only the SQL-fragment mechanism collapses. Note this only covers ASCII case-folding — Postgres's `ILIKE` is more permissive on non-ASCII text, a known gap if a table has non-ASCII data. |
 
+### Boolean values in a filter comparison
+
+Every backend casts the target column to text before comparing a filter
+value (`"col"::text` / `CAST(col AS CHAR|TEXT)` — see §5.4.4), so a filter
+condition on a boolean column matches against the engine's *text
+rendering* of that boolean: Postgres `true`/`false`, MySQL and SQLite
+`1`/`0`. A frontend-built condition like `in_stock = true` therefore only
+matches on Postgres; on MySQL/SQLite the value would need to be `1`. This
+is inherent to the text-cast contract, not a per-engine mapping choice;
+`conformance/runner/filter_dsl.rs` selects the literal via
+`Backend::bool_true_literal()`.
+
 ## §1 — resolved schema
 
 Protocol property: every catalog and data query for one operation is

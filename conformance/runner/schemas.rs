@@ -3,6 +3,7 @@
 //! exactly this (`conformance/seed/README.md`).
 
 use crate::assert::{assert_exact, assert_status};
+use crate::backend::Backend;
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
 
@@ -24,9 +25,10 @@ async fn lists_public_and_the_seed_s_second_schema_excluding_system_namespaces()
         .iter()
         .map(|s| s.as_str().unwrap())
         .collect();
+    let default_schema = Backend::current().default_schema();
     assert!(
-        names.contains(&"public") && names.contains(&"other_schema"),
-        "GET /api/schemas must list both seeded schemas: {names:?}"
+        names.contains(&default_schema.as_str()) && names.contains(&"other_schema"),
+        "GET /api/schemas must list both seeded schemas (default {default_schema:?}): {names:?}"
     );
     assert!(
         !names
@@ -37,8 +39,9 @@ async fn lists_public_and_the_seed_s_second_schema_excluding_system_namespaces()
 }
 
 #[tokio::test]
-async fn explicit_schema_public_matches_the_implicit_default() {
+async fn explicit_default_schema_matches_the_implicit_default() {
     let srv = TestServer::spawn().await;
+    let default_schema = Backend::current().default_schema();
     let implicit: serde_json::Value = srv
         .client()
         .get(srv.url("/api/tables"))
@@ -51,7 +54,7 @@ async fn explicit_schema_public_matches_the_implicit_default() {
     let explicit: serde_json::Value = srv
         .client()
         .get(srv.url("/api/tables"))
-        .query(&[("schema", "public")])
+        .query(&[("schema", default_schema.as_str())])
         .send()
         .await
         .unwrap()
@@ -61,7 +64,9 @@ async fn explicit_schema_public_matches_the_implicit_default() {
     assert_exact(
         explicit,
         implicit,
-        "schema=public must resolve identically to an absent schema param (spec/protocol.md §1)",
+        &format!(
+            "schema={default_schema:?} must resolve identically to an absent schema param (spec/protocol.md §1)"
+        ),
     );
 }
 

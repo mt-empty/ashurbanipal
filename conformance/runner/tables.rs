@@ -1,4 +1,5 @@
 use crate::assert::{assert_exact, assert_row_estimate, assert_status};
+use crate::backend::{Backend, UnanalyzedCount};
 use crate::common::TestServer;
 
 pub(crate) const SEEDED_TABLES: [&str; 15] = [
@@ -126,16 +127,24 @@ async fn table_counts_cover_all_seeded_tables_with_approx_rows() {
     }
 
     // feature_flags is deliberately never ANALYZEd (conformance/seed/README.md)
-    // — the §5.3 case for reltuples reading back -1.
+    // — the §5.3 case for a table with no planner statistics.
     let feature_flags = counts
         .iter()
         .find(|c| c["table"] == "feature_flags")
         .unwrap();
-    assert_exact(
-        feature_flags["approx_rows"].as_i64().unwrap(),
-        -1,
-        "feature_flags.approx_rows (never analyzed)",
-    );
+    match Backend::current().unanalyzed_count() {
+        UnanalyzedCount::ExactlyMinusOne => assert_exact(
+            feature_flags["approx_rows"].as_i64().unwrap(),
+            -1,
+            "feature_flags.approx_rows (never analyzed)",
+        ),
+        // MySQL's InnoDB fills an estimate in on first access, so -1 isn't
+        // guaranteed — only that it's a valid row estimate.
+        UnanalyzedCount::AnyValidEstimate => assert_row_estimate(
+            &feature_flags["approx_rows"],
+            "feature_flags.approx_rows (never analyzed)",
+        ),
+    }
 }
 
 /// spec/protocol.md §6: every catalog and data query MUST be scoped to

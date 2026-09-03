@@ -18,7 +18,7 @@ output exactly.
 |---|---|---|
 | `P1-SOURCE-DEFAULT` | Absent `source` resolves to the first-registered source | `sources::explicit_default_source_matches_the_implicit_default` |
 | `P1-SOURCE-VALIDATED` | Present `source` MUST match a live §5.8 entry exactly; else 400 | `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |
-| `P1-SCHEMA-DEFAULT` | Absent `schema` resolves to the connection's own default | `schemas::explicit_schema_public_matches_the_implicit_default` |
+| `P1-SCHEMA-DEFAULT` | Absent `schema` resolves to the connection's own default | `schemas::explicit_default_schema_matches_the_implicit_default` |
 | `P1-SCHEMA-VALIDATED` | Present `schema` MUST match a live §5.7 entry exactly; else 400 | `schemas::unrecognized_schema_values_are_rejected_cleanly_on_every_route` |
 | `P1-SCHEMA-RESOLVED-ONCE` | One operation resolves the schema once, reuses it for every query in that operation | not independently observable over black-box HTTP beyond internal consistency of one response's shape — covered at the implementation level by `implementations/rust/axum/tests/schema_isolation.rs` (Postgres-specific: pool sessions with divergent `search_path`) |
 
@@ -56,7 +56,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 |---|---|---|
 | `P5.2-COMMENT-OMITTED` | `comment` omitted when the table has none | `tables::table_comments_are_present_only_where_seeded` |
 | `P5.2-STABLE-ORDER` | Stable (name) order | `tables::lists_exactly_the_seeded_tables_in_alphabetical_order` |
-| `P5.2-SCHEMA-PARAM` | `schema` selects the resolved schema (§1) | `schemas::explicit_other_schema_selects_only_its_own_table`, `schemas::explicit_schema_public_matches_the_implicit_default` |
+| `P5.2-SCHEMA-PARAM` | `schema` selects the resolved schema (§1) | `schemas::explicit_other_schema_selects_only_its_own_table`, `schemas::explicit_default_schema_matches_the_implicit_default` |
 | `P5.2-SOURCE-PARAM` | `source` selects the resolved source (§1); unrecognized → 400 | `sources::explicit_default_source_matches_the_implicit_default`, `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |
 | `P5.2-SELECT-PRIVILEGE` | Postgres: listing and the `table` allow-list both exclude tables the role can't `SELECT`. MySQL/MariaDB: listing is not gated (documented gap, `docs/adapter-decisions.md`), but a residual permission-denied at the row fetch maps to `NotAllowed` (400), not a 500. | not exercised by the shared suite (runs as a fully-privileged role) — covered by each port's own port-local integration tests: `table_listing_privileges` + `table_listing_privileges_mysql` (Rust), `TableListingPrivilegesTest` + `TableListingPrivilegesMysqlTest` (Spring), and the equivalents in Go/Node/Flask |
 
@@ -148,7 +148,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 
 | ID | Requirement | Test |
 |---|---|---|
-| `P5.7-LISTS-LIVE-SCHEMAS` | Lists every schema §1's default-resolution case could resolve to | `schemas::lists_public_and_the_seed_s_second_schema_excluding_system_namespaces`, `schemas::explicit_schema_public_matches_the_implicit_default` |
+| `P5.7-LISTS-LIVE-SCHEMAS` | Lists every schema §1's default-resolution case could resolve to | `schemas::lists_public_and_the_seed_s_second_schema_excluding_system_namespaces`, `schemas::explicit_default_schema_matches_the_implicit_default` |
 | `P5.7-EXCLUDES-SYSTEM-NAMESPACES` | Excludes engine system/internal namespaces | `schemas::lists_public_and_the_seed_s_second_schema_excluding_system_namespaces` |
 | `P5.7-HEADER` | Carries the protocol version header | `schemas::every_schemas_response_carries_the_protocol_version_header` |
 | `P5.7-SOURCE-PARAM` | `source` selects which source's schemas are listed; unrecognized → 400 | `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |

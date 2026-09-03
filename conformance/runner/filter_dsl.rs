@@ -20,6 +20,7 @@
 //! negation, IS NULL, and injection values staying inert bind params.
 
 use crate::assert::{assert_exact, assert_row_estimate, assert_status};
+use crate::backend::Backend;
 use crate::common::TestServer;
 
 const BUILDER_FIXTURES: &str = include_str!("../../spec/fixtures/filter-builder-tests.json");
@@ -144,10 +145,13 @@ async fn equality_filter_narrows_rows() {
 #[tokio::test]
 async fn and_binds_tighter_than_or() {
     let srv = TestServer::spawn().await;
+    // `in_stock` is a boolean; a text-compared filter value renders it
+    // `true`/`false` on Postgres but `1`/`0` on MySQL/SQLite
+    // (docs/adapter-decisions.md §5.4.2).
     let ast = serde_json::json!([
         {"column": "category", "op": "=", "value": "electronics"},
         {"logic": "AND", "column": "created_on", "op": ">", "value": "2016-01-01"},
-        {"logic": "OR", "column": "in_stock", "op": "=", "value": "true"},
+        {"logic": "OR", "column": "in_stock", "op": "=", "value": Backend::current().bool_true_literal()},
     ]);
     let body = assert_ast_accepted(&srv, "precedence", "products", ast).await;
     let rows = body["rows"].as_array().unwrap();
