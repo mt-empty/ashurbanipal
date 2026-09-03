@@ -1,4 +1,5 @@
 use crate::assert::{assert_exact, assert_row_estimate, assert_status};
+use crate::backend::{Backend, Comments};
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
 
@@ -166,17 +167,28 @@ async fn column_comments_are_present_only_where_seeded() {
     let columns = body["columns"].as_array().unwrap();
     let col =
         |name: &str| -> &serde_json::Value { columns.iter().find(|c| c["name"] == name).unwrap() };
-    assert_exact(
-        col("user_id")["comment"].clone(),
-        serde_json::json!("The user who placed this order."),
-        "orders.user_id comment",
-    );
-    assert!(col("discount_pct")["comment"].is_string());
+    let has_comment_key = |name: &str| col(name).as_object().unwrap().contains_key("comment");
+
+    match Backend::current().comments() {
+        Comments::Supported => {
+            assert_exact(
+                col("user_id")["comment"].clone(),
+                serde_json::json!("The user who placed this order."),
+                "orders.user_id comment",
+            );
+            assert!(col("discount_pct")["comment"].is_string());
+        }
+        // Absent, never emitted as "" (docs/adapter-decisions.md §5.4.1).
+        Comments::Unsupported => {
+            assert!(!has_comment_key("user_id"), "orders.user_id comment key");
+            assert!(
+                !has_comment_key("discount_pct"),
+                "orders.discount_pct comment key"
+            );
+        }
+    }
     assert!(
-        !col("total_cents")
-            .as_object()
-            .unwrap()
-            .contains_key("comment"),
+        !has_comment_key("total_cents"),
         "orders.total_cents should have no comment key at all"
     );
 }

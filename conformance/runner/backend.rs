@@ -26,6 +26,26 @@ pub enum Backend {
     Sqlite,
 }
 
+/// Whether the engine namespaces tables into schemas at all.
+pub enum SchemaModel {
+    /// Postgres / MySQL: `/api/schemas` can list more than one, `schema=`
+    /// selects among them, and the seed's `other_schema` fixture makes
+    /// cross-schema scoping (`spec/protocol.md` §6) falsifiable.
+    Namespaced,
+    /// SQLite: one schema (`main`); no cross-schema fixture can exist, so
+    /// the tests that need one self-skip.
+    Single,
+}
+
+/// Whether the engine's catalog carries table/column comments.
+pub enum Comments {
+    /// Postgres / MySQL: `COMMENT ON` / column `COMMENT '…'`.
+    Supported,
+    /// SQLite: none — `comment` is always absent, never emitted as `""`
+    /// (`docs/adapter-decisions.md` §5.4.1).
+    Unsupported,
+}
+
 /// What `/api/tables/common-values` returns for a column that has data.
 pub enum CommonValues {
     /// Postgres samples `pg_stats`: a non-empty, most-frequent-first list.
@@ -98,6 +118,20 @@ impl Backend {
             Backend::Sqlite => "main".to_string(),
             Backend::Mysql => std::env::var("ASHURBANIPAL_CONFORMANCE_DEFAULT_SCHEMA")
                 .unwrap_or_else(|_| "ashurbanipal".to_string()),
+        }
+    }
+
+    pub fn schema_model(self) -> SchemaModel {
+        match self {
+            Backend::Postgres | Backend::Mysql => SchemaModel::Namespaced,
+            Backend::Sqlite => SchemaModel::Single,
+        }
+    }
+
+    pub fn comments(self) -> Comments {
+        match self {
+            Backend::Postgres | Backend::Mysql => Comments::Supported,
+            Backend::Sqlite => Comments::Unsupported,
         }
     }
 

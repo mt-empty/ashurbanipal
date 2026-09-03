@@ -3,12 +3,12 @@
 //! exactly this (`conformance/seed/README.md`).
 
 use crate::assert::{assert_exact, assert_status};
-use crate::backend::Backend;
+use crate::backend::{Backend, SchemaModel};
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
 
 #[tokio::test]
-async fn lists_public_and_the_seed_s_second_schema_excluding_system_namespaces() {
+async fn lists_the_default_schema_and_the_seed_s_second_one_excluding_system_namespaces() {
     let srv = TestServer::spawn().await;
     let body: serde_json::Value = srv
         .client()
@@ -26,10 +26,17 @@ async fn lists_public_and_the_seed_s_second_schema_excluding_system_namespaces()
         .map(|s| s.as_str().unwrap())
         .collect();
     let default_schema = Backend::current().default_schema();
-    assert!(
-        names.contains(&default_schema.as_str()) && names.contains(&"other_schema"),
-        "GET /api/schemas must list both seeded schemas (default {default_schema:?}): {names:?}"
-    );
+    match Backend::current().schema_model() {
+        SchemaModel::Namespaced => assert!(
+            names.contains(&default_schema.as_str()) && names.contains(&"other_schema"),
+            "GET /api/schemas must list both seeded schemas (default {default_schema:?}): {names:?}"
+        ),
+        SchemaModel::Single => assert_exact(
+            names.clone(),
+            vec![default_schema.as_str()],
+            "a single-schema backend lists exactly its one schema",
+        ),
+    }
     assert!(
         !names
             .iter()
@@ -73,6 +80,10 @@ async fn explicit_default_schema_matches_the_implicit_default() {
 #[tokio::test]
 async fn explicit_other_schema_selects_only_its_own_table() {
     let srv = TestServer::spawn().await;
+    if let SchemaModel::Single = Backend::current().schema_model() {
+        eprintln!("schemas: skipping — single-schema backend has no second schema to select");
+        return;
+    }
     let body: serde_json::Value = srv
         .client()
         .get(srv.url("/api/tables"))

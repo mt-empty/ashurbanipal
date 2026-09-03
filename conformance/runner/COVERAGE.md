@@ -148,8 +148,8 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 
 | ID | Requirement | Test |
 |---|---|---|
-| `P5.7-LISTS-LIVE-SCHEMAS` | Lists every schema §1's default-resolution case could resolve to | `schemas::lists_public_and_the_seed_s_second_schema_excluding_system_namespaces`, `schemas::explicit_default_schema_matches_the_implicit_default` |
-| `P5.7-EXCLUDES-SYSTEM-NAMESPACES` | Excludes engine system/internal namespaces | `schemas::lists_public_and_the_seed_s_second_schema_excluding_system_namespaces` |
+| `P5.7-LISTS-LIVE-SCHEMAS` | Lists every schema §1's default-resolution case could resolve to | `schemas::lists_the_default_schema_and_the_seed_s_second_one_excluding_system_namespaces`, `schemas::explicit_default_schema_matches_the_implicit_default` |
+| `P5.7-EXCLUDES-SYSTEM-NAMESPACES` | Excludes engine system/internal namespaces | `schemas::lists_the_default_schema_and_the_seed_s_second_one_excluding_system_namespaces` |
 | `P5.7-HEADER` | Carries the protocol version header | `schemas::every_schemas_response_carries_the_protocol_version_header` |
 | `P5.7-SOURCE-PARAM` | `source` selects which source's schemas are listed; unrecognized → 400 | `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |
 

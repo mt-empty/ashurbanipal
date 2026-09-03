@@ -1,5 +1,5 @@
 use crate::assert::{assert_exact, assert_row_estimate, assert_status};
-use crate::backend::{Backend, UnanalyzedCount};
+use crate::backend::{Backend, Comments, SchemaModel, UnanalyzedCount};
 use crate::common::TestServer;
 
 pub(crate) const SEEDED_TABLES: [&str; 15] = [
@@ -64,20 +64,16 @@ async fn table_comments_are_present_only_where_seeded() {
             .unwrap()
     };
 
-    for commented in [
+    // Seeded with a comment on Postgres/MySQL; never on SQLite.
+    let commented_where_supported = [
         "users",
         "orders",
         "sessions",
         "reviews",
         "support_tickets",
         "_conformance_meta",
-    ] {
-        assert!(
-            by_name(commented)["comment"].is_string(),
-            "{commented} should have a string comment"
-        );
-    }
-    for uncommented in [
+    ];
+    let never_commented = [
         "products",
         "events",
         "payments",
@@ -86,13 +82,31 @@ async fn table_comments_are_present_only_where_seeded() {
         "inventory_locations",
         "inventory_counts",
         "feature_flags",
-    ] {
+    ];
+
+    match Backend::current().comments() {
+        Comments::Supported => {
+            for table in commented_where_supported {
+                assert!(
+                    by_name(table)["comment"].is_string(),
+                    "{table} should have a string comment"
+                );
+            }
+        }
+        // Absent, never emitted as "" (docs/adapter-decisions.md §5.4.1).
+        Comments::Unsupported => {
+            for table in commented_where_supported {
+                assert!(
+                    !by_name(table).as_object().unwrap().contains_key("comment"),
+                    "{table} must have no `comment` key on a comment-less backend"
+                );
+            }
+        }
+    }
+    for table in never_commented {
         assert!(
-            !by_name(uncommented)
-                .as_object()
-                .unwrap()
-                .contains_key("comment"),
-            "{uncommented} should have no `comment` key at all"
+            !by_name(table).as_object().unwrap().contains_key("comment"),
+            "{table} should have no `comment` key at all"
         );
     }
 }
@@ -154,6 +168,10 @@ async fn table_counts_cover_all_seeded_tables_with_approx_rows() {
 #[tokio::test]
 async fn schema_scoping_excludes_other_schemas() {
     let srv = TestServer::spawn().await;
+    if let SchemaModel::Single = Backend::current().schema_model() {
+        eprintln!("tables: skipping — single-schema backend has no other schema to leak from");
+        return;
+    }
     let body: serde_json::Value = srv
         .client()
         .get(srv.url("/api/tables"))
