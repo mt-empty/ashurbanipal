@@ -178,6 +178,9 @@ async fn ensure_seed(http: &reqwest::Client, mount_root: &str) {
     verify_seed_sentinel(http, mount_root).await;
 }
 
+/// Postgres only (`psql` + `seed.sql`). For a MySQL/SQLite target, apply
+/// `seed.mysql.sql` / `seed.sqlite.sql` out of band and let the sentinel
+/// path below take over — see `rust-axum-conformance.yml`.
 fn apply_seed(dsn: &str) {
     let seed_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("conformance/seed/seed.sql");
     let status = Command::new("psql")

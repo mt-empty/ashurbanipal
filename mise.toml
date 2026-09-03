@@ -14,12 +14,22 @@ uv = "latest"
 # `<layer>:*` subtasks below.
 
 [tasks.check]
-description = "everything CI would run, across every implementation: rust, spring, go, node, flask, frontend, conformance, docs, changelog"
-depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance", "docs", "changelog"]
+description = "everything CI would run, across every implementation: rust, rust-backends, spring, go, node, flask, frontend, conformance, docs, changelog"
+depends = ["rust", "rust:backends", "spring", "go", "node", "flask", "frontend", "conformance", "docs", "changelog"]
 
 [tasks.rust]
-description = "rust implementation checks: fmt-check, lint, test, integration-test"
+description = "rust implementation checks (default features): fmt-check, lint, test, integration-test"
 depends = ["rust:fmt-check", "rust:lint", "rust:test", "rust:integration-test", "rust:integration-test-actix"]
+
+[tasks."rust:backends"]
+description = "non-default backend checks: sqlite/mysql feature lint + unit + integration tests (needs MYSQL_TEST_URL, MARIADB_TEST_URL). Kept out of `rust` so the publish-check path stays Postgres-only."
+depends = [
+    "rust:lint-all-features",
+    "rust:test-sqlite",
+    "rust:test-mysql",
+    "rust:integration-test-sqlite",
+    "rust:integration-test-mysql",
+]
 
 [tasks.spring]
 description = "spring-boot-starter implementation checks: build, test"

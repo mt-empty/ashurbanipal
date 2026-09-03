@@ -195,13 +195,18 @@ language/framework port under `PORTING.md`. `MySqlSource` targets one
 `sqlx` driver serving both MySQL and MariaDB (they share a wire protocol)
 but the two forks diverge on the query-timeout mechanism (§6 above); it
 detects which one it's talking to at runtime rather than requiring the
-host to declare it. Neither adapter is run through `conformance/runner`
-(that suite targets Postgres); each has its own unit test suite instead —
-SQLite's needs no external infrastructure (`sqlite::memory:`), while
-MySQL/MariaDB's needs a live instance reachable via `MYSQL_TEST_URL` or
-`MARIADB_TEST_URL` (the devcontainer runs permanent `mysql` and `mariadb`
-services for exactly this — but neither has a dedicated CI job, the same
-"no CI coverage" gap already accepted for `mysql`/`sqlite` generally). The rows above
+host to declare it. Both adapters now run through `conformance/runner`:
+`rust-axum-conformance.yml`'s `mysql-conformance` and `sqlite-conformance`
+jobs boot a `DB_BACKEND=mysql` / `DB_BACKEND=sqlite` demo against a
+hand-authored dialect seed (`conformance/seed/seed.mysql.sql` /
+`seed.sqlite.sql`, the sqlx-style split — the Postgres seed's generator
+emits Postgres-only SQL) and point the kit at it; the runner learns which
+engine's expectations to hold from the seed's `_conformance_meta.dialect`
+column (`conformance/runner/backend.rs`). A `non-default-backend-tests`
+job runs the feature lint plus the `sqlite`/`mysql` unit and integration
+tests (`mise run rust:backends`) against `mysql:8` + `mariadb:11` service
+containers. The devcontainer still runs permanent `mysql` and `mariadb`
+services for local runs (`MYSQL_TEST_URL` / `MARIADB_TEST_URL`). The rows above
 describe the per-clause decisions each makes to satisfy
 `spec/protocol.md`'s properties without Postgres's catalog/stats
 mechanisms — most notably SQLite's exact-`COUNT(*)`-turned-`-1` and live-
