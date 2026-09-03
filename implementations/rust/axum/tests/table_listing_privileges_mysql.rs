@@ -15,7 +15,7 @@
 
 use ashurbanipal_axum::{DbError, DbSource, MySqlSource, QueryOpts};
 use sqlx::mysql::MySqlPoolOptions;
-use sqlx::{Executor, MySqlPool};
+use sqlx::Executor;
 
 mod common;
 use common::MysqlCleanup;
@@ -37,7 +37,7 @@ fn as_limited_user(url: &str, user: &str, password: &str) -> String {
     format!("{scheme}://{user}:{password}@{host}/{SCHEMA}")
 }
 
-async fn setup(admin_url: &str) -> MySqlPool {
+async fn setup(admin_url: &str) {
     let pool = MySqlPoolOptions::new()
         .max_connections(1)
         .connect(admin_url)
@@ -61,7 +61,6 @@ async fn setup(admin_url: &str) -> MySqlPool {
             .await
             .expect("setup database/user");
     }
-    pool
 }
 
 async fn run(admin_url: &str) {

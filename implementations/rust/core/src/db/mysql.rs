@@ -620,14 +620,27 @@ mod tests {
                     return;
                 };
                 rt.block_on(async move {
-                    if let Ok(admin) = MySqlPool::connect(&test_url()).await {
-                        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
-                            "drop database if exists `{name}`"
-                        )))
-                        .execute(&admin)
-                        .await;
-                        admin.close().await;
+                    let admin = match sqlx::mysql::MySqlPoolOptions::new()
+                        .max_connections(1)
+                        .acquire_timeout(std::time::Duration::from_secs(5))
+                        .connect(&test_url())
+                        .await
+                    {
+                        Ok(admin) => admin,
+                        Err(e) => {
+                            eprintln!("SeededDb::drop: could not connect to drop `{name}`: {e}");
+                            return;
+                        }
+                    };
+                    if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(format!(
+                        "drop database if exists `{name}`"
+                    )))
+                    .execute(&admin)
+                    .await
+                    {
+                        eprintln!("SeededDb::drop: dropping `{name}` failed: {e}");
                     }
+                    admin.close().await;
                 });
             })
             .join();

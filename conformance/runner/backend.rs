@@ -19,6 +19,11 @@ use std::sync::OnceLock;
 /// Set once from `_conformance_meta.dialect` by `common::ensure_seed`.
 static SEEDED: OnceLock<Backend> = OnceLock::new();
 
+/// Set by `common::ensure_seed` once the sentinel has been read — whether
+/// or not it carried a `dialect` — so `current()` can catch a call that
+/// races ahead of backend selection.
+static SEED_CHECKED: OnceLock<()> = OnceLock::new();
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Backend {
     Postgres,
@@ -68,13 +73,19 @@ pub enum UnanalyzedCount {
 }
 
 impl Backend {
-    fn parse(raw: &str) -> Option<Backend> {
+    pub(crate) fn parse(raw: &str) -> Option<Backend> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "postgres" | "postgresql" => Some(Backend::Postgres),
             "mysql" | "mariadb" => Some(Backend::Mysql),
             "sqlite" => Some(Backend::Sqlite),
             _ => None,
         }
+    }
+
+    /// Called by `common::ensure_seed` right after the sentinel read, so
+    /// `current()` can `debug_assert` it isn't consulted earlier.
+    pub fn mark_seed_checked() {
+        let _ = SEED_CHECKED.set(());
     }
 
     /// Records the dialect the loaded seed declares in its
@@ -94,6 +105,11 @@ impl Backend {
     /// otherwise `ASHURBANIPAL_CONFORMANCE_BACKEND`, otherwise Postgres —
     /// the reference.
     pub fn current() -> Backend {
+        debug_assert!(
+            SEED_CHECKED.get().is_some(),
+            "Backend::current() called before common::ensure_seed — backend selection has not run \
+             (every test must `TestServer::spawn().await` first)"
+        );
         if let Some(backend) = SEEDED.get() {
             return *backend;
         }

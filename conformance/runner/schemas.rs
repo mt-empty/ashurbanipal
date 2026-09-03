@@ -38,9 +38,14 @@ async fn lists_the_default_schema_and_the_seed_s_second_one_excluding_system_nam
         ),
     }
     assert!(
-        !names
-            .iter()
-            .any(|n| *n == "pg_catalog" || *n == "information_schema" || n.starts_with("pg_")),
+        !names.iter().any(|n| {
+            n.starts_with("pg_")
+                || matches!(
+                    *n,
+                    // Postgres | MySQL/MariaDB system schemas
+                    "pg_catalog" | "information_schema" | "mysql" | "performance_schema" | "sys"
+                )
+        }),
         "GET /api/schemas must never list system/internal namespaces: {names:?}"
     );
 }

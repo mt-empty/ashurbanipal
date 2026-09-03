@@ -127,6 +127,16 @@ role can't access.
 | MySQL    | `information_schema.schemata`, filtered to exclude `mysql`, `information_schema`, `performance_schema`, `sys` | MUST clause satisfied. The SHOULD clause (excluding schemas the connected role can't access) is a documented, accepted gap: MySQL has no single boolean-returning function equivalent to Postgres's `has_schema_privilege` — the nearest analog (`information_schema.schema_privileges`/`user_privileges`) is materially more awkward to apply correctly, and this was deliberately not attempted for a first cut. |
 | SQLite   | Fixed single-element list (`["main"]`) | No live catalog to query — trivially satisfied the same way §1's resolution is. |
 
+**Identifier case-folding (MySQL).** `spec/protocol.md` §5.4 requires
+`table`/`column`/`schema` matching to be case-sensitive exact. On MySQL
+that holds only when the server runs `lower_case_table_names = 0` (the
+Linux default, and what the `mysql:8` conformance CI image uses); a server
+with `lower_case_table_names = 1` (macOS default, some managed hosts)
+folds table identifiers to lowercase, so `table=Users` would resolve to
+`users`. The conformance suite's `table_data::table_param_match_is_case_sensitive`
+assumes the `= 0` setting; running it against a `= 1` server is out of
+scope.
+
 ## §5.2 / §5.3 — table listing & the `table` allow-list
 
 Protocol property: `GET /api/tables` *is* the allow-list every other

@@ -5,6 +5,8 @@
 //! test is re-run. This module is only ever compiled into a test binary
 //! built with `--features mysql`.
 
+use std::time::Duration;
+
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::Executor;
 
@@ -13,7 +15,10 @@ use sqlx::Executor;
 /// the value is dropped, panic unwinds included. `Drop` is sync and may
 /// run while the test's own Tokio runtime is still the ambient one, so the
 /// work goes on a throwaway current-thread runtime on its own thread; the
-/// `join()` keeps `cargo test` from exiting before the drops land.
+/// `join()` keeps `cargo test` from exiting before the drops land. A short
+/// `acquire_timeout` bounds that `join()` if MySQL is briefly unreachable,
+/// and a failed connect/statement is logged rather than lost — a leaked
+/// database is worth a line on stderr.
 pub struct MysqlCleanup {
     pub url: String,
     pub statements: Vec<String>,
@@ -31,15 +36,22 @@ impl Drop for MysqlCleanup {
                 return;
             };
             rt.block_on(async move {
-                let Ok(pool) = MySqlPoolOptions::new()
+                let pool = match MySqlPoolOptions::new()
                     .max_connections(1)
+                    .acquire_timeout(Duration::from_secs(5))
                     .connect(&url)
                     .await
-                else {
-                    return;
+                {
+                    Ok(pool) => pool,
+                    Err(e) => {
+                        eprintln!("MysqlCleanup: could not connect to drop test databases: {e}");
+                        return;
+                    }
                 };
                 for stmt in statements {
-                    let _ = pool.execute(sqlx::AssertSqlSafe(stmt)).await;
+                    if let Err(e) = pool.execute(sqlx::AssertSqlSafe(stmt)).await {
+                        eprintln!("MysqlCleanup: teardown statement failed: {e}");
+                    }
                 }
             });
         })
