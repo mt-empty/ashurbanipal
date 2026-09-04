@@ -100,6 +100,35 @@ test("record view's whole-row copy button copies the full row as JSON", async ({
   ]);
 });
 
+test("record view's INSERT copy button copies the row as a SQL INSERT", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const firstRow = page.locator("#tbody tr").first();
+  const id = await firstRow.locator('td[data-col="id"] .cell-text').textContent();
+  const status = await firstRow.locator('td[data-col="status"] .cell-text').textContent();
+  const totalCents = await firstRow.locator('td[data-col="total_cents"] .cell-text').textContent();
+  const discountPct = await firstRow.locator('td[data-col="discount_pct"] .cell-text').textContent();
+  await firstRow.locator(".record-btn").click();
+  await expect(page.locator("#record-dialog")).toBeVisible();
+
+  await page.locator("#record-copy-insert").click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("INSERT INTO ");
+  const sql = await page.evaluate(() => navigator.clipboard.readText());
+
+  // The e2e demo has multiple schemas, so the table name is schema-qualified.
+  expect(sql).toMatch(
+    /^INSERT INTO (public\.)?orders \(id, user_id, status, total_cents, discount_pct, tags, line_items, created_at\)\nVALUES \(/,
+  );
+  expect(sql).toContain(`'${id}'`);
+  expect(sql).toContain(`'${status}'`);
+  expect(sql).toContain(`, ${totalCents}, `);
+  expect(sql).not.toContain(`'${totalCents}'`);
+  if (discountPct === "∅") expect(sql).toContain(", NULL, ");
+  expect(sql.endsWith(");")).toBe(true);
+});
+
 test("record view closes via Escape", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");

@@ -301,7 +301,10 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 /* Lives in the dialog header, so it stays visible regardless of hover —
    a standalone action, not a per-field affordance. */
 .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
-.dialog-head .copy { position: static; top: auto; transform: none; opacity: 1; }
+.dialog-head .copy { position: static; top: auto; transform: none; opacity: 1;
+                     border: 1px solid var(--border); border-radius: 4px;
+                     padding: .1rem .4rem; font-size: .85em; }
+.copy-icon { display: inline-block; min-width: 1ch; text-align: center; }
 
 /* white-space: normal resets the pre-wrap inherited from ancestors
    (#cell-pop / dialog dl dd's plain-text case). */
@@ -491,7 +494,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 
 <dialog id="record-dialog" closedby="any">
   <div class="dialog-head">
-    <span class="dialog-head-title"><strong>record</strong><button id="record-copy-row" class="copy" aria-label="copy row as JSON">⧉</button></span>
+    <span class="dialog-head-title"><strong>record</strong><button id="record-copy-row" class="copy" aria-label="copy row as JSON" title="copy row as JSON"><span class="copy-icon">⧉</span> JSON</button><button id="record-copy-insert" class="copy" aria-label="copy row as SQL INSERT statement" title="copy row as an INSERT statement"><span class="copy-icon">⧉</span> SQL INSERT</button></span>
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
   <dl id="record-dl"></dl>
@@ -520,6 +523,9 @@ function setStatus(text) {
   $("status").textContent = text;
 }
 async function copyText(text, btn) {
+  const mark = btn.querySelector(".copy-icon") ?? btn;
+  if (mark.dataset.rest === void 0) mark.dataset.rest = mark.textContent ?? "";
+  const resting = mark.dataset.rest;
   try {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(text);
@@ -531,12 +537,12 @@ async function copyText(text, btn) {
       document.execCommand("copy");
       ta.remove();
     }
-    btn.textContent = "\u2713";
+    mark.textContent = "\u2713";
   } catch {
-    btn.textContent = "\u2717";
+    mark.textContent = "\u2717";
   }
   setTimeout(() => {
-    btn.textContent = "\u29C9";
+    mark.textContent = resting;
   }, 800);
 }
 
@@ -1300,10 +1306,25 @@ function recordAsJson(columns, row) {
   }
   return JSON.stringify(obj, null, 2);
 }
+var NUMERIC_TYPE_RE = /int|serial|numeric|decimal|real|double|float|^number/i;
+function recordAsInsert(columns, row) {
+  const target = state.schema ? `${state.schema}.${state.table}` : state.table;
+  const cols = columns.map((c) => c.name).join(", ");
+  const vals = columns.map((c) => sqlLiteral(c, row[c.name])).join(", ");
+  return `INSERT INTO ${target} (${cols})
+VALUES (${vals});`;
+}
+function sqlLiteral(col, raw) {
+  if (raw == null) return "NULL";
+  if (NUMERIC_TYPE_RE.test(col.type) && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
+  return "'" + raw.replace(/'/g, "''") + "'";
+}
 function openRecordView(columns, row) {
   $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
   const copyRowBtn = $("record-copy-row");
   copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
+  const copyInsertBtn = $("record-copy-insert");
+  copyInsertBtn.onclick = () => copyText(recordAsInsert(columns, row), copyInsertBtn);
   const open = () => $("record-dialog").showModal();
   document.startViewTransition ? document.startViewTransition(open) : open();
 }

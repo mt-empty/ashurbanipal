@@ -8,6 +8,10 @@ export function setStatus(text: string): void {
 
 // ---- per-cell copy (Clipboard API) ----
 export async function copyText(text: string, btn: HTMLElement): Promise<void> {
+  const mark = btn.querySelector<HTMLElement>(".copy-icon") ?? btn;
+  // Saved once so a re-click mid-flash can't capture the ✓/✗ as the resting glyph.
+  if (mark.dataset.rest === undefined) mark.dataset.rest = mark.textContent ?? "";
+  const resting = mark.dataset.rest;
   try {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(text);
@@ -21,11 +25,11 @@ export async function copyText(text: string, btn: HTMLElement): Promise<void> {
       document.execCommand("copy");
       ta.remove();
     }
-    btn.textContent = "✓";
+    mark.textContent = "✓";
   } catch {
-    btn.textContent = "✗";
+    mark.textContent = "✗";
   }
   setTimeout(() => {
-    btn.textContent = "⧉";
+    mark.textContent = resting;
   }, 800);
 }

@@ -4,14 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Working style
 
-Be terse — no restating what was just asked, no narrating obvious next
-steps. Comment discipline (non-obvious *why* only, one line max) applies
-everywhere in the repo, not just to
-`implementations/rust/{axum/src,core/src}/**/*.rs` (see the Architecture
-invariants entry below) — tests and scripts included. Comments describe
-the code as it is now, not a rejected alternative or its history — say
-what a widget *is* (e.g. "a caret-anchored popover"), not that it's "not a
-native `<datalist>`."
+Be terse — no restating what was just asked, no narrating obvious next steps.
+
+### Comments and docs
+
+- **Comments:** state only a non-obvious current constraint — a security
+  invariant, driver/browser quirk, race, or test setup requirement. Keep them
+  to one or two sentences. Do not narrate history, rejected alternatives, or
+  another port's implementation; comments describe this code, not its lineage.
+- **Documentation ownership:** `spec/protocol.md`, `spec/openapi.yaml`, and
+  `spec/filter-dsl.md` are normative. `docs/adapter-decisions.md` records
+  backend mechanisms and accepted gaps. `PORTING.md` owns porting/review
+  workflow. `docs/design.md` is rationale, while frontend, browser, E2E, and
+  publishing guides own their respective operational rules. Link to the owning
+  document; do not restate it elsewhere.
+- **Peer ports:** no implementation is canonical. Cross-port comparisons only
+  belong in conformance or adapter-decision material when they explain an
+  active compatibility constraint.
 
 **Every commit subject MUST be a Conventional Commit** — `type(scope):
 summary`, types `feat fix docs style refactor perf test build ci chore
@@ -71,9 +80,8 @@ Two kinds of component — `docs/design.md` §3 has the full architecture:
   for why. `docs/adapter-decisions.md` has where each language's DB
   backends' catalog queries diverge from Postgres.
 
-Read `docs/design.md` first for anything non-obvious — it's the source of
-truth for intended behavior. `spec/protocol.md` is the normative endpoint
-contract (design.md §4 stays as rationale). `PORTING.md` is the contract
+Read `docs/design.md` first for architecture rationale. `spec/protocol.md` is
+the normative endpoint contract (design.md §4 stays as rationale). `PORTING.md` is the contract
 for adding or reviewing a port — what it reuses, what it implements, and
 the governance/hardening checklist a reviewer signs off against.
 `docs/adapter-decisions.md` is the companion registry of per-backend

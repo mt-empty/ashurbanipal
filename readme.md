@@ -38,7 +38,7 @@ Ashurbanipal skips the whole chain by not needing a new connection: it runs insi
 ## What it doesn't do
 
 - No write access, no migrations, no schema changes.
-- Not a replacement for a full-featured DB client like DBeaver, pgcli, etc.
+- At the moment, this is not a replacement for a full-featured DB client like DBeaver, pgcli, however I do plan to support some of that functionality in the future
 
 ## Security
 
