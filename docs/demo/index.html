@@ -1299,6 +1299,7 @@ var state = {
   offset: 0,
   hiddenColumns: {},
   sortByTable: {},
+  schemaBySource: {},
   filter: ""
 };
 try {
@@ -1321,6 +1322,11 @@ try {
       }
     }
   }
+  if (saved.schemaBySource && typeof saved.schemaBySource === "object" && !Array.isArray(saved.schemaBySource)) {
+    for (const [source, schema] of Object.entries(saved.schemaBySource)) {
+      if (typeof schema === "string") state.schemaBySource[source] = schema;
+    }
+  }
 } catch {
   localStorage.removeItem(UI_KEY);
 }
@@ -1333,8 +1339,8 @@ if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "d
 if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
 if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
 function persist() {
-  const { source, schema, table, limit, hiddenColumns, sortByTable } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable }));
+  const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
+  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
 }
 function hiddenColumnsForTable() {
   return state.hiddenColumns[state.table ?? ""] ?? [];
@@ -1364,6 +1370,10 @@ function dropStoredSort(table) {
   state.sort = null;
   state.order = "asc";
   storedSortUnverified = false;
+  persist();
+}
+function rememberSchema() {
+  if (state.schema) state.schemaBySource[state.source ?? ""] = state.schema;
   persist();
 }
 function applyScopeParams(params) {
@@ -1821,7 +1831,7 @@ async function loadSources() {
 }
 $("source-select").onchange = () => {
   state.source = $("source-select").value;
-  state.schema = null;
+  state.schema = state.schemaBySource[state.source ?? ""] ?? null;
   state.table = null;
   state.sort = null;
   state.offset = 0;
@@ -1868,7 +1878,7 @@ $("schema-select").onchange = () => {
   state.filter = "";
   setAppliedFilterAst([]);
   $("filter").value = "";
-  persist();
+  rememberSchema();
   loadTables().catch((e) => {
     $("error").textContent = e.message;
   });
@@ -2069,7 +2079,7 @@ function buildCell(col, raw) {
       if (references.schema && references.schema !== state.schema) {
         state.schema = references.schema;
         $("schema-select").value = state.schema;
-        persist();
+        rememberSchema();
         loadTables().then(() => applyFilterClause(references.column, "=", raw)).catch((e) => {
           $("error").textContent = e.message;
         });
