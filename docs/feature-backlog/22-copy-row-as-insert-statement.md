@@ -52,3 +52,13 @@ and the three diverge (Postgres `integer`/`boolean`, MySQL
 - Multi-row form ("copy all N visible rows as INSERTs"). Not built.
 - Very wide rows / large text cells — copied in full regardless of
   on-screen truncation (matches the cell viewer).
+- **True per-backend dialect** (raised in PR review, `#87`): Postgres
+  `::type` casts, MySQL backtick-quoted identifiers, engine-specific
+  literal forms, instead of the one portable dialect above. Blocked on the
+  frontend not knowing which engine is behind the selected source —
+  `spec/protocol.md` has no `engine`/`dialect` field on `/sources`,
+  `/schemas`, or `/tables` today, and column-type spellings alone aren't a
+  reliable proxy (the whole reason §3's detection is loose-match +
+  value-shape gated, not type-name-keyed). Doing this properly means a
+  protocol addition wired through all five ports and conformance, not a
+  frontend-only change — a separate, larger story if picked up.
