@@ -38,18 +38,27 @@ produces byte-identical output.
 ## Sentinel: `_conformance_meta`
 
 The seed ends with a `_conformance_meta` table (one row: `seed_version`,
-an informational `checksum`, `generated_at`). It's an ordinary base table
-in the connection's default resolved schema — reachable over the regular protocol, no special
-access needed — so the runner can confirm a target is running *this* seed
-(not stale or absent data) with a plain
-`GET {mount}/api/tables/data?table=_conformance_meta` call, even against
-an external implementation it never spawned or connected to directly.
+`dialect`, an informational `checksum`, `generated_at`). It's an ordinary
+base table in the connection's default resolved schema — reachable over
+the regular protocol, no special access needed — so the runner can
+confirm a target is running *this* seed (not stale or absent data) with a
+plain `GET {mount}/api/tables/data?table=_conformance_meta` call, even
+against an external implementation it never spawned or connected to
+directly.
 
 `seed_version` is checked against `conformance/seed/VERSION` — the single
 source of truth both `tools/seed-gen` (embeds it into the sentinel row)
 and `conformance/runner` (compares against it) read. Bump `VERSION`
 whenever a schema/data change would invalidate fixtures written against
 the previous seed shape, and regenerate.
+
+`dialect` (one of `postgres` / `mysql` / `sqlite`) is what each seed file
+declares itself to be — the Postgres generator hardcodes `postgres`, the
+hand-authored `seed.mysql.sql` / `seed.sqlite.sql` their own. The runner
+reads it from the same sentinel call and uses it to pick which engine's
+expectations to assert (`conformance/runner/backend.rs`), so
+`ASHURBANIPAL_CONFORMANCE_BACKEND` is only a fallback for a seed that
+predates the column.
 
 ## What the seed exercises
 

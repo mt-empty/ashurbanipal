@@ -88,6 +88,18 @@ case-sensitive `LIKE`, for every implementation.
 | MySQL    | `LOWER(...) LIKE LOWER(?)` | Unlike SQLite, MySQL's plain `LIKE` case-sensitivity depends on the column's/comparison's *collation* — a `_ci`-collation column is already case-insensitive, a `_bin`/`_cs` one isn't, and this crate has no control over a host table's collation. A bare keyword swap to `LIKE` (SQLite's approach) can't reliably hold the case-insensitive guarantee `ILIKE` promises, so `mysql.rs::build_where_clause` wraps both sides in `LOWER(...)` instead. Plain `LIKE` (non-`ILIKE`) is left alone, so its case-sensitivity still depends on the column's collation exactly as MySQL's native `LIKE` always has. |
 | SQLite   | Mapped to plain `LIKE` | SQLite's `LIKE` is already ASCII case-insensitive by default, so there's no separate keyword to map to — `ILIKE` and `LIKE` compile to the same SQL fragment (`sqlite.rs::build_where_clause`). The *observable* behavior (case-insensitive match) still holds; only the SQL-fragment mechanism collapses. Note this only covers ASCII case-folding — Postgres's `ILIKE` is more permissive on non-ASCII text, a known gap if a table has non-ASCII data. |
 
+### Boolean values in a filter comparison
+
+Every backend casts the target column to text before comparing a filter
+value (`"col"::text` / `CAST(col AS CHAR|TEXT)` — see §5.4.4), so a filter
+condition on a boolean column matches against the engine's *text
+rendering* of that boolean: Postgres `true`/`false`, MySQL and SQLite
+`1`/`0`. A frontend-built condition like `in_stock = true` therefore only
+matches on Postgres; on MySQL/SQLite the value would need to be `1`. This
+is inherent to the text-cast contract, not a per-engine mapping choice;
+`conformance/runner/filter_dsl.rs` selects the literal via
+`Backend::bool_true_literal()`.
+
 ## §1 — resolved schema
 
 Protocol property: every catalog and data query for one operation is
@@ -114,6 +126,16 @@ role can't access.
 | Postgres | `pg_namespace`, filtered to exclude `pg_catalog`, `information_schema`, `pg_toast%`, `pg_temp_%`, and gated by `has_schema_privilege(nspname, 'USAGE')` | The `has_schema_privilege` filter is what satisfies the SHOULD clause — a schema the connected role can't use is never offered as a choice that same role's later request would then have to reject. |
 | MySQL    | `information_schema.schemata`, filtered to exclude `mysql`, `information_schema`, `performance_schema`, `sys` | MUST clause satisfied. The SHOULD clause (excluding schemas the connected role can't access) is a documented, accepted gap: MySQL has no single boolean-returning function equivalent to Postgres's `has_schema_privilege` — the nearest analog (`information_schema.schema_privileges`/`user_privileges`) is materially more awkward to apply correctly, and this was deliberately not attempted for a first cut. |
 | SQLite   | Fixed single-element list (`["main"]`) | No live catalog to query — trivially satisfied the same way §1's resolution is. |
+
+**Identifier case-folding (MySQL).** `spec/protocol.md` §5.4 requires
+`table`/`column`/`schema` matching to be case-sensitive exact. On MySQL
+that holds only when the server runs `lower_case_table_names = 0` (the
+Linux default, and what the `mysql:8` conformance CI image uses); a server
+with `lower_case_table_names = 1` (macOS default, some managed hosts)
+folds table identifiers to lowercase, so `table=Users` would resolve to
+`users`. The conformance suite's `table_data::table_param_match_is_case_sensitive`
+assumes the `= 0` setting; running it against a `= 1` server is out of
+scope.
 
 ## §5.2 / §5.3 — table listing & the `table` allow-list
 
@@ -183,13 +205,18 @@ language/framework port under `PORTING.md`. `MySqlSource` targets one
 `sqlx` driver serving both MySQL and MariaDB (they share a wire protocol)
 but the two forks diverge on the query-timeout mechanism (§6 above); it
 detects which one it's talking to at runtime rather than requiring the
-host to declare it. Neither adapter is run through `conformance/runner`
-(that suite targets Postgres); each has its own unit test suite instead —
-SQLite's needs no external infrastructure (`sqlite::memory:`), while
-MySQL/MariaDB's needs a live instance reachable via `MYSQL_TEST_URL` or
-`MARIADB_TEST_URL` (the devcontainer runs permanent `mysql` and `mariadb`
-services for exactly this — but neither has a dedicated CI job, the same
-"no CI coverage" gap already accepted for `mysql`/`sqlite` generally). The rows above
+host to declare it. Both adapters now run through `conformance/runner`:
+`rust-axum-conformance.yml`'s `mysql-conformance` and `sqlite-conformance`
+jobs boot a `DB_BACKEND=mysql` / `DB_BACKEND=sqlite` demo against a
+hand-authored dialect seed (`conformance/seed/seed.mysql.sql` /
+`seed.sqlite.sql`, the sqlx-style split — the Postgres seed's generator
+emits Postgres-only SQL) and point the kit at it; the runner learns which
+engine's expectations to hold from the seed's `_conformance_meta.dialect`
+column (`conformance/runner/backend.rs`). A `non-default-backend-tests`
+job runs the feature lint plus the `sqlite`/`mysql` unit and integration
+tests (`mise run rust:backends`) against `mysql:8` + `mariadb:11` service
+containers. The devcontainer still runs permanent `mysql` and `mariadb`
+services for local runs (`MYSQL_TEST_URL` / `MARIADB_TEST_URL`). The rows above
 describe the per-clause decisions each makes to satisfy
 `spec/protocol.md`'s properties without Postgres's catalog/stats
 mechanisms — most notably SQLite's exact-`COUNT(*)`-turned-`-1` and live-

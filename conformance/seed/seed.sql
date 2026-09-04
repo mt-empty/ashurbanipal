@@ -213,6 +213,7 @@ create table feature_flags (
 -- to apply the seed itself) — see write_conformance_meta().
 create table _conformance_meta (
     seed_version text not null,
+    dialect text not null,
     checksum text not null,
     generated_at timestamptz not null default now()
 );
@@ -53552,4 +53553,4 @@ analyze inventory_counts;
 analyze warehouse.carriers;
 analyze warehouse.shipments;
 analyze warehouse.shipment_events;
-insert into _conformance_meta (seed_version, checksum) values ('3', '35dd594b94ecf279');
+insert into _conformance_meta (seed_version, dialect, checksum) values ('4', 'postgres', '4dd6f9273f410e7e');

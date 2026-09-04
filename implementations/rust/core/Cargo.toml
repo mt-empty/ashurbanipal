@@ -16,6 +16,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"
 
+[dev-dependencies]
+# Current-thread only: every `#[tokio::test]` here is single-threaded and the
+# `mysql` tests' Drop-guard builds its own `new_current_thread` runtime.
+tokio = { version = "1", features = ["rt", "macros"] }
+
 [features]
 default = ["postgres"]
 # On by default: PgPoolSource is the reference backend. Disable

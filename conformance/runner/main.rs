@@ -5,6 +5,7 @@
 //! selection.
 
 mod assert;
+mod backend;
 mod common;
 mod common_values;
 mod filter_dsl;

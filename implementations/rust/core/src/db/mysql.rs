@@ -603,18 +603,47 @@ mod tests {
         name: String,
     }
 
-    impl SeededDb {
-        async fn drop_and_close(self) {
-            self.pool.close().await;
-            let admin = MySqlPool::connect(&test_url()).await.unwrap();
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "drop database `{}`",
-                self.name
-            )))
-            .execute(&admin)
-            .await
-            .unwrap();
-            admin.close().await;
+    impl Drop for SeededDb {
+        fn drop(&mut self) {
+            // Drop is sync and may run during a panic unwind, while the
+            // test's own runtime is still the ambient one — so the
+            // `drop database` goes on a throwaway runtime on its own
+            // thread. Without this, a failed assertion leaks the test
+            // database into the shared instance, where a later
+            // `/api/schemas` (or the conformance suite) would surface it.
+            let name = std::mem::take(&mut self.name);
+            let _ = std::thread::spawn(move || {
+                let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                else {
+                    return;
+                };
+                rt.block_on(async move {
+                    let admin = match sqlx::mysql::MySqlPoolOptions::new()
+                        .max_connections(1)
+                        .acquire_timeout(std::time::Duration::from_secs(5))
+                        .connect(&test_url())
+                        .await
+                    {
+                        Ok(admin) => admin,
+                        Err(e) => {
+                            eprintln!("SeededDb::drop: could not connect to drop `{name}`: {e}");
+                            return;
+                        }
+                    };
+                    if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(format!(
+                        "drop database if exists `{name}`"
+                    )))
+                    .execute(&admin)
+                    .await
+                    {
+                        eprintln!("SeededDb::drop: dropping `{name}` failed: {e}");
+                    }
+                    admin.close().await;
+                });
+            })
+            .join();
         }
     }
 
@@ -622,9 +651,8 @@ mod tests {
         let admin = MySqlPool::connect(&test_url()).await.unwrap();
         // A counter alone collides across separate `cargo test` invocations
         // against the same long-lived instance (it resets to 0 every
-        // process run) — a run that panics before `drop_and_close` leaves
-        // its database behind for the next run to collide with. The nanos
-        // component makes that collision practically impossible even then.
+        // process run); the nanos component keeps names unique even if a
+        // `Drop` cleanup is ever skipped (SIGKILL mid-test).
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -747,8 +775,6 @@ mod tests {
                 assert!(value.is_string() || value.is_null());
             }
         }
-
-        db.drop_and_close().await;
     }
 
     #[tokio::test]
@@ -774,8 +800,6 @@ mod tests {
         assert_eq!(user_id_col.key, Some(KeyKind::Fk));
         assert_eq!(user_id_col.references.as_ref().unwrap().table, "users");
         assert_eq!(user_id_col.references.as_ref().unwrap().column, "id");
-
-        db.drop_and_close().await;
     }
 
     #[tokio::test]
@@ -801,8 +825,6 @@ mod tests {
         assert_eq!(order_id_col.key, Some(KeyKind::Pk));
         assert_eq!(order_id_col.references.as_ref().unwrap().table, "orders");
         assert_eq!(order_id_col.references.as_ref().unwrap().column, "id");
-
-        db.drop_and_close().await;
     }
 
     #[tokio::test]
@@ -831,8 +853,6 @@ mod tests {
             users_count >= 0,
             "expected a real estimate, got the no-estimate sentinel: {users_count}"
         );
-
-        db.drop_and_close().await;
     }
 
     #[tokio::test]
@@ -843,8 +863,6 @@ mod tests {
         // §5.5's "no statistics available" case), not a live scan.
         let values = source.common_values(None, "users", "age").await.unwrap();
         assert!(values.is_empty());
-
-        db.drop_and_close().await;
     }
 
     #[tokio::test]
@@ -855,8 +873,6 @@ mod tests {
             source.common_values(None, "users", "nope").await,
             Err(DbError::NotAllowed(_))
         ));
-
-        db.drop_and_close().await;
     }
 
     #[tokio::test]
@@ -912,7 +928,5 @@ mod tests {
             .unwrap();
         assert_eq!(ok, 1);
         drop(conn);
-
-        db.drop_and_close().await;
     }
 }

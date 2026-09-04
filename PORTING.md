@@ -208,12 +208,22 @@ ASHURBANIPAL_CONFORMANCE_URL=http://localhost:PORT/__ashurbanipal \
 ```
 
 Add `ASHURBANIPAL_CONFORMANCE_SEED_DSN=$YOUR_DSN` to have the runner apply
-the seed itself instead of doing it by hand first; omit it and the runner
-instead verifies the `_conformance_meta` sentinel table and fails fast
-with a clear message if the seed looks absent or stale (see
+the seed itself instead of doing it by hand first (Postgres only); omit it
+and the runner instead verifies the `_conformance_meta` sentinel table and
+fails fast with a clear message if the seed looks absent or stale (see
 `conformance/seed/README.md`). Writes `conformance-report.json` (suite
 version, target, pass/fail per requirement ID from
 `conformance/runner/COVERAGE.md`).
+
+**Non-Postgres targets:** apply `conformance/seed/seed.mysql.sql` or
+`seed.sqlite.sql` instead (hand-authored dialect counterparts — the
+Postgres seed's generator emits Postgres-only SQL). The runner reads the
+engine from that seed's `_conformance_meta.dialect` column and asserts
+that engine's flavor of the spec's documented relaxations
+(`conformance/runner/backend.rs`); `ASHURBANIPAL_CONFORMANCE_BACKEND` is a
+fallback for a seed predating the column, cross-checked against it when
+both are present. `rust-axum-conformance.yml`'s `mysql-conformance` /
+`sqlite-conformance` jobs are the concrete pattern.
 
 Shape conformance — Python + schemathesis, no Rust toolchain needed:
 

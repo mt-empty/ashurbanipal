@@ -15,7 +15,10 @@
 
 use ashurbanipal_axum::{DbError, DbSource, MySqlSource, QueryOpts};
 use sqlx::mysql::MySqlPoolOptions;
-use sqlx::{Executor, MySqlPool};
+use sqlx::Executor;
+
+mod common;
+use common::MysqlCleanup;
 
 const SCHEMA: &str = "ashb_test_table_privileges";
 const USER: &str = "ashb_test_table_privileges_user";
@@ -34,7 +37,7 @@ fn as_limited_user(url: &str, user: &str, password: &str) -> String {
     format!("{scheme}://{user}:{password}@{host}/{SCHEMA}")
 }
 
-async fn setup(admin_url: &str) -> MySqlPool {
+async fn setup(admin_url: &str) {
     let pool = MySqlPoolOptions::new()
         .max_connections(1)
         .connect(admin_url)
@@ -58,20 +61,17 @@ async fn setup(admin_url: &str) -> MySqlPool {
             .await
             .expect("setup database/user");
     }
-    pool
-}
-
-async fn teardown(pool: &MySqlPool) {
-    for stmt in [
-        format!("drop database if exists {SCHEMA}"),
-        format!("drop user if exists '{USER}'@'%'"),
-    ] {
-        pool.execute(sqlx::AssertSqlSafe(stmt)).await.ok();
-    }
 }
 
 async fn run(admin_url: &str) {
-    let admin_pool = setup(admin_url).await;
+    setup(admin_url).await;
+    let _cleanup = MysqlCleanup {
+        url: admin_url.to_string(),
+        statements: vec![
+            format!("drop database if exists {SCHEMA}"),
+            format!("drop user if exists '{USER}'@'%'"),
+        ],
+    };
 
     let pool = MySqlPoolOptions::new()
         .max_connections(2)
@@ -131,8 +131,6 @@ async fn run(admin_url: &str) {
         ),
         "a table absent from the allow-list must be rejected as NotAllowed"
     );
-
-    teardown(&admin_pool).await;
 }
 
 #[tokio::test]

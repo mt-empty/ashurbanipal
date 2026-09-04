@@ -3,11 +3,12 @@
 //! exactly this (`conformance/seed/README.md`).
 
 use crate::assert::{assert_exact, assert_status};
+use crate::backend::{Backend, SchemaModel};
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
 
 #[tokio::test]
-async fn lists_public_and_the_seed_s_second_schema_excluding_system_namespaces() {
+async fn lists_the_default_schema_and_the_seed_s_second_one_excluding_system_namespaces() {
     let srv = TestServer::spawn().await;
     let body: serde_json::Value = srv
         .client()
@@ -24,21 +25,35 @@ async fn lists_public_and_the_seed_s_second_schema_excluding_system_namespaces()
         .iter()
         .map(|s| s.as_str().unwrap())
         .collect();
+    let default_schema = Backend::current().default_schema();
+    match Backend::current().schema_model() {
+        SchemaModel::Namespaced => assert!(
+            names.contains(&default_schema.as_str()) && names.contains(&"other_schema"),
+            "GET /api/schemas must list both seeded schemas (default {default_schema:?}): {names:?}"
+        ),
+        SchemaModel::Single => assert_exact(
+            names.clone(),
+            vec![default_schema.as_str()],
+            "a single-schema backend lists exactly its one schema",
+        ),
+    }
     assert!(
-        names.contains(&"public") && names.contains(&"other_schema"),
-        "GET /api/schemas must list both seeded schemas: {names:?}"
-    );
-    assert!(
-        !names
-            .iter()
-            .any(|n| *n == "pg_catalog" || *n == "information_schema" || n.starts_with("pg_")),
+        !names.iter().any(|n| {
+            n.starts_with("pg_")
+                || matches!(
+                    *n,
+                    // Postgres | MySQL/MariaDB system schemas
+                    "pg_catalog" | "information_schema" | "mysql" | "performance_schema" | "sys"
+                )
+        }),
         "GET /api/schemas must never list system/internal namespaces: {names:?}"
     );
 }
 
 #[tokio::test]
-async fn explicit_schema_public_matches_the_implicit_default() {
+async fn explicit_default_schema_matches_the_implicit_default() {
     let srv = TestServer::spawn().await;
+    let default_schema = Backend::current().default_schema();
     let implicit: serde_json::Value = srv
         .client()
         .get(srv.url("/api/tables"))
@@ -51,7 +66,7 @@ async fn explicit_schema_public_matches_the_implicit_default() {
     let explicit: serde_json::Value = srv
         .client()
         .get(srv.url("/api/tables"))
-        .query(&[("schema", "public")])
+        .query(&[("schema", default_schema.as_str())])
         .send()
         .await
         .unwrap()
@@ -61,13 +76,19 @@ async fn explicit_schema_public_matches_the_implicit_default() {
     assert_exact(
         explicit,
         implicit,
-        "schema=public must resolve identically to an absent schema param (spec/protocol.md §1)",
+        &format!(
+            "schema={default_schema:?} must resolve identically to an absent schema param (spec/protocol.md §1)"
+        ),
     );
 }
 
 #[tokio::test]
 async fn explicit_other_schema_selects_only_its_own_table() {
     let srv = TestServer::spawn().await;
+    if let SchemaModel::Single = Backend::current().schema_model() {
+        eprintln!("schemas: skipping — single-schema backend has no second schema to select");
+        return;
+    }
     let body: serde_json::Value = srv
         .client()
         .get(srv.url("/api/tables"))

@@ -436,6 +436,7 @@ fn write_schema(out: &mut String) {
          -- to apply the seed itself) — see write_conformance_meta().\n\
          create table _conformance_meta (\n\
          \x20   seed_version text not null,\n\
+         \x20   dialect text not null,\n\
          \x20   checksum text not null,\n\
          \x20   generated_at timestamptz not null default now()\n\
          );\n\n",
@@ -1538,7 +1539,7 @@ fn write_conformance_meta(out: &mut String) {
     let version = CONFORMANCE_VERSION.trim();
     writeln!(
         out,
-        "insert into _conformance_meta (seed_version, checksum) values ({}, {});",
+        "insert into _conformance_meta (seed_version, dialect, checksum) values ({}, 'postgres', {});",
         q(version),
         q(&checksum),
     )

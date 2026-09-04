@@ -22,7 +22,10 @@ use std::sync::Arc;
 
 use ashurbanipal_axum::{DbSource, MySqlSource, QueryOpts};
 use sqlx::mysql::MySqlPoolOptions;
-use sqlx::{Executor, MySqlPool};
+use sqlx::Executor;
+
+mod common;
+use common::MysqlCleanup;
 
 const SCHEMA_A: &str = "ashb_test_schema_isolation_a";
 const SCHEMA_B: &str = "ashb_test_schema_isolation_b";
@@ -79,13 +82,20 @@ async fn setup_schemas(test_url: &str, schema_a: &str, schema_b: &str) {
     .unwrap();
 }
 
-async fn teardown_schemas(pool: &MySqlPool, schema_a: &str, schema_b: &str) {
-    for schema in [schema_a, schema_b] {
-        pool.execute(sqlx::AssertSqlSafe(format!(
-            "drop database if exists {schema}"
-        )))
-        .await
-        .ok();
+/// The cross-schema-FK test's `child` references `parent` in a sibling
+/// database, so an in-order `DROP DATABASE` hits a constraint — the leading
+/// `set foreign_key_checks = 0` clears enforcement for the throwaway
+/// cleanup session first.
+fn cleanup_for(test_url: &str, databases: &[&str]) -> MysqlCleanup {
+    let mut statements = vec!["set foreign_key_checks = 0".to_string()];
+    statements.extend(
+        databases
+            .iter()
+            .map(|db| format!("drop database if exists {db}")),
+    );
+    MysqlCleanup {
+        url: test_url.to_string(),
+        statements,
     }
 }
 
@@ -95,6 +105,7 @@ async fn query_table_never_mixes_schemas_across_pooled_connections() {
         .expect("MYSQL_TEST_URL must be set (the devcontainer sets it automatically)");
 
     setup_schemas(&test_url, SCHEMA_A, SCHEMA_B).await;
+    let _cleanup = cleanup_for(&test_url, &[SCHEMA_A, SCHEMA_B]);
 
     // Alternates each newly-opened physical connection's default database
     // between the two schemas, simulating a host pool whose sessions don't
@@ -175,8 +186,6 @@ async fn query_table_never_mixes_schemas_across_pooled_connections() {
             ),
         }
     }
-
-    teardown_schemas(&pool, SCHEMA_A, SCHEMA_B).await;
 }
 
 #[tokio::test]
@@ -185,6 +194,7 @@ async fn explicit_schema_selects_that_schema_and_rejects_unknown_ones() {
         .expect("MYSQL_TEST_URL must be set (the devcontainer sets it automatically)");
 
     setup_schemas(&test_url, SCHEMA_C, SCHEMA_D).await;
+    let _cleanup = cleanup_for(&test_url, &[SCHEMA_C, SCHEMA_D]);
 
     let pool = MySqlPoolOptions::new()
         .max_connections(2)
@@ -244,8 +254,6 @@ async fn explicit_schema_selects_that_schema_and_rejects_unknown_ones() {
         }),
         "system schemas must never be offered as selectable"
     );
-
-    teardown_schemas(&pool, SCHEMA_C, SCHEMA_D).await;
 }
 
 /// Positive assertion, not a regression test for a known bug (unlike the
@@ -259,6 +267,7 @@ async fn cross_schema_foreign_key_reports_schema_qualified_reference() {
     let test_url = std::env::var("MYSQL_TEST_URL")
         .expect("MYSQL_TEST_URL must be set (the devcontainer sets it automatically)");
 
+    let _cleanup = cleanup_for(&test_url, &[SCHEMA_E, SCHEMA_F]);
     let pool = MySqlPoolOptions::new()
         .max_connections(2)
         .connect(&test_url)
@@ -345,6 +354,4 @@ async fn cross_schema_foreign_key_reports_schema_qualified_reference() {
         same_refs.schema, None,
         "same-schema FK must omit `schema`, keeping the wire payload unchanged"
     );
-
-    teardown_schemas(&pool, SCHEMA_E, SCHEMA_F).await;
 }

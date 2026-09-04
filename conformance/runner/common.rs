@@ -165,18 +165,22 @@ impl Drop for TestServer {
 
 /// If `ASHURBANIPAL_CONFORMANCE_SEED_DSN` is set, applies
 /// `conformance/seed/seed.sql` directly (idempotent — drops and recreates
-/// its own tables). Otherwise, verifies the target already carries this
-/// seed via the ordinary protocol itself — `_conformance_meta` is an
-/// unprivileged base table, so `GET /api/tables/data?table=_conformance_meta`
-/// works identically for a spawned reference and an external port, with no
-/// separate DB credential needed for the common case.
+/// its own tables). Either way, then reads the `_conformance_meta` sentinel
+/// back over the ordinary protocol — an unprivileged base table, so
+/// `GET /api/tables/data?table=_conformance_meta` works identically for a
+/// spawned reference and an external port with no separate DB credential —
+/// to confirm the seed version and record the SQL dialect it declares
+/// (`crate::backend`).
 async fn ensure_seed(http: &reqwest::Client, mount_root: &str) {
-    match std::env::var("ASHURBANIPAL_CONFORMANCE_SEED_DSN") {
-        Ok(dsn) => apply_seed(&dsn),
-        Err(_) => verify_seed_sentinel(http, mount_root).await,
+    if let Ok(dsn) = std::env::var("ASHURBANIPAL_CONFORMANCE_SEED_DSN") {
+        apply_seed(&dsn);
     }
+    verify_seed_sentinel(http, mount_root).await;
 }
 
+/// Postgres only (`psql` + `seed.sql`). For a MySQL/SQLite target, apply
+/// `seed.mysql.sql` / `seed.sqlite.sql` out of band and let the sentinel
+/// path below take over — see `rust-axum-conformance.yml`.
 fn apply_seed(dsn: &str) {
     let seed_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("conformance/seed/seed.sql");
     let status = Command::new("psql")
@@ -228,4 +232,25 @@ async fn verify_seed_sentinel(http: &reqwest::Client, mount_root: &str) {
              conformance/seed/seed.sql."
         );
     }
+
+    // `dialect` (added in seed_version 4) tells the backend-aware
+    // assertions which engine's expectations to hold. A seed without it
+    // leaves `ASHURBANIPAL_CONFORMANCE_BACKEND` (or the Postgres default)
+    // in play; if both are set they must resolve to the same engine.
+    use crate::backend::Backend;
+    if let Some(dialect) = body["rows"][0]["dialect"].as_str() {
+        if let Ok(env_backend) = std::env::var("ASHURBANIPAL_CONFORMANCE_BACKEND") {
+            if let (Some(from_env), Some(from_seed)) =
+                (Backend::parse(&env_backend), Backend::parse(dialect))
+            {
+                assert_eq!(
+                    from_env, from_seed,
+                    "ASHURBANIPAL_CONFORMANCE_BACKEND={env_backend:?} disagrees with the loaded \
+                     seed's dialect {dialect:?} — the target isn't seeded with what the env var claims"
+                );
+            }
+        }
+        Backend::record_from_seed(dialect);
+    }
+    Backend::mark_seed_checked();
 }
