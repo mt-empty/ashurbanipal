@@ -1154,6 +1154,7 @@ $("api-help-copy").onclick = () => copyText($("api-help-pre").textContent ?? "",
 // src/filter-dsl.ts
 var FILTER_MAX_DSL_BYTES = 1024;
 var FILTER_MAX_CONDITIONS = 10;
+var RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 var FilterDslError = class extends Error {
   position;
   constructor(message, position) {
@@ -1234,7 +1235,7 @@ function parseFilterDsl(input) {
       pos += c.length;
     }
     if (value === "") throw err("expected value", start);
-    if (/^(AND|OR|NOT)$/i.test(value))
+    if (RESERVED_WORD_RE.test(value))
       throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
     return value;
   };
@@ -1310,7 +1311,7 @@ function tryParseFilterDsl(input) {
   }
 }
 function quoteFilterValue(value) {
-  if (value !== "" && !/[\s']/.test(value) && !/^(AND|OR|NOT)$/i.test(value)) return value;
+  if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return "'" + value.replace(/'/g, "''") + "'";
 }
 window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };
