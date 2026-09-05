@@ -2252,8 +2252,7 @@ function syncUrl() {
     params.set("sort", state.sort);
     params.set("order", state.order);
   }
-  if (state.source) params.set("source", state.source);
-  if (state.schema) params.set("schema", state.schema);
+  applyScopeParams(params);
   if (state.filter) params.set("filter", state.filter);
   const qs = "?" + params;
   const key = navViewKey();

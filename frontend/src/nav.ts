@@ -1,6 +1,6 @@
 import { $, reportError } from "./dom.js";
 import { loadTables } from "./sidebar.js";
-import { persist, restoreFilterFromParams, state } from "./state.js";
+import { applyScopeParams, persist, restoreFilterFromParams, state } from "./state.js";
 
 // Back/forward navigation stops at table/schema/source switches, not every
 // sort/page tweak within the same table — otherwise "back" would undo
@@ -31,8 +31,7 @@ export function syncUrl(): void {
     table: state.table ?? "", limit: String(state.limit), offset: String(state.offset),
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
-  if (state.source) params.set("source", state.source);
-  if (state.schema) params.set("schema", state.schema);
+  applyScopeParams(params);
   if (state.filter) params.set("filter", state.filter);
   const qs = "?" + params;
   const key = navViewKey();
