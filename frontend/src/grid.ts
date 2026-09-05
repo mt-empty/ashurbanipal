@@ -133,7 +133,7 @@ function showCellPop(e: MouseEvent, text: string): void {
 
 // A real <button> as the click target so it's keyboard-focusable and
 // Enter/Space-activatable, matching the copy button one element over.
-function buildCell(col: Column, raw: string | null): HTMLTableCellElement {
+function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTableCellElement {
   const isNull = raw == null;
   // A null cell has no copy/expand affordance to clone, so it builds a bare
   // <td> rather than the template's.
@@ -141,7 +141,7 @@ function buildCell(col: Column, raw: string | null): HTMLTableCellElement {
     ? document.createElement("td")
     : (cellTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
   td.dataset.col = col.name;
-  if (hiddenColumnsForTable().includes(col.name)) td.classList.add("col-hidden");
+  if (hidden.has(col.name)) td.classList.add("col-hidden");
   if (isNull) {
     const span = document.createElement("span");
     span.className = "cell-text";
@@ -254,11 +254,13 @@ function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
 // passed only on an explicit refresh) tint those rows via .row-new;
 // pkNames is the matching PK column list, computed once by the caller.
 export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
+  // Same for every cell in this render, so computed once rather than
+  // re-derived (array rebuild + linear scan) per cell.
+  const hidden = new Set(hiddenColumnsForTable());
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
     // hidden columns (display:none) aren't counted.
-    const hidden = hiddenColumnsForTable();
-    const visible = data.columns.filter((c) => !hidden.includes(c.name)).length;
+    const visible = data.columns.filter((c) => !hidden.has(c.name)).length;
     renderEmptyState(visible + 1);
     return;
   }
@@ -268,7 +270,7 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
     if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
     tr.appendChild(buildRowActionCell(data.columns, row));
     for (const col of data.columns) {
-      tr.appendChild(buildCell(col, row[col.name]));
+      tr.appendChild(buildCell(col, row[col.name], hidden));
     }
     return tr;
   }));

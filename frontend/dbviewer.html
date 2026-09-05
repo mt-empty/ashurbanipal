@@ -1639,11 +1639,11 @@ function showCellPop(e, text) {
   cellPopAnchor.style.anchorName = "--cell-anchor";
   $("cell-pop").showPopover();
 }
-function buildCell(col, raw) {
+function buildCell(col, raw, hidden) {
   const isNull = raw == null;
   const td = isNull ? document.createElement("td") : cellTemplate.content.cloneNode(true).firstElementChild;
   td.dataset.col = col.name;
-  if (hiddenColumnsForTable().includes(col.name)) td.classList.add("col-hidden");
+  if (hidden.has(col.name)) td.classList.add("col-hidden");
   if (isNull) {
     const span = document.createElement("span");
     span.className = "cell-text";
@@ -1732,9 +1732,9 @@ function buildRowActionCell(columns, row) {
   return td;
 }
 function renderRows(data, newRowKeys, pkNames = []) {
+  const hidden = new Set(hiddenColumnsForTable());
   if (data.rows.length === 0) {
-    const hidden = hiddenColumnsForTable();
-    const visible = data.columns.filter((c) => !hidden.includes(c.name)).length;
+    const visible = data.columns.filter((c) => !hidden.has(c.name)).length;
     renderEmptyState(visible + 1);
     return;
   }
@@ -1744,7 +1744,7 @@ function renderRows(data, newRowKeys, pkNames = []) {
     if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
     tr.appendChild(buildRowActionCell(data.columns, row));
     for (const col of data.columns) {
-      tr.appendChild(buildCell(col, row[col.name]));
+      tr.appendChild(buildCell(col, row[col.name], hidden));
     }
     return tr;
   }));
