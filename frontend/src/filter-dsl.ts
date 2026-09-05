@@ -1,4 +1,4 @@
-import type { FilterCondition } from "./types.js";
+import type { FilterCondition, FilterOp } from "./types.js";
 
 // ==== Filter DSL parser (box text → wire AST) ====
 // The single canonical implementation of spec/filter-dsl.md — no backend
@@ -25,7 +25,7 @@ class FilterDslError extends Error {
   }
 }
 
-type SimpleCondition = { column: string; op: string; value?: string };
+type SimpleCondition = { column: string; op: FilterOp; value?: string };
 
 export function parseFilterDsl(input: string): FilterCondition[] {
   const err = (message: string, index: number): FilterDslError => {
@@ -106,11 +106,11 @@ export function parseFilterDsl(input: string): FilterCondition[] {
   };
   // Symbolic operators longest-first so >=/<= aren't misread as >/< plus
   // a bare =... value.
-  const parseOperator = (): string => {
+  const parseOperator = (): FilterOp => {
     const start = pos;
     if (consumeKeyword("ILIKE")) return "ILIKE";
     if (consumeKeyword("LIKE")) return "LIKE";
-    for (const sym of [">=", "<=", "!=", ">", "<", "="]) {
+    for (const sym of [">=", "<=", "!=", ">", "<", "="] as const) {
       if (input.startsWith(sym, pos)) { pos += sym.length; return sym; }
     }
     throw err("expected operator (one of = != >= <= > < LIKE ILIKE, or IS [NOT] NULL)", start);

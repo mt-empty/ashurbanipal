@@ -22,11 +22,13 @@ export interface TableData {
   total_approx: number;
 }
 
+export type FilterOp = "=" | "!=" | ">" | ">=" | "<" | "<=" | "LIKE" | "ILIKE" | "IS NULL" | "IS NOT NULL";
+
 export interface FilterCondition {
   logic?: "AND" | "OR";
   not?: boolean;
   column: string;
-  op: string;
+  op: FilterOp;
   value?: string;
 }
 

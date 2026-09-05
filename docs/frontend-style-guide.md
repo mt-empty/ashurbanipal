@@ -32,10 +32,10 @@ something a review should flag.
   two behind getter/setter functions, since a plain `let` export can't be
   reassigned from outside its own module under ESM.
 - `dom.ts` holds generic, feature-agnostic helpers (`$`, `setStatus`,
-  `copyText`).
+  `copyText`, `reportError`/`clearError`, `populateSelect`, `flashIcon`).
 - `main.ts` is the entry point: owns `loadData` (the render-orchestration
   hub touching multiple feature modules), the remaining top-level wiring,
-  and the bootstrap calls at the very bottom (`loadSchemas().then(loadTables)`,
+  and the bootstrap calls at the very bottom (`loadSources().then(loadSchemas).then(loadTables)`,
   `loadSiblings()`, the polling `setInterval`) — nothing else after them.
 - Circular imports between feature modules are expected and safe here
   (e.g. `grid.ts` ↔ `main.ts` for `loadData`, `grid.ts` ↔ `record-view.ts`
@@ -92,9 +92,10 @@ instead of searching one file for a banner.
   is a real, observed failure mode here (stuck loading spinners, and a
   table's chrome/label disagreeing with the rows actually rendered), not a
   hypothetical. `cvRequestToken` (`showCommonValues`), `loadDataToken`
-  (`loadData`), `siblingsRequestToken` (`loadSiblings`), and
-  `loadTablesToken` (`loadTables`) are the existing instances of this
-  pattern — copy their shape for the next one rather than reinventing it.
+  (`loadData`), `siblingsRequestToken` (`loadSiblings`), `loadTablesToken`
+  (`loadTables`), and `loadSchemasToken` (`loadSchemas`) are the existing
+  instances of this pattern — copy their shape for the next one rather
+  than reinventing it.
 - **Functions do one thing.** Don't let a function fetch, re-render
   multiple DOM regions, *and* update pager state in one body — split
   fetch/render-header/render-body/update-pager into separate functions even

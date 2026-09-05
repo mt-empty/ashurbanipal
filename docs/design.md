@@ -153,11 +153,12 @@ Two components, same as the original concept:
   - *Sidebar table search* — a search box above the table list filters it
     live, client-side, as the user types.
 - **UI state persistence**: `localStorage` remembers lightweight UI state
-  across visits — currently selected table, sort column/direction, page
-  size, and per-table hidden-column sets — and the same state (except
-  hidden columns and the filter) is mirrored into the URL's query params
-  via `history.replaceState`, so the address bar is always a shareable
-  link for the current view. Properties:
+  across visits — currently selected source, schema (remembered per
+  source), table, sort column/direction (remembered per table, like
+  hidden columns), page size, and per-table hidden-column sets — and the
+  same state (except hidden columns and the filter) is mirrored into the
+  URL's query params via `history.replaceState`, so the address bar is
+  always a shareable link for the current view. Properties:
   - One `localStorage` key, `ashurbanipal_ui`, value is a small JSON
     object. Nothing sensitive ever goes in it — table/column names only,
     no row data, no filters. The *applied* filter is the one exception,

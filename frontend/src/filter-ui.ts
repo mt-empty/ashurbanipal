@@ -3,7 +3,7 @@ import { $, reportError } from "./dom.js";
 import { parseFilterDsl, quoteFilterValue } from "./filter-dsl.js";
 import { loadData } from "./main.js";
 import { applyScopeParams, getLastPayload, markFilterVerified, setAppliedFilterAst, state } from "./state.js";
-import type { CommonValue, FilterCondition } from "./types.js";
+import type { CommonValue, FilterCondition, FilterOp } from "./types.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
@@ -18,7 +18,7 @@ export function submitFilter(text: string): void {
   loadData();
 }
 
-export function applyFilterClause(column: string, op: string, value?: string): void {
+export function applyFilterClause(column: string, op: FilterOp, value?: string): void {
   // value is omitted for a valueless predicate (IS NULL). The composed
   // text round-trips through parseFilterDsl like a hand-typed clause —
   // quoteFilterValue guarantees it parses.

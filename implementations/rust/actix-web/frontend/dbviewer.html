@@ -591,7 +591,7 @@ function buildApiReference() {
   const base = new URL(API, location.href).toString().replace(/\/$/, "");
   const exampleFilter = encodeURIComponent(JSON.stringify([{ column: "status", op: "=", value: "active" }]));
   return {
-    description: "Read-only REST API for browsing this service's database tables. Every endpoint is GET and returns JSON. Table/column names are data-dependent \u2014 call GET /tables first to discover real names before calling anything else.",
+    description: "Read-only REST API for browsing this service's database tables. Every endpoint is GET and returns JSON. Every cell value is a JSON string or null, regardless of the column's real type \u2014 never a JSON number or boolean. Source/schema/table names are data-dependent \u2014 call GET /sources, then GET /schemas, then GET /tables to discover real names before calling anything else.",
     base_url: base,
     endpoints: [
       {
@@ -633,7 +633,7 @@ function buildApiReference() {
       {
         method: "GET",
         path: `${base}/tables/data`,
-        summary: "Paginated, filtered, sorted rows for one table.",
+        summary: 'Paginated, filtered, sorted rows for one table. `total_approx` may be -1, same caveat as GET /table-counts. A column that is both primary key and foreign key reports `key: "pk"` but still carries `references` (see the `order_id` example column); `references.schema` is present only when the referenced table lives in a different schema.',
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables" },
@@ -649,9 +649,15 @@ function buildApiReference() {
           columns: [
             { name: "id", type: "uuid", key: "pk" },
             { name: "user_id", type: "uuid", key: "fk", references: { table: "users", column: "id" } },
+            {
+              name: "order_id",
+              type: "integer",
+              key: "pk",
+              references: { table: "orders", column: "id", schema: "public" }
+            },
             { name: "status", type: "text" }
           ],
-          rows: [{ id: "...", user_id: "...", status: "active" }],
+          rows: [{ id: "...", user_id: "...", order_id: "...", status: "active" }],
           total_approx: 108234
         }
       },
@@ -683,7 +689,8 @@ function buildApiReference() {
         '`logic` ("AND" | "OR") must be absent on the first condition and present on every later one; AND binds tighter than OR (SQL precedence \u2014 no parentheses/nesting exist).',
         "`not: true` negates its single condition; optional, defaults to false.",
         "`value` is always a JSON string, required except for IS NULL / IS NOT NULL, which take none.",
-        "columns are cast to text before comparison, so the same operators work across uuid/timestamptz/jsonb/etc.",
+        "columns are cast to text before comparison, so the same operators work across uuid/timestamptz/jsonb/etc. \u2014 but '>'/'<'/'>='/'<=' then compare lexicographically as text, not numerically: a filter like age > 9 will incorrectly exclude age = 10.",
+        "an empty condition array is treated identically to an absent `filter` param.",
         "at most 10 conditions and 8192 bytes of URL-decoded JSON \u2014 exceeding either is a 400.",
         "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text and compiles it to this AST client-side \u2014 DSL text sent as the `filter` param is a 400."
       ],
@@ -929,9 +936,10 @@ function isPlainObject(v) {
 function restoreFromStorage() {
   try {
     const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-    for (const k of ["source", "schema", "table", "limit"]) {
-      if (saved[k] !== void 0) state[k] = saved[k];
-    }
+    if (typeof saved.source === "string") state.source = saved.source;
+    if (typeof saved.schema === "string") state.schema = saved.schema;
+    if (typeof saved.table === "string") state.table = saved.table;
+    if (typeof saved.limit === "number" && Number.isFinite(saved.limit)) state.limit = saved.limit;
     if (isPlainObject(saved.hiddenColumns)) {
       for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
         if (!Array.isArray(cols)) continue;

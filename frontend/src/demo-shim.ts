@@ -1,7 +1,7 @@
 // Fake backend for the GitHub Pages demo: answers dbviewer.html's /api/*
 // calls from demo-fixtures.ts instead of a real server.
 import { SCHEMAS, SIBLINGS, TABLES, type CellValue, type TableDef } from "./demo-fixtures.js";
-import type { FilterCondition } from "./types.js";
+import type { FilterCondition, FilterOp } from "./types.js";
 
 function toWire(v: CellValue): string | null {
   if (v === null || v === undefined) return null;
@@ -56,7 +56,7 @@ function typedCompare(t: string, a: CellValue, b: CellValue): number {
   if (typeof a === "boolean" && typeof b === "boolean") return a === b ? 0 : a ? 1 : -1;
   return String(toWire(a)).localeCompare(String(toWire(b)));
 }
-const VALID_OPS = new Set(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
+const VALID_OPS = new Set<FilterOp>(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
 function likeToRegExp(pattern: string, ci: boolean): RegExp {
   const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
   return new RegExp(`^${escaped}$`, ci ? "i" : "");
@@ -80,7 +80,9 @@ function matchesCondition(table: TableDef, row: Record<string, CellValue>, cond:
       result = cond.op === ">" ? cmp > 0 : cond.op === "<" ? cmp < 0 : cond.op === ">=" ? cmp >= 0 : cmp <= 0;
       break;
     }
-    default: result = false;
+    // Unreachable given FilterOp's 10 members are all handled above — a
+    // future member added without a matching case fails to compile here.
+    default: { const _exhaustive: never = cond.op; result = false; }
   }
   return cond.not ? !result : result;
 }
