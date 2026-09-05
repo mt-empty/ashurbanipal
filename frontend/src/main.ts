@@ -6,7 +6,7 @@ import { syncUrl } from "./nav.js";
 import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
-import { applyScopeParams, dropOneStaleInput, getAppliedFilterAst, getLastPayload, getLastScopeKey, markRestoredFilterVerified, markStoredSortVerified, rowKey, scopeKey, setLastPayload, setLastScopeKey, state } from "./state.js";
+import { applyScopeParams, dropOneStaleInput, getAppliedFilterAst, getLastPayload, getLastScopeKey, markFilterVerified, markStoredSortVerified, rowKey, scopeKey, setLastPayload, setLastScopeKey, state } from "./state.js";
 import "./theme.js";
 import type { TableData } from "./types.js";
 
@@ -122,18 +122,16 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   try { data = await fetchTableData(); }
   catch (e) {
     if (token !== loadDataToken) return; // superseded by a newer request
-    // A restored sort or a URL-restored filter can each name a column that
-    // no longer exists (schema changed since the last visit, or a link
-    // shared to another deployment) — dropOneStaleInput() drops at most one
-    // per call (sort before filter, ui-guidelines R11), so a retry has a
-    // chance to succeed without dead-ending on either.
+    // A restored sort or a URL-restored filter can each name a column that no
+    // longer exists, so drop one and retry — at most one per call (sort before
+    // filter, ui-guidelines R11), leaving the other a chance to render.
     if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
     $("error").textContent = (e as Error).message;
     return;
   }
   if (token !== loadDataToken) return; // superseded by a newer request
   markStoredSortVerified();
-  markRestoredFilterVerified();
+  markFilterVerified();
   updateActiveTableChrome();
 
   // Rows present now but absent from the previous fetch of this same view.

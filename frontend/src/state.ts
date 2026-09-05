@@ -38,9 +38,7 @@ export const state: State = {
 
 // state.filter stays the applied *text*; the AST that actually goes on the
 // wire is derived from it once, at commit time, so unparseable box text
-// never produces a request at all (spec/filter-dsl.md §4). Declared here,
-// ahead of the URL-param restore block below, which needs to call
-// setAppliedFilterAst() before it would otherwise be defined.
+// never produces a request at all (spec/filter-dsl.md §4).
 let appliedFilterAst: FilterCondition[] = [];
 export function getAppliedFilterAst(): FilterCondition[] {
   return appliedFilterAst;
@@ -49,55 +47,48 @@ export function setAppliedFilterAst(ast: FilterCondition[]): void {
   appliedFilterAst = ast;
 }
 
-// A restored/persisted value (a remembered sort column, a URL-restored
-// filter) is provisionally "unverified" from the moment it's restored until
-// its first fetch either confirms it (markVerified — the value was fine) or
-// the backend rejects it, at which point the caller drops the value itself
-// (dropStoredSort / clearFilter below) rather than leaving it flagged. One
-// instance per stale-risk input; a third one should reuse this rather than
-// copy-pasting a third flag pair.
+// A restored value (a remembered sort column, a URL-restored filter) is
+// "unverified" from the moment it's restored until its first fetch returns —
+// the one window where a 400 may be that value's fault (schema drift, or a
+// link shared to another deployment) rather than the request's.
 function staleRiskFlag() {
   let unverified = false;
   return {
     isUnverified: () => unverified,
-    markUnverified: () => { unverified = true; },
-    markVerified: () => { unverified = false; },
+    set: (value: boolean) => { unverified = value; },
   };
 }
-
-// True only between a URL-sourced filter being restored and its first fetch
-// returning. A filter nobody typed on this visit can name a column the
-// table no longer has (schema drift, or a link shared to another
-// deployment), so that one window is where a 400 may be the restored
-// filter's fault. Declared ahead of the URL-param restore block, which
-// sets it.
 const filterRisk = staleRiskFlag();
-export function markRestoredFilterVerified(): void {
-  filterRisk.markVerified();
+const sortRisk = staleRiskFlag();
+
+export function markFilterVerified(): void {
+  filterRisk.set(false);
+}
+export function markStoredSortVerified(): void {
+  sortRisk.set(false);
 }
 
-// Resets to no filter (ui-guidelines R5), box included. Used both for a
-// restored filter the backend rejected (dropOneStaleInput below) and for an
-// ordinary scope switch (table/schema/source, in sidebar.ts) — either way,
-// the filter was written against columns the new scope doesn't share.
+// Resets to no filter (ui-guidelines R5), box included — whether the backend
+// rejected a restored filter or a scope switch left it written against
+// columns the new scope doesn't share.
 export function clearFilter(): void {
   state.filter = "";
   appliedFilterAst = [];
-  filterRisk.markVerified();
+  filterRisk.set(false);
   $<HTMLInputElement>("filter").value = "";
 }
 
-// Shared by the module-init URL restore below and nav.ts's popstate handler:
-// applies (or silently resets, per R5) a `filter` query param. A missing key
-// is indistinguishable from a present-but-empty one — both correctly leave/
-// reset state.filter to "".
+// Shared by the module-init URL restore below and nav.ts's popstate handler.
+// An absent `filter` key and a malformed one land in the same place: no
+// filter at all (R5).
 export function restoreFilterFromParams(params: URLSearchParams): void {
-  const filterText = params.get("filter") ?? "";
-  const ast = filterText ? tryParseFilterDsl(filterText) : [];
-  state.filter = ast !== null ? filterText : ""; // malformed -> silent reset (R5)
-  setAppliedFilterAst(ast ?? []);
-  if (state.filter) filterRisk.markUnverified();
-  else filterRisk.markVerified();
+  const text = params.get("filter") ?? "";
+  const ast = text ? tryParseFilterDsl(text) : null;
+  if (!ast) { clearFilter(); return; }
+  state.filter = text;
+  appliedFilterAst = ast;
+  filterRisk.set(true);
+  $<HTMLInputElement>("filter").value = text;
 }
 
 try {
@@ -159,23 +150,13 @@ export function hiddenColumnsForTable(): string[] {
   return state.hiddenColumns[state.table ?? ""] ?? [];
 }
 
-// True only between applyStoredSort() restoring a sort and that sort's
-// first fetch returning — the one window where a 400 might be the restored
-// sort column's fault (schema drift, or storage from another database).
-// filterRisk above is the same staleRiskFlag() shape, applied to a
-// URL-restored filter instead of a remembered sort.
-const sortRisk = staleRiskFlag();
-export function markStoredSortVerified(): void {
-  sortRisk.markVerified();
-}
-
 // sort + order are remembered per table (like hiddenColumns): a column
 // name is table-specific, so this never carries a sort across tables.
 export function rememberSort(): void {
   if (!state.table) return;
   if (state.sort) state.sortByTable[state.table] = { col: state.sort, order: state.order };
   else delete state.sortByTable[state.table];
-  sortRisk.markVerified(); // came from a click on a live header
+  sortRisk.set(false); // came from a click on a live header
   persist();
 }
 
@@ -184,8 +165,7 @@ export function applyStoredSort(table: string | null): void {
   const stored = table ? state.sortByTable[table] : undefined;
   state.sort = stored?.col ?? null;
   state.order = stored?.order ?? "asc";
-  if (state.sort !== null) sortRisk.markUnverified();
-  else sortRisk.markVerified();
+  sortRisk.set(state.sort !== null);
 }
 
 // The backend rejected a restored sort column (400). Drop it so the caller
@@ -194,20 +174,20 @@ function dropStoredSort(table: string | null): void {
   if (table) delete state.sortByTable[table];
   state.sort = null;
   state.order = "asc";
-  sortRisk.markVerified();
+  sortRisk.set(false);
   persist();
 }
 
-// R11's retry-ladder policy: a restored sort and a URL-restored filter are
-// each stale-risk on a fresh load, but at most one is dropped per call, so
-// the other still gets a chance to render — sort first, since it's the
-// visitor's own incidental state, while the filter is what a shared link
-// was for. A filter typed on this visit isn't stale-risk and suppresses the
-// sort drop instead of being retried itself. Returns whether it dropped
-// anything, so the caller knows whether a retry is worth attempting.
+// R11's retry ladder: a restored sort and a URL-restored filter are each
+// stale-risk on a fresh load, but at most one is dropped per call, so the
+// other still gets a chance to render — sort first, since it's the visitor's
+// own incidental state while the filter is what a shared link was for.
 export function dropOneStaleInput(): boolean {
-  const filterIsUserTyped = state.filter !== "" && !filterRisk.isUnverified();
-  if (sortRisk.isUnverified() && state.table && !filterIsUserTyped) {
+  // An applied filter that already survived a fetch was typed on this visit,
+  // so the 400 is the user's to see — it suppresses the whole ladder rather
+  // than being silently discarded.
+  if (state.filter !== "" && !filterRisk.isUnverified()) return false;
+  if (sortRisk.isUnverified() && state.table) {
     dropStoredSort(state.table);
     return true;
   }

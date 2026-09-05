@@ -23,10 +23,9 @@ export function updateNavButtons(): void {
   $<HTMLButtonElement>("nav-forward").disabled = navIndex >= navStack.length - 1;
 }
 
-// filter is carried in the URL (ui-guidelines.md R6) like table/sort/scope,
-// but deliberately excluded from navViewKey() below — a filter change
-// replaces the current history entry exactly like a sort click or a page
-// turn, never pushing a new back-stack stop.
+// filter rides in the URL (ui-guidelines.md R6) but is deliberately excluded
+// from navViewKey() below — a filter change replaces the current history
+// entry like a sort click or a page turn, never pushing a new back-stack stop.
 export function syncUrl(): void {
   const params = new URLSearchParams({
     table: state.table ?? "", limit: String(state.limit), offset: String(state.offset),
@@ -64,7 +63,6 @@ window.addEventListener("popstate", (ev) => {
   state.limit = Number(params.get("limit")) || state.limit;
   state.offset = Number(params.get("offset")) || 0;
   restoreFilterFromParams(params);
-  $<HTMLInputElement>("filter").value = state.filter;
   const sourceSelect = $<HTMLSelectElement>("source-select");
   if (sourceSelect) sourceSelect.value = state.source ?? "";
   const schemaSelect = $<HTMLSelectElement>("schema-select");

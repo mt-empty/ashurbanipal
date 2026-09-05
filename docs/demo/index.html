@@ -1326,31 +1326,36 @@ function staleRiskFlag() {
   let unverified = false;
   return {
     isUnverified: () => unverified,
-    markUnverified: () => {
-      unverified = true;
-    },
-    markVerified: () => {
-      unverified = false;
+    set: (value) => {
+      unverified = value;
     }
   };
 }
 var filterRisk = staleRiskFlag();
-function markRestoredFilterVerified() {
-  filterRisk.markVerified();
+var sortRisk = staleRiskFlag();
+function markFilterVerified() {
+  filterRisk.set(false);
+}
+function markStoredSortVerified() {
+  sortRisk.set(false);
 }
 function clearFilter() {
   state.filter = "";
   appliedFilterAst = [];
-  filterRisk.markVerified();
+  filterRisk.set(false);
   $("filter").value = "";
 }
 function restoreFilterFromParams(params) {
-  const filterText = params.get("filter") ?? "";
-  const ast = filterText ? tryParseFilterDsl(filterText) : [];
-  state.filter = ast !== null ? filterText : "";
-  setAppliedFilterAst(ast ?? []);
-  if (state.filter) filterRisk.markUnverified();
-  else filterRisk.markVerified();
+  const text = params.get("filter") ?? "";
+  const ast = text ? tryParseFilterDsl(text) : null;
+  if (!ast) {
+    clearFilter();
+    return;
+  }
+  state.filter = text;
+  appliedFilterAst = ast;
+  filterRisk.set(true);
+  $("filter").value = text;
 }
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
@@ -1396,34 +1401,29 @@ function persist() {
 function hiddenColumnsForTable() {
   return state.hiddenColumns[state.table ?? ""] ?? [];
 }
-var sortRisk = staleRiskFlag();
-function markStoredSortVerified() {
-  sortRisk.markVerified();
-}
 function rememberSort() {
   if (!state.table) return;
   if (state.sort) state.sortByTable[state.table] = { col: state.sort, order: state.order };
   else delete state.sortByTable[state.table];
-  sortRisk.markVerified();
+  sortRisk.set(false);
   persist();
 }
 function applyStoredSort(table) {
   const stored = table ? state.sortByTable[table] : void 0;
   state.sort = stored?.col ?? null;
   state.order = stored?.order ?? "asc";
-  if (state.sort !== null) sortRisk.markUnverified();
-  else sortRisk.markVerified();
+  sortRisk.set(state.sort !== null);
 }
 function dropStoredSort(table) {
   if (table) delete state.sortByTable[table];
   state.sort = null;
   state.order = "asc";
-  sortRisk.markVerified();
+  sortRisk.set(false);
   persist();
 }
 function dropOneStaleInput() {
-  const filterIsUserTyped = state.filter !== "" && !filterRisk.isUnverified();
-  if (sortRisk.isUnverified() && state.table && !filterIsUserTyped) {
+  if (state.filter !== "" && !filterRisk.isUnverified()) return false;
+  if (sortRisk.isUnverified() && state.table) {
     dropStoredSort(state.table);
     return true;
   }
@@ -1492,7 +1492,7 @@ function submitFilter(text) {
   }
   state.filter = text;
   setAppliedFilterAst(ast);
-  markRestoredFilterVerified();
+  markFilterVerified();
   state.offset = 0;
   loadData();
 }
@@ -1501,7 +1501,6 @@ function applyFilterClause(column, op, value) {
   $("filter").value = clause;
   submitFilter(clause);
 }
-$("filter").value = state.filter;
 $("filter-form").onsubmit = (e) => {
   e.preventDefault();
   submitFilter($("filter").value.trim());
@@ -2287,7 +2286,6 @@ window.addEventListener("popstate", (ev) => {
   state.limit = Number(params.get("limit")) || state.limit;
   state.offset = Number(params.get("offset")) || 0;
   restoreFilterFromParams(params);
-  $("filter").value = state.filter;
   const sourceSelect = $("source-select");
   if (sourceSelect) sourceSelect.value = state.source ?? "";
   const schemaSelect = $("schema-select");
@@ -2471,7 +2469,7 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
   }
   if (token !== loadDataToken) return;
   markStoredSortVerified();
-  markRestoredFilterVerified();
+  markFilterVerified();
   updateActiveTableChrome();
   let newRowKeys;
   let pkNames = [];
