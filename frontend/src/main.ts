@@ -1,6 +1,6 @@
 import { api } from "./api.js";
 import "./api-reference.js";
-import { $, clearError, reportError, setStatus } from "./dom.js";
+import { $, clearError, flashIcon, reportError, setStatus } from "./dom.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "./grid.js";
 import { syncUrl } from "./nav.js";
 import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
@@ -202,9 +202,7 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
     // button gets its own "done, unchanged" cue — a ✓ glyph swap mirroring
     // the copy buttons, plus the sr-only #status line.
     setStatus("no changes");
-    const icon = $("refresh-icon");
-    icon.textContent = "✓";
-    setTimeout(() => { icon.textContent = "⟳"; }, 1000);
+    flashIcon($("refresh-icon"), "✓", 1000);
   }
   // Default true: table switch and filter submit jump to a new row 0, so
   // snapping to the top orients the user. Sort and prev/next explicitly

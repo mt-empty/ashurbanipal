@@ -537,10 +537,16 @@ function populateSelect(select, values, selected) {
   }));
   select.value = selected;
 }
+function flashIcon(el, glyph, ms = 800) {
+  if (el.dataset.rest === void 0) el.dataset.rest = el.textContent ?? "";
+  el.textContent = glyph;
+  setTimeout(() => {
+    el.textContent = el.dataset.rest;
+  }, ms);
+}
 async function copyText(text, btn) {
   const mark = btn.querySelector(".copy-icon") ?? btn;
-  if (mark.dataset.rest === void 0) mark.dataset.rest = mark.textContent ?? "";
-  const resting = mark.dataset.rest;
+  let glyph = "\u2713";
   try {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(text);
@@ -552,13 +558,10 @@ async function copyText(text, btn) {
       document.execCommand("copy");
       ta.remove();
     }
-    mark.textContent = "\u2713";
   } catch {
-    mark.textContent = "\u2717";
+    glyph = "\u2717";
   }
-  setTimeout(() => {
-    mark.textContent = resting;
-  }, 800);
+  flashIcon(mark, glyph);
 }
 
 // src/api.ts
@@ -2041,11 +2044,7 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
     setStatus(`${newRowKeys.size} new`);
   } else if (highlightNew && newRowKeys) {
     setStatus("no changes");
-    const icon = $("refresh-icon");
-    icon.textContent = "\u2713";
-    setTimeout(() => {
-      icon.textContent = "\u27F3";
-    }, 1e3);
+    flashIcon($("refresh-icon"), "\u2713", 1e3);
   }
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }

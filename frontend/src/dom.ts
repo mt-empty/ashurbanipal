@@ -25,12 +25,19 @@ export function populateSelect(select: HTMLSelectElement, values: string[], sele
   select.value = selected;
 }
 
+// Flashes `glyph` on `el`, then restores whatever glyph was resting there —
+// captured once per element (dataset.rest) so a re-click mid-flash can't
+// capture the transient glyph as the new resting state.
+export function flashIcon(el: HTMLElement, glyph: string, ms = 800): void {
+  if (el.dataset.rest === undefined) el.dataset.rest = el.textContent ?? "";
+  el.textContent = glyph;
+  setTimeout(() => { el.textContent = el.dataset.rest!; }, ms);
+}
+
 // ---- per-cell copy (Clipboard API) ----
 export async function copyText(text: string, btn: HTMLElement): Promise<void> {
   const mark = btn.querySelector<HTMLElement>(".copy-icon") ?? btn;
-  // Saved once so a re-click mid-flash can't capture the ✓/✗ as the resting glyph.
-  if (mark.dataset.rest === undefined) mark.dataset.rest = mark.textContent ?? "";
-  const resting = mark.dataset.rest;
+  let glyph = "✓";
   try {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(text);
@@ -44,11 +51,8 @@ export async function copyText(text: string, btn: HTMLElement): Promise<void> {
       document.execCommand("copy");
       ta.remove();
     }
-    mark.textContent = "✓";
   } catch {
-    mark.textContent = "✗";
+    glyph = "✗";
   }
-  setTimeout(() => {
-    mark.textContent = resting;
-  }, 800);
+  flashIcon(mark, glyph);
 }
