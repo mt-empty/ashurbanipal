@@ -61,7 +61,7 @@ export function renderHeader(columns: Column[]): void {
   $("thead").replaceChildren(tr);
 }
 
-export function renderEmptyState(columnCount: number): void {
+function renderEmptyState(columnCount: number): void {
   const emptyRow = document.createElement("tr");
   emptyRow.className = "empty";
   const td = document.createElement("td");
@@ -133,7 +133,7 @@ function showCellPop(e: MouseEvent, text: string): void {
 
 // A real <button> as the click target so it's keyboard-focusable and
 // Enter/Space-activatable, matching the copy button one element over.
-export function buildCell(col: Column, raw: string | null): HTMLTableCellElement {
+function buildCell(col: Column, raw: string | null): HTMLTableCellElement {
   const isNull = raw == null;
   // A null cell has no copy/expand affordance to clone, so it builds a bare
   // <td> rather than the template's.

@@ -18,7 +18,7 @@ function navViewKey(): string {
   return `${state.source ?? ""} ${state.schema ?? ""} ${state.table ?? ""}`;
 }
 
-export function updateNavButtons(): void {
+function updateNavButtons(): void {
   $<HTMLButtonElement>("nav-back").disabled = navIndex <= 0;
   $<HTMLButtonElement>("nav-forward").disabled = navIndex >= navStack.length - 1;
 }
