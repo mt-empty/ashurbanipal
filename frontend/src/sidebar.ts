@@ -114,11 +114,18 @@ export async function loadSchemas(): Promise<void> {
   populateSelect($<HTMLSelectElement>("schema-select"), schemas, state.schema!);
   $("schema-select-wrap").hidden = false;
 }
+// Syncs the schema dropdown, state, and the per-source memory (R12) in one
+// place — the step shared by an explicit switch and grid.ts's FK
+// cross-schema navigation, which then diverge on what resets afterward.
+export function setSchema(name: string): void {
+  state.schema = name;
+  $<HTMLSelectElement>("schema-select").value = name;
+  rememberSchema();
+}
 $<HTMLSelectElement>("schema-select").onchange = () => {
-  state.schema = $<HTMLSelectElement>("schema-select").value;
+  setSchema($<HTMLSelectElement>("schema-select").value);
   state.table = null; state.sort = null; state.offset = 0;
   clearFilter();
-  rememberSchema();
   loadTables().catch(reportError);
 };
 

@@ -1499,13 +1499,17 @@ async function loadSchemas() {
   populateSelect($("schema-select"), schemas, state.schema);
   $("schema-select-wrap").hidden = false;
 }
+function setSchema(name) {
+  state.schema = name;
+  $("schema-select").value = name;
+  rememberSchema();
+}
 $("schema-select").onchange = () => {
-  state.schema = $("schema-select").value;
+  setSchema($("schema-select").value);
   state.table = null;
   state.sort = null;
   state.offset = 0;
   clearFilter();
-  rememberSchema();
   loadTables().catch(reportError);
 };
 var loadTablesToken = 0;
@@ -1700,9 +1704,7 @@ function buildCell(col, raw, hidden) {
       state.table = references.table;
       state.sort = null;
       if (references.schema && references.schema !== state.schema) {
-        state.schema = references.schema;
-        $("schema-select").value = state.schema;
-        rememberSchema();
+        setSchema(references.schema);
         loadTables().then(() => applyFilterClause(references.column, "=", raw)).catch(reportError);
         return;
       }

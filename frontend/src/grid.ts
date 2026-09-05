@@ -3,8 +3,8 @@ import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { renderJsonTree, type JsonValue } from "./json-tree.js";
 import { loadData } from "./main.js";
 import { openRecordView } from "./record-view.js";
-import { APPROX_COUNT_TITLE, formatApproxCount, loadTables } from "./sidebar.js";
-import { hiddenColumnsForTable, persist, rememberSchema, rememberSort, rowKey, state } from "./state.js";
+import { APPROX_COUNT_TITLE, formatApproxCount, loadTables, setSchema } from "./sidebar.js";
+import { hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
@@ -178,17 +178,14 @@ function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTa
       state.table = references.table;
       state.sort = null;
       // `references.schema` is only present when it differs from the
-      // current schema (a cross-schema FK) — switch the selector too,
-      // mirroring #schema-select's onchange, before navigating so the
-      // table lookup below lands in the right schema rather than a
-      // same-named table in the wrong one. loadTables() auto-loads a
-      // default view as a side effect (same as #schema-select's onchange
-      // triggers); applyFilterClause's own load immediately supersedes it
+      // current schema (a cross-schema FK) — setSchema() switches it before
+      // navigating so the table lookup below lands in the right schema
+      // rather than a same-named table in the wrong one. loadTables()
+      // auto-loads a default view as a side effect (same as #schema-select's
+      // onchange); applyFilterClause's own load immediately supersedes it
       // via loadDataToken, so the extra fetch is discarded, not shown.
       if (references.schema && references.schema !== state.schema) {
-        state.schema = references.schema;
-        $<HTMLSelectElement>("schema-select").value = state.schema;
-        rememberSchema();
+        setSchema(references.schema);
         loadTables()
           .then(() => applyFilterClause(references.column, "=", raw))
           .catch(reportError);

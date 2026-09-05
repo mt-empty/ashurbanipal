@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { gotoApp, selectTable } from "./support/helpers";
+import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 test("clicking an FK cell switches table and filters to the matching row", async ({ page }) => {
   await gotoApp(page);
@@ -47,4 +47,36 @@ test("a column that is both PK and FK shows both facts and navigates like an FK"
 
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
   await expect(page.locator("#filter")).toHaveValue(`id = ${orderId}`);
+});
+
+// warehouse.shipments.order_id references public.orders(id) — the seed's
+// one cross-schema FK (spec/protocol.md's references.schema, present only
+// when the referenced table lives in a different schema than the column).
+test("clicking a cross-schema FK cell switches schema, table, and filters to the matching row", async ({ page }) => {
+  await gotoApp(page);
+  await expect(page.locator("#schema-select-wrap")).toBeVisible();
+
+  const schemaLoaded = page.waitForResponse(
+    (r) => r.url().includes("/api/tables/data") && r.url().includes("schema=warehouse") && r.ok(),
+  );
+  await page.locator("#schema-select").selectOption("warehouse");
+  await schemaLoaded;
+  await waitForIdle(page);
+
+  await selectTable(page, "shipments");
+  const firstFkCell = page.locator("#tbody tr").first().locator('td[data-col="order_id"] .fk-cell');
+  const orderId = await firstFkCell.textContent();
+  await firstFkCell.click();
+
+  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
+  await waitForIdle(page);
+  await expect(page.locator("#schema-select")).toHaveValue("public");
+  await expect(page.locator("#filter")).toHaveValue(`id = ${orderId}`);
+  const idCells = page.locator('#tbody td[data-col="id"] .cell-text');
+  await expect
+    .poll(async () => {
+      const values = await idCells.allTextContents();
+      return values.length > 0 && values.every((v) => v === orderId);
+    })
+    .toBe(true);
 });
