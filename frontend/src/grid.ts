@@ -1,10 +1,10 @@
-import { $, copyText } from "./dom.js";
+import { $, copyText, reportError } from "./dom.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { renderJsonTree, type JsonValue } from "./json-tree.js";
 import { loadData } from "./main.js";
 import { openRecordView } from "./record-view.js";
-import { APPROX_COUNT_TITLE, formatApproxCount, loadTables } from "./sidebar.js";
-import { hiddenColumnsForTable, persist, rememberSchema, rememberSort, rowKey, state } from "./state.js";
+import { APPROX_COUNT_TITLE, formatApproxCount, loadTables, setSchema } from "./sidebar.js";
+import { hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
@@ -61,7 +61,7 @@ export function renderHeader(columns: Column[]): void {
   $("thead").replaceChildren(tr);
 }
 
-export function renderEmptyState(columnCount: number): void {
+function renderEmptyState(columnCount: number): void {
   const emptyRow = document.createElement("tr");
   emptyRow.className = "empty";
   const td = document.createElement("td");
@@ -133,12 +133,16 @@ function showCellPop(e: MouseEvent, text: string): void {
 
 // A real <button> as the click target so it's keyboard-focusable and
 // Enter/Space-activatable, matching the copy button one element over.
-export function buildCell(col: Column, raw: string | null): HTMLTableCellElement {
-  const hidden = hiddenColumnsForTable().includes(col.name);
-  if (raw == null) {
-    const td = document.createElement("td");
-    td.dataset.col = col.name;
-    if (hidden) td.classList.add("col-hidden");
+function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTableCellElement {
+  const isNull = raw == null;
+  // A null cell has no copy/expand affordance to clone, so it builds a bare
+  // <td> rather than the template's.
+  const td = isNull
+    ? document.createElement("td")
+    : (cellTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
+  td.dataset.col = col.name;
+  if (hidden.has(col.name)) td.classList.add("col-hidden");
+  if (isNull) {
     const span = document.createElement("span");
     span.className = "cell-text";
     span.textContent = "∅";
@@ -153,9 +157,6 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
     td.appendChild(filterBtn);
     return td;
   }
-  const td = (cellTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
-  td.dataset.col = col.name;
-  if (hidden) td.classList.add("col-hidden");
   const cellText = td.querySelector<HTMLElement>(".cell-text")!;
   const btn = td.querySelector<HTMLElement>(".copy")!;
   const filterBtn = td.querySelector<HTMLElement>(".filter-eq")!;
@@ -177,20 +178,17 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
       state.table = references.table;
       state.sort = null;
       // `references.schema` is only present when it differs from the
-      // current schema (a cross-schema FK) — switch the selector too,
-      // mirroring #schema-select's onchange, before navigating so the
-      // table lookup below lands in the right schema rather than a
-      // same-named table in the wrong one. loadTables() auto-loads a
-      // default view as a side effect (same as #schema-select's onchange
-      // triggers); applyFilterClause's own load immediately supersedes it
+      // current schema (a cross-schema FK) — setSchema() switches it before
+      // navigating so the table lookup below lands in the right schema
+      // rather than a same-named table in the wrong one. loadTables()
+      // auto-loads a default view as a side effect (same as #schema-select's
+      // onchange); applyFilterClause's own load immediately supersedes it
       // via loadDataToken, so the extra fetch is discarded, not shown.
       if (references.schema && references.schema !== state.schema) {
-        state.schema = references.schema;
-        $<HTMLSelectElement>("schema-select").value = state.schema;
-        rememberSchema();
+        setSchema(references.schema);
         loadTables()
           .then(() => applyFilterClause(references.column, "=", raw))
-          .catch((e) => { $("error").textContent = e.message; });
+          .catch(reportError);
         return;
       }
       persist();
@@ -253,11 +251,13 @@ function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
 // passed only on an explicit refresh) tint those rows via .row-new;
 // pkNames is the matching PK column list, computed once by the caller.
 export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
+  // Same for every cell in this render, so computed once rather than
+  // re-derived (array rebuild + linear scan) per cell.
+  const hidden = new Set(hiddenColumnsForTable());
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
     // hidden columns (display:none) aren't counted.
-    const hidden = hiddenColumnsForTable();
-    const visible = data.columns.filter((c) => !hidden.includes(c.name)).length;
+    const visible = data.columns.filter((c) => !hidden.has(c.name)).length;
     renderEmptyState(visible + 1);
     return;
   }
@@ -267,7 +267,7 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
     if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
     tr.appendChild(buildRowActionCell(data.columns, row));
     for (const col of data.columns) {
-      tr.appendChild(buildCell(col, row[col.name]));
+      tr.appendChild(buildCell(col, row[col.name], hidden));
     }
     return tr;
   }));

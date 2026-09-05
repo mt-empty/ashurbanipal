@@ -9,6 +9,10 @@ import type { FilterCondition } from "./types.js";
 // input, same convention the DSL-era backend parser reported.
 const FILTER_MAX_DSL_BYTES = 1024;
 const FILTER_MAX_CONDITIONS = 10;
+// The one place that decides what counts as a reserved word: the parser
+// rejects it bare, and quoteFilterValue quotes it so a value spelled like
+// one still round-trips.
+const RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 
 // tools/e2e-tests/tests/filter-parser.spec.ts reads `.position` off a
 // caught error via page.evaluate — must stay a real own property on the
@@ -96,7 +100,7 @@ export function parseFilterDsl(input: string): FilterCondition[] {
     let c: string | null;
     while ((c = peek()) !== null && !isWs(c) && c !== "'") { value += c; pos += c.length; }
     if (value === "") throw err("expected value", start);
-    if (/^(AND|OR|NOT)$/i.test(value))
+    if (RESERVED_WORD_RE.test(value))
       throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
     return value;
   };
@@ -176,7 +180,7 @@ export function tryParseFilterDsl(input: string): FilterCondition[] | null {
 // exactly what the filter DSL compares against, so it can be spliced
 // straight into a clause without reshaping.
 export function quoteFilterValue(value: string): string {
-  if (value !== "" && !/[\s']/.test(value) && !/^(AND|OR|NOT)$/i.test(value)) return value;
+  if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return "'" + value.replace(/'/g, "''") + "'";
 }
 

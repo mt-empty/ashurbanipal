@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $, setStatus } from "./dom.js";
+import { $, populateSelect, reportError, setStatus } from "./dom.js";
 import { loadData } from "./main.js";
 import { applyStoredSort, clearFilter, persist, rememberSchema, scopeQuery, sourceQuery, state } from "./state.js";
 import type { SourceEntry, TableListEntry } from "./types.js";
@@ -64,13 +64,7 @@ export async function loadSources(): Promise<void> {
   if (!state.source || !sources.some((s) => s.name === state.source)) {
     state.source = sources[0]!.name;
   }
-  const select = $<HTMLSelectElement>("source-select");
-  select.replaceChildren(...sources.map((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.name; opt.textContent = s.name;
-    return opt;
-  }));
-  select.value = state.source!;
+  populateSelect($<HTMLSelectElement>("source-select"), sources.map((s) => s.name), state.source!);
   $("source-select-wrap").hidden = false;
 }
 $<HTMLSelectElement>("source-select").onchange = () => {
@@ -81,7 +75,7 @@ $<HTMLSelectElement>("source-select").onchange = () => {
   state.table = null; state.sort = null; state.offset = 0;
   clearFilter();
   persist();
-  loadSchemas().then(loadTables).catch((e) => { $("error").textContent = e.message; });
+  loadSchemas().then(loadTables).catch(reportError);
 };
 
 // ==== Schema selector ====
@@ -117,21 +111,22 @@ export async function loadSchemas(): Promise<void> {
   if (!state.schema || !schemas.includes(state.schema)) {
     state.schema = schemas.includes("public") ? "public" : schemas[0];
   }
-  const select = $<HTMLSelectElement>("schema-select");
-  select.replaceChildren(...schemas.map((s) => {
-    const opt = document.createElement("option");
-    opt.value = s; opt.textContent = s;
-    return opt;
-  }));
-  select.value = state.schema!;
+  populateSelect($<HTMLSelectElement>("schema-select"), schemas, state.schema!);
   $("schema-select-wrap").hidden = false;
 }
+// Syncs the schema dropdown, state, and the per-source memory (R12) in one
+// place — the step shared by an explicit switch and grid.ts's FK
+// cross-schema navigation, which then diverge on what resets afterward.
+export function setSchema(name: string): void {
+  state.schema = name;
+  $<HTMLSelectElement>("schema-select").value = name;
+  rememberSchema();
+}
 $<HTMLSelectElement>("schema-select").onchange = () => {
-  state.schema = $<HTMLSelectElement>("schema-select").value;
+  setSchema($<HTMLSelectElement>("schema-select").value);
   state.table = null; state.sort = null; state.offset = 0;
   clearFilter();
-  rememberSchema();
-  loadTables().catch((e) => { $("error").textContent = e.message; });
+  loadTables().catch(reportError);
 };
 
 // A slower earlier loadTables() (e.g. from a schema switch quickly
@@ -200,4 +195,17 @@ export async function loadTables(): Promise<void> {
 // still correct if tableEntries is ever rebuilt mid-fetch.
 export function setRowLoading(name: string, loading: boolean): void {
   tableEntries.find((e) => e.name === name)?.btn.classList.toggle("loading", loading);
+}
+
+// Same tableEntries lookup as setRowLoading, so "find the row for table X"
+// stays one idiom — a re-scan on every call rather than a cached reference,
+// so this self-heals if tableEntries is rebuilt (schema/source switch)
+// between calls instead of toggling a detached button.
+export function setActiveTable(name: string | null): void {
+  for (const e of tableEntries) {
+    const isActive = e.name === name;
+    e.btn.classList.toggle("active", isActive);
+    if (isActive) e.btn.setAttribute("aria-current", "true");
+    else e.btn.removeAttribute("aria-current");
+  }
 }

@@ -1,6 +1,6 @@
-import { $ } from "./dom.js";
+import { $, reportError } from "./dom.js";
 import { loadTables } from "./sidebar.js";
-import { persist, restoreFilterFromParams, state } from "./state.js";
+import { applyScopeParams, persist, restoreFilterFromParams, state } from "./state.js";
 
 // Back/forward navigation stops at table/schema/source switches, not every
 // sort/page tweak within the same table — otherwise "back" would undo
@@ -18,22 +18,20 @@ function navViewKey(): string {
   return `${state.source ?? ""} ${state.schema ?? ""} ${state.table ?? ""}`;
 }
 
-export function updateNavButtons(): void {
+function updateNavButtons(): void {
   $<HTMLButtonElement>("nav-back").disabled = navIndex <= 0;
   $<HTMLButtonElement>("nav-forward").disabled = navIndex >= navStack.length - 1;
 }
 
-// filter is carried in the URL (ui-guidelines.md R6) like table/sort/scope,
-// but deliberately excluded from navViewKey() below — a filter change
-// replaces the current history entry exactly like a sort click or a page
-// turn, never pushing a new back-stack stop.
+// filter rides in the URL (ui-guidelines.md R6) but is deliberately excluded
+// from navViewKey() below — a filter change replaces the current history
+// entry like a sort click or a page turn, never pushing a new back-stack stop.
 export function syncUrl(): void {
   const params = new URLSearchParams({
     table: state.table ?? "", limit: String(state.limit), offset: String(state.offset),
   });
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
-  if (state.source) params.set("source", state.source);
-  if (state.schema) params.set("schema", state.schema);
+  applyScopeParams(params);
   if (state.filter) params.set("filter", state.filter);
   const qs = "?" + params;
   const key = navViewKey();
@@ -64,7 +62,6 @@ window.addEventListener("popstate", (ev) => {
   state.limit = Number(params.get("limit")) || state.limit;
   state.offset = Number(params.get("offset")) || 0;
   restoreFilterFromParams(params);
-  $<HTMLInputElement>("filter").value = state.filter;
   const sourceSelect = $<HTMLSelectElement>("source-select");
   if (sourceSelect) sourceSelect.value = state.source ?? "";
   const schemaSelect = $<HTMLSelectElement>("schema-select");
@@ -78,6 +75,6 @@ window.addEventListener("popstate", (ev) => {
   updateNavButtons();
   restoringFromHistory = true;
   loadTables()
-    .catch((e) => { $("error").textContent = e.message; })
+    .catch(reportError)
     .finally(() => { restoringFromHistory = false; });
 });

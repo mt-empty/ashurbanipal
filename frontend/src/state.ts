@@ -38,9 +38,7 @@ export const state: State = {
 
 // state.filter stays the applied *text*; the AST that actually goes on the
 // wire is derived from it once, at commit time, so unparseable box text
-// never produces a request at all (spec/filter-dsl.md §4). Declared here,
-// ahead of the URL-param restore block below, which needs to call
-// setAppliedFilterAst() before it would otherwise be defined.
+// never produces a request at all (spec/filter-dsl.md §4).
 let appliedFilterAst: FilterCondition[] = [];
 export function getAppliedFilterAst(): FilterCondition[] {
   return appliedFilterAst;
@@ -49,103 +47,106 @@ export function setAppliedFilterAst(ast: FilterCondition[]): void {
   appliedFilterAst = ast;
 }
 
-// A restored/persisted value (a remembered sort column, a URL-restored
-// filter) is provisionally "unverified" from the moment it's restored until
-// its first fetch either confirms it (markVerified — the value was fine) or
-// the backend rejects it, at which point the caller drops the value itself
-// (dropStoredSort / clearFilter below) rather than leaving it flagged. One
-// instance per stale-risk input; a third one should reuse this rather than
-// copy-pasting a third flag pair.
+// A restored value (a remembered sort column, a URL-restored filter) is
+// "unverified" from the moment it's restored until its first fetch returns —
+// the one window where a 400 may be that value's fault (schema drift, or a
+// link shared to another deployment) rather than the request's.
 function staleRiskFlag() {
   let unverified = false;
   return {
     isUnverified: () => unverified,
-    markUnverified: () => { unverified = true; },
-    markVerified: () => { unverified = false; },
+    set: (value: boolean) => { unverified = value; },
   };
 }
-
-// True only between a URL-sourced filter being restored and its first fetch
-// returning. A filter nobody typed on this visit can name a column the
-// table no longer has (schema drift, or a link shared to another
-// deployment), so that one window is where a 400 may be the restored
-// filter's fault. Declared ahead of the URL-param restore block, which
-// sets it.
 const filterRisk = staleRiskFlag();
-export function markRestoredFilterVerified(): void {
-  filterRisk.markVerified();
+const sortRisk = staleRiskFlag();
+
+export function markFilterVerified(): void {
+  filterRisk.set(false);
+}
+export function markStoredSortVerified(): void {
+  sortRisk.set(false);
 }
 
-// Resets to no filter (ui-guidelines R5), box included. Used both for a
-// restored filter the backend rejected (dropOneStaleInput below) and for an
-// ordinary scope switch (table/schema/source, in sidebar.ts) — either way,
-// the filter was written against columns the new scope doesn't share.
+// Resets to no filter (ui-guidelines R5), box included — whether the backend
+// rejected a restored filter or a scope switch left it written against
+// columns the new scope doesn't share.
 export function clearFilter(): void {
   state.filter = "";
   appliedFilterAst = [];
-  filterRisk.markVerified();
+  filterRisk.set(false);
   $<HTMLInputElement>("filter").value = "";
 }
 
-// Shared by the module-init URL restore below and nav.ts's popstate handler:
-// applies (or silently resets, per R5) a `filter` query param. A missing key
-// is indistinguishable from a present-but-empty one — both correctly leave/
-// reset state.filter to "".
+// Shared by the module-init URL restore below and nav.ts's popstate handler.
+// An absent `filter` key and a malformed one land in the same place: no
+// filter at all (R5).
 export function restoreFilterFromParams(params: URLSearchParams): void {
-  const filterText = params.get("filter") ?? "";
-  const ast = filterText ? tryParseFilterDsl(filterText) : [];
-  state.filter = ast !== null ? filterText : ""; // malformed -> silent reset (R5)
-  setAppliedFilterAst(ast ?? []);
-  if (state.filter) filterRisk.markUnverified();
-  else filterRisk.markVerified();
+  const text = params.get("filter") ?? "";
+  const ast = text ? tryParseFilterDsl(text) : null;
+  if (!ast) { clearFilter(); return; }
+  state.filter = text;
+  appliedFilterAst = ast;
+  filterRisk.set(true);
+  $<HTMLInputElement>("filter").value = text;
 }
 
-try {
-  const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-  for (const k of ["source", "schema", "table", "limit"] as const) {
-    if (saved[k] !== undefined) (state as unknown as Record<string, unknown>)[k] = saved[k];
-  }
-  // Keyed by table name so hiding a column on one table never hides a
-  // same-named column on another. A malformed value is discarded rather
-  // than migrated — it's cheap to lose and there's no reliable way to
-  // guess which table it belonged to.
-  if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
-    for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
-      if (!Array.isArray(cols)) continue;
-      const clean = cols.filter((c) => typeof c === "string");
-      if (clean.length) state.hiddenColumns[table] = clean;
+// JSON.parse gives back `any`, so every persisted map is re-checked against
+// the shape the restore loop assumes before it is read.
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+// Restores the persisted view (never the filter — ui-guidelines R6). A
+// malformed blob is discarded wholesale rather than migrated: it is cheap to
+// lose and there is no reliable way to guess what it meant.
+function restoreFromStorage(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+    for (const k of ["source", "schema", "table", "limit"] as const) {
+      if (saved[k] !== undefined) (state as unknown as Record<string, unknown>)[k] = saved[k];
     }
-  }
-  // Same per-table keying and discard-if-malformed rule as hiddenColumns.
-  if (saved.sortByTable && typeof saved.sortByTable === "object" && !Array.isArray(saved.sortByTable)) {
-    for (const [table, v] of Object.entries(saved.sortByTable)) {
-      if (v && typeof v === "object" && typeof (v as { col?: unknown }).col === "string") {
-        const { col, order } = v as { col: string; order?: unknown };
-        state.sortByTable[table] = { col, order: order === "desc" ? "desc" : "asc" };
+    // Keyed by table name so hiding a column on one table never hides a
+    // same-named column on another.
+    if (isPlainObject(saved.hiddenColumns)) {
+      for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
+        if (!Array.isArray(cols)) continue;
+        const clean = cols.filter((c) => typeof c === "string");
+        if (clean.length) state.hiddenColumns[table] = clean;
       }
     }
-  }
-  // Same discard-if-malformed rule; keyed by source name, values are plain
-  // schema-name strings.
-  if (saved.schemaBySource && typeof saved.schemaBySource === "object" && !Array.isArray(saved.schemaBySource)) {
-    for (const [source, schema] of Object.entries(saved.schemaBySource)) {
-      if (typeof schema === "string") state.schemaBySource[source] = schema;
+    // Same per-table keying as hiddenColumns.
+    if (isPlainObject(saved.sortByTable)) {
+      for (const [table, v] of Object.entries(saved.sortByTable)) {
+        if (isPlainObject(v) && typeof v.col === "string") {
+          state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
+        }
+      }
     }
+    // Keyed by source name; values are plain schema-name strings.
+    if (isPlainObject(saved.schemaBySource)) {
+      for (const [source, schema] of Object.entries(saved.schemaBySource)) {
+        if (typeof schema === "string") state.schemaBySource[source] = schema;
+      }
+    }
+  } catch {
+    localStorage.removeItem(UI_KEY);
   }
-} catch {
-  localStorage.removeItem(UI_KEY);
 }
-// URL query params win over localStorage: opening a shared/bookmarked link
-// should reproduce that link's view, not the visitor's own saved prefs.
-const urlParams = new URLSearchParams(location.search);
-if (urlParams.has("source")) state.source = urlParams.get("source");
-if (urlParams.has("schema")) state.schema = urlParams.get("schema");
-if (urlParams.has("table")) state.table = urlParams.get("table");
-if (urlParams.has("sort")) state.sort = urlParams.get("sort");
-if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "desc" : "asc";
-if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
-if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
-restoreFilterFromParams(urlParams);
+
+// Runs after restoreFromStorage(), because a shared or bookmarked link must
+// reproduce that link's view rather than the visitor's own saved prefs.
+function restoreFromUrl(): void {
+  const params = new URLSearchParams(location.search);
+  if (params.has("source")) state.source = params.get("source");
+  if (params.has("schema")) state.schema = params.get("schema");
+  if (params.has("table")) state.table = params.get("table");
+  if (params.has("sort")) state.sort = params.get("sort");
+  if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
+  if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
+  if (params.has("offset")) state.offset = Number(params.get("offset")) || 0;
+  restoreFilterFromParams(params);
+}
 
 export function persist(): void {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
@@ -159,23 +160,13 @@ export function hiddenColumnsForTable(): string[] {
   return state.hiddenColumns[state.table ?? ""] ?? [];
 }
 
-// True only between applyStoredSort() restoring a sort and that sort's
-// first fetch returning — the one window where a 400 might be the restored
-// sort column's fault (schema drift, or storage from another database).
-// filterRisk above is the same staleRiskFlag() shape, applied to a
-// URL-restored filter instead of a remembered sort.
-const sortRisk = staleRiskFlag();
-export function markStoredSortVerified(): void {
-  sortRisk.markVerified();
-}
-
 // sort + order are remembered per table (like hiddenColumns): a column
 // name is table-specific, so this never carries a sort across tables.
 export function rememberSort(): void {
   if (!state.table) return;
   if (state.sort) state.sortByTable[state.table] = { col: state.sort, order: state.order };
   else delete state.sortByTable[state.table];
-  sortRisk.markVerified(); // came from a click on a live header
+  sortRisk.set(false); // came from a click on a live header
   persist();
 }
 
@@ -184,8 +175,7 @@ export function applyStoredSort(table: string | null): void {
   const stored = table ? state.sortByTable[table] : undefined;
   state.sort = stored?.col ?? null;
   state.order = stored?.order ?? "asc";
-  if (state.sort !== null) sortRisk.markUnverified();
-  else sortRisk.markVerified();
+  sortRisk.set(state.sort !== null);
 }
 
 // The backend rejected a restored sort column (400). Drop it so the caller
@@ -194,20 +184,20 @@ function dropStoredSort(table: string | null): void {
   if (table) delete state.sortByTable[table];
   state.sort = null;
   state.order = "asc";
-  sortRisk.markVerified();
+  sortRisk.set(false);
   persist();
 }
 
-// R11's retry-ladder policy: a restored sort and a URL-restored filter are
-// each stale-risk on a fresh load, but at most one is dropped per call, so
-// the other still gets a chance to render — sort first, since it's the
-// visitor's own incidental state, while the filter is what a shared link
-// was for. A filter typed on this visit isn't stale-risk and suppresses the
-// sort drop instead of being retried itself. Returns whether it dropped
-// anything, so the caller knows whether a retry is worth attempting.
+// R11's retry ladder: a restored sort and a URL-restored filter are each
+// stale-risk on a fresh load, but at most one is dropped per call, so the
+// other still gets a chance to render — sort first, since it's the visitor's
+// own incidental state while the filter is what a shared link was for.
 export function dropOneStaleInput(): boolean {
-  const filterIsUserTyped = state.filter !== "" && !filterRisk.isUnverified();
-  if (sortRisk.isUnverified() && state.table && !filterIsUserTyped) {
+  // An applied filter that already survived a fetch was typed on this visit,
+  // so the 400 is the user's to see — it suppresses the whole ladder rather
+  // than being silently discarded.
+  if (state.filter !== "" && !filterRisk.isUnverified()) return false;
+  if (sortRisk.isUnverified() && state.table) {
     dropStoredSort(state.table);
     return true;
   }
@@ -282,3 +272,30 @@ export function getLastScopeKey(): string | null {
 export function setLastScopeKey(key: string | null): void {
   lastScopeKey = key;
 }
+
+// R10: rows present now but absent from the previous fetch of the same view
+// count as new, so a refresh can tint them — but only when the scope is
+// unchanged (a sort/filter/page change makes every row look new) and the
+// table has a PK to identify rows by. Also advances lastPayload/lastScopeKey
+// to this fetch, since that bookkeeping only ever happens alongside this diff.
+export function diffNewRows(data: TableData, highlightNew: boolean): { newRowKeys?: Set<string>; pkNames: string[] } {
+  const prev = getLastPayload();
+  const nowScope = scopeKey();
+  let newRowKeys: Set<string> | undefined;
+  let pkNames: string[] = [];
+  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    if (pkNames.length) {
+      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
+      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
+    }
+  }
+  setLastPayload(data);
+  setLastScopeKey(nowScope);
+  return { newRowKeys, pkNames };
+}
+
+// state.ts's body is evaluated before any importing module's, so the restore
+// has to run here rather than with main.ts's other bootstrap calls.
+restoreFromStorage();
+restoreFromUrl();

@@ -1,12 +1,12 @@
 import { api } from "./api.js";
 import "./api-reference.js";
-import { $, setStatus } from "./dom.js";
+import { $, clearError, flashIcon, reportError, setStatus } from "./dom.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "./grid.js";
 import { syncUrl } from "./nav.js";
-import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
+import { loadSchemas, loadSources, loadTables, setActiveTable, setRowLoading } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
-import { applyScopeParams, dropOneStaleInput, getAppliedFilterAst, getLastPayload, getLastScopeKey, markRestoredFilterVerified, markStoredSortVerified, rowKey, scopeKey, setLastPayload, setLastScopeKey, state } from "./state.js";
+import { applyScopeParams, diffNewRows, dropOneStaleInput, getAppliedFilterAst, getLastPayload, markFilterVerified, markStoredSortVerified, state } from "./state.js";
 import "./theme.js";
 import type { TableData } from "./types.js";
 
@@ -15,6 +15,18 @@ $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $<HTMLDialogElement>("payload-dialog").showModal();
 };
+
+
+// Static markup (index.html), so this resolves once at module init rather
+// than on every fetch and every focus restore.
+const tableEl = document.querySelector<HTMLTableElement>("table")!;
+
+// aria-busy is held by two independent things — an in-flight fetch and an
+// in-progress view transition — so it is set and cleared through one place.
+function setTableBusy(busy: boolean): void {
+  if (busy) tableEl.setAttribute("aria-busy", "true");
+  else tableEl.removeAttribute("aria-busy");
+}
 
 // Reference-counted, not a plain boolean: fetchTableData() can be in
 // flight more than once (switching tables again before the previous fetch
@@ -37,7 +49,7 @@ async function fetchTableData(): Promise<TableData> {
   if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
   if (inFlightFetches++ === 0) {
     setStatus("loading…");
-    document.querySelector("table")!.setAttribute("aria-busy", "true");
+    setTableBusy(true);
   }
   setRowLoading(table, true);
   try {
@@ -46,7 +58,7 @@ async function fetchTableData(): Promise<TableData> {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
       setStatus("");
-      document.querySelector("table")!.removeAttribute("aria-busy");
+      setTableBusy(false);
     }
   }
 }
@@ -67,8 +79,7 @@ interface FocusCapture {
 
 function captureTableFocus(): FocusCapture | null {
   const active = document.activeElement;
-  const table = document.querySelector("table")!;
-  if (!active || !table.contains(active)) return null;
+  if (!active || !tableEl.contains(active)) return null;
   const cell = active.closest("th, td");
   const tr = active.closest("tr");
   if (!cell || !tr) return null;
@@ -90,19 +101,14 @@ function restoreTableFocus(captured: FocusCapture | null): void {
   // `.${className}` would otherwise parse as a descendant combinator.
   const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
   const target = classSelector ? cell?.querySelector<HTMLElement>(classSelector) : null;
-  (target ?? document.querySelector<HTMLElement>("table")!).focus();
+  (target ?? tableEl).focus();
 }
 
 // Must only ever move in lockstep with a *successful* render, never ahead
 // of it — a failed fetchTableData() (see loadData) must leave these
 // exactly as they were, matching the stale <table> body they describe.
 function updateActiveTableChrome(): void {
-  document.querySelectorAll<HTMLButtonElement>("#tables button").forEach((b) => {
-    const isActive = b.dataset.table === state.table;
-    b.classList.toggle("active", isActive);
-    if (isActive) b.setAttribute("aria-current", "true");
-    else b.removeAttribute("aria-current");
-  });
+  setActiveTable(state.table);
   $("current").textContent = state.table ?? "—";
   document.title = state.table ? `${state.table} — Ashurbanipal` : "Ashurbanipal";
 }
@@ -115,44 +121,26 @@ function updateActiveTableChrome(): void {
 let loadDataToken = 0;
 
 export async function loadData({ resetScroll = true, highlightNew = false }: { resetScroll?: boolean; highlightNew?: boolean } = {}): Promise<void> {
-  $("error").textContent = "";
+  clearError();
   if (!state.table) { updateActiveTableChrome(); setStatus(""); return; }
   const token = ++loadDataToken;
   let data: TableData;
   try { data = await fetchTableData(); }
   catch (e) {
     if (token !== loadDataToken) return; // superseded by a newer request
-    // A restored sort or a URL-restored filter can each name a column that
-    // no longer exists (schema changed since the last visit, or a link
-    // shared to another deployment) — dropOneStaleInput() drops at most one
-    // per call (sort before filter, ui-guidelines R11), so a retry has a
-    // chance to succeed without dead-ending on either.
+    // A restored sort or a URL-restored filter can each name a column that no
+    // longer exists, so drop one and retry — at most one per call (sort before
+    // filter, ui-guidelines R11), leaving the other a chance to render.
     if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
-    $("error").textContent = (e as Error).message;
+    reportError(e);
     return;
   }
   if (token !== loadDataToken) return; // superseded by a newer request
   markStoredSortVerified();
-  markRestoredFilterVerified();
+  markFilterVerified();
   updateActiveTableChrome();
 
-  // Rows present now but absent from the previous fetch of this same view.
-  // Only computed on an explicit refresh (highlightNew), only when the
-  // scope is unchanged (a sort/filter/page change makes every row "new"),
-  // and only for a table with a PK to identify rows by.
-  let newRowKeys: Set<string> | undefined;
-  let pkNames: string[] = [];
-  const prev = getLastPayload();
-  const nowScope = scopeKey();
-  if (highlightNew && prev && getLastScopeKey() === nowScope) {
-    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
-    if (pkNames.length) {
-      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
-      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
-    }
-  }
-  setLastPayload(data);
-  setLastScopeKey(nowScope);
+  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
 
   $<HTMLButtonElement>("payload").disabled = false;
   $<HTMLButtonElement>("columns-btn").disabled = false;
@@ -174,9 +162,9 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   // waitForIdle's own animation-poll only proves a transition isn't
   // *currently* running, not that one has already happened.
   if (document.startViewTransition) {
-    document.querySelector("table")!.setAttribute("aria-busy", "true");
+    setTableBusy(true);
     await document.startViewTransition(renderTable).updateCallbackDone;
-    document.querySelector("table")!.removeAttribute("aria-busy");
+    setTableBusy(false);
   } else {
     renderTable();
   }
@@ -193,9 +181,7 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
     // button gets its own "done, unchanged" cue — a ✓ glyph swap mirroring
     // the copy buttons, plus the sr-only #status line.
     setStatus("no changes");
-    const icon = $("refresh-icon");
-    icon.textContent = "✓";
-    setTimeout(() => { icon.textContent = "⟳"; }, 1000);
+    flashIcon($("refresh-icon"), "✓", 1000);
   }
   // Default true: table switch and filter submit jump to a new row 0, so
   // snapping to the top orients the user. Sort and prev/next explicitly
@@ -230,6 +216,6 @@ new ResizeObserver(([entry]) => {
 // turn resolves state.schema before loadTables' first request needs it —
 // bootstrap-only ordering; loadSchemas/loadTables are safe to call on their
 // own after this (source/schema switching does exactly that).
-loadSources().then(loadSchemas).then(loadTables).catch((e) => { $("error").textContent = e.message; });
+loadSources().then(loadSchemas).then(loadTables).catch(reportError);
 loadSiblings();
 setInterval(loadSiblings, 15_000);

@@ -992,10 +992,31 @@ function $(id) {
 function setStatus(text) {
   $("status").textContent = text;
 }
+function reportError(e) {
+  $("error").textContent = e.message;
+}
+function clearError() {
+  $("error").textContent = "";
+}
+function populateSelect(select, values, selected) {
+  select.replaceChildren(...values.map((v) => {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = v;
+    return opt;
+  }));
+  select.value = selected;
+}
+function flashIcon(el, glyph, ms = 800) {
+  if (el.dataset.rest === void 0) el.dataset.rest = el.textContent ?? "";
+  el.textContent = glyph;
+  setTimeout(() => {
+    el.textContent = el.dataset.rest;
+  }, ms);
+}
 async function copyText(text, btn) {
   const mark = btn.querySelector(".copy-icon") ?? btn;
-  if (mark.dataset.rest === void 0) mark.dataset.rest = mark.textContent ?? "";
-  const resting = mark.dataset.rest;
+  let glyph = "\u2713";
   try {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(text);
@@ -1007,13 +1028,10 @@ async function copyText(text, btn) {
       document.execCommand("copy");
       ta.remove();
     }
-    mark.textContent = "\u2713";
   } catch {
-    mark.textContent = "\u2717";
+    glyph = "\u2717";
   }
-  setTimeout(() => {
-    mark.textContent = resting;
-  }, 800);
+  flashIcon(mark, glyph);
 }
 
 // src/api.ts
@@ -1139,6 +1157,7 @@ $("api-help-copy").onclick = () => copyText($("api-help-pre").textContent ?? "",
 // src/filter-dsl.ts
 var FILTER_MAX_DSL_BYTES = 1024;
 var FILTER_MAX_CONDITIONS = 10;
+var RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 var FilterDslError = class extends Error {
   position;
   constructor(message, position) {
@@ -1219,7 +1238,7 @@ function parseFilterDsl(input) {
       pos += c.length;
     }
     if (value === "") throw err("expected value", start);
-    if (/^(AND|OR|NOT)$/i.test(value))
+    if (RESERVED_WORD_RE.test(value))
       throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
     return value;
   };
@@ -1295,7 +1314,7 @@ function tryParseFilterDsl(input) {
   }
 }
 function quoteFilterValue(value) {
-  if (value !== "" && !/[\s']/.test(value) && !/^(AND|OR|NOT)$/i.test(value)) return value;
+  if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return "'" + value.replace(/'/g, "''") + "'";
 }
 window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };
@@ -1326,69 +1345,80 @@ function staleRiskFlag() {
   let unverified = false;
   return {
     isUnverified: () => unverified,
-    markUnverified: () => {
-      unverified = true;
-    },
-    markVerified: () => {
-      unverified = false;
+    set: (value) => {
+      unverified = value;
     }
   };
 }
 var filterRisk = staleRiskFlag();
-function markRestoredFilterVerified() {
-  filterRisk.markVerified();
+var sortRisk = staleRiskFlag();
+function markFilterVerified() {
+  filterRisk.set(false);
+}
+function markStoredSortVerified() {
+  sortRisk.set(false);
 }
 function clearFilter() {
   state.filter = "";
   appliedFilterAst = [];
-  filterRisk.markVerified();
+  filterRisk.set(false);
   $("filter").value = "";
 }
 function restoreFilterFromParams(params) {
-  const filterText = params.get("filter") ?? "";
-  const ast = filterText ? tryParseFilterDsl(filterText) : [];
-  state.filter = ast !== null ? filterText : "";
-  setAppliedFilterAst(ast ?? []);
-  if (state.filter) filterRisk.markUnverified();
-  else filterRisk.markVerified();
+  const text = params.get("filter") ?? "";
+  const ast = text ? tryParseFilterDsl(text) : null;
+  if (!ast) {
+    clearFilter();
+    return;
+  }
+  state.filter = text;
+  appliedFilterAst = ast;
+  filterRisk.set(true);
+  $("filter").value = text;
 }
-try {
-  const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-  for (const k of ["source", "schema", "table", "limit"]) {
-    if (saved[k] !== void 0) state[k] = saved[k];
-  }
-  if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
-    for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
-      if (!Array.isArray(cols)) continue;
-      const clean = cols.filter((c) => typeof c === "string");
-      if (clean.length) state.hiddenColumns[table] = clean;
+function isPlainObject(v) {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+function restoreFromStorage() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+    for (const k of ["source", "schema", "table", "limit"]) {
+      if (saved[k] !== void 0) state[k] = saved[k];
     }
-  }
-  if (saved.sortByTable && typeof saved.sortByTable === "object" && !Array.isArray(saved.sortByTable)) {
-    for (const [table, v] of Object.entries(saved.sortByTable)) {
-      if (v && typeof v === "object" && typeof v.col === "string") {
-        const { col, order } = v;
-        state.sortByTable[table] = { col, order: order === "desc" ? "desc" : "asc" };
+    if (isPlainObject(saved.hiddenColumns)) {
+      for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
+        if (!Array.isArray(cols)) continue;
+        const clean = cols.filter((c) => typeof c === "string");
+        if (clean.length) state.hiddenColumns[table] = clean;
       }
     }
-  }
-  if (saved.schemaBySource && typeof saved.schemaBySource === "object" && !Array.isArray(saved.schemaBySource)) {
-    for (const [source, schema] of Object.entries(saved.schemaBySource)) {
-      if (typeof schema === "string") state.schemaBySource[source] = schema;
+    if (isPlainObject(saved.sortByTable)) {
+      for (const [table, v] of Object.entries(saved.sortByTable)) {
+        if (isPlainObject(v) && typeof v.col === "string") {
+          state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
+        }
+      }
     }
+    if (isPlainObject(saved.schemaBySource)) {
+      for (const [source, schema] of Object.entries(saved.schemaBySource)) {
+        if (typeof schema === "string") state.schemaBySource[source] = schema;
+      }
+    }
+  } catch {
+    localStorage.removeItem(UI_KEY);
   }
-} catch {
-  localStorage.removeItem(UI_KEY);
 }
-var urlParams = new URLSearchParams(location.search);
-if (urlParams.has("source")) state.source = urlParams.get("source");
-if (urlParams.has("schema")) state.schema = urlParams.get("schema");
-if (urlParams.has("table")) state.table = urlParams.get("table");
-if (urlParams.has("sort")) state.sort = urlParams.get("sort");
-if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "desc" : "asc";
-if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
-if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
-restoreFilterFromParams(urlParams);
+function restoreFromUrl() {
+  const params = new URLSearchParams(location.search);
+  if (params.has("source")) state.source = params.get("source");
+  if (params.has("schema")) state.schema = params.get("schema");
+  if (params.has("table")) state.table = params.get("table");
+  if (params.has("sort")) state.sort = params.get("sort");
+  if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
+  if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
+  if (params.has("offset")) state.offset = Number(params.get("offset")) || 0;
+  restoreFilterFromParams(params);
+}
 function persist() {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
   localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
@@ -1396,34 +1426,29 @@ function persist() {
 function hiddenColumnsForTable() {
   return state.hiddenColumns[state.table ?? ""] ?? [];
 }
-var sortRisk = staleRiskFlag();
-function markStoredSortVerified() {
-  sortRisk.markVerified();
-}
 function rememberSort() {
   if (!state.table) return;
   if (state.sort) state.sortByTable[state.table] = { col: state.sort, order: state.order };
   else delete state.sortByTable[state.table];
-  sortRisk.markVerified();
+  sortRisk.set(false);
   persist();
 }
 function applyStoredSort(table) {
   const stored = table ? state.sortByTable[table] : void 0;
   state.sort = stored?.col ?? null;
   state.order = stored?.order ?? "asc";
-  if (state.sort !== null) sortRisk.markUnverified();
-  else sortRisk.markVerified();
+  sortRisk.set(state.sort !== null);
 }
 function dropStoredSort(table) {
   if (table) delete state.sortByTable[table];
   state.sort = null;
   state.order = "asc";
-  sortRisk.markVerified();
+  sortRisk.set(false);
   persist();
 }
 function dropOneStaleInput() {
-  const filterIsUserTyped = state.filter !== "" && !filterRisk.isUnverified();
-  if (sortRisk.isUnverified() && state.table && !filterIsUserTyped) {
+  if (state.filter !== "" && !filterRisk.isUnverified()) return false;
+  if (sortRisk.isUnverified() && state.table) {
     dropStoredSort(state.table);
     return true;
   }
@@ -1478,6 +1503,24 @@ function getLastScopeKey() {
 function setLastScopeKey(key) {
   lastScopeKey = key;
 }
+function diffNewRows(data, highlightNew) {
+  const prev = getLastPayload();
+  const nowScope = scopeKey();
+  let newRowKeys;
+  let pkNames = [];
+  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    if (pkNames.length) {
+      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
+      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
+    }
+  }
+  setLastPayload(data);
+  setLastScopeKey(nowScope);
+  return { newRowKeys, pkNames };
+}
+restoreFromStorage();
+restoreFromUrl();
 
 // src/filter-ui.ts
 function submitFilter(text) {
@@ -1486,13 +1529,13 @@ function submitFilter(text) {
     try {
       ast = parseFilterDsl(text);
     } catch (e) {
-      $("error").textContent = e.message;
+      reportError(e);
       return;
     }
   }
   state.filter = text;
   setAppliedFilterAst(ast);
-  markRestoredFilterVerified();
+  markFilterVerified();
   state.offset = 0;
   loadData();
 }
@@ -1501,7 +1544,6 @@ function applyFilterClause(column, op, value) {
   $("filter").value = clause;
   submitFilter(clause);
 }
-$("filter").value = state.filter;
 $("filter-form").onsubmit = (e) => {
   e.preventDefault();
   submitFilter($("filter").value.trim());
@@ -1890,14 +1932,7 @@ async function loadSources() {
   if (!state.source || !sources.some((s) => s.name === state.source)) {
     state.source = sources[0].name;
   }
-  const select = $("source-select");
-  select.replaceChildren(...sources.map((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.name;
-    opt.textContent = s.name;
-    return opt;
-  }));
-  select.value = state.source;
+  populateSelect($("source-select"), sources.map((s) => s.name), state.source);
   $("source-select-wrap").hidden = false;
 }
 $("source-select").onchange = () => {
@@ -1908,9 +1943,7 @@ $("source-select").onchange = () => {
   state.offset = 0;
   clearFilter();
   persist();
-  loadSchemas().then(loadTables).catch((e) => {
-    $("error").textContent = e.message;
-  });
+  loadSchemas().then(loadTables).catch(reportError);
 };
 var loadSchemasToken = 0;
 async function loadSchemas() {
@@ -1933,26 +1966,21 @@ async function loadSchemas() {
   if (!state.schema || !schemas.includes(state.schema)) {
     state.schema = schemas.includes("public") ? "public" : schemas[0];
   }
-  const select = $("schema-select");
-  select.replaceChildren(...schemas.map((s) => {
-    const opt = document.createElement("option");
-    opt.value = s;
-    opt.textContent = s;
-    return opt;
-  }));
-  select.value = state.schema;
+  populateSelect($("schema-select"), schemas, state.schema);
   $("schema-select-wrap").hidden = false;
 }
+function setSchema(name) {
+  state.schema = name;
+  $("schema-select").value = name;
+  rememberSchema();
+}
 $("schema-select").onchange = () => {
-  state.schema = $("schema-select").value;
+  setSchema($("schema-select").value);
   state.table = null;
   state.sort = null;
   state.offset = 0;
   clearFilter();
-  rememberSchema();
-  loadTables().catch((e) => {
-    $("error").textContent = e.message;
-  });
+  loadTables().catch(reportError);
 };
 var loadTablesToken = 0;
 async function loadTables() {
@@ -2001,6 +2029,14 @@ async function loadTables() {
 }
 function setRowLoading(name, loading) {
   tableEntries.find((e) => e.name === name)?.btn.classList.toggle("loading", loading);
+}
+function setActiveTable(name) {
+  for (const e of tableEntries) {
+    const isActive = e.name === name;
+    e.btn.classList.toggle("active", isActive);
+    if (isActive) e.btn.setAttribute("aria-current", "true");
+    else e.btn.removeAttribute("aria-current");
+  }
 }
 
 // src/grid.ts
@@ -2104,16 +2140,16 @@ function showCellPop(e, text) {
   cellPopAnchor.style.anchorName = "--cell-anchor";
   $("cell-pop").showPopover();
 }
-function buildCell(col, raw) {
-  const hidden = hiddenColumnsForTable().includes(col.name);
-  if (raw == null) {
-    const td2 = document.createElement("td");
-    td2.dataset.col = col.name;
-    if (hidden) td2.classList.add("col-hidden");
+function buildCell(col, raw, hidden) {
+  const isNull = raw == null;
+  const td = isNull ? document.createElement("td") : cellTemplate.content.cloneNode(true).firstElementChild;
+  td.dataset.col = col.name;
+  if (hidden.has(col.name)) td.classList.add("col-hidden");
+  if (isNull) {
     const span = document.createElement("span");
     span.className = "cell-text";
     span.textContent = "\u2205";
-    td2.appendChild(span);
+    td.appendChild(span);
     const filterBtn2 = document.createElement("button");
     filterBtn2.className = "filter-eq only-action";
     filterBtn2.setAttribute("aria-label", "filter by null");
@@ -2122,12 +2158,9 @@ function buildCell(col, raw) {
       e.stopPropagation();
       applyFilterClause(col.name, "IS NULL");
     };
-    td2.appendChild(filterBtn2);
-    return td2;
+    td.appendChild(filterBtn2);
+    return td;
   }
-  const td = cellTemplate.content.cloneNode(true).firstElementChild;
-  td.dataset.col = col.name;
-  if (hidden) td.classList.add("col-hidden");
   const cellText = td.querySelector(".cell-text");
   const btn = td.querySelector(".copy");
   const filterBtn = td.querySelector(".filter-eq");
@@ -2149,12 +2182,8 @@ function buildCell(col, raw) {
       state.table = references.table;
       state.sort = null;
       if (references.schema && references.schema !== state.schema) {
-        state.schema = references.schema;
-        $("schema-select").value = state.schema;
-        rememberSchema();
-        loadTables().then(() => applyFilterClause(references.column, "=", raw)).catch((e) => {
-          $("error").textContent = e.message;
-        });
+        setSchema(references.schema);
+        loadTables().then(() => applyFilterClause(references.column, "=", raw)).catch(reportError);
         return;
       }
       persist();
@@ -2202,9 +2231,9 @@ function buildRowActionCell(columns, row) {
   return td;
 }
 function renderRows(data, newRowKeys, pkNames = []) {
+  const hidden = new Set(hiddenColumnsForTable());
   if (data.rows.length === 0) {
-    const hidden = hiddenColumnsForTable();
-    const visible = data.columns.filter((c) => !hidden.includes(c.name)).length;
+    const visible = data.columns.filter((c) => !hidden.has(c.name)).length;
     renderEmptyState(visible + 1);
     return;
   }
@@ -2214,7 +2243,7 @@ function renderRows(data, newRowKeys, pkNames = []) {
     if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
     tr.appendChild(buildRowActionCell(data.columns, row));
     for (const col of data.columns) {
-      tr.appendChild(buildCell(col, row[col.name]));
+      tr.appendChild(buildCell(col, row[col.name], hidden));
     }
     return tr;
   }));
@@ -2253,8 +2282,7 @@ function syncUrl() {
     params.set("sort", state.sort);
     params.set("order", state.order);
   }
-  if (state.source) params.set("source", state.source);
-  if (state.schema) params.set("schema", state.schema);
+  applyScopeParams(params);
   if (state.filter) params.set("filter", state.filter);
   const qs = "?" + params;
   const key = navViewKey();
@@ -2287,7 +2315,6 @@ window.addEventListener("popstate", (ev) => {
   state.limit = Number(params.get("limit")) || state.limit;
   state.offset = Number(params.get("offset")) || 0;
   restoreFilterFromParams(params);
-  $("filter").value = state.filter;
   const sourceSelect = $("source-select");
   if (sourceSelect) sourceSelect.value = state.source ?? "";
   const schemaSelect = $("schema-select");
@@ -2296,9 +2323,7 @@ window.addEventListener("popstate", (ev) => {
   persist();
   updateNavButtons();
   restoringFromHistory = true;
-  loadTables().catch((e) => {
-    $("error").textContent = e.message;
-  }).finally(() => {
+  loadTables().catch(reportError).finally(() => {
     restoringFromHistory = false;
   });
 });
@@ -2390,6 +2415,11 @@ $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $("payload-dialog").showModal();
 };
+var tableEl = document.querySelector("table");
+function setTableBusy(busy) {
+  if (busy) tableEl.setAttribute("aria-busy", "true");
+  else tableEl.removeAttribute("aria-busy");
+}
 var inFlightFetches = 0;
 async function fetchTableData() {
   const table = state.table ?? "";
@@ -2406,7 +2436,7 @@ async function fetchTableData() {
   if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
   if (inFlightFetches++ === 0) {
     setStatus("loading\u2026");
-    document.querySelector("table").setAttribute("aria-busy", "true");
+    setTableBusy(true);
   }
   setRowLoading(table, true);
   try {
@@ -2415,14 +2445,13 @@ async function fetchTableData() {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
       setStatus("");
-      document.querySelector("table").removeAttribute("aria-busy");
+      setTableBusy(false);
     }
   }
 }
 function captureTableFocus() {
   const active = document.activeElement;
-  const table = document.querySelector("table");
-  if (!active || !table.contains(active)) return null;
+  if (!active || !tableEl.contains(active)) return null;
   const cell = active.closest("th, td");
   const tr = active.closest("tr");
   if (!cell || !tr) return null;
@@ -2439,21 +2468,16 @@ function restoreTableFocus(captured) {
   const cell = tr?.children[captured.colIndex];
   const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
   const target = classSelector ? cell?.querySelector(classSelector) : null;
-  (target ?? document.querySelector("table")).focus();
+  (target ?? tableEl).focus();
 }
 function updateActiveTableChrome() {
-  document.querySelectorAll("#tables button").forEach((b) => {
-    const isActive = b.dataset.table === state.table;
-    b.classList.toggle("active", isActive);
-    if (isActive) b.setAttribute("aria-current", "true");
-    else b.removeAttribute("aria-current");
-  });
+  setActiveTable(state.table);
   $("current").textContent = state.table ?? "\u2014";
   document.title = state.table ? `${state.table} \u2014 Ashurbanipal` : "Ashurbanipal";
 }
 var loadDataToken = 0;
 async function loadData({ resetScroll = true, highlightNew = false } = {}) {
-  $("error").textContent = "";
+  clearError();
   if (!state.table) {
     updateActiveTableChrome();
     setStatus("");
@@ -2466,26 +2490,14 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
   } catch (e) {
     if (token !== loadDataToken) return;
     if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
-    $("error").textContent = e.message;
+    reportError(e);
     return;
   }
   if (token !== loadDataToken) return;
   markStoredSortVerified();
-  markRestoredFilterVerified();
+  markFilterVerified();
   updateActiveTableChrome();
-  let newRowKeys;
-  let pkNames = [];
-  const prev = getLastPayload();
-  const nowScope = scopeKey();
-  if (highlightNew && prev && getLastScopeKey() === nowScope) {
-    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
-    if (pkNames.length) {
-      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
-      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
-    }
-  }
-  setLastPayload(data);
-  setLastScopeKey(nowScope);
+  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
   $("payload").disabled = false;
   $("columns-btn").disabled = false;
   $("refresh").disabled = false;
@@ -2499,9 +2511,9 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
     restoreTableFocus(focusCapture);
   };
   if (document.startViewTransition) {
-    document.querySelector("table").setAttribute("aria-busy", "true");
+    setTableBusy(true);
     await document.startViewTransition(renderTable).updateCallbackDone;
-    document.querySelector("table").removeAttribute("aria-busy");
+    setTableBusy(false);
   } else {
     renderTable();
   }
@@ -2511,11 +2523,7 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
     setStatus(`${newRowKeys.size} new`);
   } else if (highlightNew && newRowKeys) {
     setStatus("no changes");
-    const icon = $("refresh-icon");
-    icon.textContent = "\u2713";
-    setTimeout(() => {
-      icon.textContent = "\u27F3";
-    }, 1e3);
+    flashIcon($("refresh-icon"), "\u2713", 1e3);
   }
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
@@ -2538,9 +2546,7 @@ $("refresh").onclick = () => {
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
 }).observe($("toolbar"));
-loadSources().then(loadSchemas).then(loadTables).catch((e) => {
-  $("error").textContent = e.message;
-});
+loadSources().then(loadSchemas).then(loadTables).catch(reportError);
 loadSiblings();
 setInterval(loadSiblings, 15e3);
 export {
