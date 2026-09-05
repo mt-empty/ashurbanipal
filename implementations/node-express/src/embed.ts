@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 // frontend/dbviewer.html release artifact; here it pins this repo's own
 // copy since there is no separate tagged release to vendor from yet
 // (same caveat the go-nethttp port documents).
-const PINNED_FRONTEND_SHA256 = "fe82b452904b9c4c76bb080665b1620f99e5b1d70ae9da74b00d3b48d036502c";
+const PINNED_FRONTEND_SHA256 = "6018128131b339a40444a89b37c07d099de54c5c167b5082cbcaf64355dfb7e4";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // From dist/ (built) or src/ (tsx dev run) the frontend dir is one level up, at the package root.

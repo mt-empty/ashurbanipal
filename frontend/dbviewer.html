@@ -1033,6 +1033,22 @@ function getLastScopeKey() {
 function setLastScopeKey(key) {
   lastScopeKey = key;
 }
+function diffNewRows(data, highlightNew) {
+  const prev = getLastPayload();
+  const nowScope = scopeKey();
+  let newRowKeys;
+  let pkNames = [];
+  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    if (pkNames.length) {
+      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
+      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
+    }
+  }
+  setLastPayload(data);
+  setLastScopeKey(nowScope);
+  return { newRowKeys, pkNames };
+}
 restoreFromStorage();
 restoreFromUrl();
 
@@ -2006,19 +2022,7 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
   markStoredSortVerified();
   markFilterVerified();
   updateActiveTableChrome();
-  let newRowKeys;
-  let pkNames = [];
-  const prev = getLastPayload();
-  const nowScope = scopeKey();
-  if (highlightNew && prev && getLastScopeKey() === nowScope) {
-    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
-    if (pkNames.length) {
-      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
-      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
-    }
-  }
-  setLastPayload(data);
-  setLastScopeKey(nowScope);
+  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
   $("payload").disabled = false;
   $("columns-btn").disabled = false;
   $("refresh").disabled = false;

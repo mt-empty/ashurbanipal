@@ -273,6 +273,28 @@ export function setLastScopeKey(key: string | null): void {
   lastScopeKey = key;
 }
 
+// R10: rows present now but absent from the previous fetch of the same view
+// count as new, so a refresh can tint them — but only when the scope is
+// unchanged (a sort/filter/page change makes every row look new) and the
+// table has a PK to identify rows by. Also advances lastPayload/lastScopeKey
+// to this fetch, since that bookkeeping only ever happens alongside this diff.
+export function diffNewRows(data: TableData, highlightNew: boolean): { newRowKeys?: Set<string>; pkNames: string[] } {
+  const prev = getLastPayload();
+  const nowScope = scopeKey();
+  let newRowKeys: Set<string> | undefined;
+  let pkNames: string[] = [];
+  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
+    if (pkNames.length) {
+      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
+      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
+    }
+  }
+  setLastPayload(data);
+  setLastScopeKey(nowScope);
+  return { newRowKeys, pkNames };
+}
+
 // state.ts's body is evaluated before any importing module's, so the restore
 // has to run here rather than with main.ts's other bootstrap calls.
 restoreFromStorage();

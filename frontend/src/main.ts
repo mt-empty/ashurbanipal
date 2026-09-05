@@ -6,7 +6,7 @@ import { syncUrl } from "./nav.js";
 import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
-import { applyScopeParams, dropOneStaleInput, getAppliedFilterAst, getLastPayload, getLastScopeKey, markFilterVerified, markStoredSortVerified, rowKey, scopeKey, setLastPayload, setLastScopeKey, state } from "./state.js";
+import { applyScopeParams, diffNewRows, dropOneStaleInput, getAppliedFilterAst, getLastPayload, markFilterVerified, markStoredSortVerified, state } from "./state.js";
 import "./theme.js";
 import type { TableData } from "./types.js";
 
@@ -145,23 +145,7 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   markFilterVerified();
   updateActiveTableChrome();
 
-  // Rows present now but absent from the previous fetch of this same view.
-  // Only computed on an explicit refresh (highlightNew), only when the
-  // scope is unchanged (a sort/filter/page change makes every row "new"),
-  // and only for a table with a PK to identify rows by.
-  let newRowKeys: Set<string> | undefined;
-  let pkNames: string[] = [];
-  const prev = getLastPayload();
-  const nowScope = scopeKey();
-  if (highlightNew && prev && getLastScopeKey() === nowScope) {
-    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
-    if (pkNames.length) {
-      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
-      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
-    }
-  }
-  setLastPayload(data);
-  setLastScopeKey(nowScope);
+  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
 
   $<HTMLButtonElement>("payload").disabled = false;
   $<HTMLButtonElement>("columns-btn").disabled = false;
