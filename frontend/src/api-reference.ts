@@ -14,9 +14,18 @@ function buildApiReference() {
     endpoints: [
       {
         method: "GET",
+        path: `${base}/sources`,
+        summary: "Source names selectable as the `source` param on the routes below, for a host that has registered more than one. A single-source deployment still returns exactly one entry; the first is the default used when `source` is omitted.",
+        params: [],
+        example_response: { sources: [{ name: "primary" }, { name: "reporting" }] },
+      },
+      {
+        method: "GET",
         path: `${base}/schemas`,
         summary: "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry.",
-        params: [],
+        params: [
+          { name: "source", required: false, notes: "must be a name returned by GET /sources; omit to use the default source" },
+        ],
         example_response: { schemas: ["public"] },
       },
       {
@@ -24,6 +33,7 @@ function buildApiReference() {
         path: `${base}/tables`,
         summary: "List table names in the resolved schema — also the allow-list for every other endpoint's `table` param.",
         params: [
+          { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "must be a name returned by GET /schemas; omit to use the connection's default schema" },
         ],
         example_response: { tables: [{ name: "users", comment: "Registered accounts." }, { name: "sessions" }] },
@@ -33,6 +43,7 @@ function buildApiReference() {
         path: `${base}/table-counts`,
         summary: "Approximate row count per table — a cheap engine estimate, never a live COUNT(*); may be -1 when the engine exposes no estimate.",
         params: [
+          { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables" },
         ],
         example_response: { counts: [{ table: "users", approx_rows: 108234 }] },
@@ -42,6 +53,7 @@ function buildApiReference() {
         path: `${base}/tables/data`,
         summary: "Paginated, filtered, sorted rows for one table.",
         params: [
+          { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables" },
           { name: "table", required: true, notes: "must be a name returned by GET /tables" },
           { name: "filter", required: false, notes: "URL-encoded JSON array of condition objects — see the `filter` key below" },
@@ -52,8 +64,12 @@ function buildApiReference() {
         ],
         example_request: `${base}/tables/data?table=users&filter=${exampleFilter}&limit=20&sort=created_at&order=desc`,
         example_response: {
-          columns: [{ name: "id", type: "uuid", key: "pk" }, { name: "status", type: "text" }],
-          rows: [{ id: "...", status: "active" }],
+          columns: [
+            { name: "id", type: "uuid", key: "pk" },
+            { name: "user_id", type: "uuid", key: "fk", references: { table: "users", column: "id" } },
+            { name: "status", type: "text" },
+          ],
+          rows: [{ id: "...", user_id: "...", status: "active" }],
           total_approx: 108234,
         },
       },
@@ -62,6 +78,7 @@ function buildApiReference() {
         path: `${base}/tables/common-values`,
         summary: "Most frequent values for one column — approximate, from engine statistics; empty when the engine keeps no such statistics for the column.",
         params: [
+          { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables" },
           { name: "table", required: true },
           { name: "column", required: true },

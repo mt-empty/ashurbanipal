@@ -275,7 +275,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1;
                      border: 1px solid var(--border); border-radius: 4px;
                      padding: .1rem .4rem; font-size: .85em; }
-.copy-icon { display: inline-block; min-width: 1ch; text-align: center; }
+.copy-icon { display: inline-block; width: 1.2em; text-align: center; }
 
 /* white-space: normal resets the pre-wrap inherited from ancestors
    (#cell-pop / dialog dl dd's plain-text case). */
