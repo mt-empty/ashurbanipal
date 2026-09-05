@@ -328,8 +328,12 @@
         result = cond.op === ">" ? cmp > 0 : cond.op === "<" ? cmp < 0 : cond.op === ">=" ? cmp >= 0 : cmp <= 0;
         break;
       }
-      default:
+      // Unreachable given FilterOp's 10 members are all handled above — a
+      // future member added without a matching case fails to compile here.
+      default: {
+        const _exhaustive = cond.op;
         result = false;
+      }
     }
     return cond.not ? !result : result;
   }
