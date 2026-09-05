@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { applyFilter, gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 test("back/forward buttons step through table navigation history", async ({ page }) => {
   await gotoApp(page);
@@ -54,6 +54,23 @@ test("navigating to a different table from a back-stepped position truncates the
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
   await page.locator("#nav-forward").click();
   await page.locator("#current").getByText("sessions", { exact: true }).waitFor();
+});
+
+test("back/forward steps the filter in and out along with table navigation", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await applyFilter(page, "status = completed");
+  await expect(page.locator("#filter")).toHaveValue("status = completed");
+
+  await selectTable(page, "products"); // its own back-stop; clears the filter
+
+  await page.locator("#nav-back").click();
+  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
+  await expect(page.locator("#filter")).toHaveValue("status = completed");
+
+  await page.locator("#nav-forward").click();
+  await page.locator("#current").getByText("products", { exact: true }).waitFor();
+  await expect(page.locator("#filter")).toHaveValue("");
 });
 
 test("sorting within the initially-loaded table does not create a back-stop", async ({ page }) => {

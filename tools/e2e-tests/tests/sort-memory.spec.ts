@@ -51,3 +51,38 @@ test("a remembered sort column the backend rejects is dropped and the view recov
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("ashurbanipal_ui")!));
   expect(stored.sortByTable.products).toBeUndefined();
 });
+
+test("a stale remembered sort is dropped without discarding a shared link's filter", async ({
+  page,
+}) => {
+  // Two stale-risk inputs at once: the visitor's own stored sort names a
+  // dead column, while the link's ?filter= is perfectly valid. The sort is
+  // this visitor's incidental state, the filter is the link's whole point —
+  // so the sort is dropped first and the filtered view still renders.
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "ashurbanipal_ui",
+      JSON.stringify({ sortByTable: { orders: { col: "ghost_col", order: "asc" } } }),
+    );
+  });
+  await page.route("**/api/tables/data*", (r) => {
+    if (new URL(r.request().url()).searchParams.get("sort") === "ghost_col") {
+      return r.fulfill({ status: 400, body: 'unknown sort column "ghost_col"' });
+    }
+    return r.continue();
+  });
+
+  await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("status = completed"));
+  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
+
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect(page.locator("#filter")).toHaveValue("status = completed");
+  await expect(page.locator('thead th[data-col]:not([aria-sort="none"])')).toHaveCount(0);
+  // The filter is actually applied, not merely left sitting in the box.
+  await expect
+    .poll(async () => {
+      const values = await page.locator('#tbody td[data-col="status"] .cell-text').allTextContents();
+      return values.length > 0 && values.every((v) => v === "completed");
+    })
+    .toBe(true);
+});

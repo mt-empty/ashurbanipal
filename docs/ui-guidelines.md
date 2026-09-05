@@ -97,12 +97,30 @@ should block on.
   discard and rewrite); it generalizes to any future persisted client
   state. A corrupted local value is a reset, never a dead end.
   *(Derives from: error prevention, recovery.)*
-- **R6 — No sensitive or bulky data persisted client-side.** `localStorage`
-  carries UI shape only (selected table, sort, page size) — never row data,
-  never filter values (filters can contain data). This is a blanket rule so
-  each future feature doesn't re-litigate it case by case. *(Security
-  invariant first, but also match-the-real-world: a user's mental model of
-  "this tool doesn't cache my data" should stay true.)*
+- **R6 — Persisted client-side state is the user's own view intent, never
+  row data.** Every persistence mechanism — `localStorage` and the URL
+  (`history.replaceState()`) alike — may carry the view the user built:
+  selected table, sort, order, page size, offset, and the filter the user
+  authored. It must never carry values read back out of result rows — cell
+  contents, or a primary key lifted from a row to build a link. The test is
+  authorship: a `WHERE` clause the user typed persists; a value the UI
+  copied out of a fetched row does not. A restored filter that the current
+  database can't satisfy — it no longer parses, names a column the table
+  lacks, or was written against a table that isn't here — resets silently
+  to no filter (R5), never an error or a dead-end link. The applied filter
+  is the one field that goes to the URL but never `localStorage`: a URL is
+  already the shareable-link surface a teammate might reuse, while keeping
+  filter text out of `localStorage` means returning to a table later never
+  silently reapplies a filter the current visit didn't type. *(Derives from:
+  recognition rather than recall — a reload or a shared link should restore
+  the view the user built. The host owns who may reach the UI and what data
+  is sensitive, `readme.md` §Security; the frontend's remaining duty is
+  only that it never persists a value the user did not enter.)*
+
+  Host-facing: filter text now appears in URLs, so it reaches browser
+  history, `Referer` headers, and any access log that records query
+  strings. A host shipping those logs somewhere long-lived, or rendering
+  link previews outside its trust perimeter, should account for that.
 - **R7 — Bounded rendering.** The UI renders what the server paginates it —
   it must not independently fetch-all or attempt to render an unbounded
   result set regardless of what an API technically allows. *(Derives from:
@@ -133,8 +151,13 @@ should block on.
   sort last chosen there — which is what lets R10's refresh surface new
   rows without re-sorting every visit. A restored sort column the backend
   rejects (400 — the schema changed, or storage carried over from another
-  database) is dropped and the view retried unsorted (R5); the retry only
-  fires when sort was the sole stale-risk input (no filter on the request).
+  database) is dropped and the view retried unsorted (R5). A URL-restored
+  filter is stale-risk the same way, so the two are dropped one at a time,
+  sort first: it's the visitor's own incidental state, while the filter is
+  what the shared link was for, so the link's filtered view still gets its
+  chance to render. A filter the user typed on this visit is *not*
+  stale-risk — its 400 is theirs to see, and it suppresses the sort retry
+  rather than being silently discarded.
   Sort is never carried across tables — a column name is table-specific.
   *(Derives from: recognition rather than recall.)*
 - **R12 — Schema is remembered per source.** The selected schema persists

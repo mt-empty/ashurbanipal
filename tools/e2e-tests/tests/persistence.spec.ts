@@ -37,18 +37,65 @@ test("corrupted localStorage is discarded and falls back to the default view", a
   expect(stored).not.toBe("not valid json{");
 });
 
-test("the applied filter is never persisted to localStorage or the URL", async ({ page }) => {
+test("the applied filter persists to the URL, never localStorage", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
   await applyFilter(page, "status = completed");
 
   const state = await uiState(page);
   expect(state).not.toHaveProperty("filter");
-  expect(new URL(page.url()).searchParams.has("filter")).toBe(false);
+  expect(new URL(page.url()).searchParams.get("filter")).toBe("status = completed");
 
-  await gotoApp(page); // bare URL, restore from localStorage
+  await gotoApp(page); // bare URL — no filter param, restore-from-localStorage only
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
+  await expect(page.locator("#filter")).toHaveValue(""); // localStorage never carried it
+});
+
+const statusCells = (page: import("@playwright/test").Page) =>
+  page.locator('#tbody td[data-col="status"] .cell-text');
+
+test("a malformed filter URL param resets to no filter silently", async ({ page }) => {
+  await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("status = 'unterminated"));
+  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
+  await expect(page.locator("#error")).toBeEmpty();
   await expect(page.locator("#filter")).toHaveValue("");
+  await expect
+    .poll(async () => new Set(await statusCells(page).allTextContents()).size)
+    .toBeGreaterThan(1); // unfiltered — mixed statuses still visible
+});
+
+test("a filter URL param naming a column the table lacks resets silently", async ({ page }) => {
+  // Parses fine, so tryParseFilterDsl accepts it — the backend is what
+  // rejects it (a link shared to a deployment where the column has drifted
+  // away). Must degrade like a stale sort does, not dead-end the link (R5).
+  await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("nosuchcol = 1"));
+  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect(page.locator("#filter")).toHaveValue("");
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
+});
+
+test("a filter survives no better than the table it was written against", async ({ page }) => {
+  // ?table= names a table that isn't here, so loadTables falls back to the
+  // first one — and the filter, written against the named table's columns,
+  // must not ride along onto a table that may not have them.
+  await gotoApp(page, "?table=nosuchtable&filter=" + encodeURIComponent("status = completed"));
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect(page.locator("#filter")).toHaveValue("");
+  await expect(page.locator("#current")).not.toHaveText("—");
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
+});
+
+test("a filter URL param restores the filtered view on load", async ({ page }) => {
+  await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("status = completed"));
+  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
+  await expect(page.locator("#filter")).toHaveValue("status = completed");
+  await expect
+    .poll(async () => {
+      const values = await statusCells(page).allTextContents();
+      return values.length > 0 && values.every((v) => v === "completed");
+    })
+    .toBe(true);
 });
 
 test("hidden columns persist across a fresh visit, scoped per table", async ({ page }) => {

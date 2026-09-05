@@ -155,14 +155,16 @@ Two components, same as the original concept:
 - **UI state persistence**: `localStorage` remembers lightweight UI state
   across visits — currently selected table, sort column/direction, page
   size, and per-table hidden-column sets — and the same state (except
-  hidden columns) is mirrored into the URL's query params via
-  `history.replaceState`, so the address bar is always a shareable link
-  for the current view. Properties:
+  hidden columns and the filter) is mirrored into the URL's query params
+  via `history.replaceState`, so the address bar is always a shareable
+  link for the current view. Properties:
   - One `localStorage` key, `ashurbanipal_ui`, value is a small JSON
     object. Nothing sensitive ever goes in it — table/column names only,
-    no row data, no filters (filters can contain data values, so the
-    *applied* filter is deliberately excluded from both `localStorage` and
-    the URL, never just one of the two).
+    no row data, no filters. The *applied* filter is the one exception,
+    and it's asymmetric by design: it's carried in the URL (as the raw DSL
+    text the user typed, verbatim — no JSON-AST param, no separate
+    serializer) but never written to `localStorage`, so returning to a
+    table later never silently reapplies a filter this visit didn't type.
   - A URL's query params win over `localStorage` on load, so opening a
     shared/bookmarked link reproduces that link's view rather than the
     visitor's own saved preferences.
@@ -176,6 +178,13 @@ Two components, same as the original concept:
   - On load: if the stored state names a table that no longer exists in
     `/tables`, fall back to the default view silently (stale state must
     never wedge the UI). Malformed JSON in the key → discard and rewrite.
+    A `?filter=` the current database can't satisfy gets the same
+    treatment — whether it fails to parse, names a column the table lacks,
+    or was written against a table that isn't here, it silently resets to
+    no filter, never an error or a wedge. Where a stale stored sort and a
+    URL filter are both in play, they're dropped one at a time (sort
+    first, so the link's filtered view still renders — `ui-guidelines.md`
+    R11).
   Detailed behavioral rules for all of the above (what may/may not be
   persisted, how affordances must degrade, no-client-parsing constraints)
   live in `ui-guidelines.md` and `frontend-style-guide.md` — this section

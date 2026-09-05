@@ -20,3 +20,13 @@
     case by case."
 - Either way, this is a scope/policy decision before it's an implementation
   one.
+
+**Update (2026-09-05):** `docs/feature-backlog/20-persisted-and-shareable-filter-state.md`
+shipped, replacing R6 with a narrower rule permitting the *current* applied
+filter (URL-only, never `localStorage`) as the user's own authored view
+intent. The "carve out an exception to R6" branch above is no longer
+hypothetical — it's the shipped default for the single current filter.
+This entry's actual ask, a *history* of past filters, is still a distinct,
+undecided feature: R6 as it now reads permits the one filter the user is
+actively viewing, not an accumulating list of prior ones, so the
+session-only-vs-persisted choice above is unresolved.

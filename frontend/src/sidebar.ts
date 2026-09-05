@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { $, setStatus } from "./dom.js";
 import { loadData } from "./main.js";
-import { applyStoredSort, persist, rememberSchema, scopeQuery, setAppliedFilterAst, sourceQuery, state } from "./state.js";
+import { applyStoredSort, clearFilter, persist, rememberSchema, scopeQuery, sourceQuery, state } from "./state.js";
 import type { SourceEntry, TableListEntry } from "./types.js";
 
 // approx_rows/total_approx is -1 when the backend has no cheap estimate for
@@ -79,7 +79,7 @@ $<HTMLSelectElement>("source-select").onchange = () => {
   // loadSchemas() still validates it and falls back if it's gone (R5/R12).
   state.schema = state.schemaBySource[state.source ?? ""] ?? null;
   state.table = null; state.sort = null; state.offset = 0;
-  state.filter = ""; setAppliedFilterAst([]); $<HTMLInputElement>("filter").value = "";
+  clearFilter();
   persist();
   loadSchemas().then(loadTables).catch((e) => { $("error").textContent = e.message; });
 };
@@ -129,7 +129,7 @@ export async function loadSchemas(): Promise<void> {
 $<HTMLSelectElement>("schema-select").onchange = () => {
   state.schema = $<HTMLSelectElement>("schema-select").value;
   state.table = null; state.sort = null; state.offset = 0;
-  state.filter = ""; setAppliedFilterAst([]); $<HTMLInputElement>("filter").value = "";
+  clearFilter();
   rememberSchema();
   loadTables().catch((e) => { $("error").textContent = e.message; });
 };
@@ -168,8 +168,7 @@ export async function loadTables(): Promise<void> {
     // switch; the sort is restored to whatever was last used on this table.
     btn.onclick = () => {
       state.table = t.name; state.offset = 0; applyStoredSort(t.name);
-      state.filter = ""; setAppliedFilterAst([]);
-      $<HTMLInputElement>("filter").value = "";
+      clearFilter();
       persist(); loadData();
     };
     li.appendChild(btn);
@@ -179,7 +178,13 @@ export async function loadTables(): Promise<void> {
   filterTables();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
-  if (!tableNames.includes(state.table ?? "")) state.table = tableNames[0] ?? null;
+  if (!tableNames.includes(state.table ?? "")) {
+    state.table = tableNames[0] ?? null;
+    // A ?filter= was written against the table the URL named; that table
+    // isn't here, so its columns can't apply to the fallback — carrying it
+    // over would 400 and dead-end the very load meant to recover (R5).
+    clearFilter();
+  }
   // Restore this table's remembered sort unless one is already set — a
   // shared link's ?sort= or a history entry takes precedence.
   if (state.table && state.sort === null) applyStoredSort(state.table);

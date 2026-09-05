@@ -1,6 +1,6 @@
 import { $ } from "./dom.js";
 import { loadTables } from "./sidebar.js";
-import { persist, setAppliedFilterAst, state } from "./state.js";
+import { persist, restoreFilterFromParams, state } from "./state.js";
 
 // Back/forward navigation stops at table/schema/source switches, not every
 // sort/page tweak within the same table — otherwise "back" would undo
@@ -23,8 +23,10 @@ export function updateNavButtons(): void {
   $<HTMLButtonElement>("nav-forward").disabled = navIndex >= navStack.length - 1;
 }
 
-// filter is never included (ui-guidelines.md R6) — applies to history.state
-// exactly as it does to the URL and localStorage.
+// filter is carried in the URL (ui-guidelines.md R6) like table/sort/scope,
+// but deliberately excluded from navViewKey() below — a filter change
+// replaces the current history entry exactly like a sort click or a page
+// turn, never pushing a new back-stack stop.
 export function syncUrl(): void {
   const params = new URLSearchParams({
     table: state.table ?? "", limit: String(state.limit), offset: String(state.offset),
@@ -32,6 +34,7 @@ export function syncUrl(): void {
   if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
   if (state.source) params.set("source", state.source);
   if (state.schema) params.set("schema", state.schema);
+  if (state.filter) params.set("filter", state.filter);
   const qs = "?" + params;
   const key = navViewKey();
   const samePlace = navIndex >= 0 && navStack[navIndex] === key;
@@ -60,9 +63,8 @@ window.addEventListener("popstate", (ev) => {
   state.order = params.get("order") === "desc" ? "desc" : "asc";
   state.limit = Number(params.get("limit")) || state.limit;
   state.offset = Number(params.get("offset")) || 0;
-  state.filter = "";
-  setAppliedFilterAst([]);
-  $<HTMLInputElement>("filter").value = "";
+  restoreFilterFromParams(params);
+  $<HTMLInputElement>("filter").value = state.filter;
   const sourceSelect = $<HTMLSelectElement>("source-select");
   if (sourceSelect) sourceSelect.value = state.source ?? "";
   const schemaSelect = $<HTMLSelectElement>("schema-select");

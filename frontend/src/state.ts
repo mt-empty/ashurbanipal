@@ -1,3 +1,5 @@
+import { $ } from "./dom.js";
+import { tryParseFilterDsl } from "./filter-dsl.js";
 import type { FilterCondition, Row, TableData } from "./types.js";
 
 const UI_KEY = "ashurbanipal_ui";
@@ -22,15 +24,81 @@ export interface State {
 }
 
 // Persisted to localStorage and mirrored to the URL: table/limit/offset
-// directly, sort/order keyed per table — never filter. A filter can
-// contain data values, and a URL is even more exposed than localStorage
-// (history, access logs, Referer headers). state.filter is the *applied*
-// filter, decoupled from the live #filter input text — only committing
-// (submit, or a click-to-filter action) updates it, so an unfinished edit
-// never gets silently resent by an unrelated sort/page click.
+// directly, sort/order keyed per table. filter is the one exception — it
+// goes in the URL (a link is already the shareable-view surface) but never
+// to localStorage (so returning to a table later never silently reapplies
+// a filter this visit didn't type — ui-guidelines R6). state.filter is the
+// *applied* filter, decoupled from the live #filter input text — only
+// committing (submit, a click-to-filter action, or a URL restore) updates
+// it, so an unfinished edit never gets silently resent by an unrelated
+// sort/page click.
 export const state: State = {
   source: null, schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, sortByTable: {}, schemaBySource: {}, filter: "",
 };
+
+// state.filter stays the applied *text*; the AST that actually goes on the
+// wire is derived from it once, at commit time, so unparseable box text
+// never produces a request at all (spec/filter-dsl.md §4). Declared here,
+// ahead of the URL-param restore block below, which needs to call
+// setAppliedFilterAst() before it would otherwise be defined.
+let appliedFilterAst: FilterCondition[] = [];
+export function getAppliedFilterAst(): FilterCondition[] {
+  return appliedFilterAst;
+}
+export function setAppliedFilterAst(ast: FilterCondition[]): void {
+  appliedFilterAst = ast;
+}
+
+// A restored/persisted value (a remembered sort column, a URL-restored
+// filter) is provisionally "unverified" from the moment it's restored until
+// its first fetch either confirms it (markVerified — the value was fine) or
+// the backend rejects it, at which point the caller drops the value itself
+// (dropStoredSort / clearFilter below) rather than leaving it flagged. One
+// instance per stale-risk input; a third one should reuse this rather than
+// copy-pasting a third flag pair.
+function staleRiskFlag() {
+  let unverified = false;
+  return {
+    isUnverified: () => unverified,
+    markUnverified: () => { unverified = true; },
+    markVerified: () => { unverified = false; },
+  };
+}
+
+// True only between a URL-sourced filter being restored and its first fetch
+// returning. A filter nobody typed on this visit can name a column the
+// table no longer has (schema drift, or a link shared to another
+// deployment), so that one window is where a 400 may be the restored
+// filter's fault. Declared ahead of the URL-param restore block, which
+// sets it.
+const filterRisk = staleRiskFlag();
+export function markRestoredFilterVerified(): void {
+  filterRisk.markVerified();
+}
+
+// Resets to no filter (ui-guidelines R5), box included. Used both for a
+// restored filter the backend rejected (dropOneStaleInput below) and for an
+// ordinary scope switch (table/schema/source, in sidebar.ts) — either way,
+// the filter was written against columns the new scope doesn't share.
+export function clearFilter(): void {
+  state.filter = "";
+  appliedFilterAst = [];
+  filterRisk.markVerified();
+  $<HTMLInputElement>("filter").value = "";
+}
+
+// Shared by the module-init URL restore below and nav.ts's popstate handler:
+// applies (or silently resets, per R5) a `filter` query param. A missing key
+// is indistinguishable from a present-but-empty one — both correctly leave/
+// reset state.filter to "".
+export function restoreFilterFromParams(params: URLSearchParams): void {
+  const filterText = params.get("filter") ?? "";
+  const ast = filterText ? tryParseFilterDsl(filterText) : [];
+  state.filter = ast !== null ? filterText : ""; // malformed -> silent reset (R5)
+  setAppliedFilterAst(ast ?? []);
+  if (state.filter) filterRisk.markUnverified();
+  else filterRisk.markVerified();
+}
 
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
@@ -77,6 +145,7 @@ if (urlParams.has("sort")) state.sort = urlParams.get("sort");
 if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "desc" : "asc";
 if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
 if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
+restoreFilterFromParams(urlParams);
 
 export function persist(): void {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
@@ -93,12 +162,11 @@ export function hiddenColumnsForTable(): string[] {
 // True only between applyStoredSort() restoring a sort and that sort's
 // first fetch returning — the one window where a 400 might be the restored
 // sort column's fault (schema drift, or storage from another database).
-let storedSortUnverified = false;
-export function isStoredSortUnverified(): boolean {
-  return storedSortUnverified;
-}
+// filterRisk above is the same staleRiskFlag() shape, applied to a
+// URL-restored filter instead of a remembered sort.
+const sortRisk = staleRiskFlag();
 export function markStoredSortVerified(): void {
-  storedSortUnverified = false;
+  sortRisk.markVerified();
 }
 
 // sort + order are remembered per table (like hiddenColumns): a column
@@ -107,7 +175,7 @@ export function rememberSort(): void {
   if (!state.table) return;
   if (state.sort) state.sortByTable[state.table] = { col: state.sort, order: state.order };
   else delete state.sortByTable[state.table];
-  storedSortUnverified = false; // came from a click on a live header
+  sortRisk.markVerified(); // came from a click on a live header
   persist();
 }
 
@@ -116,17 +184,38 @@ export function applyStoredSort(table: string | null): void {
   const stored = table ? state.sortByTable[table] : undefined;
   state.sort = stored?.col ?? null;
   state.order = stored?.order ?? "asc";
-  storedSortUnverified = state.sort !== null;
+  if (state.sort !== null) sortRisk.markUnverified();
+  else sortRisk.markVerified();
 }
 
 // The backend rejected a restored sort column (400). Drop it so the caller
 // can retry unsorted (ui-guidelines R5).
-export function dropStoredSort(table: string | null): void {
+function dropStoredSort(table: string | null): void {
   if (table) delete state.sortByTable[table];
   state.sort = null;
   state.order = "asc";
-  storedSortUnverified = false;
+  sortRisk.markVerified();
   persist();
+}
+
+// R11's retry-ladder policy: a restored sort and a URL-restored filter are
+// each stale-risk on a fresh load, but at most one is dropped per call, so
+// the other still gets a chance to render — sort first, since it's the
+// visitor's own incidental state, while the filter is what a shared link
+// was for. A filter typed on this visit isn't stale-risk and suppresses the
+// sort drop instead of being retried itself. Returns whether it dropped
+// anything, so the caller knows whether a retry is worth attempting.
+export function dropOneStaleInput(): boolean {
+  const filterIsUserTyped = state.filter !== "" && !filterRisk.isUnverified();
+  if (sortRisk.isUnverified() && state.table && !filterIsUserTyped) {
+    dropStoredSort(state.table);
+    return true;
+  }
+  if (filterRisk.isUnverified()) {
+    clearFilter();
+    return true;
+  }
+  return false;
 }
 
 // Records the active schema against the current source (ui-guidelines R12),
@@ -159,17 +248,6 @@ export function scopeQuery(): string {
 // builder rather than scopeQuery()'s combined source+schema.
 export function sourceQuery(): string {
   return state.source ? "?" + new URLSearchParams({ source: state.source }) : "";
-}
-
-// state.filter stays the applied *text*; the AST that actually goes on the
-// wire is derived from it once, at commit time, so unparseable box text
-// never produces a request at all (spec/filter-dsl.md §4).
-let appliedFilterAst: FilterCondition[] = [];
-export function getAppliedFilterAst(): FilterCondition[] {
-  return appliedFilterAst;
-}
-export function setAppliedFilterAst(ast: FilterCondition[]): void {
-  appliedFilterAst = ast;
 }
 
 let lastPayload: TableData | null = null;

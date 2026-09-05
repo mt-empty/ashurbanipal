@@ -2,7 +2,7 @@ import { api } from "./api.js";
 import { $ } from "./dom.js";
 import { parseFilterDsl, quoteFilterValue } from "./filter-dsl.js";
 import { loadData } from "./main.js";
-import { applyScopeParams, getLastPayload, setAppliedFilterAst, state } from "./state.js";
+import { applyScopeParams, getLastPayload, markRestoredFilterVerified, setAppliedFilterAst, state } from "./state.js";
 import type { CommonValue, FilterCondition } from "./types.js";
 
 export function submitFilter(text: string): void {
@@ -13,6 +13,7 @@ export function submitFilter(text: string): void {
   }
   state.filter = text;
   setAppliedFilterAst(ast);
+  markRestoredFilterVerified(); // typed here, so a 400 on it is the user's to see
   state.offset = 0;
   loadData();
 }
@@ -25,6 +26,12 @@ export function applyFilterClause(column: string, op: string, value?: string): v
   $<HTMLInputElement>("filter").value = clause;
   submitFilter(clause);
 }
+
+// This module imports ./state.js directly, so state.ts's module-init code
+// has already restored state.filter from a `?filter=` URL param by the time
+// this line runs — without it, a fresh shared-link load would filter the
+// grid correctly but leave the visible box empty.
+$<HTMLInputElement>("filter").value = state.filter;
 
 $<HTMLFormElement>("filter-form").onsubmit = (e) => {
   e.preventDefault();
