@@ -2,7 +2,13 @@
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["chrome-devtools-mcp@latest", "--browserUrl", "http://172.19.0.1:9222"]
+      "args": [
+        "chrome-devtools-mcp@latest",
+        "--headless",
+        "--isolated",
+        "--executablePath=/home/vscode/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome",
+        "--chromeArg=--no-sandbox"
+      ]
     }
   }
 }
