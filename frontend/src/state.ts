@@ -91,6 +91,12 @@ export function restoreFilterFromParams(params: URLSearchParams): void {
   $<HTMLInputElement>("filter").value = text;
 }
 
+// JSON.parse gives back `any`, so every persisted map is re-checked against
+// the shape the restore loop assumes before it is read.
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   for (const k of ["source", "schema", "table", "limit"] as const) {
@@ -100,7 +106,7 @@ try {
   // same-named column on another. A malformed value is discarded rather
   // than migrated — it's cheap to lose and there's no reliable way to
   // guess which table it belonged to.
-  if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
+  if (isPlainObject(saved.hiddenColumns)) {
     for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
       if (!Array.isArray(cols)) continue;
       const clean = cols.filter((c) => typeof c === "string");
@@ -108,17 +114,16 @@ try {
     }
   }
   // Same per-table keying and discard-if-malformed rule as hiddenColumns.
-  if (saved.sortByTable && typeof saved.sortByTable === "object" && !Array.isArray(saved.sortByTable)) {
+  if (isPlainObject(saved.sortByTable)) {
     for (const [table, v] of Object.entries(saved.sortByTable)) {
-      if (v && typeof v === "object" && typeof (v as { col?: unknown }).col === "string") {
-        const { col, order } = v as { col: string; order?: unknown };
-        state.sortByTable[table] = { col, order: order === "desc" ? "desc" : "asc" };
+      if (isPlainObject(v) && typeof v.col === "string") {
+        state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
       }
     }
   }
   // Same discard-if-malformed rule; keyed by source name, values are plain
   // schema-name strings.
-  if (saved.schemaBySource && typeof saved.schemaBySource === "object" && !Array.isArray(saved.schemaBySource)) {
+  if (isPlainObject(saved.schemaBySource)) {
     for (const [source, schema] of Object.entries(saved.schemaBySource)) {
       if (typeof schema === "string") state.schemaBySource[source] = schema;
     }

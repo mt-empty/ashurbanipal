@@ -1363,27 +1363,29 @@ function restoreFilterFromParams(params) {
   filterRisk.set(true);
   $("filter").value = text;
 }
+function isPlainObject(v) {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
 try {
   const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
   for (const k of ["source", "schema", "table", "limit"]) {
     if (saved[k] !== void 0) state[k] = saved[k];
   }
-  if (saved.hiddenColumns && typeof saved.hiddenColumns === "object" && !Array.isArray(saved.hiddenColumns)) {
+  if (isPlainObject(saved.hiddenColumns)) {
     for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
       if (!Array.isArray(cols)) continue;
       const clean = cols.filter((c) => typeof c === "string");
       if (clean.length) state.hiddenColumns[table] = clean;
     }
   }
-  if (saved.sortByTable && typeof saved.sortByTable === "object" && !Array.isArray(saved.sortByTable)) {
+  if (isPlainObject(saved.sortByTable)) {
     for (const [table, v] of Object.entries(saved.sortByTable)) {
-      if (v && typeof v === "object" && typeof v.col === "string") {
-        const { col, order } = v;
-        state.sortByTable[table] = { col, order: order === "desc" ? "desc" : "asc" };
+      if (isPlainObject(v) && typeof v.col === "string") {
+        state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
       }
     }
   }
-  if (saved.schemaBySource && typeof saved.schemaBySource === "object" && !Array.isArray(saved.schemaBySource)) {
+  if (isPlainObject(saved.schemaBySource)) {
     for (const [source, schema] of Object.entries(saved.schemaBySource)) {
       if (typeof schema === "string") state.schemaBySource[source] = schema;
     }
