@@ -103,9 +103,12 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 function restoreFromStorage(): void {
   try {
     const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-    for (const k of ["source", "schema", "table", "limit"] as const) {
-      if (saved[k] !== undefined) (state as unknown as Record<string, unknown>)[k] = saved[k];
-    }
+    if (typeof saved.source === "string") state.source = saved.source;
+    if (typeof saved.schema === "string") state.schema = saved.schema;
+    if (typeof saved.table === "string") state.table = saved.table;
+    // isFinite, not just typeof: a corrupted NaN/Infinity is still type
+    // "number" but breaks the pager arithmetic in grid.ts that divides by it.
+    if (typeof saved.limit === "number" && Number.isFinite(saved.limit)) state.limit = saved.limit;
     // Keyed by table name so hiding a column on one table never hides a
     // same-named column on another.
     if (isPlainObject(saved.hiddenColumns)) {
