@@ -97,51 +97,56 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-try {
-  const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-  for (const k of ["source", "schema", "table", "limit"] as const) {
-    if (saved[k] !== undefined) (state as unknown as Record<string, unknown>)[k] = saved[k];
-  }
-  // Keyed by table name so hiding a column on one table never hides a
-  // same-named column on another. A malformed value is discarded rather
-  // than migrated — it's cheap to lose and there's no reliable way to
-  // guess which table it belonged to.
-  if (isPlainObject(saved.hiddenColumns)) {
-    for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
-      if (!Array.isArray(cols)) continue;
-      const clean = cols.filter((c) => typeof c === "string");
-      if (clean.length) state.hiddenColumns[table] = clean;
+// Restores the persisted view (never the filter — ui-guidelines R6). A
+// malformed blob is discarded wholesale rather than migrated: it is cheap to
+// lose and there is no reliable way to guess what it meant.
+function restoreFromStorage(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+    for (const k of ["source", "schema", "table", "limit"] as const) {
+      if (saved[k] !== undefined) (state as unknown as Record<string, unknown>)[k] = saved[k];
     }
-  }
-  // Same per-table keying and discard-if-malformed rule as hiddenColumns.
-  if (isPlainObject(saved.sortByTable)) {
-    for (const [table, v] of Object.entries(saved.sortByTable)) {
-      if (isPlainObject(v) && typeof v.col === "string") {
-        state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
+    // Keyed by table name so hiding a column on one table never hides a
+    // same-named column on another.
+    if (isPlainObject(saved.hiddenColumns)) {
+      for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
+        if (!Array.isArray(cols)) continue;
+        const clean = cols.filter((c) => typeof c === "string");
+        if (clean.length) state.hiddenColumns[table] = clean;
       }
     }
-  }
-  // Same discard-if-malformed rule; keyed by source name, values are plain
-  // schema-name strings.
-  if (isPlainObject(saved.schemaBySource)) {
-    for (const [source, schema] of Object.entries(saved.schemaBySource)) {
-      if (typeof schema === "string") state.schemaBySource[source] = schema;
+    // Same per-table keying as hiddenColumns.
+    if (isPlainObject(saved.sortByTable)) {
+      for (const [table, v] of Object.entries(saved.sortByTable)) {
+        if (isPlainObject(v) && typeof v.col === "string") {
+          state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
+        }
+      }
     }
+    // Keyed by source name; values are plain schema-name strings.
+    if (isPlainObject(saved.schemaBySource)) {
+      for (const [source, schema] of Object.entries(saved.schemaBySource)) {
+        if (typeof schema === "string") state.schemaBySource[source] = schema;
+      }
+    }
+  } catch {
+    localStorage.removeItem(UI_KEY);
   }
-} catch {
-  localStorage.removeItem(UI_KEY);
 }
-// URL query params win over localStorage: opening a shared/bookmarked link
-// should reproduce that link's view, not the visitor's own saved prefs.
-const urlParams = new URLSearchParams(location.search);
-if (urlParams.has("source")) state.source = urlParams.get("source");
-if (urlParams.has("schema")) state.schema = urlParams.get("schema");
-if (urlParams.has("table")) state.table = urlParams.get("table");
-if (urlParams.has("sort")) state.sort = urlParams.get("sort");
-if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "desc" : "asc";
-if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
-if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
-restoreFilterFromParams(urlParams);
+
+// Runs after restoreFromStorage(), because a shared or bookmarked link must
+// reproduce that link's view rather than the visitor's own saved prefs.
+function restoreFromUrl(): void {
+  const params = new URLSearchParams(location.search);
+  if (params.has("source")) state.source = params.get("source");
+  if (params.has("schema")) state.schema = params.get("schema");
+  if (params.has("table")) state.table = params.get("table");
+  if (params.has("sort")) state.sort = params.get("sort");
+  if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
+  if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
+  if (params.has("offset")) state.offset = Number(params.get("offset")) || 0;
+  restoreFilterFromParams(params);
+}
 
 export function persist(): void {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
@@ -267,3 +272,8 @@ export function getLastScopeKey(): string | null {
 export function setLastScopeKey(key: string | null): void {
   lastScopeKey = key;
 }
+
+// state.ts's body is evaluated before any importing module's, so the restore
+// has to run here rather than with main.ts's other bootstrap calls.
+restoreFromStorage();
+restoreFromUrl();

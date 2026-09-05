@@ -896,42 +896,46 @@ function restoreFilterFromParams(params) {
 function isPlainObject(v) {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
-try {
-  const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
-  for (const k of ["source", "schema", "table", "limit"]) {
-    if (saved[k] !== void 0) state[k] = saved[k];
-  }
-  if (isPlainObject(saved.hiddenColumns)) {
-    for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
-      if (!Array.isArray(cols)) continue;
-      const clean = cols.filter((c) => typeof c === "string");
-      if (clean.length) state.hiddenColumns[table] = clean;
+function restoreFromStorage() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+    for (const k of ["source", "schema", "table", "limit"]) {
+      if (saved[k] !== void 0) state[k] = saved[k];
     }
-  }
-  if (isPlainObject(saved.sortByTable)) {
-    for (const [table, v] of Object.entries(saved.sortByTable)) {
-      if (isPlainObject(v) && typeof v.col === "string") {
-        state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
+    if (isPlainObject(saved.hiddenColumns)) {
+      for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
+        if (!Array.isArray(cols)) continue;
+        const clean = cols.filter((c) => typeof c === "string");
+        if (clean.length) state.hiddenColumns[table] = clean;
       }
     }
-  }
-  if (isPlainObject(saved.schemaBySource)) {
-    for (const [source, schema] of Object.entries(saved.schemaBySource)) {
-      if (typeof schema === "string") state.schemaBySource[source] = schema;
+    if (isPlainObject(saved.sortByTable)) {
+      for (const [table, v] of Object.entries(saved.sortByTable)) {
+        if (isPlainObject(v) && typeof v.col === "string") {
+          state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
+        }
+      }
     }
+    if (isPlainObject(saved.schemaBySource)) {
+      for (const [source, schema] of Object.entries(saved.schemaBySource)) {
+        if (typeof schema === "string") state.schemaBySource[source] = schema;
+      }
+    }
+  } catch {
+    localStorage.removeItem(UI_KEY);
   }
-} catch {
-  localStorage.removeItem(UI_KEY);
 }
-var urlParams = new URLSearchParams(location.search);
-if (urlParams.has("source")) state.source = urlParams.get("source");
-if (urlParams.has("schema")) state.schema = urlParams.get("schema");
-if (urlParams.has("table")) state.table = urlParams.get("table");
-if (urlParams.has("sort")) state.sort = urlParams.get("sort");
-if (urlParams.has("order")) state.order = urlParams.get("order") === "desc" ? "desc" : "asc";
-if (urlParams.has("limit")) state.limit = Number(urlParams.get("limit")) || state.limit;
-if (urlParams.has("offset")) state.offset = Number(urlParams.get("offset")) || 0;
-restoreFilterFromParams(urlParams);
+function restoreFromUrl() {
+  const params = new URLSearchParams(location.search);
+  if (params.has("source")) state.source = params.get("source");
+  if (params.has("schema")) state.schema = params.get("schema");
+  if (params.has("table")) state.table = params.get("table");
+  if (params.has("sort")) state.sort = params.get("sort");
+  if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
+  if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
+  if (params.has("offset")) state.offset = Number(params.get("offset")) || 0;
+  restoreFilterFromParams(params);
+}
 function persist() {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
   localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
@@ -1016,6 +1020,8 @@ function getLastScopeKey() {
 function setLastScopeKey(key) {
   lastScopeKey = key;
 }
+restoreFromStorage();
+restoreFromUrl();
 
 // src/filter-ui.ts
 function submitFilter(text) {
