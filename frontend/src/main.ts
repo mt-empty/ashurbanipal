@@ -16,6 +16,18 @@ $("payload").onclick = () => {
   $<HTMLDialogElement>("payload-dialog").showModal();
 };
 
+
+// Static markup (index.html), so this resolves once at module init rather
+// than on every fetch and every focus restore.
+const tableEl = document.querySelector<HTMLTableElement>("table")!;
+
+// aria-busy is held by two independent things — an in-flight fetch and an
+// in-progress view transition — so it is set and cleared through one place.
+function setTableBusy(busy: boolean): void {
+  if (busy) tableEl.setAttribute("aria-busy", "true");
+  else tableEl.removeAttribute("aria-busy");
+}
+
 // Reference-counted, not a plain boolean: fetchTableData() can be in
 // flight more than once (switching tables again before the previous fetch
 // resolves), and a plain true/false pair would let the first fetch to
@@ -37,7 +49,7 @@ async function fetchTableData(): Promise<TableData> {
   if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
   if (inFlightFetches++ === 0) {
     setStatus("loading…");
-    document.querySelector("table")!.setAttribute("aria-busy", "true");
+    setTableBusy(true);
   }
   setRowLoading(table, true);
   try {
@@ -46,7 +58,7 @@ async function fetchTableData(): Promise<TableData> {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
       setStatus("");
-      document.querySelector("table")!.removeAttribute("aria-busy");
+      setTableBusy(false);
     }
   }
 }
@@ -67,8 +79,7 @@ interface FocusCapture {
 
 function captureTableFocus(): FocusCapture | null {
   const active = document.activeElement;
-  const table = document.querySelector("table")!;
-  if (!active || !table.contains(active)) return null;
+  if (!active || !tableEl.contains(active)) return null;
   const cell = active.closest("th, td");
   const tr = active.closest("tr");
   if (!cell || !tr) return null;
@@ -90,7 +101,7 @@ function restoreTableFocus(captured: FocusCapture | null): void {
   // `.${className}` would otherwise parse as a descendant combinator.
   const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
   const target = classSelector ? cell?.querySelector<HTMLElement>(classSelector) : null;
-  (target ?? document.querySelector<HTMLElement>("table")!).focus();
+  (target ?? tableEl).focus();
 }
 
 // Must only ever move in lockstep with a *successful* render, never ahead
@@ -172,9 +183,9 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   // waitForIdle's own animation-poll only proves a transition isn't
   // *currently* running, not that one has already happened.
   if (document.startViewTransition) {
-    document.querySelector("table")!.setAttribute("aria-busy", "true");
+    setTableBusy(true);
     await document.startViewTransition(renderTable).updateCallbackDone;
-    document.querySelector("table")!.removeAttribute("aria-busy");
+    setTableBusy(false);
   } else {
     renderTable();
   }

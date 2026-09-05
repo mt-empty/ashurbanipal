@@ -2386,6 +2386,11 @@ $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $("payload-dialog").showModal();
 };
+var tableEl = document.querySelector("table");
+function setTableBusy(busy) {
+  if (busy) tableEl.setAttribute("aria-busy", "true");
+  else tableEl.removeAttribute("aria-busy");
+}
 var inFlightFetches = 0;
 async function fetchTableData() {
   const table = state.table ?? "";
@@ -2402,7 +2407,7 @@ async function fetchTableData() {
   if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
   if (inFlightFetches++ === 0) {
     setStatus("loading\u2026");
-    document.querySelector("table").setAttribute("aria-busy", "true");
+    setTableBusy(true);
   }
   setRowLoading(table, true);
   try {
@@ -2411,14 +2416,13 @@ async function fetchTableData() {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
       setStatus("");
-      document.querySelector("table").removeAttribute("aria-busy");
+      setTableBusy(false);
     }
   }
 }
 function captureTableFocus() {
   const active = document.activeElement;
-  const table = document.querySelector("table");
-  if (!active || !table.contains(active)) return null;
+  if (!active || !tableEl.contains(active)) return null;
   const cell = active.closest("th, td");
   const tr = active.closest("tr");
   if (!cell || !tr) return null;
@@ -2435,7 +2439,7 @@ function restoreTableFocus(captured) {
   const cell = tr?.children[captured.colIndex];
   const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
   const target = classSelector ? cell?.querySelector(classSelector) : null;
-  (target ?? document.querySelector("table")).focus();
+  (target ?? tableEl).focus();
 }
 function updateActiveTableChrome() {
   document.querySelectorAll("#tables button").forEach((b) => {
@@ -2495,9 +2499,9 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
     restoreTableFocus(focusCapture);
   };
   if (document.startViewTransition) {
-    document.querySelector("table").setAttribute("aria-busy", "true");
+    setTableBusy(true);
     await document.startViewTransition(renderTable).updateCallbackDone;
-    document.querySelector("table").removeAttribute("aria-busy");
+    setTableBusy(false);
   } else {
     renderTable();
   }
