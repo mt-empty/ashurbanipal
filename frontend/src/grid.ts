@@ -134,11 +134,15 @@ function showCellPop(e: MouseEvent, text: string): void {
 // A real <button> as the click target so it's keyboard-focusable and
 // Enter/Space-activatable, matching the copy button one element over.
 export function buildCell(col: Column, raw: string | null): HTMLTableCellElement {
-  const hidden = hiddenColumnsForTable().includes(col.name);
-  if (raw == null) {
-    const td = document.createElement("td");
-    td.dataset.col = col.name;
-    if (hidden) td.classList.add("col-hidden");
+  const isNull = raw == null;
+  // A null cell has no copy/expand affordance to clone, so it builds a bare
+  // <td> rather than the template's.
+  const td = isNull
+    ? document.createElement("td")
+    : (cellTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
+  td.dataset.col = col.name;
+  if (hiddenColumnsForTable().includes(col.name)) td.classList.add("col-hidden");
+  if (isNull) {
     const span = document.createElement("span");
     span.className = "cell-text";
     span.textContent = "∅";
@@ -153,9 +157,6 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
     td.appendChild(filterBtn);
     return td;
   }
-  const td = (cellTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
-  td.dataset.col = col.name;
-  if (hidden) td.classList.add("col-hidden");
   const cellText = td.querySelector<HTMLElement>(".cell-text")!;
   const btn = td.querySelector<HTMLElement>(".copy")!;
   const filterBtn = td.querySelector<HTMLElement>(".filter-eq")!;

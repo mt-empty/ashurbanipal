@@ -2106,15 +2106,15 @@ function showCellPop(e, text) {
   $("cell-pop").showPopover();
 }
 function buildCell(col, raw) {
-  const hidden = hiddenColumnsForTable().includes(col.name);
-  if (raw == null) {
-    const td2 = document.createElement("td");
-    td2.dataset.col = col.name;
-    if (hidden) td2.classList.add("col-hidden");
+  const isNull = raw == null;
+  const td = isNull ? document.createElement("td") : cellTemplate.content.cloneNode(true).firstElementChild;
+  td.dataset.col = col.name;
+  if (hiddenColumnsForTable().includes(col.name)) td.classList.add("col-hidden");
+  if (isNull) {
     const span = document.createElement("span");
     span.className = "cell-text";
     span.textContent = "\u2205";
-    td2.appendChild(span);
+    td.appendChild(span);
     const filterBtn2 = document.createElement("button");
     filterBtn2.className = "filter-eq only-action";
     filterBtn2.setAttribute("aria-label", "filter by null");
@@ -2123,12 +2123,9 @@ function buildCell(col, raw) {
       e.stopPropagation();
       applyFilterClause(col.name, "IS NULL");
     };
-    td2.appendChild(filterBtn2);
-    return td2;
+    td.appendChild(filterBtn2);
+    return td;
   }
-  const td = cellTemplate.content.cloneNode(true).firstElementChild;
-  td.dataset.col = col.name;
-  if (hidden) td.classList.add("col-hidden");
   const cellText = td.querySelector(".cell-text");
   const btn = td.querySelector(".copy");
   const filterBtn = td.querySelector(".filter-eq");
