@@ -162,12 +162,16 @@ a broken page.
 
 ## 6. State and URLs
 
-- `localStorage` and the URL (`history.replaceState()`) persist UI *shape*
-  only — table, sort, order, limit, offset. Never filter values (they can
-  carry data) or row data — this boundary applies to every persistence
-  mechanism, not just `localStorage` (`ui-guidelines.md` R6).
-- Stale or malformed persisted state (an unknown table, unparseable JSON)
-  resets silently to the default view. It never wedges the UI or errors.
+- `localStorage` and the URL (`history.replaceState()`) persist the user's
+  own view intent — table, sort, order, limit, offset — never values read
+  back out of result rows (cell contents, PKs lifted from a row). The
+  applied filter is the one exception to "both mechanisms": it is
+  URL-only, never `localStorage`. Authorship is the line for what may ever
+  be persisted at all: a filter the user typed persists; a value the UI
+  copied from a fetched row does not (`ui-guidelines.md` R6).
+- Stale or malformed persisted state (an unknown table, unparseable JSON,
+  a filter that no longer parses) resets silently to the default view. It
+  never wedges the UI or errors.
 
 ## 7. What not to introduce
 

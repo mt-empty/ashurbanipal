@@ -1,9 +1,21 @@
 # Persisted and shareable filter state
 
-Status: proposed 2026-09-01. Challenges an existing rule (`ui-guidelines.md`
-R6, `frontend-style-guide.md` §6) rather than working around it. Not
-scheduled. Supersedes the "carve out an exception to R6" branch of
-`docs/feature-backlog/02-per-table-query-filter-history.md` if accepted.
+Status: shipped 2026-09-05. Replaced the rule in `ui-guidelines.md` R6 and
+`frontend-style-guide.md` §6 rather than working around it. §7's open
+questions resolved as: DSL text, not the JSON AST, goes in the `filter`
+param (human-readable, hand-editable, reuses the existing parse/apply
+path); URL only, never `localStorage` (a filter hides rows, unlike sort,
+which only reorders them — silently reapplying one from `localStorage`
+risks a narrowed view the user didn't ask for); no host opt-out flag
+(`CLAUDE.md`'s "no concept of environment" forecloses it, not a tradeoff
+to weigh); no "share" button (these are developers — the address bar
+changing live is expected to be noticed, same as table/sort/page today).
+Exact-restore fidelity (§7) turned out moot: the DSL text is stored and
+restored as an opaque string, never round-tripped through parse→
+reserialize, so there's nothing to normalize. Supersedes the "carve out an
+exception to R6" branch of
+`docs/feature-backlog/02-per-table-query-filter-history.md`, now the
+shipped default.
 
 ## 1. The ask
 
