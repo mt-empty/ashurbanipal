@@ -196,3 +196,16 @@ export async function loadTables(): Promise<void> {
 export function setRowLoading(name: string, loading: boolean): void {
   tableEntries.find((e) => e.name === name)?.btn.classList.toggle("loading", loading);
 }
+
+// Same tableEntries lookup as setRowLoading, so "find the row for table X"
+// stays one idiom — a re-scan on every call rather than a cached reference,
+// so this self-heals if tableEntries is rebuilt (schema/source switch)
+// between calls instead of toggling a detached button.
+export function setActiveTable(name: string | null): void {
+  for (const e of tableEntries) {
+    const isActive = e.name === name;
+    e.btn.classList.toggle("active", isActive);
+    if (isActive) e.btn.setAttribute("aria-current", "true");
+    else e.btn.removeAttribute("aria-current");
+  }
+}

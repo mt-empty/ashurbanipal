@@ -1560,6 +1560,14 @@ async function loadTables() {
 function setRowLoading(name, loading) {
   tableEntries.find((e) => e.name === name)?.btn.classList.toggle("loading", loading);
 }
+function setActiveTable(name) {
+  for (const e of tableEntries) {
+    const isActive = e.name === name;
+    e.btn.classList.toggle("active", isActive);
+    if (isActive) e.btn.setAttribute("aria-current", "true");
+    else e.btn.removeAttribute("aria-current");
+  }
+}
 
 // src/grid.ts
 function renderHeader(columns) {
@@ -1993,12 +2001,7 @@ function restoreTableFocus(captured) {
   (target ?? tableEl).focus();
 }
 function updateActiveTableChrome() {
-  document.querySelectorAll("#tables button").forEach((b) => {
-    const isActive = b.dataset.table === state.table;
-    b.classList.toggle("active", isActive);
-    if (isActive) b.setAttribute("aria-current", "true");
-    else b.removeAttribute("aria-current");
-  });
+  setActiveTable(state.table);
   $("current").textContent = state.table ?? "\u2014";
   document.title = state.table ? `${state.table} \u2014 Ashurbanipal` : "Ashurbanipal";
 }

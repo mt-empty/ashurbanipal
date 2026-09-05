@@ -3,7 +3,7 @@ import "./api-reference.js";
 import { $, clearError, flashIcon, reportError, setStatus } from "./dom.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "./grid.js";
 import { syncUrl } from "./nav.js";
-import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
+import { loadSchemas, loadSources, loadTables, setActiveTable, setRowLoading } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
 import { applyScopeParams, diffNewRows, dropOneStaleInput, getAppliedFilterAst, getLastPayload, markFilterVerified, markStoredSortVerified, state } from "./state.js";
@@ -108,12 +108,7 @@ function restoreTableFocus(captured: FocusCapture | null): void {
 // of it — a failed fetchTableData() (see loadData) must leave these
 // exactly as they were, matching the stale <table> body they describe.
 function updateActiveTableChrome(): void {
-  document.querySelectorAll<HTMLButtonElement>("#tables button").forEach((b) => {
-    const isActive = b.dataset.table === state.table;
-    b.classList.toggle("active", isActive);
-    if (isActive) b.setAttribute("aria-current", "true");
-    else b.removeAttribute("aria-current");
-  });
+  setActiveTable(state.table);
   $("current").textContent = state.table ?? "—";
   document.title = state.table ? `${state.table} — Ashurbanipal` : "Ashurbanipal";
 }
