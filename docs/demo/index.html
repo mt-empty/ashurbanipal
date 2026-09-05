@@ -774,11 +774,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1;
                      border: 1px solid var(--border); border-radius: 4px;
                      padding: .1rem .4rem; font-size: .85em; }
-/* Fixed width (not just min-width): flashIcon() swaps this glyph for ✓/✗,
-   which render narrower than ⧉ in most fonts — a min-width let the
-   buttons that pair this with a label (record-copy-row/-insert) visibly
-   shrink for the flash's duration. */
-.copy-icon { display: inline-block; width: 1.1em; text-align: center; }
+.copy-icon { display: inline-block; width: 1.2em; text-align: center; }
 
 /* white-space: normal resets the pre-wrap inherited from ancestors
    (#cell-pop / dialog dl dd's plain-text case). */
