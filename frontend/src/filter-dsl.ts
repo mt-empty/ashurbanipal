@@ -164,6 +164,13 @@ export function parseFilterDsl(input: string): FilterCondition[] {
   return conditions;
 }
 
+// Non-throwing sibling for restore paths (URL-sourced filter) that must
+// discard a bad filter silently (ui-guidelines R5) rather than surface it,
+// unlike a live submission through submitFilter().
+export function tryParseFilterDsl(input: string): FilterCondition[] | null {
+  try { return parseFilterDsl(input); } catch { return null; }
+}
+
 // ---- click-to-filter: compose "column op value" into #filter and apply ----
 // Every cell value is fetched with an explicit ::text cast, which is
 // exactly what the filter DSL compares against, so it can be spliced
