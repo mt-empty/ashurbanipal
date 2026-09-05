@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $ } from "./dom.js";
+import { $, reportError } from "./dom.js";
 import { parseFilterDsl, quoteFilterValue } from "./filter-dsl.js";
 import { loadData } from "./main.js";
 import { applyScopeParams, getLastPayload, markFilterVerified, setAppliedFilterAst, state } from "./state.js";
@@ -9,7 +9,7 @@ export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
   if (text) {
     try { ast = parseFilterDsl(text); }
-    catch (e) { $("error").textContent = (e as Error).message; return; }
+    catch (e) { reportError(e); return; }
   }
   state.filter = text;
   setAppliedFilterAst(ast);

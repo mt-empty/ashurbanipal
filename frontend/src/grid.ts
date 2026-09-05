@@ -1,4 +1,4 @@
-import { $, copyText } from "./dom.js";
+import { $, copyText, reportError } from "./dom.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { renderJsonTree, type JsonValue } from "./json-tree.js";
 import { loadData } from "./main.js";
@@ -190,7 +190,7 @@ export function buildCell(col: Column, raw: string | null): HTMLTableCellElement
         rememberSchema();
         loadTables()
           .then(() => applyFilterClause(references.column, "=", raw))
-          .catch((e) => { $("error").textContent = e.message; });
+          .catch(reportError);
         return;
       }
       persist();

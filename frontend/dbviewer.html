@@ -522,6 +522,12 @@ function $(id) {
 function setStatus(text) {
   $("status").textContent = text;
 }
+function reportError(e) {
+  $("error").textContent = e.message;
+}
+function clearError() {
+  $("error").textContent = "";
+}
 async function copyText(text, btn) {
   const mark = btn.querySelector(".copy-icon") ?? btn;
   if (mark.dataset.rest === void 0) mark.dataset.rest = mark.textContent ?? "";
@@ -1016,7 +1022,7 @@ function submitFilter(text) {
     try {
       ast = parseFilterDsl(text);
     } catch (e) {
-      $("error").textContent = e.message;
+      reportError(e);
       return;
     }
   }
@@ -1437,9 +1443,7 @@ $("source-select").onchange = () => {
   state.offset = 0;
   clearFilter();
   persist();
-  loadSchemas().then(loadTables).catch((e) => {
-    $("error").textContent = e.message;
-  });
+  loadSchemas().then(loadTables).catch(reportError);
 };
 var loadSchemasToken = 0;
 async function loadSchemas() {
@@ -1479,9 +1483,7 @@ $("schema-select").onchange = () => {
   state.offset = 0;
   clearFilter();
   rememberSchema();
-  loadTables().catch((e) => {
-    $("error").textContent = e.message;
-  });
+  loadTables().catch(reportError);
 };
 var loadTablesToken = 0;
 async function loadTables() {
@@ -1681,9 +1683,7 @@ function buildCell(col, raw) {
         state.schema = references.schema;
         $("schema-select").value = state.schema;
         rememberSchema();
-        loadTables().then(() => applyFilterClause(references.column, "=", raw)).catch((e) => {
-          $("error").textContent = e.message;
-        });
+        loadTables().then(() => applyFilterClause(references.column, "=", raw)).catch(reportError);
         return;
       }
       persist();
@@ -1824,9 +1824,7 @@ window.addEventListener("popstate", (ev) => {
   persist();
   updateNavButtons();
   restoringFromHistory = true;
-  loadTables().catch((e) => {
-    $("error").textContent = e.message;
-  }).finally(() => {
+  loadTables().catch(reportError).finally(() => {
     restoringFromHistory = false;
   });
 });
@@ -1981,7 +1979,7 @@ function updateActiveTableChrome() {
 }
 var loadDataToken = 0;
 async function loadData({ resetScroll = true, highlightNew = false } = {}) {
-  $("error").textContent = "";
+  clearError();
   if (!state.table) {
     updateActiveTableChrome();
     setStatus("");
@@ -1994,7 +1992,7 @@ async function loadData({ resetScroll = true, highlightNew = false } = {}) {
   } catch (e) {
     if (token !== loadDataToken) return;
     if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
-    $("error").textContent = e.message;
+    reportError(e);
     return;
   }
   if (token !== loadDataToken) return;
@@ -2066,9 +2064,7 @@ $("refresh").onclick = () => {
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
 }).observe($("toolbar"));
-loadSources().then(loadSchemas).then(loadTables).catch((e) => {
-  $("error").textContent = e.message;
-});
+loadSources().then(loadSchemas).then(loadTables).catch(reportError);
 loadSiblings();
 setInterval(loadSiblings, 15e3);
 export {

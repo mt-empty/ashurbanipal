@@ -1,6 +1,6 @@
 import { api } from "./api.js";
 import "./api-reference.js";
-import { $, setStatus } from "./dom.js";
+import { $, clearError, reportError, setStatus } from "./dom.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "./grid.js";
 import { syncUrl } from "./nav.js";
 import { loadSchemas, loadSources, loadTables, setRowLoading } from "./sidebar.js";
@@ -115,7 +115,7 @@ function updateActiveTableChrome(): void {
 let loadDataToken = 0;
 
 export async function loadData({ resetScroll = true, highlightNew = false }: { resetScroll?: boolean; highlightNew?: boolean } = {}): Promise<void> {
-  $("error").textContent = "";
+  clearError();
   if (!state.table) { updateActiveTableChrome(); setStatus(""); return; }
   const token = ++loadDataToken;
   let data: TableData;
@@ -126,7 +126,7 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
     if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
-    $("error").textContent = (e as Error).message;
+    reportError(e);
     return;
   }
   if (token !== loadDataToken) return; // superseded by a newer request
@@ -228,6 +228,6 @@ new ResizeObserver(([entry]) => {
 // turn resolves state.schema before loadTables' first request needs it —
 // bootstrap-only ordering; loadSchemas/loadTables are safe to call on their
 // own after this (source/schema switching does exactly that).
-loadSources().then(loadSchemas).then(loadTables).catch((e) => { $("error").textContent = e.message; });
+loadSources().then(loadSchemas).then(loadTables).catch(reportError);
 loadSiblings();
 setInterval(loadSiblings, 15_000);

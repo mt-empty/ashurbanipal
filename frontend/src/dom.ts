@@ -6,6 +6,16 @@ export function setStatus(text: string): void {
   $("status").textContent = text;
 }
 
+// The only writers of #error, so there is one place to look for what can
+// surface a message in the error banner and what clears it again.
+export function reportError(e: unknown): void {
+  $("error").textContent = (e as Error).message;
+}
+
+export function clearError(): void {
+  $("error").textContent = "";
+}
+
 // ---- per-cell copy (Clipboard API) ----
 export async function copyText(text: string, btn: HTMLElement): Promise<void> {
   const mark = btn.querySelector<HTMLElement>(".copy-icon") ?? btn;

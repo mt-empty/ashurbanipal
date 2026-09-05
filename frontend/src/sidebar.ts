@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $, setStatus } from "./dom.js";
+import { $, reportError, setStatus } from "./dom.js";
 import { loadData } from "./main.js";
 import { applyStoredSort, clearFilter, persist, rememberSchema, scopeQuery, sourceQuery, state } from "./state.js";
 import type { SourceEntry, TableListEntry } from "./types.js";
@@ -81,7 +81,7 @@ $<HTMLSelectElement>("source-select").onchange = () => {
   state.table = null; state.sort = null; state.offset = 0;
   clearFilter();
   persist();
-  loadSchemas().then(loadTables).catch((e) => { $("error").textContent = e.message; });
+  loadSchemas().then(loadTables).catch(reportError);
 };
 
 // ==== Schema selector ====
@@ -131,7 +131,7 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
   state.table = null; state.sort = null; state.offset = 0;
   clearFilter();
   rememberSchema();
-  loadTables().catch((e) => { $("error").textContent = e.message; });
+  loadTables().catch(reportError);
 };
 
 // A slower earlier loadTables() (e.g. from a schema switch quickly

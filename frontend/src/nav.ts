@@ -1,4 +1,4 @@
-import { $ } from "./dom.js";
+import { $, reportError } from "./dom.js";
 import { loadTables } from "./sidebar.js";
 import { persist, restoreFilterFromParams, state } from "./state.js";
 
@@ -76,6 +76,6 @@ window.addEventListener("popstate", (ev) => {
   updateNavButtons();
   restoringFromHistory = true;
   loadTables()
-    .catch((e) => { $("error").textContent = e.message; })
+    .catch(reportError)
     .finally(() => { restoringFromHistory = false; });
 });
