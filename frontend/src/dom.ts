@@ -16,6 +16,15 @@ export function clearError(): void {
   $("error").textContent = "";
 }
 
+export function populateSelect(select: HTMLSelectElement, values: string[], selected: string): void {
+  select.replaceChildren(...values.map((v) => {
+    const opt = document.createElement("option");
+    opt.value = v; opt.textContent = v;
+    return opt;
+  }));
+  select.value = selected;
+}
+
 // ---- per-cell copy (Clipboard API) ----
 export async function copyText(text: string, btn: HTMLElement): Promise<void> {
   const mark = btn.querySelector<HTMLElement>(".copy-icon") ?? btn;

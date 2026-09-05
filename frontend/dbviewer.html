@@ -528,6 +528,15 @@ function reportError(e) {
 function clearError() {
   $("error").textContent = "";
 }
+function populateSelect(select, values, selected) {
+  select.replaceChildren(...values.map((v) => {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = v;
+    return opt;
+  }));
+  select.value = selected;
+}
 async function copyText(text, btn) {
   const mark = btn.querySelector(".copy-icon") ?? btn;
   if (mark.dataset.rest === void 0) mark.dataset.rest = mark.textContent ?? "";
@@ -1433,14 +1442,7 @@ async function loadSources() {
   if (!state.source || !sources.some((s) => s.name === state.source)) {
     state.source = sources[0].name;
   }
-  const select = $("source-select");
-  select.replaceChildren(...sources.map((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.name;
-    opt.textContent = s.name;
-    return opt;
-  }));
-  select.value = state.source;
+  populateSelect($("source-select"), sources.map((s) => s.name), state.source);
   $("source-select-wrap").hidden = false;
 }
 $("source-select").onchange = () => {
@@ -1474,14 +1476,7 @@ async function loadSchemas() {
   if (!state.schema || !schemas.includes(state.schema)) {
     state.schema = schemas.includes("public") ? "public" : schemas[0];
   }
-  const select = $("schema-select");
-  select.replaceChildren(...schemas.map((s) => {
-    const opt = document.createElement("option");
-    opt.value = s;
-    opt.textContent = s;
-    return opt;
-  }));
-  select.value = state.schema;
+  populateSelect($("schema-select"), schemas, state.schema);
   $("schema-select-wrap").hidden = false;
 }
 $("schema-select").onchange = () => {

@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $, reportError, setStatus } from "./dom.js";
+import { $, populateSelect, reportError, setStatus } from "./dom.js";
 import { loadData } from "./main.js";
 import { applyStoredSort, clearFilter, persist, rememberSchema, scopeQuery, sourceQuery, state } from "./state.js";
 import type { SourceEntry, TableListEntry } from "./types.js";
@@ -64,13 +64,7 @@ export async function loadSources(): Promise<void> {
   if (!state.source || !sources.some((s) => s.name === state.source)) {
     state.source = sources[0]!.name;
   }
-  const select = $<HTMLSelectElement>("source-select");
-  select.replaceChildren(...sources.map((s) => {
-    const opt = document.createElement("option");
-    opt.value = s.name; opt.textContent = s.name;
-    return opt;
-  }));
-  select.value = state.source!;
+  populateSelect($<HTMLSelectElement>("source-select"), sources.map((s) => s.name), state.source!);
   $("source-select-wrap").hidden = false;
 }
 $<HTMLSelectElement>("source-select").onchange = () => {
@@ -117,13 +111,7 @@ export async function loadSchemas(): Promise<void> {
   if (!state.schema || !schemas.includes(state.schema)) {
     state.schema = schemas.includes("public") ? "public" : schemas[0];
   }
-  const select = $<HTMLSelectElement>("schema-select");
-  select.replaceChildren(...schemas.map((s) => {
-    const opt = document.createElement("option");
-    opt.value = s; opt.textContent = s;
-    return opt;
-  }));
-  select.value = state.schema!;
+  populateSelect($<HTMLSelectElement>("schema-select"), schemas, state.schema!);
   $("schema-select-wrap").hidden = false;
 }
 $<HTMLSelectElement>("schema-select").onchange = () => {
