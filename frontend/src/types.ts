@@ -4,13 +4,20 @@ export interface ColumnRef {
   column: string;
 }
 
-export interface Column {
+interface ColumnBase {
   name: string;
   type: string;
-  key?: "pk" | "fk";
   comment?: string;
-  references?: ColumnRef;
 }
+
+// spec/openapi.yaml ColumnInfo: `references` is present exactly when the
+// column is a foreign key, independent of `key` — a column that is both its
+// table's primary key and a foreign key reports `key: "pk"` but still carries
+// `references`. So an `fk` column always has it; a `pk` column may.
+export type Column =
+  | (ColumnBase & { key?: undefined; references?: undefined })
+  | (ColumnBase & { key: "pk"; references?: ColumnRef })
+  | (ColumnBase & { key: "fk"; references: ColumnRef });
 
 export interface Row {
   [column: string]: string | null;

@@ -114,11 +114,11 @@ function matchesCondition(table: TableDef, row: Record<string, CellValue>, cond:
 // condition list into OR-of-AND-groups on each "OR" logic token.
 function matchesFilter(table: TableDef, row: Record<string, CellValue>, conditions: FilterCondition[]): boolean {
   if (conditions.length === 0) return true;
-  const groups: FilterCondition[][] = [[conditions[0]!]];
+  const groups: FilterCondition[][] = [[conditions[0]]];
   for (let i = 1; i < conditions.length; i++) {
-    const c = conditions[i]!;
+    const c = conditions[i];
     if (c.logic === "OR") groups.push([c]);
-    else groups[groups.length - 1]!.push(c);
+    else groups[groups.length - 1].push(c);
   }
   return groups.some((g) => g.every((c) => matchesCondition(table, row, c)));
 }
@@ -178,7 +178,7 @@ function handleTableData(params: URLSearchParams): Response {
     if (order !== null && order !== "asc" && order !== "desc") return badRequest("invalid order");
     const dir = order === "desc" ? -1 : 1;
     const t = columnType(table, sort);
-    rows = [...rows].sort((a, b) => dir * typedCompare(t, a[sort]!, b[sort]!));
+    rows = [...rows].sort((a, b) => dir * typedCompare(t, a[sort], b[sort]));
   }
 
   // Number(x) || fallback treats an explicit "0" the same as absent —
@@ -194,7 +194,7 @@ function handleTableData(params: URLSearchParams): Response {
 
   return jsonResponse({
     columns: table.columns,
-    rows: page.map((r) => Object.fromEntries(table.columns.map((c) => [c.name, toWire(r[c.name]!)]))),
+    rows: page.map((r) => Object.fromEntries(table.columns.map((c) => [c.name, toWire(r[c.name])]))),
     total_approx: table.approxRows,
   });
 }
@@ -209,7 +209,7 @@ function handleCommonValues(params: URLSearchParams): Response {
   const rows = allRows(table);
   const counts = new Map<string, number>();
   for (const r of rows) {
-    const v = toWire(r[column]!);
+    const v = toWire(r[column]);
     if (v === null) continue;
     counts.set(v, (counts.get(v) ?? 0) + 1);
   }

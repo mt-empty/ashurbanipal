@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { $, populateSelect, reportError, setStatus } from "./dom.js";
+import { $, populateSelect, qs, reportError, setStatus } from "./dom.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "./format.js";
 import { loadData } from "./reload.js";
 import {
@@ -23,6 +23,7 @@ interface TableEntry {
   textNode: Text;
 }
 let tableEntries: TableEntry[] = [];
+const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 const tableMatchHighlight = CSS.highlights ? new Highlight() : null;
 if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
 
@@ -63,13 +64,15 @@ export async function loadSources(): Promise<void> {
     state.source = null;
     return;
   }
-  if (!state.source || !sources.some((s) => s.name === state.source)) {
-    state.source = sources[0]!.name;
+  let source = state.source;
+  if (!source || !sources.some((s) => s.name === source)) {
+    source = sources[0].name;
   }
+  state.source = source;
   populateSelect(
     $<HTMLSelectElement>("source-select"),
     sources.map((s) => s.name),
-    state.source!,
+    source,
   );
   $("source-select-wrap").hidden = false;
 }
@@ -116,10 +119,12 @@ export async function loadSchemas(): Promise<void> {
     $("schema-select-wrap").hidden = true;
     return;
   }
-  if (!state.schema || !schemas.includes(state.schema)) {
-    state.schema = schemas.includes("public") ? "public" : schemas[0];
+  let schema = state.schema;
+  if (!schema || !schemas.includes(schema)) {
+    schema = schemas.includes("public") ? "public" : schemas[0];
   }
-  populateSelect($<HTMLSelectElement>("schema-select"), schemas, state.schema!);
+  state.schema = schema;
+  populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
   $("schema-select-wrap").hidden = false;
 }
 $<HTMLSelectElement>("schema-select").onchange = () => {
@@ -143,14 +148,14 @@ export async function loadTables(): Promise<void> {
   if (token !== loadTablesToken) return; // superseded by a newer call
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
-  ul.innerHTML = "";
+  ul.replaceChildren();
   tableEntries = [];
   for (const t of tables) {
-    const li = document.createElement("li");
-    const btn = document.createElement("button");
-    btn.innerHTML = `<span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
-    (btn.firstChild as HTMLElement).textContent = t.name;
-    const countEl = btn.querySelector<HTMLElement>(".count")!;
+    const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
+    const btn = qs<HTMLButtonElement>(li, "button");
+    const textNode = document.createTextNode(t.name);
+    qs<HTMLElement>(li, ".row-name").appendChild(textNode);
+    const countEl = qs<HTMLElement>(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     countEl.title = APPROX_COUNT_TITLE;
     btn.dataset.table = t.name;
@@ -161,9 +166,8 @@ export async function loadTables(): Promise<void> {
       switchTable(t.name);
       loadData();
     };
-    li.appendChild(btn);
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn, textNode: btn.firstChild!.firstChild as Text });
+    tableEntries.push({ name: t.name, li, btn, textNode });
   }
   filterTables();
   const tableNames = tables.map((t) => t.name);

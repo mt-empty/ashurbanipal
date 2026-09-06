@@ -476,6 +476,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
     <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
     <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
+    <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
     <div id="pager">
       <button id="prev">‹ prev</button>
       <output id="page"></output>
@@ -519,6 +520,11 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 function $(id) {
   return document.getElementById(id);
 }
+function qs(root, selector) {
+  const el = root.querySelector(selector);
+  if (!el) throw new Error(`no element matches ${selector}`);
+  return el;
+}
 function setStatus(text) {
   $("status").textContent = text;
 }
@@ -541,9 +547,10 @@ function populateSelect(select, values, selected) {
 }
 function flashIcon(el, glyph, ms = 800) {
   if (el.dataset.rest === void 0) el.dataset.rest = el.textContent ?? "";
+  const rest = el.dataset.rest ?? "";
   el.textContent = glyph;
   setTimeout(() => {
-    el.textContent = el.dataset.rest;
+    el.textContent = rest;
   }, ms);
 }
 async function copyText(text, btn) {
@@ -743,12 +750,19 @@ function parseFilterDsl(input) {
   if (new TextEncoder().encode(input).length > FILTER_MAX_DSL_BYTES)
     throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
   let pos = 0;
-  const peekAt = (i) => i < input.length ? String.fromCodePoint(input.codePointAt(i)) : null;
+  const peekAt = (i) => {
+    if (i >= input.length) return null;
+    const cp = input.codePointAt(i);
+    return cp === void 0 ? null : String.fromCodePoint(cp);
+  };
   const peek = () => peekAt(pos);
   const isWs = (c) => /\s/.test(c);
   const skipWsOptional = () => {
-    let c;
-    while ((c = peek()) !== null && isWs(c)) pos += c.length;
+    let c = peek();
+    while (c !== null && isWs(c)) {
+      pos += c.length;
+      c = peek();
+    }
   };
   const skipWsRequired = () => {
     const start = pos;
@@ -775,8 +789,11 @@ function parseFilterDsl(input) {
     const first = peek();
     if (first === null || !/^[a-zA-Z_]$/.test(first)) throw err("expected column name", start);
     pos += 1;
-    let c;
-    while ((c = peek()) !== null && /^[a-zA-Z0-9_]$/.test(c)) pos += 1;
+    let c = peek();
+    while (c !== null && /^[a-zA-Z0-9_]$/.test(c)) {
+      pos += 1;
+      c = peek();
+    }
     return input.slice(start, pos);
   };
   const parseQuotedValue = () => {
@@ -802,10 +819,11 @@ function parseFilterDsl(input) {
   const parseBareValue = () => {
     const start = pos;
     let value = "";
-    let c;
-    while ((c = peek()) !== null && !isWs(c) && c !== "'") {
+    let c = peek();
+    while (c !== null && !isWs(c) && c !== "'") {
       value += c;
       pos += c.length;
+      c = peek();
     }
     if (value === "") throw err("expected value", start);
     if (RESERVED_WORD_RE.test(value))
@@ -1571,6 +1589,7 @@ function openRecordView(columns, row) {
 
 // src/sidebar.ts
 var tableEntries = [];
+var tableRowTemplate = $("table-row-template");
 var tableMatchHighlight = CSS.highlights ? new Highlight() : null;
 if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
 function filterTables() {
@@ -1603,13 +1622,15 @@ async function loadSources() {
     state.source = null;
     return;
   }
-  if (!state.source || !sources.some((s) => s.name === state.source)) {
-    state.source = sources[0].name;
+  let source = state.source;
+  if (!source || !sources.some((s) => s.name === source)) {
+    source = sources[0].name;
   }
+  state.source = source;
   populateSelect(
     $("source-select"),
     sources.map((s) => s.name),
-    state.source
+    source
   );
   $("source-select-wrap").hidden = false;
 }
@@ -1635,10 +1656,12 @@ async function loadSchemas() {
     $("schema-select-wrap").hidden = true;
     return;
   }
-  if (!state.schema || !schemas.includes(state.schema)) {
-    state.schema = schemas.includes("public") ? "public" : schemas[0];
+  let schema = state.schema;
+  if (!schema || !schemas.includes(schema)) {
+    schema = schemas.includes("public") ? "public" : schemas[0];
   }
-  populateSelect($("schema-select"), schemas, state.schema);
+  state.schema = schema;
+  populateSelect($("schema-select"), schemas, schema);
   $("schema-select-wrap").hidden = false;
 }
 $("schema-select").onchange = () => {
@@ -1656,14 +1679,14 @@ async function loadTables() {
   if (token !== loadTablesToken) return;
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
-  ul.innerHTML = "";
+  ul.replaceChildren();
   tableEntries = [];
   for (const t of tables) {
-    const li = document.createElement("li");
-    const btn = document.createElement("button");
-    btn.innerHTML = `<span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
-    btn.firstChild.textContent = t.name;
-    const countEl = btn.querySelector(".count");
+    const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
+    const btn = qs(li, "button");
+    const textNode = document.createTextNode(t.name);
+    qs(li, ".row-name").appendChild(textNode);
+    const countEl = qs(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     countEl.title = APPROX_COUNT_TITLE;
     btn.dataset.table = t.name;
@@ -1672,9 +1695,8 @@ async function loadTables() {
       switchTable(t.name);
       loadData();
     };
-    li.appendChild(btn);
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn, textNode: btn.firstChild.firstChild });
+    tableEntries.push({ name: t.name, li, btn, textNode });
   }
   filterTables();
   const tableNames = tables.map((t) => t.name);
@@ -1796,9 +1818,9 @@ function buildCell(col, raw, hidden) {
     td.appendChild(filterBtn2);
     return td;
   }
-  const cellText = td.querySelector(".cell-text");
-  const btn = td.querySelector(".copy");
-  const filterBtn = td.querySelector(".filter-eq");
+  const cellText = qs(td, ".cell-text");
+  const btn = qs(td, ".copy");
+  const filterBtn = qs(td, ".filter-eq");
   cellText.appendChild(formatCellValue(col, raw));
   btn.onclick = (e) => {
     e.stopPropagation();
@@ -1809,11 +1831,11 @@ function buildCell(col, raw, hidden) {
     applyFilterClause(col.name, "=", raw);
   };
   if (col.references) {
+    const references = col.references;
     cellText.classList.add("fk-cell");
-    const refLabel = col.references.schema ? `${col.references.schema}.${col.references.table}` : col.references.table;
-    cellText.title = `go to ${refLabel}.${col.references.column} = ${raw}`;
+    const refLabel = references.schema ? `${references.schema}.${references.table}` : references.table;
+    cellText.title = `go to ${refLabel}.${references.column} = ${raw}`;
     cellText.onclick = () => {
-      const references = col.references;
       state.table = references.table;
       state.sort = null;
       if (references.schema && references.schema !== state.schema) {
@@ -1866,7 +1888,7 @@ function renderColumnMenu(columns) {
 }
 function buildRowActionCell(columns, row) {
   const td = rowActionTemplate.content.cloneNode(true).firstElementChild;
-  td.querySelector(".record-btn").onclick = () => openRecordView(columns, row);
+  qs(td, ".record-btn").onclick = () => openRecordView(columns, row);
   return td;
 }
 function renderRows(data, newRowKeys, pkNames = []) {
@@ -1925,7 +1947,7 @@ function syncUrl() {
   }
   applyScopeParams(params);
   if (state.filter) params.set("filter", state.filter);
-  const qs = `?${params}`;
+  const qs2 = `?${params}`;
   const key = navViewKey();
   const samePlace = navIndex >= 0 && navStack[navIndex] === key;
   if (restoringFromHistory || navStack.length === 0 || samePlace) {
@@ -1933,12 +1955,12 @@ function syncUrl() {
       navStack = [key];
       navIndex = 0;
     }
-    history.replaceState({ navIndex }, "", qs);
+    history.replaceState({ navIndex }, "", qs2);
   } else {
     navStack = navStack.slice(0, navIndex + 1);
     navStack.push(key);
     navIndex = navStack.length - 1;
-    history.pushState({ navIndex }, "", qs);
+    history.pushState({ navIndex }, "", qs2);
   }
   updateNavButtons();
 }
@@ -1963,16 +1985,17 @@ window.addEventListener("popstate", (ev) => {
 });
 
 // src/table-focus.ts
-var tableEl = document.querySelector("table");
+var tableEl = qs(document, "table");
 function captureTableFocus() {
   const active = document.activeElement;
   if (!active || !tableEl.contains(active)) return null;
   const cell = active.closest("th, td");
   const tr = active.closest("tr");
-  if (!cell || !tr) return null;
+  const section = tr?.parentElement;
+  if (!cell || !tr || !section) return null;
   return {
-    region: tr.parentElement.id,
-    rowIndex: [...tr.parentElement.children].indexOf(tr),
+    region: section.id,
+    rowIndex: [...section.children].indexOf(tr),
     colIndex: [...tr.children].indexOf(cell),
     className: active.className
   };

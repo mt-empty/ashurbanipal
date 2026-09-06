@@ -1,8 +1,8 @@
-import { $ } from "./dom.js";
+import { $, qs } from "./dom.js";
 
 // Static markup (index.html), so this resolves once at module init rather
 // than on every fetch and every focus restore.
-export const tableEl = document.querySelector<HTMLTableElement>("table")!;
+export const tableEl = qs<HTMLTableElement>(document, "table");
 
 // ---- focus preservation across thead/tbody re-renders ----
 // replaceChildren() detaches whatever was focused inside it, and the
@@ -23,10 +23,11 @@ export function captureTableFocus(): FocusCapture | null {
   if (!active || !tableEl.contains(active)) return null;
   const cell = active.closest("th, td");
   const tr = active.closest("tr");
-  if (!cell || !tr) return null;
+  const section = tr?.parentElement;
+  if (!cell || !tr || !section) return null;
   return {
-    region: tr.parentElement!.id,
-    rowIndex: [...tr.parentElement!.children].indexOf(tr),
+    region: section.id,
+    rowIndex: [...section.children].indexOf(tr),
     colIndex: [...tr.children].indexOf(cell),
     className: active.className,
   };

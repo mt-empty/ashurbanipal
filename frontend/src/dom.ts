@@ -2,6 +2,15 @@ export function $<T extends HTMLElement = HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
 
+// Throws on a miss. Every caller targets an element a freshly-cloned
+// <template> or the static markup guarantees, so a null there is a
+// markup/build bug to surface, not a branch to handle.
+export function qs<T extends Element>(root: ParentNode, selector: string): T {
+  const el = root.querySelector<T>(selector);
+  if (!el) throw new Error(`no element matches ${selector}`);
+  return el;
+}
+
 export function setStatus(text: string): void {
   $("status").textContent = text;
 }
@@ -28,14 +37,15 @@ export function populateSelect(select: HTMLSelectElement, values: string[], sele
   select.value = selected;
 }
 
-// Flashes `glyph` on `el`, then restores whatever glyph was resting there —
-// captured once per element (dataset.rest) so a re-click mid-flash can't
-// capture the transient glyph as the new resting state.
+// Flashes `glyph` on `el`, then restores whatever glyph was resting there.
+// The resting value is recorded on dataset.rest the first time only, so a
+// re-click mid-flash restores the real glyph rather than the transient one.
 export function flashIcon(el: HTMLElement, glyph: string, ms = 800): void {
   if (el.dataset.rest === undefined) el.dataset.rest = el.textContent ?? "";
+  const rest = el.dataset.rest ?? "";
   el.textContent = glyph;
   setTimeout(() => {
-    el.textContent = el.dataset.rest!;
+    el.textContent = rest;
   }, ms);
 }
 

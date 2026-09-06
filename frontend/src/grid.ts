@@ -1,4 +1,4 @@
-import { $, copyText, reportError } from "./dom.js";
+import { $, copyText, qs, reportError } from "./dom.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { APPROX_COUNT_TITLE, formatApproxCount, formatCellValue } from "./format.js";
 import { type JsonValue, renderJsonTree } from "./json-tree.js";
@@ -28,7 +28,7 @@ export function renderHeader(columns: Column[]): void {
           ? col.references
             ? `primary key, also references ${col.references.table}.${col.references.column}`
             : "primary key"
-          : `foreign key, references ${col.references!.table}.${col.references!.column}`;
+          : `foreign key, references ${col.references.table}.${col.references.column}`;
       const icon = document.createElement("span");
       icon.className = "key-icon";
       icon.setAttribute("aria-hidden", "true");
@@ -135,9 +135,9 @@ function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTa
     td.appendChild(filterBtn);
     return td;
   }
-  const cellText = td.querySelector<HTMLElement>(".cell-text")!;
-  const btn = td.querySelector<HTMLElement>(".copy")!;
-  const filterBtn = td.querySelector<HTMLElement>(".filter-eq")!;
+  const cellText = qs<HTMLElement>(td, ".cell-text");
+  const btn = qs<HTMLElement>(td, ".copy");
+  const filterBtn = qs<HTMLElement>(td, ".filter-eq");
   cellText.appendChild(formatCellValue(col, raw));
   btn.onclick = (e) => {
     e.stopPropagation();
@@ -154,11 +154,11 @@ function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTa
     // target's remembered sort, whereas here sort must be cleared, since a
     // stale stored column would defeat loadData's drop-and-retry against the
     // filter submitted in the same fetch.
+    const references = col.references;
     cellText.classList.add("fk-cell");
-    const refLabel = col.references.schema ? `${col.references.schema}.${col.references.table}` : col.references.table;
-    cellText.title = `go to ${refLabel}.${col.references.column} = ${raw}`;
+    const refLabel = references.schema ? `${references.schema}.${references.table}` : references.table;
+    cellText.title = `go to ${refLabel}.${references.column} = ${raw}`;
     cellText.onclick = () => {
-      const references = col.references!;
       state.table = references.table;
       state.sort = null;
       // `references.schema` is only present when it differs from the
@@ -230,7 +230,7 @@ export function renderColumnMenu(columns: Column[]): void {
 
 function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
   const td = (rowActionTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
-  td.querySelector<HTMLElement>(".record-btn")!.onclick = () => openRecordView(columns, row);
+  qs<HTMLElement>(td, ".record-btn").onclick = () => openRecordView(columns, row);
   return td;
 }
 

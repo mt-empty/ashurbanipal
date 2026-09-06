@@ -38,12 +38,19 @@ export function parseFilterDsl(input: string): FilterCondition[] {
   let pos = 0;
   // Peeks return the full code point (length 2 for astral chars) so
   // surrogate pairs are never split mid-character while advancing.
-  const peekAt = (i: number): string | null => (i < input.length ? String.fromCodePoint(input.codePointAt(i)!) : null);
+  const peekAt = (i: number): string | null => {
+    if (i >= input.length) return null;
+    const cp = input.codePointAt(i);
+    return cp === undefined ? null : String.fromCodePoint(cp);
+  };
   const peek = (): string | null => peekAt(pos);
   const isWs = (c: string): boolean => /\s/.test(c);
   const skipWsOptional = (): void => {
-    let c: string | null;
-    while ((c = peek()) !== null && isWs(c)) pos += c.length;
+    let c = peek();
+    while (c !== null && isWs(c)) {
+      pos += c.length;
+      c = peek();
+    }
   };
   const skipWsRequired = (): void => {
     const start = pos;
@@ -72,8 +79,11 @@ export function parseFilterDsl(input: string): FilterCondition[] {
     const first = peek();
     if (first === null || !/^[a-zA-Z_]$/.test(first)) throw err("expected column name", start);
     pos += 1;
-    let c: string | null;
-    while ((c = peek()) !== null && /^[a-zA-Z0-9_]$/.test(c)) pos += 1;
+    let c = peek();
+    while (c !== null && /^[a-zA-Z0-9_]$/.test(c)) {
+      pos += 1;
+      c = peek();
+    }
     return input.slice(start, pos);
   };
   // A doubled '' decodes to a single literal '.
@@ -102,10 +112,11 @@ export function parseFilterDsl(input: string): FilterCondition[] {
   const parseBareValue = (): string => {
     const start = pos;
     let value = "";
-    let c: string | null;
-    while ((c = peek()) !== null && !isWs(c) && c !== "'") {
+    let c = peek();
+    while (c !== null && !isWs(c) && c !== "'") {
       value += c;
       pos += c.length;
+      c = peek();
     }
     if (value === "") throw err("expected value", start);
     if (RESERVED_WORD_RE.test(value))

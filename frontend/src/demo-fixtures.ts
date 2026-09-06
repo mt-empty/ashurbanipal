@@ -41,7 +41,7 @@ function rngFor(table: string, row: number): () => number {
   return mulberry32(hashSeed(`${table}:${row}`));
 }
 function pick<T>(rng: () => number, xs: readonly T[]): T {
-  return xs[Math.floor(rng() * xs.length)]!;
+  return xs[Math.floor(rng() * xs.length)];
 }
 function uuid(rng: () => number): string {
   const hex = () => Math.floor(rng() * 16).toString(16);
@@ -127,7 +127,7 @@ const products: TableDef = {
     const noun = pick(rng, ["Widget", "Gadget", "Kit", "Set", "Case", "Lamp", "Mug", "Sensor"]);
     return {
       id: uuid(rng),
-      name: `${category[0]!.toUpperCase()}${category.slice(1)} ${noun} ${i}`,
+      name: `${category[0].toUpperCase()}${category.slice(1)} ${noun} ${i}`,
       tags: [category, rng() < 0.4 ? "sale" : "new"],
       price_cents: Math.floor(rng() * 9800) + 200,
       metadata: { category, weight_kg: Math.round(rng() * 2000) / 100, in_stock: rng() < 0.85 },
