@@ -86,7 +86,7 @@ const rowActionTemplate = $<HTMLTemplateElement>("row-action-template");
 
 // ---- cell preview ----
 let cellPopAnchor: HTMLElement | null = null;
-function showCellPop(e: MouseEvent, text: string): void {
+function showCellPop(e: MouseEvent, text: string, isJsonbColumn: boolean): void {
   // jsonb (or any JSON-shaped value) renders as a colored, collapsible
   // tree; everything else falls back to the plain <pre>. Parsing and
   // rendering share one try/catch, matching record-view.ts's pattern —
@@ -95,8 +95,11 @@ function showCellPop(e: MouseEvent, text: string): void {
   let isJson = true;
   try {
     $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text) as JsonValue));
-  } catch {
+  } catch (err) {
     isJson = false;
+    // A long plain-text cell failing to parse here is the normal path, not a
+    // bug; only warn when the backend actually typed the column jsonb.
+    if (isJsonbColumn) console.warn("ashurbanipal: jsonb cell is not valid JSON", err);
   }
   $("cell-pre").hidden = isJson;
   $("cell-json").hidden = !isJson;
@@ -184,7 +187,7 @@ function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTa
     // per click rather than per render.
     cellText.onclick = (e) => {
       if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
-        showCellPop(e, raw);
+        showCellPop(e, raw, col.type === "jsonb");
       }
     };
     if (col.type === "jsonb") td.classList.add("expandable");

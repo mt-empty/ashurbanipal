@@ -17,6 +17,13 @@ import "../features/theme.js";
 initState();
 registerLoadData(loadData);
 
+// loadData()/loadSiblings() run unawaited and their own try/catch covers only
+// the fetch, so a render-phase throw would otherwise vanish. Console only — the
+// #error banner is for user-actionable failures, which a background poll is not.
+window.addEventListener("unhandledrejection", (ev) => {
+  console.error("ashurbanipal: unhandled promise rejection", ev.reason);
+});
+
 // Protocol-skew banner: api.ts flags a version mismatch on the first
 // /tables response; this owns the DOM it shows in.
 onProtocolSkew((message) => {

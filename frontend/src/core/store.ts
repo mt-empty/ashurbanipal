@@ -153,8 +153,16 @@ export function restoreFromStorage(): void {
         if (typeof schema === "string") state.schemaBySource[source] = schema;
       }
     }
-  } catch {
-    localStorage.removeItem(UI_KEY);
+  } catch (e) {
+    // A corrupt persisted blob (truncated write, pre-migration schema) otherwise
+    // reverts the view to defaults with no trace. removeItem can itself throw
+    // where getItem did (site data blocked), and this runs at bootstrap.
+    console.warn("ashurbanipal: discarding unreadable view state", e);
+    try {
+      localStorage.removeItem(UI_KEY);
+    } catch {
+      /* best-effort */
+    }
   }
 }
 

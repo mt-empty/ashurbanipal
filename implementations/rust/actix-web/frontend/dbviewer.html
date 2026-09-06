@@ -561,7 +561,7 @@ function setStatus(text) {
   $("status").textContent = text;
 }
 function reportError(e) {
-  $("error").textContent = e.message;
+  $("error").textContent = e instanceof Error ? e.message : String(e);
 }
 function clearError() {
   $("error").textContent = "";
@@ -599,7 +599,8 @@ async function copyText(text, btn) {
       document.execCommand("copy");
       ta.remove();
     }
-  } catch {
+  } catch (e) {
+    console.warn("ashurbanipal: copy to clipboard failed", e);
     glyph = "\u2717";
   }
   flashIcon(mark, glyph);
@@ -1023,8 +1024,12 @@ function restoreFromStorage() {
         if (typeof schema === "string") state.schemaBySource[source] = schema;
       }
     }
-  } catch {
-    localStorage.removeItem(UI_KEY);
+  } catch (e) {
+    console.warn("ashurbanipal: discarding unreadable view state", e);
+    try {
+      localStorage.removeItem(UI_KEY);
+    } catch {
+    }
   }
 }
 function persist() {
@@ -1232,7 +1237,8 @@ async function loadSources() {
   let sources;
   try {
     ({ sources } = await api("/sources"));
-  } catch {
+  } catch (e) {
+    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
     return;
   }
   if (sources.length <= 1) {
@@ -1261,8 +1267,9 @@ async function loadSchemas() {
   let schemas;
   try {
     ({ schemas } = await api(`/schemas${sourceQuery()}`));
-  } catch {
+  } catch (e) {
     if (token !== loadSchemasToken) return;
+    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
     state.schema = null;
     $("schema-select-wrap").hidden = true;
     return;
@@ -1684,7 +1691,8 @@ function buildRecordEntries(columns, row) {
         try {
           dd.classList.add("json-tree");
           dd.appendChild(renderJsonTree(JSON.parse(raw)));
-        } catch {
+        } catch (e) {
+          warnBadJsonb(col.name, e);
           dd.textContent = raw;
         }
       } else dd.appendChild(formatCellValue(col, raw));
@@ -1699,11 +1707,22 @@ function buildRecordEntries(columns, row) {
   }
   return nodes;
 }
+function warnBadJsonb(colName, e) {
+  console.warn(`ashurbanipal: jsonb column ${colName} is not valid JSON`, e);
+}
+function parseJsonbOrRaw(colName, raw) {
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    warnBadJsonb(colName, e);
+    return raw;
+  }
+}
 function recordAsJson(columns, row) {
   const obj = {};
   for (const col of columns) {
     const raw = row[col.name];
-    obj[col.name] = col.type === "jsonb" && raw != null ? JSON.parse(raw) : raw;
+    obj[col.name] = col.type === "jsonb" && raw != null ? parseJsonbOrRaw(col.name, raw) : raw;
   }
   return JSON.stringify(obj, null, 2);
 }
@@ -1792,12 +1811,13 @@ function renderEmptyState(columnCount) {
 var cellTemplate = $("cell-template");
 var rowActionTemplate = $("row-action-template");
 var cellPopAnchor = null;
-function showCellPop(e, text) {
+function showCellPop(e, text, isJsonbColumn) {
   let isJson = true;
   try {
     $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text)));
-  } catch {
+  } catch (err) {
     isJson = false;
+    if (isJsonbColumn) console.warn("ashurbanipal: jsonb cell is not valid JSON", err);
   }
   $("cell-pre").hidden = isJson;
   $("cell-json").hidden = !isJson;
@@ -1859,7 +1879,7 @@ function buildCell(col, raw, hidden) {
   } else {
     cellText.onclick = (e) => {
       if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
-        showCellPop(e, raw);
+        showCellPop(e, raw, col.type === "jsonb");
       }
     };
     if (col.type === "jsonb") td.classList.add("expandable");
@@ -2149,12 +2169,18 @@ handle.addEventListener("pointercancel", endDrag);
 
 // src/features/siblings.ts
 var siblingsRequestToken = 0;
+var siblingsWarned = false;
 async function loadSiblings() {
   const token = ++siblingsRequestToken;
   let siblings = [];
   try {
     ({ siblings } = await api("/siblings"));
-  } catch {
+    siblingsWarned = false;
+  } catch (e) {
+    if (!siblingsWarned) {
+      console.warn("ashurbanipal: /siblings poll failed; hiding the panel", e);
+      siblingsWarned = true;
+    }
   }
   if (token !== siblingsRequestToken) return;
   $("siblings").hidden = siblings.length === 0;
@@ -2201,6 +2227,9 @@ $("theme-toggle").onclick = () => {
 // src/bootstrap/main.ts
 initState();
 registerLoadData(loadData2);
+window.addEventListener("unhandledrejection", (ev) => {
+  console.error("ashurbanipal: unhandled promise rejection", ev.reason);
+});
 onProtocolSkew((message) => {
   $("protocol-warning-text").textContent = message;
   $("protocol-warning").hidden = false;
