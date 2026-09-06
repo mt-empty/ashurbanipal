@@ -136,6 +136,14 @@ instead of searching one file for a banner.
   FK navigation, the common-values dropdown): those *compose* a clause from
   a column/value the server already gave us, never parsing or judging
   arbitrary user-typed text — keep that boundary when extending either.
+- **Testing.** A module with no runtime imports and no DOM output — the DSL
+  parser is the current example — gets a `node --test` unit in
+  `frontend/test/` (`mise run frontend:test-unit`), driven by the same
+  `spec/fixtures/` table the conformance runner uses where one exists.
+  Anything that touches the DOM or observable behaviour stays in the
+  Playwright suite (`docs/e2e-testing-guidelines.md`). Do not add a
+  `window.*` test hook to reach otherwise-sealed module scope — extract the
+  pure part instead.
 
 ## 4. Prefer the platform over hand-written JS
 

@@ -9,6 +9,10 @@ on:
       - "frontend/package.json"
       - "frontend/pnpm-lock.yaml"
       - "frontend/biome.json"
+      - "frontend/tsconfig.json"
+      - "frontend/tsconfig.test.json"
+      - "frontend/test/**"
+      - "spec/fixtures/parser-tests.json"
       - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
@@ -26,6 +30,10 @@ on:
       - "frontend/package.json"
       - "frontend/pnpm-lock.yaml"
       - "frontend/biome.json"
+      - "frontend/tsconfig.json"
+      - "frontend/tsconfig.test.json"
+      - "frontend/test/**"
+      - "spec/fixtures/parser-tests.json"
       - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
@@ -43,7 +51,7 @@ concurrency:
 
 jobs:
   check:
-    name: lint, cycle-check, api-reference-check, and verify frontend/dbviewer.html + vendored copies match frontend/src/
+    name: lint, cycle-check, api-reference-check, unit tests, and verify frontend/dbviewer.html + vendored copies match frontend/src/
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -57,6 +65,7 @@ jobs:
       - run: mise run frontend:check-cycles
       - run: mise run frontend:check-api-reference
       - run: mise run frontend:typecheck
+      - run: mise run frontend:test-unit
       - run: mise run frontend:build-check
       - run: mise run frontend:build-demo-check
       - run: mise run frontend:check-ports-sync

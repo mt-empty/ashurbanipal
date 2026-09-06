@@ -904,7 +904,6 @@ function quoteFilterValue(value) {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return `'${value.replace(/'/g, "''")}'`;
 }
-window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };
 
 // src/reload.ts
 var impl = null;

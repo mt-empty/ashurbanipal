@@ -48,8 +48,8 @@ description = "flask-python implementation checks: lint, fmt-check, test"
 depends = ["flask:lint", "flask:fmt-check", "flask:test"]
 
 [tasks.frontend]
-description = "frontend checks: lint, cycle check, api-reference drift, typecheck, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
-depends = ["frontend:lint", "frontend:check-cycles", "frontend:check-api-reference", "frontend:typecheck", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
+description = "frontend checks: lint, cycle check, api-reference drift, typecheck, unit tests, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
+depends = ["frontend:lint", "frontend:check-cycles", "frontend:check-api-reference", "frontend:typecheck", "frontend:test-unit", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
 
 [tasks.docs]
 description = "docs checks: hardcoded version strings in sync with docs/publishing-checklist.md"
@@ -115,8 +115,14 @@ dir = "frontend"
 depends = ["frontend:install"]
 
 [tasks."frontend:typecheck"]
-description = "tsc --noEmit over frontend/src/"
-run = "pnpm exec tsc --noEmit"
+description = "tsc --noEmit over frontend/src/ (DOM libs) and frontend/test/ (node types)"
+run = ["pnpm exec tsc --noEmit", "pnpm exec tsc --noEmit -p tsconfig.test.json"]
+dir = "frontend"
+depends = ["frontend:install"]
+
+[tasks."frontend:test-unit"]
+description = "node --test over frontend/test/ — pure-logic units (the DSL parser); no browser"
+run = "pnpm run test"
 dir = "frontend"
 depends = ["frontend:install"]
 

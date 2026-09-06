@@ -212,14 +212,3 @@ export function quoteFilterValue(value: string): string {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return `'${value.replace(/'/g, "''")}'`;
 }
-
-// Test hook: tools/e2e-tests/tests/filter-parser.spec.ts drives the parser
-// fixture table (and the quoteFilterValue→parser round-trip) via
-// page.evaluate — module scope is otherwise unreachable from outside, and
-// this one namespaced global is the entire exposed surface.
-declare global {
-  interface Window {
-    __ashurbanipal: { parseFilterDsl: typeof parseFilterDsl; quoteFilterValue: typeof quoteFilterValue };
-  }
-}
-window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };
