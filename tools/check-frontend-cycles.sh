@@ -21,14 +21,17 @@ const files = fs.readdirSync(dir).filter((f) => f.endsWith(".ts"));
 const mod = (f) => f.replace(/\.ts$/, "");
 const graph = new Map(files.map((f) => [mod(f), new Set()]));
 
-// `import ... from "./x.js"` and side-effect `import "./x.js"`, minus
-// `import type ...` (whole-statement type imports).
-const importRe = /^\s*import\s+(?!type\s)(?:[^;]*?\sfrom\s+)?["]\.\/([\w.-]+)\.js["]/gm;
+// Value-graph edges: `import ... from "./x.js"`, side-effect
+// `import "./x.js"`, and re-export `export ... from "./x.js"` (a barrel
+// re-export triggers evaluation of the re-exported module, same as a
+// value import) — minus whole-statement `import type` / `export type`,
+// which are erased at build.
+const edgeRe = /^\s*(?:import\s+(?!type\s)(?:[^;]*?\sfrom\s+)?|export\s+(?!type\s)[^;]*?\sfrom\s+)["]\.\/([\w.-]+)\.js["]/gm;
 
 for (const f of files) {
   const src = fs.readFileSync(path.join(dir, f), "utf8");
   let m;
-  while ((m = importRe.exec(src)) !== null) {
+  while ((m = edgeRe.exec(src)) !== null) {
     const target = m[1];
     if (graph.has(target)) graph.get(mod(f)).add(target);
   }
