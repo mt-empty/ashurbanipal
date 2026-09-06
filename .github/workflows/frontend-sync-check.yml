@@ -16,6 +16,8 @@ on:
       - "implementations/flask-python/**"
       - "tools/sync-ports-frontend.sh"
       - "tools/check-frontend-cycles.sh"
+      - "tools/check-frontend-api-reference.sh"
+      - "spec/openapi.yaml"
       - ".github/workflows/frontend-sync-check.yml"
   pull_request:
     paths:
@@ -31,6 +33,8 @@ on:
       - "implementations/flask-python/**"
       - "tools/sync-ports-frontend.sh"
       - "tools/check-frontend-cycles.sh"
+      - "tools/check-frontend-api-reference.sh"
+      - "spec/openapi.yaml"
       - ".github/workflows/frontend-sync-check.yml"
 
 concurrency:
@@ -39,7 +43,7 @@ concurrency:
 
 jobs:
   check:
-    name: lint, cycle-check, and verify frontend/dbviewer.html + vendored copies match frontend/src/
+    name: lint, cycle-check, api-reference-check, and verify frontend/dbviewer.html + vendored copies match frontend/src/
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -51,6 +55,7 @@ jobs:
 
       - run: mise run frontend:lint
       - run: mise run frontend:check-cycles
+      - run: mise run frontend:check-api-reference
       - run: mise run frontend:typecheck
       - run: mise run frontend:build-check
       - run: mise run frontend:build-demo-check

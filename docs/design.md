@@ -106,7 +106,9 @@ Two components, same as the original concept:
     button. Deliberately not its own endpoint — the
     doc doesn't vary per request, so it's meant for a human to copy and
     paste into an agent's context, not to be machine-fetched. Lives in the
-    frontend JS and must be kept in sync with §4 by hand.
+    frontend JS; route descriptions are kept in sync with §4 by hand, while
+    its operator list and filter limits are held to `spec/openapi.yaml` by
+    `tools/check-frontend-api-reference.sh`.
 - **Navigation and filtering affordances**:
   - *Click-to-filter* — a button on a cell (or a dedicated button for null
     cells) composes an exact-match `column = value` (or `IS NULL`) clause

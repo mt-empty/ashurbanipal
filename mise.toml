@@ -48,8 +48,8 @@ description = "flask-python implementation checks: lint, fmt-check, test"
 depends = ["flask:lint", "flask:fmt-check", "flask:test"]
 
 [tasks.frontend]
-description = "frontend checks: lint, cycle check, typecheck, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
-depends = ["frontend:lint", "frontend:check-cycles", "frontend:typecheck", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
+description = "frontend checks: lint, cycle check, api-reference drift, typecheck, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
+depends = ["frontend:lint", "frontend:check-cycles", "frontend:check-api-reference", "frontend:typecheck", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
 
 [tasks.docs]
 description = "docs checks: hardcoded version strings in sync with docs/publishing-checklist.md"
@@ -129,6 +129,10 @@ depends = ["frontend:install"]
 [tasks."frontend:check-cycles"]
 description = "fail if frontend/src/ has any value-import cycle (docs/frontend-style-guide.md §1)"
 run = "sh tools/check-frontend-cycles.sh"
+
+[tasks."frontend:check-api-reference"]
+description = "fail if the filter operator list / limits drift between spec/openapi.yaml and frontend/src/"
+run = "sh tools/check-frontend-api-reference.sh"
 
 [tasks."frontend:build-check"]
 description = "verify frontend/dbviewer.html is what frontend/src/ currently builds to"

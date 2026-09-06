@@ -212,9 +212,14 @@ a broken page.
   `spec/filter-dsl.md`.
   It was forbidden here originally to avoid two parser copies (frontend +
   backend) silently drifting apart; that risk is gone now that there's
-  exactly one copy, so the rule no longer applies. Left as a struck-through
-  entry rather than deleted so this doesn't read as an oversight next time
-  someone re-derives "should parsing be client-side?" from first principles.
+  exactly one *parser* copy, so the rule no longer applies. Left as a
+  struck-through entry rather than deleted so this doesn't read as an
+  oversight next time someone re-derives "should parsing be client-side?"
+  from first principles. The operator list and the filter limits are still
+  restated — `api-reference.ts` (the in-app dialog) and `demo-shim.ts` (the
+  offline demo backend, which reimplements filter/sort semantics) — now
+  held to `spec/openapi.yaml` by `tools/check-frontend-api-reference.sh`
+  (`mise run frontend:check-api-reference`).
 - **`@scope`** — the file already gets rule-scoping for free from its
   ID-selector discipline; no cascade-leakage problem to solve.
 - **`requestIdleCallback` / `scheduler.postTask()`** — no measured
