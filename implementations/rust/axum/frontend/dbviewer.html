@@ -529,12 +529,14 @@ function clearError() {
   $("error").textContent = "";
 }
 function populateSelect(select, values, selected) {
-  select.replaceChildren(...values.map((v) => {
-    const opt = document.createElement("option");
-    opt.value = v;
-    opt.textContent = v;
-    return opt;
-  }));
+  select.replaceChildren(
+    ...values.map((v) => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      return opt;
+    })
+  );
   select.value = selected;
 }
 function flashIcon(el, glyph, ms = 800) {
@@ -565,7 +567,7 @@ async function copyText(text, btn) {
 }
 
 // src/api.ts
-var API = location.pathname.replace(/\/+$/, "") + "/api";
+var API = `${location.pathname.replace(/\/+$/, "")}/api`;
 var PROTOCOL_VERSION = "1";
 var protocolChecked = false;
 function checkProtocolVersion(resp) {
@@ -606,7 +608,11 @@ function buildApiReference() {
         path: `${base}/schemas`,
         summary: "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry.",
         params: [
-          { name: "source", required: false, notes: "must be a name returned by GET /sources; omit to use the default source" }
+          {
+            name: "source",
+            required: false,
+            notes: "must be a name returned by GET /sources; omit to use the default source"
+          }
         ],
         example_response: { schemas: ["public"] }
       },
@@ -616,7 +622,11 @@ function buildApiReference() {
         summary: "List table names in the resolved schema \u2014 also the allow-list for every other endpoint's `table` param.",
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
-          { name: "schema", required: false, notes: "must be a name returned by GET /schemas; omit to use the connection's default schema" }
+          {
+            name: "schema",
+            required: false,
+            notes: "must be a name returned by GET /schemas; omit to use the connection's default schema"
+          }
         ],
         example_response: { tables: [{ name: "users", comment: "Registered accounts." }, { name: "sessions" }] }
       },
@@ -638,7 +648,11 @@ function buildApiReference() {
           { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables" },
           { name: "table", required: true, notes: "must be a name returned by GET /tables" },
-          { name: "filter", required: false, notes: "URL-encoded JSON array of condition objects \u2014 see the `filter` key below" },
+          {
+            name: "filter",
+            required: false,
+            notes: "URL-encoded JSON array of condition objects \u2014 see the `filter` key below"
+          },
           { name: "limit", required: false, notes: "default 50, max 100" },
           { name: "offset", required: false, notes: "default 0" },
           { name: "sort", required: false, notes: "single column name" },
@@ -678,7 +692,9 @@ function buildApiReference() {
         path: `${base}/siblings`,
         summary: "Other related services configured for this instance, with live health status.",
         params: [],
-        example_response: { siblings: [{ name: "billing", base_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] }
+        example_response: {
+          siblings: [{ name: "billing", base_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }]
+        }
       }
     ],
     filter: {
@@ -847,8 +863,7 @@ function parseFilterDsl(input) {
       ...simple.value !== void 0 ? { value: simple.value } : {}
     };
     conditions.push(condition);
-    if (conditions.length > FILTER_MAX_CONDITIONS)
-      throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
+    if (conditions.length > FILTER_MAX_CONDITIONS) throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
     if (pos >= input.length) break;
     skipWsRequired();
     if (pos >= input.length) break;
@@ -869,7 +884,7 @@ function tryParseFilterDsl(input) {
 }
 function quoteFilterValue(value) {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
-  return "'" + value.replace(/'/g, "''") + "'";
+  return `'${value.replace(/'/g, "''")}'`;
 }
 window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };
 
@@ -977,7 +992,10 @@ function restoreFromUrl() {
 function persist() {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
   try {
-    localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
+    localStorage.setItem(
+      UI_KEY,
+      JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource })
+    );
   } catch (e) {
     console.warn("ashurbanipal: could not persist view state", e);
   }
@@ -1028,10 +1046,10 @@ function applyScopeParams(params) {
 function scopeQuery() {
   const params = new URLSearchParams();
   applyScopeParams(params);
-  return params.size ? "?" + params : "";
+  return params.size ? `?${params}` : "";
 }
 function sourceQuery() {
-  return state.source ? "?" + new URLSearchParams({ source: state.source }) : "";
+  return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
 }
 var lastPayload = null;
 function getLastPayload() {
@@ -1145,7 +1163,13 @@ var CARET_MIRROR_PROPS = [
 function measureCaretPosition(input) {
   const mirror = document.createElement("div");
   const computed = getComputedStyle(input);
-  Object.assign(mirror.style, { position: "absolute", visibility: "hidden", whiteSpace: "pre", top: "0", left: "-9999px" });
+  Object.assign(mirror.style, {
+    position: "absolute",
+    visibility: "hidden",
+    whiteSpace: "pre",
+    top: "0",
+    left: "-9999px"
+  });
   const mirrorStyle = mirror.style;
   const computedStyle = computed;
   for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
@@ -1172,15 +1196,17 @@ function closeFilterSuggest() {
   $("filter-suggest").hidePopover();
 }
 function renderFilterSuggest() {
-  $("filter-suggest-list").replaceChildren(...filterSuggestMatches.map((name, i) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = name;
-    btn.className = i === filterSuggestIndex ? "active" : "";
-    btn.onmousedown = (e) => e.preventDefault();
-    btn.onclick = () => acceptFilterSuggestion(i);
-    return btn;
-  }));
+  $("filter-suggest-list").replaceChildren(
+    ...filterSuggestMatches.map((name, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = name;
+      btn.className = i === filterSuggestIndex ? "active" : "";
+      btn.onmousedown = (e) => e.preventDefault();
+      btn.onclick = () => acceptFilterSuggestion(i);
+      return btn;
+    })
+  );
   $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
 }
 function acceptFilterSuggestion(i) {
@@ -1193,15 +1219,24 @@ function acceptFilterSuggestion(i) {
 function updateFilterSuggestions() {
   const input = $("filter");
   const pos = input.selectionStart;
-  if (pos !== input.value.length) return closeFilterSuggest();
+  if (pos !== input.value.length) {
+    closeFilterSuggest();
+    return;
+  }
   const before = input.value.slice(0, pos ?? 0);
   const tokenStart = before.search(/\S*$/);
   const head = before.slice(0, tokenStart);
   const partial = before.slice(tokenStart);
-  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) return closeFilterSuggest();
+  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) {
+    closeFilterSuggest();
+    return;
+  }
   const columns = (getLastPayload()?.columns ?? []).map((c) => c.name);
   filterSuggestMatches = columns.filter((name) => name.toLowerCase().startsWith(partial.toLowerCase()));
-  if (filterSuggestMatches.length === 0) return closeFilterSuggest();
+  if (filterSuggestMatches.length === 0) {
+    closeFilterSuggest();
+    return;
+  }
   filterSuggestHead = head;
   filterSuggestIndex = 0;
   renderFilterSuggest();
@@ -1247,22 +1282,24 @@ function renderCommonValues(values, column) {
     list.replaceChildren(p);
     return;
   }
-  list.replaceChildren(...values.map((v) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "cv-value";
-    const val = document.createElement("span");
-    val.textContent = v.value;
-    const freq = document.createElement("span");
-    freq.className = "cv-freq";
-    freq.textContent = `${Math.round(v.freq * 100)}%`;
-    btn.append(val, freq);
-    btn.onclick = () => {
-      $("cv-pop").hidePopover();
-      applyFilterClause(column, "=", v.value);
-    };
-    return btn;
-  }));
+  list.replaceChildren(
+    ...values.map((v) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cv-value";
+      const val = document.createElement("span");
+      val.textContent = v.value;
+      const freq = document.createElement("span");
+      freq.className = "cv-freq";
+      freq.textContent = `${Math.round(v.freq * 100)}%`;
+      btn.append(val, freq);
+      btn.onclick = () => {
+        $("cv-pop").hidePopover();
+        applyFilterClause(column, "=", v.value);
+      };
+      return btn;
+    })
+  );
 }
 async function showCommonValues(e, column) {
   const btn = e.currentTarget;
@@ -1280,7 +1317,7 @@ async function showCommonValues(e, column) {
   applyScopeParams(params);
   let values;
   try {
-    ({ values } = await api("/tables/common-values?" + params));
+    ({ values } = await api(`/tables/common-values?${params}`));
   } catch (err) {
     if (token !== cvRequestToken) return;
     const p = document.createElement("p");
@@ -1300,7 +1337,13 @@ function renderJsonTree(value) {
 }
 function jsonEntryValue(value, prefix, comma) {
   if (Array.isArray(value)) {
-    return jsonContainer(value.map((v) => ({ prefix: null, value: v })), "[", "]", prefix, comma);
+    return jsonContainer(
+      value.map((v) => ({ prefix: null, value: v })),
+      "[",
+      "]",
+      prefix,
+      comma
+    );
   }
   if (value !== null && typeof value === "object") {
     return jsonContainer(
@@ -1438,7 +1481,7 @@ VALUES (${vals});`;
 function sqlLiteral(col, raw) {
   if (raw == null) return "NULL";
   if (NUMERIC_TYPE_RE.test(col.type) && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
-  return "'" + raw.replace(/'/g, "''") + "'";
+  return `'${raw.replace(/'/g, "''")}'`;
 }
 function openRecordView(columns, row) {
   $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
@@ -1491,7 +1534,11 @@ async function loadSources() {
   if (!state.source || !sources.some((s) => s.name === state.source)) {
     state.source = sources[0].name;
   }
-  populateSelect($("source-select"), sources.map((s) => s.name), state.source);
+  populateSelect(
+    $("source-select"),
+    sources.map((s) => s.name),
+    state.source
+  );
   $("source-select-wrap").hidden = false;
 }
 $("source-select").onchange = () => {
@@ -1509,7 +1556,7 @@ async function loadSchemas() {
   const token = ++loadSchemasToken;
   let schemas;
   try {
-    ({ schemas } = await api("/schemas" + sourceQuery()));
+    ({ schemas } = await api(`/schemas${sourceQuery()}`));
   } catch {
     if (token !== loadSchemasToken) return;
     state.schema = null;
@@ -1546,8 +1593,8 @@ async function loadTables() {
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
-    api("/tables" + scopeQuery()),
-    api("/table-counts" + scopeQuery())
+    api(`/tables${scopeQuery()}`),
+    api(`/table-counts${scopeQuery()}`)
   ]);
   if (token !== loadTablesToken) return;
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
@@ -1623,7 +1670,10 @@ function renderHeader(columns) {
       th.append(label);
     }
     if (col.comment) th.title = col.comment;
-    th.setAttribute("aria-sort", col.name === state.sort ? state.order === "desc" ? "descending" : "ascending" : "none");
+    th.setAttribute(
+      "aria-sort",
+      col.name === state.sort ? state.order === "desc" ? "descending" : "ascending" : "none"
+    );
     th.onclick = () => {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
       state.sort = col.name;
@@ -1765,7 +1815,9 @@ function setColumnVisibility(name, hidden) {
   if (next.length) state.hiddenColumns[table] = next;
   else delete state.hiddenColumns[table];
   persist();
-  document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`).forEach((el) => el.classList.toggle("col-hidden", hidden));
+  for (const el of document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
+    el.classList.toggle("col-hidden", hidden);
+  }
   updateColumnsButtonLabel();
 }
 function updateColumnsButtonLabel() {
@@ -1774,15 +1826,17 @@ function updateColumnsButtonLabel() {
 }
 function renderColumnMenu(columns) {
   const hidden = hiddenColumnsForTable();
-  $("columns-pop-list").replaceChildren(...columns.map((col) => {
-    const label = document.createElement("label");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = !hidden.includes(col.name);
-    input.onchange = () => setColumnVisibility(col.name, !input.checked);
-    label.append(input, col.name);
-    return label;
-  }));
+  $("columns-pop-list").replaceChildren(
+    ...columns.map((col) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !hidden.includes(col.name);
+      input.onchange = () => setColumnVisibility(col.name, !input.checked);
+      label.append(input, col.name);
+      return label;
+    })
+  );
 }
 function buildRowActionCell(columns, row) {
   const td = rowActionTemplate.content.cloneNode(true).firstElementChild;
@@ -1797,15 +1851,17 @@ function renderRows(data, newRowKeys, pkNames = []) {
     return;
   }
   const tbody = $("tbody");
-  tbody.replaceChildren(...data.rows.map((row) => {
-    const tr = document.createElement("tr");
-    if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
-    tr.appendChild(buildRowActionCell(data.columns, row));
-    for (const col of data.columns) {
-      tr.appendChild(buildCell(col, row[col.name], hidden));
-    }
-    return tr;
-  }));
+  tbody.replaceChildren(
+    ...data.rows.map((row) => {
+      const tr = document.createElement("tr");
+      if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
+      tr.appendChild(buildRowActionCell(data.columns, row));
+      for (const col of data.columns) {
+        tr.appendChild(buildCell(col, row[col.name], hidden));
+      }
+      return tr;
+    })
+  );
   requestAnimationFrame(() => {
     for (const el of tbody.querySelectorAll(".cell-text:not(.fk-cell)")) {
       if (el.scrollWidth > el.clientWidth) el.closest("td")?.classList.add("expandable");
@@ -1843,7 +1899,7 @@ function syncUrl() {
   }
   applyScopeParams(params);
   if (state.filter) params.set("filter", state.filter);
-  const qs = "?" + params;
+  const qs = `?${params}`;
   const key = navViewKey();
   const samePlace = navIndex >= 0 && navStack[navIndex] === key;
   if (restoringFromHistory || navStack.length === 0 || samePlace) {
@@ -1932,23 +1988,25 @@ async function loadSiblings() {
   if (token !== siblingsRequestToken) return;
   $("siblings").hidden = siblings.length === 0;
   const div = $("siblings-list");
-  div.replaceChildren(...siblings.map((s) => {
-    const p = document.createElement("div");
-    const dot = document.createElement("span");
-    dot.className = "dot " + (s.healthy ? "up" : "down");
-    dot.setAttribute("role", "img");
-    dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
-    const a = document.createElement("a");
-    a.href = s.base_url;
-    a.textContent = s.name;
-    a.target = "_blank";
-    a.rel = "noopener";
-    a.title = s.name;
-    p.className = "sibling-row";
-    a.className = "sibling-name";
-    p.append(dot, a);
-    return p;
-  }));
+  div.replaceChildren(
+    ...siblings.map((s) => {
+      const p = document.createElement("div");
+      const dot = document.createElement("span");
+      dot.className = `dot ${s.healthy ? "up" : "down"}`;
+      dot.setAttribute("role", "img");
+      dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
+      const a = document.createElement("a");
+      a.href = s.base_url;
+      a.textContent = s.name;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.title = s.name;
+      p.className = "sibling-row";
+      a.className = "sibling-name";
+      p.append(dot, a);
+      return p;
+    })
+  );
 }
 
 // src/theme.ts
@@ -1999,7 +2057,7 @@ async function fetchTableData() {
   }
   setRowLoading(table, true);
   try {
-    return await api("/tables/data?" + params);
+    return await api(`/tables/data?${params}`);
   } finally {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
@@ -2035,7 +2093,10 @@ function updateActiveTableChrome() {
   document.title = state.table ? `${state.table} \u2014 Ashurbanipal` : "Ashurbanipal";
 }
 var loadDataToken = 0;
-async function loadData({ resetScroll = true, highlightNew = false } = {}) {
+async function loadData({
+  resetScroll = true,
+  highlightNew = false
+} = {}) {
   clearError();
   if (!state.table) {
     updateActiveTableChrome();

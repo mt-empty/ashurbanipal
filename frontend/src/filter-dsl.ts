@@ -86,9 +86,14 @@ export function parseFilterDsl(input: string): FilterCondition[] {
       if (c === null) throw err("unterminated quoted value", start);
       if (c === "'") {
         pos += 1;
-        if (peek() === "'") { value += "'"; pos += 1; }
-        else break;
-      } else { value += c; pos += c.length; }
+        if (peek() === "'") {
+          value += "'";
+          pos += 1;
+        } else break;
+      } else {
+        value += c;
+        pos += c.length;
+      }
     }
     return value;
   };
@@ -98,7 +103,10 @@ export function parseFilterDsl(input: string): FilterCondition[] {
     const start = pos;
     let value = "";
     let c: string | null;
-    while ((c = peek()) !== null && !isWs(c) && c !== "'") { value += c; pos += c.length; }
+    while ((c = peek()) !== null && !isWs(c) && c !== "'") {
+      value += c;
+      pos += c.length;
+    }
     if (value === "") throw err("expected value", start);
     if (RESERVED_WORD_RE.test(value))
       throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
@@ -111,7 +119,10 @@ export function parseFilterDsl(input: string): FilterCondition[] {
     if (consumeKeyword("ILIKE")) return "ILIKE";
     if (consumeKeyword("LIKE")) return "LIKE";
     for (const sym of [">=", "<=", "!=", ">", "<", "="] as const) {
-      if (input.startsWith(sym, pos)) { pos += sym.length; return sym; }
+      if (input.startsWith(sym, pos)) {
+        pos += sym.length;
+        return sym;
+      }
     }
     throw err("expected operator (one of = != >= <= > < LIKE ILIKE, or IS [NOT] NULL)", start);
   };
@@ -143,7 +154,11 @@ export function parseFilterDsl(input: string): FilterCondition[] {
   let pendingLogic: "AND" | "OR" | null = null;
   for (;;) {
     let not = false;
-    if (matchKeyword("NOT")) { pos += 3; skipWsRequired(); not = true; }
+    if (matchKeyword("NOT")) {
+      pos += 3;
+      skipWsRequired();
+      not = true;
+    }
     const simple = parseSimpleCondition();
     // Optional wire fields are omitted, never null/false-filled (§5.4.2).
     const condition: FilterCondition = {
@@ -154,8 +169,7 @@ export function parseFilterDsl(input: string): FilterCondition[] {
       ...(simple.value !== undefined ? { value: simple.value } : {}),
     };
     conditions.push(condition);
-    if (conditions.length > FILTER_MAX_CONDITIONS)
-      throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
+    if (conditions.length > FILTER_MAX_CONDITIONS) throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
     if (pos >= input.length) break;
     skipWsRequired();
     if (pos >= input.length) break;
@@ -172,7 +186,11 @@ export function parseFilterDsl(input: string): FilterCondition[] {
 // discard a bad filter silently (ui-guidelines R5) rather than surface it,
 // unlike a live submission through submitFilter().
 export function tryParseFilterDsl(input: string): FilterCondition[] | null {
-  try { return parseFilterDsl(input); } catch { return null; }
+  try {
+    return parseFilterDsl(input);
+  } catch {
+    return null;
+  }
 }
 
 // ---- click-to-filter: compose "column op value" into #filter and apply ----
@@ -181,7 +199,7 @@ export function tryParseFilterDsl(input: string): FilterCondition[] | null {
 // straight into a clause without reshaping.
 export function quoteFilterValue(value: string): string {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
-  return "'" + value.replace(/'/g, "''") + "'";
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 // Test hook: tools/e2e-tests/tests/filter-parser.spec.ts drives the parser

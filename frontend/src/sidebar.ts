@@ -12,8 +12,9 @@ import type { SourceEntry, TableListEntry } from "./types.js";
 export function formatApproxCount(n: number | null | undefined): string {
   return n == null || n < 0 ? "?" : `~${n}`;
 }
-export const APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; "
-  + "? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
+export const APPROX_COUNT_TITLE =
+  "~ = approximate, from the backend's own statistics, not a live count; " +
+  "? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
 
 // ---- sidebar table search-as-you-type: transient, session-local state,
 // not part of `state`/localStorage — resets on reload ----
@@ -60,11 +61,18 @@ export async function loadSources(): Promise<void> {
   } catch {
     return; // older port without /sources — degrade to single-source behavior
   }
-  if (sources.length <= 1) { state.source = null; return; }
+  if (sources.length <= 1) {
+    state.source = null;
+    return;
+  }
   if (!state.source || !sources.some((s) => s.name === state.source)) {
     state.source = sources[0]!.name;
   }
-  populateSelect($<HTMLSelectElement>("source-select"), sources.map((s) => s.name), state.source!);
+  populateSelect(
+    $<HTMLSelectElement>("source-select"),
+    sources.map((s) => s.name),
+    state.source!,
+  );
   $("source-select-wrap").hidden = false;
 }
 $<HTMLSelectElement>("source-select").onchange = () => {
@@ -72,7 +80,9 @@ $<HTMLSelectElement>("source-select").onchange = () => {
   // Restore the schema last used on this source rather than resetting;
   // loadSchemas() still validates it and falls back if it's gone (R5/R12).
   state.schema = state.schemaBySource[state.source ?? ""] ?? null;
-  state.table = null; state.sort = null; state.offset = 0;
+  state.table = null;
+  state.sort = null;
+  state.offset = 0;
   clearFilter();
   persist();
   loadSchemas().then(loadTables).catch(reportError);
@@ -96,18 +106,24 @@ export async function loadSchemas(): Promise<void> {
   const token = ++loadSchemasToken;
   let schemas: string[];
   try {
-    ({ schemas } = await api<{ schemas: string[] }>("/schemas" + sourceQuery()));
+    ({ schemas } = await api<{ schemas: string[] }>(`/schemas${sourceQuery()}`));
   } catch {
     if (token !== loadSchemasToken) return;
     // older port without /schemas — degrade to single-schema behavior
-    state.schema = null; $("schema-select-wrap").hidden = true; return;
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return;
   }
   if (token !== loadSchemasToken) return; // superseded by a newer source switch
   // Explicitly re-hides even though the element starts hidden in markup:
   // switching source can re-run this against a source with fewer schemas
   // than the previously selected one, and without this the wrap would keep
   // showing the prior source's stale multi-schema dropdown.
-  if (schemas.length <= 1) { state.schema = null; $("schema-select-wrap").hidden = true; return; }
+  if (schemas.length <= 1) {
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return;
+  }
   if (!state.schema || !schemas.includes(state.schema)) {
     state.schema = schemas.includes("public") ? "public" : schemas[0];
   }
@@ -124,7 +140,9 @@ export function setSchema(name: string): void {
 }
 $<HTMLSelectElement>("schema-select").onchange = () => {
   setSchema($<HTMLSelectElement>("schema-select").value);
-  state.table = null; state.sort = null; state.offset = 0;
+  state.table = null;
+  state.sort = null;
+  state.offset = 0;
   clearFilter();
   loadTables().catch(reportError);
 };
@@ -139,8 +157,8 @@ export async function loadTables(): Promise<void> {
   setStatus("loading tables…");
   const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
-    api<{ tables: TableListEntry[] }>("/tables" + scopeQuery()),
-    api<{ counts: { table: string; approx_rows: number }[] }>("/table-counts" + scopeQuery()),
+    api<{ tables: TableListEntry[] }>(`/tables${scopeQuery()}`),
+    api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery()}`),
   ]);
   if (token !== loadTablesToken) return; // superseded by a newer call
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
@@ -162,9 +180,12 @@ export async function loadTables(): Promise<void> {
     // The filter is written against this table's columns, so it clears on
     // switch; the sort is restored to whatever was last used on this table.
     btn.onclick = () => {
-      state.table = t.name; state.offset = 0; applyStoredSort(t.name);
+      state.table = t.name;
+      state.offset = 0;
+      applyStoredSort(t.name);
       clearFilter();
-      persist(); loadData();
+      persist();
+      loadData();
     };
     li.appendChild(btn);
     ul.appendChild(li);

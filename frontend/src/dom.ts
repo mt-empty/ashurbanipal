@@ -17,11 +17,14 @@ export function clearError(): void {
 }
 
 export function populateSelect(select: HTMLSelectElement, values: string[], selected: string): void {
-  select.replaceChildren(...values.map((v) => {
-    const opt = document.createElement("option");
-    opt.value = v; opt.textContent = v;
-    return opt;
-  }));
+  select.replaceChildren(
+    ...values.map((v) => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      return opt;
+    }),
+  );
   select.value = selected;
 }
 
@@ -31,7 +34,9 @@ export function populateSelect(select: HTMLSelectElement, values: string[], sele
 export function flashIcon(el: HTMLElement, glyph: string, ms = 800): void {
   if (el.dataset.rest === undefined) el.dataset.rest = el.textContent ?? "";
   el.textContent = glyph;
-  setTimeout(() => { el.textContent = el.dataset.rest!; }, ms);
+  setTimeout(() => {
+    el.textContent = el.dataset.rest!;
+  }, ms);
 }
 
 // ---- per-cell copy (Clipboard API) ----

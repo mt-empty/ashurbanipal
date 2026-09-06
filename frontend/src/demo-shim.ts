@@ -1,6 +1,6 @@
 // Fake backend for the GitHub Pages demo: answers dbviewer.html's /api/*
 // calls from demo-fixtures.ts instead of a real server.
-import { SCHEMAS, SIBLINGS, TABLES, type CellValue, type TableDef } from "./demo-fixtures.js";
+import { type CellValue, SCHEMAS, SIBLINGS, TABLES, type TableDef } from "./demo-fixtures.js";
 import type { FilterCondition, FilterOp } from "./types.js";
 
 function toWire(v: CellValue): string | null {
@@ -58,7 +58,10 @@ function typedCompare(t: string, a: CellValue, b: CellValue): number {
 }
 const VALID_OPS = new Set<FilterOp>(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
 function likeToRegExp(pattern: string, ci: boolean): RegExp {
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
+  const escaped = pattern
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/%/g, ".*")
+    .replace(/_/g, ".");
   return new RegExp(`^${escaped}$`, ci ? "i" : "");
 }
 function matchesCondition(table: TableDef, row: Record<string, CellValue>, cond: FilterCondition): boolean {
@@ -67,14 +70,32 @@ function matchesCondition(table: TableDef, row: Record<string, CellValue>, cond:
   const wire = toWire(cell);
   let result: boolean;
   switch (cond.op) {
-    case "IS NULL": result = wire === null; break;
-    case "IS NOT NULL": result = wire !== null; break;
-    case "=": result = wire !== null && wire === cond.value; break;
-    case "!=": result = wire === null || wire !== cond.value; break;
-    case "LIKE": result = wire !== null && likeToRegExp(cond.value ?? "", false).test(wire); break;
-    case "ILIKE": result = wire !== null && likeToRegExp(cond.value ?? "", true).test(wire); break;
-    case ">": case "<": case ">=": case "<=": {
-      if (wire === null) { result = false; break; }
+    case "IS NULL":
+      result = wire === null;
+      break;
+    case "IS NOT NULL":
+      result = wire !== null;
+      break;
+    case "=":
+      result = wire !== null && wire === cond.value;
+      break;
+    case "!=":
+      result = wire === null || wire !== cond.value;
+      break;
+    case "LIKE":
+      result = wire !== null && likeToRegExp(cond.value ?? "", false).test(wire);
+      break;
+    case "ILIKE":
+      result = wire !== null && likeToRegExp(cond.value ?? "", true).test(wire);
+      break;
+    case ">":
+    case "<":
+    case ">=":
+    case "<=": {
+      if (wire === null) {
+        result = false;
+        break;
+      }
       const target = isNumericType(t) ? Number(cond.value) : (cond.value ?? "");
       const cmp = typedCompare(t, cell, target);
       result = cond.op === ">" ? cmp > 0 : cond.op === "<" ? cmp < 0 : cond.op === ">=" ? cmp >= 0 : cmp <= 0;
@@ -82,7 +103,10 @@ function matchesCondition(table: TableDef, row: Record<string, CellValue>, cond:
     }
     // Unreachable given FilterOp's 10 members are all handled above — a
     // future member added without a matching case fails to compile here.
-    default: { const _exhaustive: never = cond.op; result = false; }
+    default: {
+      const _exhaustive: never = cond.op;
+      result = false;
+    }
   }
   return cond.not ? !result : result;
 }
@@ -203,7 +227,7 @@ const realFetch = window.fetch.bind(window);
 // Same derivation as api.ts's API constant — matches whatever path this
 // page is actually served at, so the demo works from any GitHub Pages
 // project/user-site prefix without hardcoding one.
-const API_BASE = location.pathname.replace(/\/+$/, "") + "/api";
+const API_BASE = `${location.pathname.replace(/\/+$/, "")}/api`;
 
 // Runs at top level, not inside a DOMContentLoaded handler: build-demo.mjs
 // splices this in as a classic <script>, which installs before
@@ -215,14 +239,22 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const path = url.pathname.slice(API_BASE.length);
   const params = url.searchParams;
   switch (path) {
-    case "/sources": return handleSources();
-    case "/schemas": return handleSchemas();
-    case "/tables": return handleTables(params);
-    case "/table-counts": return handleTableCounts(params);
-    case "/tables/data": return handleTableData(params);
-    case "/tables/common-values": return handleCommonValues(params);
-    case "/siblings": return handleSiblings();
-    default: return realFetch(input, init);
+    case "/sources":
+      return handleSources();
+    case "/schemas":
+      return handleSchemas();
+    case "/tables":
+      return handleTables(params);
+    case "/table-counts":
+      return handleTableCounts(params);
+    case "/tables/data":
+      return handleTableData(params);
+    case "/tables/common-values":
+      return handleCommonValues(params);
+    case "/siblings":
+      return handleSiblings();
+    default:
+      return realFetch(input, init);
   }
 };
 
@@ -230,9 +262,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const badge = document.createElement("div");
   badge.textContent = "Demo — synthetic data, no live backend";
   Object.assign(badge.style, {
-    position: "fixed", bottom: "0.5rem", right: "0.5rem", zIndex: "9999",
-    background: "#222", color: "#eee", font: "12px ui-monospace, monospace",
-    padding: "4px 8px", borderRadius: "4px", opacity: "0.85", pointerEvents: "none",
+    position: "fixed",
+    bottom: "0.5rem",
+    right: "0.5rem",
+    zIndex: "9999",
+    background: "#222",
+    color: "#eee",
+    font: "12px ui-monospace, monospace",
+    padding: "4px 8px",
+    borderRadius: "4px",
+    opacity: "0.85",
+    pointerEvents: "none",
   });
   document.body.appendChild(badge);
 });

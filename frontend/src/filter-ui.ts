@@ -8,8 +8,12 @@ import type { CommonValue, FilterCondition, FilterOp } from "./types.js";
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
   if (text) {
-    try { ast = parseFilterDsl(text); }
-    catch (e) { reportError(e); return; }
+    try {
+      ast = parseFilterDsl(text);
+    } catch (e) {
+      reportError(e);
+      return;
+    }
   }
   state.filter = text;
   setAppliedFilterAst(ast);
@@ -54,15 +58,34 @@ $<HTMLInputElement>("filter").addEventListener("search", () => {
 const FILTER_COND_FIRST = /^\s*(?:NOT\s+)?$/i;
 const FILTER_COND_AFTER_LOGIC = /(^|\s)(?:AND|OR)\s+(?:NOT\s+)?$/i;
 const CARET_MIRROR_PROPS: Extract<keyof CSSStyleDeclaration, string>[] = [
-  "boxSizing", "width", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
-  "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+  "boxSizing",
+  "width",
+  "paddingTop",
+  "paddingRight",
+  "paddingBottom",
+  "paddingLeft",
+  "borderTopWidth",
+  "borderRightWidth",
+  "borderBottomWidth",
+  "borderLeftWidth",
   // border-*-style matters too, not just width: a border's used width
   // collapses to 0 when style is "none" (the mirror's default), so without
   // these the mirror omits #filter's UA-default border and the measured
   // caret position is off by that width.
-  "borderTopStyle", "borderRightStyle", "borderBottomStyle", "borderLeftStyle",
-  "fontStyle", "fontVariant", "fontWeight", "fontStretch", "fontSize", "fontFamily",
-  "lineHeight", "letterSpacing", "textTransform", "wordSpacing",
+  "borderTopStyle",
+  "borderRightStyle",
+  "borderBottomStyle",
+  "borderLeftStyle",
+  "fontStyle",
+  "fontVariant",
+  "fontWeight",
+  "fontStretch",
+  "fontSize",
+  "fontFamily",
+  "lineHeight",
+  "letterSpacing",
+  "textTransform",
+  "wordSpacing",
 ];
 
 // Renders an invisible clone of the text up to the cursor with identical
@@ -71,7 +94,13 @@ const CARET_MIRROR_PROPS: Extract<keyof CSSStyleDeclaration, string>[] = [
 function measureCaretPosition(input: HTMLInputElement): { x: number; y: number } {
   const mirror = document.createElement("div");
   const computed = getComputedStyle(input);
-  Object.assign(mirror.style, { position: "absolute", visibility: "hidden", whiteSpace: "pre", top: "0", left: "-9999px" });
+  Object.assign(mirror.style, {
+    position: "absolute",
+    visibility: "hidden",
+    whiteSpace: "pre",
+    top: "0",
+    left: "-9999px",
+  });
   // Runtime-only copy of computed style values keyed by camelCase property
   // name; keyof CSSStyleDeclaration also covers readonly members (length,
   // parentRule, methods), which the settable-property view below sidesteps.
@@ -93,8 +122,8 @@ function measureCaretPosition(input: HTMLInputElement): { x: number; y: number }
 }
 
 let filterSuggestMatches: string[] = []; // column names currently shown, in display order
-let filterSuggestIndex = -1;             // highlighted row, -1 = none
-let filterSuggestHead = "";              // input text up to (not including) the partial token being completed
+let filterSuggestIndex = -1; // highlighted row, -1 = none
+let filterSuggestHead = ""; // input text up to (not including) the partial token being completed
 
 function closeFilterSuggest(): void {
   filterSuggestMatches = [];
@@ -104,18 +133,20 @@ function closeFilterSuggest(): void {
 }
 
 function renderFilterSuggest(): void {
-  $("filter-suggest-list").replaceChildren(...filterSuggestMatches.map((name, i) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = name;
-    btn.className = i === filterSuggestIndex ? "active" : "";
-    // Keeps focus (and the caret) in #filter — otherwise the button
-    // would steal focus, firing #filter's blur handler and closing this
-    // popup before its own click handler runs.
-    btn.onmousedown = (e) => e.preventDefault();
-    btn.onclick = () => acceptFilterSuggestion(i);
-    return btn;
-  }));
+  $("filter-suggest-list").replaceChildren(
+    ...filterSuggestMatches.map((name, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = name;
+      btn.className = i === filterSuggestIndex ? "active" : "";
+      // Keeps focus (and the caret) in #filter — otherwise the button
+      // would steal focus, firing #filter's blur handler and closing this
+      // popup before its own click handler runs.
+      btn.onmousedown = (e) => e.preventDefault();
+      btn.onclick = () => acceptFilterSuggestion(i);
+      return btn;
+    }),
+  );
   // Arrow-key moves change .active without mouse involvement, so the
   // list has to scroll itself.
   $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
@@ -132,15 +163,24 @@ function acceptFilterSuggestion(i: number): void {
 function updateFilterSuggestions(): void {
   const input = $<HTMLInputElement>("filter");
   const pos = input.selectionStart;
-  if (pos !== input.value.length) return closeFilterSuggest();
+  if (pos !== input.value.length) {
+    closeFilterSuggest();
+    return;
+  }
   const before = input.value.slice(0, pos ?? 0);
   const tokenStart = before.search(/\S*$/);
   const head = before.slice(0, tokenStart);
   const partial = before.slice(tokenStart);
-  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) return closeFilterSuggest();
+  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) {
+    closeFilterSuggest();
+    return;
+  }
   const columns = (getLastPayload()?.columns ?? []).map((c) => c.name);
   filterSuggestMatches = columns.filter((name) => name.toLowerCase().startsWith(partial.toLowerCase()));
-  if (filterSuggestMatches.length === 0) return closeFilterSuggest();
+  if (filterSuggestMatches.length === 0) {
+    closeFilterSuggest();
+    return;
+  }
   filterSuggestHead = head;
   filterSuggestIndex = 0;
   renderFilterSuggest();
@@ -172,7 +212,11 @@ $<HTMLInputElement>("filter").onkeydown = (e) => {
   }
 };
 document.onpointerdown = (e) => {
-  if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target as Node) && !$("filter-suggest").contains(e.target as Node)) {
+  if (
+    filterSuggestMatches.length > 0 &&
+    !$("filter").contains(e.target as Node) &&
+    !$("filter-suggest").contains(e.target as Node)
+  ) {
     closeFilterSuggest();
   }
 };
@@ -192,19 +236,24 @@ function renderCommonValues(values: CommonValue[], column: string): void {
     list.replaceChildren(p);
     return;
   }
-  list.replaceChildren(...values.map((v) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "cv-value";
-    const val = document.createElement("span");
-    val.textContent = v.value;
-    const freq = document.createElement("span");
-    freq.className = "cv-freq";
-    freq.textContent = `${Math.round(v.freq * 100)}%`;
-    btn.append(val, freq);
-    btn.onclick = () => { $("cv-pop").hidePopover(); applyFilterClause(column, "=", v.value); };
-    return btn;
-  }));
+  list.replaceChildren(
+    ...values.map((v) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cv-value";
+      const val = document.createElement("span");
+      val.textContent = v.value;
+      const freq = document.createElement("span");
+      freq.className = "cv-freq";
+      freq.textContent = `${Math.round(v.freq * 100)}%`;
+      btn.append(val, freq);
+      btn.onclick = () => {
+        $("cv-pop").hidePopover();
+        applyFilterClause(column, "=", v.value);
+      };
+      return btn;
+    }),
+  );
 }
 
 export async function showCommonValues(e: MouseEvent, column: string): Promise<void> {
@@ -226,7 +275,7 @@ export async function showCommonValues(e: MouseEvent, column: string): Promise<v
   applyScopeParams(params);
   let values: CommonValue[];
   try {
-    ({ values } = await api<{ values: CommonValue[] }>("/tables/common-values?" + params));
+    ({ values } = await api<{ values: CommonValue[] }>(`/tables/common-values?${params}`));
   } catch (err) {
     if (token !== cvRequestToken) return;
     const p = document.createElement("p");

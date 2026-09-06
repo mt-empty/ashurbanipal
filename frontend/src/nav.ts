@@ -28,16 +28,24 @@ function updateNavButtons(): void {
 // entry like a sort click or a page turn, never pushing a new back-stack stop.
 export function syncUrl(): void {
   const params = new URLSearchParams({
-    table: state.table ?? "", limit: String(state.limit), offset: String(state.offset),
+    table: state.table ?? "",
+    limit: String(state.limit),
+    offset: String(state.offset),
   });
-  if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
   applyScopeParams(params);
   if (state.filter) params.set("filter", state.filter);
-  const qs = "?" + params;
+  const qs = `?${params}`;
   const key = navViewKey();
   const samePlace = navIndex >= 0 && navStack[navIndex] === key;
   if (restoringFromHistory || navStack.length === 0 || samePlace) {
-    if (navStack.length === 0) { navStack = [key]; navIndex = 0; }
+    if (navStack.length === 0) {
+      navStack = [key];
+      navIndex = 0;
+    }
     history.replaceState({ navIndex }, "", qs);
   } else {
     navStack = navStack.slice(0, navIndex + 1);
@@ -76,5 +84,7 @@ window.addEventListener("popstate", (ev) => {
   restoringFromHistory = true;
   loadTables()
     .catch(reportError)
-    .finally(() => { restoringFromHistory = false; });
+    .finally(() => {
+      restoringFromHistory = false;
+    });
 });

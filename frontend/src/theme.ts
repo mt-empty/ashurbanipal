@@ -21,5 +21,9 @@ $("theme-toggle").onclick = () => {
   const next = currentTheme() === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   $("theme-toggle").setAttribute("aria-pressed", String(next === "dark"));
-  try { localStorage.setItem(THEME_KEY, next); } catch { /* best-effort */ }
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    /* best-effort */
+  }
 };

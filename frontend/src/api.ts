@@ -2,7 +2,7 @@ import { $ } from "./dom.js";
 
 // Derived from the page's own URL, not hardcoded, so the UI works behind
 // any reverse-proxy prefix; trailing slashes stripped so /x/ and /x agree.
-export const API = location.pathname.replace(/\/+$/, "") + "/api";
+export const API = `${location.pathname.replace(/\/+$/, "")}/api`;
 
 // ==== Protocol version skew warning ====
 // The frontend artifact ships separately from backends (ports vendor this

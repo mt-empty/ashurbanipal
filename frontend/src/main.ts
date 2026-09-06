@@ -6,7 +6,16 @@ import { syncUrl } from "./nav.js";
 import { loadSchemas, loadSources, loadTables, setActiveTable, setRowLoading } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
-import { applyScopeParams, diffNewRows, dropOneStaleInput, getAppliedFilterAst, getLastPayload, markFilterVerified, markStoredSortVerified, state } from "./state.js";
+import {
+  applyScopeParams,
+  diffNewRows,
+  dropOneStaleInput,
+  getAppliedFilterAst,
+  getLastPayload,
+  markFilterVerified,
+  markStoredSortVerified,
+  state,
+} from "./state.js";
 import "./theme.js";
 import type { TableData } from "./types.js";
 
@@ -15,7 +24,6 @@ $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $<HTMLDialogElement>("payload-dialog").showModal();
 };
-
 
 // Static markup (index.html), so this resolves once at module init rather
 // than on every fetch and every focus restore.
@@ -40,9 +48,14 @@ async function fetchTableData(): Promise<TableData> {
   // had become by the time A's `finally` runs) instead of its own.
   const table = state.table ?? "";
   const params = new URLSearchParams({
-    table, limit: String(state.limit), offset: String(state.offset),
+    table,
+    limit: String(state.limit),
+    offset: String(state.offset),
   });
-  if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
   applyScopeParams(params);
   // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
   // box's DSL text — URLSearchParams handles the URL-encoding.
@@ -53,7 +66,7 @@ async function fetchTableData(): Promise<TableData> {
   }
   setRowLoading(table, true);
   try {
-    return await api<TableData>("/tables/data?" + params);
+    return await api<TableData>(`/tables/data?${params}`);
   } finally {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
@@ -99,7 +112,12 @@ function restoreTableFocus(captured: FocusCapture | null): void {
   // button is both "cell-text" and "fk-cell") — join them into a single
   // compound selector instead of interpolating the raw string, which
   // `.${className}` would otherwise parse as a descendant combinator.
-  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
+  const classSelector = captured.className
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((c) => `.${CSS.escape(c)}`)
+    .join("");
   const target = classSelector ? cell?.querySelector<HTMLElement>(classSelector) : null;
   (target ?? tableEl).focus();
 }
@@ -120,13 +138,24 @@ function updateActiveTableChrome(): void {
 // Same shape of fix as showCommonValues's cvRequestToken.
 let loadDataToken = 0;
 
-export async function loadData({ resetScroll = true, highlightNew = false }: { resetScroll?: boolean; highlightNew?: boolean } = {}): Promise<void> {
+export async function loadData({
+  resetScroll = true,
+  highlightNew = false,
+}: {
+  resetScroll?: boolean;
+  highlightNew?: boolean;
+} = {}): Promise<void> {
   clearError();
-  if (!state.table) { updateActiveTableChrome(); setStatus(""); return; }
+  if (!state.table) {
+    updateActiveTableChrome();
+    setStatus("");
+    return;
+  }
   const token = ++loadDataToken;
   let data: TableData;
-  try { data = await fetchTableData(); }
-  catch (e) {
+  try {
+    data = await fetchTableData();
+  } catch (e) {
     if (token !== loadDataToken) return; // superseded by a newer request
     // A restored sort or a URL-restored filter can each name a column that no
     // longer exists, so drop one and retry — at most one per call (sort before
@@ -191,8 +220,14 @@ export async function loadData({ resetScroll = true, highlightNew = false }: { r
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
 
-$<HTMLButtonElement>("prev").onclick = () => { state.offset = Math.max(0, state.offset - state.limit); loadData({ resetScroll: false }); };
-$<HTMLButtonElement>("next").onclick = () => { state.offset += state.limit; loadData({ resetScroll: false }); };
+$<HTMLButtonElement>("prev").onclick = () => {
+  state.offset = Math.max(0, state.offset - state.limit);
+  loadData({ resetScroll: false });
+};
+$<HTMLButtonElement>("next").onclick = () => {
+  state.offset += state.limit;
+  loadData({ resetScroll: false });
+};
 $<HTMLButtonElement>("nav-back").onclick = () => history.back();
 $<HTMLButtonElement>("nav-forward").onclick = () => history.forward();
 // resetScroll: false — an in-place re-fetch of the current view; highlightNew

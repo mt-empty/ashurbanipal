@@ -33,7 +33,17 @@ export interface State {
 // it, so an unfinished edit never gets silently resent by an unrelated
 // sort/page click.
 export const state: State = {
-  source: null, schema: null, table: null, sort: null, order: "asc", limit: 50, offset: 0, hiddenColumns: {}, sortByTable: {}, schemaBySource: {}, filter: "",
+  source: null,
+  schema: null,
+  table: null,
+  sort: null,
+  order: "asc",
+  limit: 50,
+  offset: 0,
+  hiddenColumns: {},
+  sortByTable: {},
+  schemaBySource: {},
+  filter: "",
 };
 
 // state.filter stays the applied *text*; the AST that actually goes on the
@@ -55,7 +65,9 @@ function staleRiskFlag() {
   let unverified = false;
   return {
     isUnverified: () => unverified,
-    set: (value: boolean) => { unverified = value; },
+    set: (value: boolean) => {
+      unverified = value;
+    },
   };
 }
 const filterRisk = staleRiskFlag();
@@ -84,7 +96,10 @@ export function clearFilter(): void {
 export function restoreFilterFromParams(params: URLSearchParams): void {
   const text = params.get("filter") ?? "";
   const ast = text ? tryParseFilterDsl(text) : null;
-  if (!ast) { clearFilter(); return; }
+  if (!ast) {
+    clearFilter();
+    return;
+  }
   state.filter = text;
   appliedFilterAst = ast;
   filterRisk.set(true);
@@ -159,7 +174,10 @@ export function persist(): void {
   // sidebar-resize.ts, this blob grows per table/source touched, so a quota
   // failure is plausible on a long session — warn so it isn't wholly invisible.
   try {
-    localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
+    localStorage.setItem(
+      UI_KEY,
+      JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }),
+    );
   } catch (e) {
     console.warn("ashurbanipal: could not persist view state", e);
   }
@@ -242,14 +260,14 @@ export function applyScopeParams(params: URLSearchParams): void {
 export function scopeQuery(): string {
   const params = new URLSearchParams();
   applyScopeParams(params);
-  return params.size ? "?" + params : "";
+  return params.size ? `?${params}` : "";
 }
 
 // `api/schemas` (spec/protocol.md §5.7) takes `source` but not `schema` —
 // it's what resolves schema in the first place — so it gets its own query
 // builder rather than scopeQuery()'s combined source+schema.
 export function sourceQuery(): string {
-  return state.source ? "?" + new URLSearchParams({ source: state.source }) : "";
+  return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
 }
 
 let lastPayload: TableData | null = null;
@@ -272,8 +290,14 @@ export function rowKey(pkNames: string[], row: Row): string {
 // is unchanged from the fetch it's being diffed against.
 export function scopeKey(): string {
   return JSON.stringify([
-    state.source, state.schema, state.table, state.sort, state.order,
-    state.offset, state.limit, appliedFilterAst,
+    state.source,
+    state.schema,
+    state.table,
+    state.sort,
+    state.order,
+    state.offset,
+    state.limit,
+    appliedFilterAst,
   ]);
 }
 

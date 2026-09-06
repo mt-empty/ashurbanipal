@@ -48,8 +48,8 @@ description = "flask-python implementation checks: lint, fmt-check, test"
 depends = ["flask:lint", "flask:fmt-check", "flask:test"]
 
 [tasks.frontend]
-description = "frontend checks: typecheck, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
-depends = ["frontend:typecheck", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
+description = "frontend checks: lint, typecheck, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
+depends = ["frontend:lint", "frontend:typecheck", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
 
 [tasks.docs]
 description = "docs checks: hardcoded version strings in sync with docs/publishing-checklist.md"
@@ -119,6 +119,16 @@ description = "tsc --noEmit over frontend/src/"
 run = "pnpm exec tsc --noEmit"
 dir = "frontend"
 depends = ["frontend:install"]
+
+[tasks."frontend:lint"]
+description = "biome check over frontend/src/ (format + recommended lint; see frontend/biome.json)"
+run = "pnpm run lint"
+dir = "frontend"
+depends = ["frontend:install"]
+
+[tasks."frontend:check-cycles"]
+description = "fail if frontend/src/ has any value-import cycle (docs/frontend-style-guide.md §1)"
+run = "sh tools/check-frontend-cycles.sh"
 
 [tasks."frontend:build-check"]
 description = "verify frontend/dbviewer.html is what frontend/src/ currently builds to"
