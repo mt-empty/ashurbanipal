@@ -102,7 +102,7 @@ Two components, same as the original concept:
     a native `<dialog>` (same chrome as the payload viewer) showing a
     static, hand-maintained JSON document describing every route in §4
     (method, params, an example request/response) plus the filter AST
-    wire format (including its 10-condition / 8192-byte limits), with a copy
+    wire format and its limits (`spec/protocol.md` §5.4.2), with a copy
     button. Deliberately not its own endpoint — the
     doc doesn't vary per request, so it's meant for a human to copy and
     paste into an agent's context, not to be machine-fetched. Lives in the
@@ -131,9 +131,9 @@ Two components, same as the original concept:
     input, or right after `AND `/`OR `/`NOT `). No value- or operator-level
     autocomplete, and no *as-you-type* parsing of the filter text — both
     would require understanding where the cursor sits in the grammar.
-    (The submit-time client-side parser — `spec/filter-dsl.md`,
-    `frontend-style-guide.md` §7 — is separate: it runs on the full text
-    once, cursor-free.) (An earlier
+    (The submit-time DSL parser — `spec/filter-dsl.md`,
+    `frontend-style-guide.md` §7 — is a separate concern, not
+    per-keystroke.) (An earlier
     version of this also highlighted the typed clause's tokens via a
     transparent-input-plus-overlay; removed after three rounds of
     increasingly subtle scroll/stacking bugs made it too bug-prone to

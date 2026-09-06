@@ -10,9 +10,13 @@ must/must-not do) and the `CLAUDE.md` invariant that the *shipped*
 doc is about the sources that build it, not an exception to that
 invariant.
 
-The tenets below are already reflected in the current sources, not
-aspirations for them — treat deviation from any of them in a new change as
-something a review should flag.
+The tenets below are the target shape for the sources. Most current code
+follows them; where a tenet is ahead of the code, that gap is called out
+inline, and new code still complies. A tenet's authority is that it is
+right for the project as it stands, not that it happens to describe today's
+code — so when the two disagree, fix the code or change the tenet
+deliberately, don't let the guide drift to match an accident. Treat a new
+deviation as something review flags.
 
 ## 1. Source layout (`frontend/src/`)
 

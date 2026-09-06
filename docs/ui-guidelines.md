@@ -98,29 +98,33 @@ should block on.
   state. A corrupted local value is a reset, never a dead end.
   *(Derives from: error prevention, recovery.)*
 - **R6 — Persisted client-side state is the user's own view intent, never
-  row data.** Every persistence mechanism — `localStorage` and the URL
-  (`history.replaceState()`) alike — may carry the view the user built:
-  selected table, sort, order, page size, offset, and the filter the user
-  authored. It must never carry values read back out of result rows — cell
-  contents, or a primary key lifted from a row to build a link. The test is
-  authorship: a `WHERE` clause the user typed persists; a value the UI
-  copied out of a fetched row does not. A restored filter that the current
-  database can't satisfy — it no longer parses, names a column the table
-  lacks, or was written against a table that isn't here — resets silently
-  to no filter (R5), never an error or a dead-end link. The applied filter
-  is the one field that goes to the URL but never `localStorage`: a URL is
-  already the shareable-link surface a teammate might reuse, while keeping
-  filter text out of `localStorage` means returning to a table later never
-  silently reapplies a filter the current visit didn't type. *(Derives from:
-  recognition rather than recall — a reload or a shared link should restore
-  the view the user built. The host owns who may reach the UI and what data
-  is sensitive, `readme.md` §Security; the frontend's remaining duty is
-  only that it never persists a value the user did not enter.)*
-
-  Host-facing: filter text now appears in URLs, so it reaches browser
-  history, `Referer` headers, and any access log that records query
-  strings. A host shipping those logs somewhere long-lived, or rendering
-  link previews outside its trust perimeter, should account for that.
+  row data.** The lettered clauses below are the individually-citable parts
+  of that rule. *(Derives from: recognition rather than recall — a reload or
+  a shared link should restore the view the user built. The host owns who
+  may reach the UI and what data is sensitive, `readme.md` §Security; the
+  frontend's remaining duty is only that it never persists a value the user
+  did not enter.)*
+  - **R6a — What may persist.** Every persistence mechanism — `localStorage`
+    and the URL (`history.replaceState()`) alike — may carry the view the
+    user built: selected table, sort, order, page size, offset, and the
+    filter the user authored. It must never carry values read back out of
+    result rows — cell contents, or a primary key lifted from a row to build
+    a link.
+  - **R6b — Authorship is the test.** A `WHERE` clause the user typed
+    persists; a value the UI copied out of a fetched row does not.
+  - **R6c — The applied filter is URL-only, never `localStorage`.** A URL is
+    already the shareable-link surface a teammate might reuse, while keeping
+    filter text out of `localStorage` means returning to a table later never
+    silently reapplies a filter the current visit didn't type.
+  - **R6d — A restored filter the current database can't satisfy resets
+    silently.** It no longer parses, names a column the table lacks, or was
+    written against a table that isn't here — reset to no filter (R5), never
+    an error or a dead-end link.
+  - **R6e — Host-facing exposure.** Filter text appears in URLs, so it
+    reaches browser history, `Referer` headers, and any access log that
+    records query strings. A host shipping those logs somewhere long-lived,
+    or rendering link previews outside its trust perimeter, should account
+    for that.
 - **R7 — Bounded rendering.** The UI renders what the server paginates it —
   it must not independently fetch-all or attempt to render an unbounded
   result set regardless of what an API technically allows. *(Derives from:
