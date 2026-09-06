@@ -1,10 +1,11 @@
-import { $, copyText, reportError } from "./dom.js";
+import { $, copyText, qs, reportError } from "./dom.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
-import { renderJsonTree, type JsonValue } from "./json-tree.js";
-import { loadData } from "./main.js";
+import { APPROX_COUNT_TITLE, formatApproxCount, formatCellValue } from "./format.js";
+import { type JsonValue, renderJsonTree } from "./json-tree.js";
 import { openRecordView } from "./record-view.js";
-import { APPROX_COUNT_TITLE, formatApproxCount, loadTables, setSchema } from "./sidebar.js";
-import { hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
+import { loadData } from "./reload.js";
+import { loadTables } from "./sidebar.js";
+import { hiddenColumnsForTable, persist, rememberSort, rowKey, setSchema, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
@@ -22,11 +23,12 @@ export function renderHeader(columns: Column[]): void {
       // A column can be its own table's PK and an FK at once (1:1 detail
       // table shape) — key still reports "pk", but references is populated
       // too (spec/protocol.md §5.4.1), so the label surfaces both facts.
-      const keyLabel = col.key === "pk"
-        ? (col.references
-          ? `primary key, also references ${col.references.table}.${col.references.column}`
-          : "primary key")
-        : `foreign key, references ${col.references!.table}.${col.references!.column}`;
+      const keyLabel =
+        col.key === "pk"
+          ? col.references
+            ? `primary key, also references ${col.references.table}.${col.references.column}`
+            : "primary key"
+          : `foreign key, references ${col.references.table}.${col.references.column}`;
       const icon = document.createElement("span");
       icon.className = "key-icon";
       icon.setAttribute("aria-hidden", "true");
@@ -40,12 +42,16 @@ export function renderHeader(columns: Column[]): void {
       th.append(label);
     }
     if (col.comment) th.title = col.comment;
-    th.setAttribute("aria-sort", col.name === state.sort
-      ? (state.order === "desc" ? "descending" : "ascending")
-      : "none");
+    th.setAttribute(
+      "aria-sort",
+      col.name === state.sort ? (state.order === "desc" ? "descending" : "ascending") : "none",
+    );
     th.onclick = () => {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
-      state.sort = col.name; state.offset = 0; rememberSort(); loadData({ resetScroll: false });
+      state.sort = col.name;
+      state.offset = 0;
+      rememberSort();
+      loadData({ resetScroll: false });
     };
     // A focusable control nested in the sortable th — stopPropagation so
     // opening it doesn't also toggle sort.
@@ -54,7 +60,10 @@ export function renderHeader(columns: Column[]): void {
     cvBtn.className = "common-values-btn";
     cvBtn.setAttribute("aria-label", `common values for ${col.name}`);
     cvBtn.textContent = "▾";
-    cvBtn.onclick = (e) => { e.stopPropagation(); showCommonValues(e, col.name); };
+    cvBtn.onclick = (e) => {
+      e.stopPropagation();
+      showCommonValues(e, col.name);
+    };
     th.appendChild(cvBtn);
     tr.appendChild(th);
   }
@@ -73,40 +82,6 @@ function renderEmptyState(columnCount: number): void {
 
 const cellTemplate = $<HTMLTemplateElement>("cell-template");
 const rowActionTemplate = $<HTMLTemplateElement>("row-action-template");
-
-// Postgres data_type strings bucketed into the --type-* palette — ground
-// truth from the schema, so unlike renderJsonTree's scalars this is a
-// straight lookup, no parsing needed.
-const CELL_TYPE_CLASSES: Record<string, string> = {
-  boolean: "cell-type-bool",
-  uuid: "cell-type-uuid",
-  smallint: "cell-type-number",
-  integer: "cell-type-number",
-  bigint: "cell-type-number",
-  numeric: "cell-type-number",
-  real: "cell-type-number",
-  "double precision": "cell-type-number",
-};
-
-// Shared by buildCell and buildRecordEntries so a column's rendering rule
-// lives in one place.
-export function formatCellValue(col: Column, raw: string): Node {
-  if (col.type === "timestamp with time zone" || col.type === "date") {
-    const time = document.createElement("time");
-    time.dateTime = raw;
-    time.textContent = raw;
-    time.className = "cell-type-date";
-    return time;
-  }
-  const cls = CELL_TYPE_CLASSES[col.type];
-  if (cls) {
-    const span = document.createElement("span");
-    span.className = cls;
-    span.textContent = raw;
-    return span;
-  }
-  return document.createTextNode(raw);
-}
 
 // ---- cell preview ----
 let cellPopAnchor: HTMLElement | null = null;
@@ -139,7 +114,7 @@ function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTa
   // <td> rather than the template's.
   const td = isNull
     ? document.createElement("td")
-    : (cellTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
+    : ((cellTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement);
   td.dataset.col = col.name;
   if (hidden.has(col.name)) td.classList.add("col-hidden");
   if (isNull) {
@@ -153,28 +128,37 @@ function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTa
     filterBtn.className = "filter-eq only-action";
     filterBtn.setAttribute("aria-label", "filter by null");
     filterBtn.textContent = "=";
-    filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "IS NULL"); };
+    filterBtn.onclick = (e) => {
+      e.stopPropagation();
+      applyFilterClause(col.name, "IS NULL");
+    };
     td.appendChild(filterBtn);
     return td;
   }
-  const cellText = td.querySelector<HTMLElement>(".cell-text")!;
-  const btn = td.querySelector<HTMLElement>(".copy")!;
-  const filterBtn = td.querySelector<HTMLElement>(".filter-eq")!;
+  const cellText = qs<HTMLElement>(td, ".cell-text");
+  const btn = qs<HTMLElement>(td, ".copy");
+  const filterBtn = qs<HTMLElement>(td, ".filter-eq");
   cellText.appendChild(formatCellValue(col, raw));
-  btn.onclick = (e) => { e.stopPropagation(); copyText(raw, btn); };
-  filterBtn.onclick = (e) => { e.stopPropagation(); applyFilterClause(col.name, "=", raw); };
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    copyText(raw, btn);
+  };
+  filterBtn.onclick = (e) => {
+    e.stopPropagation();
+    applyFilterClause(col.name, "=", raw);
+  };
   if (col.references) {
     // In-app navigation: switch to the referenced table and seed a filter
-    // for the referenced row. Clear sort rather than restore the target's
-    // remembered one — this path submits a filter in the same fetch, which
-    // would defeat loadData's drop-and-retry if that stored column is stale.
+    // for the referenced row. Deliberately not switchTable() — that clears
+    // the filter, and this path is *setting* one; it also restores the
+    // target's remembered sort, whereas here sort must be cleared, since a
+    // stale stored column would defeat loadData's drop-and-retry against the
+    // filter submitted in the same fetch.
+    const references = col.references;
     cellText.classList.add("fk-cell");
-    const refLabel = col.references.schema
-      ? `${col.references.schema}.${col.references.table}`
-      : col.references.table;
-    cellText.title = `go to ${refLabel}.${col.references.column} = ${raw}`;
+    const refLabel = references.schema ? `${references.schema}.${references.table}` : references.table;
+    cellText.title = `go to ${refLabel}.${references.column} = ${raw}`;
     cellText.onclick = () => {
-      const references = col.references!;
       state.table = references.table;
       state.sort = null;
       // `references.schema` is only present when it differs from the
@@ -218,8 +202,9 @@ function setColumnVisibility(name: string, hidden: boolean): void {
   if (next.length) state.hiddenColumns[table] = next;
   else delete state.hiddenColumns[table];
   persist();
-  document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)
-    .forEach((el) => el.classList.toggle("col-hidden", hidden));
+  for (const el of document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
+    el.classList.toggle("col-hidden", hidden);
+  }
   updateColumnsButtonLabel();
 }
 
@@ -230,20 +215,22 @@ export function updateColumnsButtonLabel(): void {
 
 export function renderColumnMenu(columns: Column[]): void {
   const hidden = hiddenColumnsForTable();
-  $("columns-pop-list").replaceChildren(...columns.map((col) => {
-    const label = document.createElement("label");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = !hidden.includes(col.name);
-    input.onchange = () => setColumnVisibility(col.name, !input.checked);
-    label.append(input, col.name);
-    return label;
-  }));
+  $("columns-pop-list").replaceChildren(
+    ...columns.map((col) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !hidden.includes(col.name);
+      input.onchange = () => setColumnVisibility(col.name, !input.checked);
+      label.append(input, col.name);
+      return label;
+    }),
+  );
 }
 
 function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
   const td = (rowActionTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
-  td.querySelector<HTMLElement>(".record-btn")!.onclick = () => openRecordView(columns, row);
+  qs<HTMLElement>(td, ".record-btn").onclick = () => openRecordView(columns, row);
   return td;
 }
 
@@ -262,15 +249,17 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
     return;
   }
   const tbody = $("tbody");
-  tbody.replaceChildren(...data.rows.map((row) => {
-    const tr = document.createElement("tr");
-    if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
-    tr.appendChild(buildRowActionCell(data.columns, row));
-    for (const col of data.columns) {
-      tr.appendChild(buildCell(col, row[col.name], hidden));
-    }
-    return tr;
-  }));
+  tbody.replaceChildren(
+    ...data.rows.map((row) => {
+      const tr = document.createElement("tr");
+      if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
+      tr.appendChild(buildRowActionCell(data.columns, row));
+      for (const col of data.columns) {
+        tr.appendChild(buildCell(col, row[col.name], hidden));
+      }
+      return tr;
+    }),
+  );
   // Overflow is only measurable after layout (jsonb cells are marked at
   // render instead). fk-cell is excluded: its title is already the escape
   // hatch, and a click navigates rather than expands.

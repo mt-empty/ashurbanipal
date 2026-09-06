@@ -8,7 +8,7 @@
 <script>
 "use strict";
 (() => {
-  // src/demo-fixtures.ts
+  // src/demo/demo-fixtures.ts
   function hashSeed(s) {
     let h = 1779033703 ^ s.length;
     for (let i = 0; i < s.length; i++) {
@@ -43,7 +43,23 @@
     const d = new Date(Date.UTC(startYear, 0, 1) + day * 864e5);
     return `${d.toISOString().slice(0, 19).replace("T", " ")}+00`;
   }
-  var FIRST = ["Alex", "Sam", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Jamie", "Drew", "Quinn", "Priya", "Wei", "Fatima", "Noah", "Ivy"];
+  var FIRST = [
+    "Alex",
+    "Sam",
+    "Jordan",
+    "Taylor",
+    "Morgan",
+    "Casey",
+    "Riley",
+    "Jamie",
+    "Drew",
+    "Quinn",
+    "Priya",
+    "Wei",
+    "Fatima",
+    "Noah",
+    "Ivy"
+  ];
   var LAST = ["Chen", "Patel", "Garcia", "Nguyen", "Smith", "Okafor", "Rossi", "Kim", "Novak", "Silva"];
   var DOMAINS = ["example.com", "mail.example.org", "example.net"];
   var users = {
@@ -65,7 +81,7 @@
       const first = pick(rng, FIRST), last = pick(rng, LAST);
       return {
         id: uuid(rng),
-        email: `${first}.${last}${i}`.toLowerCase() + "@" + pick(rng, DOMAINS),
+        email: `${`${first}.${last}${i}`.toLowerCase()}@${pick(rng, DOMAINS)}`,
         display_name: `${first} ${last}`,
         is_admin: rng() < 0.06,
         signup_source: {
@@ -224,22 +240,14 @@
       };
     }
   };
-  var TABLES = [
-    users,
-    orders,
-    orderItems,
-    products,
-    userProfiles,
-    dailySummary,
-    signupFunnel
-  ];
+  var TABLES = [users, orders, orderItems, products, userProfiles, dailySummary, signupFunnel];
   var SCHEMAS = ["public", "reporting"];
   var SIBLINGS = [
     { name: "billing (demo)", base_url: "https://billing.example.com/__ashurbanipal", healthy: true },
     { name: "notifications (demo)", base_url: "https://notifications.example.com/__ashurbanipal", healthy: false }
   ];
 
-  // src/demo-shim.ts
+  // src/demo/demo-shim.ts
   function toWire(v) {
     if (v === null || v === void 0) return null;
     if (typeof v === "boolean") return v ? "true" : "false";
@@ -433,7 +441,7 @@
     return jsonResponse({ siblings: SIBLINGS });
   }
   var realFetch = window.fetch.bind(window);
-  var API_BASE = location.pathname.replace(/\/+$/, "") + "/api";
+  var API_BASE = `${location.pathname.replace(/\/+$/, "")}/api`;
   window.fetch = async (input, init) => {
     const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     const url = new URL(rawUrl, location.href);
@@ -493,11 +501,16 @@
       document.documentElement.dataset.theme = ashurbanipalTheme;
   } catch {}
   try {
-    // Bounds duplicated in sidebar-resize.ts's MIN_W/MAX_W — this script
-    // runs standalone, before the bundled module graph, so it can't import them.
-    var ashurbanipalSidebarW = parseFloat(localStorage.getItem("ashurbanipal_sidebar_w"));
-    if (ashurbanipalSidebarW >= 180 && ashurbanipalSidebarW <= 500)
-      document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+    // build.mjs injects the key and bounds here from sidebar-bounds.ts: this
+    // script runs standalone, before the bundled module graph, so it can't
+    // import them. Until injection the typeof guard makes it an inert no-op
+    // (raw index.html is a build input, never served).
+    var ASHURBANIPAL_SIDEBAR_W_KEY = "ashurbanipal_sidebar_w", ASHURBANIPAL_SIDEBAR_MIN = 180, ASHURBANIPAL_SIDEBAR_MAX = 500;
+    if (typeof ASHURBANIPAL_SIDEBAR_W_KEY === "string") {
+      var ashurbanipalSidebarW = parseFloat(localStorage.getItem(ASHURBANIPAL_SIDEBAR_W_KEY));
+      if (ashurbanipalSidebarW >= ASHURBANIPAL_SIDEBAR_MIN && ashurbanipalSidebarW <= ASHURBANIPAL_SIDEBAR_MAX)
+        document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+    }
   } catch {}
 </script>
 <style>
@@ -950,6 +963,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
     <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
     <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
+    <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
     <div id="pager">
       <button id="prev">‹ prev</button>
       <output id="page"></output>
@@ -989,9 +1003,41 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 </dialog>
 
 <script type="module">
+// src/api.ts
+var API = `${location.pathname.replace(/\/+$/, "")}/api`;
+var PROTOCOL_VERSION = "1";
+var protocolChecked = false;
+var skewMessage = null;
+var skewSubscriber = null;
+function onProtocolSkew(cb) {
+  skewSubscriber = cb;
+  if (skewMessage !== null) cb(skewMessage);
+}
+function checkProtocolVersion(resp) {
+  if (protocolChecked) return;
+  protocolChecked = true;
+  const got = resp.headers.get("x-ashurbanipal-protocol");
+  if (got === PROTOCOL_VERSION) return;
+  skewMessage = `protocol version mismatch: this UI speaks v${PROTOCOL_VERSION}, the server reports ${got ? `v${got}` : "no version"} \u2014 some features may misbehave`;
+  skewSubscriber?.(skewMessage);
+}
+async function api(path) {
+  const resp = await fetch(API + path);
+  if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
 // src/dom.ts
 function $(id) {
-  return document.getElementById(id);
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`no element with id ${id}`);
+  return el;
+}
+function qs(root, selector) {
+  const el = root.querySelector(selector);
+  if (!el) throw new Error(`no element matches ${selector}`);
+  return el;
 }
 function setStatus(text) {
   $("status").textContent = text;
@@ -1003,19 +1049,22 @@ function clearError() {
   $("error").textContent = "";
 }
 function populateSelect(select, values, selected) {
-  select.replaceChildren(...values.map((v) => {
-    const opt = document.createElement("option");
-    opt.value = v;
-    opt.textContent = v;
-    return opt;
-  }));
+  select.replaceChildren(
+    ...values.map((v) => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      return opt;
+    })
+  );
   select.value = selected;
 }
 function flashIcon(el, glyph, ms = 800) {
   if (el.dataset.rest === void 0) el.dataset.rest = el.textContent ?? "";
+  const rest = el.dataset.rest ?? "";
   el.textContent = glyph;
   setTimeout(() => {
-    el.textContent = el.dataset.rest;
+    el.textContent = rest;
   }, ms);
 }
 async function copyText(text, btn) {
@@ -1038,28 +1087,6 @@ async function copyText(text, btn) {
   flashIcon(mark, glyph);
 }
 
-// src/api.ts
-var API = location.pathname.replace(/\/+$/, "") + "/api";
-var PROTOCOL_VERSION = "1";
-var protocolChecked = false;
-function checkProtocolVersion(resp) {
-  if (protocolChecked) return;
-  protocolChecked = true;
-  const got = resp.headers.get("x-ashurbanipal-protocol");
-  if (got === PROTOCOL_VERSION) return;
-  $("protocol-warning-text").textContent = `protocol version mismatch: this UI speaks v${PROTOCOL_VERSION}, the server reports ${got ? `v${got}` : "no version"} \u2014 some features may misbehave`;
-  $("protocol-warning").hidden = false;
-}
-$("protocol-warning-dismiss").onclick = () => {
-  $("protocol-warning").hidden = true;
-};
-async function api(path) {
-  const resp = await fetch(API + path);
-  if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
-  if (!resp.ok) throw new Error(await resp.text());
-  return resp.json();
-}
-
 // src/api-reference.ts
 function buildApiReference() {
   const base = new URL(API, location.href).toString().replace(/\/$/, "");
@@ -1080,7 +1107,11 @@ function buildApiReference() {
         path: `${base}/schemas`,
         summary: "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry.",
         params: [
-          { name: "source", required: false, notes: "must be a name returned by GET /sources; omit to use the default source" }
+          {
+            name: "source",
+            required: false,
+            notes: "must be a name returned by GET /sources; omit to use the default source"
+          }
         ],
         example_response: { schemas: ["public"] }
       },
@@ -1090,7 +1121,11 @@ function buildApiReference() {
         summary: "List table names in the resolved schema \u2014 also the allow-list for every other endpoint's `table` param.",
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
-          { name: "schema", required: false, notes: "must be a name returned by GET /schemas; omit to use the connection's default schema" }
+          {
+            name: "schema",
+            required: false,
+            notes: "must be a name returned by GET /schemas; omit to use the connection's default schema"
+          }
         ],
         example_response: { tables: [{ name: "users", comment: "Registered accounts." }, { name: "sessions" }] }
       },
@@ -1112,7 +1147,11 @@ function buildApiReference() {
           { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables" },
           { name: "table", required: true, notes: "must be a name returned by GET /tables" },
-          { name: "filter", required: false, notes: "URL-encoded JSON array of condition objects \u2014 see the `filter` key below" },
+          {
+            name: "filter",
+            required: false,
+            notes: "URL-encoded JSON array of condition objects \u2014 see the `filter` key below"
+          },
           { name: "limit", required: false, notes: "default 50, max 100" },
           { name: "offset", required: false, notes: "default 0" },
           { name: "sort", required: false, notes: "single column name" },
@@ -1152,7 +1191,9 @@ function buildApiReference() {
         path: `${base}/siblings`,
         summary: "Other related services configured for this instance, with live health status.",
         params: [],
-        example_response: { siblings: [{ name: "billing", base_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] }
+        example_response: {
+          siblings: [{ name: "billing", base_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }]
+        }
       }
     ],
     filter: {
@@ -1201,12 +1242,19 @@ function parseFilterDsl(input) {
   if (new TextEncoder().encode(input).length > FILTER_MAX_DSL_BYTES)
     throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
   let pos = 0;
-  const peekAt = (i) => i < input.length ? String.fromCodePoint(input.codePointAt(i)) : null;
+  const peekAt = (i) => {
+    if (i >= input.length) return null;
+    const cp = input.codePointAt(i);
+    return cp === void 0 ? null : String.fromCodePoint(cp);
+  };
   const peek = () => peekAt(pos);
   const isWs = (c) => /\s/.test(c);
   const skipWsOptional = () => {
-    let c;
-    while ((c = peek()) !== null && isWs(c)) pos += c.length;
+    let c = peek();
+    while (c !== null && isWs(c)) {
+      pos += c.length;
+      c = peek();
+    }
   };
   const skipWsRequired = () => {
     const start = pos;
@@ -1233,8 +1281,11 @@ function parseFilterDsl(input) {
     const first = peek();
     if (first === null || !/^[a-zA-Z_]$/.test(first)) throw err("expected column name", start);
     pos += 1;
-    let c;
-    while ((c = peek()) !== null && /^[a-zA-Z0-9_]$/.test(c)) pos += 1;
+    let c = peek();
+    while (c !== null && /^[a-zA-Z0-9_]$/.test(c)) {
+      pos += 1;
+      c = peek();
+    }
     return input.slice(start, pos);
   };
   const parseQuotedValue = () => {
@@ -1260,10 +1311,11 @@ function parseFilterDsl(input) {
   const parseBareValue = () => {
     const start = pos;
     let value = "";
-    let c;
-    while ((c = peek()) !== null && !isWs(c) && c !== "'") {
+    let c = peek();
+    while (c !== null && !isWs(c) && c !== "'") {
       value += c;
       pos += c.length;
+      c = peek();
     }
     if (value === "") throw err("expected value", start);
     if (RESERVED_WORD_RE.test(value))
@@ -1321,8 +1373,7 @@ function parseFilterDsl(input) {
       ...simple.value !== void 0 ? { value: simple.value } : {}
     };
     conditions.push(condition);
-    if (conditions.length > FILTER_MAX_CONDITIONS)
-      throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
+    if (conditions.length > FILTER_MAX_CONDITIONS) throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
     if (pos >= input.length) break;
     skipWsRequired();
     if (pos >= input.length) break;
@@ -1343,11 +1394,19 @@ function tryParseFilterDsl(input) {
 }
 function quoteFilterValue(value) {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
-  return "'" + value.replace(/'/g, "''") + "'";
+  return `'${value.replace(/'/g, "''")}'`;
 }
-window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };
 
-// src/state.ts
+// src/reload.ts
+var impl = null;
+function registerLoadData(fn) {
+  impl = fn;
+}
+function loadData(opts) {
+  return impl ? impl(opts) : Promise.resolve();
+}
+
+// src/store.ts
 var UI_KEY = "ashurbanipal_ui";
 var state = {
   source: null,
@@ -1437,20 +1496,16 @@ function restoreFromStorage() {
     localStorage.removeItem(UI_KEY);
   }
 }
-function restoreFromUrl() {
-  const params = new URLSearchParams(location.search);
-  if (params.has("source")) state.source = params.get("source");
-  if (params.has("schema")) state.schema = params.get("schema");
-  if (params.has("table")) state.table = params.get("table");
-  if (params.has("sort")) state.sort = params.get("sort");
-  if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
-  if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
-  if (params.has("offset")) state.offset = Number(params.get("offset")) || 0;
-  restoreFilterFromParams(params);
-}
 function persist() {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
+  try {
+    localStorage.setItem(
+      UI_KEY,
+      JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource })
+    );
+  } catch (e) {
+    console.warn("ashurbanipal: could not persist view state", e);
+  }
 }
 function hiddenColumnsForTable() {
   return state.hiddenColumns[state.table ?? ""] ?? [];
@@ -1491,25 +1546,36 @@ function rememberSchema() {
   if (state.source && state.schema) state.schemaBySource[state.source] = state.schema;
   persist();
 }
-function applyScopeParams(params) {
-  if (state.source) params.set("source", state.source);
-  if (state.schema) params.set("schema", state.schema);
+function setSchema(name) {
+  state.schema = name;
+  $("schema-select").value = name;
+  rememberSchema();
 }
-function scopeQuery() {
-  const params = new URLSearchParams();
-  applyScopeParams(params);
-  return params.size ? "?" + params : "";
+function switchSource(name) {
+  state.source = name;
+  state.schema = state.schemaBySource[name] ?? null;
+  state.table = null;
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
+  persist();
 }
-function sourceQuery() {
-  return state.source ? "?" + new URLSearchParams({ source: state.source }) : "";
+function switchSchema(name) {
+  setSchema(name);
+  state.table = null;
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
 }
-var lastPayload = null;
-function getLastPayload() {
-  return lastPayload;
+function switchTable(name) {
+  state.table = name;
+  state.offset = 0;
+  applyStoredSort(name);
+  clearFilter();
+  persist();
 }
-function setLastPayload(data) {
-  lastPayload = data;
-}
+
+// src/row-diff.ts
 function rowKey(pkNames, row) {
   return JSON.stringify(pkNames.map((n) => row[n]));
 }
@@ -1522,34 +1588,68 @@ function scopeKey() {
     state.order,
     state.offset,
     state.limit,
-    appliedFilterAst
+    getAppliedFilterAst()
   ]);
 }
+var lastPayload = null;
+function getLastPayload() {
+  return lastPayload;
+}
 var lastScopeKey = null;
-function getLastScopeKey() {
-  return lastScopeKey;
-}
-function setLastScopeKey(key) {
-  lastScopeKey = key;
-}
 function diffNewRows(data, highlightNew) {
-  const prev = getLastPayload();
+  const prev = lastPayload;
   const nowScope = scopeKey();
   let newRowKeys;
   let pkNames = [];
-  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+  if (highlightNew && prev && lastScopeKey === nowScope) {
     pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
     if (pkNames.length) {
       const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
       newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
     }
   }
-  setLastPayload(data);
-  setLastScopeKey(nowScope);
+  lastPayload = data;
+  lastScopeKey = nowScope;
   return { newRowKeys, pkNames };
 }
-restoreFromStorage();
-restoreFromUrl();
+
+// src/url.ts
+function applyUrlOverlay(params) {
+  if (params.has("source")) state.source = params.get("source");
+  if (params.has("schema")) state.schema = params.get("schema");
+  if (params.has("table")) state.table = params.get("table");
+  if (params.has("sort")) state.sort = params.get("sort");
+  if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
+  if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
+  if (params.has("offset")) state.offset = Number(params.get("offset")) || 0;
+  restoreFilterFromParams(params);
+}
+function applyUrlExact(params) {
+  state.source = params.get("source") || null;
+  state.schema = params.get("schema") || null;
+  state.table = params.get("table") || null;
+  state.sort = params.get("sort") || null;
+  state.order = params.get("order") === "desc" ? "desc" : "asc";
+  state.limit = Number(params.get("limit")) || state.limit;
+  state.offset = Number(params.get("offset")) || 0;
+  restoreFilterFromParams(params);
+}
+function applyScopeParams(params) {
+  if (state.source) params.set("source", state.source);
+  if (state.schema) params.set("schema", state.schema);
+}
+function scopeQuery() {
+  const params = new URLSearchParams();
+  applyScopeParams(params);
+  return params.size ? `?${params}` : "";
+}
+function sourceQuery() {
+  return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
+}
+function initState() {
+  restoreFromStorage();
+  applyUrlOverlay(new URLSearchParams(location.search));
+}
 
 // src/filter-ui.ts
 function submitFilter(text) {
@@ -1615,7 +1715,13 @@ var CARET_MIRROR_PROPS = [
 function measureCaretPosition(input) {
   const mirror = document.createElement("div");
   const computed = getComputedStyle(input);
-  Object.assign(mirror.style, { position: "absolute", visibility: "hidden", whiteSpace: "pre", top: "0", left: "-9999px" });
+  Object.assign(mirror.style, {
+    position: "absolute",
+    visibility: "hidden",
+    whiteSpace: "pre",
+    top: "0",
+    left: "-9999px"
+  });
   const mirrorStyle = mirror.style;
   const computedStyle = computed;
   for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
@@ -1642,15 +1748,17 @@ function closeFilterSuggest() {
   $("filter-suggest").hidePopover();
 }
 function renderFilterSuggest() {
-  $("filter-suggest-list").replaceChildren(...filterSuggestMatches.map((name, i) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = name;
-    btn.className = i === filterSuggestIndex ? "active" : "";
-    btn.onmousedown = (e) => e.preventDefault();
-    btn.onclick = () => acceptFilterSuggestion(i);
-    return btn;
-  }));
+  $("filter-suggest-list").replaceChildren(
+    ...filterSuggestMatches.map((name, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = name;
+      btn.className = i === filterSuggestIndex ? "active" : "";
+      btn.onmousedown = (e) => e.preventDefault();
+      btn.onclick = () => acceptFilterSuggestion(i);
+      return btn;
+    })
+  );
   $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
 }
 function acceptFilterSuggestion(i) {
@@ -1663,15 +1771,24 @@ function acceptFilterSuggestion(i) {
 function updateFilterSuggestions() {
   const input = $("filter");
   const pos = input.selectionStart;
-  if (pos !== input.value.length) return closeFilterSuggest();
+  if (pos !== input.value.length) {
+    closeFilterSuggest();
+    return;
+  }
   const before = input.value.slice(0, pos ?? 0);
   const tokenStart = before.search(/\S*$/);
   const head = before.slice(0, tokenStart);
   const partial = before.slice(tokenStart);
-  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) return closeFilterSuggest();
+  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) {
+    closeFilterSuggest();
+    return;
+  }
   const columns = (getLastPayload()?.columns ?? []).map((c) => c.name);
   filterSuggestMatches = columns.filter((name) => name.toLowerCase().startsWith(partial.toLowerCase()));
-  if (filterSuggestMatches.length === 0) return closeFilterSuggest();
+  if (filterSuggestMatches.length === 0) {
+    closeFilterSuggest();
+    return;
+  }
   filterSuggestHead = head;
   filterSuggestIndex = 0;
   renderFilterSuggest();
@@ -1701,11 +1818,11 @@ $("filter").onkeydown = (e) => {
     closeFilterSuggest();
   }
 };
-document.onpointerdown = (e) => {
+document.addEventListener("pointerdown", (e) => {
   if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target) && !$("filter-suggest").contains(e.target)) {
     closeFilterSuggest();
   }
-};
+});
 var cvAnchor = null;
 var cvRequestToken = 0;
 function renderCommonValues(values, column) {
@@ -1717,22 +1834,24 @@ function renderCommonValues(values, column) {
     list.replaceChildren(p);
     return;
   }
-  list.replaceChildren(...values.map((v) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "cv-value";
-    const val = document.createElement("span");
-    val.textContent = v.value;
-    const freq = document.createElement("span");
-    freq.className = "cv-freq";
-    freq.textContent = `${Math.round(v.freq * 100)}%`;
-    btn.append(val, freq);
-    btn.onclick = () => {
-      $("cv-pop").hidePopover();
-      applyFilterClause(column, "=", v.value);
-    };
-    return btn;
-  }));
+  list.replaceChildren(
+    ...values.map((v) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cv-value";
+      const val = document.createElement("span");
+      val.textContent = v.value;
+      const freq = document.createElement("span");
+      freq.className = "cv-freq";
+      freq.textContent = `${Math.round(v.freq * 100)}%`;
+      btn.append(val, freq);
+      btn.onclick = () => {
+        $("cv-pop").hidePopover();
+        applyFilterClause(column, "=", v.value);
+      };
+      return btn;
+    })
+  );
 }
 async function showCommonValues(e, column) {
   const btn = e.currentTarget;
@@ -1750,7 +1869,7 @@ async function showCommonValues(e, column) {
   applyScopeParams(params);
   let values;
   try {
-    ({ values } = await api("/tables/common-values?" + params));
+    ({ values } = await api(`/tables/common-values?${params}`));
   } catch (err) {
     if (token !== cvRequestToken) return;
     const p = document.createElement("p");
@@ -1763,6 +1882,39 @@ async function showCommonValues(e, column) {
   renderCommonValues(values, column);
 }
 
+// src/format.ts
+function formatApproxCount(n) {
+  return n == null || n < 0 ? "?" : `~${n}`;
+}
+var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
+var CELL_TYPE_CLASSES = {
+  boolean: "cell-type-bool",
+  uuid: "cell-type-uuid",
+  smallint: "cell-type-number",
+  integer: "cell-type-number",
+  bigint: "cell-type-number",
+  numeric: "cell-type-number",
+  real: "cell-type-number",
+  "double precision": "cell-type-number"
+};
+function formatCellValue(col, raw) {
+  if (col.type === "timestamp with time zone" || col.type === "date") {
+    const time = document.createElement("time");
+    time.dateTime = raw;
+    time.textContent = raw;
+    time.className = "cell-type-date";
+    return time;
+  }
+  const cls = CELL_TYPE_CLASSES[col.type];
+  if (cls) {
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = raw;
+    return span;
+  }
+  return document.createTextNode(raw);
+}
+
 // src/json-tree.ts
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function renderJsonTree(value) {
@@ -1770,7 +1922,13 @@ function renderJsonTree(value) {
 }
 function jsonEntryValue(value, prefix, comma) {
   if (Array.isArray(value)) {
-    return jsonContainer(value.map((v) => ({ prefix: null, value: v })), "[", "]", prefix, comma);
+    return jsonContainer(
+      value.map((v) => ({ prefix: null, value: v })),
+      "[",
+      "]",
+      prefix,
+      comma
+    );
   }
   if (value !== null && typeof value === "object") {
     return jsonContainer(
@@ -1908,7 +2066,7 @@ VALUES (${vals});`;
 function sqlLiteral(col, raw) {
   if (raw == null) return "NULL";
   if (NUMERIC_TYPE_RE.test(col.type) && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
-  return "'" + raw.replace(/'/g, "''") + "'";
+  return `'${raw.replace(/'/g, "''")}'`;
 }
 function openRecordView(columns, row) {
   $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
@@ -1921,11 +2079,8 @@ function openRecordView(columns, row) {
 }
 
 // src/sidebar.ts
-function formatApproxCount(n) {
-  return n == null || n < 0 ? "?" : `~${n}`;
-}
-var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
 var tableEntries = [];
+var tableRowTemplate = $("table-row-template");
 var tableMatchHighlight = CSS.highlights ? new Highlight() : null;
 if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
 function filterTables() {
@@ -1958,20 +2113,20 @@ async function loadSources() {
     state.source = null;
     return;
   }
-  if (!state.source || !sources.some((s) => s.name === state.source)) {
-    state.source = sources[0].name;
+  let source = state.source;
+  if (!source || !sources.some((s) => s.name === source)) {
+    source = sources[0].name;
   }
-  populateSelect($("source-select"), sources.map((s) => s.name), state.source);
+  state.source = source;
+  populateSelect(
+    $("source-select"),
+    sources.map((s) => s.name),
+    source
+  );
   $("source-select-wrap").hidden = false;
 }
 $("source-select").onchange = () => {
-  state.source = $("source-select").value;
-  state.schema = state.schemaBySource[state.source ?? ""] ?? null;
-  state.table = null;
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
-  persist();
+  switchSource($("source-select").value);
   loadSchemas().then(loadTables).catch(reportError);
 };
 var loadSchemasToken = 0;
@@ -1979,7 +2134,7 @@ async function loadSchemas() {
   const token = ++loadSchemasToken;
   let schemas;
   try {
-    ({ schemas } = await api("/schemas" + sourceQuery()));
+    ({ schemas } = await api(`/schemas${sourceQuery()}`));
   } catch {
     if (token !== loadSchemasToken) return;
     state.schema = null;
@@ -1992,23 +2147,16 @@ async function loadSchemas() {
     $("schema-select-wrap").hidden = true;
     return;
   }
-  if (!state.schema || !schemas.includes(state.schema)) {
-    state.schema = schemas.includes("public") ? "public" : schemas[0];
+  let schema = state.schema;
+  if (!schema || !schemas.includes(schema)) {
+    schema = schemas.includes("public") ? "public" : schemas[0];
   }
-  populateSelect($("schema-select"), schemas, state.schema);
+  state.schema = schema;
+  populateSelect($("schema-select"), schemas, schema);
   $("schema-select-wrap").hidden = false;
 }
-function setSchema(name) {
-  state.schema = name;
-  $("schema-select").value = name;
-  rememberSchema();
-}
 $("schema-select").onchange = () => {
-  setSchema($("schema-select").value);
-  state.table = null;
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
+  switchSchema($("schema-select").value);
   loadTables().catch(reportError);
 };
 var loadTablesToken = 0;
@@ -2016,35 +2164,30 @@ async function loadTables() {
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
-    api("/tables" + scopeQuery()),
-    api("/table-counts" + scopeQuery())
+    api(`/tables${scopeQuery()}`),
+    api(`/table-counts${scopeQuery()}`)
   ]);
   if (token !== loadTablesToken) return;
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
-  ul.innerHTML = "";
+  ul.replaceChildren();
   tableEntries = [];
   for (const t of tables) {
-    const li = document.createElement("li");
-    const btn = document.createElement("button");
-    btn.innerHTML = `<span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
-    btn.firstChild.textContent = t.name;
-    const countEl = btn.querySelector(".count");
+    const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
+    const btn = qs(li, "button");
+    const textNode = document.createTextNode(t.name);
+    qs(li, ".row-name").appendChild(textNode);
+    const countEl = qs(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     countEl.title = APPROX_COUNT_TITLE;
     btn.dataset.table = t.name;
     btn.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
     btn.onclick = () => {
-      state.table = t.name;
-      state.offset = 0;
-      applyStoredSort(t.name);
-      clearFilter();
-      persist();
+      switchTable(t.name);
       loadData();
     };
-    li.appendChild(btn);
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn, textNode: btn.firstChild.firstChild });
+    tableEntries.push({ name: t.name, li, btn, textNode });
   }
   filterTables();
   const tableNames = tables.map((t) => t.name);
@@ -2093,7 +2236,10 @@ function renderHeader(columns) {
       th.append(label);
     }
     if (col.comment) th.title = col.comment;
-    th.setAttribute("aria-sort", col.name === state.sort ? state.order === "desc" ? "descending" : "ascending" : "none");
+    th.setAttribute(
+      "aria-sort",
+      col.name === state.sort ? state.order === "desc" ? "descending" : "ascending" : "none"
+    );
     th.onclick = () => {
       state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
       state.sort = col.name;
@@ -2126,33 +2272,6 @@ function renderEmptyState(columnCount) {
 }
 var cellTemplate = $("cell-template");
 var rowActionTemplate = $("row-action-template");
-var CELL_TYPE_CLASSES = {
-  boolean: "cell-type-bool",
-  uuid: "cell-type-uuid",
-  smallint: "cell-type-number",
-  integer: "cell-type-number",
-  bigint: "cell-type-number",
-  numeric: "cell-type-number",
-  real: "cell-type-number",
-  "double precision": "cell-type-number"
-};
-function formatCellValue(col, raw) {
-  if (col.type === "timestamp with time zone" || col.type === "date") {
-    const time = document.createElement("time");
-    time.dateTime = raw;
-    time.textContent = raw;
-    time.className = "cell-type-date";
-    return time;
-  }
-  const cls = CELL_TYPE_CLASSES[col.type];
-  if (cls) {
-    const span = document.createElement("span");
-    span.className = cls;
-    span.textContent = raw;
-    return span;
-  }
-  return document.createTextNode(raw);
-}
 var cellPopAnchor = null;
 function showCellPop(e, text) {
   let isJson = true;
@@ -2190,9 +2309,9 @@ function buildCell(col, raw, hidden) {
     td.appendChild(filterBtn2);
     return td;
   }
-  const cellText = td.querySelector(".cell-text");
-  const btn = td.querySelector(".copy");
-  const filterBtn = td.querySelector(".filter-eq");
+  const cellText = qs(td, ".cell-text");
+  const btn = qs(td, ".copy");
+  const filterBtn = qs(td, ".filter-eq");
   cellText.appendChild(formatCellValue(col, raw));
   btn.onclick = (e) => {
     e.stopPropagation();
@@ -2203,11 +2322,11 @@ function buildCell(col, raw, hidden) {
     applyFilterClause(col.name, "=", raw);
   };
   if (col.references) {
+    const references = col.references;
     cellText.classList.add("fk-cell");
-    const refLabel = col.references.schema ? `${col.references.schema}.${col.references.table}` : col.references.table;
-    cellText.title = `go to ${refLabel}.${col.references.column} = ${raw}`;
+    const refLabel = references.schema ? `${references.schema}.${references.table}` : references.table;
+    cellText.title = `go to ${refLabel}.${references.column} = ${raw}`;
     cellText.onclick = () => {
-      const references = col.references;
       state.table = references.table;
       state.sort = null;
       if (references.schema && references.schema !== state.schema) {
@@ -2235,7 +2354,9 @@ function setColumnVisibility(name, hidden) {
   if (next.length) state.hiddenColumns[table] = next;
   else delete state.hiddenColumns[table];
   persist();
-  document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`).forEach((el) => el.classList.toggle("col-hidden", hidden));
+  for (const el of document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
+    el.classList.toggle("col-hidden", hidden);
+  }
   updateColumnsButtonLabel();
 }
 function updateColumnsButtonLabel() {
@@ -2244,19 +2365,21 @@ function updateColumnsButtonLabel() {
 }
 function renderColumnMenu(columns) {
   const hidden = hiddenColumnsForTable();
-  $("columns-pop-list").replaceChildren(...columns.map((col) => {
-    const label = document.createElement("label");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = !hidden.includes(col.name);
-    input.onchange = () => setColumnVisibility(col.name, !input.checked);
-    label.append(input, col.name);
-    return label;
-  }));
+  $("columns-pop-list").replaceChildren(
+    ...columns.map((col) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !hidden.includes(col.name);
+      input.onchange = () => setColumnVisibility(col.name, !input.checked);
+      label.append(input, col.name);
+      return label;
+    })
+  );
 }
 function buildRowActionCell(columns, row) {
   const td = rowActionTemplate.content.cloneNode(true).firstElementChild;
-  td.querySelector(".record-btn").onclick = () => openRecordView(columns, row);
+  qs(td, ".record-btn").onclick = () => openRecordView(columns, row);
   return td;
 }
 function renderRows(data, newRowKeys, pkNames = []) {
@@ -2267,15 +2390,17 @@ function renderRows(data, newRowKeys, pkNames = []) {
     return;
   }
   const tbody = $("tbody");
-  tbody.replaceChildren(...data.rows.map((row) => {
-    const tr = document.createElement("tr");
-    if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
-    tr.appendChild(buildRowActionCell(data.columns, row));
-    for (const col of data.columns) {
-      tr.appendChild(buildCell(col, row[col.name], hidden));
-    }
-    return tr;
-  }));
+  tbody.replaceChildren(
+    ...data.rows.map((row) => {
+      const tr = document.createElement("tr");
+      if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
+      tr.appendChild(buildRowActionCell(data.columns, row));
+      for (const col of data.columns) {
+        tr.appendChild(buildCell(col, row[col.name], hidden));
+      }
+      return tr;
+    })
+  );
   requestAnimationFrame(() => {
     for (const el of tbody.querySelectorAll(".cell-text:not(.fk-cell)")) {
       if (el.scrollWidth > el.clientWidth) el.closest("td")?.classList.add("expandable");
@@ -2313,7 +2438,7 @@ function syncUrl() {
   }
   applyScopeParams(params);
   if (state.filter) params.set("filter", state.filter);
-  const qs = "?" + params;
+  const qs2 = `?${params}`;
   const key = navViewKey();
   const samePlace = navIndex >= 0 && navStack[navIndex] === key;
   if (restoringFromHistory || navStack.length === 0 || samePlace) {
@@ -2321,12 +2446,12 @@ function syncUrl() {
       navStack = [key];
       navIndex = 0;
     }
-    history.replaceState({ navIndex }, "", qs);
+    history.replaceState({ navIndex }, "", qs2);
   } else {
     navStack = navStack.slice(0, navIndex + 1);
     navStack.push(key);
     navIndex = navStack.length - 1;
-    history.pushState({ navIndex }, "", qs);
+    history.pushState({ navIndex }, "", qs2);
   }
   updateNavButtons();
 }
@@ -2336,18 +2461,9 @@ window.addEventListener("popstate", (ev) => {
   if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
   navIndex = navState.navIndex;
   const params = new URLSearchParams(location.search);
-  state.source = params.get("source") || null;
-  state.schema = params.get("schema") || null;
-  state.table = params.get("table") || null;
-  state.sort = params.get("sort") || null;
-  state.order = params.get("order") === "desc" ? "desc" : "asc";
-  state.limit = Number(params.get("limit")) || state.limit;
-  state.offset = Number(params.get("offset")) || 0;
-  restoreFilterFromParams(params);
-  const sourceSelect = $("source-select");
-  if (sourceSelect) sourceSelect.value = state.source ?? "";
-  const schemaSelect = $("schema-select");
-  if (schemaSelect) schemaSelect.value = state.schema ?? "";
+  applyUrlExact(params);
+  $("source-select").value = state.source ?? "";
+  $("schema-select").value = state.schema ?? "";
   $("schema-select-wrap").hidden = !state.schema;
   persist();
   updateNavButtons();
@@ -2357,12 +2473,134 @@ window.addEventListener("popstate", (ev) => {
   });
 });
 
-// src/sidebar-resize.ts
+// src/table-focus.ts
+var tableEl = qs(document, "table");
+function captureTableFocus() {
+  const active = document.activeElement;
+  if (!active || !tableEl.contains(active)) return null;
+  const cell = active.closest("th, td");
+  const tr = active.closest("tr");
+  const section = tr?.parentElement;
+  if (!cell || !tr || !section) return null;
+  return {
+    region: section.id,
+    rowIndex: [...section.children].indexOf(tr),
+    colIndex: [...tr.children].indexOf(cell),
+    className: active.className
+  };
+}
+function restoreTableFocus(captured) {
+  if (!captured) return;
+  const tr = $(captured.region)?.children[captured.rowIndex];
+  const cell = tr?.children[captured.colIndex];
+  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
+  const target = classSelector ? cell?.querySelector(classSelector) : null;
+  (target ?? tableEl).focus();
+}
+
+// src/controller.ts
+function setTableBusy(busy) {
+  if (busy) tableEl.setAttribute("aria-busy", "true");
+  else tableEl.removeAttribute("aria-busy");
+}
+var inFlightFetches = 0;
+async function fetchTableData() {
+  const table = state.table ?? "";
+  const params = new URLSearchParams({
+    table,
+    limit: String(state.limit),
+    offset: String(state.offset)
+  });
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
+  applyScopeParams(params);
+  if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
+  if (inFlightFetches++ === 0) {
+    setStatus("loading\u2026");
+    setTableBusy(true);
+  }
+  setRowLoading(table, true);
+  try {
+    return await api(`/tables/data?${params}`);
+  } finally {
+    setRowLoading(table, false);
+    if (--inFlightFetches === 0) {
+      setStatus("");
+      setTableBusy(false);
+    }
+  }
+}
+function updateActiveTableChrome() {
+  setActiveTable(state.table);
+  $("current").textContent = state.table ?? "\u2014";
+  document.title = state.table ? `${state.table} \u2014 Ashurbanipal` : "Ashurbanipal";
+}
+var loadDataToken = 0;
+async function loadData2({
+  resetScroll = true,
+  highlightNew = false
+} = {}) {
+  clearError();
+  if (!state.table) {
+    updateActiveTableChrome();
+    setStatus("");
+    return;
+  }
+  const token = ++loadDataToken;
+  let data;
+  try {
+    data = await fetchTableData();
+  } catch (e) {
+    if (token !== loadDataToken) return;
+    if (dropOneStaleInput()) return loadData2({ resetScroll, highlightNew });
+    reportError(e);
+    return;
+  }
+  if (token !== loadDataToken) return;
+  markStoredSortVerified();
+  markFilterVerified();
+  updateActiveTableChrome();
+  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
+  $("payload").disabled = false;
+  $("columns-btn").disabled = false;
+  $("refresh").disabled = false;
+  updateColumnsButtonLabel();
+  syncUrl();
+  const renderTable = () => {
+    const focusCapture = captureTableFocus();
+    renderHeader(data.columns);
+    renderRows(data, newRowKeys, pkNames);
+    renderColumnMenu(data.columns);
+    restoreTableFocus(focusCapture);
+  };
+  if (document.startViewTransition) {
+    setTableBusy(true);
+    await document.startViewTransition(renderTable).updateCallbackDone;
+    setTableBusy(false);
+  } else {
+    renderTable();
+  }
+  if (token !== loadDataToken) return;
+  updatePager(data);
+  if (newRowKeys?.size) {
+    setStatus(`${newRowKeys.size} new`);
+  } else if (highlightNew && newRowKeys) {
+    setStatus("no changes");
+    flashIcon($("refresh-icon"), "\u2713", 1e3);
+  }
+  if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
+}
+
+// src/sidebar-bounds.ts
 var SIDEBAR_W_KEY = "ashurbanipal_sidebar_w";
-var MIN_W = 180;
-var MAX_W = 500;
+var SIDEBAR_MIN_W = 180;
+var SIDEBAR_MAX_W = 500;
+
+// src/sidebar-resize.ts
 function clamp(w) {
-  return Math.min(MAX_W, Math.max(MIN_W, w));
+  return Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, w));
 }
 var handle = $("sidebar-resize-handle");
 var dragging = false;
@@ -2402,23 +2640,25 @@ async function loadSiblings() {
   if (token !== siblingsRequestToken) return;
   $("siblings").hidden = siblings.length === 0;
   const div = $("siblings-list");
-  div.replaceChildren(...siblings.map((s) => {
-    const p = document.createElement("div");
-    const dot = document.createElement("span");
-    dot.className = "dot " + (s.healthy ? "up" : "down");
-    dot.setAttribute("role", "img");
-    dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
-    const a = document.createElement("a");
-    a.href = s.base_url;
-    a.textContent = s.name;
-    a.target = "_blank";
-    a.rel = "noopener";
-    a.title = s.name;
-    p.className = "sibling-row";
-    a.className = "sibling-name";
-    p.append(dot, a);
-    return p;
-  }));
+  div.replaceChildren(
+    ...siblings.map((s) => {
+      const p = document.createElement("div");
+      const dot = document.createElement("span");
+      dot.className = `dot ${s.healthy ? "up" : "down"}`;
+      dot.setAttribute("role", "img");
+      dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
+      const a = document.createElement("a");
+      a.href = s.base_url;
+      a.textContent = s.name;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.title = s.name;
+      p.className = "sibling-row";
+      a.className = "sibling-name";
+      p.append(dot, a);
+      return p;
+    })
+  );
 }
 
 // src/theme.ts
@@ -2440,129 +2680,26 @@ $("theme-toggle").onclick = () => {
 };
 
 // src/main.ts
+initState();
+registerLoadData(loadData2);
+onProtocolSkew((message) => {
+  $("protocol-warning-text").textContent = message;
+  $("protocol-warning").hidden = false;
+  $("protocol-warning-dismiss").onclick = () => {
+    $("protocol-warning").hidden = true;
+  };
+});
 $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $("payload-dialog").showModal();
 };
-var tableEl = document.querySelector("table");
-function setTableBusy(busy) {
-  if (busy) tableEl.setAttribute("aria-busy", "true");
-  else tableEl.removeAttribute("aria-busy");
-}
-var inFlightFetches = 0;
-async function fetchTableData() {
-  const table = state.table ?? "";
-  const params = new URLSearchParams({
-    table,
-    limit: String(state.limit),
-    offset: String(state.offset)
-  });
-  if (state.sort) {
-    params.set("sort", state.sort);
-    params.set("order", state.order);
-  }
-  applyScopeParams(params);
-  if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
-  if (inFlightFetches++ === 0) {
-    setStatus("loading\u2026");
-    setTableBusy(true);
-  }
-  setRowLoading(table, true);
-  try {
-    return await api("/tables/data?" + params);
-  } finally {
-    setRowLoading(table, false);
-    if (--inFlightFetches === 0) {
-      setStatus("");
-      setTableBusy(false);
-    }
-  }
-}
-function captureTableFocus() {
-  const active = document.activeElement;
-  if (!active || !tableEl.contains(active)) return null;
-  const cell = active.closest("th, td");
-  const tr = active.closest("tr");
-  if (!cell || !tr) return null;
-  return {
-    region: tr.parentElement.id,
-    rowIndex: [...tr.parentElement.children].indexOf(tr),
-    colIndex: [...tr.children].indexOf(cell),
-    className: active.className
-  };
-}
-function restoreTableFocus(captured) {
-  if (!captured) return;
-  const tr = $(captured.region)?.children[captured.rowIndex];
-  const cell = tr?.children[captured.colIndex];
-  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
-  const target = classSelector ? cell?.querySelector(classSelector) : null;
-  (target ?? tableEl).focus();
-}
-function updateActiveTableChrome() {
-  setActiveTable(state.table);
-  $("current").textContent = state.table ?? "\u2014";
-  document.title = state.table ? `${state.table} \u2014 Ashurbanipal` : "Ashurbanipal";
-}
-var loadDataToken = 0;
-async function loadData({ resetScroll = true, highlightNew = false } = {}) {
-  clearError();
-  if (!state.table) {
-    updateActiveTableChrome();
-    setStatus("");
-    return;
-  }
-  const token = ++loadDataToken;
-  let data;
-  try {
-    data = await fetchTableData();
-  } catch (e) {
-    if (token !== loadDataToken) return;
-    if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
-    reportError(e);
-    return;
-  }
-  if (token !== loadDataToken) return;
-  markStoredSortVerified();
-  markFilterVerified();
-  updateActiveTableChrome();
-  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
-  $("payload").disabled = false;
-  $("columns-btn").disabled = false;
-  $("refresh").disabled = false;
-  updateColumnsButtonLabel();
-  syncUrl();
-  const renderTable = () => {
-    const focusCapture = captureTableFocus();
-    renderHeader(data.columns);
-    renderRows(data, newRowKeys, pkNames);
-    renderColumnMenu(data.columns);
-    restoreTableFocus(focusCapture);
-  };
-  if (document.startViewTransition) {
-    setTableBusy(true);
-    await document.startViewTransition(renderTable).updateCallbackDone;
-    setTableBusy(false);
-  } else {
-    renderTable();
-  }
-  if (token !== loadDataToken) return;
-  updatePager(data);
-  if (newRowKeys?.size) {
-    setStatus(`${newRowKeys.size} new`);
-  } else if (highlightNew && newRowKeys) {
-    setStatus("no changes");
-    flashIcon($("refresh-icon"), "\u2713", 1e3);
-  }
-  if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
-}
 $("prev").onclick = () => {
   state.offset = Math.max(0, state.offset - state.limit);
-  loadData({ resetScroll: false });
+  loadData2({ resetScroll: false });
 };
 $("next").onclick = () => {
   state.offset += state.limit;
-  loadData({ resetScroll: false });
+  loadData2({ resetScroll: false });
 };
 $("nav-back").onclick = () => history.back();
 $("nav-forward").onclick = () => history.forward();
@@ -2570,7 +2707,7 @@ $("refresh").onclick = () => {
   const btn = $("refresh");
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 500);
-  loadData({ resetScroll: false, highlightNew: true });
+  loadData2({ resetScroll: false, highlightNew: true });
 };
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
@@ -2578,9 +2715,6 @@ new ResizeObserver(([entry]) => {
 loadSources().then(loadSchemas).then(loadTables).catch(reportError);
 loadSiblings();
 setInterval(loadSiblings, 15e3);
-export {
-  loadData
-};
 </script>
 </body>
 </html>

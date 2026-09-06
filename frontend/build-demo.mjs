@@ -1,4 +1,4 @@
-// Bundles frontend/src/demo-shim.ts into docs/demo/index.html — a
+// Bundles frontend/src/demo/demo-shim.ts into docs/demo/index.html — a
 // GitHub Pages-hostable copy of dbviewer.html wired to synthetic data.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ const dir = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const result = await esbuild.build({
-  entryPoints: [`${dir}src/demo-shim.ts`],
+  entryPoints: [`${dir}src/demo/demo-shim.ts`],
   absWorkingDir: dir.replace(/\/$/, ""),
   bundle: true,
   write: false,

@@ -19,12 +19,21 @@ export function renderJsonTree(value: JsonValue): HTMLElement {
 // prefix: [keySpan, ": "] for object entries, or null for array/top level.
 function jsonEntryValue(value: JsonValue, prefix: Prefix, comma: boolean): HTMLElement {
   if (Array.isArray(value)) {
-    return jsonContainer(value.map((v) => ({ prefix: null, value: v })), "[", "]", prefix, comma);
+    return jsonContainer(
+      value.map((v) => ({ prefix: null, value: v })),
+      "[",
+      "]",
+      prefix,
+      comma,
+    );
   }
   if (value !== null && typeof value === "object") {
     return jsonContainer(
       Object.entries(value).map(([k, v]) => ({ prefix: jsonKeyPrefix(k), value: v })),
-      "{", "}", prefix, comma,
+      "{",
+      "}",
+      prefix,
+      comma,
     );
   }
   const line = document.createElement("div");

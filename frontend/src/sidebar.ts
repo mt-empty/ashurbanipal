@@ -1,19 +1,18 @@
 import { api } from "./api.js";
-import { $, populateSelect, reportError, setStatus } from "./dom.js";
-import { loadData } from "./main.js";
-import { applyStoredSort, clearFilter, persist, rememberSchema, scopeQuery, sourceQuery, state } from "./state.js";
+import { $, populateSelect, qs, reportError, setStatus } from "./dom.js";
+import { APPROX_COUNT_TITLE, formatApproxCount } from "./format.js";
+import { loadData } from "./reload.js";
+import {
+  applyStoredSort,
+  clearFilter,
+  scopeQuery,
+  sourceQuery,
+  state,
+  switchSchema,
+  switchSource,
+  switchTable,
+} from "./state.js";
 import type { SourceEntry, TableListEntry } from "./types.js";
-
-// approx_rows/total_approx is -1 when the backend has no cheap estimate for
-// this table (e.g. Postgres before ANALYZE, or an engine with no such
-// catalog at all — see docs/adapter-decisions.md); show "?" rather than a
-// confusing raw negative number. No leading "~" in that case either —
-// "~?" would read as "approximately unknown".
-export function formatApproxCount(n: number | null | undefined): string {
-  return n == null || n < 0 ? "?" : `~${n}`;
-}
-export const APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; "
-  + "? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
 
 // ---- sidebar table search-as-you-type: transient, session-local state,
 // not part of `state`/localStorage — resets on reload ----
@@ -24,6 +23,7 @@ interface TableEntry {
   textNode: Text;
 }
 let tableEntries: TableEntry[] = [];
+const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 const tableMatchHighlight = CSS.highlights ? new Highlight() : null;
 if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
 
@@ -60,21 +60,26 @@ export async function loadSources(): Promise<void> {
   } catch {
     return; // older port without /sources — degrade to single-source behavior
   }
-  if (sources.length <= 1) { state.source = null; return; }
-  if (!state.source || !sources.some((s) => s.name === state.source)) {
-    state.source = sources[0]!.name;
+  if (sources.length <= 1) {
+    state.source = null;
+    return;
   }
-  populateSelect($<HTMLSelectElement>("source-select"), sources.map((s) => s.name), state.source!);
+  let source = state.source;
+  if (!source || !sources.some((s) => s.name === source)) {
+    source = sources[0].name;
+  }
+  state.source = source;
+  populateSelect(
+    $<HTMLSelectElement>("source-select"),
+    sources.map((s) => s.name),
+    source,
+  );
   $("source-select-wrap").hidden = false;
 }
 $<HTMLSelectElement>("source-select").onchange = () => {
-  state.source = $<HTMLSelectElement>("source-select").value;
-  // Restore the schema last used on this source rather than resetting;
-  // loadSchemas() still validates it and falls back if it's gone (R5/R12).
-  state.schema = state.schemaBySource[state.source ?? ""] ?? null;
-  state.table = null; state.sort = null; state.offset = 0;
-  clearFilter();
-  persist();
+  // switchSource restores the schema last used on this source rather than
+  // resetting; loadSchemas() still validates it and falls back (R5/R12).
+  switchSource($<HTMLSelectElement>("source-select").value);
   loadSchemas().then(loadTables).catch(reportError);
 };
 
@@ -96,36 +101,34 @@ export async function loadSchemas(): Promise<void> {
   const token = ++loadSchemasToken;
   let schemas: string[];
   try {
-    ({ schemas } = await api<{ schemas: string[] }>("/schemas" + sourceQuery()));
+    ({ schemas } = await api<{ schemas: string[] }>(`/schemas${sourceQuery()}`));
   } catch {
     if (token !== loadSchemasToken) return;
     // older port without /schemas — degrade to single-schema behavior
-    state.schema = null; $("schema-select-wrap").hidden = true; return;
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return;
   }
   if (token !== loadSchemasToken) return; // superseded by a newer source switch
   // Explicitly re-hides even though the element starts hidden in markup:
   // switching source can re-run this against a source with fewer schemas
   // than the previously selected one, and without this the wrap would keep
   // showing the prior source's stale multi-schema dropdown.
-  if (schemas.length <= 1) { state.schema = null; $("schema-select-wrap").hidden = true; return; }
-  if (!state.schema || !schemas.includes(state.schema)) {
-    state.schema = schemas.includes("public") ? "public" : schemas[0];
+  if (schemas.length <= 1) {
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return;
   }
-  populateSelect($<HTMLSelectElement>("schema-select"), schemas, state.schema!);
+  let schema = state.schema;
+  if (!schema || !schemas.includes(schema)) {
+    schema = schemas.includes("public") ? "public" : schemas[0];
+  }
+  state.schema = schema;
+  populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
   $("schema-select-wrap").hidden = false;
 }
-// Syncs the schema dropdown, state, and the per-source memory (R12) in one
-// place — the step shared by an explicit switch and grid.ts's FK
-// cross-schema navigation, which then diverge on what resets afterward.
-export function setSchema(name: string): void {
-  state.schema = name;
-  $<HTMLSelectElement>("schema-select").value = name;
-  rememberSchema();
-}
 $<HTMLSelectElement>("schema-select").onchange = () => {
-  setSchema($<HTMLSelectElement>("schema-select").value);
-  state.table = null; state.sort = null; state.offset = 0;
-  clearFilter();
+  switchSchema($<HTMLSelectElement>("schema-select").value);
   loadTables().catch(reportError);
 };
 
@@ -139,36 +142,32 @@ export async function loadTables(): Promise<void> {
   setStatus("loading tables…");
   const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
-    api<{ tables: TableListEntry[] }>("/tables" + scopeQuery()),
-    api<{ counts: { table: string; approx_rows: number }[] }>("/table-counts" + scopeQuery()),
+    api<{ tables: TableListEntry[] }>(`/tables${scopeQuery()}`),
+    api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery()}`),
   ]);
   if (token !== loadTablesToken) return; // superseded by a newer call
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
-  ul.innerHTML = "";
+  ul.replaceChildren();
   tableEntries = [];
   for (const t of tables) {
-    const li = document.createElement("li");
-    const btn = document.createElement("button");
-    btn.innerHTML = `<span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span>`;
-    (btn.firstChild as HTMLElement).textContent = t.name;
-    const countEl = btn.querySelector<HTMLElement>(".count")!;
+    const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
+    const btn = qs<HTMLButtonElement>(li, "button");
+    const textNode = document.createTextNode(t.name);
+    qs<HTMLElement>(li, ".row-name").appendChild(textNode);
+    const countEl = qs<HTMLElement>(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     countEl.title = APPROX_COUNT_TITLE;
     btn.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
     // (see .row-name), so the title tooltip is the escape hatch.
     btn.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
-    // The filter is written against this table's columns, so it clears on
-    // switch; the sort is restored to whatever was last used on this table.
     btn.onclick = () => {
-      state.table = t.name; state.offset = 0; applyStoredSort(t.name);
-      clearFilter();
-      persist(); loadData();
+      switchTable(t.name);
+      loadData();
     };
-    li.appendChild(btn);
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn, textNode: btn.firstChild!.firstChild as Text });
+    tableEntries.push({ name: t.name, li, btn, textNode });
   }
   filterTables();
   const tableNames = tables.map((t) => t.name);

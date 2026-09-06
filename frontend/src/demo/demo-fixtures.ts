@@ -1,6 +1,6 @@
 // Synthetic, deterministic data for the GitHub Pages demo (docs/demo/) —
 // no live backend, no real schema. See demo-shim.ts for how this is served.
-import type { Column } from "./types.js";
+import type { Column } from "../types.js";
 
 export type CellValue = string | number | boolean | null | Record<string, unknown> | unknown[];
 
@@ -30,7 +30,8 @@ function hashSeed(s: string): number {
 function mulberry32(seed: number): () => number {
   let a = seed;
   return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -40,7 +41,7 @@ function rngFor(table: string, row: number): () => number {
   return mulberry32(hashSeed(`${table}:${row}`));
 }
 function pick<T>(rng: () => number, xs: readonly T[]): T {
-  return xs[Math.floor(rng() * xs.length)]!;
+  return xs[Math.floor(rng() * xs.length)];
 }
 function uuid(rng: () => number): string {
   const hex = () => Math.floor(rng() * 16).toString(16);
@@ -53,14 +54,31 @@ function dateAt(rng: () => number, startYear = 2023): string {
   return `${d.toISOString().slice(0, 19).replace("T", " ")}+00`;
 }
 
-const FIRST = ["Alex", "Sam", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Jamie", "Drew", "Quinn", "Priya", "Wei", "Fatima", "Noah", "Ivy"];
+const FIRST = [
+  "Alex",
+  "Sam",
+  "Jordan",
+  "Taylor",
+  "Morgan",
+  "Casey",
+  "Riley",
+  "Jamie",
+  "Drew",
+  "Quinn",
+  "Priya",
+  "Wei",
+  "Fatima",
+  "Noah",
+  "Ivy",
+];
 const LAST = ["Chen", "Patel", "Garcia", "Nguyen", "Smith", "Okafor", "Rossi", "Kim", "Novak", "Silva"];
 // example.com/.org/.net are reserved for documentation (RFC 2606) — never
 // resolve to anything real, so fixture emails/URLs can't look like a leak.
 const DOMAINS = ["example.com", "mail.example.org", "example.net"];
 
 const users: TableDef = {
-  schema: "public", name: "users",
+  schema: "public",
+  name: "users",
   comment: "Registered accounts.",
   columns: [
     { name: "id", type: "uuid", key: "pk" },
@@ -74,10 +92,11 @@ const users: TableDef = {
   approxRows: 61,
   row(i) {
     const rng = rngFor("users", i);
-    const first = pick(rng, FIRST), last = pick(rng, LAST);
+    const first = pick(rng, FIRST),
+      last = pick(rng, LAST);
     return {
       id: uuid(rng),
-      email: `${first}.${last}${i}`.toLowerCase() + "@" + pick(rng, DOMAINS),
+      email: `${`${first}.${last}${i}`.toLowerCase()}@${pick(rng, DOMAINS)}`,
       display_name: `${first} ${last}`,
       is_admin: rng() < 0.06,
       signup_source: {
@@ -90,7 +109,8 @@ const users: TableDef = {
 };
 
 const products: TableDef = {
-  schema: "public", name: "products",
+  schema: "public",
+  name: "products",
   comment: "Catalog items.",
   columns: [
     { name: "id", type: "uuid", key: "pk" },
@@ -107,7 +127,7 @@ const products: TableDef = {
     const noun = pick(rng, ["Widget", "Gadget", "Kit", "Set", "Case", "Lamp", "Mug", "Sensor"]);
     return {
       id: uuid(rng),
-      name: `${category[0]!.toUpperCase()}${category.slice(1)} ${noun} ${i}`,
+      name: `${category[0].toUpperCase()}${category.slice(1)} ${noun} ${i}`,
       tags: [category, rng() < 0.4 ? "sale" : "new"],
       price_cents: Math.floor(rng() * 9800) + 200,
       metadata: { category, weight_kg: Math.round(rng() * 2000) / 100, in_stock: rng() < 0.85 },
@@ -116,7 +136,8 @@ const products: TableDef = {
 };
 
 const orders: TableDef = {
-  schema: "public", name: "orders",
+  schema: "public",
+  name: "orders",
   columns: [
     { name: "id", type: "uuid", key: "pk" },
     { name: "user_id", type: "uuid", key: "fk", references: { table: "users", column: "id" } },
@@ -142,7 +163,8 @@ const orders: TableDef = {
 };
 
 const orderItems: TableDef = {
-  schema: "public", name: "order_items",
+  schema: "public",
+  name: "order_items",
   columns: [
     { name: "id", type: "uuid", key: "pk" },
     { name: "order_id", type: "uuid", key: "fk", references: { table: "orders", column: "id" } },
@@ -169,7 +191,8 @@ const orderItems: TableDef = {
 // 1:1 "detail table" shape — user_id is simultaneously this table's PK and
 // a FK to users(id), same as spec/protocol.md §5.4.1's key-precedence example.
 const userProfiles: TableDef = {
-  schema: "public", name: "user_profiles",
+  schema: "public",
+  name: "user_profiles",
   columns: [
     { name: "user_id", type: "uuid", key: "pk", references: { table: "users", column: "id" } },
     { name: "bio", type: "text" },
@@ -181,17 +204,24 @@ const userProfiles: TableDef = {
     const rng = rngFor("user_profiles", i);
     return {
       user_id: users.row(i).id,
-      bio: rng() < 0.2 ? null : pick(rng, [
-        "Coffee-powered engineer.", "Cat parent.", "Runs on weekends.",
-        "Still learning SQL.", "Here for the data.",
-      ]),
+      bio:
+        rng() < 0.2
+          ? null
+          : pick(rng, [
+              "Coffee-powered engineer.",
+              "Cat parent.",
+              "Runs on weekends.",
+              "Still learning SQL.",
+              "Here for the data.",
+            ]),
       avatar_url: rng() < 0.5 ? null : `https://example.com/avatars/${i}.png`,
     };
   },
 };
 
 const dailySummary: TableDef = {
-  schema: "reporting", name: "daily_summary",
+  schema: "reporting",
+  name: "daily_summary",
   columns: [
     { name: "summary_date", type: "date", key: "pk" },
     { name: "total_orders", type: "integer" },
@@ -207,16 +237,20 @@ const dailySummary: TableDef = {
       summary_date: d.toISOString().slice(0, 10),
       total_orders: Math.floor(rng() * 300) + 20,
       total_revenue_cents: Math.floor(rng() * 900000) + 30000,
-      notes: rng() < 0.7 ? null : {
-        flagged: true,
-        reason: pick(rng, ["payment provider outage", "holiday spike", "data backfill"]),
-      },
+      notes:
+        rng() < 0.7
+          ? null
+          : {
+              flagged: true,
+              reason: pick(rng, ["payment provider outage", "holiday spike", "data backfill"]),
+            },
     };
   },
 };
 
 const signupFunnel: TableDef = {
-  schema: "reporting", name: "signup_funnel",
+  schema: "reporting",
+  name: "signup_funnel",
   columns: [
     { name: "id", type: "uuid", key: "pk" },
     { name: "stage", type: "text" },
@@ -236,9 +270,7 @@ const signupFunnel: TableDef = {
   },
 };
 
-export const TABLES: TableDef[] = [
-  users, orders, orderItems, products, userProfiles, dailySummary, signupFunnel,
-];
+export const TABLES: TableDef[] = [users, orders, orderItems, products, userProfiles, dailySummary, signupFunnel];
 
 export const SCHEMAS = ["public", "reporting"];
 

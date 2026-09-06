@@ -1,6 +1,6 @@
 import { $, reportError } from "./dom.js";
 import { loadTables } from "./sidebar.js";
-import { applyScopeParams, persist, restoreFilterFromParams, state } from "./state.js";
+import { applyScopeParams, applyUrlExact, persist, state } from "./state.js";
 
 // Back/forward navigation stops at table/schema/source switches, not every
 // sort/page tweak within the same table — otherwise "back" would undo
@@ -28,16 +28,24 @@ function updateNavButtons(): void {
 // entry like a sort click or a page turn, never pushing a new back-stack stop.
 export function syncUrl(): void {
   const params = new URLSearchParams({
-    table: state.table ?? "", limit: String(state.limit), offset: String(state.offset),
+    table: state.table ?? "",
+    limit: String(state.limit),
+    offset: String(state.offset),
   });
-  if (state.sort) { params.set("sort", state.sort); params.set("order", state.order); }
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
   applyScopeParams(params);
   if (state.filter) params.set("filter", state.filter);
-  const qs = "?" + params;
+  const qs = `?${params}`;
   const key = navViewKey();
   const samePlace = navIndex >= 0 && navStack[navIndex] === key;
   if (restoringFromHistory || navStack.length === 0 || samePlace) {
-    if (navStack.length === 0) { navStack = [key]; navIndex = 0; }
+    if (navStack.length === 0) {
+      navStack = [key];
+      navIndex = 0;
+    }
     history.replaceState({ navIndex }, "", qs);
   } else {
     navStack = navStack.slice(0, navIndex + 1);
@@ -54,18 +62,12 @@ window.addEventListener("popstate", (ev) => {
   if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
   navIndex = navState.navIndex;
   const params = new URLSearchParams(location.search);
-  state.source = params.get("source") || null;
-  state.schema = params.get("schema") || null;
-  state.table = params.get("table") || null;
-  state.sort = params.get("sort") || null;
-  state.order = params.get("order") === "desc" ? "desc" : "asc";
-  state.limit = Number(params.get("limit")) || state.limit;
-  state.offset = Number(params.get("offset")) || 0;
-  restoreFilterFromParams(params);
-  const sourceSelect = $<HTMLSelectElement>("source-select");
-  if (sourceSelect) sourceSelect.value = state.source ?? "";
-  const schemaSelect = $<HTMLSelectElement>("schema-select");
-  if (schemaSelect) schemaSelect.value = state.schema ?? "";
+  // Exact reader: reproduce this history entry verbatim, absences included
+  // (contrast url.ts's load-time overlay). Keep it separate from that overlay
+  // reader — the header comment in url.ts says why.
+  applyUrlExact(params);
+  $<HTMLSelectElement>("source-select").value = state.source ?? "";
+  $<HTMLSelectElement>("schema-select").value = state.schema ?? "";
   // syncUrl() only ever writes `schema` when the source at that history
   // point had more than one (loadSchemas pins state.schema to a concrete
   // name only then) — its presence/absence here is a reliable proxy for
@@ -76,5 +78,7 @@ window.addEventListener("popstate", (ev) => {
   restoringFromHistory = true;
   loadTables()
     .catch(reportError)
-    .finally(() => { restoringFromHistory = false; });
+    .finally(() => {
+      restoringFromHistory = false;
+    });
 });

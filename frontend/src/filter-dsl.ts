@@ -14,9 +14,9 @@ const FILTER_MAX_CONDITIONS = 10;
 // one still round-trips.
 const RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 
-// tools/e2e-tests/tests/filter-parser.spec.ts reads `.position` off a
-// caught error via page.evaluate — must stay a real own property on the
-// thrown object, not just baked into the message.
+// frontend/test/filter-dsl.test.ts asserts `.position` off a caught error —
+// it must stay a real own property on the thrown object, not just baked into
+// the message string.
 class FilterDslError extends Error {
   position: number;
   constructor(message: string, position: number) {
@@ -38,12 +38,19 @@ export function parseFilterDsl(input: string): FilterCondition[] {
   let pos = 0;
   // Peeks return the full code point (length 2 for astral chars) so
   // surrogate pairs are never split mid-character while advancing.
-  const peekAt = (i: number): string | null => (i < input.length ? String.fromCodePoint(input.codePointAt(i)!) : null);
+  const peekAt = (i: number): string | null => {
+    if (i >= input.length) return null;
+    const cp = input.codePointAt(i);
+    return cp === undefined ? null : String.fromCodePoint(cp);
+  };
   const peek = (): string | null => peekAt(pos);
   const isWs = (c: string): boolean => /\s/.test(c);
   const skipWsOptional = (): void => {
-    let c: string | null;
-    while ((c = peek()) !== null && isWs(c)) pos += c.length;
+    let c = peek();
+    while (c !== null && isWs(c)) {
+      pos += c.length;
+      c = peek();
+    }
   };
   const skipWsRequired = (): void => {
     const start = pos;
@@ -72,8 +79,11 @@ export function parseFilterDsl(input: string): FilterCondition[] {
     const first = peek();
     if (first === null || !/^[a-zA-Z_]$/.test(first)) throw err("expected column name", start);
     pos += 1;
-    let c: string | null;
-    while ((c = peek()) !== null && /^[a-zA-Z0-9_]$/.test(c)) pos += 1;
+    let c = peek();
+    while (c !== null && /^[a-zA-Z0-9_]$/.test(c)) {
+      pos += 1;
+      c = peek();
+    }
     return input.slice(start, pos);
   };
   // A doubled '' decodes to a single literal '.
@@ -86,9 +96,14 @@ export function parseFilterDsl(input: string): FilterCondition[] {
       if (c === null) throw err("unterminated quoted value", start);
       if (c === "'") {
         pos += 1;
-        if (peek() === "'") { value += "'"; pos += 1; }
-        else break;
-      } else { value += c; pos += c.length; }
+        if (peek() === "'") {
+          value += "'";
+          pos += 1;
+        } else break;
+      } else {
+        value += c;
+        pos += c.length;
+      }
     }
     return value;
   };
@@ -97,8 +112,12 @@ export function parseFilterDsl(input: string): FilterCondition[] {
   const parseBareValue = (): string => {
     const start = pos;
     let value = "";
-    let c: string | null;
-    while ((c = peek()) !== null && !isWs(c) && c !== "'") { value += c; pos += c.length; }
+    let c = peek();
+    while (c !== null && !isWs(c) && c !== "'") {
+      value += c;
+      pos += c.length;
+      c = peek();
+    }
     if (value === "") throw err("expected value", start);
     if (RESERVED_WORD_RE.test(value))
       throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
@@ -111,7 +130,10 @@ export function parseFilterDsl(input: string): FilterCondition[] {
     if (consumeKeyword("ILIKE")) return "ILIKE";
     if (consumeKeyword("LIKE")) return "LIKE";
     for (const sym of [">=", "<=", "!=", ">", "<", "="] as const) {
-      if (input.startsWith(sym, pos)) { pos += sym.length; return sym; }
+      if (input.startsWith(sym, pos)) {
+        pos += sym.length;
+        return sym;
+      }
     }
     throw err("expected operator (one of = != >= <= > < LIKE ILIKE, or IS [NOT] NULL)", start);
   };
@@ -143,7 +165,11 @@ export function parseFilterDsl(input: string): FilterCondition[] {
   let pendingLogic: "AND" | "OR" | null = null;
   for (;;) {
     let not = false;
-    if (matchKeyword("NOT")) { pos += 3; skipWsRequired(); not = true; }
+    if (matchKeyword("NOT")) {
+      pos += 3;
+      skipWsRequired();
+      not = true;
+    }
     const simple = parseSimpleCondition();
     // Optional wire fields are omitted, never null/false-filled (§5.4.2).
     const condition: FilterCondition = {
@@ -154,8 +180,7 @@ export function parseFilterDsl(input: string): FilterCondition[] {
       ...(simple.value !== undefined ? { value: simple.value } : {}),
     };
     conditions.push(condition);
-    if (conditions.length > FILTER_MAX_CONDITIONS)
-      throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
+    if (conditions.length > FILTER_MAX_CONDITIONS) throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
     if (pos >= input.length) break;
     skipWsRequired();
     if (pos >= input.length) break;
@@ -172,7 +197,11 @@ export function parseFilterDsl(input: string): FilterCondition[] {
 // discard a bad filter silently (ui-guidelines R5) rather than surface it,
 // unlike a live submission through submitFilter().
 export function tryParseFilterDsl(input: string): FilterCondition[] | null {
-  try { return parseFilterDsl(input); } catch { return null; }
+  try {
+    return parseFilterDsl(input);
+  } catch {
+    return null;
+  }
 }
 
 // ---- click-to-filter: compose "column op value" into #filter and apply ----
@@ -181,16 +210,5 @@ export function tryParseFilterDsl(input: string): FilterCondition[] | null {
 // straight into a clause without reshaping.
 export function quoteFilterValue(value: string): string {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
-  return "'" + value.replace(/'/g, "''") + "'";
+  return `'${value.replace(/'/g, "''")}'`;
 }
-
-// Test hook: tools/e2e-tests/tests/filter-parser.spec.ts drives the parser
-// fixture table (and the quoteFilterValue→parser round-trip) via
-// page.evaluate — module scope is otherwise unreachable from outside, and
-// this one namespaced global is the entire exposed surface.
-declare global {
-  interface Window {
-    __ashurbanipal: { parseFilterDsl: typeof parseFilterDsl; quoteFilterValue: typeof quoteFilterValue };
-  }
-}
-window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };

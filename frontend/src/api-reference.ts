@@ -9,39 +9,52 @@ function buildApiReference() {
   const base = new URL(API, location.href).toString().replace(/\/$/, "");
   const exampleFilter = encodeURIComponent(JSON.stringify([{ column: "status", op: "=", value: "active" }]));
   return {
-    description: "Read-only REST API for browsing this service's database tables. Every endpoint is GET and returns JSON. Every cell value is a JSON string or null, regardless of the column's real type — never a JSON number or boolean. Source/schema/table names are data-dependent — call GET /sources, then GET /schemas, then GET /tables to discover real names before calling anything else.",
+    description:
+      "Read-only REST API for browsing this service's database tables. Every endpoint is GET and returns JSON. Every cell value is a JSON string or null, regardless of the column's real type — never a JSON number or boolean. Source/schema/table names are data-dependent — call GET /sources, then GET /schemas, then GET /tables to discover real names before calling anything else.",
     base_url: base,
     endpoints: [
       {
         method: "GET",
         path: `${base}/sources`,
-        summary: "Source names selectable as the `source` param on the routes below, for a host that has registered more than one. A single-source deployment still returns exactly one entry; the first is the default used when `source` is omitted.",
+        summary:
+          "Source names selectable as the `source` param on the routes below, for a host that has registered more than one. A single-source deployment still returns exactly one entry; the first is the default used when `source` is omitted.",
         params: [],
         example_response: { sources: [{ name: "primary" }, { name: "reporting" }] },
       },
       {
         method: "GET",
         path: `${base}/schemas`,
-        summary: "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry.",
+        summary:
+          "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry.",
         params: [
-          { name: "source", required: false, notes: "must be a name returned by GET /sources; omit to use the default source" },
+          {
+            name: "source",
+            required: false,
+            notes: "must be a name returned by GET /sources; omit to use the default source",
+          },
         ],
         example_response: { schemas: ["public"] },
       },
       {
         method: "GET",
         path: `${base}/tables`,
-        summary: "List table names in the resolved schema — also the allow-list for every other endpoint's `table` param.",
+        summary:
+          "List table names in the resolved schema — also the allow-list for every other endpoint's `table` param.",
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
-          { name: "schema", required: false, notes: "must be a name returned by GET /schemas; omit to use the connection's default schema" },
+          {
+            name: "schema",
+            required: false,
+            notes: "must be a name returned by GET /schemas; omit to use the connection's default schema",
+          },
         ],
         example_response: { tables: [{ name: "users", comment: "Registered accounts." }, { name: "sessions" }] },
       },
       {
         method: "GET",
         path: `${base}/table-counts`,
-        summary: "Approximate row count per table — a cheap engine estimate, never a live COUNT(*); may be -1 when the engine exposes no estimate.",
+        summary:
+          "Approximate row count per table — a cheap engine estimate, never a live COUNT(*); may be -1 when the engine exposes no estimate.",
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables" },
@@ -51,12 +64,17 @@ function buildApiReference() {
       {
         method: "GET",
         path: `${base}/tables/data`,
-        summary: "Paginated, filtered, sorted rows for one table. `total_approx` may be -1, same caveat as GET /table-counts. A column that is both primary key and foreign key reports `key: \"pk\"` but still carries `references` (see the `order_id` example column); `references.schema` is present only when the referenced table lives in a different schema.",
+        summary:
+          'Paginated, filtered, sorted rows for one table. `total_approx` may be -1, same caveat as GET /table-counts. A column that is both primary key and foreign key reports `key: "pk"` but still carries `references` (see the `order_id` example column); `references.schema` is present only when the referenced table lives in a different schema.',
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables" },
           { name: "table", required: true, notes: "must be a name returned by GET /tables" },
-          { name: "filter", required: false, notes: "URL-encoded JSON array of condition objects — see the `filter` key below" },
+          {
+            name: "filter",
+            required: false,
+            notes: "URL-encoded JSON array of condition objects — see the `filter` key below",
+          },
           { name: "limit", required: false, notes: "default 50, max 100" },
           { name: "offset", required: false, notes: "default 0" },
           { name: "sort", required: false, notes: "single column name" },
@@ -68,7 +86,9 @@ function buildApiReference() {
             { name: "id", type: "uuid", key: "pk" },
             { name: "user_id", type: "uuid", key: "fk", references: { table: "users", column: "id" } },
             {
-              name: "order_id", type: "integer", key: "pk",
+              name: "order_id",
+              type: "integer",
+              key: "pk",
               references: { table: "orders", column: "id", schema: "public" },
             },
             { name: "status", type: "text" },
@@ -80,7 +100,8 @@ function buildApiReference() {
       {
         method: "GET",
         path: `${base}/tables/common-values`,
-        summary: "Most frequent values for one column — approximate, from engine statistics; empty when the engine keeps no such statistics for the column.",
+        summary:
+          "Most frequent values for one column — approximate, from engine statistics; empty when the engine keeps no such statistics for the column.",
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables" },
@@ -94,7 +115,9 @@ function buildApiReference() {
         path: `${base}/siblings`,
         summary: "Other related services configured for this instance, with live health status.",
         params: [],
-        example_response: { siblings: [{ name: "billing", base_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }] },
+        example_response: {
+          siblings: [{ name: "billing", base_url: "https://billing.internal.vpn/__ashurbanipal", healthy: true }],
+        },
       },
     ],
     filter: {
@@ -102,7 +125,7 @@ function buildApiReference() {
       operators: ["=", "!=", ">", ">=", "<", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"],
       limits: { max_conditions: 10, max_json_bytes: 8192 },
       notes: [
-        "`logic` (\"AND\" | \"OR\") must be absent on the first condition and present on every later one; AND binds tighter than OR (SQL precedence — no parentheses/nesting exist).",
+        '`logic` ("AND" | "OR") must be absent on the first condition and present on every later one; AND binds tighter than OR (SQL precedence — no parentheses/nesting exist).',
         "`not: true` negates its single condition; optional, defaults to false.",
         "`value` is always a JSON string, required except for IS NULL / IS NOT NULL, which take none.",
         "columns are cast to text before comparison, so the same operators work across uuid/timestamptz/jsonb/etc. — but '>'/'<'/'>='/'<=' then compare lexicographically as text, not numerically: a filter like age > 9 will incorrectly exclude age = 10.",

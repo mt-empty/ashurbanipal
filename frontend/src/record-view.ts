@@ -1,5 +1,5 @@
 import { $, copyText } from "./dom.js";
-import { formatCellValue } from "./grid.js";
+import { formatCellValue } from "./format.js";
 import { renderJsonTree } from "./json-tree.js";
 import { state } from "./state.js";
 import type { Column, Row } from "./types.js";
@@ -22,7 +22,9 @@ export function buildRecordEntries(columns: Column[], row: Row): Node[] {
         try {
           dd.classList.add("json-tree");
           dd.appendChild(renderJsonTree(JSON.parse(raw)));
-        } catch { dd.textContent = raw; }
+        } catch {
+          dd.textContent = raw;
+        }
       } else dd.appendChild(formatCellValue(col, raw));
       const btn = document.createElement("button");
       btn.className = "copy";
@@ -64,7 +66,7 @@ function recordAsInsert(columns: Column[], row: Row): string {
 function sqlLiteral(col: Column, raw: string | null): string {
   if (raw == null) return "NULL";
   if (NUMERIC_TYPE_RE.test(col.type) && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
-  return "'" + raw.replace(/'/g, "''") + "'";
+  return `'${raw.replace(/'/g, "''")}'`;
 }
 
 export function openRecordView(columns: Column[], row: Row): void {

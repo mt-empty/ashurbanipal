@@ -10,9 +10,13 @@ must/must-not do) and the `CLAUDE.md` invariant that the *shipped*
 doc is about the sources that build it, not an exception to that
 invariant.
 
-The tenets below are already reflected in the current sources, not
-aspirations for them — treat deviation from any of them in a new change as
-something a review should flag.
+The tenets below are the target shape for the sources. Most current code
+follows them; where a tenet is ahead of the code, that gap is called out
+inline, and new code still complies. A tenet's authority is that it is
+right for the project as it stands, not that it happens to describe today's
+code — so when the two disagree, fix the code or change the tenet
+deliberately, don't let the guide drift to match an accident. Treat a new
+deviation as something review flags.
 
 ## 1. Source layout (`frontend/src/`)
 
@@ -27,23 +31,35 @@ something a review should flag.
   its event wiring together (locality of behavior) — the same principle
   the old single-file layout expressed with banners, now expressed as file
   boundaries.
-- `state.ts` owns the state genuinely shared across modules (the `state`
-  object, the applied filter AST, the last-fetched payload) — the latter
-  two behind getter/setter functions, since a plain `let` export can't be
-  reassigned from outside its own module under ESM.
+- The shared client state is behind one `./state.js` entry point that
+  re-exports three concern-split modules: `store.ts` (the `state` object,
+  its localStorage persistence, and the named scope transitions),
+  `url.ts` (URL params ⇄ state, read side — two readers that differ on
+  purpose, see the header comment there), `row-diff.ts` (the
+  new-rows-since-refresh derivation). `store.ts` exposes named transitions
+  (`switchSource` / `switchSchema` / `switchTable`) that run the resets and
+  persistence each one implies; feature modules call those rather than
+  assigning scope fields ad hoc, and a site that deliberately diverges
+  (grid.ts's FK navigation, which seeds a filter instead of clearing one)
+  says why inline. A value a plain `let` export can't expose (the applied
+  filter AST) stays behind a getter/setter pair.
 - `dom.ts` holds generic, feature-agnostic helpers (`$`, `setStatus`,
   `copyText`, `reportError`/`clearError`, `populateSelect`, `flashIcon`).
-- `main.ts` is the entry point: owns `loadData` (the render-orchestration
-  hub touching multiple feature modules), the remaining top-level wiring,
-  and the bootstrap calls at the very bottom (`loadSources().then(loadSchemas).then(loadTables)`,
-  `loadSiblings()`, the polling `setInterval`) — nothing else after them.
-- Circular imports between feature modules are expected and safe here
-  (e.g. `grid.ts` ↔ `main.ts` for `loadData`, `grid.ts` ↔ `record-view.ts`
-  for `formatCellValue`/`openRecordView`): every cross-module call happens
-  inside a function body invoked later — an event handler, a bootstrap
-  call — never at module-evaluation time, which is exactly the case ESM
-  circular imports handle correctly. Don't restructure a module boundary
-  just to avoid a cycle that's safe by this rule.
+- `controller.ts` owns `loadData` / `fetchTableData` — the
+  render-orchestration hub. It imports the feature modules *downward*;
+  feature modules never import it (that re-forms a cycle through everything
+  it imports), they call `loadData` via `reload.ts`, an import-free seam
+  `main.ts` wires at bootstrap.
+- `main.ts` is the entry point and is *wiring only*: the side-effect
+  imports, `registerLoadData(loadData)`, the toolbar/dialog event wiring,
+  and the bootstrap calls at the very bottom
+  (`loadSources().then(loadSchemas).then(loadTables)`, `loadSiblings()`,
+  the polling `setInterval`) — nothing else.
+- **Import cycles are debt.** `mise run frontend:check-cycles` (Tarjan over
+  the value-import graph, `import type` excluded) fails CI on any cycle.
+  When module A needs a function from an upstream module B, route it through
+  an import-free seam (`reload.ts`) or move the shared helper to a leaf
+  (`format.ts`) — never add the back-edge.
 
 The payoff: a reviewer with "the bug is in pagination" opens `grid.ts`
 instead of searching one file for a banner.
@@ -73,15 +89,17 @@ instead of searching one file for a banner.
 
 ## 3. JavaScript
 
-- **One consistent event-binding style: `.onX =`.** Two legitimate reasons
-  to reach for `addEventListener` instead, neither of which applies to most
-  wiring in this file: needing a second listener on the same element/event,
-  or a non-standardized event whose IDL property doesn't exist on every
-  engine (e.g. `onsearch` — Chromium and legacy WebKit expose it, Firefox
-  never implemented it, so `.onsearch =` silently no-ops there instead of
-  erroring; `$("filter").addEventListener("search", ...)` is the fix and
-  works identically everywhere). Don't reach for `addEventListener` without
-  one of these two reasons, and note which one inline when you do.
+- **Event binding: `.onX =` only on an element this file exclusively owns
+  and binds once.** That covers most wiring here — a toolbar button, a
+  freshly-created cell — and stays the default for it: one slot, one
+  assignment, one place to look. Reach for `addEventListener` when any of
+  three things is true, and note which inline: (a) the target is
+  `document` / `window` / `document.body` — a single shared IDL slot any
+  other module can silently overwrite, so it is never `.onX =`; (b) a
+  second listener is needed on the same element/event; (c) the event has
+  no IDL property on every engine (e.g. `onsearch` — Chromium and legacy
+  WebKit expose it, Firefox never did, so `.onsearch =` silently no-ops
+  there; `$("filter").addEventListener("search", ...)` works everywhere).
 - **Any function that fetches and then mutates shared state must guard
   against out-of-order responses with a per-call token.** Capture a
   monotonic counter at the start of the call (`const token = ++xRequestToken`)
@@ -99,7 +117,10 @@ instead of searching one file for a banner.
 - **Functions do one thing.** Don't let a function fetch, re-render
   multiple DOM regions, *and* update pager state in one body — split
   fetch/render-header/render-body/update-pager into separate functions even
-  if a top-level flow calls them in sequence.
+  if a top-level flow calls them in sequence. An orchestrator is exempt
+  *provided* it only sequences calls to single-purpose functions and holds
+  no rendering logic of its own — `loadData` in `controller.ts` is the
+  canonical example.
 - **No editorializing comments.** A comment earns its place only by
   explaining a non-obvious *why* (a browser quirk, a security invariant, a
   workaround) — never a *what* a well-named function or variable already
@@ -121,6 +142,14 @@ instead of searching one file for a banner.
   FK navigation, the common-values dropdown): those *compose* a clause from
   a column/value the server already gave us, never parsing or judging
   arbitrary user-typed text — keep that boundary when extending either.
+- **Testing.** A module with no runtime imports and no DOM output — the DSL
+  parser is the current example — gets a `node --test` unit in
+  `frontend/test/` (`mise run frontend:test-unit`), driven by the same
+  `spec/fixtures/` table the conformance runner uses where one exists.
+  Anything that touches the DOM or observable behaviour stays in the
+  Playwright suite (`docs/e2e-testing-guidelines.md`). Do not add a
+  `window.*` test hook to reach otherwise-sealed module scope — extract the
+  pure part instead.
 
 ## 4. Prefer the platform over hand-written JS
 
@@ -197,9 +226,14 @@ a broken page.
   `spec/filter-dsl.md`.
   It was forbidden here originally to avoid two parser copies (frontend +
   backend) silently drifting apart; that risk is gone now that there's
-  exactly one copy, so the rule no longer applies. Left as a struck-through
-  entry rather than deleted so this doesn't read as an oversight next time
-  someone re-derives "should parsing be client-side?" from first principles.
+  exactly one *parser* copy, so the rule no longer applies. Left as a
+  struck-through entry rather than deleted so this doesn't read as an
+  oversight next time someone re-derives "should parsing be client-side?"
+  from first principles. The operator list and the filter limits are still
+  restated — `api-reference.ts` (the in-app dialog) and `demo-shim.ts` (the
+  offline demo backend, which reimplements filter/sort semantics) — now
+  held to `spec/openapi.yaml` by `tools/check-frontend-api-reference.sh`
+  (`mise run frontend:check-api-reference`).
 - **`@scope`** — the file already gets rule-scoping for free from its
   ID-selector discipline; no cascade-leakage problem to solve.
 - **`requestIdleCallback` / `scheduler.postTask()`** — no measured

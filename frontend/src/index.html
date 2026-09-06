@@ -19,11 +19,16 @@
       document.documentElement.dataset.theme = ashurbanipalTheme;
   } catch {}
   try {
-    // Bounds duplicated in sidebar-resize.ts's MIN_W/MAX_W — this script
-    // runs standalone, before the bundled module graph, so it can't import them.
-    var ashurbanipalSidebarW = parseFloat(localStorage.getItem("ashurbanipal_sidebar_w"));
-    if (ashurbanipalSidebarW >= 180 && ashurbanipalSidebarW <= 500)
-      document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+    // build.mjs injects the key and bounds here from sidebar-bounds.ts: this
+    // script runs standalone, before the bundled module graph, so it can't
+    // import them. Until injection the typeof guard makes it an inert no-op
+    // (raw index.html is a build input, never served).
+    /*ASHURBANIPAL_SIDEBAR_BOUNDS*/
+    if (typeof ASHURBANIPAL_SIDEBAR_W_KEY === "string") {
+      var ashurbanipalSidebarW = parseFloat(localStorage.getItem(ASHURBANIPAL_SIDEBAR_W_KEY));
+      if (ashurbanipalSidebarW >= ASHURBANIPAL_SIDEBAR_MIN && ashurbanipalSidebarW <= ASHURBANIPAL_SIDEBAR_MAX)
+        document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+    }
   } catch {}
 </script>
 <style>
@@ -81,6 +86,7 @@
     <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
     <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
+    <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
     <div id="pager">
       <button id="prev">‹ prev</button>
       <output id="page"></output>

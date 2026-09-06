@@ -1,5 +1,18 @@
+// Throws on a miss: every id here is in the co-shipped static markup, so a
+// null is a markup/build bug to surface, not a branch every caller must
+// carry.
 export function $<T extends HTMLElement = HTMLElement>(id: string): T {
-  return document.getElementById(id) as T;
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`no element with id ${id}`);
+  return el as T;
+}
+
+// Same policy as $, for a selector against a freshly-cloned <template> or a
+// known-present subtree.
+export function qs<T extends Element>(root: ParentNode, selector: string): T {
+  const el = root.querySelector<T>(selector);
+  if (!el) throw new Error(`no element matches ${selector}`);
+  return el;
 }
 
 export function setStatus(text: string): void {
@@ -17,21 +30,27 @@ export function clearError(): void {
 }
 
 export function populateSelect(select: HTMLSelectElement, values: string[], selected: string): void {
-  select.replaceChildren(...values.map((v) => {
-    const opt = document.createElement("option");
-    opt.value = v; opt.textContent = v;
-    return opt;
-  }));
+  select.replaceChildren(
+    ...values.map((v) => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      return opt;
+    }),
+  );
   select.value = selected;
 }
 
-// Flashes `glyph` on `el`, then restores whatever glyph was resting there —
-// captured once per element (dataset.rest) so a re-click mid-flash can't
-// capture the transient glyph as the new resting state.
+// Flashes `glyph` on `el`, then restores whatever glyph was resting there.
+// The resting value is recorded on dataset.rest the first time only, so a
+// re-click mid-flash restores the real glyph rather than the transient one.
 export function flashIcon(el: HTMLElement, glyph: string, ms = 800): void {
   if (el.dataset.rest === undefined) el.dataset.rest = el.textContent ?? "";
+  const rest = el.dataset.rest ?? "";
   el.textContent = glyph;
-  setTimeout(() => { el.textContent = el.dataset.rest!; }, ms);
+  setTimeout(() => {
+    el.textContent = rest;
+  }, ms);
 }
 
 // ---- per-cell copy (Clipboard API) ----
