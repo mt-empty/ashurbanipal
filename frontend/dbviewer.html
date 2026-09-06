@@ -19,10 +19,10 @@
       document.documentElement.dataset.theme = ashurbanipalTheme;
   } catch {}
   try {
-    // Key and bounds are injected here by build.mjs from sidebar-resize.ts's
-    // constants — this script runs standalone, before the bundled module
-    // graph, so it can't import them. Until injection the typeof guard makes
-    // it an inert no-op (raw index.html is a build input, never served).
+    // build.mjs injects the key and bounds here from sidebar-bounds.ts: this
+    // script runs standalone, before the bundled module graph, so it can't
+    // import them. Until injection the typeof guard makes it an inert no-op
+    // (raw index.html is a build input, never served).
     var ASHURBANIPAL_SIDEBAR_W_KEY = "ashurbanipal_sidebar_w", ASHURBANIPAL_SIDEBAR_MIN = 180, ASHURBANIPAL_SIDEBAR_MAX = 500;
     if (typeof ASHURBANIPAL_SIDEBAR_W_KEY === "string") {
       var ashurbanipalSidebarW = parseFloat(localStorage.getItem(ASHURBANIPAL_SIDEBAR_W_KEY));

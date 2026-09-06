@@ -63,8 +63,8 @@ window.addEventListener("popstate", (ev) => {
   navIndex = navState.navIndex;
   const params = new URLSearchParams(location.search);
   // Exact reader: reproduce this history entry verbatim, absences included
-  // (contrast url.ts's load-time overlay). Do not inline this back — see the
-  // header comment in url.ts.
+  // (contrast url.ts's load-time overlay). Keep it separate from that overlay
+  // reader — the header comment in url.ts says why.
   applyUrlExact(params);
   $<HTMLSelectElement>("source-select").value = state.source ?? "";
   $<HTMLSelectElement>("schema-select").value = state.schema ?? "";

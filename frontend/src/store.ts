@@ -240,8 +240,8 @@ export function rememberSchema(): void {
 }
 
 // ---- named scope transitions ----
-// The three sidebar scope switches share a shape that used to be copy-pasted
-// with per-site drift; each is exactly one caller, so they take no options.
+// Each of the three sidebar scope switches has exactly one caller, so they take
+// no options.
 // grid.ts's FK navigation deliberately does not use switchTable — it seeds a
 // filter rather than clearing one, drops the remembered sort (a stale one
 // would defeat loadData's drop-and-retry against the same-fetch filter), and

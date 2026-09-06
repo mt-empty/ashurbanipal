@@ -60,8 +60,7 @@ export function sourceQuery(): string {
 }
 
 // Called once, first thing in main.ts's bootstrap: stored prefs, then the
-// URL layered over them. Replaces the module-evaluation-time restore that
-// used to live at the bottom of state.ts.
+// URL layered over them.
 export function initState(): void {
   restoreFromStorage();
   applyUrlOverlay(new URLSearchParams(location.search));

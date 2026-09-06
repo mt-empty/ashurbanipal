@@ -57,8 +57,9 @@ if (!sameSet(demoOps, specOps))
   fail(`demo-shim.ts VALID_OPS ${JSON.stringify(sortU(demoOps))} != spec/openapi.yaml op enum`);
 
 // ---- condition cap: spec maxItems is canonical ----
-// Anchored to the filter array schema (its maxItems sits just above the
-// items $ref to FilterCondition), not the first maxItems anywhere in the file.
+// Anchored to the filter array schema: its maxItems must sit within 200
+// chars of the items $ref to FilterCondition, so an unrelated maxItems
+// elsewhere in the file is not picked up.
 const specMax = Number(cap(/maxItems:\s*(\d+)[\s\S]{0,200}?FilterCondition/, openapi));
 const dslMax = Number(cap(/FILTER_MAX_CONDITIONS\s*=\s*(\d+)/, dsl));
 const refMax = Number(cap(/max_conditions:\s*(\d+)/, apiRef));
