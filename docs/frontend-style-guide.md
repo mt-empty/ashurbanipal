@@ -33,17 +33,21 @@ something a review should flag.
   reassigned from outside its own module under ESM.
 - `dom.ts` holds generic, feature-agnostic helpers (`$`, `setStatus`,
   `copyText`, `reportError`/`clearError`, `populateSelect`, `flashIcon`).
-- `main.ts` is the entry point: owns `loadData` (the render-orchestration
-  hub touching multiple feature modules), the remaining top-level wiring,
-  and the bootstrap calls at the very bottom (`loadSources().then(loadSchemas).then(loadTables)`,
-  `loadSiblings()`, the polling `setInterval`) — nothing else after them.
-- Circular imports between feature modules are expected and safe here
-  (e.g. `grid.ts` ↔ `main.ts` for `loadData`, `grid.ts` ↔ `record-view.ts`
-  for `formatCellValue`/`openRecordView`): every cross-module call happens
-  inside a function body invoked later — an event handler, a bootstrap
-  call — never at module-evaluation time, which is exactly the case ESM
-  circular imports handle correctly. Don't restructure a module boundary
-  just to avoid a cycle that's safe by this rule.
+- `controller.ts` owns `loadData` / `fetchTableData` — the
+  render-orchestration hub. It imports the feature modules *downward*;
+  feature modules never import it (that re-forms a cycle through everything
+  it imports), they call `loadData` via `reload.ts`, an import-free seam
+  `main.ts` wires at bootstrap.
+- `main.ts` is the entry point and is *wiring only*: the side-effect
+  imports, `registerLoadData(loadData)`, the toolbar/dialog event wiring,
+  and the bootstrap calls at the very bottom
+  (`loadSources().then(loadSchemas).then(loadTables)`, `loadSiblings()`,
+  the polling `setInterval`) — nothing else.
+- **Import cycles are debt.** `mise run frontend:check-cycles` (Tarjan over
+  the value-import graph, `import type` excluded) fails CI on any cycle.
+  When module A needs a function from an upstream module B, route it through
+  an import-free seam (`reload.ts`) or move the shared helper to a leaf
+  (`format.ts`) — never add the back-edge.
 
 The payoff: a reviewer with "the bug is in pagination" opens `grid.ts`
 instead of searching one file for a banner.
@@ -99,7 +103,10 @@ instead of searching one file for a banner.
 - **Functions do one thing.** Don't let a function fetch, re-render
   multiple DOM regions, *and* update pager state in one body — split
   fetch/render-header/render-body/update-pager into separate functions even
-  if a top-level flow calls them in sequence.
+  if a top-level flow calls them in sequence. An orchestrator is exempt
+  *provided* it only sequences calls to single-purpose functions and holds
+  no rendering logic of its own — `loadData` in `controller.ts` is the
+  canonical example.
 - **No editorializing comments.** A comment earns its place only by
   explaining a non-obvious *why* (a browser quirk, a security invariant, a
   workaround) — never a *what* a well-named function or variable already

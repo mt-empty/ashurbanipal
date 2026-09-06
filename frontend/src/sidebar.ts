@@ -1,20 +1,9 @@
 import { api } from "./api.js";
 import { $, populateSelect, reportError, setStatus } from "./dom.js";
-import { loadData } from "./main.js";
+import { APPROX_COUNT_TITLE, formatApproxCount } from "./format.js";
+import { loadData } from "./reload.js";
 import { applyStoredSort, clearFilter, persist, rememberSchema, scopeQuery, sourceQuery, state } from "./state.js";
 import type { SourceEntry, TableListEntry } from "./types.js";
-
-// approx_rows/total_approx is -1 when the backend has no cheap estimate for
-// this table (e.g. Postgres before ANALYZE, or an engine with no such
-// catalog at all — see docs/adapter-decisions.md); show "?" rather than a
-// confusing raw negative number. No leading "~" in that case either —
-// "~?" would read as "approximately unknown".
-export function formatApproxCount(n: number | null | undefined): string {
-  return n == null || n < 0 ? "?" : `~${n}`;
-}
-export const APPROX_COUNT_TITLE =
-  "~ = approximate, from the backend's own statistics, not a live count; " +
-  "? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
 
 // ---- sidebar table search-as-you-type: transient, session-local state,
 // not part of `state`/localStorage — resets on reload ----

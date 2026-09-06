@@ -1,9 +1,10 @@
 import { $, copyText, reportError } from "./dom.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
+import { APPROX_COUNT_TITLE, formatApproxCount, formatCellValue } from "./format.js";
 import { type JsonValue, renderJsonTree } from "./json-tree.js";
-import { loadData } from "./main.js";
 import { openRecordView } from "./record-view.js";
-import { APPROX_COUNT_TITLE, formatApproxCount, loadTables, setSchema } from "./sidebar.js";
+import { loadData } from "./reload.js";
+import { loadTables, setSchema } from "./sidebar.js";
 import { hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
@@ -81,40 +82,6 @@ function renderEmptyState(columnCount: number): void {
 
 const cellTemplate = $<HTMLTemplateElement>("cell-template");
 const rowActionTemplate = $<HTMLTemplateElement>("row-action-template");
-
-// Postgres data_type strings bucketed into the --type-* palette — ground
-// truth from the schema, so unlike renderJsonTree's scalars this is a
-// straight lookup, no parsing needed.
-const CELL_TYPE_CLASSES: Record<string, string> = {
-  boolean: "cell-type-bool",
-  uuid: "cell-type-uuid",
-  smallint: "cell-type-number",
-  integer: "cell-type-number",
-  bigint: "cell-type-number",
-  numeric: "cell-type-number",
-  real: "cell-type-number",
-  "double precision": "cell-type-number",
-};
-
-// Shared by buildCell and buildRecordEntries so a column's rendering rule
-// lives in one place.
-export function formatCellValue(col: Column, raw: string): Node {
-  if (col.type === "timestamp with time zone" || col.type === "date") {
-    const time = document.createElement("time");
-    time.dateTime = raw;
-    time.textContent = raw;
-    time.className = "cell-type-date";
-    return time;
-  }
-  const cls = CELL_TYPE_CLASSES[col.type];
-  if (cls) {
-    const span = document.createElement("span");
-    span.className = cls;
-    span.textContent = raw;
-    return span;
-  }
-  return document.createTextNode(raw);
-}
 
 // ---- cell preview ----
 let cellPopAnchor: HTMLElement | null = null;

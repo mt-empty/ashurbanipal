@@ -888,6 +888,15 @@ function quoteFilterValue(value) {
 }
 window.__ashurbanipal = { parseFilterDsl, quoteFilterValue };
 
+// src/reload.ts
+var impl = null;
+function registerLoadData(fn) {
+  impl = fn;
+}
+function loadData(opts) {
+  return impl ? impl(opts) : Promise.resolve();
+}
+
 // src/state.ts
 var UI_KEY = "ashurbanipal_ui";
 var state = {
@@ -1330,6 +1339,39 @@ async function showCommonValues(e, column) {
   renderCommonValues(values, column);
 }
 
+// src/format.ts
+function formatApproxCount(n) {
+  return n == null || n < 0 ? "?" : `~${n}`;
+}
+var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
+var CELL_TYPE_CLASSES = {
+  boolean: "cell-type-bool",
+  uuid: "cell-type-uuid",
+  smallint: "cell-type-number",
+  integer: "cell-type-number",
+  bigint: "cell-type-number",
+  numeric: "cell-type-number",
+  real: "cell-type-number",
+  "double precision": "cell-type-number"
+};
+function formatCellValue(col, raw) {
+  if (col.type === "timestamp with time zone" || col.type === "date") {
+    const time = document.createElement("time");
+    time.dateTime = raw;
+    time.textContent = raw;
+    time.className = "cell-type-date";
+    return time;
+  }
+  const cls = CELL_TYPE_CLASSES[col.type];
+  if (cls) {
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = raw;
+    return span;
+  }
+  return document.createTextNode(raw);
+}
+
 // src/json-tree.ts
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function renderJsonTree(value) {
@@ -1494,10 +1536,6 @@ function openRecordView(columns, row) {
 }
 
 // src/sidebar.ts
-function formatApproxCount(n) {
-  return n == null || n < 0 ? "?" : `~${n}`;
-}
-var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
 var tableEntries = [];
 var tableMatchHighlight = CSS.highlights ? new Highlight() : null;
 if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
@@ -1706,33 +1744,6 @@ function renderEmptyState(columnCount) {
 }
 var cellTemplate = $("cell-template");
 var rowActionTemplate = $("row-action-template");
-var CELL_TYPE_CLASSES = {
-  boolean: "cell-type-bool",
-  uuid: "cell-type-uuid",
-  smallint: "cell-type-number",
-  integer: "cell-type-number",
-  bigint: "cell-type-number",
-  numeric: "cell-type-number",
-  real: "cell-type-number",
-  "double precision": "cell-type-number"
-};
-function formatCellValue(col, raw) {
-  if (col.type === "timestamp with time zone" || col.type === "date") {
-    const time = document.createElement("time");
-    time.dateTime = raw;
-    time.textContent = raw;
-    time.className = "cell-type-date";
-    return time;
-  }
-  const cls = CELL_TYPE_CLASSES[col.type];
-  if (cls) {
-    const span = document.createElement("span");
-    span.className = cls;
-    span.textContent = raw;
-    return span;
-  }
-  return document.createTextNode(raw);
-}
 var cellPopAnchor = null;
 function showCellPop(e, text) {
   let isJson = true;
@@ -1943,6 +1954,125 @@ window.addEventListener("popstate", (ev) => {
   });
 });
 
+// src/table-focus.ts
+var tableEl = document.querySelector("table");
+function captureTableFocus() {
+  const active = document.activeElement;
+  if (!active || !tableEl.contains(active)) return null;
+  const cell = active.closest("th, td");
+  const tr = active.closest("tr");
+  if (!cell || !tr) return null;
+  return {
+    region: tr.parentElement.id,
+    rowIndex: [...tr.parentElement.children].indexOf(tr),
+    colIndex: [...tr.children].indexOf(cell),
+    className: active.className
+  };
+}
+function restoreTableFocus(captured) {
+  if (!captured) return;
+  const tr = $(captured.region)?.children[captured.rowIndex];
+  const cell = tr?.children[captured.colIndex];
+  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
+  const target = classSelector ? cell?.querySelector(classSelector) : null;
+  (target ?? tableEl).focus();
+}
+
+// src/controller.ts
+function setTableBusy(busy) {
+  if (busy) tableEl.setAttribute("aria-busy", "true");
+  else tableEl.removeAttribute("aria-busy");
+}
+var inFlightFetches = 0;
+async function fetchTableData() {
+  const table = state.table ?? "";
+  const params = new URLSearchParams({
+    table,
+    limit: String(state.limit),
+    offset: String(state.offset)
+  });
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
+  applyScopeParams(params);
+  if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
+  if (inFlightFetches++ === 0) {
+    setStatus("loading\u2026");
+    setTableBusy(true);
+  }
+  setRowLoading(table, true);
+  try {
+    return await api(`/tables/data?${params}`);
+  } finally {
+    setRowLoading(table, false);
+    if (--inFlightFetches === 0) {
+      setStatus("");
+      setTableBusy(false);
+    }
+  }
+}
+function updateActiveTableChrome() {
+  setActiveTable(state.table);
+  $("current").textContent = state.table ?? "\u2014";
+  document.title = state.table ? `${state.table} \u2014 Ashurbanipal` : "Ashurbanipal";
+}
+var loadDataToken = 0;
+async function loadData2({
+  resetScroll = true,
+  highlightNew = false
+} = {}) {
+  clearError();
+  if (!state.table) {
+    updateActiveTableChrome();
+    setStatus("");
+    return;
+  }
+  const token = ++loadDataToken;
+  let data;
+  try {
+    data = await fetchTableData();
+  } catch (e) {
+    if (token !== loadDataToken) return;
+    if (dropOneStaleInput()) return loadData2({ resetScroll, highlightNew });
+    reportError(e);
+    return;
+  }
+  if (token !== loadDataToken) return;
+  markStoredSortVerified();
+  markFilterVerified();
+  updateActiveTableChrome();
+  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
+  $("payload").disabled = false;
+  $("columns-btn").disabled = false;
+  $("refresh").disabled = false;
+  updateColumnsButtonLabel();
+  syncUrl();
+  const renderTable = () => {
+    const focusCapture = captureTableFocus();
+    renderHeader(data.columns);
+    renderRows(data, newRowKeys, pkNames);
+    renderColumnMenu(data.columns);
+    restoreTableFocus(focusCapture);
+  };
+  if (document.startViewTransition) {
+    setTableBusy(true);
+    await document.startViewTransition(renderTable).updateCallbackDone;
+    setTableBusy(false);
+  } else {
+    renderTable();
+  }
+  if (token !== loadDataToken) return;
+  updatePager(data);
+  if (newRowKeys?.size) {
+    setStatus(`${newRowKeys.size} new`);
+  } else if (highlightNew && newRowKeys) {
+    setStatus("no changes");
+    flashIcon($("refresh-icon"), "\u2713", 1e3);
+  }
+  if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
+}
+
 // src/sidebar-resize.ts
 var SIDEBAR_W_KEY = "ashurbanipal_sidebar_w";
 var MIN_W = 180;
@@ -2028,132 +2158,18 @@ $("theme-toggle").onclick = () => {
 };
 
 // src/main.ts
+registerLoadData(loadData2);
 $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $("payload-dialog").showModal();
 };
-var tableEl = document.querySelector("table");
-function setTableBusy(busy) {
-  if (busy) tableEl.setAttribute("aria-busy", "true");
-  else tableEl.removeAttribute("aria-busy");
-}
-var inFlightFetches = 0;
-async function fetchTableData() {
-  const table = state.table ?? "";
-  const params = new URLSearchParams({
-    table,
-    limit: String(state.limit),
-    offset: String(state.offset)
-  });
-  if (state.sort) {
-    params.set("sort", state.sort);
-    params.set("order", state.order);
-  }
-  applyScopeParams(params);
-  if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
-  if (inFlightFetches++ === 0) {
-    setStatus("loading\u2026");
-    setTableBusy(true);
-  }
-  setRowLoading(table, true);
-  try {
-    return await api(`/tables/data?${params}`);
-  } finally {
-    setRowLoading(table, false);
-    if (--inFlightFetches === 0) {
-      setStatus("");
-      setTableBusy(false);
-    }
-  }
-}
-function captureTableFocus() {
-  const active = document.activeElement;
-  if (!active || !tableEl.contains(active)) return null;
-  const cell = active.closest("th, td");
-  const tr = active.closest("tr");
-  if (!cell || !tr) return null;
-  return {
-    region: tr.parentElement.id,
-    rowIndex: [...tr.parentElement.children].indexOf(tr),
-    colIndex: [...tr.children].indexOf(cell),
-    className: active.className
-  };
-}
-function restoreTableFocus(captured) {
-  if (!captured) return;
-  const tr = $(captured.region)?.children[captured.rowIndex];
-  const cell = tr?.children[captured.colIndex];
-  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
-  const target = classSelector ? cell?.querySelector(classSelector) : null;
-  (target ?? tableEl).focus();
-}
-function updateActiveTableChrome() {
-  setActiveTable(state.table);
-  $("current").textContent = state.table ?? "\u2014";
-  document.title = state.table ? `${state.table} \u2014 Ashurbanipal` : "Ashurbanipal";
-}
-var loadDataToken = 0;
-async function loadData({
-  resetScroll = true,
-  highlightNew = false
-} = {}) {
-  clearError();
-  if (!state.table) {
-    updateActiveTableChrome();
-    setStatus("");
-    return;
-  }
-  const token = ++loadDataToken;
-  let data;
-  try {
-    data = await fetchTableData();
-  } catch (e) {
-    if (token !== loadDataToken) return;
-    if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
-    reportError(e);
-    return;
-  }
-  if (token !== loadDataToken) return;
-  markStoredSortVerified();
-  markFilterVerified();
-  updateActiveTableChrome();
-  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
-  $("payload").disabled = false;
-  $("columns-btn").disabled = false;
-  $("refresh").disabled = false;
-  updateColumnsButtonLabel();
-  syncUrl();
-  const renderTable = () => {
-    const focusCapture = captureTableFocus();
-    renderHeader(data.columns);
-    renderRows(data, newRowKeys, pkNames);
-    renderColumnMenu(data.columns);
-    restoreTableFocus(focusCapture);
-  };
-  if (document.startViewTransition) {
-    setTableBusy(true);
-    await document.startViewTransition(renderTable).updateCallbackDone;
-    setTableBusy(false);
-  } else {
-    renderTable();
-  }
-  if (token !== loadDataToken) return;
-  updatePager(data);
-  if (newRowKeys?.size) {
-    setStatus(`${newRowKeys.size} new`);
-  } else if (highlightNew && newRowKeys) {
-    setStatus("no changes");
-    flashIcon($("refresh-icon"), "\u2713", 1e3);
-  }
-  if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
-}
 $("prev").onclick = () => {
   state.offset = Math.max(0, state.offset - state.limit);
-  loadData({ resetScroll: false });
+  loadData2({ resetScroll: false });
 };
 $("next").onclick = () => {
   state.offset += state.limit;
-  loadData({ resetScroll: false });
+  loadData2({ resetScroll: false });
 };
 $("nav-back").onclick = () => history.back();
 $("nav-forward").onclick = () => history.forward();
@@ -2161,7 +2177,7 @@ $("refresh").onclick = () => {
   const btn = $("refresh");
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 500);
-  loadData({ resetScroll: false, highlightNew: true });
+  loadData2({ resetScroll: false, highlightNew: true });
 };
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
@@ -2169,9 +2185,6 @@ new ResizeObserver(([entry]) => {
 loadSources().then(loadSchemas).then(loadTables).catch(reportError);
 loadSiblings();
 setInterval(loadSiblings, 15e3);
-export {
-  loadData
-};
 </script>
 </body>
 </html>

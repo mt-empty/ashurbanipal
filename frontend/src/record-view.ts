@@ -1,5 +1,5 @@
 import { $, copyText } from "./dom.js";
-import { formatCellValue } from "./grid.js";
+import { formatCellValue } from "./format.js";
 import { renderJsonTree } from "./json-tree.js";
 import { state } from "./state.js";
 import type { Column, Row } from "./types.js";

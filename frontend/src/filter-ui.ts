@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { $, reportError } from "./dom.js";
 import { parseFilterDsl, quoteFilterValue } from "./filter-dsl.js";
-import { loadData } from "./main.js";
+import { loadData } from "./reload.js";
 import { applyScopeParams, getLastPayload, markFilterVerified, setAppliedFilterAst, state } from "./state.js";
 import type { CommonValue, FilterCondition, FilterOp } from "./types.js";
 

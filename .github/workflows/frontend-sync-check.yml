@@ -8,12 +8,14 @@ on:
       - "frontend/src/**"
       - "frontend/package.json"
       - "frontend/pnpm-lock.yaml"
+      - "frontend/biome.json"
       - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
       - "implementations/node-express/**"
       - "implementations/flask-python/**"
       - "tools/sync-ports-frontend.sh"
+      - "tools/check-frontend-cycles.sh"
       - ".github/workflows/frontend-sync-check.yml"
   pull_request:
     paths:
@@ -21,12 +23,14 @@ on:
       - "frontend/src/**"
       - "frontend/package.json"
       - "frontend/pnpm-lock.yaml"
+      - "frontend/biome.json"
       - "implementations/rust/**"
       - "implementations/go-nethttp/**"
       - "implementations/spring-boot-starter/**"
       - "implementations/node-express/**"
       - "implementations/flask-python/**"
       - "tools/sync-ports-frontend.sh"
+      - "tools/check-frontend-cycles.sh"
       - ".github/workflows/frontend-sync-check.yml"
 
 concurrency:
@@ -35,7 +39,7 @@ concurrency:
 
 jobs:
   check:
-    name: verify frontend/dbviewer.html matches frontend/src/, and vendored copies match it
+    name: lint, cycle-check, and verify frontend/dbviewer.html + vendored copies match frontend/src/
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -45,6 +49,9 @@ jobs:
         with:
           install: false
 
+      - run: mise run frontend:lint
+      - run: mise run frontend:check-cycles
       - run: mise run frontend:typecheck
       - run: mise run frontend:build-check
+      - run: mise run frontend:build-demo-check
       - run: mise run frontend:check-ports-sync
