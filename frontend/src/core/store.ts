@@ -1,6 +1,7 @@
 import { tryParseFilterDsl } from "../lib/filter-dsl.js";
+import { collectNewRowKeys } from "../lib/row-diff.js";
 import { $ } from "./dom.js";
-import type { FilterCondition } from "./types.js";
+import type { FilterCondition, TableData } from "./types.js";
 
 const UI_KEY = "ashurbanipal_ui";
 
@@ -289,4 +290,43 @@ export function switchTable(name: string): void {
   applyStoredSort(name);
   clearFilter();
   persist();
+}
+
+// ---- new-rows-since-refresh bookkeeping ----
+// scopeKey identifies "the same view" between two fetches: a sort/filter/page/
+// scope change makes every row look new, so the highlight only fires when this
+// is unchanged from the fetch being diffed against. The last payload and its
+// scope key are held here because they are per-session mutable state, like the
+// rest of this module; the diff itself is pure (lib/row-diff.ts).
+export function scopeKey(): string {
+  return JSON.stringify([
+    state.source,
+    state.schema,
+    state.table,
+    state.sort,
+    state.order,
+    state.offset,
+    state.limit,
+    getAppliedFilterAst(),
+  ]);
+}
+
+let lastPayload: TableData | null = null;
+export function getLastPayload(): TableData | null {
+  return lastPayload;
+}
+
+let lastScopeKey: string | null = null;
+
+// Advances the lastPayload/lastScopeKey bookkeeping, since it only ever happens
+// alongside this diff.
+export function diffNewRows(data: TableData, highlightNew: boolean): { newRowKeys?: Set<string>; pkNames: string[] } {
+  const nowScope = scopeKey();
+  const result = collectNewRowKeys(lastPayload, data, {
+    highlightNew,
+    sameScope: lastScopeKey === nowScope,
+  });
+  lastPayload = data;
+  lastScopeKey = nowScope;
+  return result;
 }
