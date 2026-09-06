@@ -976,7 +976,11 @@ function restoreFromUrl() {
 }
 function persist() {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
+  } catch (e) {
+    console.warn("ashurbanipal: could not persist view state", e);
+  }
 }
 function hiddenColumnsForTable() {
   return state.hiddenColumns[state.table ?? ""] ?? [];

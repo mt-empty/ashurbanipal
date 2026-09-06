@@ -153,7 +153,16 @@ function restoreFromUrl(): void {
 
 export function persist(): void {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
-  localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
+  // Best-effort: a throw here (quota, private mode) must not abort the caller,
+  // which almost always follows persist() with a loadData()/loadTables() the
+  // user still needs. Unlike the single-string writes in theme.ts /
+  // sidebar-resize.ts, this blob grows per table/source touched, so a quota
+  // failure is plausible on a long session — warn so it isn't wholly invisible.
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }));
+  } catch (e) {
+    console.warn("ashurbanipal: could not persist view state", e);
+  }
 }
 
 // A stale table key or column name absent from the current table's
