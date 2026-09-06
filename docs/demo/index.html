@@ -8,7 +8,7 @@
 <script>
 "use strict";
 (() => {
-  // src/demo-fixtures.ts
+  // src/demo/demo-fixtures.ts
   function hashSeed(s) {
     let h = 1779033703 ^ s.length;
     for (let i = 0; i < s.length; i++) {
@@ -247,7 +247,7 @@
     { name: "notifications (demo)", base_url: "https://notifications.example.com/__ashurbanipal", healthy: false }
   ];
 
-  // src/demo-shim.ts
+  // src/demo/demo-shim.ts
   function toWire(v) {
     if (v === null || v === void 0) return null;
     if (typeof v === "boolean") return v ? "true" : "false";
@@ -501,11 +501,16 @@
       document.documentElement.dataset.theme = ashurbanipalTheme;
   } catch {}
   try {
-    // Bounds duplicated in sidebar-resize.ts's MIN_W/MAX_W — this script
-    // runs standalone, before the bundled module graph, so it can't import them.
-    var ashurbanipalSidebarW = parseFloat(localStorage.getItem("ashurbanipal_sidebar_w"));
-    if (ashurbanipalSidebarW >= 180 && ashurbanipalSidebarW <= 500)
-      document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+    // Key and bounds are injected here by build.mjs from sidebar-resize.ts's
+    // constants — this script runs standalone, before the bundled module
+    // graph, so it can't import them. Until injection the typeof guard makes
+    // it an inert no-op (raw index.html is a build input, never served).
+    var ASHURBANIPAL_SIDEBAR_W_KEY = "ashurbanipal_sidebar_w", ASHURBANIPAL_SIDEBAR_MIN = 180, ASHURBANIPAL_SIDEBAR_MAX = 500;
+    if (typeof ASHURBANIPAL_SIDEBAR_W_KEY === "string") {
+      var ashurbanipalSidebarW = parseFloat(localStorage.getItem(ASHURBANIPAL_SIDEBAR_W_KEY));
+      if (ashurbanipalSidebarW >= ASHURBANIPAL_SIDEBAR_MIN && ashurbanipalSidebarW <= ASHURBANIPAL_SIDEBAR_MAX)
+        document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+    }
   } catch {}
 </script>
 <style>
@@ -998,9 +1003,36 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 </dialog>
 
 <script type="module">
+// src/api.ts
+var API = `${location.pathname.replace(/\/+$/, "")}/api`;
+var PROTOCOL_VERSION = "1";
+var protocolChecked = false;
+var skewMessage = null;
+var skewSubscriber = null;
+function onProtocolSkew(cb) {
+  skewSubscriber = cb;
+  if (skewMessage !== null) cb(skewMessage);
+}
+function checkProtocolVersion(resp) {
+  if (protocolChecked) return;
+  protocolChecked = true;
+  const got = resp.headers.get("x-ashurbanipal-protocol");
+  if (got === PROTOCOL_VERSION) return;
+  skewMessage = `protocol version mismatch: this UI speaks v${PROTOCOL_VERSION}, the server reports ${got ? `v${got}` : "no version"} \u2014 some features may misbehave`;
+  skewSubscriber?.(skewMessage);
+}
+async function api(path) {
+  const resp = await fetch(API + path);
+  if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
 // src/dom.ts
 function $(id) {
-  return document.getElementById(id);
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`no element with id ${id}`);
+  return el;
 }
 function qs(root, selector) {
   const el = root.querySelector(selector);
@@ -1053,28 +1085,6 @@ async function copyText(text, btn) {
     glyph = "\u2717";
   }
   flashIcon(mark, glyph);
-}
-
-// src/api.ts
-var API = `${location.pathname.replace(/\/+$/, "")}/api`;
-var PROTOCOL_VERSION = "1";
-var protocolChecked = false;
-function checkProtocolVersion(resp) {
-  if (protocolChecked) return;
-  protocolChecked = true;
-  const got = resp.headers.get("x-ashurbanipal-protocol");
-  if (got === PROTOCOL_VERSION) return;
-  $("protocol-warning-text").textContent = `protocol version mismatch: this UI speaks v${PROTOCOL_VERSION}, the server reports ${got ? `v${got}` : "no version"} \u2014 some features may misbehave`;
-  $("protocol-warning").hidden = false;
-}
-$("protocol-warning-dismiss").onclick = () => {
-  $("protocol-warning").hidden = true;
-};
-async function api(path) {
-  const resp = await fetch(API + path);
-  if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
-  if (!resp.ok) throw new Error(await resp.text());
-  return resp.json();
 }
 
 // src/api-reference.ts
@@ -1808,11 +1818,11 @@ $("filter").onkeydown = (e) => {
     closeFilterSuggest();
   }
 };
-document.onpointerdown = (e) => {
+document.addEventListener("pointerdown", (e) => {
   if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target) && !$("filter-suggest").contains(e.target)) {
     closeFilterSuggest();
   }
-};
+});
 var cvAnchor = null;
 var cvRequestToken = 0;
 function renderCommonValues(values, column) {
@@ -2452,10 +2462,8 @@ window.addEventListener("popstate", (ev) => {
   navIndex = navState.navIndex;
   const params = new URLSearchParams(location.search);
   applyUrlExact(params);
-  const sourceSelect = $("source-select");
-  if (sourceSelect) sourceSelect.value = state.source ?? "";
-  const schemaSelect = $("schema-select");
-  if (schemaSelect) schemaSelect.value = state.schema ?? "";
+  $("source-select").value = state.source ?? "";
+  $("schema-select").value = state.schema ?? "";
   $("schema-select-wrap").hidden = !state.schema;
   persist();
   updateNavButtons();
@@ -2585,12 +2593,14 @@ async function loadData2({
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
 
-// src/sidebar-resize.ts
+// src/sidebar-bounds.ts
 var SIDEBAR_W_KEY = "ashurbanipal_sidebar_w";
-var MIN_W = 180;
-var MAX_W = 500;
+var SIDEBAR_MIN_W = 180;
+var SIDEBAR_MAX_W = 500;
+
+// src/sidebar-resize.ts
 function clamp(w) {
-  return Math.min(MAX_W, Math.max(MIN_W, w));
+  return Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, w));
 }
 var handle = $("sidebar-resize-handle");
 var dragging = false;
@@ -2672,6 +2682,13 @@ $("theme-toggle").onclick = () => {
 // src/main.ts
 initState();
 registerLoadData(loadData2);
+onProtocolSkew((message) => {
+  $("protocol-warning-text").textContent = message;
+  $("protocol-warning").hidden = false;
+  $("protocol-warning-dismiss").onclick = () => {
+    $("protocol-warning").hidden = true;
+  };
+});
 $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $("payload-dialog").showModal();

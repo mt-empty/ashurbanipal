@@ -1,10 +1,14 @@
+// Throws on a miss: every id here is in the co-shipped static markup, so a
+// null is a markup/build bug to surface, not a branch every caller must
+// carry.
 export function $<T extends HTMLElement = HTMLElement>(id: string): T {
-  return document.getElementById(id) as T;
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`no element with id ${id}`);
+  return el as T;
 }
 
-// Throws on a miss. Every caller targets an element a freshly-cloned
-// <template> or the static markup guarantees, so a null there is a
-// markup/build bug to surface, not a branch to handle.
+// Same policy as $, for a selector against a freshly-cloned <template> or a
+// known-present subtree.
 export function qs<T extends Element>(root: ParentNode, selector: string): T {
   const el = root.querySelector<T>(selector);
   if (!el) throw new Error(`no element matches ${selector}`);

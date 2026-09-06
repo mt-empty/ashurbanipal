@@ -7,7 +7,7 @@ set -eu
 #   - frontend/src/types.ts   — the FilterOp union
 #   - frontend/src/api-reference.ts — the in-app API reference dialog
 #   - frontend/src/filter-dsl.ts    — FILTER_MAX_CONDITIONS
-#   - frontend/src/demo-shim.ts     — VALID_OPS (offline demo backend)
+#   - frontend/src/demo/demo-shim.ts     — VALID_OPS (offline demo backend)
 # spec/openapi.yaml is the source of truth for the operator set and the
 # condition cap. max_json_bytes has no normative home (spec/protocol.md
 # §5.4.2 describes only the Rust port's bound), so it is checked only for
@@ -40,7 +40,7 @@ const openapi = read("spec/openapi.yaml");
 const types = read("frontend/src/types.ts");
 const apiRef = read("frontend/src/api-reference.ts");
 const dsl = read("frontend/src/filter-dsl.ts");
-const demoShim = read("frontend/src/demo-shim.ts");
+const demoShim = read("frontend/src/demo/demo-shim.ts");
 
 // ---- operator set: spec is canonical, three frontend copies must match ----
 const specOps = quoted(cap(/enum:\s*(\[[^\]]*"IS NOT NULL"[^\]]*\])/, openapi));

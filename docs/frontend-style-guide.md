@@ -85,15 +85,17 @@ instead of searching one file for a banner.
 
 ## 3. JavaScript
 
-- **One consistent event-binding style: `.onX =`.** Two legitimate reasons
-  to reach for `addEventListener` instead, neither of which applies to most
-  wiring in this file: needing a second listener on the same element/event,
-  or a non-standardized event whose IDL property doesn't exist on every
-  engine (e.g. `onsearch` — Chromium and legacy WebKit expose it, Firefox
-  never implemented it, so `.onsearch =` silently no-ops there instead of
-  erroring; `$("filter").addEventListener("search", ...)` is the fix and
-  works identically everywhere). Don't reach for `addEventListener` without
-  one of these two reasons, and note which one inline when you do.
+- **Event binding: `.onX =` only on an element this file exclusively owns
+  and binds once.** That covers most wiring here — a toolbar button, a
+  freshly-created cell — and stays the default for it: one slot, one
+  assignment, one place to look. Reach for `addEventListener` when any of
+  three things is true, and note which inline: (a) the target is
+  `document` / `window` / `document.body` — a single shared IDL slot any
+  other module can silently overwrite, so it is never `.onX =`; (b) a
+  second listener is needed on the same element/event; (c) the event has
+  no IDL property on every engine (e.g. `onsearch` — Chromium and legacy
+  WebKit expose it, Firefox never did, so `.onsearch =` silently no-ops
+  there; `$("filter").addEventListener("search", ...)` works everywhere).
 - **Any function that fetches and then mutates shared state must guard
   against out-of-order responses with a per-call token.** Capture a
   monotonic counter at the start of the call (`const token = ++xRequestToken`)

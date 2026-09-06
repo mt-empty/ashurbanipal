@@ -1,12 +1,8 @@
 import { $ } from "./dom.js";
-
-const SIDEBAR_W_KEY = "ashurbanipal_sidebar_w";
-// Bounds duplicated in index.html's pre-paint <script> (which can't import this).
-const MIN_W = 180;
-const MAX_W = 500;
+import { SIDEBAR_MAX_W, SIDEBAR_MIN_W, SIDEBAR_W_KEY } from "./sidebar-bounds.js";
 
 function clamp(w: number): number {
-  return Math.min(MAX_W, Math.max(MIN_W, w));
+  return Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, w));
 }
 
 const handle = $("sidebar-resize-handle");

@@ -1,3 +1,4 @@
+import { onProtocolSkew } from "./api.js";
 import "./api-reference.js";
 import { loadData } from "./controller.js";
 import { $, reportError } from "./dom.js";
@@ -15,6 +16,16 @@ import "./theme.js";
 // orchestration lives in controller.ts.
 initState();
 registerLoadData(loadData);
+
+// Protocol-skew banner: api.ts flags a version mismatch on the first
+// /tables response; this owns the DOM it shows in.
+onProtocolSkew((message) => {
+  $("protocol-warning-text").textContent = message;
+  $("protocol-warning").hidden = false;
+  $<HTMLButtonElement>("protocol-warning-dismiss").onclick = () => {
+    $("protocol-warning").hidden = true;
+  };
+});
 
 // ---- raw payload viewer ----
 $("payload").onclick = () => {

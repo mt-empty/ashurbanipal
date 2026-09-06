@@ -211,7 +211,10 @@ $<HTMLInputElement>("filter").onkeydown = (e) => {
     closeFilterSuggest();
   }
 };
-document.onpointerdown = (e) => {
+// addEventListener, not `document.onpointerdown =`: the single IDL slot on
+// document is shared global state any other module could silently overwrite
+// (frontend-style-guide.md §3).
+document.addEventListener("pointerdown", (e) => {
   if (
     filterSuggestMatches.length > 0 &&
     !$("filter").contains(e.target as Node) &&
@@ -219,7 +222,7 @@ document.onpointerdown = (e) => {
   ) {
     closeFilterSuggest();
   }
-};
+});
 
 // ---- common-values header dropdown: a shortlist from Postgres planner
 // statistics, never a full distinct-value scan — copy says "common

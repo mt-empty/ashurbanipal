@@ -66,10 +66,8 @@ window.addEventListener("popstate", (ev) => {
   // (contrast url.ts's load-time overlay). Do not inline this back — see the
   // header comment in url.ts.
   applyUrlExact(params);
-  const sourceSelect = $<HTMLSelectElement>("source-select");
-  if (sourceSelect) sourceSelect.value = state.source ?? "";
-  const schemaSelect = $<HTMLSelectElement>("schema-select");
-  if (schemaSelect) schemaSelect.value = state.schema ?? "";
+  $<HTMLSelectElement>("source-select").value = state.source ?? "";
+  $<HTMLSelectElement>("schema-select").value = state.schema ?? "";
   // syncUrl() only ever writes `schema` when the source at that history
   // point had more than one (loadSchemas pins state.schema to a concrete
   // name only then) — its presence/absence here is a reliable proxy for

@@ -19,11 +19,16 @@
       document.documentElement.dataset.theme = ashurbanipalTheme;
   } catch {}
   try {
-    // Bounds duplicated in sidebar-resize.ts's MIN_W/MAX_W — this script
-    // runs standalone, before the bundled module graph, so it can't import them.
-    var ashurbanipalSidebarW = parseFloat(localStorage.getItem("ashurbanipal_sidebar_w"));
-    if (ashurbanipalSidebarW >= 180 && ashurbanipalSidebarW <= 500)
-      document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+    // Key and bounds are injected here by build.mjs from sidebar-resize.ts's
+    // constants — this script runs standalone, before the bundled module
+    // graph, so it can't import them. Until injection the typeof guard makes
+    // it an inert no-op (raw index.html is a build input, never served).
+    /*ASHURBANIPAL_SIDEBAR_BOUNDS*/
+    if (typeof ASHURBANIPAL_SIDEBAR_W_KEY === "string") {
+      var ashurbanipalSidebarW = parseFloat(localStorage.getItem(ASHURBANIPAL_SIDEBAR_W_KEY));
+      if (ashurbanipalSidebarW >= ASHURBANIPAL_SIDEBAR_MIN && ashurbanipalSidebarW <= ASHURBANIPAL_SIDEBAR_MAX)
+        document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
+    }
   } catch {}
 </script>
 <style>
