@@ -1,6 +1,6 @@
 import { $, reportError } from "./dom.js";
 import { loadTables } from "./sidebar.js";
-import { applyScopeParams, persist, restoreFilterFromParams, state } from "./state.js";
+import { applyScopeParams, applyUrlExact, persist, state } from "./state.js";
 
 // Back/forward navigation stops at table/schema/source switches, not every
 // sort/page tweak within the same table — otherwise "back" would undo
@@ -62,14 +62,10 @@ window.addEventListener("popstate", (ev) => {
   if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
   navIndex = navState.navIndex;
   const params = new URLSearchParams(location.search);
-  state.source = params.get("source") || null;
-  state.schema = params.get("schema") || null;
-  state.table = params.get("table") || null;
-  state.sort = params.get("sort") || null;
-  state.order = params.get("order") === "desc" ? "desc" : "asc";
-  state.limit = Number(params.get("limit")) || state.limit;
-  state.offset = Number(params.get("offset")) || 0;
-  restoreFilterFromParams(params);
+  // Exact reader: reproduce this history entry verbatim, absences included
+  // (contrast url.ts's load-time overlay). Do not inline this back — see the
+  // header comment in url.ts.
+  applyUrlExact(params);
   const sourceSelect = $<HTMLSelectElement>("source-select");
   if (sourceSelect) sourceSelect.value = state.source ?? "";
   const schemaSelect = $<HTMLSelectElement>("schema-select");

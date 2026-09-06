@@ -897,7 +897,7 @@ function loadData(opts) {
   return impl ? impl(opts) : Promise.resolve();
 }
 
-// src/state.ts
+// src/store.ts
 var UI_KEY = "ashurbanipal_ui";
 var state = {
   source: null,
@@ -987,17 +987,6 @@ function restoreFromStorage() {
     localStorage.removeItem(UI_KEY);
   }
 }
-function restoreFromUrl() {
-  const params = new URLSearchParams(location.search);
-  if (params.has("source")) state.source = params.get("source");
-  if (params.has("schema")) state.schema = params.get("schema");
-  if (params.has("table")) state.table = params.get("table");
-  if (params.has("sort")) state.sort = params.get("sort");
-  if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
-  if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
-  if (params.has("offset")) state.offset = Number(params.get("offset")) || 0;
-  restoreFilterFromParams(params);
-}
 function persist() {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
   try {
@@ -1048,25 +1037,36 @@ function rememberSchema() {
   if (state.source && state.schema) state.schemaBySource[state.source] = state.schema;
   persist();
 }
-function applyScopeParams(params) {
-  if (state.source) params.set("source", state.source);
-  if (state.schema) params.set("schema", state.schema);
+function setSchema(name) {
+  state.schema = name;
+  $("schema-select").value = name;
+  rememberSchema();
 }
-function scopeQuery() {
-  const params = new URLSearchParams();
-  applyScopeParams(params);
-  return params.size ? `?${params}` : "";
+function switchSource(name) {
+  state.source = name;
+  state.schema = state.schemaBySource[name] ?? null;
+  state.table = null;
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
+  persist();
 }
-function sourceQuery() {
-  return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
+function switchSchema(name) {
+  setSchema(name);
+  state.table = null;
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
 }
-var lastPayload = null;
-function getLastPayload() {
-  return lastPayload;
+function switchTable(name) {
+  state.table = name;
+  state.offset = 0;
+  applyStoredSort(name);
+  clearFilter();
+  persist();
 }
-function setLastPayload(data) {
-  lastPayload = data;
-}
+
+// src/row-diff.ts
 function rowKey(pkNames, row) {
   return JSON.stringify(pkNames.map((n) => row[n]));
 }
@@ -1079,34 +1079,68 @@ function scopeKey() {
     state.order,
     state.offset,
     state.limit,
-    appliedFilterAst
+    getAppliedFilterAst()
   ]);
 }
+var lastPayload = null;
+function getLastPayload() {
+  return lastPayload;
+}
 var lastScopeKey = null;
-function getLastScopeKey() {
-  return lastScopeKey;
-}
-function setLastScopeKey(key) {
-  lastScopeKey = key;
-}
 function diffNewRows(data, highlightNew) {
-  const prev = getLastPayload();
+  const prev = lastPayload;
   const nowScope = scopeKey();
   let newRowKeys;
   let pkNames = [];
-  if (highlightNew && prev && getLastScopeKey() === nowScope) {
+  if (highlightNew && prev && lastScopeKey === nowScope) {
     pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
     if (pkNames.length) {
       const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
       newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
     }
   }
-  setLastPayload(data);
-  setLastScopeKey(nowScope);
+  lastPayload = data;
+  lastScopeKey = nowScope;
   return { newRowKeys, pkNames };
 }
-restoreFromStorage();
-restoreFromUrl();
+
+// src/url.ts
+function applyUrlOverlay(params) {
+  if (params.has("source")) state.source = params.get("source");
+  if (params.has("schema")) state.schema = params.get("schema");
+  if (params.has("table")) state.table = params.get("table");
+  if (params.has("sort")) state.sort = params.get("sort");
+  if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
+  if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
+  if (params.has("offset")) state.offset = Number(params.get("offset")) || 0;
+  restoreFilterFromParams(params);
+}
+function applyUrlExact(params) {
+  state.source = params.get("source") || null;
+  state.schema = params.get("schema") || null;
+  state.table = params.get("table") || null;
+  state.sort = params.get("sort") || null;
+  state.order = params.get("order") === "desc" ? "desc" : "asc";
+  state.limit = Number(params.get("limit")) || state.limit;
+  state.offset = Number(params.get("offset")) || 0;
+  restoreFilterFromParams(params);
+}
+function applyScopeParams(params) {
+  if (state.source) params.set("source", state.source);
+  if (state.schema) params.set("schema", state.schema);
+}
+function scopeQuery() {
+  const params = new URLSearchParams();
+  applyScopeParams(params);
+  return params.size ? `?${params}` : "";
+}
+function sourceQuery() {
+  return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
+}
+function initState() {
+  restoreFromStorage();
+  applyUrlOverlay(new URLSearchParams(location.search));
+}
 
 // src/filter-ui.ts
 function submitFilter(text) {
@@ -1580,13 +1614,7 @@ async function loadSources() {
   $("source-select-wrap").hidden = false;
 }
 $("source-select").onchange = () => {
-  state.source = $("source-select").value;
-  state.schema = state.schemaBySource[state.source ?? ""] ?? null;
-  state.table = null;
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
-  persist();
+  switchSource($("source-select").value);
   loadSchemas().then(loadTables).catch(reportError);
 };
 var loadSchemasToken = 0;
@@ -1613,17 +1641,8 @@ async function loadSchemas() {
   populateSelect($("schema-select"), schemas, state.schema);
   $("schema-select-wrap").hidden = false;
 }
-function setSchema(name) {
-  state.schema = name;
-  $("schema-select").value = name;
-  rememberSchema();
-}
 $("schema-select").onchange = () => {
-  setSchema($("schema-select").value);
-  state.table = null;
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
+  switchSchema($("schema-select").value);
   loadTables().catch(reportError);
 };
 var loadTablesToken = 0;
@@ -1650,11 +1669,7 @@ async function loadTables() {
     btn.dataset.table = t.name;
     btn.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
     btn.onclick = () => {
-      state.table = t.name;
-      state.offset = 0;
-      applyStoredSort(t.name);
-      clearFilter();
-      persist();
+      switchTable(t.name);
       loadData();
     };
     li.appendChild(btn);
@@ -1933,14 +1948,7 @@ window.addEventListener("popstate", (ev) => {
   if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
   navIndex = navState.navIndex;
   const params = new URLSearchParams(location.search);
-  state.source = params.get("source") || null;
-  state.schema = params.get("schema") || null;
-  state.table = params.get("table") || null;
-  state.sort = params.get("sort") || null;
-  state.order = params.get("order") === "desc" ? "desc" : "asc";
-  state.limit = Number(params.get("limit")) || state.limit;
-  state.offset = Number(params.get("offset")) || 0;
-  restoreFilterFromParams(params);
+  applyUrlExact(params);
   const sourceSelect = $("source-select");
   if (sourceSelect) sourceSelect.value = state.source ?? "";
   const schemaSelect = $("schema-select");
@@ -2158,6 +2166,7 @@ $("theme-toggle").onclick = () => {
 };
 
 // src/main.ts
+initState();
 registerLoadData(loadData2);
 $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);

@@ -27,10 +27,18 @@ something a review should flag.
   its event wiring together (locality of behavior) — the same principle
   the old single-file layout expressed with banners, now expressed as file
   boundaries.
-- `state.ts` owns the state genuinely shared across modules (the `state`
-  object, the applied filter AST, the last-fetched payload) — the latter
-  two behind getter/setter functions, since a plain `let` export can't be
-  reassigned from outside its own module under ESM.
+- The shared client state is behind one `./state.js` entry point that
+  re-exports three concern-split modules: `store.ts` (the `state` object,
+  its localStorage persistence, and the named scope transitions),
+  `url.ts` (URL params ⇄ state, read side — two readers that differ on
+  purpose, see the header comment there), `row-diff.ts` (the
+  new-rows-since-refresh derivation). `store.ts` exposes named transitions
+  (`switchSource` / `switchSchema` / `switchTable`) that run the resets and
+  persistence each one implies; feature modules call those rather than
+  assigning scope fields ad hoc, and a site that deliberately diverges
+  (grid.ts's FK navigation, which seeds a filter instead of clearing one)
+  says why inline. A value a plain `let` export can't expose (the applied
+  filter AST) stays behind a getter/setter pair.
 - `dom.ts` holds generic, feature-agnostic helpers (`$`, `setStatus`,
   `copyText`, `reportError`/`clearError`, `populateSelect`, `flashIcon`).
 - `controller.ts` owns `loadData` / `fetchTableData` — the

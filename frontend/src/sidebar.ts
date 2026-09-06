@@ -2,7 +2,16 @@ import { api } from "./api.js";
 import { $, populateSelect, reportError, setStatus } from "./dom.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "./format.js";
 import { loadData } from "./reload.js";
-import { applyStoredSort, clearFilter, persist, rememberSchema, scopeQuery, sourceQuery, state } from "./state.js";
+import {
+  applyStoredSort,
+  clearFilter,
+  scopeQuery,
+  sourceQuery,
+  state,
+  switchSchema,
+  switchSource,
+  switchTable,
+} from "./state.js";
 import type { SourceEntry, TableListEntry } from "./types.js";
 
 // ---- sidebar table search-as-you-type: transient, session-local state,
@@ -65,15 +74,9 @@ export async function loadSources(): Promise<void> {
   $("source-select-wrap").hidden = false;
 }
 $<HTMLSelectElement>("source-select").onchange = () => {
-  state.source = $<HTMLSelectElement>("source-select").value;
-  // Restore the schema last used on this source rather than resetting;
-  // loadSchemas() still validates it and falls back if it's gone (R5/R12).
-  state.schema = state.schemaBySource[state.source ?? ""] ?? null;
-  state.table = null;
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
-  persist();
+  // switchSource restores the schema last used on this source rather than
+  // resetting; loadSchemas() still validates it and falls back (R5/R12).
+  switchSource($<HTMLSelectElement>("source-select").value);
   loadSchemas().then(loadTables).catch(reportError);
 };
 
@@ -119,20 +122,8 @@ export async function loadSchemas(): Promise<void> {
   populateSelect($<HTMLSelectElement>("schema-select"), schemas, state.schema!);
   $("schema-select-wrap").hidden = false;
 }
-// Syncs the schema dropdown, state, and the per-source memory (R12) in one
-// place — the step shared by an explicit switch and grid.ts's FK
-// cross-schema navigation, which then diverge on what resets afterward.
-export function setSchema(name: string): void {
-  state.schema = name;
-  $<HTMLSelectElement>("schema-select").value = name;
-  rememberSchema();
-}
 $<HTMLSelectElement>("schema-select").onchange = () => {
-  setSchema($<HTMLSelectElement>("schema-select").value);
-  state.table = null;
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
+  switchSchema($<HTMLSelectElement>("schema-select").value);
   loadTables().catch(reportError);
 };
 
@@ -166,14 +157,8 @@ export async function loadTables(): Promise<void> {
     // Always set, not just when commented: long names get CSS-truncated
     // (see .row-name), so the title tooltip is the escape hatch.
     btn.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
-    // The filter is written against this table's columns, so it clears on
-    // switch; the sort is restored to whatever was last used on this table.
     btn.onclick = () => {
-      state.table = t.name;
-      state.offset = 0;
-      applyStoredSort(t.name);
-      clearFilter();
-      persist();
+      switchTable(t.name);
       loadData();
     };
     li.appendChild(btn);

@@ -5,13 +5,15 @@ import { registerLoadData } from "./reload.js";
 import { loadSchemas, loadSources, loadTables } from "./sidebar.js";
 import "./sidebar-resize.js";
 import { loadSiblings } from "./siblings.js";
-import { getLastPayload, state } from "./state.js";
+import { getLastPayload, initState, state } from "./state.js";
 import "./theme.js";
 
-// Entry point: wiring only. Register the reload seam so feature modules can
-// reach loadData without importing controller.ts, wire the toolbar buttons
-// and the payload dialog, then kick off the bootstrap sequence. All render
+// Entry point: wiring only. Restore state (storage, then URL layered over
+// it), register the reload seam so feature modules can reach loadData
+// without importing controller.ts, wire the toolbar buttons and the
+// payload dialog, then kick off the bootstrap sequence. All render
 // orchestration lives in controller.ts.
+initState();
 registerLoadData(loadData);
 
 // ---- raw payload viewer ----

@@ -4,8 +4,8 @@ import { APPROX_COUNT_TITLE, formatApproxCount, formatCellValue } from "./format
 import { type JsonValue, renderJsonTree } from "./json-tree.js";
 import { openRecordView } from "./record-view.js";
 import { loadData } from "./reload.js";
-import { loadTables, setSchema } from "./sidebar.js";
-import { hiddenColumnsForTable, persist, rememberSort, rowKey, state } from "./state.js";
+import { loadTables } from "./sidebar.js";
+import { hiddenColumnsForTable, persist, rememberSort, rowKey, setSchema, state } from "./state.js";
 import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
@@ -149,9 +149,11 @@ function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTa
   };
   if (col.references) {
     // In-app navigation: switch to the referenced table and seed a filter
-    // for the referenced row. Clear sort rather than restore the target's
-    // remembered one — this path submits a filter in the same fetch, which
-    // would defeat loadData's drop-and-retry if that stored column is stale.
+    // for the referenced row. Deliberately not switchTable() — that clears
+    // the filter, and this path is *setting* one; it also restores the
+    // target's remembered sort, whereas here sort must be cleared, since a
+    // stale stored column would defeat loadData's drop-and-retry against the
+    // filter submitted in the same fetch.
     cellText.classList.add("fk-cell");
     const refLabel = col.references.schema ? `${col.references.schema}.${col.references.table}` : col.references.table;
     cellText.title = `go to ${refLabel}.${col.references.column} = ${raw}`;
