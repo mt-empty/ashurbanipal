@@ -30,25 +30,31 @@ time, or write the check on a real OpenAPI + TS parser rather than a grep.
 `api()` still casts `resp.json()` with no runtime validation — the one
 normative wire surface with no guard at all.
 
-## 2. `row-diff.ts` unit tests
+## 2. `row-diff.ts` unit tests — DONE
 
-Deferred from Phase 6. `rowKey()` is pure but trivial; the part worth testing
-is `diffNewRows()`'s PK-diff (the reason `refresh-highlight.spec.ts` exists),
-and that is entangled with `scopeKey()`, which reads `state`. Making it
-`node --test`-able cleanly means moving `scopeKey` into `store.ts` so
-`row-diff.ts` becomes a true leaf that imports nothing — a Phase-3-shaped
-restructure not worth doing inside a test phase. Do that move first, then port
-the PK-diff cases (same-scope, scope-changed, no-PK table).
+`scopeKey()` and the last-payload/last-scope bookkeeping moved into
+`store.ts`; `diffNewRows()` there is now a thin wrapper that delegates the
+scope-gated PK diff to a pure `collectNewRowKeys(prev, next, {highlightNew,
+sameScope})` in `frontend/src/lib/row-diff.ts`. `row-diff.ts` moved
+`core/` → `lib/` and imports only `core/types.ts` (type-only) — a true leaf,
+closing item #7's caveat. `frontend/test/row-diff.test.ts` covers `rowKey`
+plus the diff's gates (highlight off, first fetch, scope changed, no-PK
+table, edited vs. new row, composite PK). The `../core/state.js` barrel
+surface is unchanged (the moved names re-export via `store.ts`); only
+`grid.ts`'s `rowKey` import repointed to `lib/row-diff.ts`.
 
-## 3. `json-tree.ts` unit tests
+## 3. `json-tree.ts` unit tests — DONE
 
-Out of scope for Phase 6 by design, not by test-infrastructure gap.
-`renderJsonTree` returns an `HTMLElement` built from 10+ `document.createElement`
-calls — it is a DOM renderer. Unit-testing it needs either a DOM-shim
-dependency (which Phase 6 deliberately avoided — plain `node --test`, no new
-deps) or splitting it into a pure fold/shape function plus a thin renderer.
-**That split is the task**, with its own review; `cell-preview.spec.ts` covers
-it until then.
+`frontend/src/lib/json-tree.ts` split into a pure `foldJson(value):
+JsonNode` (a `scalar`/`empty`/`container` shape tree) and a thin
+`renderNode` walk; `renderJsonTree`'s signature and emitted DOM are
+byte-identical (verified by rendering both versions under a throwaway DOM
+shim and diffing, since `inspection-affordances.spec.ts` only asserts
+`.json-key` text). Today's deliberately inconsistent comma emission (bare
+text node on scalar lines, inside `.json-punct` on empty/close) is
+preserved. `frontend/test/json-tree.test.ts` covers the fold: scalar
+kind/text, UUID tagging, string escaping, empty `{}`/`[]`, entry order and
+raw keys, nesting, and the inherited large-integer precision loss.
 
 ## 4. `tsconfig` `noUncheckedIndexedAccess`
 
@@ -91,9 +97,8 @@ resize + bounds, nav, record-view, siblings, api-reference, theme), and
 `lib/` (filter-dsl, json-tree, format). `demo/` is unchanged. Role-based was
 chosen over feature-based so the shared renderers (`lib/format.ts`,
 `lib/json-tree.ts`) have one home rather than a `shared/` catch-all.
-`row-diff.ts` sits in `core/` with the state cluster (it imports `store.ts`,
-so it is not yet a true leaf — see item 2). No CI rule enforces layer
-direction yet; the cycle + demo-boundary checks are unchanged.
+`row-diff.ts` has since moved to `lib/` as a true leaf (item 2). No CI rule
+enforces layer direction yet; the cycle + demo-boundary checks are unchanged.
 
 ## 8. Revisit `tools/check-frontend-cycles.sh`
 

@@ -924,6 +924,19 @@ function quoteFilterValue(value) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+// src/lib/row-diff.ts
+function rowKey(pkNames, row) {
+  return JSON.stringify(pkNames.map((n) => row[n]));
+}
+function collectNewRowKeys(prev, next, opts) {
+  if (!opts.highlightNew || !prev || !opts.sameScope) return { pkNames: [] };
+  const pkNames = next.columns.filter((c) => c.key === "pk").map((c) => c.name);
+  if (!pkNames.length) return { pkNames: [] };
+  const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
+  const newRowKeys = new Set(next.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
+  return { newRowKeys, pkNames };
+}
+
 // src/core/store.ts
 var UI_KEY = "ashurbanipal_ui";
 var state = {
@@ -1092,11 +1105,6 @@ function switchTable(name) {
   clearFilter();
   persist();
 }
-
-// src/core/row-diff.ts
-function rowKey(pkNames, row) {
-  return JSON.stringify(pkNames.map((n) => row[n]));
-}
 function scopeKey() {
   return JSON.stringify([
     state.source,
@@ -1115,20 +1123,14 @@ function getLastPayload() {
 }
 var lastScopeKey = null;
 function diffNewRows(data, highlightNew) {
-  const prev = lastPayload;
   const nowScope = scopeKey();
-  let newRowKeys;
-  let pkNames = [];
-  if (highlightNew && prev && lastScopeKey === nowScope) {
-    pkNames = data.columns.filter((c) => c.key === "pk").map((c) => c.name);
-    if (pkNames.length) {
-      const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
-      newRowKeys = new Set(data.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
-    }
-  }
+  const result = collectNewRowKeys(lastPayload, data, {
+    highlightNew,
+    sameScope: lastScopeKey === nowScope
+  });
   lastPayload = data;
   lastScopeKey = nowScope;
-  return { newRowKeys, pkNames };
+  return result;
 }
 
 // src/core/url.ts
@@ -1336,62 +1338,65 @@ function setActiveTable(name) {
 }
 
 // src/lib/json-tree.ts
+var SCALAR_CLASS = {
+  null: "json-null",
+  bool: "json-bool",
+  number: "json-number",
+  string: "json-string",
+  uuid: "json-string json-uuid"
+};
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function renderJsonTree(value) {
-  return jsonEntryValue(value, null, false);
-}
-function jsonEntryValue(value, prefix, comma) {
+function foldJson(value) {
   if (Array.isArray(value)) {
-    return jsonContainer(
-      value.map((v) => ({ prefix: null, value: v })),
-      "[",
-      "]",
-      prefix,
-      comma
-    );
+    if (value.length === 0) return { kind: "empty", open: "[", close: "]" };
+    return { kind: "container", open: "[", close: "]", entries: value.map((v) => ({ node: foldJson(v) })) };
   }
   if (value !== null && typeof value === "object") {
-    return jsonContainer(
-      Object.entries(value).map(([k, v]) => ({ prefix: jsonKeyPrefix(k), value: v })),
-      "{",
-      "}",
-      prefix,
-      comma
-    );
+    const entries = Object.entries(value);
+    if (entries.length === 0) return { kind: "empty", open: "{", close: "}" };
+    return {
+      kind: "container",
+      open: "{",
+      close: "}",
+      entries: entries.map(([key, v]) => ({ key, node: foldJson(v) }))
+    };
   }
-  const line = document.createElement("div");
-  line.className = "json-line";
-  if (prefix) line.append(...prefix);
-  line.append(jsonScalar(value));
-  if (comma) line.append(",");
-  return line;
+  if (value === null) return { kind: "scalar", scalar: "null", text: "null" };
+  if (typeof value === "boolean") return { kind: "scalar", scalar: "bool", text: String(value) };
+  if (typeof value === "number") return { kind: "scalar", scalar: "number", text: String(value) };
+  return { kind: "scalar", scalar: UUID_RE.test(value) ? "uuid" : "string", text: JSON.stringify(value) };
 }
-function jsonKeyPrefix(key) {
-  const span = document.createElement("span");
-  span.className = "json-key";
-  span.textContent = JSON.stringify(key);
-  return [span, ": "];
+function renderJsonTree(value) {
+  return renderNode(foldJson(value), null, false);
 }
-function jsonContainer(entries, openCh, closeCh, prefix, comma) {
-  if (entries.length === 0) {
+function renderNode(node, prefix, comma) {
+  if (node.kind === "scalar") {
+    const line = document.createElement("div");
+    line.className = "json-line";
+    if (prefix) line.append(...prefix);
+    line.append(scalarSpan(node));
+    if (comma) line.append(",");
+    return line;
+  }
+  if (node.kind === "empty") {
     const line = document.createElement("div");
     line.className = "json-line";
     if (prefix) line.append(...prefix);
     const span = document.createElement("span");
     span.className = "json-punct";
-    span.textContent = openCh + closeCh + (comma ? "," : "");
+    span.textContent = node.open + node.close + (comma ? "," : "");
     line.append(span);
     return line;
   }
-  const node = document.createElement("div");
-  node.className = "json-node";
+  const treeNode = document.createElement("div");
+  treeNode.className = "json-node";
   const fold = document.createElement("button");
   fold.type = "button";
   fold.className = "json-fold";
   fold.setAttribute("aria-expanded", "true");
   fold.setAttribute("aria-label", "collapse");
   fold.onclick = () => {
-    const collapsed = node.classList.toggle("collapsed");
+    const collapsed = treeNode.classList.toggle("collapsed");
     fold.setAttribute("aria-expanded", String(!collapsed));
     fold.setAttribute("aria-label", collapsed ? "expand" : "collapse");
   };
@@ -1399,41 +1404,37 @@ function jsonContainer(entries, openCh, closeCh, prefix, comma) {
   openLine.className = "json-line";
   const openBrace = document.createElement("span");
   openBrace.className = "json-punct";
-  openBrace.textContent = openCh;
+  openBrace.textContent = node.open;
   const ellipsis = document.createElement("span");
   ellipsis.className = "json-ellipsis";
-  ellipsis.textContent = `\u2026${closeCh}${comma ? "," : ""}`;
+  ellipsis.textContent = `\u2026${node.close}${comma ? "," : ""}`;
   if (prefix) openLine.append(...prefix);
   openLine.append(fold, openBrace, ellipsis);
   const children = document.createElement("div");
   children.className = "json-children";
-  entries.forEach((entry, i) => {
-    children.append(jsonEntryValue(entry.value, entry.prefix, i < entries.length - 1));
+  node.entries.forEach((entry, i) => {
+    const childPrefix = entry.key === void 0 ? null : keyPrefix(entry.key);
+    children.append(renderNode(entry.node, childPrefix, i < node.entries.length - 1));
   });
   const closeLine = document.createElement("div");
   closeLine.className = "json-line";
   const closeBrace = document.createElement("span");
   closeBrace.className = "json-punct";
-  closeBrace.textContent = closeCh + (comma ? "," : "");
+  closeBrace.textContent = node.close + (comma ? "," : "");
   closeLine.append(closeBrace);
-  node.append(openLine, children, closeLine);
-  return node;
+  treeNode.append(openLine, children, closeLine);
+  return treeNode;
 }
-function jsonScalar(value) {
+function keyPrefix(key) {
   const span = document.createElement("span");
-  if (value === null) {
-    span.className = "json-null";
-    span.textContent = "null";
-  } else if (typeof value === "boolean") {
-    span.className = "json-bool";
-    span.textContent = String(value);
-  } else if (typeof value === "number") {
-    span.className = "json-number";
-    span.textContent = String(value);
-  } else {
-    span.className = UUID_RE.test(value) ? "json-string json-uuid" : "json-string";
-    span.textContent = JSON.stringify(value);
-  }
+  span.className = "json-key";
+  span.textContent = JSON.stringify(key);
+  return [span, ": "];
+}
+function scalarSpan(node) {
+  const span = document.createElement("span");
+  span.className = SCALAR_CLASS[node.scalar];
+  span.textContent = node.text;
   return span;
 }
 

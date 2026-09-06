@@ -30,8 +30,8 @@ src/
   bootstrap/   main, controller, reload, table-focus
   features/    grid, filter-ui, sidebar (+ sidebar-resize, sidebar-bounds),
                nav, record-view, siblings, api-reference, theme
-  core/        api, dom, types, state (+ store, url, row-diff)
-  lib/         filter-dsl, json-tree, format
+  core/        api, dom, types, state (+ store, url)
+  lib/         filter-dsl, json-tree, format, row-diff
   demo/        demo-shim, demo-fixtures — offline demo backend only
 ```
 
@@ -51,12 +51,14 @@ src/
   helpers (`$`, `setStatus`, `copyText`, `reportError`/`clearError`,
   `populateSelect`, `flashIcon`). The client state is behind one
   `./state.js` entry point re-exporting `store.ts` (the `state` object, its
-  localStorage persistence, the named scope transitions), `url.ts` (URL
-  params ⇄ state, read side — two readers that differ on purpose, see the
-  header comment there), and `row-diff.ts` (the new-rows-since-refresh
-  derivation). `store.ts` exposes named transitions (`switchSource` /
-  `switchSchema` / `switchTable`) that run the resets and persistence each
-  implies; feature modules call those rather than assigning scope fields ad
+  localStorage persistence, the named scope transitions, and the
+  new-rows-since-refresh bookkeeping — `scopeKey` and the last-payload
+  cache, delegating the actual diff to the pure `lib/row-diff.ts`) and
+  `url.ts` (URL params ⇄ state, read side — two readers that differ on
+  purpose, see the header comment there). `store.ts` exposes named
+  transitions (`switchSource` / `switchSchema` / `switchTable`) that run the
+  resets and persistence each implies; feature modules call those rather
+  than assigning scope fields ad
   hoc, and a site that deliberately diverges (grid.ts's FK navigation,
   which seeds a filter instead of clearing one) says why inline. A value a
   plain `let` export can't expose (the applied filter AST) stays behind a

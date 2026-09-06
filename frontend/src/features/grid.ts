@@ -1,9 +1,10 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, qs, reportError } from "../core/dom.js";
-import { hiddenColumnsForTable, persist, rememberSort, rowKey, setSchema, state } from "../core/state.js";
+import { hiddenColumnsForTable, persist, rememberSort, setSchema, state } from "../core/state.js";
 import type { Column, Row, TableData } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount, formatCellValue } from "../lib/format.js";
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
+import { rowKey } from "../lib/row-diff.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { openRecordView } from "./record-view.js";
 import { loadTables } from "./sidebar.js";
