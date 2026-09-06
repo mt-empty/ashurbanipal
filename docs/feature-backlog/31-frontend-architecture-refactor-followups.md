@@ -116,18 +116,19 @@ cycle rule once it ships. Any replacement must keep all three current
 properties: `import type` edges excluded, re-export (`export … from`) edges
 included, and the `src/` → `src/demo/` boundary assertion.
 
-## 9. Spring / Gradle test flake under `mise run check`
+## 9. Spring / Gradle test flake under `mise run check` — DONE
 
-`mise run check` runs `spring:build` and `spring:test` under mise's task
-parallelism; they share one Kotlin incremental-compile cache and one Gradle
-daemon, and under load that cache corrupts ("Could not close incremental
-caches … `class-fq-name-to-source.tab`", "Detected multiple Kotlin daemon
-sessions"), cascading into spurious `SQLSyntaxErrorException` / `EOFException`
-failures in the MySQL/MariaDB tests. A clean serial
-`./gradlew clean test --no-daemon` passes all 59 Spring tests.
+`spring:check` was a `depends = ["spring:build", "spring:test"]` fan-out, and
+mise runs `depends` in parallel — two Gradle clients (`./gradlew build`,
+`./gradlew test`) racing on one daemon and one Kotlin incremental-compile
+cache, which corrupted under load ("Could not close incremental caches …
+`class-fq-name-to-source.tab`", "Detected multiple Kotlin daemon sessions")
+and cascaded into spurious `SQLSyntaxErrorException` / `EOFException` in the
+MySQL/MariaDB tests.
 
-This predates the refactor (whose only Spring change is a `build.gradle.kts`
-sha256 pin). Fix candidates: make `spring:build` and `spring:test` mutually
-exclusive in `mise.toml`, disable the Kotlin daemon / incremental compilation
-for those tasks, or give each its own build dir. Low priority — CI runs the
-Spring job in isolation, so only local `mise run check` hits it.
+`spring:check` now runs a single `./gradlew build` (compile + assemble +
+test in one invocation), matching what `.github/workflows/_spring-build-test.yml`
+already does — no parallel Gradle clients, so nothing to corrupt the cache.
+`spring:build` was narrowed to `./gradlew assemble` (compile + jar only) and
+`spring:test` kept as-is, both still callable individually; they are just no
+longer run concurrently.
