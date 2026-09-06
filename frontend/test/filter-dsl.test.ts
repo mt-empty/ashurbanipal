@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { parseFilterDsl, quoteFilterValue } from "../src/filter-dsl.ts";
+import { parseFilterDsl, quoteFilterValue } from "../src/lib/filter-dsl.ts";
 
 // The single canonical DSL-text -> wire-AST parser (spec/filter-dsl.md). Cases
 // come from spec/fixtures/parser-tests.json, generated from the doc's §5

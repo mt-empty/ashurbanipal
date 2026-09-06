@@ -1,5 +1,5 @@
-import { API } from "./api.js";
-import { $, copyText } from "./dom.js";
+import { API } from "../core/api.js";
+import { $, copyText } from "../core/dom.js";
 
 // ---- API reference: static, hand-maintained description of every route,
 // for copy-pasting to an AI agent. Not its own endpoint — the doc never

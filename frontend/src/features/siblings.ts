@@ -1,6 +1,6 @@
-import { api } from "./api.js";
-import { $ } from "./dom.js";
-import type { Sibling } from "./types.js";
+import { api } from "../core/api.js";
+import { $ } from "../core/dom.js";
+import type { Sibling } from "../core/types.js";
 
 // Same class of bug as loadDataToken: a slow health-check round that
 // resolves after a later poll would otherwise overwrite the more-current

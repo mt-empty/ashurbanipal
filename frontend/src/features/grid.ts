@@ -1,12 +1,12 @@
-import { $, copyText, qs, reportError } from "./dom.js";
+import { loadData } from "../bootstrap/reload.js";
+import { $, copyText, qs, reportError } from "../core/dom.js";
+import { hiddenColumnsForTable, persist, rememberSort, rowKey, setSchema, state } from "../core/state.js";
+import type { Column, Row, TableData } from "../core/types.js";
+import { APPROX_COUNT_TITLE, formatApproxCount, formatCellValue } from "../lib/format.js";
+import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
-import { APPROX_COUNT_TITLE, formatApproxCount, formatCellValue } from "./format.js";
-import { type JsonValue, renderJsonTree } from "./json-tree.js";
 import { openRecordView } from "./record-view.js";
-import { loadData } from "./reload.js";
 import { loadTables } from "./sidebar.js";
-import { hiddenColumnsForTable, persist, rememberSort, rowKey, setSchema, state } from "./state.js";
-import type { Column, Row, TableData } from "./types.js";
 
 export function renderHeader(columns: Column[]): void {
   const hidden = hiddenColumnsForTable();

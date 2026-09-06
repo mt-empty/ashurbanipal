@@ -82,22 +82,18 @@ exist at all is a `PORTING.md` governance question for the port owners, not a
 frontend change. Options if it stays: run the conformance filter/sort table
 against `demo-shim` too, or thin it to a canned-response fixture.
 
-## 7. Restructure `frontend/src/` to a standard layout
+## 7. Restructure `frontend/src/` to a standard layout — DONE
 
-`frontend/src/` is ~19 flat `.ts` files plus the `demo/` subdir added in
-Phase 7. A flat directory stops communicating structure as it grows. A
-conventional layout would group by role — e.g. `core/` (state, api, dom,
-types), `features/` (grid, filter-ui, sidebar, record-view, nav, siblings),
-`lib/` (filter-dsl, json-tree, format, row-diff), `bootstrap/` (main,
-controller, reload, table-focus) — or one folder per feature.
-
-Deferred because it is pure churn: no behaviour change, a diff touching nearly
-every import specifier and the vendored `dbviewer.html` bytes, best done in
-isolation. Enablers are already in place — `check-frontend-cycles.sh` walks
-`src/` recursively (Phase 7), and `esbuild`/`tsc`/Biome globs are all
-`src/**`. Decide the taxonomy (role vs feature) first, then move in one
-commit. Worth doing once the module count, or a "where does X live?" question
-from a contributor, justifies the churn.
+Landed: `frontend/src/` is grouped into four role-based layers —
+`bootstrap/` (main, controller, reload, table-focus), `core/` (api, dom,
+types, state, store, url, row-diff), `features/` (grid, filter-ui, sidebar +
+resize + bounds, nav, record-view, siblings, api-reference, theme), and
+`lib/` (filter-dsl, json-tree, format). `demo/` is unchanged. Role-based was
+chosen over feature-based so the shared renderers (`lib/format.ts`,
+`lib/json-tree.ts`) have one home rather than a `shared/` catch-all.
+`row-diff.ts` sits in `core/` with the state cluster (it imports `store.ts`,
+so it is not yet a true leaf — see item 2). No CI rule enforces layer
+direction yet; the cycle + demo-boundary checks are unchanged.
 
 ## 8. Revisit `tools/check-frontend-cycles.sh`
 

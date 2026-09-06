@@ -8,7 +8,7 @@ import * as esbuild from "esbuild";
 const dir = fileURLToPath(new URL(".", import.meta.url));
 
 const result = await esbuild.build({
-  entryPoints: [`${dir}src/main.ts`],
+  entryPoints: [`${dir}src/bootstrap/main.ts`],
   // Pins esbuild's inline path comments to this script's own directory
   // rather than process.cwd() (esbuild's default) — otherwise `node
   // build.mjs` from the repo root vs. from frontend/ (what the mise task
@@ -41,7 +41,7 @@ function splice(text, marker, value) {
 // Pre-paint sidebar bounds: index.html's standalone <script> runs before the
 // module bundle and can't import at runtime, so build.mjs imports the shared
 // leaf and injects its values into that script.
-const { SIDEBAR_W_KEY, SIDEBAR_MIN_W, SIDEBAR_MAX_W } = await import(`${dir}src/sidebar-bounds.ts`);
+const { SIDEBAR_W_KEY, SIDEBAR_MIN_W, SIDEBAR_MAX_W } = await import(`${dir}src/features/sidebar-bounds.ts`);
 const sidebarBounds =
   `var ASHURBANIPAL_SIDEBAR_W_KEY = ${JSON.stringify(SIDEBAR_W_KEY)}, ` +
   `ASHURBANIPAL_SIDEBAR_MIN = ${SIDEBAR_MIN_W}, ` +

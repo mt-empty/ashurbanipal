@@ -1,6 +1,6 @@
 // Synthetic, deterministic data for the GitHub Pages demo (docs/demo/) —
 // no live backend, no real schema. See demo-shim.ts for how this is served.
-import type { Column } from "../types.js";
+import type { Column } from "../core/types.js";
 
 export type CellValue = string | number | boolean | null | Record<string, unknown> | unknown[];
 

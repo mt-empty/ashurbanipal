@@ -127,7 +127,7 @@ Two components, same as the original concept:
     a join.
   - *Filter autocomplete* — the filter input suggests column names via a
     hand-rolled, caret-anchored popover that stays open while typing (see
-    `frontend/src/filter-ui.ts`) at condition-start boundaries (empty
+    `frontend/src/features/filter-ui.ts`) at condition-start boundaries (empty
     input, or right after `AND `/`OR `/`NOT `). No value- or operator-level
     autocomplete, and no *as-you-type* parsing of the filter text — both
     would require understanding where the cursor sits in the grammar.
@@ -270,7 +270,7 @@ designed or scheduled.
 
 A single-source deployment still returns exactly one entry — same
 degrade-gracefully shape as `/schemas`, and the frontend's source
-selector (`frontend/src/sidebar.ts`'s `loadSources`) hides itself
+selector (`frontend/src/features/sidebar.ts`'s `loadSources`) hides itself
 entirely in that case, byte-identical wire behavior to before this
 feature existed.
 
@@ -290,7 +290,7 @@ Excludes Postgres's own system/internal namespaces (`pg_catalog`,
 `information_schema`, `pg_toast`/`pg_temp`) and any schema the connected
 role lacks access to. A single-schema deployment still returns exactly
 one entry — the frontend treats a one-element list the same as "no schema
-selector needed" (see `frontend/src/sidebar.ts`'s `loadSchemas`).
+selector needed" (see `frontend/src/features/sidebar.ts`'s `loadSchemas`).
 
 ### `GET /tables`
 

@@ -1,13 +1,13 @@
-import { onProtocolSkew } from "./api.js";
-import "./api-reference.js";
+import { onProtocolSkew } from "../core/api.js";
+import "../features/api-reference.js";
+import { $, reportError } from "../core/dom.js";
+import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
 import { loadData } from "./controller.js";
-import { $, reportError } from "./dom.js";
 import { registerLoadData } from "./reload.js";
-import { loadSchemas, loadSources, loadTables } from "./sidebar.js";
-import "./sidebar-resize.js";
-import { loadSiblings } from "./siblings.js";
-import { getLastPayload, initState, state } from "./state.js";
-import "./theme.js";
+import "../features/sidebar-resize.js";
+import { getLastPayload, initState, state } from "../core/state.js";
+import { loadSiblings } from "../features/siblings.js";
+import "../features/theme.js";
 
 // Entry point: wiring only. Restore state (storage, then URL layered over
 // it), register the reload seam so feature modules can reach loadData

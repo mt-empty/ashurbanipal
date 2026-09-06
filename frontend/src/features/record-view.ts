@@ -1,8 +1,8 @@
-import { $, copyText } from "./dom.js";
-import { formatCellValue } from "./format.js";
-import { renderJsonTree } from "./json-tree.js";
-import { state } from "./state.js";
-import type { Column, Row } from "./types.js";
+import { $, copyText } from "../core/dom.js";
+import { state } from "../core/state.js";
+import type { Column, Row } from "../core/types.js";
+import { formatCellValue } from "../lib/format.js";
+import { renderJsonTree } from "../lib/json-tree.js";
 
 // ---- record / vertical view: one already-fetched row as a stacked
 // column:value list, for tables too wide to scan across ----

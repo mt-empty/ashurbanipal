@@ -1,4 +1,4 @@
-import { $ } from "./dom.js";
+import { $ } from "../core/dom.js";
 import { SIDEBAR_MAX_W, SIDEBAR_MIN_W, SIDEBAR_W_KEY } from "./sidebar-bounds.js";
 
 function clamp(w: number): number {

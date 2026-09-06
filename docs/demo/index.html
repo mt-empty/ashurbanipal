@@ -1003,7 +1003,7 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 </dialog>
 
 <script type="module">
-// src/api.ts
+// src/core/api.ts
 var API = `${location.pathname.replace(/\/+$/, "")}/api`;
 var PROTOCOL_VERSION = "1";
 var protocolChecked = false;
@@ -1028,7 +1028,7 @@ async function api(path) {
   return resp.json();
 }
 
-// src/dom.ts
+// src/core/dom.ts
 function $(id) {
   const el = document.getElementById(id);
   if (!el) throw new Error(`no element with id ${id}`);
@@ -1087,7 +1087,7 @@ async function copyText(text, btn) {
   flashIcon(mark, glyph);
 }
 
-// src/api-reference.ts
+// src/features/api-reference.ts
 function buildApiReference() {
   const base = new URL(API, location.href).toString().replace(/\/$/, "");
   const exampleFilter = encodeURIComponent(JSON.stringify([{ column: "status", op: "=", value: "active" }]));
@@ -1223,7 +1223,16 @@ $("api-help-btn").onclick = () => {
 };
 $("api-help-copy").onclick = () => copyText($("api-help-pre").textContent ?? "", $("api-help-copy"));
 
-// src/filter-dsl.ts
+// src/bootstrap/reload.ts
+var impl = null;
+function registerLoadData(fn) {
+  impl = fn;
+}
+function loadData(opts) {
+  return impl ? impl(opts) : Promise.resolve();
+}
+
+// src/lib/filter-dsl.ts
 var FILTER_MAX_DSL_BYTES = 1024;
 var FILTER_MAX_CONDITIONS = 10;
 var RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
@@ -1397,16 +1406,7 @@ function quoteFilterValue(value) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-// src/reload.ts
-var impl = null;
-function registerLoadData(fn) {
-  impl = fn;
-}
-function loadData(opts) {
-  return impl ? impl(opts) : Promise.resolve();
-}
-
-// src/store.ts
+// src/core/store.ts
 var UI_KEY = "ashurbanipal_ui";
 var state = {
   source: null,
@@ -1575,7 +1575,7 @@ function switchTable(name) {
   persist();
 }
 
-// src/row-diff.ts
+// src/core/row-diff.ts
 function rowKey(pkNames, row) {
   return JSON.stringify(pkNames.map((n) => row[n]));
 }
@@ -1613,7 +1613,7 @@ function diffNewRows(data, highlightNew) {
   return { newRowKeys, pkNames };
 }
 
-// src/url.ts
+// src/core/url.ts
 function applyUrlOverlay(params) {
   if (params.has("source")) state.source = params.get("source");
   if (params.has("schema")) state.schema = params.get("schema");
@@ -1651,7 +1651,275 @@ function initState() {
   applyUrlOverlay(new URLSearchParams(location.search));
 }
 
-// src/filter-ui.ts
+// src/lib/format.ts
+function formatApproxCount(n) {
+  return n == null || n < 0 ? "?" : `~${n}`;
+}
+var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
+var CELL_TYPE_CLASSES = {
+  boolean: "cell-type-bool",
+  uuid: "cell-type-uuid",
+  smallint: "cell-type-number",
+  integer: "cell-type-number",
+  bigint: "cell-type-number",
+  numeric: "cell-type-number",
+  real: "cell-type-number",
+  "double precision": "cell-type-number"
+};
+function formatCellValue(col, raw) {
+  if (col.type === "timestamp with time zone" || col.type === "date") {
+    const time = document.createElement("time");
+    time.dateTime = raw;
+    time.textContent = raw;
+    time.className = "cell-type-date";
+    return time;
+  }
+  const cls = CELL_TYPE_CLASSES[col.type];
+  if (cls) {
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = raw;
+    return span;
+  }
+  return document.createTextNode(raw);
+}
+
+// src/features/sidebar.ts
+var tableEntries = [];
+var tableRowTemplate = $("table-row-template");
+var tableMatchHighlight = CSS.highlights ? new Highlight() : null;
+if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
+function filterTables() {
+  const q = $("table-filter").value.trim().toLowerCase();
+  tableMatchHighlight?.clear();
+  let visible = 0;
+  for (const { name, li, textNode } of tableEntries) {
+    const idx = q ? name.toLowerCase().indexOf(q) : -1;
+    const match = !q || idx !== -1;
+    li.hidden = !match;
+    if (match) visible++;
+    if (tableMatchHighlight && idx !== -1) {
+      const range = new Range();
+      range.setStart(textNode, idx);
+      range.setEnd(textNode, idx + q.length);
+      tableMatchHighlight.add(range);
+    }
+  }
+  $("tables-empty").hidden = visible > 0 || tableEntries.length === 0;
+}
+$("table-filter").oninput = filterTables;
+async function loadSources() {
+  let sources;
+  try {
+    ({ sources } = await api("/sources"));
+  } catch {
+    return;
+  }
+  if (sources.length <= 1) {
+    state.source = null;
+    return;
+  }
+  let source = state.source;
+  if (!source || !sources.some((s) => s.name === source)) {
+    source = sources[0].name;
+  }
+  state.source = source;
+  populateSelect(
+    $("source-select"),
+    sources.map((s) => s.name),
+    source
+  );
+  $("source-select-wrap").hidden = false;
+}
+$("source-select").onchange = () => {
+  switchSource($("source-select").value);
+  loadSchemas().then(loadTables).catch(reportError);
+};
+var loadSchemasToken = 0;
+async function loadSchemas() {
+  const token = ++loadSchemasToken;
+  let schemas;
+  try {
+    ({ schemas } = await api(`/schemas${sourceQuery()}`));
+  } catch {
+    if (token !== loadSchemasToken) return;
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return;
+  }
+  if (token !== loadSchemasToken) return;
+  if (schemas.length <= 1) {
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return;
+  }
+  let schema = state.schema;
+  if (!schema || !schemas.includes(schema)) {
+    schema = schemas.includes("public") ? "public" : schemas[0];
+  }
+  state.schema = schema;
+  populateSelect($("schema-select"), schemas, schema);
+  $("schema-select-wrap").hidden = false;
+}
+$("schema-select").onchange = () => {
+  switchSchema($("schema-select").value);
+  loadTables().catch(reportError);
+};
+var loadTablesToken = 0;
+async function loadTables() {
+  setStatus("loading tables\u2026");
+  const token = ++loadTablesToken;
+  const [{ tables }, { counts }] = await Promise.all([
+    api(`/tables${scopeQuery()}`),
+    api(`/table-counts${scopeQuery()}`)
+  ]);
+  if (token !== loadTablesToken) return;
+  const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
+  const ul = $("tables");
+  ul.replaceChildren();
+  tableEntries = [];
+  for (const t of tables) {
+    const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
+    const btn = qs(li, "button");
+    const textNode = document.createTextNode(t.name);
+    qs(li, ".row-name").appendChild(textNode);
+    const countEl = qs(li, ".count");
+    countEl.textContent = formatApproxCount(countMap[t.name]);
+    countEl.title = APPROX_COUNT_TITLE;
+    btn.dataset.table = t.name;
+    btn.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
+    btn.onclick = () => {
+      switchTable(t.name);
+      loadData();
+    };
+    ul.appendChild(li);
+    tableEntries.push({ name: t.name, li, btn, textNode });
+  }
+  filterTables();
+  const tableNames = tables.map((t) => t.name);
+  if (!tableNames.includes(state.table ?? "")) {
+    state.table = tableNames[0] ?? null;
+    clearFilter();
+  }
+  if (state.table && state.sort === null) applyStoredSort(state.table);
+  if (state.table) await loadData();
+  else setStatus("");
+}
+function setRowLoading(name, loading) {
+  tableEntries.find((e) => e.name === name)?.btn.classList.toggle("loading", loading);
+}
+function setActiveTable(name) {
+  for (const e of tableEntries) {
+    const isActive = e.name === name;
+    e.btn.classList.toggle("active", isActive);
+    if (isActive) e.btn.setAttribute("aria-current", "true");
+    else e.btn.removeAttribute("aria-current");
+  }
+}
+
+// src/lib/json-tree.ts
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function renderJsonTree(value) {
+  return jsonEntryValue(value, null, false);
+}
+function jsonEntryValue(value, prefix, comma) {
+  if (Array.isArray(value)) {
+    return jsonContainer(
+      value.map((v) => ({ prefix: null, value: v })),
+      "[",
+      "]",
+      prefix,
+      comma
+    );
+  }
+  if (value !== null && typeof value === "object") {
+    return jsonContainer(
+      Object.entries(value).map(([k, v]) => ({ prefix: jsonKeyPrefix(k), value: v })),
+      "{",
+      "}",
+      prefix,
+      comma
+    );
+  }
+  const line = document.createElement("div");
+  line.className = "json-line";
+  if (prefix) line.append(...prefix);
+  line.append(jsonScalar(value));
+  if (comma) line.append(",");
+  return line;
+}
+function jsonKeyPrefix(key) {
+  const span = document.createElement("span");
+  span.className = "json-key";
+  span.textContent = JSON.stringify(key);
+  return [span, ": "];
+}
+function jsonContainer(entries, openCh, closeCh, prefix, comma) {
+  if (entries.length === 0) {
+    const line = document.createElement("div");
+    line.className = "json-line";
+    if (prefix) line.append(...prefix);
+    const span = document.createElement("span");
+    span.className = "json-punct";
+    span.textContent = openCh + closeCh + (comma ? "," : "");
+    line.append(span);
+    return line;
+  }
+  const node = document.createElement("div");
+  node.className = "json-node";
+  const fold = document.createElement("button");
+  fold.type = "button";
+  fold.className = "json-fold";
+  fold.setAttribute("aria-expanded", "true");
+  fold.setAttribute("aria-label", "collapse");
+  fold.onclick = () => {
+    const collapsed = node.classList.toggle("collapsed");
+    fold.setAttribute("aria-expanded", String(!collapsed));
+    fold.setAttribute("aria-label", collapsed ? "expand" : "collapse");
+  };
+  const openLine = document.createElement("div");
+  openLine.className = "json-line";
+  const openBrace = document.createElement("span");
+  openBrace.className = "json-punct";
+  openBrace.textContent = openCh;
+  const ellipsis = document.createElement("span");
+  ellipsis.className = "json-ellipsis";
+  ellipsis.textContent = `\u2026${closeCh}${comma ? "," : ""}`;
+  if (prefix) openLine.append(...prefix);
+  openLine.append(fold, openBrace, ellipsis);
+  const children = document.createElement("div");
+  children.className = "json-children";
+  entries.forEach((entry, i) => {
+    children.append(jsonEntryValue(entry.value, entry.prefix, i < entries.length - 1));
+  });
+  const closeLine = document.createElement("div");
+  closeLine.className = "json-line";
+  const closeBrace = document.createElement("span");
+  closeBrace.className = "json-punct";
+  closeBrace.textContent = closeCh + (comma ? "," : "");
+  closeLine.append(closeBrace);
+  node.append(openLine, children, closeLine);
+  return node;
+}
+function jsonScalar(value) {
+  const span = document.createElement("span");
+  if (value === null) {
+    span.className = "json-null";
+    span.textContent = "null";
+  } else if (typeof value === "boolean") {
+    span.className = "json-bool";
+    span.textContent = String(value);
+  } else if (typeof value === "number") {
+    span.className = "json-number";
+    span.textContent = String(value);
+  } else {
+    span.className = UUID_RE.test(value) ? "json-string json-uuid" : "json-string";
+    span.textContent = JSON.stringify(value);
+  }
+  return span;
+}
+
+// src/features/filter-ui.ts
 function submitFilter(text) {
   let ast = [];
   if (text) {
@@ -1882,142 +2150,7 @@ async function showCommonValues(e, column) {
   renderCommonValues(values, column);
 }
 
-// src/format.ts
-function formatApproxCount(n) {
-  return n == null || n < 0 ? "?" : `~${n}`;
-}
-var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
-var CELL_TYPE_CLASSES = {
-  boolean: "cell-type-bool",
-  uuid: "cell-type-uuid",
-  smallint: "cell-type-number",
-  integer: "cell-type-number",
-  bigint: "cell-type-number",
-  numeric: "cell-type-number",
-  real: "cell-type-number",
-  "double precision": "cell-type-number"
-};
-function formatCellValue(col, raw) {
-  if (col.type === "timestamp with time zone" || col.type === "date") {
-    const time = document.createElement("time");
-    time.dateTime = raw;
-    time.textContent = raw;
-    time.className = "cell-type-date";
-    return time;
-  }
-  const cls = CELL_TYPE_CLASSES[col.type];
-  if (cls) {
-    const span = document.createElement("span");
-    span.className = cls;
-    span.textContent = raw;
-    return span;
-  }
-  return document.createTextNode(raw);
-}
-
-// src/json-tree.ts
-var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function renderJsonTree(value) {
-  return jsonEntryValue(value, null, false);
-}
-function jsonEntryValue(value, prefix, comma) {
-  if (Array.isArray(value)) {
-    return jsonContainer(
-      value.map((v) => ({ prefix: null, value: v })),
-      "[",
-      "]",
-      prefix,
-      comma
-    );
-  }
-  if (value !== null && typeof value === "object") {
-    return jsonContainer(
-      Object.entries(value).map(([k, v]) => ({ prefix: jsonKeyPrefix(k), value: v })),
-      "{",
-      "}",
-      prefix,
-      comma
-    );
-  }
-  const line = document.createElement("div");
-  line.className = "json-line";
-  if (prefix) line.append(...prefix);
-  line.append(jsonScalar(value));
-  if (comma) line.append(",");
-  return line;
-}
-function jsonKeyPrefix(key) {
-  const span = document.createElement("span");
-  span.className = "json-key";
-  span.textContent = JSON.stringify(key);
-  return [span, ": "];
-}
-function jsonContainer(entries, openCh, closeCh, prefix, comma) {
-  if (entries.length === 0) {
-    const line = document.createElement("div");
-    line.className = "json-line";
-    if (prefix) line.append(...prefix);
-    const span = document.createElement("span");
-    span.className = "json-punct";
-    span.textContent = openCh + closeCh + (comma ? "," : "");
-    line.append(span);
-    return line;
-  }
-  const node = document.createElement("div");
-  node.className = "json-node";
-  const fold = document.createElement("button");
-  fold.type = "button";
-  fold.className = "json-fold";
-  fold.setAttribute("aria-expanded", "true");
-  fold.setAttribute("aria-label", "collapse");
-  fold.onclick = () => {
-    const collapsed = node.classList.toggle("collapsed");
-    fold.setAttribute("aria-expanded", String(!collapsed));
-    fold.setAttribute("aria-label", collapsed ? "expand" : "collapse");
-  };
-  const openLine = document.createElement("div");
-  openLine.className = "json-line";
-  const openBrace = document.createElement("span");
-  openBrace.className = "json-punct";
-  openBrace.textContent = openCh;
-  const ellipsis = document.createElement("span");
-  ellipsis.className = "json-ellipsis";
-  ellipsis.textContent = `\u2026${closeCh}${comma ? "," : ""}`;
-  if (prefix) openLine.append(...prefix);
-  openLine.append(fold, openBrace, ellipsis);
-  const children = document.createElement("div");
-  children.className = "json-children";
-  entries.forEach((entry, i) => {
-    children.append(jsonEntryValue(entry.value, entry.prefix, i < entries.length - 1));
-  });
-  const closeLine = document.createElement("div");
-  closeLine.className = "json-line";
-  const closeBrace = document.createElement("span");
-  closeBrace.className = "json-punct";
-  closeBrace.textContent = closeCh + (comma ? "," : "");
-  closeLine.append(closeBrace);
-  node.append(openLine, children, closeLine);
-  return node;
-}
-function jsonScalar(value) {
-  const span = document.createElement("span");
-  if (value === null) {
-    span.className = "json-null";
-    span.textContent = "null";
-  } else if (typeof value === "boolean") {
-    span.className = "json-bool";
-    span.textContent = String(value);
-  } else if (typeof value === "number") {
-    span.className = "json-number";
-    span.textContent = String(value);
-  } else {
-    span.className = UUID_RE.test(value) ? "json-string json-uuid" : "json-string";
-    span.textContent = JSON.stringify(value);
-  }
-  return span;
-}
-
-// src/record-view.ts
+// src/features/record-view.ts
 function buildRecordEntries(columns, row) {
   const nodes = [];
   for (const col of columns) {
@@ -2078,140 +2211,7 @@ function openRecordView(columns, row) {
   document.startViewTransition ? document.startViewTransition(open) : open();
 }
 
-// src/sidebar.ts
-var tableEntries = [];
-var tableRowTemplate = $("table-row-template");
-var tableMatchHighlight = CSS.highlights ? new Highlight() : null;
-if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
-function filterTables() {
-  const q = $("table-filter").value.trim().toLowerCase();
-  tableMatchHighlight?.clear();
-  let visible = 0;
-  for (const { name, li, textNode } of tableEntries) {
-    const idx = q ? name.toLowerCase().indexOf(q) : -1;
-    const match = !q || idx !== -1;
-    li.hidden = !match;
-    if (match) visible++;
-    if (tableMatchHighlight && idx !== -1) {
-      const range = new Range();
-      range.setStart(textNode, idx);
-      range.setEnd(textNode, idx + q.length);
-      tableMatchHighlight.add(range);
-    }
-  }
-  $("tables-empty").hidden = visible > 0 || tableEntries.length === 0;
-}
-$("table-filter").oninput = filterTables;
-async function loadSources() {
-  let sources;
-  try {
-    ({ sources } = await api("/sources"));
-  } catch {
-    return;
-  }
-  if (sources.length <= 1) {
-    state.source = null;
-    return;
-  }
-  let source = state.source;
-  if (!source || !sources.some((s) => s.name === source)) {
-    source = sources[0].name;
-  }
-  state.source = source;
-  populateSelect(
-    $("source-select"),
-    sources.map((s) => s.name),
-    source
-  );
-  $("source-select-wrap").hidden = false;
-}
-$("source-select").onchange = () => {
-  switchSource($("source-select").value);
-  loadSchemas().then(loadTables).catch(reportError);
-};
-var loadSchemasToken = 0;
-async function loadSchemas() {
-  const token = ++loadSchemasToken;
-  let schemas;
-  try {
-    ({ schemas } = await api(`/schemas${sourceQuery()}`));
-  } catch {
-    if (token !== loadSchemasToken) return;
-    state.schema = null;
-    $("schema-select-wrap").hidden = true;
-    return;
-  }
-  if (token !== loadSchemasToken) return;
-  if (schemas.length <= 1) {
-    state.schema = null;
-    $("schema-select-wrap").hidden = true;
-    return;
-  }
-  let schema = state.schema;
-  if (!schema || !schemas.includes(schema)) {
-    schema = schemas.includes("public") ? "public" : schemas[0];
-  }
-  state.schema = schema;
-  populateSelect($("schema-select"), schemas, schema);
-  $("schema-select-wrap").hidden = false;
-}
-$("schema-select").onchange = () => {
-  switchSchema($("schema-select").value);
-  loadTables().catch(reportError);
-};
-var loadTablesToken = 0;
-async function loadTables() {
-  setStatus("loading tables\u2026");
-  const token = ++loadTablesToken;
-  const [{ tables }, { counts }] = await Promise.all([
-    api(`/tables${scopeQuery()}`),
-    api(`/table-counts${scopeQuery()}`)
-  ]);
-  if (token !== loadTablesToken) return;
-  const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
-  const ul = $("tables");
-  ul.replaceChildren();
-  tableEntries = [];
-  for (const t of tables) {
-    const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
-    const btn = qs(li, "button");
-    const textNode = document.createTextNode(t.name);
-    qs(li, ".row-name").appendChild(textNode);
-    const countEl = qs(li, ".count");
-    countEl.textContent = formatApproxCount(countMap[t.name]);
-    countEl.title = APPROX_COUNT_TITLE;
-    btn.dataset.table = t.name;
-    btn.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
-    btn.onclick = () => {
-      switchTable(t.name);
-      loadData();
-    };
-    ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn, textNode });
-  }
-  filterTables();
-  const tableNames = tables.map((t) => t.name);
-  if (!tableNames.includes(state.table ?? "")) {
-    state.table = tableNames[0] ?? null;
-    clearFilter();
-  }
-  if (state.table && state.sort === null) applyStoredSort(state.table);
-  if (state.table) await loadData();
-  else setStatus("");
-}
-function setRowLoading(name, loading) {
-  tableEntries.find((e) => e.name === name)?.btn.classList.toggle("loading", loading);
-}
-function setActiveTable(name) {
-  for (const e of tableEntries) {
-    const isActive = e.name === name;
-    e.btn.classList.toggle("active", isActive);
-    if (isActive) e.btn.setAttribute("aria-current", "true");
-    else e.btn.removeAttribute("aria-current");
-  }
-}
-
-// src/grid.ts
+// src/features/grid.ts
 function renderHeader(columns) {
   const hidden = hiddenColumnsForTable();
   const tr = document.createElement("tr");
@@ -2415,7 +2415,7 @@ function updatePager(data) {
   $("next").disabled = data.rows.length < state.limit;
 }
 
-// src/nav.ts
+// src/features/nav.ts
 var navStack = [];
 var navIndex = -1;
 var restoringFromHistory = false;
@@ -2473,7 +2473,7 @@ window.addEventListener("popstate", (ev) => {
   });
 });
 
-// src/table-focus.ts
+// src/bootstrap/table-focus.ts
 var tableEl = qs(document, "table");
 function captureTableFocus() {
   const active = document.activeElement;
@@ -2498,7 +2498,7 @@ function restoreTableFocus(captured) {
   (target ?? tableEl).focus();
 }
 
-// src/controller.ts
+// src/bootstrap/controller.ts
 function setTableBusy(busy) {
   if (busy) tableEl.setAttribute("aria-busy", "true");
   else tableEl.removeAttribute("aria-busy");
@@ -2593,12 +2593,12 @@ async function loadData2({
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
 
-// src/sidebar-bounds.ts
+// src/features/sidebar-bounds.ts
 var SIDEBAR_W_KEY = "ashurbanipal_sidebar_w";
 var SIDEBAR_MIN_W = 180;
 var SIDEBAR_MAX_W = 500;
 
-// src/sidebar-resize.ts
+// src/features/sidebar-resize.ts
 function clamp(w) {
   return Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, w));
 }
@@ -2628,7 +2628,7 @@ function endDrag() {
 handle.addEventListener("pointerup", endDrag);
 handle.addEventListener("pointercancel", endDrag);
 
-// src/siblings.ts
+// src/features/siblings.ts
 var siblingsRequestToken = 0;
 async function loadSiblings() {
   const token = ++siblingsRequestToken;
@@ -2661,7 +2661,7 @@ async function loadSiblings() {
   );
 }
 
-// src/theme.ts
+// src/features/theme.ts
 var THEME_KEY = "ashurbanipal_theme";
 function currentTheme() {
   const saved = document.documentElement.dataset.theme;
@@ -2679,7 +2679,7 @@ $("theme-toggle").onclick = () => {
   }
 };
 
-// src/main.ts
+// src/bootstrap/main.ts
 initState();
 registerLoadData(loadData2);
 onProtocolSkew((message) => {

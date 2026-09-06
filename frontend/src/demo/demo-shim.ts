@@ -1,7 +1,7 @@
 // Fake backend for the GitHub Pages demo: answers dbviewer.html's /api/*
 // calls from demo-fixtures.ts instead of a real server.
 
-import type { FilterCondition, FilterOp } from "../types.js";
+import type { FilterCondition, FilterOp } from "../core/types.js";
 import { type CellValue, SCHEMAS, SIBLINGS, TABLES, type TableDef } from "./demo-fixtures.js";
 
 function toWire(v: CellValue): string | null {

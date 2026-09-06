@@ -1,4 +1,4 @@
-import { $ } from "./dom.js";
+import { $ } from "../core/dom.js";
 
 const THEME_KEY = "ashurbanipal_theme";
 

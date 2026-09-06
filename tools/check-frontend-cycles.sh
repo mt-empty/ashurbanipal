@@ -4,8 +4,8 @@ set -eu
 # Two checks over frontend/src/:
 #   1. no import cycle in the value-import graph (`import type` edges
 #      excluded — erased at build, can't cause an evaluation-order cycle).
-#      The fix is an import-free seam (reload.ts) or moving a shared helper
-#      to a leaf (format.ts), never a back-edge.
+#      The fix is an import-free seam (bootstrap/reload.ts) or moving a
+#      shared helper to a leaf (lib/format.ts), never a back-edge.
 #   2. no app module (anything not under src/demo/) imports src/demo/ — the
 #      offline-demo backend is bundled only by build-demo.mjs.
 # See docs/frontend-style-guide.md §1.
