@@ -14,9 +14,9 @@ const FILTER_MAX_CONDITIONS = 10;
 // one still round-trips.
 const RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 
-// tools/e2e-tests/tests/filter-parser.spec.ts reads `.position` off a
-// caught error via page.evaluate — must stay a real own property on the
-// thrown object, not just baked into the message.
+// frontend/test/filter-dsl.test.ts asserts `.position` off a caught error —
+// it must stay a real own property on the thrown object, not just baked into
+// the message string.
 class FilterDslError extends Error {
   position: number;
   constructor(message: string, position: number) {
