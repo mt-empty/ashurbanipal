@@ -1,4 +1,4 @@
-import type { Column } from "./types.js";
+import type { Column } from "../core/types.js";
 
 // Value-rendering helpers shared across feature modules. A leaf (type-only
 // imports) so grid.ts / sidebar.ts / record-view.ts can share them without

@@ -1,5 +1,5 @@
+import { tryParseFilterDsl } from "../lib/filter-dsl.js";
 import { $ } from "./dom.js";
-import { tryParseFilterDsl } from "./filter-dsl.js";
 import type { FilterCondition } from "./types.js";
 
 const UI_KEY = "ashurbanipal_ui";

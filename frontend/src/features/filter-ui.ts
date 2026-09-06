@@ -1,9 +1,9 @@
-import { api } from "./api.js";
-import { $, reportError } from "./dom.js";
-import { parseFilterDsl, quoteFilterValue } from "./filter-dsl.js";
-import { loadData } from "./reload.js";
-import { applyScopeParams, getLastPayload, markFilterVerified, setAppliedFilterAst, state } from "./state.js";
-import type { CommonValue, FilterCondition, FilterOp } from "./types.js";
+import { loadData } from "../bootstrap/reload.js";
+import { api } from "../core/api.js";
+import { $, reportError } from "../core/dom.js";
+import { applyScopeParams, getLastPayload, markFilterVerified, setAppliedFilterAst, state } from "../core/state.js";
+import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
+import { parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];

@@ -1,8 +1,5 @@
-import { api } from "./api.js";
-import { $, clearError, flashIcon, reportError, setStatus } from "./dom.js";
-import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "./grid.js";
-import { syncUrl } from "./nav.js";
-import { setActiveTable, setRowLoading } from "./sidebar.js";
+import { api } from "../core/api.js";
+import { $, clearError, flashIcon, reportError, setStatus } from "../core/dom.js";
 import {
   applyScopeParams,
   diffNewRows,
@@ -11,9 +8,12 @@ import {
   markFilterVerified,
   markStoredSortVerified,
   state,
-} from "./state.js";
+} from "../core/state.js";
+import type { TableData } from "../core/types.js";
+import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
+import { syncUrl } from "../features/nav.js";
+import { setActiveTable, setRowLoading } from "../features/sidebar.js";
 import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js";
-import type { TableData } from "./types.js";
 
 // The render-orchestration hub: loadData sequences fetch -> chrome ->
 // header/body/menu -> pager. Feature modules never import this file (that

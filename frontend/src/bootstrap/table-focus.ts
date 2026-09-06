@@ -1,4 +1,4 @@
-import { $, qs } from "./dom.js";
+import { $, qs } from "../core/dom.js";
 
 // Static markup (index.html), so this resolves once at module init rather
 // than on every fetch and every focus restore.

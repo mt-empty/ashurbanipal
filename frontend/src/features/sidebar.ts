@@ -1,7 +1,6 @@
-import { api } from "./api.js";
-import { $, populateSelect, qs, reportError, setStatus } from "./dom.js";
-import { APPROX_COUNT_TITLE, formatApproxCount } from "./format.js";
-import { loadData } from "./reload.js";
+import { loadData } from "../bootstrap/reload.js";
+import { api } from "../core/api.js";
+import { $, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
 import {
   applyStoredSort,
   clearFilter,
@@ -11,8 +10,9 @@ import {
   switchSchema,
   switchSource,
   switchTable,
-} from "./state.js";
-import type { SourceEntry, TableListEntry } from "./types.js";
+} from "../core/state.js";
+import type { SourceEntry, TableListEntry } from "../core/types.js";
+import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
 
 // ---- sidebar table search-as-you-type: transient, session-local state,
 // not part of `state`/localStorage — resets on reload ----

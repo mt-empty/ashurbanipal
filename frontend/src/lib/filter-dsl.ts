@@ -1,4 +1,4 @@
-import type { FilterCondition, FilterOp } from "./types.js";
+import type { FilterCondition, FilterOp } from "../core/types.js";
 
 // ==== Filter DSL parser (box text → wire AST) ====
 // The single canonical implementation of spec/filter-dsl.md — no backend

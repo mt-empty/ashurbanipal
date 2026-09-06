@@ -1,6 +1,6 @@
-import { $, reportError } from "./dom.js";
+import { $, reportError } from "../core/dom.js";
+import { applyScopeParams, applyUrlExact, persist, state } from "../core/state.js";
 import { loadTables } from "./sidebar.js";
-import { applyScopeParams, applyUrlExact, persist, state } from "./state.js";
 
 // Back/forward navigation stops at table/schema/source switches, not every
 // sort/page tweak within the same table — otherwise "back" would undo

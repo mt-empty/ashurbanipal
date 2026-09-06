@@ -20,49 +20,63 @@ deviation as something review flags.
 
 ## 1. Source layout (`frontend/src/`)
 
-- `index.html` — head meta/favicon/pre-paint theme bootstrap script, and
-  body structural markup only. No inline `style=` attributes, no inline
-  `onclick=`-style attributes — every behavior wire-up happens in a
-  TypeScript module, so there's exactly one place to look for "what does
-  this element do."
-- `styles.css` — one file; see §2 for why it isn't split further.
-- One TypeScript module per feature (`grid.ts`, `filter-ui.ts`,
-  `sidebar.ts`, etc.), each containing that feature's render logic *and*
-  its event wiring together (locality of behavior) — the same principle
-  the old single-file layout expressed with banners, now expressed as file
-  boundaries.
-- The shared client state is behind one `./state.js` entry point that
-  re-exports three concern-split modules: `store.ts` (the `state` object,
-  its localStorage persistence, and the named scope transitions),
-  `url.ts` (URL params ⇄ state, read side — two readers that differ on
-  purpose, see the header comment there), `row-diff.ts` (the
-  new-rows-since-refresh derivation). `store.ts` exposes named transitions
-  (`switchSource` / `switchSchema` / `switchTable`) that run the resets and
-  persistence each one implies; feature modules call those rather than
-  assigning scope fields ad hoc, and a site that deliberately diverges
-  (grid.ts's FK navigation, which seeds a filter instead of clearing one)
-  says why inline. A value a plain `let` export can't expose (the applied
-  filter AST) stays behind a getter/setter pair.
-- `dom.ts` holds generic, feature-agnostic helpers (`$`, `setStatus`,
-  `copyText`, `reportError`/`clearError`, `populateSelect`, `flashIcon`).
-- `controller.ts` owns `loadData` / `fetchTableData` — the
-  render-orchestration hub. It imports the feature modules *downward*;
-  feature modules never import it (that re-forms a cycle through everything
-  it imports), they call `loadData` via `reload.ts`, an import-free seam
-  `main.ts` wires at bootstrap.
-- `main.ts` is the entry point and is *wiring only*: the side-effect
-  imports, `registerLoadData(loadData)`, the toolbar/dialog event wiring,
-  and the bootstrap calls at the very bottom
-  (`loadSources().then(loadSchemas).then(loadTables)`, `loadSiblings()`,
-  the polling `setInterval`) — nothing else.
-- **Import cycles are debt.** `mise run frontend:check-cycles` (Tarjan over
-  the value-import graph, `import type` excluded) fails CI on any cycle.
-  When module A needs a function from an upstream module B, route it through
-  an import-free seam (`reload.ts`) or move the shared helper to a leaf
-  (`format.ts`) — never add the back-edge.
+`src/` is grouped into four role-based layers plus `demo/`. Imports only
+ever point *down* this list; `frontend:check-cycles` fails CI on any
+value-import cycle, which a back-edge would create.
 
-The payoff: a reviewer with "the bug is in pagination" opens `grid.ts`
-instead of searching one file for a banner.
+```
+src/
+  index.html   styles.css
+  bootstrap/   main, controller, reload, table-focus
+  features/    grid, filter-ui, sidebar (+ sidebar-resize, sidebar-bounds),
+               nav, record-view, siblings, api-reference, theme
+  core/        api, dom, types, state (+ store, url, row-diff)
+  lib/         filter-dsl, json-tree, format
+  demo/        demo-shim, demo-fixtures — offline demo backend only
+```
+
+- `bootstrap/` wires the app and owns render orchestration. `main.ts` is
+  *wiring only*: side-effect imports, `registerLoadData(loadData)`, the
+  toolbar/dialog event wiring, and the bootstrap calls at the bottom
+  (`loadSources().then(loadSchemas).then(loadTables)`, `loadSiblings()`,
+  the polling `setInterval`). `controller.ts` owns `loadData` /
+  `fetchTableData`; it imports feature modules *downward* and they never
+  import it (that would re-form a cycle) — they call `loadData` through
+  `reload.ts`, an import-free seam `main.ts` wires at bootstrap.
+- `features/` — one module per feature or chrome unit, each holding that
+  feature's render logic *and* its event wiring together (locality of
+  behavior). May import `core/` and `lib/`, never `bootstrap/` (except
+  `loadData` via `reload.ts`).
+- `core/` — shared infrastructure. `dom.ts` is generic feature-agnostic
+  helpers (`$`, `setStatus`, `copyText`, `reportError`/`clearError`,
+  `populateSelect`, `flashIcon`). The client state is behind one
+  `./state.js` entry point re-exporting `store.ts` (the `state` object, its
+  localStorage persistence, the named scope transitions), `url.ts` (URL
+  params ⇄ state, read side — two readers that differ on purpose, see the
+  header comment there), and `row-diff.ts` (the new-rows-since-refresh
+  derivation). `store.ts` exposes named transitions (`switchSource` /
+  `switchSchema` / `switchTable`) that run the resets and persistence each
+  implies; feature modules call those rather than assigning scope fields ad
+  hoc, and a site that deliberately diverges (grid.ts's FK navigation,
+  which seeds a filter instead of clearing one) says why inline. A value a
+  plain `let` export can't expose (the applied filter AST) stays behind a
+  getter/setter pair.
+- `lib/` — pure leaves: import only `core/types.ts`, or nothing.
+- `index.html` — head meta/favicon/pre-paint theme bootstrap script and
+  body structural markup only. No inline `style=` or `onclick=`-style
+  attributes — every behavior wire-up happens in a module, so there's
+  exactly one place to look for "what does this element do."
+- `styles.css` — one file; see §2 for why it isn't split further.
+
+When module A needs a function from an upstream module B, route it through
+an import-free seam (`bootstrap/reload.ts`) or move the shared helper to a
+leaf (`lib/format.ts`) — never add the back-edge. Nothing enforces the
+layer *direction* yet (only the cycle and the `src/` → `src/demo/`
+boundary); a direction assertion is a possible add to `check-cycles`.
+
+The payoff: a reviewer with "the bug is in pagination" opens
+`features/grid.ts` instead of searching one file for a banner, and a
+misplaced import shows up as a wrong-looking path.
 
 ## 2. CSS
 
