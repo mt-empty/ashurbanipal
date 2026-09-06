@@ -309,8 +309,8 @@ run = "mise watch actix:demo --restart"
 # ---- spring:* -----------------------------------------------------------
 
 [tasks."spring:build"]
-description = "gradle build (compile + assemble)"
-run = "./gradlew build"
+description = "gradle assemble (compile + jar, no tests)"
+run = "./gradlew assemble"
 dir = "implementations/spring-boot-starter"
 
 [tasks."spring:test"]
@@ -318,9 +318,15 @@ description = "gradle test"
 run = "./gradlew test"
 dir = "implementations/spring-boot-starter"
 
+# One Gradle invocation, matching the CI step (_spring-build-test.yml).
+# `./gradlew build` compiles, assembles, and runs the tests in a single
+# daemon; fanning out to parallel spring:build + spring:test tasks made two
+# clients race on one Kotlin incremental-compile cache, corrupting it under
+# `mise run check` load.
 [tasks."spring:check"]
-description = "gradle build + test"
-depends = ["spring:build", "spring:test"]
+description = "gradle build (compile + assemble + test, single invocation)"
+run = "./gradlew build"
+dir = "implementations/spring-boot-starter"
 
 [tasks."spring:demo"]
 description = "host demo app at http://localhost:4100/__ashurbanipal"
