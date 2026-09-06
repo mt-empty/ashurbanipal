@@ -20,9 +20,11 @@ export function setStatus(text: string): void {
 }
 
 // The only writers of #error, so there is one place to look for what can
-// surface a message in the error banner and what clears it again.
+// surface a message in the error banner and what clears it again. A
+// non-Error thrown value falls back to String() rather than rendering a
+// bare "undefined".
 export function reportError(e: unknown): void {
-  $("error").textContent = (e as Error).message;
+  $("error").textContent = e instanceof Error ? e.message : String(e);
 }
 
 export function clearError(): void {
@@ -70,7 +72,10 @@ export async function copyText(text: string, btn: HTMLElement): Promise<void> {
       document.execCommand("copy");
       ta.remove();
     }
-  } catch {
+  } catch (e) {
+    // writeText() rejects when the document isn't focused or the permission
+    // is denied — the ✗ glyph alone gives no clue which.
+    console.warn("ashurbanipal: copy to clipboard failed", e);
     glyph = "✗";
   }
   flashIcon(mark, glyph);

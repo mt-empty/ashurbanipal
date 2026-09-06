@@ -6,13 +6,19 @@ import type { Sibling } from "../core/types.js";
 // resolves after a later poll would otherwise overwrite the more-current
 // result.
 let siblingsRequestToken = 0;
+// Warn once per outage, not on every 15s poll; re-armed on the next success.
+let siblingsWarned = false;
 export async function loadSiblings(): Promise<void> {
   const token = ++siblingsRequestToken;
   let siblings: Sibling[] = [];
   try {
     ({ siblings } = await api<{ siblings: Sibling[] }>("/siblings"));
-  } catch {
-    /* leave empty */
+    siblingsWarned = false;
+  } catch (e) {
+    if (!siblingsWarned) {
+      console.warn("ashurbanipal: /siblings poll failed; hiding the panel", e);
+      siblingsWarned = true;
+    }
   }
   if (token !== siblingsRequestToken) return; // superseded by a newer poll
   $("siblings").hidden = siblings.length === 0;

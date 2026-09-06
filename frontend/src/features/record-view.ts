@@ -20,9 +20,12 @@ export function buildRecordEntries(columns: Column[], row: Row): Node[] {
     else {
       if (col.type === "jsonb") {
         try {
+          // Parse and render share one catch: a malformed tree build degrades
+          // to plain text the same as unparseable JSON.
           dd.classList.add("json-tree");
           dd.appendChild(renderJsonTree(JSON.parse(raw)));
-        } catch {
+        } catch (e) {
+          warnBadJsonb(col.name, e);
           dd.textContent = raw;
         }
       } else dd.appendChild(formatCellValue(col, raw));
@@ -38,13 +41,30 @@ export function buildRecordEntries(columns: Column[], row: Row): Node[] {
   return nodes;
 }
 
+// The backend declared this column jsonb but the ::text value isn't parseable
+// JSON — surface the protocol violation the plain-text fallback would hide.
+function warnBadJsonb(colName: string, e: unknown): void {
+  console.warn(`ashurbanipal: jsonb column ${colName} is not valid JSON`, e);
+}
+
+// jsonb value or, when it won't parse, the raw string — so recordAsJson's copy
+// still produces a usable document instead of throwing out of the click handler.
+function parseJsonbOrRaw(colName: string, raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    warnBadJsonb(colName, e);
+    return raw;
+  }
+}
+
 // jsonb columns are re-nested (raw value is the ::text-cast JSON string)
 // so the copied JSON has real nested objects instead of an escaped string.
 function recordAsJson(columns: Column[], row: Row): string {
   const obj: Record<string, unknown> = {};
   for (const col of columns) {
     const raw = row[col.name];
-    obj[col.name] = col.type === "jsonb" && raw != null ? JSON.parse(raw) : raw;
+    obj[col.name] = col.type === "jsonb" && raw != null ? parseJsonbOrRaw(col.name, raw) : raw;
   }
   return JSON.stringify(obj, null, 2);
 }

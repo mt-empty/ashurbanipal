@@ -57,8 +57,11 @@ export async function loadSources(): Promise<void> {
   let sources: SourceEntry[];
   try {
     ({ sources } = await api<{ sources: SourceEntry[] }>("/sources"));
-  } catch {
-    return; // older port without /sources — degrade to single-source behavior
+  } catch (e) {
+    // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
+    // single-source but leave a trace.
+    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
+    return;
   }
   if (sources.length <= 1) {
     state.source = null;
@@ -102,9 +105,11 @@ export async function loadSchemas(): Promise<void> {
   let schemas: string[];
   try {
     ({ schemas } = await api<{ schemas: string[] }>(`/schemas${sourceQuery()}`));
-  } catch {
+  } catch (e) {
     if (token !== loadSchemasToken) return;
-    // older port without /schemas — degrade to single-schema behavior
+    // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
+    // single-schema but leave a trace.
+    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
     state.schema = null;
     $("schema-select-wrap").hidden = true;
     return;
