@@ -2,6 +2,9 @@ target
 *.txt
 test.sh
 
+# mise per-machine overrides (mise.toml is the shared, committed config)
+mise.local.toml
+
 # Secrets (never commit)
 .env
 .env.local
