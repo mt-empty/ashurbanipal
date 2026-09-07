@@ -1,0 +1,35 @@
+# go:* — Go/net-http port (implementations/go-nethttp).
+
+["go:build"]
+description = "go build ./..."
+run = "go build ./..."
+dir = "implementations/go-nethttp"
+
+["go:vet"]
+description = "go vet ./..."
+run = "go vet ./..."
+dir = "implementations/go-nethttp"
+
+["go:fmt"]
+description = "gofmt -w ."
+run = "gofmt -w ."
+dir = "implementations/go-nethttp"
+
+["go:fmt-check"]
+description = "gofmt -l . (fails if any file needs reformatting)"
+run = "sh tools/check-go-fmt.sh"
+
+["go:test"]
+description = "go test -race ./... (integration_test.go needs DATABASE_URL + the conformance seed applied)"
+run = "go test -race ./..."
+dir = "implementations/go-nethttp"
+
+["go:demo"]
+description = "run the demo host app at http://localhost:4000/__ashurbanipal"
+run = "go run ./cmd/demo"
+dir = "implementations/go-nethttp"
+sources = ["*.go", "cmd/demo/**/*.go", "frontend/dbviewer.html"]
+
+["go:dev"]
+description = "run the demo host app, auto-rebuilding and restarting on implementations/go-nethttp/{*.go,cmd/demo} or frontend/dbviewer.html changes"
+run = "mise watch go:demo --restart"

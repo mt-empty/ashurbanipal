@@ -1,0 +1,84 @@
+# frontend:* — the single self-contained frontend/dbviewer.html, generated from
+# frontend/src/ and vendored into each port.
+
+["frontend:install"]
+description = "pnpm install --frozen-lockfile"
+hide = true
+run = "pnpm install --frozen-lockfile"
+dir = "frontend"
+
+["frontend:build"]
+description = "bundle frontend/src/ into frontend/dbviewer.html, then regenerate the docs/demo/index.html GitHub Pages demo from it"
+run = "node build.mjs && node build-demo.mjs"
+dir = "frontend"
+depends = ["frontend:install"]
+# Skip the esbuild re-bundle when nothing it reads has changed. Only the two
+# bundlers get this — test/lint/*-check tasks stay unconditional so a stale
+# marker can never mask a real failure.
+sources = ["src/**/*", "build.mjs", "build-demo.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json"]
+outputs = ["dbviewer.html", "../docs/demo/index.html"]
+
+["frontend:typecheck"]
+description = "tsc --noEmit over frontend/src/ (DOM libs) and frontend/test/ (node types)"
+run = ["pnpm exec tsc --noEmit", "pnpm exec tsc --noEmit -p tsconfig.test.json"]
+dir = "frontend"
+depends = ["frontend:install"]
+
+["frontend:test-unit"]
+description = "node --test over frontend/test/ — pure-logic units (the DSL parser); no browser"
+run = "pnpm run test"
+dir = "frontend"
+depends = ["frontend:install"]
+
+["frontend:lint"]
+description = "biome check over frontend/src/ (format + recommended lint; see frontend/biome.json)"
+run = "pnpm run lint"
+dir = "frontend"
+depends = ["frontend:install"]
+
+["frontend:check-cycles"]
+description = "fail if frontend/src/ has any value-import cycle (docs/frontend-style-guide.md §1)"
+run = "sh tools/check-frontend-cycles.sh"
+
+["frontend:check-api-reference"]
+description = "fail if the filter operator list / limits drift between spec/openapi.yaml and frontend/src/"
+run = "sh tools/check-frontend-api-reference.sh"
+
+["frontend:build-check"]
+description = "verify frontend/dbviewer.html is what frontend/src/ currently builds to"
+run = "sh tools/check-frontend-build.sh"
+depends = ["frontend:install"]
+
+["frontend:build-demo"]
+description = "bundle a synthetic in-browser demo (fake data, no backend) into docs/demo/index.html for GitHub Pages — runs automatically as part of frontend:build; this is for explicit standalone use"
+run = "node build-demo.mjs"
+dir = "frontend"
+depends = ["frontend:build"]
+
+["frontend:build-demo-check"]
+description = "verify docs/demo/index.html is what frontend/src/ + dbviewer.html currently builds to"
+run = "sh tools/check-frontend-build-demo.sh"
+depends = ["frontend:build"]
+
+["frontend:sync-ports"]
+description = "sync the canonical frontend and re-pin its Rust, Go, Spring, Node, and Flask consumers"
+run = "tools/sync-ports-frontend.sh"
+
+["frontend:check-ports-sync"]
+description = "verify vendored frontend copies and pins match frontend/dbviewer.html"
+run = "tools/sync-ports-frontend.sh --check"
+
+["frontend:test-e2e-install"]
+description = "one-time Playwright browser install (Chromium, Firefox, WebKit) for the e2e suite"
+run = "pnpm install && pnpm exec playwright install --with-deps chromium firefox webkit"
+dir = "tools/e2e-tests"
+
+["frontend:test-e2e"]
+description = "run the Playwright e2e suite against dbviewer.html"
+run = "pnpm exec playwright test"
+dir = "tools/e2e-tests"
+
+["frontend:showcase"]
+description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to a Bayer-dithered tools/e2e-tests/showcase.gif"
+run = "./generate-showcase-gif.sh"
+dir = "tools/e2e-tests"

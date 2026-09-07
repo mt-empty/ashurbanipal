@@ -1,0 +1,6 @@
+# docs:* — repo-doc consistency checks (docs/).
+
+["docs:check-versions"]
+description = "verify readme.md's Spring coordinate matches the publishing-checklist ledger (and the ledger matches the highest Spring release tag); --fix rewrites readme.md"
+hide = true
+run = "tools/check-doc-versions.sh"

@@ -1,0 +1,36 @@
+# flask:* — Python/Flask port (implementations/flask-python), via uv.
+
+["flask:install"]
+description = "uv sync --extra dev into implementations/flask-python/.venv (Python pinned by .python-version)"
+hide = true
+run = "uv sync -q --extra dev"
+dir = "implementations/flask-python"
+
+["flask:lint"]
+description = "ruff check ."
+run = "uv run ruff check ."
+dir = "implementations/flask-python"
+depends = ["flask:install"]
+
+["flask:fmt-check"]
+description = "ruff format --check ."
+run = "uv run ruff format --check ."
+dir = "implementations/flask-python"
+depends = ["flask:install"]
+
+["flask:test"]
+description = "pytest -q (postgres/mysql integration tests skip without DATABASE_URL/MYSQL_TEST_URL/MARIADB_TEST_URL)"
+run = "uv run pytest -q"
+dir = "implementations/flask-python"
+depends = ["flask:install"]
+
+["flask:demo"]
+description = "host demo app at http://localhost:4000/__ashurbanipal (ASHURBANIPAL_BACKEND selects postgres|sqlite|mysql)"
+run = "uv run python demo/app.py"
+dir = "implementations/flask-python"
+depends = ["flask:install"]
+sources = ["ashurbanipal/**/*.py", "demo/**/*.py", "ashurbanipal/frontend/dbviewer.html"]
+
+["flask:dev"]
+description = "run the demo host app, auto-restarting on implementations/flask-python/{ashurbanipal,demo} or vendored frontend/dbviewer.html changes"
+run = "mise watch flask:demo --restart"

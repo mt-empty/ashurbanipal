@@ -1,0 +1,39 @@
+# changelog:* — one implementations/<port>/CHANGELOG.md per published port. The
+# 0.3.0 floor is hand-written; git-cliff only ever generates > 0.3.0.
+# `changelog:<port>` prints the not-yet-released section — at release time
+# paste it under a new `## [X.Y.Z]` heading (docs/publishing-checklist.md).
+# The publish workflows generate the same notes with `git cliff --current`.
+# Each --tag-pattern is a single prefix (git-cliff --current errors on '^(a|b)').
+
+["changelog:check"]
+description = "verify each implementations/<port>/CHANGELOG.md top section matches that port's manifest version (offline; no git-cliff)"
+hide = true
+run = "tools/check-changelogs.sh"
+
+["changelog:rust-core"]
+description = "print the unreleased CHANGELOG section for the ashurbanipal core crate"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-v' --include-path 'implementations/rust/core/**' 'spec/**'"
+
+["changelog:rust-axum"]
+description = "print the unreleased CHANGELOG section for ashurbanipal-axum"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-axum-v' --include-path 'implementations/rust/axum/**' 'implementations/rust/core/**' 'frontend/**' 'spec/**'"
+
+["changelog:rust-actix-web"]
+description = "print the unreleased CHANGELOG section for ashurbanipal-actix-web"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-actix-web-v' --include-path 'implementations/rust/actix-web/**' 'implementations/rust/core/**' 'frontend/**' 'spec/**'"
+
+["changelog:node-express"]
+description = "print the unreleased CHANGELOG section for ashurbanipal-node-express"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-node-express-v' --include-path 'implementations/node-express/**' 'frontend/**' 'spec/**'"
+
+["changelog:flask-python"]
+description = "print the unreleased CHANGELOG section for ashurbanipal-flask"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-flask-v' --include-path 'implementations/flask-python/**' 'frontend/**' 'spec/**'"
+
+["changelog:spring-boot-starter"]
+description = "print the unreleased CHANGELOG section for the Spring Boot starter"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-spring-boot-starter-v' --include-path 'implementations/spring-boot-starter/**' 'frontend/**' 'spec/**'"
+
+["changelog:go-nethttp"]
+description = "print the unreleased CHANGELOG section for the Go/net-http port"
+run = "git-cliff --unreleased --strip header --tag-pattern '^implementations/go-nethttp/v' --include-path 'implementations/go-nethttp/**' 'frontend/**' 'spec/**'"

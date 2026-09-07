@@ -1,0 +1,42 @@
+# node:* — Node/Express port (implementations/node-express).
+
+["node:install"]
+description = "pnpm install --frozen-lockfile"
+hide = true
+run = "pnpm install --frozen-lockfile"
+dir = "implementations/node-express"
+
+["node:lint"]
+description = "biome check ."
+run = "pnpm run lint"
+dir = "implementations/node-express"
+depends = ["node:install"]
+
+["node:typecheck"]
+description = "tsc --noEmit"
+run = "pnpm run typecheck"
+dir = "implementations/node-express"
+depends = ["node:install"]
+
+["node:build"]
+description = "tsc build + vendor the frontend into dist/"
+run = "pnpm run build"
+dir = "implementations/node-express"
+depends = ["node:install"]
+
+["node:test"]
+description = "vitest run (fixture + kill-switch tests, no database needed)"
+run = "pnpm test"
+dir = "implementations/node-express"
+depends = ["node:install"]
+
+["node:demo"]
+description = "host demo app at http://localhost:4000/__ashurbanipal (DB_BACKEND selects postgres|sqlite|mysql)"
+run = "pnpm run demo"
+dir = "implementations/node-express"
+depends = ["node:install"]
+sources = ["src/**/*.ts", "demo/**/*.ts", "frontend/dbviewer.html"]
+
+["node:dev"]
+description = "run the demo host app, auto-restarting on implementations/node-express/{src,demo} or frontend/dbviewer.html changes"
+run = "mise watch node:demo --restart"
