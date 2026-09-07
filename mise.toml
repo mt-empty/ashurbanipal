@@ -145,16 +145,7 @@ run = "sh tools/check-frontend-api-reference.sh"
 
 [tasks."frontend:build-check"]
 description = "verify frontend/dbviewer.html is what frontend/src/ currently builds to"
-run = '''
-cp dbviewer.html /tmp/ashurbanipal-dbviewer-committed.html
-node build.mjs
-if ! diff -q dbviewer.html /tmp/ashurbanipal-dbviewer-committed.html > /dev/null; then
-  echo "frontend/dbviewer.html is out of date — run \`mise run frontend:build\` and commit the result" >&2
-  cp /tmp/ashurbanipal-dbviewer-committed.html dbviewer.html
-  exit 1
-fi
-'''
-dir = "frontend"
+run = "sh tools/check-frontend-build.sh"
 depends = ["frontend:install"]
 
 [tasks."frontend:build-demo"]
@@ -165,16 +156,7 @@ depends = ["frontend:build"]
 
 [tasks."frontend:build-demo-check"]
 description = "verify docs/demo/index.html is what frontend/src/ + dbviewer.html currently builds to"
-run = '''
-cp ../docs/demo/index.html /tmp/ashurbanipal-demo-committed.html
-node build-demo.mjs
-if ! diff -q ../docs/demo/index.html /tmp/ashurbanipal-demo-committed.html > /dev/null; then
-  echo "docs/demo/index.html is out of date — run \`mise run frontend:build-demo\` and commit the result" >&2
-  cp /tmp/ashurbanipal-demo-committed.html ../docs/demo/index.html
-  exit 1
-fi
-'''
-dir = "frontend"
+run = "sh tools/check-frontend-build-demo.sh"
 depends = ["frontend:build"]
 
 [tasks."frontend:sync-ports"]
@@ -364,15 +346,7 @@ dir = "implementations/go-nethttp"
 
 [tasks."go:fmt-check"]
 description = "gofmt -l . (fails if any file needs reformatting)"
-run = '''
-unformatted="$(gofmt -l .)"
-if [ -n "$unformatted" ]; then
-  echo "gofmt would reformat:" >&2
-  echo "$unformatted" >&2
-  exit 1
-fi
-'''
-dir = "implementations/go-nethttp"
+run = "sh tools/check-go-fmt.sh"
 
 [tasks."go:test"]
 description = "go test -race ./... (integration_test.go needs DATABASE_URL + the conformance seed applied)"
