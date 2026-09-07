@@ -2,8 +2,8 @@
 
 > **Status:** OPEN · **Area:** spec, frontend
 
-Status: proposed 2026-09-01. Read-only. The single-file / no-CDN frontend
-constraint is the bulk of the work. Not scheduled.
+Read-only. The single-file / no-CDN frontend constraint is the bulk of the
+work.
 
 ## 1. The ask
 

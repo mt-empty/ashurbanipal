@@ -2,9 +2,8 @@
 
 > **Status:** OPEN · **Area:** frontend
 
-Status: discussed in depth (2026-07-19); confirmed more complex than
-originally scoped. Not designed, not scheduled — captured here so the
-clarity gained isn't lost before it's picked up.
+Confirmed more complex than originally scoped when discussed in depth —
+captured here so the clarity gained isn't lost before it's picked up.
 
 ## 1. The ask
 

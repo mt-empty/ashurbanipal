@@ -2,11 +2,10 @@
 
 > **Status:** OPEN · **Area:** ports
 
-**Status:** discussed 2026-08-16, alongside making Postgres a symmetric,
-opt-in Cargo feature (`core = ["postgres"]`, default-on) and moving `pg` to
-an optional peer dependency in `implementations/node-express`. Not designed,
-not scheduled — capturing the shape of the idea and why it's a bigger job
-in Go than it was in the other four ports.
+Discussed alongside making Postgres a symmetric, opt-in Cargo feature
+(`core = ["postgres"]`, default-on) and moving `pg` to an optional peer
+dependency in `implementations/node-express` — capturing the shape of the
+idea and why it's a bigger job in Go than it was in the other four ports.
 
 **Ask:** today `implementations/go-nethttp/go.mod` requires
 `github.com/jackc/pgx/v5`, `modernc.org/sqlite`, and
