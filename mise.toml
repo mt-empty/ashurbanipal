@@ -7,6 +7,11 @@ java = "temurin-21"
 uv = "latest"
 "aqua:orhun/git-cliff" = "2"
 
+[settings]
+# Pin every tool's exact resolved version + checksum in mise.lock (committed);
+# the specs above stay loose. Keeps CI and every clone on the same bytes.
+lockfile = true
+
 # ---- top-level umbrella tasks -----------------------------------------
 # `mise run check` is everything CI runs, across every implementation.
 # `mise run rust` / `spring` / `frontend` / `conformance` are the same
