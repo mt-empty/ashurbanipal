@@ -116,6 +116,11 @@ description = "bundle frontend/src/ into frontend/dbviewer.html, then regenerate
 run = "node build.mjs && node build-demo.mjs"
 dir = "frontend"
 depends = ["frontend:install"]
+# Skip the esbuild re-bundle when nothing it reads has changed. Only the two
+# bundlers get this — test/lint/*-check tasks stay unconditional so a stale
+# marker can never mask a real failure.
+sources = ["src/**/*", "build.mjs", "build-demo.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json"]
+outputs = ["dbviewer.html", "../docs/demo/index.html"]
 
 [tasks."frontend:typecheck"]
 description = "tsc --noEmit over frontend/src/ (DOM libs) and frontend/test/ (node types)"
