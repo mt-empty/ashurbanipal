@@ -181,8 +181,9 @@ as reference points for the next feature:
   `position-try-fallbacks`) for the cell-preview popover, instead of manual
   `getBoundingClientRect()` + clamping math.
 - Semantic elements over generic containers: `<search>` for the filter
-  controls, `<time datetime="...">` for timestamp cells, `<output>` for
-  computed status/page text.
+  controls, `<time>` for timestamp cells (no `datetime` attribute — the
+  engine's text cast isn't a valid HTML datetime on any backend), `<output>`
+  for computed status/page text.
 - `<template>` + `content.cloneNode(true)` for repeated DOM (table
   rows/cells), instead of nested `document.createElement()` calls.
 - `document.startViewTransition()` (feature-detected) around the table

@@ -41,6 +41,11 @@ Divergence in what "type" and "enum" mean across the three belongs in
 ## 4. Open questions
 
 - Raw engine type string, or a normalised label? Raw is less work and more
-  honest; normalised reads better but reintroduces a mapping table.
+  honest; normalised reads better but reintroduces a mapping table. For
+  *rendering* purposes this was settled by
+  `docs/feature-backlog/32-cross-engine-column-type-rendering.md` (ship the
+  raw string, bucket it tolerantly in the frontend); if this story adds a
+  popover, the same `<code>`-wrapped raw type and the same `columnTypeClass`
+  helper apply.
 - Does the enum list feed the filter's value autocomplete (currently
   column-name only)? Natural follow-on, separate story.

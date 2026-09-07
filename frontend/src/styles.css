@@ -151,6 +151,10 @@ th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
 /* Decorative (aria-hidden) — the th carries an aria-label with the text
    equivalent. */
 .key-icon { margin-right: .2rem; }
+/* The engine-native column type, rendered as inline code in the header. */
+th code.col-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em;
+            font-weight: normal; background: color-mix(in srgb, currentColor 10%, transparent);
+            padding: 0 .25em; border-radius: 3px; }
 /* Not part of the sort click target — its onclick stops propagation so
    it doesn't also trigger th's sort handler. */
 .common-values-btn { background: none; border: none; cursor: pointer; font: inherit;

@@ -128,7 +128,7 @@ function buildApiReference() {
         '`logic` ("AND" | "OR") must be absent on the first condition and present on every later one; AND binds tighter than OR (SQL precedence — no parentheses/nesting exist).',
         "`not: true` negates its single condition; optional, defaults to false.",
         "`value` is always a JSON string, required except for IS NULL / IS NOT NULL, which take none.",
-        "columns are cast to text before comparison, so the same operators work across uuid/timestamptz/jsonb/etc. — but '>'/'<'/'>='/'<=' then compare lexicographically as text, not numerically: a filter like age > 9 will incorrectly exclude age = 10.",
+        "columns are cast to text before comparison, so the same operators work regardless of the column's real type (UUID, timestamp, JSON, etc.) — but '>'/'<'/'>='/'<=' then compare lexicographically as text, not numerically: a filter like age > 9 will incorrectly exclude age = 10.",
         "an empty condition array is treated identically to an absent `filter` param.",
         "at most 10 conditions and 8192 bytes of URL-decoded JSON — exceeding either is a 400.",
         "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text and compiles it to this AST client-side — DSL text sent as the `filter` param is a 400.",
