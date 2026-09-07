@@ -1,5 +1,7 @@
 # Copy row as INSERT statement
 
+> **Status:** DONE · **Area:** frontend · **Ref:** shipped 2026-09-02
+
 Status: shipped 2026-09-02 (record-view button; single dialect, quoted
 string literals). Read-only — generates text, executes nothing.
 

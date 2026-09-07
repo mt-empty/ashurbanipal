@@ -1,5 +1,7 @@
 # Per-table index and constraint metadata panel
 
+> **Status:** OPEN · **Area:** spec, frontend
+
 Status: proposed 2026-09-01. Read-only — catalog introspection only. Not
 scheduled.
 

@@ -1,5 +1,7 @@
 # Inline column type, nullability, default, and enum values
 
+> **Status:** OPEN · **Area:** spec, frontend
+
 Status: proposed 2026-09-01. Read-only — catalog metadata only. Not
 scheduled.
 

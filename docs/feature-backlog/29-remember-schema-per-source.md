@@ -1,5 +1,7 @@
 # Remember the selected schema per source
 
+> **Status:** DONE · **Area:** frontend · **Ref:** PR #90 (2026-09-05)
+
 Status: shipped 2026-09-05 (commit `ca5fff1`, PR #90), matching the shape
 proposed below: `schemaBySource` on `State` (`frontend/src/state.ts`),
 recorded on `#schema-select` change and on the FK-navigation schema

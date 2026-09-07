@@ -1,5 +1,7 @@
 # List views and materialized views alongside base tables
 
+> **Status:** OPEN · **Area:** spec, ports
+
 Status: proposed 2026-09-01. Read-only — a view read is the same code path
 as a table read. Not scheduled.
 

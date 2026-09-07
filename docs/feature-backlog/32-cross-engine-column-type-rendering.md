@@ -1,5 +1,7 @@
 # Cross-engine column-type rendering
 
+> **Status:** DONE · **Area:** frontend · **Ref:** implemented 2026-09-06
+
 Status: implemented 2026-09-06 (Option A). Frontend-only. §§1–7 are the
 plan as proposed; §8 records what actually shipped and where it diverged.
 

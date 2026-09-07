@@ -1,5 +1,7 @@
 # `AnySource` enum for cross-backend source mixing (Postgres + SQLite in one process)
 
+> **Status:** OPEN · **Area:** rust, spec
+
 **Status:** discussed 2026-08-20, during the multi-source support rollout
 (`spec/protocol.md` §1 "Resolved source", new `GET api/sources` route,
 `source` param on §5.2–§5.5/§5.7). Deliberately deferred, not designed —

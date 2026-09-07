@@ -1,5 +1,7 @@
 # True two-source round-trip in CI conformance
 
+> **Status:** DONE · **Area:** conformance · **Ref:** resolved 2026-08-25
+
 **Status:** resolved 2026-08-25. `conformance/runner/two_source.rs`
 covers the properties below across all five ports, each with its own
 two-source demo mode and a second `two-source-conformance` CI job (see

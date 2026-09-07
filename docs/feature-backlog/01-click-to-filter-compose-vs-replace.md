@@ -1,5 +1,7 @@
 # Click-to-filter: compose into existing filter vs. replace it
 
+> **Status:** OPEN · **Area:** frontend
+
 Status: discussed in depth (2026-07-19); confirmed more complex than
 originally scoped. Not designed, not scheduled — captured here so the
 clarity gained isn't lost before it's picked up.
