@@ -490,6 +490,7 @@ dir = "tools/e2e-tests"
 
 [tasks."conformance:seed-gen"]
 description = "regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql from tools/seed-gen (same generator, kept identical)"
+confirm = "Overwrite the committed seed SQL (.devcontainer/db/init/01-seed.sql, conformance/seed/seed.sql) from tools/seed-gen?"
 run = "cargo run > ../../.devcontainer/db/init/01-seed.sql && cp ../../.devcontainer/db/init/01-seed.sql ../../conformance/seed/seed.sql"
 dir = "tools/seed-gen"
 
