@@ -57,6 +57,7 @@ depends = ["docs:check-versions"]
 
 [tasks."docs:check-versions"]
 description = "verify readme.md's Spring coordinate matches the publishing-checklist ledger (and the ledger matches the highest Spring release tag); --fix rewrites readme.md"
+hide = true
 run = "tools/check-doc-versions.sh"
 
 # ---- changelog:* ------------------------------------------------------
@@ -73,6 +74,7 @@ depends = ["changelog:check"]
 
 [tasks."changelog:check"]
 description = "verify each implementations/<port>/CHANGELOG.md top section matches that port's manifest version (offline; no git-cliff)"
+hide = true
 run = "tools/check-changelogs.sh"
 
 [tasks."changelog:rust-core"]
@@ -105,6 +107,7 @@ run = "git-cliff --unreleased --strip header --tag-pattern '^implementations/go-
 
 [tasks."frontend:install"]
 description = "pnpm install --frozen-lockfile"
+hide = true
 run = "pnpm install --frozen-lockfile"
 dir = "frontend"
 
@@ -390,6 +393,7 @@ run = "mise watch go:demo --restart"
 
 [tasks."node:install"]
 description = "pnpm install --frozen-lockfile"
+hide = true
 run = "pnpm install --frozen-lockfile"
 dir = "implementations/node-express"
 
@@ -432,6 +436,7 @@ run = "mise watch node:demo --restart"
 
 [tasks."flask:install"]
 description = "uv sync --extra dev into implementations/flask-python/.venv (Python pinned by .python-version)"
+hide = true
 run = "uv sync -q --extra dev"
 dir = "implementations/flask-python"
 
