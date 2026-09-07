@@ -50,7 +50,7 @@ locale- and timezone-independent and consistent across implementations.
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
 | Postgres | `column::text` in the select list | Postgres's own cast; locale/timezone-independent by construction. |
-| MySQL    | `CAST(column AS CHAR)` in the select list | Same property, different syntax — MySQL has no `::` operator and no `TEXT` cast target (`CHAR` is the cast target for a text representation). |
+| MySQL    | `CAST(column AS CHAR)` in the select list | Same property, different syntax — MySQL has no `::` operator and no `TEXT` cast target (`CHAR` is the cast target for a text representation). The `type` metadata label comes from `information_schema.COLUMNS.DATA_TYPE`, which is bare `tinyint` for a `TINYINT(1)` boolean column — the `(1)` that marks it a bool lives only in `COLUMN_TYPE`, which is not sent — so the frontend renders MySQL booleans as numbers (accepted gap). |
 | SQLite   | `CAST(column AS TEXT)` in the select list | Same property, different syntax — SQLite has no `::` cast operator. SQLite's declared column types can be the empty string (dynamic typing); `sqlite.rs::query_table` falls back to the literal `"unknown"` type-name label rather than emitting `""`. |
 
 Both mechanisms satisfy the same requirement: the cast is server-side SQL,

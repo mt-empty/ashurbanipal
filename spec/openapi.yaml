@@ -1,13 +1,15 @@
 # Machine-readable companion to spec/protocol.md (which is normative where
 # they disagree). Shapes derived from the Rust implementation's
 # serialization (implementations/rust/axum/src/routes.rs,
-# implementations/rust/core/src/db/postgres.rs).
+# implementations/rust/core/src/db/); identical across the Postgres,
+# MySQL, and SQLite backends.
 openapi: 3.1.0
 info:
   title: Ashurbanipal Protocol
   version: "1"
   description: >
-    Read-only Postgres table-browsing API. Paths are relative to
+    Read-only SQL table-browsing API (Postgres, MySQL, or SQLite
+    backend). Paths are relative to
     {mount}/api, where {mount} is the implementation-defined mount point
     (reference default: /__ashurbanipal). The UI itself is served at
     {mount} as text/html and is not described here.
@@ -410,7 +412,12 @@ components:
           type: string
         type:
           type: string
-          description: Postgres data type name (information_schema.columns.data_type).
+          description: >
+            The column's type name as the backing engine's own catalog
+            reports it (Postgres information_schema.columns.data_type;
+            MySQL information_schema.COLUMNS.DATA_TYPE; SQLite the declared
+            type, or "unknown" when none). Informational only — never used
+            to build SQL.
         key:
           type: string
           enum: [pk, fk]
@@ -451,8 +458,8 @@ components:
           type: array
           description: >
             One object per row, keyed by column name. Every value is a
-            JSON string (the Postgres text rendering — uuids, numbers,
-            timestamps, jsonb all serialize as strings) or null for SQL
+            JSON string (the engine's own text rendering — uuids, numbers,
+            timestamps, JSON all serialize as strings) or null for SQL
             NULL; an undecodable value is the sentinel string
             "<undecodable>". Native JSON numbers/booleans are
             non-conformant.

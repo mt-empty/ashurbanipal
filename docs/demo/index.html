@@ -8,6 +8,44 @@
 <script>
 "use strict";
 (() => {
+  // src/lib/format.ts
+  var TYPE_ALIASES = {
+    smallint: "number",
+    integer: "number",
+    int: "number",
+    int2: "number",
+    int4: "number",
+    int8: "number",
+    bigint: "number",
+    mediumint: "number",
+    tinyint: "number",
+    numeric: "number",
+    decimal: "number",
+    real: "number",
+    double: "number",
+    "double precision": "number",
+    float: "number",
+    number: "number",
+    serial: "number",
+    smallserial: "number",
+    bigserial: "number",
+    boolean: "bool",
+    bool: "bool",
+    date: "date",
+    timestamp: "date",
+    timestamptz: "date",
+    datetime: "date",
+    "timestamp with time zone": "date",
+    "timestamp without time zone": "date",
+    uuid: "uuid",
+    json: "json",
+    jsonb: "json"
+  };
+  function columnTypeClass(rawType) {
+    const key = rawType.toLowerCase().replace(/\s*\(.*$/, "").trim();
+    return TYPE_ALIASES[key] ?? null;
+  }
+
   // src/demo/demo-fixtures.ts
   function hashSeed(s) {
     let h = 1779033703 ^ s.length;
@@ -280,10 +318,10 @@
     return table.columns.find((c) => c.name === name)?.type ?? "text";
   }
   function isNumericType(t) {
-    return t === "integer" || t === "numeric";
+    return columnTypeClass(t) === "number";
   }
   function isDateType(t) {
-    return t.startsWith("timestamp") || t === "date";
+    return columnTypeClass(t) === "date";
   }
   function typedCompare(t, a, b) {
     if (a === null && b === null) return 0;
@@ -667,6 +705,10 @@ th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
 /* Decorative (aria-hidden) — the th carries an aria-label with the text
    equivalent. */
 .key-icon { margin-right: .2rem; }
+/* The engine-native column type, rendered as inline code in the header. */
+th code.col-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em;
+            font-weight: normal; background: color-mix(in srgb, currentColor 10%, transparent);
+            padding: 0 .25em; border-radius: 3px; }
 /* Not part of the sort click target — its onclick stops propagation so
    it doesn't also trigger th's sort handler. */
 .common-values-btn { background: none; border: none; cursor: pointer; font: inherit;
@@ -1205,7 +1247,7 @@ function buildApiReference() {
         '`logic` ("AND" | "OR") must be absent on the first condition and present on every later one; AND binds tighter than OR (SQL precedence \u2014 no parentheses/nesting exist).',
         "`not: true` negates its single condition; optional, defaults to false.",
         "`value` is always a JSON string, required except for IS NULL / IS NOT NULL, which take none.",
-        "columns are cast to text before comparison, so the same operators work across uuid/timestamptz/jsonb/etc. \u2014 but '>'/'<'/'>='/'<=' then compare lexicographically as text, not numerically: a filter like age > 9 will incorrectly exclude age = 10.",
+        "columns are cast to text before comparison, so the same operators work regardless of the column's real type (UUID, timestamp, JSON, etc.) \u2014 but '>'/'<'/'>='/'<=' then compare lexicographically as text, not numerically: a filter like age > 9 will incorrectly exclude age = 10.",
         "an empty condition array is treated identically to an absent `filter` param.",
         "at most 10 conditions and 8192 bytes of URL-decoded JSON \u2014 exceeding either is a 400.",
         "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text and compiles it to this AST client-side \u2014 DSL text sent as the `filter` param is a 400."
@@ -1659,29 +1701,72 @@ function initState() {
 }
 
 // src/lib/format.ts
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function formatApproxCount(n) {
   return n == null || n < 0 ? "?" : `~${n}`;
 }
 var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
-var CELL_TYPE_CLASSES = {
-  boolean: "cell-type-bool",
-  uuid: "cell-type-uuid",
-  smallint: "cell-type-number",
-  integer: "cell-type-number",
-  bigint: "cell-type-number",
-  numeric: "cell-type-number",
-  real: "cell-type-number",
-  "double precision": "cell-type-number"
+var TYPE_ALIASES = {
+  smallint: "number",
+  integer: "number",
+  int: "number",
+  int2: "number",
+  int4: "number",
+  int8: "number",
+  bigint: "number",
+  mediumint: "number",
+  tinyint: "number",
+  numeric: "number",
+  decimal: "number",
+  real: "number",
+  double: "number",
+  "double precision": "number",
+  float: "number",
+  number: "number",
+  serial: "number",
+  smallserial: "number",
+  bigserial: "number",
+  boolean: "bool",
+  bool: "bool",
+  date: "date",
+  timestamp: "date",
+  timestamptz: "date",
+  datetime: "date",
+  "timestamp with time zone": "date",
+  "timestamp without time zone": "date",
+  uuid: "uuid",
+  json: "json",
+  jsonb: "json"
 };
+function columnTypeClass(rawType) {
+  const key = rawType.toLowerCase().replace(/\s*\(.*$/, "").trim();
+  return TYPE_ALIASES[key] ?? null;
+}
+var TYPE_CLASS_CSS = {
+  number: "cell-type-number",
+  bool: "cell-type-bool",
+  uuid: "cell-type-uuid"
+};
+function rendersAsJson(col, raw) {
+  const klass = columnTypeClass(col.type);
+  return klass === "json" || klass === null && /^\s*[[{]/.test(raw);
+}
+function warnBadJsonCell(col, err) {
+  if (columnTypeClass(col.type) === "json") {
+    console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
+  }
+}
 function formatCellValue(col, raw) {
-  if (col.type === "timestamp with time zone" || col.type === "date") {
+  const klass = columnTypeClass(col.type);
+  if (klass === "date") {
     const time = document.createElement("time");
-    time.dateTime = raw;
     time.textContent = raw;
     time.className = "cell-type-date";
     return time;
   }
-  const cls = CELL_TYPE_CLASSES[col.type];
+  let cls;
+  if (klass) cls = TYPE_CLASS_CSS[klass];
+  else if (UUID_RE.test(raw)) cls = "cell-type-uuid";
   if (cls) {
     const span = document.createElement("span");
     span.className = cls;
@@ -1834,7 +1919,7 @@ var SCALAR_CLASS = {
   string: "json-string",
   uuid: "json-string json-uuid"
 };
-var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function foldJson(value) {
   if (Array.isArray(value)) {
     if (value.length === 0) return { kind: "empty", open: "[", close: "]" };
@@ -1853,7 +1938,7 @@ function foldJson(value) {
   if (value === null) return { kind: "scalar", scalar: "null", text: "null" };
   if (typeof value === "boolean") return { kind: "scalar", scalar: "bool", text: String(value) };
   if (typeof value === "number") return { kind: "scalar", scalar: "number", text: String(value) };
-  return { kind: "scalar", scalar: UUID_RE.test(value) ? "uuid" : "string", text: JSON.stringify(value) };
+  return { kind: "scalar", scalar: UUID_RE2.test(value) ? "uuid" : "string", text: JSON.stringify(value) };
 }
 function renderJsonTree(value) {
   return renderNode(foldJson(value), null, false);
@@ -2169,12 +2254,12 @@ function buildRecordEntries(columns, row) {
     let action = document.createElement("span");
     if (raw == null) dd.textContent = "\u2205";
     else {
-      if (col.type === "jsonb") {
+      if (rendersAsJson(col, raw)) {
         try {
           dd.classList.add("json-tree");
           dd.appendChild(renderJsonTree(JSON.parse(raw)));
         } catch (e) {
-          warnBadJsonb(col.name, e);
+          warnBadJsonCell(col, e);
           dd.textContent = raw;
         }
       } else dd.appendChild(formatCellValue(col, raw));
@@ -2189,14 +2274,11 @@ function buildRecordEntries(columns, row) {
   }
   return nodes;
 }
-function warnBadJsonb(colName, e) {
-  console.warn(`ashurbanipal: jsonb column ${colName} is not valid JSON`, e);
-}
-function parseJsonbOrRaw(colName, raw) {
+function parseJsonOrRaw(col, raw) {
   try {
     return JSON.parse(raw);
   } catch (e) {
-    warnBadJsonb(colName, e);
+    warnBadJsonCell(col, e);
     return raw;
   }
 }
@@ -2204,11 +2286,10 @@ function recordAsJson(columns, row) {
   const obj = {};
   for (const col of columns) {
     const raw = row[col.name];
-    obj[col.name] = col.type === "jsonb" && raw != null ? parseJsonbOrRaw(col.name, raw) : raw;
+    obj[col.name] = raw != null && rendersAsJson(col, raw) ? parseJsonOrRaw(col, raw) : raw;
   }
   return JSON.stringify(obj, null, 2);
 }
-var NUMERIC_TYPE_RE = /int|serial|numeric|decimal|real|double|float|^number/i;
 function recordAsInsert(columns, row) {
   const target = state.schema ? `${state.schema}.${state.table}` : state.table;
   const cols = columns.map((c) => c.name).join(", ");
@@ -2218,7 +2299,7 @@ VALUES (${vals});`;
 }
 function sqlLiteral(col, raw) {
   if (raw == null) return "NULL";
-  if (NUMERIC_TYPE_RE.test(col.type) && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
+  if (columnTypeClass(col.type) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
   return `'${raw.replace(/'/g, "''")}'`;
 }
 function openRecordView(columns, row) {
@@ -2243,6 +2324,9 @@ function renderHeader(columns) {
     th.dataset.col = col.name;
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
+    const typeCode = document.createElement("code");
+    typeCode.className = "col-type";
+    typeCode.textContent = col.type;
     if (col.key === "pk" || col.key === "fk") {
       const keyLabel = col.key === "pk" ? col.references ? `primary key, also references ${col.references.table}.${col.references.column}` : "primary key" : `foreign key, references ${col.references.table}.${col.references.column}`;
       const icon = document.createElement("span");
@@ -2250,10 +2334,10 @@ function renderHeader(columns) {
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "\u{1F511}" : "\u{1F517}";
-      th.append(icon, label);
+      th.append(icon, `${col.name} `, typeCode);
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
-      th.append(label);
+      th.append(`${col.name} `, typeCode);
     }
     if (col.comment) th.title = col.comment;
     th.setAttribute(
@@ -2293,13 +2377,13 @@ function renderEmptyState(columnCount) {
 var cellTemplate = $("cell-template");
 var rowActionTemplate = $("row-action-template");
 var cellPopAnchor = null;
-function showCellPop(e, text, isJsonbColumn) {
+function showCellPop(e, text, col) {
   let isJson = true;
   try {
     $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text)));
   } catch (err) {
     isJson = false;
-    if (isJsonbColumn) console.warn("ashurbanipal: jsonb cell is not valid JSON", err);
+    warnBadJsonCell(col, err);
   }
   $("cell-pre").hidden = isJson;
   $("cell-json").hidden = !isJson;
@@ -2359,12 +2443,13 @@ function buildCell(col, raw, hidden) {
       applyFilterClause(references.column, "=", raw);
     };
   } else {
+    const jsonAtRender = rendersAsJson(col, raw);
     cellText.onclick = (e) => {
-      if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
-        showCellPop(e, raw, col.type === "jsonb");
+      if (jsonAtRender || cellText.scrollWidth > cellText.clientWidth) {
+        showCellPop(e, raw, col);
       }
     };
-    if (col.type === "jsonb") td.classList.add("expandable");
+    if (jsonAtRender) td.classList.add("expandable");
   }
   return td;
 }

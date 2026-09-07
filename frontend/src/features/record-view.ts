@@ -1,7 +1,7 @@
 import { $, copyText } from "../core/dom.js";
 import { state } from "../core/state.js";
 import type { Column, Row } from "../core/types.js";
-import { formatCellValue } from "../lib/format.js";
+import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
 import { renderJsonTree } from "../lib/json-tree.js";
 
 // ---- record / vertical view: one already-fetched row as a stacked
@@ -18,14 +18,14 @@ export function buildRecordEntries(columns: Column[], row: Row): Node[] {
     let action: Node = document.createElement("span");
     if (raw == null) dd.textContent = "∅";
     else {
-      if (col.type === "jsonb") {
+      if (rendersAsJson(col, raw)) {
         try {
           // Parse and render share one catch: a malformed tree build degrades
           // to plain text the same as unparseable JSON.
           dd.classList.add("json-tree");
           dd.appendChild(renderJsonTree(JSON.parse(raw)));
         } catch (e) {
-          warnBadJsonb(col.name, e);
+          warnBadJsonCell(col, e);
           dd.textContent = raw;
         }
       } else dd.appendChild(formatCellValue(col, raw));
@@ -41,37 +41,27 @@ export function buildRecordEntries(columns: Column[], row: Row): Node[] {
   return nodes;
 }
 
-// The backend declared this column jsonb but the ::text value isn't parseable
-// JSON — surface the protocol violation the plain-text fallback would hide.
-function warnBadJsonb(colName: string, e: unknown): void {
-  console.warn(`ashurbanipal: jsonb column ${colName} is not valid JSON`, e);
-}
-
-// jsonb value or, when it won't parse, the raw string — so recordAsJson's copy
+// Parsed JSON or, when it won't parse, the raw string — so recordAsJson's copy
 // still produces a usable document instead of throwing out of the click handler.
-function parseJsonbOrRaw(colName: string, raw: string): unknown {
+function parseJsonOrRaw(col: Column, raw: string): unknown {
   try {
     return JSON.parse(raw);
   } catch (e) {
-    warnBadJsonb(colName, e);
+    warnBadJsonCell(col, e);
     return raw;
   }
 }
 
-// jsonb columns are re-nested (raw value is the ::text-cast JSON string)
+// JSON columns are re-nested (the value is the engine's text-cast JSON string)
 // so the copied JSON has real nested objects instead of an escaped string.
 function recordAsJson(columns: Column[], row: Row): string {
   const obj: Record<string, unknown> = {};
   for (const col of columns) {
     const raw = row[col.name];
-    obj[col.name] = col.type === "jsonb" && raw != null ? parseJsonbOrRaw(col.name, raw) : raw;
+    obj[col.name] = raw != null && rendersAsJson(col, raw) ? parseJsonOrRaw(col, raw) : raw;
   }
   return JSON.stringify(obj, null, 2);
 }
-
-// Deliberately loose — the three backends spell numeric types differently;
-// a stray hit (e.g. "point" matches "int") is caught by the value check below.
-const NUMERIC_TYPE_RE = /int|serial|numeric|decimal|real|double|float|^number/i;
 
 function recordAsInsert(columns: Column[], row: Row): string {
   // Identifiers left unquoted — no quote char is portable across all three engines.
@@ -85,7 +75,7 @@ function recordAsInsert(columns: Column[], row: Row): string {
 // MySQL/SQLite, and a quoted string inserts fine into a bool column on all three.
 function sqlLiteral(col: Column, raw: string | null): string {
   if (raw == null) return "NULL";
-  if (NUMERIC_TYPE_RE.test(col.type) && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
+  if (columnTypeClass(col.type) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
   return `'${raw.replace(/'/g, "''")}'`;
 }
 

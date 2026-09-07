@@ -205,7 +205,7 @@ export function tryParseFilterDsl(input: string): FilterCondition[] | null {
 }
 
 // ---- click-to-filter: compose "column op value" into #filter and apply ----
-// Every cell value is fetched with an explicit ::text cast, which is
+// Every cell value is fetched already cast to text in-query, which is
 // exactly what the filter DSL compares against, so it can be spliced
 // straight into a clause without reshaping.
 export function quoteFilterValue(value: string): string {

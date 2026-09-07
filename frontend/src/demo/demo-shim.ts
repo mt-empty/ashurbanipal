@@ -2,6 +2,7 @@
 // calls from demo-fixtures.ts instead of a real server.
 
 import type { FilterCondition, FilterOp } from "../core/types.js";
+import { columnTypeClass } from "../lib/format.js";
 import { type CellValue, SCHEMAS, SIBLINGS, TABLES, type TableDef } from "./demo-fixtures.js";
 
 function toWire(v: CellValue): string | null {
@@ -38,10 +39,10 @@ function columnType(table: TableDef, name: string): string {
   return table.columns.find((c) => c.name === name)?.type ?? "text";
 }
 function isNumericType(t: string): boolean {
-  return t === "integer" || t === "numeric";
+  return columnTypeClass(t) === "number";
 }
 function isDateType(t: string): boolean {
-  return t.startsWith("timestamp") || t === "date";
+  return columnTypeClass(t) === "date";
 }
 // Compares by native type, not spec/protocol.md §5.4.2's text-cast
 // lexicographic quirk ("10" < "9") — a demo should show filtering work.

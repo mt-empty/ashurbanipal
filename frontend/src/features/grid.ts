@@ -2,7 +2,13 @@ import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, qs, reportError } from "../core/dom.js";
 import { hiddenColumnsForTable, persist, rememberSort, setSchema, state } from "../core/state.js";
 import type { Column, Row, TableData } from "../core/types.js";
-import { APPROX_COUNT_TITLE, formatApproxCount, formatCellValue } from "../lib/format.js";
+import {
+  APPROX_COUNT_TITLE,
+  formatApproxCount,
+  formatCellValue,
+  rendersAsJson,
+  warnBadJsonCell,
+} from "../lib/format.js";
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
@@ -20,6 +26,11 @@ export function renderHeader(columns: Column[]): void {
     th.dataset.col = col.name;
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
+    // The visible header renders the engine-native type spelling as inline
+    // code; `label` stays the plain-text form for the aria-label only.
+    const typeCode = document.createElement("code");
+    typeCode.className = "col-type";
+    typeCode.textContent = col.type;
     if (col.key === "pk" || col.key === "fk") {
       // A column can be its own table's PK and an FK at once (1:1 detail
       // table shape) — key still reports "pk", but references is populated
@@ -35,12 +46,12 @@ export function renderHeader(columns: Column[]): void {
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "🔑" : "🔗";
-      th.append(icon, label);
+      th.append(icon, `${col.name} `, typeCode);
       // Layers onto the accessible name rather than replacing the key
       // description — the icon keeps its own `title` above.
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
-      th.append(label);
+      th.append(`${col.name} `, typeCode);
     }
     if (col.comment) th.title = col.comment;
     th.setAttribute(
@@ -86,20 +97,18 @@ const rowActionTemplate = $<HTMLTemplateElement>("row-action-template");
 
 // ---- cell preview ----
 let cellPopAnchor: HTMLElement | null = null;
-function showCellPop(e: MouseEvent, text: string, isJsonbColumn: boolean): void {
-  // jsonb (or any JSON-shaped value) renders as a colored, collapsible
-  // tree; everything else falls back to the plain <pre>. Parsing and
-  // rendering share one try/catch, matching record-view.ts's pattern —
-  // a malformed tree build degrades to plain text the same as
+function showCellPop(e: MouseEvent, text: string, col: Column): void {
+  // A JSON column (or any JSON-shaped value) renders as a colored,
+  // collapsible tree; everything else falls back to the plain <pre>.
+  // Parsing and rendering share one try/catch, matching record-view.ts's
+  // pattern — a malformed tree build degrades to plain text the same as
   // unparseable JSON, rather than throwing out of a click handler.
   let isJson = true;
   try {
     $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text) as JsonValue));
   } catch (err) {
     isJson = false;
-    // A long plain-text cell failing to parse here is the normal path, not a
-    // bug; only warn when the backend actually typed the column jsonb.
-    if (isJsonbColumn) console.warn("ashurbanipal: jsonb cell is not valid JSON", err);
+    warnBadJsonCell(col, err);
   }
   $("cell-pre").hidden = isJson;
   $("cell-json").hidden = !isJson;
@@ -183,14 +192,15 @@ function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTa
       applyFilterClause(references.column, "=", raw);
     };
   } else {
+    const jsonAtRender = rendersAsJson(col, raw);
     // scrollWidth > clientWidth is only known after layout, so decide
     // per click rather than per render.
     cellText.onclick = (e) => {
-      if (col.type === "jsonb" || cellText.scrollWidth > cellText.clientWidth) {
-        showCellPop(e, raw, col.type === "jsonb");
+      if (jsonAtRender || cellText.scrollWidth > cellText.clientWidth) {
+        showCellPop(e, raw, col);
       }
     };
-    if (col.type === "jsonb") td.classList.add("expandable");
+    if (jsonAtRender) td.classList.add("expandable");
   }
   return td;
 }
@@ -264,7 +274,7 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
       return tr;
     }),
   );
-  // Overflow is only measurable after layout (jsonb cells are marked at
+  // Overflow is only measurable after layout (JSON cells are marked at
   // render instead). fk-cell is excluded: its title is already the escape
   // hatch, and a click navigates rather than expands.
   requestAnimationFrame(() => {
