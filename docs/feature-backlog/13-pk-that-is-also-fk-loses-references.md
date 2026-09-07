@@ -1,5 +1,7 @@
 # A column that's both PK and FK never reports `references`
 
+> **Status:** DONE · **Area:** spec, ports · **Ref:** PR #36 (commit 07070db)
+
 **Status:** fixed — commit `07070db` (PR #36). `references` is now
 populated for a PK+FK column regardless of what `key` reports, and
 `spec/protocol.md` §5.4.1 specifies it (`key: "pk"` wins the single-value

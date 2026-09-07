@@ -1,5 +1,7 @@
 # Make Go's Postgres/SQLite/MySQL drivers optional, like the other four ports
 
+> **Status:** OPEN · **Area:** ports
+
 **Status:** discussed 2026-08-16, alongside making Postgres a symmetric,
 opt-in Cargo feature (`core = ["postgres"]`, default-on) and moving `pg` to
 an optional peer dependency in `implementations/node-express`. Not designed,

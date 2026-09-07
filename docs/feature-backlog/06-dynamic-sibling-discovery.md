@@ -1,5 +1,7 @@
 # Dynamic sibling discovery
 
+> **Status:** OPEN · **Area:** ports, spec
+
 **Where logged:** `design.md` §2 (non-goal), §9 (deferred).
 
 **What it is:** siblings are a static, hand-maintained TOML list

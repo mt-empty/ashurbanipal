@@ -1,5 +1,7 @@
 # Shared WASM core for the filter/response logic across language ports
 
+> **Status:** OPEN · **Area:** ports
+
 **Ask:** instead of every `implementations/*` port hand-reimplementing the
 filter AST validation + operator→SQL mapping and response/metadata shaping, compile that logic once
 and embed it via a WASM runtime (e.g. wasmtime/wasmer bindings) in each host

@@ -62,8 +62,8 @@ description = "frontend checks: lint, cycle check, api-reference drift, typechec
 depends = ["frontend:lint", "frontend:check-cycles", "frontend:check-api-reference", "frontend:typecheck", "frontend:test-unit", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
 
 [tasks.docs]
-description = "docs checks: hardcoded version strings in sync with docs/publishing-checklist.md"
-depends = ["docs:check-versions"]
+description = "docs checks: version strings vs. publishing-checklist ledger; feature-backlog index vs. entry headers"
+depends = ["docs:check-versions", "docs:backlog-index-check"]
 
 [tasks.changelog]
 description = "changelog checks: each port's CHANGELOG.md top section matches its manifest version"

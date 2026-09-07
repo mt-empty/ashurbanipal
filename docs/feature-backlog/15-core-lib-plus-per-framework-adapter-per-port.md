@@ -1,5 +1,7 @@
 # Split each port into a framework-agnostic core + thin framework adapter
 
+> **Status:** PARTIAL · **Area:** rust, ports · **Ref:** Rust core+adapter split shipped; Node/Flask/Spring deferred, Go exempt
+
 **Status:** discussed 2026-08-10, alongside the Rust crate rename
 `ashurbanipal` → `ashurbanipal-axum` (`docs/publishing-checklist.md`'s
 "Decided: no bare `ashurbanipal` package name" section). The Rust split

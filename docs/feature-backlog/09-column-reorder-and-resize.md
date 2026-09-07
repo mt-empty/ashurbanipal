@@ -1,5 +1,7 @@
 # Column reorder and resize
 
+> **Status:** OPEN · **Area:** frontend
+
 **What it is:** drag-to-reorder columns and drag-to-resize column width —
 the two remaining items from the grid-customization family (column
 show/hide already shipped).

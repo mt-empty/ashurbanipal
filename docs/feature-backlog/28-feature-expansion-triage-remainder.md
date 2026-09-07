@@ -1,5 +1,7 @@
 # Feature-expansion triage — remaining candidates
 
+> **Status:** REFERENCE · **Area:** docs · **Ref:** triage log; spawned stories 20–27, 30
+
 Status: captured 2026-09-01. A list of "become more of a DB client"
 features was triaged this day. The ones worth their own entry were split
 out as stories 21–27 (and the shareable-filter item is 20). This doc holds

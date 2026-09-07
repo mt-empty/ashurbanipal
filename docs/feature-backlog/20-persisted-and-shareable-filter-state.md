@@ -1,5 +1,7 @@
 # Persisted and shareable filter state
 
+> **Status:** DONE · **Area:** frontend, docs · **Ref:** shipped 2026-09-05
+
 Status: shipped 2026-09-05. Replaced the rule in `ui-guidelines.md` R6 and
 `frontend-style-guide.md` §6 rather than working around it. §7's open
 questions resolved as: DSL text, not the JSON AST, goes in the `filter`

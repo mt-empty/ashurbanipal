@@ -1,5 +1,7 @@
 # Per-table query/filter history
 
+> **Status:** OPEN · **Area:** frontend
+
 **Ask:** remember previous filters/queries per table.
 
 **Impact / constraints:**

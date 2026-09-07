@@ -1,5 +1,7 @@
 # Jump between dev / int / staging environments of the same app
 
+> **Status:** OPEN · **Area:** frontend, spec
+
 **Ask:** a way to switch environments for the same service, not just between
 different sibling services.
 

@@ -4,3 +4,13 @@
 description = "verify readme.md's Spring coordinate matches the publishing-checklist ledger (and the ledger matches the highest Spring release tag); --fix rewrites readme.md"
 hide = true
 run = "tools/check-doc-versions.sh"
+
+["docs:backlog-index"]
+description = "regenerate docs/feature-backlog/README.md from each entry's `> **Status:**` header"
+hide = true
+run = "tools/backlog-index.sh --fix"
+
+["docs:backlog-index-check"]
+description = "fail if docs/feature-backlog/README.md is stale, or an entry's `> **Status:**` header is missing/malformed"
+hide = true
+run = "tools/backlog-index.sh"
