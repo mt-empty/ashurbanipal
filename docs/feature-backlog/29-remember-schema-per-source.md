@@ -2,12 +2,12 @@
 
 > **Status:** DONE · **Area:** frontend · **Ref:** PR #90 (2026-09-05)
 
-Status: shipped 2026-09-05 (commit `ca5fff1`, PR #90), matching the shape
-proposed below: `schemaBySource` on `State` (`frontend/src/state.ts`),
-recorded on `#schema-select` change and on the FK-navigation schema
-switch via `setSchema()` (`frontend/src/sidebar.ts`), consulted in
-`#source-select`'s `onchange`. §4's "remember table per (source, schema)"
-question remains open. Rest kept as history.
+Shipped in PR #90, matching the shape proposed below: `schemaBySource` on
+`State` (`frontend/src/state.ts`), recorded on `#schema-select` change and
+on the FK-navigation schema switch via `setSchema()`
+(`frontend/src/sidebar.ts`), consulted in `#source-select`'s `onchange`.
+§4's "remember table per (source, schema)" question remains open. Rest
+kept as history.
 
 ## 1. The pain point
 

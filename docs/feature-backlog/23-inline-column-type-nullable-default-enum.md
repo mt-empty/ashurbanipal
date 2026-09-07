@@ -2,8 +2,7 @@
 
 > **Status:** OPEN · **Area:** spec, frontend
 
-Status: proposed 2026-09-01. Read-only — catalog metadata only. Not
-scheduled.
+Read-only — catalog metadata only.
 
 ## 1. The ask
 

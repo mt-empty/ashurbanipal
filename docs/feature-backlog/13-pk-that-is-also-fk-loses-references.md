@@ -2,11 +2,10 @@
 
 > **Status:** DONE · **Area:** spec, ports · **Ref:** PR #36 (commit 07070db)
 
-**Status:** fixed — commit `07070db` (PR #36). `references` is now
-populated for a PK+FK column regardless of what `key` reports, and
-`spec/protocol.md` §5.4.1 specifies it (`key: "pk"` wins the single-value
-field; `references` is present whenever the column is a foreign key). Rest
-kept as history.
+Fixed in PR #36: `references` is now populated for a PK+FK column
+regardless of what `key` reports, and `spec/protocol.md` §5.4.1 specifies
+it (`key: "pk"` wins the single-value field; `references` is present
+whenever the column is a foreign key). Rest kept as history.
 
 **Bug, not a feature ask** — filed here because it's cross-port and
 low-severity rather than a single-PR fix; captured for a deliberate pass

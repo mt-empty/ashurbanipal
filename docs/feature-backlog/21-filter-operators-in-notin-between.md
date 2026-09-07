@@ -2,8 +2,8 @@
 
 > **Status:** OPEN · **Area:** spec, frontend
 
-Status: proposed 2026-09-01. Read-only — extends the existing filter, no
-change to the read/write posture. Not scheduled.
+Read-only — extends the existing filter, no change to the read/write
+posture.
 
 ## 1. The ask
 
