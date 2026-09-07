@@ -103,10 +103,13 @@ This is a devcontainer project; a Postgres instance (`db`, seeded via
 `.devcontainer/db/init/01-seed.sql`) is expected to be reachable at
 `DATABASE_URL` (set automatically by the devcontainer).
 
-There's a `mise.toml` with tasks wrapping all of the below, organized in
-layers — `mise tasks` lists them, `mise run <task>` runs one. Each
-implementation/area has its own umbrella task that fans out to namespaced
-`<layer>:*` subtasks, and top-level `check` runs everything:
+There's a `mise.toml` (tools, settings, and the top-level umbrella tasks)
+plus per-layer `mise-tasks/*.toml` (the namespaced `<layer>:*` subtasks) —
+`mise tasks` lists them, `mise run <task>` runs one. `mise.lock` is
+committed and pins each tool to an exact version; refresh it with `mise
+lock` after editing `[tools]`. Each implementation/area has its own
+umbrella task that fans out to its namespaced subtasks, and top-level
+`check` runs everything:
 
 ```sh
 mise run check                       # everything CI would run, across every implementation

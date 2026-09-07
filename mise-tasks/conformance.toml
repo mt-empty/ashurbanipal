@@ -1,0 +1,37 @@
+# conformance:* — the implementation-neutral conformance suite (conformance/).
+
+["conformance:seed-gen"]
+description = "regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql from tools/seed-gen (same generator, kept identical)"
+confirm = "Overwrite the committed seed SQL (.devcontainer/db/init/01-seed.sql, conformance/seed/seed.sql) from tools/seed-gen?"
+run = "cargo run > ../../.devcontainer/db/init/01-seed.sql && cp ../../.devcontainer/db/init/01-seed.sql ../../conformance/seed/seed.sql"
+dir = "tools/seed-gen"
+
+["conformance:seed-check"]
+description = "verify .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql match tools/seed-gen's current output"
+run = "tools/check-seed-sync.sh"
+
+["conformance:test"]
+description = "run the conformance kit (spawns the Rust implementation by default; set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead)"
+run = "cargo test --test conformance"
+dir = "implementations/rust"
+# Spawned mode opens one `demo` OS process per test, each with its own
+# 5-connection pool against DATABASE_URL — on a high-core-count machine,
+# default (num-CPUs) test-thread parallelism can multiply past Postgres's
+# default max_connections (100) and surface as spurious connection-reset
+# failures, not a logic bug. Capping test threads keeps peak concurrent
+# connections well under that regardless of host CPU count; the suite is
+# fast enough that this costs a couple of seconds, not minutes. Harmless,
+# and unused, against an external target.
+env = { RUST_TEST_THREADS = "8" }
+
+["conformance:report"]
+description = "run the conformance kit and write conformance-report.json (suite version, target, pass/fail per requirement ID)"
+run = "bash conformance/runner/report.sh"
+
+["conformance:schema-install"]
+description = "one-time install of schemathesis (layer 2 shape-conformance fuzzer, docs/design.md §4.2) into a local venv"
+run = "python3 -m venv .venv-schemathesis && .venv-schemathesis/bin/pip install --upgrade pip schemathesis"
+
+["conformance:schema-test"]
+description = "fire schemathesis at spec/openapi.yaml (layer 2 shape conformance, docs/design.md §4.2) — spawns the Rust demo by default, or set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead; run conformance:schema-install first"
+run = "bash conformance/runner/schema-check.sh"
