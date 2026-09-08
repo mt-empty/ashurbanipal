@@ -117,6 +117,5 @@ jobs:
       contents: write
     uses: ./.github/workflows/_post-release.yml
     with:
-      tag-pattern: '^ashurbanipal-spring-boot-starter-v'
-      include-paths: 'implementations/spring-boot-starter/** frontend/** spec/**'
+      changelog-path: 'implementations/spring-boot-starter/CHANGELOG.md'
       title-prefix: 'ashurbanipal-spring-boot-starter '

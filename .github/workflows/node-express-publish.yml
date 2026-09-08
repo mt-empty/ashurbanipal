@@ -129,6 +129,5 @@ jobs:
       contents: write
     uses: ./.github/workflows/_post-release.yml
     with:
-      tag-pattern: '^ashurbanipal-node-express-v'
-      include-paths: 'implementations/node-express/** frontend/** spec/**'
+      changelog-path: 'implementations/node-express/CHANGELOG.md'
       title-prefix: 'ashurbanipal-node-express '

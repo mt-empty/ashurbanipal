@@ -83,9 +83,11 @@ Per port, given the target version:
    the manifest version exactly.
 5. Push the tag. The publish workflow runs build + test + conformance, asserts
    the tag is on `main` and equals the manifest version, publishes to the
-   registry, then its `post-release` job creates the GitHub Release with
-   `git-cliff --current` notes (Go's workflow does the same, minus the registry
-   step).
+   registry, then its `post-release` job creates the GitHub Release, using the
+   `## [X.Y.Z]` section of that port's `CHANGELOG.md` (from step 2) as the body
+   (Go's workflow does the same, minus the registry step). If the section is
+   missing the job fails loudly — the registry publish is already done, so
+   create the Release by hand from the CHANGELOG section.
 
 ## Go — release mechanics
 

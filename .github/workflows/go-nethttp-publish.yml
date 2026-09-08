@@ -121,6 +121,5 @@ jobs:
       contents: write
     uses: ./.github/workflows/_post-release.yml
     with:
-      tag-pattern: '^implementations/go-nethttp/v'
-      include-paths: 'implementations/go-nethttp/** frontend/** spec/**'
+      changelog-path: 'implementations/go-nethttp/CHANGELOG.md'
       title-prefix: 'ashurbanipal-go-nethttp '

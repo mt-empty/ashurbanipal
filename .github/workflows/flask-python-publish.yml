@@ -137,6 +137,5 @@ jobs:
       contents: write
     uses: ./.github/workflows/_post-release.yml
     with:
-      tag-pattern: '^ashurbanipal-flask-v'
-      include-paths: 'implementations/flask-python/** frontend/** spec/**'
+      changelog-path: 'implementations/flask-python/CHANGELOG.md'
       title-prefix: 'ashurbanipal-flask '

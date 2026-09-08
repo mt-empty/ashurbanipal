@@ -83,6 +83,5 @@ jobs:
       contents: write
     uses: ./.github/workflows/_post-release.yml
     with:
-      tag-pattern: '^ashurbanipal-actix-web-v'
-      include-paths: 'implementations/rust/actix-web/** implementations/rust/core/** frontend/** spec/**'
+      changelog-path: 'implementations/rust/actix-web/CHANGELOG.md'
       title-prefix: 'ashurbanipal-actix-web '
