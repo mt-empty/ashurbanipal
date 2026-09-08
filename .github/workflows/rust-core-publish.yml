@@ -68,6 +68,5 @@ jobs:
       contents: write
     uses: ./.github/workflows/_post-release.yml
     with:
-      tag-pattern: '^ashurbanipal-v'
-      include-paths: 'implementations/rust/core/** spec/**'
+      changelog-path: 'implementations/rust/core/CHANGELOG.md'
       title-prefix: 'ashurbanipal '

@@ -82,6 +82,5 @@ jobs:
       contents: write
     uses: ./.github/workflows/_post-release.yml
     with:
-      tag-pattern: '^ashurbanipal-axum-v'
-      include-paths: 'implementations/rust/axum/** implementations/rust/core/** frontend/** spec/**'
+      changelog-path: 'implementations/rust/axum/CHANGELOG.md'
       title-prefix: 'ashurbanipal-axum '
