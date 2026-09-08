@@ -72,6 +72,32 @@ pub struct TableData {
     pub total_approx: i64,
 }
 
+/// One `{from, to}` column pairing of an incoming FK (`spec/protocol.md`
+/// §5.9). `from` is the referencing column, `to` the referenced column on
+/// the target table; a composite FK has more than one.
+#[derive(Debug, Serialize)]
+pub struct ColumnPair {
+    pub from: String,
+    pub to: String,
+}
+
+/// One foreign key elsewhere in the schema that targets the requested
+/// table (`spec/protocol.md` §5.9 — the reverse of `ColumnInfo::references`).
+#[derive(Debug, Serialize)]
+pub struct ReferencedBy {
+    /// The referencing table (the one holding the FK).
+    pub table: String,
+    /// Set only when the referencing table's schema differs from the
+    /// resolved one — the opposite end of the relationship from
+    /// `ColumnRef::schema`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    /// FK constraint name; MAY be engine-synthesized where the engine
+    /// doesn't name FK constraints (SQLite).
+    pub constraint: String,
+    pub columns: Vec<ColumnPair>,
+}
+
 #[derive(Debug)]
 pub enum DbError {
     NotAllowed(String),
@@ -121,6 +147,13 @@ pub trait DbSource: Send + Sync + 'static {
         table: &str,
         column: &str,
     ) -> impl std::future::Future<Output = Result<Vec<(String, f32)>, DbError>> + Send;
+    /// Incoming FK references: every FK constraint elsewhere in the source
+    /// whose target is `table` (`spec/protocol.md` §5.9).
+    fn referenced_by(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<ReferencedBy>, DbError>> + Send;
 }
 
 /// Resolves the `source` query param against a host's registered sources
@@ -172,6 +205,30 @@ pub(crate) fn op_sql(op: FilterOp) -> &'static str {
         FilterOp::IsNull => "IS NULL",
         FilterOp::IsNotNull => "IS NOT NULL",
     }
+}
+
+/// Merges single-`ColumnPair` `ReferencedBy` rows into one entry per
+/// `(schema, table, constraint)`. Relies on the caller's catalog `ORDER BY`
+/// putting a constraint's columns adjacent — a run-length merge, not a
+/// full group-by. Each backend maps its own row shape (and applies any
+/// allow-list filter) before calling this.
+pub(crate) fn group_referenced_by(
+    rows: impl IntoIterator<Item = ReferencedBy>,
+) -> Vec<ReferencedBy> {
+    let mut out: Vec<ReferencedBy> = Vec::new();
+    for row in rows {
+        match out.last_mut() {
+            Some(last)
+                if last.table == row.table
+                    && last.schema == row.schema
+                    && last.constraint == row.constraint =>
+            {
+                last.columns.extend(row.columns);
+            }
+            _ => out.push(row),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

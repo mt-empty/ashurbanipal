@@ -5,7 +5,8 @@ use sqlx::mysql::MySqlRow;
 use sqlx::{MySql, MySqlPool, Row, Transaction};
 
 use super::{
-    op_sql, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData, TableInfo,
+    group_referenced_by, op_sql, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource, KeyKind,
+    QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -578,6 +579,62 @@ impl DbSource for MySqlSource {
         // MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
         Ok(Vec::new())
     }
+
+    async fn referenced_by(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ReferencedBy>, DbError> {
+        let variant = self.variant().await?;
+        let mut tx = self.pinned_tx().await?;
+        let schema = self
+            .resolve_schema_in_tx(&mut tx, variant, schema, CATALOG_TIMEOUT_SECS)
+            .await?;
+        let allowed = self
+            .allowed_tables_in_tx(&mut tx, variant, &schema, CATALOG_TIMEOUT_SECS)
+            .await?;
+        if !allowed.iter().any(|t| t.as_str() == table) {
+            return Err(DbError::NotAllowed(format!("table {table:?}")));
+        }
+
+        // `table_schema = ?` keeps referrers to the same database — MySQL /
+        // MariaDB have no cross-schema `has_table_privilege` gate
+        // (`docs/adapter-decisions.md` §5.9). Read `key_column_usage`, not
+        // `referential_constraints`, whose referenced-name column MariaDB
+        // nulls for a role lacking privilege on the referenced table.
+        let rows = sqlx::query_as::<_, (String, String, String, String)>(sqlx::AssertSqlSafe(
+            timed_select(
+                variant,
+                CATALOG_TIMEOUT_SECS,
+                "kcu.table_name, kcu.constraint_name, kcu.column_name, \
+                        kcu.referenced_column_name \
+                 from information_schema.key_column_usage kcu \
+                 where kcu.referenced_table_schema = ? and kcu.referenced_table_name = ? \
+                   and kcu.table_schema = ? \
+                 order by kcu.table_name, kcu.constraint_name, kcu.ordinal_position",
+            ),
+        ))
+        .bind(&schema)
+        .bind(table)
+        .bind(&schema)
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        // Keep the referrer set inside the same allow-list every other
+        // route on this backend serves from, so this route can never name a
+        // table the rest of the API won't.
+        Ok(group_referenced_by(
+            rows.into_iter()
+                .filter(|(ref_table, ..)| allowed.iter().any(|t| t == ref_table))
+                .map(|(ref_table, constraint, from, to)| ReferencedBy {
+                    table: ref_table,
+                    schema: None,
+                    constraint,
+                    columns: vec![ColumnPair { from, to }],
+                }),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -687,8 +744,10 @@ mod tests {
             "create table orders (\
                 id integer primary key auto_increment, \
                 user_id integer, \
+                approved_by integer, \
                 status varchar(50) not null, \
-                constraint fk_orders_user foreign key (user_id) references users(id)\
+                constraint fk_orders_user foreign key (user_id) references users(id), \
+                constraint fk_orders_approver foreign key (approved_by) references users(id)\
              )"
             .to_string(),
         ))
@@ -800,6 +859,36 @@ mod tests {
         assert_eq!(user_id_col.key, Some(KeyKind::Fk));
         assert_eq!(user_id_col.references.as_ref().unwrap().table, "users");
         assert_eq!(user_id_col.references.as_ref().unwrap().column, "id");
+    }
+
+    #[tokio::test]
+    async fn referenced_by_lists_incoming_fks() {
+        let db = seeded_db().await;
+        let source = MySqlSource::new(db.pool.clone());
+
+        let refs = source.referenced_by(None, "users").await.unwrap();
+        // orders references users via two FKs (user_id, approved_by).
+        let orders: Vec<&ReferencedBy> = refs.iter().filter(|r| r.table == "orders").collect();
+        assert_eq!(orders.len(), 2, "one entry per FK constraint");
+        assert!(orders.iter().all(|r| r.schema.is_none()));
+        assert!(orders
+            .iter()
+            .all(|r| r.columns.len() == 1 && r.columns[0].to == "id"));
+        let from: Vec<&str> = orders.iter().map(|r| r.columns[0].from.as_str()).collect();
+        assert!(from.contains(&"user_id") && from.contains(&"approved_by"));
+
+        // A table nothing points at is `[]`, not an error.
+        assert!(source
+            .referenced_by(None, "order_extra")
+            .await
+            .unwrap()
+            .is_empty());
+
+        // Unknown table → NotAllowed.
+        assert!(matches!(
+            source.referenced_by(None, "nope").await,
+            Err(DbError::NotAllowed(_))
+        ));
     }
 
     #[tokio::test]

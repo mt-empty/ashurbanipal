@@ -162,6 +162,19 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER` | Stable order, same order the absent-`source` case resolves against | `two_source::api_sources_order_matches_default_resolution_order` (self-skips without a second source) |
 | `P5.8-HEADER` | Carries the protocol version header | `sources::every_sources_response_carries_the_protocol_version_header` |
 
+## §5.9 `GET /api/tables/referenced-by`
+
+| ID | Requirement | Test |
+|---|---|---|
+| `P5.9-SHAPE` | One entry per FK constraint targeting `table`; a referrer with two FKs to the target appears twice; `columns` pairs `{from,to}` explicit; `constraint` present; `(table, constraint)` unique per response | `referenced_by::lists_incoming_fk_constraints_with_explicit_column_pairs` |
+| `P5.9-COMPOSITE-INCLUDED` | Composite FKs ARE included here (contrast §5.4.1), one entry with every column pair in constraint order | `referenced_by::composite_foreign_keys_are_included_with_every_column_pair` |
+| `P5.9-ZERO-REFERRERS` | A table nothing references returns `[]`, not an error | `referenced_by::a_table_nothing_references_returns_an_empty_list` |
+| `P5.9-CROSS-SCHEMA` | A referrer in another schema carries a `schema` field (Postgres; MySQL/SQLite self-skip) | `referenced_by::cross_schema_referrers_carry_a_schema_field` |
+| `P5.9-TABLE-EXACT-MATCH` | `table` matched against §5.2 exactly; unknown or injection-shaped input → 400, never reaches SQL; `table` required | `referenced_by::unknown_or_malicious_table_values_are_rejected_cleanly` |
+| `P5.9-SCHEMA-PARAM` | Explicit default `schema` resolves like an absent one; unrecognized → 400 | `referenced_by::schema_param_resolves_like_the_other_routes` |
+| `P5.9-SOURCE-PARAM` | Unrecognized `source` → 400 | `referenced_by::unknown_source_is_rejected` |
+| `P5.9-HEADER` | Carries the protocol version header on 200 and 400 | `referenced_by::every_response_carries_the_protocol_version_header` |
+
 ## §6 Server invariants
 
 | ID | Requirement | Test |

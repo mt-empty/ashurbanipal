@@ -10,7 +10,7 @@ use axum::Router;
 use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
-use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, TableInfo};
+use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, ReferencedBy, TableInfo};
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
@@ -60,6 +60,10 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
         .route(
             "/__ashurbanipal/api/tables/common-values",
             get(common_values::<S>),
+        )
+        .route(
+            "/__ashurbanipal/api/tables/referenced-by",
+            get(referenced_by::<S>),
         )
         .route("/__ashurbanipal/api/siblings", get(siblings::<S>))
         .layer(map_response(stamp_protocol_version));
@@ -314,6 +318,29 @@ async fn common_values<S: DbSource>(
     }))
 }
 
+#[derive(Deserialize)]
+struct ReferencedByParams {
+    schema: Option<String>,
+    source: Option<String>,
+    table: String,
+}
+
+#[derive(Serialize)]
+struct ReferencedByResponse {
+    referenced_by: Vec<ReferencedBy>,
+}
+
+async fn referenced_by<S: DbSource>(
+    State(state): State<Arc<AppState<S>>>,
+    Query(params): Query<ReferencedByParams>,
+) -> Result<Json<ReferencedByResponse>, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let referenced_by = source
+        .referenced_by(params.schema.as_deref(), &params.table)
+        .await?;
+    Ok(Json(ReferencedByResponse { referenced_by }))
+}
+
 #[derive(Serialize)]
 struct SiblingStatus {
     name: String,
@@ -418,6 +445,13 @@ mod tests {
             _table: &str,
             _column: &str,
         ) -> Result<Vec<(String, f32)>, DbError> {
+            unreachable!()
+        }
+        async fn referenced_by(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+        ) -> Result<Vec<ReferencedBy>, DbError> {
             unreachable!()
         }
     }

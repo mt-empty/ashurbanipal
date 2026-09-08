@@ -4,11 +4,11 @@
 # implementations/rust/core/src/db/); identical across the Postgres,
 # MySQL, and SQLite backends.
 #
-# Exception: the error responses below (ProblemDetails / problem+json)
-# describe the RFC 9457 target from spec/protocol.md §2. Implementations
-# still emit text/plain until the migration in
-# docs/feature-backlog/34-rfc9457-problem-details.md completes — until
-# then, conformance:schema-test will flag error-response content-type.
+# Exception: the error responses below list both text/plain and RFC 9457
+# application/problem+json while the migration in
+# docs/feature-backlog/34-rfc9457-problem-details.md is in flight
+# (spec/protocol.md §2 is normative: problem+json is the target). text/plain
+# is dropped once every port has moved over.
 openapi: 3.1.0
 info:
   title: Ashurbanipal Protocol
@@ -385,11 +385,14 @@ components:
         const: "1"
 
   responses:
+    # Migration in flight (docs/feature-backlog/34-rfc9457-problem-details.md):
+    # the target error body is RFC 9457 application/problem+json (branch on
+    # `code`); implementations not yet migrated still emit text/plain. Both
+    # are listed until every port has moved over, then text/plain is dropped.
     ClientError:
       description: >
         Client error — unknown source/schema/table/column, invalid
         filter, invalid parameter, or a table the role can't read.
-        RFC 9457 problem+json; branch on `code`, not on `title`.
       headers:
         x-ashurbanipal-protocol:
           $ref: "#/components/headers/ProtocolVersion"
@@ -397,8 +400,11 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/ProblemDetails"
+        text/plain:
+          schema:
+            type: string
     ServerError:
-      description: Server error — database failure or query timeout. RFC 9457 problem+json.
+      description: Server error — database failure or query timeout.
       headers:
         x-ashurbanipal-protocol:
           $ref: "#/components/headers/ProtocolVersion"
@@ -406,6 +412,9 @@ components:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/ProblemDetails"
+        text/plain:
+          schema:
+            type: string
 
   schemas:
     SourceEntry:

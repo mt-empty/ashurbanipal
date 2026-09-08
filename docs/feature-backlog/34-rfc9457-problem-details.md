@@ -50,9 +50,8 @@ failure modes are exactly the ones the frontend needs to name.
 - **Docs** — `PORTING.md` error-handling section; each port README if it
   documents the error shape.
 
-**Rollout:** because `spec/openapi.yaml` already declares problem+json,
-`conformance:schema-test` flags every not-yet-migrated port's error
-responses. Either migrate the Rust reference first and accept the four
-ports' schema-test leg being red until they follow (consistent with the
-[[14-incoming-fk-references]] "accept a brief red window" call), or hold
-the openapi error-response flip on a branch until all five are done.
+**Rollout:** `spec/openapi.yaml` lists *both* `text/plain` and
+`application/problem+json` on the error responses for now, so
+`conformance:schema-test` stays green while ports migrate one at a time.
+Drop `text/plain` from `ClientError`/`ServerError` once every port emits
+problem+json; that flip is the last step of this story.

@@ -5,8 +5,8 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
 use super::{
-    op_sql, quote_ident, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData,
-    TableInfo,
+    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource,
+    KeyKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -400,6 +400,57 @@ impl DbSource for SqliteSource {
         // live GROUP BY scan. See docs/adapter-decisions.md.
         Ok(Vec::new())
     }
+
+    async fn referenced_by(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ReferencedBy>, DbError> {
+        check_schema(schema)?;
+        let allowed = self.allowed_tables().await?;
+        if !allowed.iter().any(|t| t.as_str() == table) {
+            return Err(DbError::NotAllowed(format!("table {table:?}")));
+        }
+        let table = table.to_string();
+
+        // No reverse-FK index and no `information_schema`: walk every
+        // table's `pragma_foreign_key_list` (the schema is already parsed
+        // in memory). The TVF argument is a column reference — not spliced;
+        // `fkl."table"` is bound. `COLLATE NOCASE` because the pragma
+        // returns the referenced name as written in the DDL, which SQLite
+        // itself resolves case-insensitively.
+        let rows = self
+            .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
+                let rows = sqlx::query_as::<_, (String, i64, String, String)>(sqlx::AssertSqlSafe(
+                    "select m.name, fkl.id, fkl.\"from\", fkl.\"to\" \
+                     from sqlite_master m \
+                     join pragma_foreign_key_list(m.name) fkl \
+                     where m.type = 'table' \
+                       and m.name not like 'sqlite\\_%' escape '\\' \
+                       and fkl.\"table\" = ? collate nocase \
+                     order by m.name, fkl.id, fkl.seq"
+                        .to_string(),
+                ))
+                .bind(&table)
+                .fetch_all(&mut *conn)
+                .await?;
+                Ok(rows)
+            })
+            .await?;
+
+        // SQLite FKs are unnamed; `fk_<id>` is a per-table-stable synthetic
+        // label (`spec/protocol.md` §5.9 permits this). The query's
+        // `sqlite_master` predicate matches `allowed_tables`, so every
+        // referrer is already allow-listed.
+        Ok(group_referenced_by(rows.into_iter().map(
+            |(ref_table, fk_id, from, to)| ReferencedBy {
+                table: ref_table,
+                schema: None,
+                constraint: format!("fk_{fk_id}"),
+                columns: vec![ColumnPair { from, to }],
+            },
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -417,6 +468,7 @@ mod tests {
              create table orders (\
                 id integer primary key, \
                 user_id integer references users(id), \
+                approved_by integer references users(id), \
                 status text not null\
              );\
              create table order_extra (\
@@ -522,6 +574,36 @@ mod tests {
         assert_eq!(user_id_col.key, Some(KeyKind::Fk));
         assert_eq!(user_id_col.references.as_ref().unwrap().table, "users");
         assert_eq!(user_id_col.references.as_ref().unwrap().column, "id");
+    }
+
+    #[tokio::test]
+    async fn referenced_by_lists_incoming_fks() {
+        let source = SqliteSource::new(seeded_pool().await);
+
+        let refs = source.referenced_by(None, "users").await.unwrap();
+        // orders references users via two FKs (user_id, approved_by).
+        let orders: Vec<&ReferencedBy> = refs.iter().filter(|r| r.table == "orders").collect();
+        assert_eq!(orders.len(), 2, "one entry per FK constraint");
+        assert!(orders.iter().all(|r| r.schema.is_none()));
+        assert!(orders.iter().all(|r| r.constraint.starts_with("fk_")));
+        assert!(orders
+            .iter()
+            .all(|r| r.columns.len() == 1 && r.columns[0].to == "id"));
+        let from: Vec<&str> = orders.iter().map(|r| r.columns[0].from.as_str()).collect();
+        assert!(from.contains(&"user_id") && from.contains(&"approved_by"));
+
+        // A table nothing points at is `[]`, not an error.
+        assert!(source
+            .referenced_by(None, "order_extra")
+            .await
+            .unwrap()
+            .is_empty());
+
+        // Unknown table → NotAllowed.
+        assert!(matches!(
+            source.referenced_by(None, "nope").await,
+            Err(DbError::NotAllowed(_))
+        ));
     }
 
     #[tokio::test]

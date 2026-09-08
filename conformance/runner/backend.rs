@@ -60,6 +60,18 @@ pub enum CommonValues {
     AlwaysEmpty,
 }
 
+/// Whether `/api/tables/referenced-by` (§5.9) can report a referrer that
+/// lives in a schema other than the resolved one.
+pub enum CrossSchemaReferrers {
+    /// Postgres: `has_table_privilege` gates referrers across schemas, so a
+    /// referrer in another schema is listed with a `schema` field
+    /// (`docs/adapter-decisions.md` §5.9).
+    Reported,
+    /// MySQL scopes the lookup to the resolved database; SQLite has a
+    /// single schema. Neither can surface a cross-schema referrer.
+    ScopedToResolvedSchema,
+}
+
 /// The strongest claim the runner can make about a never-`ANALYZE`d
 /// table's `approx_rows`.
 pub enum UnanalyzedCount {
@@ -141,6 +153,13 @@ impl Backend {
         match self {
             Backend::Postgres | Backend::Mysql => SchemaModel::Namespaced,
             Backend::Sqlite => SchemaModel::Single,
+        }
+    }
+
+    pub fn cross_schema_referrers(self) -> CrossSchemaReferrers {
+        match self {
+            Backend::Postgres => CrossSchemaReferrers::Reported,
+            Backend::Mysql | Backend::Sqlite => CrossSchemaReferrers::ScopedToResolvedSchema,
         }
     }
 

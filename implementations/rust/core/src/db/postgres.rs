@@ -4,8 +4,8 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use super::{
-    op_sql, quote_ident, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData,
-    TableInfo,
+    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource,
+    KeyKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, Logic};
 
@@ -533,6 +533,57 @@ impl DbSource for PgPoolSource {
             rows
         };
         Ok(rows)
+    }
+
+    async fn referenced_by(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ReferencedBy>, DbError> {
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
+        let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
+        let tables = self.allowed_tables_in_tx(&mut tx, &schema).await?;
+        if !tables.iter().any(|t| t.as_str() == table) {
+            return Err(DbError::NotAllowed(format!("table {table:?}")));
+        }
+
+        // `pg_catalog`, not `information_schema`: the reverse (`confrelid`)
+        // filter over the standard-SQL views runs 20–40x slower on a large
+        // catalog (`docs/adapter-decisions.md` §5.9). `has_table_privilege`
+        // is the per-referrer read gate — it works across schemas, so
+        // cross-schema referrers are reported and gated without a separate
+        // allow-list pass.
+        let rows = sqlx::query_as::<_, (String, String, String, String, String)>(
+            "select rn.nspname, rc.relname, con.conname, fa.attname, ta.attname \
+             from pg_constraint con \
+             join pg_class rc on rc.oid = con.conrelid \
+             join pg_namespace rn on rn.oid = rc.relnamespace \
+             join lateral unnest(con.conkey, con.confkey) with ordinality \
+                  as k(from_attnum, to_attnum, n) on true \
+             join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum \
+             join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum \
+             where con.contype = 'f' \
+               and con.confrelid = ( \
+                 select c.oid from pg_class c \
+                 join pg_namespace n on n.oid = c.relnamespace \
+                 where n.nspname = $1 and c.relname = $2 and c.relkind = 'r') \
+               and has_table_privilege(con.conrelid, 'SELECT') \
+             order by rn.nspname, rc.relname, con.conname, k.n",
+        )
+        .bind(&schema)
+        .bind(table)
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        Ok(group_referenced_by(rows.into_iter().map(
+            |(ref_schema, ref_table, constraint, from, to)| ReferencedBy {
+                schema: (ref_schema != schema).then_some(ref_schema),
+                table: ref_table,
+                constraint,
+                columns: vec![ColumnPair { from, to }],
+            },
+        )))
     }
 }
 
