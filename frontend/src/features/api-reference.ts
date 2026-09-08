@@ -112,6 +112,22 @@ function buildApiReference() {
       },
       {
         method: "GET",
+        path: `${base}/tables/referenced-by`,
+        summary:
+          "Incoming foreign keys — the FK constraints on other tables whose target is this one (the reverse of a column's `references`). One entry per constraint; a referrer with two FKs to the target appears twice. `columns` pairs `{from, to}` (referencing column → referenced column); a composite FK has more than one. `schema` is the referencing table's schema, present only when it differs from the resolved one. `constraint` may be engine-synthesized (SQLite). Returns `[]` — not a 404 — when nothing references the table.",
+        params: [
+          { name: "source", required: false, notes: "same as GET /schemas" },
+          { name: "schema", required: false, notes: "same as GET /tables" },
+          { name: "table", required: true, notes: "must be a name returned by GET /tables" },
+        ],
+        example_response: {
+          referenced_by: [
+            { table: "orders", constraint: "orders_user_id_fkey", columns: [{ from: "user_id", to: "id" }] },
+          ],
+        },
+      },
+      {
+        method: "GET",
         path: `${base}/siblings`,
         summary: "Other related services configured for this instance, with live health status.",
         params: [],

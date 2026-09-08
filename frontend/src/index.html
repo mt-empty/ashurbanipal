@@ -108,10 +108,14 @@
     <span class="dialog-head-title"><strong>record</strong><button id="record-copy-row" class="copy" aria-label="copy row as JSON" title="copy row as JSON"><span class="copy-icon">⧉</span> JSON</button><button id="record-copy-insert" class="copy" aria-label="copy row as SQL INSERT statement" title="copy row as an INSERT statement"><span class="copy-icon">⧉</span> SQL INSERT</button></span>
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
-  <dl id="record-dl"></dl>
+  <div id="record-body">
+    <dl id="record-dl"></dl>
+    <div id="record-referenced-by-wrap"><span class="section-label">referenced by</span><div id="record-referenced-by"></div></div>
+  </div>
 </dialog>
 
 <div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
+<div id="refby-pop" popover><div id="refby-pop-list"></div></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
 <span id="filter-caret-anchor"></span>

@@ -18,6 +18,9 @@
   --backdrop: light-dark(#0006, #0009);
   --gap: .5rem;
   --gap-lg: .75rem;
+  /* Scrollable content budget inside a modal <dialog> (max-height 80vh
+     less the header). */
+  --dialog-body-max-h: calc(80vh - 3rem);
   --sidebar-w: 220px;
   /* min() re-clamps on window shrink alone (no resize listener needed) if
      a wide persisted width no longer fits. */
@@ -161,10 +164,14 @@ th code.col-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; 
             color: inherit; margin-left: .3rem; padding: 0 .15rem; border-radius: 3px; }
 .common-values-btn:hover { background: var(--hover); }
 /* Styled distinctly from the plain cell-text button so it doesn't read
-   as an <a> hyperlink — it's an in-app state change, not navigation. */
-.fk-cell { cursor: pointer; text-decoration: underline dotted;
-           text-underline-offset: .15em; }
-.fk-cell:hover { text-decoration-style: solid; }
+   as an <a> hyperlink — it's an in-app state change, not navigation.
+   The pk cell (reverse direction: what references this row) is the same
+   family, dashed instead of dotted so the two never read alike — a
+   column can be both pk and fk. */
+.fk-cell, .pk-cell { cursor: pointer; text-decoration: underline dotted;
+                     text-underline-offset: .15em; }
+.pk-cell { text-decoration-style: dashed; }
+.fk-cell:hover, .pk-cell:hover { text-decoration-style: solid; }
 th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
 td.row-actions { padding-right: .25rem; }
 .record-btn { background: none; border: none; cursor: pointer; font: inherit;
@@ -262,7 +269,7 @@ dialog::backdrop { background: var(--backdrop); }
    max-height budget — content-box padding let long content overflow the
    dialog and add a second scrollbar around the pre's own. */
 dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
-                        max-height: calc(80vh - 3rem); box-sizing: border-box; }
+                        max-height: var(--dialog-body-max-h); box-sizing: border-box; }
 dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
             gap: .3rem var(--gap-lg); }
 dialog dl dt { font-weight: 600; }
@@ -367,6 +374,32 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
           cursor: pointer; border-radius: 4px; }
 #cv-pop button.cv-value:hover { background: var(--hover); }
 #cv-pop .cv-freq { opacity: .6; }
+
+/* ==== referenced-by (§5.9): incoming-FK list, shared by the PK-cell
+   popover and the record-dialog section ==== */
+/* Same anchored-popover shape as #cv-pop; separate anchor-name so both can
+   resolve from one render pass. */
+#refby-pop { position: fixed; position-anchor: --refby-anchor;
+          position-try-fallbacks: flip-block, flip-inline;
+          inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+          margin: 0; border: 1px solid var(--border-strong);
+          border-radius: 8px; padding: .3rem; width: max-content;
+          max-width: min(24rem, 90vw);
+          max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
+#refby-pop-list, #record-referenced-by { display: flex; flex-direction: column; }
+.refby-empty { opacity: .6; padding: .3rem .5rem; margin: 0; }
+button.refby-entry { width: 100%; box-sizing: border-box; background: none;
+          border: none; font: inherit; color: inherit; text-align: left;
+          padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+button.refby-entry:hover:not(:disabled) { background: var(--hover); }
+button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
+/* Record dialog: the field list and this section scroll together as one
+   region within the dialog's height budget — not two stacked scrollers —
+   and the section flows in the same inset column as the fields, set off
+   only by the reused sidebar section label, no rule. */
+#record-body { overflow: auto; max-height: var(--dialog-body-max-h); }
+#record-dialog #record-dl { max-height: none; }
+#record-referenced-by-wrap { padding: 0 var(--gap-lg) var(--gap-lg); }
 
 /* Same shape as #cv-pop, but the anchor is a single static button
    rather than one per header, so anchor-name is set once in CSS. */

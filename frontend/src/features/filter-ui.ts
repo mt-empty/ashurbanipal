@@ -31,6 +31,15 @@ export function applyFilterClause(column: string, op: FilterOp, value?: string):
   submitFilter(clause);
 }
 
+// AND-join of `column = value` clauses — the composite-key drill-in from
+// referenced-by. quoteFilterValue on each value keeps the whole string
+// parseable by parseFilterDsl (which handles AND between conditions).
+export function applyFilterClauses(pairs: { column: string; value: string }[]): void {
+  const clause = pairs.map((p) => `${p.column} = ${quoteFilterValue(p.value)}`).join(" AND ");
+  $<HTMLInputElement>("filter").value = clause;
+  submitFilter(clause);
+}
+
 $<HTMLFormElement>("filter-form").onsubmit = (e) => {
   e.preventDefault();
   submitFilter($<HTMLInputElement>("filter").value.trim());

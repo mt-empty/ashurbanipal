@@ -52,6 +52,9 @@
   --backdrop: light-dark(#0006, #0009);
   --gap: .5rem;
   --gap-lg: .75rem;
+  /* Scrollable content budget inside a modal <dialog> (max-height 80vh
+     less the header). */
+  --dialog-body-max-h: calc(80vh - 3rem);
   --sidebar-w: 220px;
   /* min() re-clamps on window shrink alone (no resize listener needed) if
      a wide persisted width no longer fits. */
@@ -195,10 +198,14 @@ th code.col-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; 
             color: inherit; margin-left: .3rem; padding: 0 .15rem; border-radius: 3px; }
 .common-values-btn:hover { background: var(--hover); }
 /* Styled distinctly from the plain cell-text button so it doesn't read
-   as an <a> hyperlink — it's an in-app state change, not navigation. */
-.fk-cell { cursor: pointer; text-decoration: underline dotted;
-           text-underline-offset: .15em; }
-.fk-cell:hover { text-decoration-style: solid; }
+   as an <a> hyperlink — it's an in-app state change, not navigation.
+   The pk cell (reverse direction: what references this row) is the same
+   family, dashed instead of dotted so the two never read alike — a
+   column can be both pk and fk. */
+.fk-cell, .pk-cell { cursor: pointer; text-decoration: underline dotted;
+                     text-underline-offset: .15em; }
+.pk-cell { text-decoration-style: dashed; }
+.fk-cell:hover, .pk-cell:hover { text-decoration-style: solid; }
 th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
 td.row-actions { padding-right: .25rem; }
 .record-btn { background: none; border: none; cursor: pointer; font: inherit;
@@ -296,7 +303,7 @@ dialog::backdrop { background: var(--backdrop); }
    max-height budget — content-box padding let long content overflow the
    dialog and add a second scrollbar around the pre's own. */
 dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
-                        max-height: calc(80vh - 3rem); box-sizing: border-box; }
+                        max-height: var(--dialog-body-max-h); box-sizing: border-box; }
 dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
             gap: .3rem var(--gap-lg); }
 dialog dl dt { font-weight: 600; }
@@ -401,6 +408,32 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
           cursor: pointer; border-radius: 4px; }
 #cv-pop button.cv-value:hover { background: var(--hover); }
 #cv-pop .cv-freq { opacity: .6; }
+
+/* ==== referenced-by (§5.9): incoming-FK list, shared by the PK-cell
+   popover and the record-dialog section ==== */
+/* Same anchored-popover shape as #cv-pop; separate anchor-name so both can
+   resolve from one render pass. */
+#refby-pop { position: fixed; position-anchor: --refby-anchor;
+          position-try-fallbacks: flip-block, flip-inline;
+          inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
+          margin: 0; border: 1px solid var(--border-strong);
+          border-radius: 8px; padding: .3rem; width: max-content;
+          max-width: min(24rem, 90vw);
+          max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
+#refby-pop-list, #record-referenced-by { display: flex; flex-direction: column; }
+.refby-empty { opacity: .6; padding: .3rem .5rem; margin: 0; }
+button.refby-entry { width: 100%; box-sizing: border-box; background: none;
+          border: none; font: inherit; color: inherit; text-align: left;
+          padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+button.refby-entry:hover:not(:disabled) { background: var(--hover); }
+button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
+/* Record dialog: the field list and this section scroll together as one
+   region within the dialog's height budget — not two stacked scrollers —
+   and the section flows in the same inset column as the fields, set off
+   only by the reused sidebar section label, no rule. */
+#record-body { overflow: auto; max-height: var(--dialog-body-max-h); }
+#record-dialog #record-dl { max-height: none; }
+#record-referenced-by-wrap { padding: 0 var(--gap-lg) var(--gap-lg); }
 
 /* Same shape as #cv-pop, but the anchor is a single static button
    rather than one per header, so anchor-name is set once in CSS. */
@@ -507,10 +540,14 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
     <span class="dialog-head-title"><strong>record</strong><button id="record-copy-row" class="copy" aria-label="copy row as JSON" title="copy row as JSON"><span class="copy-icon">⧉</span> JSON</button><button id="record-copy-insert" class="copy" aria-label="copy row as SQL INSERT statement" title="copy row as an INSERT statement"><span class="copy-icon">⧉</span> SQL INSERT</button></span>
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
-  <dl id="record-dl"></dl>
+  <div id="record-body">
+    <dl id="record-dl"></dl>
+    <div id="record-referenced-by-wrap"><span class="section-label">referenced by</span><div id="record-referenced-by"></div></div>
+  </div>
 </dialog>
 
 <div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
+<div id="refby-pop" popover><div id="refby-pop-list"></div></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
 <span id="filter-caret-anchor"></span>
@@ -708,6 +745,21 @@ function buildApiReference() {
           { name: "column", required: true }
         ],
         example_response: { values: [{ value: "active", freq: 0.62 }] }
+      },
+      {
+        method: "GET",
+        path: `${base}/tables/referenced-by`,
+        summary: "Incoming foreign keys \u2014 the FK constraints on other tables whose target is this one (the reverse of a column's `references`). One entry per constraint; a referrer with two FKs to the target appears twice. `columns` pairs `{from, to}` (referencing column \u2192 referenced column); a composite FK has more than one. `schema` is the referencing table's schema, present only when it differs from the resolved one. `constraint` may be engine-synthesized (SQLite). Returns `[]` \u2014 not a 404 \u2014 when nothing references the table.",
+        params: [
+          { name: "source", required: false, notes: "same as GET /schemas" },
+          { name: "schema", required: false, notes: "same as GET /tables" },
+          { name: "table", required: true, notes: "must be a name returned by GET /tables" }
+        ],
+        example_response: {
+          referenced_by: [
+            { table: "orders", constraint: "orders_user_id_fkey", columns: [{ from: "user_id", to: "id" }] }
+          ]
+        }
       },
       {
         method: "GET",
@@ -1514,6 +1566,11 @@ function applyFilterClause(column, op, value) {
   $("filter").value = clause;
   submitFilter(clause);
 }
+function applyFilterClauses(pairs) {
+  const clause = pairs.map((p) => `${p.column} = ${quoteFilterValue(p.value)}`).join(" AND ");
+  $("filter").value = clause;
+  submitFilter(clause);
+}
 $("filter-form").onsubmit = (e) => {
   e.preventDefault();
   submitFilter($("filter").value.trim());
@@ -1723,6 +1780,144 @@ async function showCommonValues(e, column) {
   renderCommonValues(values, column);
 }
 
+// src/features/nav.ts
+function navigateWithSeededFilter(table, schema, applyFilter) {
+  state.table = table;
+  state.sort = null;
+  if (schema && schema !== state.schema) {
+    setSchema(schema);
+    loadTables().then(applyFilter).catch(reportError);
+    return;
+  }
+  persist();
+  applyFilter();
+}
+var navStack = [];
+var navIndex = -1;
+var restoringFromHistory = false;
+function navViewKey() {
+  return `${state.source ?? ""} ${state.schema ?? ""} ${state.table ?? ""}`;
+}
+function updateNavButtons() {
+  $("nav-back").disabled = navIndex <= 0;
+  $("nav-forward").disabled = navIndex >= navStack.length - 1;
+}
+function syncUrl() {
+  const params = new URLSearchParams({
+    table: state.table ?? "",
+    limit: String(state.limit),
+    offset: String(state.offset)
+  });
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
+  applyScopeParams(params);
+  if (state.filter) params.set("filter", state.filter);
+  const qs2 = `?${params}`;
+  const key = navViewKey();
+  const samePlace = navIndex >= 0 && navStack[navIndex] === key;
+  if (restoringFromHistory || navStack.length === 0 || samePlace) {
+    if (navStack.length === 0) {
+      navStack = [key];
+      navIndex = 0;
+    }
+    history.replaceState({ navIndex }, "", qs2);
+  } else {
+    navStack = navStack.slice(0, navIndex + 1);
+    navStack.push(key);
+    navIndex = navStack.length - 1;
+    history.pushState({ navIndex }, "", qs2);
+  }
+  updateNavButtons();
+}
+window.addEventListener("popstate", (ev) => {
+  const navState = ev.state;
+  if (!navState || typeof navState.navIndex !== "number") return;
+  if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
+  navIndex = navState.navIndex;
+  const params = new URLSearchParams(location.search);
+  applyUrlExact(params);
+  $("source-select").value = state.source ?? "";
+  $("schema-select").value = state.schema ?? "";
+  $("schema-select-wrap").hidden = !state.schema;
+  persist();
+  updateNavButtons();
+  restoringFromHistory = true;
+  loadTables().catch(reportError).finally(() => {
+    restoringFromHistory = false;
+  });
+});
+
+// src/features/referenced-by.ts
+var cache = /* @__PURE__ */ new Map();
+var cacheKey = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
+var refbyToken = 0;
+function msg(text) {
+  const p = document.createElement("p");
+  p.className = "refby-empty";
+  p.textContent = text;
+  return p;
+}
+function drillIn(entry, row, dismiss) {
+  const clauses = entry.columns.map((c) => ({ column: c.from, value: row[c.to] }));
+  dismiss();
+  navigateWithSeededFilter(entry.table, entry.schema, () => applyFilterClauses(clauses));
+}
+function renderList(container, entries, row, dismiss) {
+  if (entries.length === 0) {
+    container.replaceChildren(msg("nothing references this table"));
+    return;
+  }
+  container.replaceChildren(
+    ...entries.map((entry) => {
+      const label = entry.schema ? `${entry.schema}.${entry.table}` : entry.table;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "refby-entry";
+      btn.textContent = `\u2192 ${label} (${entry.columns.map((c) => c.from).join(", ")})`;
+      const nullPair = entry.columns.find((c) => row[c.to] == null);
+      if (nullPair) {
+        btn.disabled = true;
+        btn.title = `${nullPair.to} is null in this row \u2014 no filter is expressible`;
+      } else {
+        btn.title = `go to ${label} where ${entry.columns.map((c) => `${c.from} = ${row[c.to]}`).join(" AND ")}`;
+        btn.onclick = () => drillIn(entry, row, dismiss);
+      }
+      return btn;
+    })
+  );
+}
+function renderReferencedBy(container, row, dismiss) {
+  const token = ++refbyToken;
+  const table = state.table ?? "";
+  const key = cacheKey(table);
+  const hit = cache.get(key);
+  if (hit) {
+    renderList(container, hit, row, dismiss);
+    return;
+  }
+  container.replaceChildren(msg("loading\u2026"));
+  const params = new URLSearchParams({ table });
+  applyScopeParams(params);
+  api(`/tables/referenced-by?${params}`).then((data) => {
+    cache.set(key, data.referenced_by);
+    if (token !== refbyToken) return;
+    renderList(container, data.referenced_by, row, dismiss);
+  }).catch((e) => {
+    if (token !== refbyToken) return;
+    container.replaceChildren(msg(e.message));
+  });
+}
+var refbyAnchor = null;
+function openReferencedByPopover(e, row) {
+  if (refbyAnchor) refbyAnchor.style.anchorName = "";
+  refbyAnchor = e.currentTarget;
+  refbyAnchor.style.anchorName = "--refby-anchor";
+  $("refby-pop").showPopover();
+  renderReferencedBy($("refby-pop-list"), row, () => $("refby-pop").hidePopover());
+}
+
 // src/features/record-view.ts
 function buildRecordEntries(columns, row) {
   const nodes = [];
@@ -1784,6 +1979,7 @@ function sqlLiteral(col, raw) {
 }
 function openRecordView(columns, row) {
   $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
+  renderReferencedBy($("record-referenced-by"), row, () => $("record-dialog").close());
   const copyRowBtn = $("record-copy-row");
   copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
   const copyInsertBtn = $("record-copy-insert");
@@ -1873,7 +2069,8 @@ function showCellPop(e, text, col) {
   cellPopAnchor.style.anchorName = "--cell-anchor";
   $("cell-pop").showPopover();
 }
-function buildCell(col, raw, hidden) {
+function buildCell(col, row, hidden) {
+  const raw = row[col.name];
   const isNull = raw == null;
   const td = isNull ? document.createElement("td") : cellTemplate.content.cloneNode(true).firstElementChild;
   td.dataset.col = col.name;
@@ -1911,17 +2108,15 @@ function buildCell(col, raw, hidden) {
     cellText.classList.add("fk-cell");
     const refLabel = references.schema ? `${references.schema}.${references.table}` : references.table;
     cellText.title = `go to ${refLabel}.${references.column} = ${raw}`;
-    cellText.onclick = () => {
-      state.table = references.table;
-      state.sort = null;
-      if (references.schema && references.schema !== state.schema) {
-        setSchema(references.schema);
-        loadTables().then(() => applyFilterClause(references.column, "=", raw)).catch(reportError);
-        return;
-      }
-      persist();
-      applyFilterClause(references.column, "=", raw);
-    };
+    cellText.onclick = () => navigateWithSeededFilter(
+      references.table,
+      references.schema,
+      () => applyFilterClause(references.column, "=", raw)
+    );
+  } else if (col.key === "pk") {
+    cellText.classList.add("pk-cell");
+    cellText.title = "what references this row";
+    cellText.onclick = (e) => openReferencedByPopover(e, row);
   } else {
     const jsonAtRender = rendersAsJson(col, raw);
     cellText.onclick = (e) => {
@@ -1982,13 +2177,13 @@ function renderRows(data, newRowKeys, pkNames = []) {
       if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
       tr.appendChild(buildRowActionCell(data.columns, row));
       for (const col of data.columns) {
-        tr.appendChild(buildCell(col, row[col.name], hidden));
+        tr.appendChild(buildCell(col, row, hidden));
       }
       return tr;
     })
   );
   requestAnimationFrame(() => {
-    for (const el of tbody.querySelectorAll(".cell-text:not(.fk-cell)")) {
+    for (const el of tbody.querySelectorAll(".cell-text:not(.fk-cell):not(.pk-cell)")) {
       if (el.scrollWidth > el.clientWidth) el.closest("td")?.classList.add("expandable");
     }
   });
@@ -2000,64 +2195,6 @@ function updatePager(data) {
   $("prev").disabled = state.offset === 0;
   $("next").disabled = data.rows.length < state.limit;
 }
-
-// src/features/nav.ts
-var navStack = [];
-var navIndex = -1;
-var restoringFromHistory = false;
-function navViewKey() {
-  return `${state.source ?? ""} ${state.schema ?? ""} ${state.table ?? ""}`;
-}
-function updateNavButtons() {
-  $("nav-back").disabled = navIndex <= 0;
-  $("nav-forward").disabled = navIndex >= navStack.length - 1;
-}
-function syncUrl() {
-  const params = new URLSearchParams({
-    table: state.table ?? "",
-    limit: String(state.limit),
-    offset: String(state.offset)
-  });
-  if (state.sort) {
-    params.set("sort", state.sort);
-    params.set("order", state.order);
-  }
-  applyScopeParams(params);
-  if (state.filter) params.set("filter", state.filter);
-  const qs2 = `?${params}`;
-  const key = navViewKey();
-  const samePlace = navIndex >= 0 && navStack[navIndex] === key;
-  if (restoringFromHistory || navStack.length === 0 || samePlace) {
-    if (navStack.length === 0) {
-      navStack = [key];
-      navIndex = 0;
-    }
-    history.replaceState({ navIndex }, "", qs2);
-  } else {
-    navStack = navStack.slice(0, navIndex + 1);
-    navStack.push(key);
-    navIndex = navStack.length - 1;
-    history.pushState({ navIndex }, "", qs2);
-  }
-  updateNavButtons();
-}
-window.addEventListener("popstate", (ev) => {
-  const navState = ev.state;
-  if (!navState || typeof navState.navIndex !== "number") return;
-  if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
-  navIndex = navState.navIndex;
-  const params = new URLSearchParams(location.search);
-  applyUrlExact(params);
-  $("source-select").value = state.source ?? "";
-  $("schema-select").value = state.schema ?? "";
-  $("schema-select-wrap").hidden = !state.schema;
-  persist();
-  updateNavButtons();
-  restoringFromHistory = true;
-  loadTables().catch(reportError).finally(() => {
-    restoringFromHistory = false;
-  });
-});
 
 // src/bootstrap/table-focus.ts
 var tableEl = qs(document, "table");

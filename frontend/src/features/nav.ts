@@ -1,6 +1,26 @@
 import { $, reportError } from "../core/dom.js";
-import { applyScopeParams, applyUrlExact, persist, state } from "../core/state.js";
+import { applyScopeParams, applyUrlExact, persist, setSchema, state } from "../core/state.js";
 import { loadTables } from "./sidebar.js";
+
+// The one sanctioned bypass of the switchSource/switchSchema/switchTable
+// transitions: it *seeds* a filter instead of clearing one, and clears the
+// remembered sort because a stale stored column would defeat loadData's
+// drop-and-retry against the filter submitted in the same fetch. `schema`
+// is set only for a cross-schema target (it's absent otherwise), so
+// setSchema() runs first and loadTables()'s auto-load is superseded by
+// applyFilter's own. Shared by grid.ts's FK-cell nav and the
+// referenced-by drill-in.
+export function navigateWithSeededFilter(table: string, schema: string | undefined, applyFilter: () => void): void {
+  state.table = table;
+  state.sort = null;
+  if (schema && schema !== state.schema) {
+    setSchema(schema);
+    loadTables().then(applyFilter).catch(reportError);
+    return;
+  }
+  persist();
+  applyFilter();
+}
 
 // Back/forward navigation stops at table/schema/source switches, not every
 // sort/page tweak within the same table — otherwise "back" would undo

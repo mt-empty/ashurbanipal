@@ -44,6 +44,22 @@ export interface CommonValue {
   freq: number;
 }
 
+// spec/openapi.yaml ReferencedByResponse (§5.9): one entry per FK constraint
+// elsewhere that targets the viewed table. `columns` is paired {from,to}, not
+// two parallel arrays. `schema` is the *referencing* table's schema, present
+// only when it differs from the resolved one — the opposite end of the arrow
+// from ColumnRef.schema. `constraint` may be engine-synthesized.
+export interface ColumnPair {
+  from: string;
+  to: string;
+}
+export interface ReferencedByEntry {
+  table: string;
+  schema?: string;
+  constraint: string;
+  columns: ColumnPair[];
+}
+
 export interface TableListEntry {
   name: string;
   comment?: string;
