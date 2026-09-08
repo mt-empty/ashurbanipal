@@ -5,6 +5,16 @@ Notable changes to the `ashurbanipal` core crate (framework-agnostic config, `Db
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.5.0] - 2026-09-08
+
+### Features
+
+- *(frontend)* Tolerant cross-engine column-type rendering (#101)
+
+### Documentation
+
+- *(ports)* Cull replicated comment prose (#77)
+
 ## [0.4.0] - 2026-08-30
 
 ### Security
