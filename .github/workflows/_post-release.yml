@@ -57,9 +57,13 @@ jobs:
             exit 1
           fi
 
-          # The "## [<version>]" heading through to the next "## " heading (or EOF).
-          awk -v v="$version" '
-            $0 ~ ("^## \\[" v "\\]") { grab = 1; print; next }
+          # Body = the "## [X.Y.Z] …" section: literal-prefix match on the
+          # heading (Keep a Changelog — the same shape tools/check-changelogs.sh
+          # requires and the publish workflow's verify job gates on), through to
+          # the next "## " heading or EOF.
+          hdr="## [$version]"
+          awk -v hdr="$hdr" '
+            substr($0, 1, length(hdr)) == hdr { grab = 1; print; next }
             grab && /^## / { exit }
             grab { print }
           ' "$changelog" > NOTES.md
