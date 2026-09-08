@@ -24,7 +24,7 @@ interpreted as described in RFC 2119.
   UI and API (see §3).
 - **Resolved source** — which registered `DbSource` one operation targets,
   for implementations that register more than one (§5.8). Every route
-  that takes a `source` parameter (§5.2–§5.5, §5.7) resolves it the same
+  that takes a `source` parameter (§5.2–§5.5, §5.7, §5.9) resolves it the same
   way:
   - **Absent** — resolves to the first-registered source, the same order
     §5.8's list returns.
@@ -41,7 +41,7 @@ interpreted as described in RFC 2119.
 - **Resolved schema** — the namespace of tables one operation browses,
   within that operation's resolved source, for engines that have a
   schema concept above a single database. Every route that takes a
-  `schema` parameter (§5.2–§5.5) resolves it the same way:
+  `schema` parameter (§5.2–§5.5, §5.9) resolves it the same way:
   - **Absent** — resolves to the connection's own default (on Postgres:
     `current_schema()`).
   - **Present** — MUST match an entry from §5.7's live list exactly
@@ -65,19 +65,36 @@ interpreted as described in RFC 2119.
   MUST NOT accept writes of any kind on any route.
 - Success responses are `application/json`, except the UI route (§5.1),
   which is `text/html`.
-- Error responses are plain-text bodies (`text/plain`), not JSON:
-  - **400** — client error: unknown table or column, invalid filter,
-    invalid `order` value.
-  - **500** — database failure.
-  The body is a short human-readable reason. Its exact wording is
-  implementation-defined; clients MUST NOT parse it. (A structured error
-  envelope would be a protocol v2 change.)
-- Every API response (§5.2–§5.8), success or error, MUST carry the
+- Error responses are `application/problem+json` — RFC 9457 Problem
+  Details (the current revision of the format first published as RFC
+  7807). Earlier revisions of this document specified plain-text
+  (`text/plain`) bodies; the migration to problem+json across the
+  reference implementation and every port is tracked in
+  `docs/feature-backlog/34-rfc9457-problem-details.md`. The body is a JSON
+  object carrying at least:
+  - `status` — the HTTP status code, repeated (RFC 9457 §3.1).
+  - `title` — a short human-readable summary; wording is
+    implementation-defined and MUST NOT be parsed.
+  - `code` — a stable machine-readable token for the problem (an
+    Ashurbanipal extension member). Clients MAY branch on it and MUST
+    treat an unrecognized value as a generic error of the given `status`
+    — the set is open, new codes are additive.
+
+  `type` MAY be `about:blank` (Ashurbanipal defines no problem-type URI
+  namespace — it is an embeddable library with no canonical origin);
+  `detail` and `instance` MAY be present. Defined `code` values:
+  - **400** — client error: `unknown_source`, `unknown_schema`,
+    `unknown_table`, `unknown_column`, `invalid_filter`,
+    `invalid_parameter` (e.g. `order` not `asc`/`desc`), or `not_readable`
+    — a table that cleared §5.2's allow-list but the connected role cannot
+    actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
+  - **500** — server error: `database_error`, or `query_timeout` (§6).
+- Every API response (§5.2–§5.9), success or error, MUST carry the
   protocol version header (§7).
 
 ## 3. Mount contract
 
-- The UI is served at `{mount}`; the seven API routes live at
+- The UI is served at `{mount}`; the eight API routes live at
   `{mount}/api/...`.
 - `{mount}` is implementation-defined. `/__ashurbanipal` is the Rust
   implementation's default, not a requirement.
@@ -413,8 +430,8 @@ Response:
 
 ### 5.7 `GET {mount}/api/schemas`
 
-Lists the schema names selectable as the `schema` parameter on §5.2–§5.5,
-for the resolved source (§1).
+Lists the schema names selectable as the `schema` parameter on §5.2–§5.5
+and §5.9, for the resolved source (§1).
 
 | Param    | Required | Rules                                             |
 |----------|----------|----------------------------------------------------|
@@ -437,8 +454,8 @@ Response:
   namespace) — this route lists browsable schemas, not every namespace
   the engine happens to expose.
 - SHOULD exclude any schema the connected role cannot access, so nothing
-  offered here would be rejected by §5.2–§5.5's schema check for lack of
-  privilege.
+  offered here would be rejected by §5.2–§5.5's or §5.9's schema check for
+  lack of privilege.
 - Engines with no schema concept above a single database (e.g. SQLite)
   MUST return exactly one entry — see `docs/adapter-decisions.md`.
 - Schemas SHOULD be returned in a stable order (the Rust implementation
@@ -447,7 +464,7 @@ Response:
 ### 5.8 `GET {mount}/api/sources`
 
 Lists the source names selectable as the `source` parameter on
-§5.2–§5.5, §5.7. This is the live allow-list §1's "present" case
+§5.2–§5.5, §5.7, and §5.9. This is the live allow-list §1's "present" case
 validates against.
 
 Response:
@@ -470,6 +487,80 @@ Response:
 - Sources SHOULD be returned in a stable order, and that order MUST be
   the same order §1's "absent" case resolves against (the first entry is
   the default).
+
+### 5.9 `GET {mount}/api/tables/referenced-by`
+
+Lists the foreign keys elsewhere in the resolved source (§1) whose target
+is `table` — the reverse of the per-column outgoing `references` in
+§5.4.1. Catalog-only: like §5.2/§5.3 it reads schema catalogs, never
+table data.
+
+| Param    | Required | Rules                                                        |
+|----------|----------|------------------------------------------------------------|
+| `source` | no       | See §1's resolution rules; unrecognized value → 400.        |
+| `schema` | no       | See §1's resolution rules; unrecognized value → 400.        |
+| `table`  | yes      | MUST match a table from §5.2 (resolved against the same `source`/`schema`) exactly (case-sensitive); otherwise 400. |
+
+Response:
+
+```json
+{
+  "referenced_by": [
+    { "table": "orders",
+      "constraint": "orders_user_id_fkey",
+      "columns": [{ "from": "user_id", "to": "id" }] },
+    { "table": "support_tickets",
+      "constraint": "support_tickets_user_id_fkey",
+      "columns": [{ "from": "user_id", "to": "id" }] },
+    { "table": "support_tickets",
+      "constraint": "support_tickets_assigned_admin_id_fkey",
+      "columns": [{ "from": "assigned_admin_id", "to": "id" }] },
+    { "table": "shipment_events", "schema": "warehouse",
+      "constraint": "shipment_events_handled_by_user_id_fkey",
+      "columns": [{ "from": "handled_by_user_id", "to": "id" }] }
+  ]
+}
+```
+
+- One entry per foreign-key constraint whose referenced table is `table`.
+  A referencing table with two separate FKs to `table` (above,
+  `support_tickets`) produces two entries. `referenced_by` MUST be `[]`
+  when nothing references `table` — never an error.
+- `table` — the referencing table, the one that holds the FK. Bare name.
+- `schema` — the referencing table's schema. Present only when it differs
+  from the resolved schema (a cross-schema reference); MUST be omitted for
+  the common same-schema case. This is the *opposite end of the
+  relationship* from §5.4.1's `references.schema`, which names the
+  *referenced* table's schema — the same "only when different" rule,
+  applied to the other side.
+- `constraint` — the foreign key's constraint name. Always present, and
+  `(table, constraint)` is unique within one response, so a client MAY
+  key on that pair. On an engine that does not name FK constraints (e.g.
+  SQLite) it MAY be a synthesized label rather than a real DDL identifier;
+  clients MUST NOT treat it as one, nor assume it is stable across schema
+  changes.
+- `columns` — the column pairing: one `{from, to}` per column in the
+  constraint, in the constraint's own column order. `from` is the
+  referencing column on `table`; `to` is the referenced column on the
+  target. A composite foreign key has more than one pair. Unlike §5.4.1,
+  which omits composite FKs from per-column `key`/`references` because a
+  single per-column field cannot say which columns pair up, this route
+  includes them — the pairing is explicit here, so there is nothing to
+  mislabel.
+- Entries SHOULD be returned in a stable order — e.g. by `(schema, table,
+  constraint)`; the collation of the string comparison is unspecified. A
+  SHOULD, not a MUST, same as §5.2.
+- SHOULD restrict the list to referencing tables the connected role can
+  `SELECT` — the same courtesy §5.2 extends to its own listing — so an
+  entry offered here is not then rejected by §5.4's `table` check on
+  drill-in. An engine with no scalar privilege predicate (see
+  `docs/adapter-decisions.md`) MAY instead defer that check to drill-in,
+  and MAY omit cross-schema referrers it cannot privilege-check, reporting
+  only references from within the resolved schema.
+- No row counts. This route reports the relationships only. A client that
+  wants the referencing rows issues a §5.4 request against an entry's
+  `table` (and `schema`), filtered on the `from` columns; the count comes
+  back as that response's `total_approx`.
 
 ## 6. Server invariants
 
@@ -512,7 +603,7 @@ These hold across all routes:
 
 ## 7. Protocol version
 
-- Every API response (§5.2–§5.8) MUST carry the header
+- Every API response (§5.2–§5.9) MUST carry the header
   `x-ashurbanipal-protocol: 1`.
 - **Versioning policy**: adding an optional response field, an optional
   request parameter, or a wholly new route is still the same version —
@@ -523,7 +614,15 @@ These hold across all routes:
   *after* a version ships, measured from this document's shape forward.
   §5.7 and the `schema` parameter on §5.2–§5.5 are the first instance of
   this: purely additive, so v1 stands. §5.8 and the `source` parameter on
-  §5.2–§5.5 and §5.7 are the second instance, for the same reason.
+  §5.2–§5.5 and §5.7 are the second instance, for the same reason. §5.9
+  (`/api/tables/referenced-by`) is the third — a wholly new route that
+  changes nothing an existing caller observes, so v1 stands again.
+  The §2 change from plain-text error bodies to problem+json *is* a
+  serialization change, and would bump the version under the rule above —
+  but it landed before any external consumer existed, so this document
+  treats it as an in-place v1 correction rather than a v2 bump (no client
+  could observe the difference; see `spec/CHANGELOG.md`). Not a precedent:
+  a serialization change after a real consumer exists bumps the version.
 - **v1 baseline**: v1 is the first protocol version ever emitted; nothing
   shipped a `x-ashurbanipal-protocol` header before it. The pre-spec
   reference's DSL-text `filter` parameter was an implementation detail,
