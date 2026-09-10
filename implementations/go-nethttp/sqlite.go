@@ -433,3 +433,61 @@ func (c *SQLiteSource) CommonValues(ctx context.Context, schema *string, table, 
 	// GROUP BY scan. See docs/adapter-decisions.md.
 	return []CommonValueEntry{}, nil
 }
+
+// ReferencedBy serves GET /api/tables/referenced-by (spec/protocol.md §5.9).
+func (c *SQLiteSource) ReferencedBy(ctx context.Context, schema *string, table string) ([]ReferencedByEntry, error) {
+	if err := checkSchema(schema); err != nil {
+		return nil, err
+	}
+	tables, err := c.allowedTables(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := findExact(tables, table); !ok {
+		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+	}
+
+	qctx, cancel := c.bounded(ctx)
+	defer cancel()
+
+	// No reverse-FK index and no information_schema: walk every table's
+	// pragma_foreign_key_list (the schema is parsed in memory on open). The
+	// TVF argument m.name is a column reference — not spliced; fkl."table"
+	// is bound. COLLATE NOCASE because the pragma returns the referenced
+	// name as written in the DDL, which SQLite resolves case-insensitively.
+	// The sqlite_master predicate here matches allowedTables(), so every
+	// referrer is already allow-listed.
+	rows, err := c.db.QueryContext(qctx,
+		`select m.name, fkl.id, fkl."from", fkl."to"
+		 from sqlite_master m
+		 join pragma_foreign_key_list(m.name) fkl
+		 where m.type = 'table'
+		   and m.name not like 'sqlite\_%' escape '\'
+		   and fkl."table" = ? collate nocase
+		 order by m.name, fkl.id, fkl.seq`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mapped []ReferencedByEntry
+	for rows.Next() {
+		var refTable, fromCol, toCol string
+		var fkID int64
+		if err := rows.Scan(&refTable, &fkID, &fromCol, &toCol); err != nil {
+			return nil, err
+		}
+		// SQLite FKs are unnamed; fk_<id> is a per-table-stable synthetic
+		// label (spec/protocol.md §5.9 permits this).
+		mapped = append(mapped, ReferencedByEntry{
+			Table:      refTable,
+			Constraint: fmt.Sprintf("fk_%d", fkID),
+			Columns:    []ColumnPair{{From: fromCol, To: toCol}},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return groupReferencedBy(mapped), nil
+}

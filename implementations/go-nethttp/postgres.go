@@ -615,3 +615,78 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 	}
 	return entries, nil
 }
+
+// ReferencedBy serves GET /api/tables/referenced-by (spec/protocol.md §5.9).
+func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table string) ([]ReferencedByEntry, error) {
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	realSchema, err := c.resolveSchema(ctx, tx, schema)
+	if err != nil {
+		return nil, err
+	}
+	tables, err := c.allowedTables(ctx, tx, realSchema)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := findExact(tables, table); !ok {
+		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+	}
+
+	qctx, cancel := c.bounded(ctx)
+	defer cancel()
+
+	// pg_catalog, not information_schema: the reverse (confrelid) filter
+	// over the standard-SQL views runs 20-40x slower on a large catalog
+	// (docs/adapter-decisions.md §5.9). has_table_privilege is the
+	// per-referrer read gate and works across schemas, so cross-schema
+	// referrers are reported and gated without a separate allow-list pass.
+	rows, err := tx.QueryContext(qctx,
+		`select rn.nspname, rc.relname, con.conname, fa.attname as from_col, ta.attname as to_col
+		 from pg_constraint con
+		 join pg_class rc on rc.oid = con.conrelid
+		 join pg_namespace rn on rn.oid = rc.relnamespace
+		 join lateral unnest(con.conkey, con.confkey) with ordinality
+		      as k(from_attnum, to_attnum, n) on true
+		 join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum
+		 join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum
+		 where con.contype = 'f'
+		   and con.confrelid = (
+		     select c.oid from pg_class c
+		     join pg_namespace n on n.oid = c.relnamespace
+		     where n.nspname = $1 and c.relname = $2 and c.relkind = 'r')
+		   and has_table_privilege(con.conrelid, 'SELECT')
+		 order by rn.nspname, rc.relname, con.conname, k.n`, realSchema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mapped []ReferencedByEntry
+	for rows.Next() {
+		var refSchema, refTable, constraint, fromCol, toCol string
+		if err := rows.Scan(&refSchema, &refTable, &constraint, &fromCol, &toCol); err != nil {
+			return nil, err
+		}
+		entry := ReferencedByEntry{
+			Table:      refTable,
+			Constraint: constraint,
+			Columns:    []ColumnPair{{From: fromCol, To: toCol}},
+		}
+		if refSchema != realSchema {
+			entry.Schema = refSchema
+		}
+		mapped = append(mapped, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return groupReferencedBy(mapped), nil
+}

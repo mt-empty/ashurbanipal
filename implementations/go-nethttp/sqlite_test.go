@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
@@ -152,6 +153,49 @@ func TestSQLitePKAndFKColumnReportsBoth(t *testing.T) {
 	}
 	if orderID.References == nil || orderID.References.Table != "orders" || orderID.References.Column != "id" {
 		t.Errorf("order_extra.order_id.references = %+v, want {orders id}", orderID.References)
+	}
+}
+
+func TestSQLiteReferencedByListsIncomingFKsWithSynthesizedConstraintNames(t *testing.T) {
+	source := NewSQLiteSource(seededDB(t), 5)
+	ctx := context.Background()
+
+	toUsers, err := source.ReferencedBy(ctx, nil, "users")
+	if err != nil {
+		t.Fatalf("ReferencedBy(users): %v", err)
+	}
+	if len(toUsers) != 1 || toUsers[0].Table != "orders" {
+		t.Fatalf("ReferencedBy(users) = %+v, want one orders entry", toUsers)
+	}
+	if toUsers[0].Schema != "" {
+		t.Errorf("single-schema referrer must omit schema, got %q", toUsers[0].Schema)
+	}
+	if len(toUsers[0].Columns) != 1 || toUsers[0].Columns[0] != (ColumnPair{From: "user_id", To: "id"}) {
+		t.Errorf("orders columns = %+v, want [{user_id id}]", toUsers[0].Columns)
+	}
+	// SQLite FKs are unnamed — the label is synthesized fk_<id>.
+	if m, _ := regexp.MatchString(`^fk_\d+$`, toUsers[0].Constraint); !m {
+		t.Errorf("constraint = %q, want /^fk_\\d+$/", toUsers[0].Constraint)
+	}
+
+	toOrders, err := source.ReferencedBy(ctx, nil, "orders")
+	if err != nil {
+		t.Fatalf("ReferencedBy(orders): %v", err)
+	}
+	if len(toOrders) != 1 || toOrders[0].Table != "order_extra" {
+		t.Errorf("ReferencedBy(orders) = %+v, want one order_extra entry", toOrders)
+	}
+
+	if leaf, err := source.ReferencedBy(ctx, nil, "order_extra"); err != nil || len(leaf) != 0 {
+		t.Errorf("ReferencedBy(order_extra) = %+v, %v, want []", leaf, err)
+	}
+
+	if _, err := source.ReferencedBy(ctx, nil, "no_such_table"); !errors.As(err, new(*NotAllowedError)) {
+		t.Errorf("ReferencedBy(no_such_table) = %v, want NotAllowedError", err)
+	}
+	other := "other"
+	if _, err := source.ReferencedBy(ctx, &other, "users"); !errors.As(err, new(*NotAllowedError)) {
+		t.Errorf("ReferencedBy(other, users) = %v, want NotAllowedError", err)
 	}
 }
 

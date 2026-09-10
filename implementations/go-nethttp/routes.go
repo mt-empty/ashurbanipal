@@ -60,6 +60,7 @@ func Router(cfg Config, sources []NamedSource) http.Handler {
 	mux.Handle("GET "+base+"/api/table-counts", withProtocolHeader(tableCountsHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/data", withProtocolHeader(tableDataHandler(sources, limits)))
 	mux.Handle("GET "+base+"/api/tables/common-values", withProtocolHeader(commonValuesHandler(sources)))
+	mux.Handle("GET "+base+"/api/tables/referenced-by", withProtocolHeader(referencedByHandler(sources)))
 	mux.Handle("GET "+base+"/api/siblings", withProtocolHeader(siblingsHandler(client, cfg.Siblings)))
 	return mux
 }
@@ -317,6 +318,29 @@ func commonValuesHandler(sources []NamedSource) http.HandlerFunc {
 		writeJSON(w, struct {
 			Values []CommonValueEntry `json:"values"`
 		}{values})
+	}
+}
+
+func referencedByHandler(sources []NamedSource) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		c, err := resolveSource(sources, querySource(q))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if !q.Has("table") {
+			httpTextError(w, http.StatusBadRequest, "table parameter is required")
+			return
+		}
+		entries, err := c.ReferencedBy(r.Context(), querySchema(q), q.Get("table"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, struct {
+			ReferencedBy []ReferencedByEntry `json:"referenced_by"`
+		}{entries})
 	}
 }
 

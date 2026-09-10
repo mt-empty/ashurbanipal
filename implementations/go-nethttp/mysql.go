@@ -654,3 +654,81 @@ func (c *MySQLSource) CommonValues(ctx context.Context, schema *string, table, c
 	// MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
 	return []CommonValueEntry{}, nil
 }
+
+// ReferencedBy serves GET /api/tables/referenced-by (spec/protocol.md §5.9).
+func (c *MySQLSource) ReferencedBy(ctx context.Context, schema *string, table string) ([]ReferencedByEntry, error) {
+	variant, err := c.variantOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := c.pinnedTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	realSchema, err := c.resolveSchemaInTx(ctx, tx, variant, schema)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := c.allowedTablesInTx(ctx, tx, variant, realSchema)
+	if err != nil {
+		return nil, err
+	}
+	// One membership structure, shared by the target-table check and the
+	// referrer post-filter below — MySQL/MariaDB have no cross-schema
+	// privilege predicate (docs/adapter-decisions.md §5.9).
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, t := range allowed {
+		allowedSet[t] = true
+	}
+	if !allowedSet[table] {
+		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+	}
+
+	qctx, cancel := c.bounded(ctx)
+	defer cancel()
+
+	// table_schema = ? keeps referrers to the resolved database — MySQL /
+	// MariaDB have no cross-schema privilege predicate
+	// (docs/adapter-decisions.md §5.9). Read key_column_usage, not
+	// referential_constraints, whose referenced-name column MariaDB nulls
+	// for a role lacking privilege on the referenced table.
+	rows, err := tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
+		`kcu.table_name, kcu.constraint_name, kcu.column_name, kcu.referenced_column_name
+		 from information_schema.key_column_usage kcu
+		 where kcu.referenced_table_schema = ? and kcu.referenced_table_name = ?
+		   and kcu.table_schema = ?
+		 order by kcu.table_name, kcu.constraint_name, kcu.ordinal_position`),
+		realSchema, table, realSchema)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mapped []ReferencedByEntry
+	for rows.Next() {
+		var refTable, constraint, fromCol, toCol string
+		if err := rows.Scan(&refTable, &constraint, &fromCol, &toCol); err != nil {
+			return nil, err
+		}
+		// Keep the referrer set inside the same allow-list every other
+		// route on this backend serves from.
+		if !allowedSet[refTable] {
+			continue
+		}
+		mapped = append(mapped, ReferencedByEntry{
+			Table:      refTable,
+			Constraint: constraint,
+			Columns:    []ColumnPair{{From: fromCol, To: toCol}},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return groupReferencedBy(mapped), nil
+}
