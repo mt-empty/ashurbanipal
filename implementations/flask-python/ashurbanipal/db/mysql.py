@@ -9,14 +9,17 @@ import pymysql
 from ..filter import Condition
 from . import (
     ColumnInfo,
+    ColumnPair,
     ColumnRef,
     DbSource,
     FilterParseError,
     KeyKind,
     NotAllowed,
     QueryOpts,
+    ReferencedBy,
     TableData,
     TableInfo,
+    group_referenced_by,
     wrap_driver_errors,
 )
 
@@ -377,3 +380,54 @@ class MySqlSource(DbSource):
             return []
         finally:
             conn.close()
+
+    @wrap_driver_errors(pymysql.Error)
+    def referenced_by(self, schema: str | None, table: str) -> list[ReferencedBy]:
+        conn = self._connect()
+        try:
+            variant = self._variant_of(conn)
+            with conn.cursor() as cur:
+                resolved_schema = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
+                # One allow-list read, shared by the target-table check and
+                # the referrer post-filter — MySQL/MariaDB have no
+                # cross-schema has_table_privilege gate
+                # (docs/adapter-decisions.md §5.9).
+                allowed = set(self._allowed_tables(cur, variant, resolved_schema, CATALOG_TIMEOUT_SECS))
+                if table not in allowed:
+                    raise NotAllowed(f"table {table!r}")
+
+                # Read key_column_usage, not referential_constraints, whose
+                # referenced-name column MariaDB nulls for a role lacking
+                # privilege on the referenced table. table_schema = %s keeps
+                # referrers to the resolved database.
+                cur.execute(
+                    _timed_select(
+                        variant,
+                        CATALOG_TIMEOUT_SECS,
+                        "kcu.table_name, kcu.constraint_name, kcu.column_name, kcu.referenced_column_name "
+                        "from information_schema.key_column_usage kcu "
+                        "where kcu.referenced_table_schema = %s and kcu.referenced_table_name = %s "
+                        "  and kcu.table_schema = %s "
+                        "order by kcu.table_name, kcu.constraint_name, kcu.ordinal_position",
+                    ),
+                    (resolved_schema, table, resolved_schema),
+                )
+                rows = cur.fetchall()
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Keep the referrer set inside the same allow-list every other
+        # route on this backend serves from.
+        return group_referenced_by(
+            [
+                ReferencedBy(
+                    table=ref_table,
+                    constraint=constraint,
+                    columns=[ColumnPair(from_=from_col, to=to_col)],
+                    schema=None,
+                )
+                for ref_table, constraint, from_col, to_col in rows
+                if ref_table in allowed
+            ]
+        )

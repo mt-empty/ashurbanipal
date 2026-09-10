@@ -8,14 +8,17 @@ from psycopg.types.string import TextLoader
 from ..filter import Condition
 from . import (
     ColumnInfo,
+    ColumnPair,
     ColumnRef,
     DbSource,
     FilterParseError,
     KeyKind,
     NotAllowed,
     QueryOpts,
+    ReferencedBy,
     TableData,
     TableInfo,
+    group_referenced_by,
     quote_ident,
     wrap_driver_errors,
 )
@@ -320,3 +323,49 @@ class PgSource(DbSource):
         if data_type == "boolean":
             rows = [({"t": "true", "f": "false"}.get(val, val), freq) for val, freq in rows]
         return [(val, float(freq)) for val, freq in rows]
+
+    @wrap_driver_errors(psycopg.Error)
+    def referenced_by(self, schema: str | None, table: str) -> list[ReferencedBy]:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
+            resolved_schema = self._resolve_schema(cur, schema)
+            if table not in self._allowed_tables(cur, resolved_schema):
+                raise NotAllowed(f"table {table!r}")
+
+            # pg_catalog, not information_schema: the reverse (confrelid)
+            # filter over the standard-SQL views runs 20-40x slower on a
+            # large catalog (docs/adapter-decisions.md §5.9).
+            # has_table_privilege is the per-referrer read gate and works
+            # across schemas, so cross-schema referrers are reported and
+            # gated without a separate allow-list pass.
+            cur.execute(
+                "select rn.nspname, rc.relname, con.conname, fa.attname, ta.attname "
+                "from pg_constraint con "
+                "join pg_class rc on rc.oid = con.conrelid "
+                "join pg_namespace rn on rn.oid = rc.relnamespace "
+                "join lateral unnest(con.conkey, con.confkey) with ordinality "
+                "     as k(from_attnum, to_attnum, n) on true "
+                "join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum "
+                "join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum "
+                "where con.contype = 'f' "
+                "  and con.confrelid = ( "
+                "    select c.oid from pg_class c "
+                "    join pg_namespace n on n.oid = c.relnamespace "
+                "    where n.nspname = %s and c.relname = %s and c.relkind = 'r') "
+                "  and has_table_privilege(con.conrelid, 'SELECT') "
+                "order by rn.nspname, rc.relname, con.conname, k.n",
+                (resolved_schema, table),
+            )
+            rows = list(cur.fetchall())
+
+        return group_referenced_by(
+            [
+                ReferencedBy(
+                    table=ref_table,
+                    constraint=constraint,
+                    columns=[ColumnPair(from_=from_col, to=to_col)],
+                    schema=ref_schema if ref_schema != resolved_schema else None,
+                )
+                for ref_schema, ref_table, constraint, from_col, to_col in rows
+            ]
+        )

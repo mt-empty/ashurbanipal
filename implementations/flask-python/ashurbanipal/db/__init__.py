@@ -37,6 +37,29 @@ class ColumnInfo:
 
 
 @dataclass
+class ColumnPair:
+    # `from` is a Python keyword, so the field is `from_`; routes.py maps it
+    # back to the `from` wire key (spec/protocol.md §5.9).
+    from_: str
+    to: str
+
+
+@dataclass
+class ReferencedBy:
+    """One FK constraint elsewhere in the source whose target is the
+    requested table (spec/protocol.md §5.9 — the reverse of ColumnRef).
+    """
+
+    table: str
+    constraint: str
+    columns: list[ColumnPair]
+    # Set only when the referencing table's schema differs from the
+    # resolved one — the opposite end of the relationship from
+    # ColumnRef.schema.
+    schema: str | None = None
+
+
+@dataclass
 class TableInfo:
     name: str
     comment: str | None = None
@@ -116,6 +139,11 @@ class DbSource(abc.ABC):
     @abc.abstractmethod
     def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]: ...
 
+    @abc.abstractmethod
+    def referenced_by(self, schema: str | None, table: str) -> list[ReferencedBy]:
+        """Every FK constraint elsewhere in the source whose target is `table` (spec/protocol.md §5.9)."""
+        ...
+
 
 # Maps allow-listed wire operators to SQL keywords (`spec/protocol.md` §5.4.2).
 OP_SQL: dict[str, str] = {
@@ -129,6 +157,28 @@ OP_SQL: dict[str, str] = {
     "IS NULL": "IS NULL",
     "IS NOT NULL": "IS NOT NULL",
 }
+
+
+def group_referenced_by(rows: list[ReferencedBy]) -> list[ReferencedBy]:
+    """Merges single-pair ReferencedBy rows into one entry per
+    (schema, table, constraint). Relies on the caller's catalog ORDER BY
+    putting a constraint's columns adjacent — a run-length merge, not a
+    full group-by. Each backend maps its own row shape (and applies any
+    allow-list filter) before calling this.
+    """
+    out: list[ReferencedBy] = []
+    for row in rows:
+        last = out[-1] if out else None
+        if (
+            last is not None
+            and last.table == row.table
+            and last.schema == row.schema
+            and last.constraint == row.constraint
+        ):
+            last.columns.extend(row.columns)
+        else:
+            out.append(row)
+    return out
 
 
 def quote_ident(ident: str) -> str:

@@ -63,6 +63,60 @@ def test_pk_and_fk_column_reports_both(source) -> None:
     assert order_id_col.references.column == "id"
 
 
+def test_referenced_by_lists_incoming_fk_constraints_with_explicit_column_pairs(source) -> None:
+    entries = source.referenced_by(None, "users")
+
+    orders = [e for e in entries if e.table == "orders"]
+    assert len(orders) == 1
+    assert [(p.from_, p.to) for p in orders[0].columns] == [("user_id", "id")]
+    assert orders[0].constraint
+    assert orders[0].schema is None, "a same-schema referrer must omit schema"
+
+    # support_tickets has two separate FKs into users -> two entries.
+    tickets = [e for e in entries if e.table == "support_tickets"]
+    assert len(tickets) == 2
+    assert {(e.columns[0].from_, e.columns[0].to) for e in tickets} == {
+        ("user_id", "id"),
+        ("assigned_admin_id", "id"),
+    }
+    assert all(e.schema is None for e in tickets)
+
+    # (table, constraint) is unique within one response.
+    keys = [(e.table, e.constraint) for e in entries]
+    assert len(keys) == len(set(keys))
+
+
+def test_referenced_by_includes_composite_foreign_keys_with_every_column_pair(source) -> None:
+    entries = source.referenced_by(None, "inventory_locations")
+    assert len(entries) == 1
+    assert entries[0].table == "inventory_counts"
+    assert [(p.from_, p.to) for p in entries[0].columns] == [
+        ("warehouse_code", "warehouse_code"),
+        ("bin_code", "bin_code"),
+    ]
+
+
+def test_referenced_by_returns_empty_list_when_nothing_references_the_table(source) -> None:
+    assert source.referenced_by(None, "feature_flags") == []
+
+
+def test_referenced_by_carries_schema_for_cross_schema_referrers(source) -> None:
+    se = [e for e in source.referenced_by(None, "users") if e.table == "shipment_events"]
+    assert len(se) == 1
+    assert se[0].schema == "warehouse"
+    assert (se[0].columns[0].from_, se[0].columns[0].to) == ("handled_by_user_id", "id")
+
+
+def test_referenced_by_explicit_public_schema_matches_implicit_default(source) -> None:
+    assert source.referenced_by("public", "users") == source.referenced_by(None, "users")
+
+
+def test_referenced_by_rejects_unknown_or_malicious_table(source) -> None:
+    for bad in ["no_such_table", 'users"; drop table users; --', "users' OR '1'='1"]:
+        with pytest.raises(NotAllowed):
+            source.referenced_by(None, bad)
+
+
 def test_every_cell_is_string_or_null(source) -> None:
     data = source.query_table(None, "orders", QueryOpts(limit=20, offset=0, timeout_secs=5))
     assert len(data.rows) > 0

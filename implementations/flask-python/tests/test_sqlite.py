@@ -6,6 +6,7 @@ The source opens one connection per operation, so `:memory:` would not persist s
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import tempfile
 import time
@@ -80,6 +81,26 @@ def test_pk_and_fk_column_reports_both(seeded_path) -> None:
     assert order_id_col.key == KeyKind.PK
     assert order_id_col.references.table == "orders"
     assert order_id_col.references.column == "id"
+
+
+def test_referenced_by_lists_incoming_fks_with_synthesized_constraint_names(seeded_path) -> None:
+    source = SqliteSource(seeded_path)
+
+    to_users = source.referenced_by(None, "users")
+    assert len(to_users) == 1
+    assert to_users[0].table == "orders"
+    assert to_users[0].schema is None
+    assert [(p.from_, p.to) for p in to_users[0].columns] == [("user_id", "id")]
+    # SQLite FKs are unnamed — the label is synthesized fk_<id>.
+    assert re.fullmatch(r"fk_\d+", to_users[0].constraint)
+
+    assert [e.table for e in source.referenced_by(None, "orders")] == ["order_extra"]
+    assert source.referenced_by(None, "order_extra") == []
+
+    with pytest.raises(NotAllowed):
+        source.referenced_by(None, "no_such_table")
+    with pytest.raises(NotAllowed):
+        source.referenced_by("other", "users")
 
 
 def test_table_counts_reports_no_estimate_sentinel(seeded_path) -> None:
