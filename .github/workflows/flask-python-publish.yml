@@ -45,6 +45,16 @@ jobs:
             exit 1
           fi
 
+      # _post-release.yml builds the GitHub Release body from this section, after
+      # the irreversible PyPI publish — so gate on it here, before publish.
+      - name: Require a CHANGELOG section for this version
+        run: |
+          version="${GITHUB_REF_NAME##*v}"
+          if ! grep -qE "^## \[${version//./\\.}\]" implementations/flask-python/CHANGELOG.md; then
+            echo "no '## [$version]' section in implementations/flask-python/CHANGELOG.md — add it before tagging (docs/publishing-checklist.md step 2)" >&2
+            exit 1
+          fi
+
   build-and-test:
     needs: verify-version
     uses: ./.github/workflows/_flask-build-test.yml
@@ -137,6 +147,5 @@ jobs:
       contents: write
     uses: ./.github/workflows/_post-release.yml
     with:
-      tag-pattern: '^ashurbanipal-flask-v'
-      include-paths: 'implementations/flask-python/** frontend/** spec/**'
+      changelog-path: 'implementations/flask-python/CHANGELOG.md'
       title-prefix: 'ashurbanipal-flask '

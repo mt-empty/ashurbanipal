@@ -1,7 +1,10 @@
 # Publishing checklist
 
-Status (2026-08-30): all six packaged ports are live on their registries and,
-as of the 0.3.0 reset, share one `major.minor` version line — now 0.4.0.
+Status (2026-09-08): all six packaged ports are live on their registries and,
+since the 0.3.0 reset, share one `major.minor` version line. The table below is
+staged at 0.5.0 ahead of tagging; each port goes live when its
+`<prefix>-v0.5.0` tag is pushed (0.4.0 was the last release to reach every
+registry).
 
 This doc governs *distribution* — whether a port's artifact can leave this repo
 and install from a public registry. `PORTING.md` governs *correctness*
@@ -12,17 +15,20 @@ separate gates.
 
 | Port | Package / coordinate | Registry | Latest | Tag prefix | Publish workflow |
 |---|---|---|---|---|---|
-| Rust core | `ashurbanipal` | crates.io | 0.4.0 | `ashurbanipal-v*` | `rust-core-publish.yml` |
-| Rust / Axum | `ashurbanipal-axum` | crates.io | 0.4.0 | `ashurbanipal-axum-v*` | `rust-axum-publish.yml` |
-| Rust / Actix-web | `ashurbanipal-actix-web` | crates.io | 0.4.0 | `ashurbanipal-actix-web-v*` | `rust-actix-web-publish.yml` |
-| Node / Express | `ashurbanipal-node-express` | npm | 0.4.0 | `ashurbanipal-node-express-v*` | `node-express-publish.yml` |
-| Python / Flask | `ashurbanipal-flask` | PyPI | 0.4.0 | `ashurbanipal-flask-v*` | `flask-python-publish.yml` |
-| Spring Boot | `io.github.mt-empty:ashurbanipal-spring-boot-starter` | Maven Central | 0.4.0 | `ashurbanipal-spring-boot-starter-v*` | `spring-boot-starter-publish.yml` |
-| Go / net-http | `github.com/mt-empty/ashurbanipal/implementations/go-nethttp` | proxy.golang.org | 0.4.0 | `implementations/go-nethttp/v*` | `go-nethttp-publish.yml` |
+| Rust core | `ashurbanipal` | crates.io | 0.5.0 | `ashurbanipal-v*` | `rust-core-publish.yml` |
+| Rust / Axum | `ashurbanipal-axum` | crates.io | 0.5.0 | `ashurbanipal-axum-v*` | `rust-axum-publish.yml` |
+| Rust / Actix-web | `ashurbanipal-actix-web` | crates.io | 0.5.0 | `ashurbanipal-actix-web-v*` | `rust-actix-web-publish.yml` |
+| Node / Express | `ashurbanipal-node-express` | npm | 0.5.0 | `ashurbanipal-node-express-v*` | `node-express-publish.yml` |
+| Python / Flask | `ashurbanipal-flask` | PyPI | 0.5.0 | `ashurbanipal-flask-v*` | `flask-python-publish.yml` |
+| Spring Boot | `io.github.mt-empty:ashurbanipal-spring-boot-starter` | Maven Central | 0.5.0 | `ashurbanipal-spring-boot-starter-v*` | `spring-boot-starter-publish.yml` |
+| Go / net-http | `github.com/mt-empty/ashurbanipal/implementations/go-nethttp` | proxy.golang.org | 0.5.0 | `implementations/go-nethttp/v*` | `go-nethttp-publish.yml` |
 
-Latest reflects the 0.3.0 reset once its tags are pushed (Rust was at 0.2.1,
-the others at 0.1.1, Go at its initial 0.1.0 — a publish-history artifact, not a
-signal).
+**Latest** is the target set in the release commit, not necessarily what's on
+the registries yet — a port goes live only when its tag is pushed, so
+`tools/check-doc-versions.sh` stays red between this commit and the tag push
+(it asserts the ledger equals the highest release tag). Pre-0.3.0, the numbers
+also diverged for a different reason — a one-time reset from Rust 0.2.1 / others
+0.1.1 / Go 0.1.0 onto the shared line.
 
 Tag prefixes are the package name plus `-v` (Go keeps the module-path prefix
 `go get` needs). This is so a consumer's Dependabot can match a GitHub Release
@@ -77,9 +83,11 @@ Per port, given the target version:
    the manifest version exactly.
 5. Push the tag. The publish workflow runs build + test + conformance, asserts
    the tag is on `main` and equals the manifest version, publishes to the
-   registry, then its `post-release` job creates the GitHub Release with
-   `git-cliff --current` notes (Go's workflow does the same, minus the registry
-   step).
+   registry, then its `post-release` job creates the GitHub Release, using the
+   `## [X.Y.Z]` section of that port's `CHANGELOG.md` (from step 2) as the body
+   (Go's workflow does the same, minus the registry step). If the section is
+   missing the job fails loudly — the registry publish is already done, so
+   create the Release by hand from the CHANGELOG section.
 
 ## Go — release mechanics
 
