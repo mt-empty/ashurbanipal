@@ -319,4 +319,46 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             CommonValueEntry(normalized, freq)
         }
     }
+
+    override fun referencedBy(schema: String?, table: String): List<ReferencedByEntry> =
+        inReadOnlyTransaction { referencedByInTransaction(schema, table) }
+
+    private fun referencedByInTransaction(schema: String?, table: String): List<ReferencedByEntry> {
+        val realSchema = resolveSchema(schema)
+        requireTable(realSchema, table)
+
+        // pg_catalog, not information_schema: the reverse (confrelid) filter
+        // over the standard-SQL views runs 20-40x slower on a large catalog
+        // (docs/adapter-decisions.md §5.9). has_table_privilege is the
+        // per-referrer read gate and works across schemas, so cross-schema
+        // referrers are reported and gated without a separate allow-list pass.
+        val rows = jdbcTemplate.query(
+            "select rn.nspname, rc.relname, con.conname, fa.attname as from_col, ta.attname as to_col " +
+                "from pg_constraint con " +
+                "join pg_class rc on rc.oid = con.conrelid " +
+                "join pg_namespace rn on rn.oid = rc.relnamespace " +
+                "join lateral unnest(con.conkey, con.confkey) with ordinality " +
+                "     as k(from_attnum, to_attnum, n) on true " +
+                "join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum " +
+                "join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum " +
+                "where con.contype = 'f' " +
+                "  and con.confrelid = ( " +
+                "    select c.oid from pg_class c " +
+                "    join pg_namespace n on n.oid = c.relnamespace " +
+                "    where n.nspname = ? and c.relname = ? and c.relkind = 'r') " +
+                "  and has_table_privilege(con.conrelid, 'SELECT') " +
+                "order by rn.nspname, rc.relname, con.conname, k.n",
+            RowMapper { rs, _ ->
+                ReferencedByEntry(
+                    table = rs.getString("relname"),
+                    schema = rs.getString("nspname").takeIf { it != realSchema },
+                    constraint = rs.getString("conname"),
+                    columns = listOf(ColumnPair(rs.getString("from_col"), rs.getString("to_col"))),
+                )
+            },
+            realSchema,
+            table,
+        )
+        return groupReferencedBy(rows)
+    }
 }

@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -142,6 +143,30 @@ class SqliteSourceTest {
             assertEquals("pk", orderIdCol.key)
             assertEquals("orders", orderIdCol.references?.table)
             assertEquals("id", orderIdCol.references?.column)
+        } finally {
+            ds.close()
+        }
+    }
+
+    @Test
+    fun `referenced-by lists incoming FKs with synthesized constraint names`() {
+        val ds = seededDataSource()
+        try {
+            val source = SqliteSource(ds, 5)
+
+            val toUsers = source.referencedBy(null, "users")
+            assertEquals(1, toUsers.size)
+            assertEquals("orders", toUsers.first().table)
+            assertNull(toUsers.first().schema)
+            assertEquals(listOf(ColumnPair("user_id", "id")), toUsers.first().columns)
+            // SQLite FKs are unnamed — the label is synthesized fk_<id>.
+            assertTrue(toUsers.first().constraint.matches(Regex("fk_\\d+")), toUsers.first().constraint)
+
+            assertEquals(listOf("order_extra"), source.referencedBy(null, "orders").map { it.table })
+            assertTrue(source.referencedBy(null, "order_extra").isEmpty())
+
+            assertThrows(NotAllowedException::class.java) { source.referencedBy(null, "no_such_table") }
+            assertThrows(NotAllowedException::class.java) { source.referencedBy("other", "users") }
         } finally {
             ds.close()
         }

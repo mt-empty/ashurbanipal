@@ -43,6 +43,39 @@ data class ColumnInfo(
 data class TableData(val columns: List<ColumnInfo>, val rows: List<LinkedHashMap<String, String?>>, val totalApprox: Long)
 data class CommonValueEntry(val value: String, val freq: Float)
 
+/** One `{from, to}` column pairing of an incoming FK (`spec/protocol.md` §5.9): `from` is the referencing column, `to` the referenced column; a composite FK has more than one. */
+data class ColumnPair(val from: String, val to: String)
+
+/** One FK constraint elsewhere in the source whose target is the requested table (`spec/protocol.md` §5.9 — the reverse of [ColumnRef]). */
+data class ReferencedByEntry(
+    val table: String,
+    // Set only when the referencing table's schema differs from the resolved
+    // one — the opposite end of the relationship from ColumnRef.schema.
+    @JsonInclude(JsonInclude.Include.NON_NULL) val schema: String? = null,
+    val constraint: String,
+    val columns: List<ColumnPair>,
+)
+
+/**
+ * Merges single-pair [ReferencedByEntry] rows into one entry per
+ * (schema, table, constraint). Relies on the caller's catalog ORDER BY
+ * putting a constraint's columns adjacent — a run-length merge, not a full
+ * group-by. Each source maps its own row shape (and applies any allow-list
+ * filter) before calling this.
+ */
+internal fun groupReferencedBy(rows: List<ReferencedByEntry>): List<ReferencedByEntry> {
+    val out = ArrayList<ReferencedByEntry>()
+    for (row in rows) {
+        val last = out.lastOrNull()
+        if (last != null && last.table == row.table && last.schema == row.schema && last.constraint == row.constraint) {
+            out[out.lastIndex] = last.copy(columns = last.columns + row.columns)
+        } else {
+            out.add(row)
+        }
+    }
+    return out
+}
+
 data class QueryOpts(
     val limit: Long,
     val offset: Long,
@@ -58,4 +91,7 @@ interface DbSource {
     fun tableCounts(schema: String?): List<CountEntry>
     fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData
     fun commonValues(schema: String?, table: String, column: String): List<CommonValueEntry>
+
+    /** Incoming FK references: every FK constraint elsewhere in the source whose target is `table` (`spec/protocol.md` §5.9). */
+    fun referencedBy(schema: String?, table: String): List<ReferencedByEntry>
 }

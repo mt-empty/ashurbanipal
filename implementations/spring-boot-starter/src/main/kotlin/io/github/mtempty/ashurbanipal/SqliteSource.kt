@@ -235,4 +235,40 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         allowedColumns(realTable).find { it == column } ?: throw NotAllowedException("not allowed: column $column")
         return emptyList()
     }
+
+    override fun referencedBy(schema: String?, table: String): List<ReferencedByEntry> {
+        checkSchema(schema)
+        requireTable(table)
+
+        // No reverse-FK index and no information_schema: walk every table's
+        // pragma_foreign_key_list (the schema is parsed in memory on open).
+        // The TVF argument is a column reference — not spliced; fkl."table" is
+        // bound. COLLATE NOCASE because the pragma returns the referenced name
+        // as written in the DDL, which SQLite itself resolves case-insensitively.
+        val rows = bounded(queryTimeoutSecs) { conn ->
+            query(
+                conn,
+                "select m.name, fkl.id, fkl.\"from\", fkl.\"to\" " +
+                    "from sqlite_master m " +
+                    "join pragma_foreign_key_list(m.name) fkl " +
+                    "where m.type = 'table' " +
+                    "  and m.name not like 'sqlite\\_%' escape '\\' " +
+                    "  and fkl.\"table\" = ? collate nocase " +
+                    "order by m.name, fkl.id, fkl.seq",
+                listOf(table),
+            ) { rs ->
+                // SQLite FKs are unnamed; fk_<id> is a per-table-stable
+                // synthetic label (spec/protocol.md §5.9 permits this). The
+                // sqlite_master predicate here matches allowedTables(), so
+                // every referrer is already allow-listed.
+                ReferencedByEntry(
+                    table = rs.getString(1),
+                    schema = null,
+                    constraint = "fk_" + rs.getLong(2),
+                    columns = listOf(ColumnPair(rs.getString(3), rs.getString(4))),
+                )
+            }
+        }
+        return groupReferencedBy(rows)
+    }
 }
