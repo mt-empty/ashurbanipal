@@ -85,6 +85,25 @@ describe("SqliteSource", () => {
     expect(userIdCol?.references).toEqual({ table: "users", column: "id" });
   });
 
+  it("referenced_by lists incoming FKs with synthesized constraint names", async () => {
+    db = await seededDb();
+    const source = new SqliteSource(db);
+
+    const toUsers = await source.referencedBy(undefined, "users", 5000);
+    expect(toUsers).toHaveLength(1);
+    expect(toUsers[0].table).toBe("orders");
+    expect(toUsers[0].schema).toBeUndefined();
+    expect(toUsers[0].columns).toEqual([{ from: "user_id", to: "id" }]);
+    // SQLite FKs are unnamed — the label is synthesized fk_<id>.
+    expect(toUsers[0].constraint).toMatch(/^fk_\d+$/);
+
+    expect((await source.referencedBy(undefined, "orders", 5000)).map((e) => e.table)).toEqual(["order_extra"]);
+    expect(await source.referencedBy(undefined, "order_extra", 5000)).toEqual([]);
+
+    await expect(source.referencedBy(undefined, "no_such_table", 5000)).rejects.toBeInstanceOf(NotAllowedError);
+    await expect(source.referencedBy("other", "users", 5000)).rejects.toBeInstanceOf(NotAllowedError);
+  });
+
   it("reports both key and references for a column that is its own PK and an FK", async () => {
     db = await seededDb();
     const source = new SqliteSource(db);

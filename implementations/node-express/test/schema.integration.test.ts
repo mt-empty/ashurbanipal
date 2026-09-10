@@ -89,6 +89,96 @@ maybeDescribe("multi-schema support (live db)", () => {
     expect(userId?.references?.schema).toBeUndefined();
   });
 
+  // GET /api/tables/referenced-by (spec/protocol.md §5.9) — the reverse of
+  // the per-column `references` above. Mirrors the Rust P5.9-* conformance
+  // checks (conformance/runner/referenced_by.rs) against the same seed.
+  describe("referenced-by (§5.9)", () => {
+    type RbEntry = { table: string; schema?: string; constraint: string; columns: { from: string; to: string }[] };
+    const referencedBy = async (table: string): Promise<RbEntry[]> => {
+      const { status, body } = await getJson(
+        `/__ashurbanipal/api/tables/referenced-by?table=${encodeURIComponent(table)}`,
+      );
+      expect(status).toBe(200);
+      return (body as { referenced_by: RbEntry[] }).referenced_by;
+    };
+    const entriesFor = (list: RbEntry[], table: string) => list.filter((e) => e.table === table);
+    const onlyPair = (e: RbEntry): [string, string] => {
+      expect(e.columns).toHaveLength(1);
+      return [e.columns[0].from, e.columns[0].to];
+    };
+
+    it("lists incoming FK constraints with explicit column pairs", async () => {
+      const list = await referencedBy("users");
+
+      const orders = entriesFor(list, "orders");
+      expect(orders).toHaveLength(1);
+      expect(onlyPair(orders[0])).toEqual(["user_id", "id"]);
+      expect(orders[0].constraint).not.toBe("");
+      expect(orders[0].schema).toBeUndefined();
+
+      // support_tickets has two separate FKs into users -> two entries.
+      const tickets = entriesFor(list, "support_tickets");
+      expect(tickets).toHaveLength(2);
+      expect(new Set(tickets.map(onlyPair).map(([f, t]) => `${f}->${t}`))).toEqual(
+        new Set(["user_id->id", "assigned_admin_id->id"]),
+      );
+      for (const e of tickets) expect(e.schema).toBeUndefined();
+
+      // (table, constraint) is unique within one response.
+      const keys = list.map((e) => `${e.table} | ${e.constraint}`);
+      expect(new Set(keys).size).toBe(keys.length);
+    });
+
+    it("includes composite foreign keys with every column pair", async () => {
+      const list = await referencedBy("inventory_locations");
+      expect(list).toHaveLength(1);
+      expect(list[0].table).toBe("inventory_counts");
+      expect(list[0].columns).toEqual([
+        { from: "warehouse_code", to: "warehouse_code" },
+        { from: "bin_code", to: "bin_code" },
+      ]);
+    });
+
+    it("returns an empty list when nothing references the table", async () => {
+      expect(await referencedBy("feature_flags")).toEqual([]);
+    });
+
+    it("carries a schema field for cross-schema referrers", async () => {
+      const se = entriesFor(await referencedBy("users"), "shipment_events");
+      expect(se).toHaveLength(1);
+      expect(se[0].schema).toBe("warehouse");
+      expect(onlyPair(se[0])).toEqual(["handled_by_user_id", "id"]);
+    });
+
+    it("an explicit schema=public matches the implicit default", async () => {
+      const implicit = await getJson("/__ashurbanipal/api/tables/referenced-by?table=users");
+      const explicit = await getJson("/__ashurbanipal/api/tables/referenced-by?schema=public&table=users");
+      expect(explicit.body).toEqual(implicit.body);
+    });
+
+    it("rejects unknown or malicious input cleanly, with the protocol header", async () => {
+      for (const path of [
+        `/__ashurbanipal/api/tables/referenced-by?table=${encodeURIComponent("")}`,
+        `/__ashurbanipal/api/tables/referenced-by?table=${encodeURIComponent("no_such_table")}`,
+        `/__ashurbanipal/api/tables/referenced-by?table=${encodeURIComponent('users"; drop table users; --')}`,
+        `/__ashurbanipal/api/tables/referenced-by?table=${encodeURIComponent("users' OR '1'='1")}`,
+        "/__ashurbanipal/api/tables/referenced-by",
+        "/__ashurbanipal/api/tables/referenced-by?schema=no_such_schema&table=users",
+        "/__ashurbanipal/api/tables/referenced-by?source=no_such_source&table=users",
+      ]) {
+        const res = await fetch(`${testServer.baseUrl}${path}`);
+        expect(res.status, path).toBe(400);
+        expect(res.headers.get("x-ashurbanipal-protocol"), path).toBe("1");
+      }
+    });
+
+    it("carries the protocol version header on a 200", async () => {
+      const res = await fetch(`${testServer.baseUrl}/__ashurbanipal/api/tables/referenced-by?table=users`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-ashurbanipal-protocol")).toBe("1");
+    });
+  });
+
   // Pool sessions with different search_path values must not drift mid-operation
   // (spec/protocol.md §1, §5).
   //

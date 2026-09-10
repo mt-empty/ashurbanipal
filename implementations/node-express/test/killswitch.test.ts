@@ -19,6 +19,7 @@ const ALL_MOUNT_PATHS = [
   "/__ashurbanipal/api/table-counts",
   "/__ashurbanipal/api/tables/data",
   "/__ashurbanipal/api/tables/common-values",
+  "/__ashurbanipal/api/tables/referenced-by",
   "/__ashurbanipal/api/siblings",
 ];
 

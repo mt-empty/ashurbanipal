@@ -9,7 +9,9 @@ import {
   cellToJson,
   type DbSource,
   findExact,
+  groupReferencedBy,
   type QueryOpts,
+  type ReferencedByEntry,
   type TableData,
   type TableInfo,
 } from "./types.js";
@@ -350,6 +352,58 @@ export class PostgresSource implements DbSource {
         }
         return { value, freq: r.freq };
       });
+    });
+  }
+
+  async referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]> {
+    return this.withTimeout(timeoutMs, async (client) => {
+      const realSchema = await this.resolveSchema(client, schema);
+      const tables = await this.allowedTables(client, realSchema);
+      if (!findExact(tables, table)) {
+        throw new NotAllowedError(`table "${table}"`);
+      }
+
+      // pg_catalog, not information_schema: the reverse (confrelid) filter
+      // over the standard-SQL views runs 20-40x slower on a large catalog
+      // (docs/adapter-decisions.md §5.9). has_table_privilege is the
+      // per-referrer read gate and works across schemas, so cross-schema
+      // referrers are reported and gated without a separate allow-list pass.
+      const { rows } = await client.query<{
+        nspname: string;
+        relname: string;
+        conname: string;
+        from_col: string;
+        to_col: string;
+      }>(
+        `select rn.nspname, rc.relname, con.conname, fa.attname as from_col, ta.attname as to_col
+         from pg_constraint con
+         join pg_class rc on rc.oid = con.conrelid
+         join pg_namespace rn on rn.oid = rc.relnamespace
+         join lateral unnest(con.conkey, con.confkey) with ordinality
+              as k(from_attnum, to_attnum, n) on true
+         join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum
+         join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum
+         where con.contype = 'f'
+           and con.confrelid = (
+             select c.oid from pg_class c
+             join pg_namespace n on n.oid = c.relnamespace
+             where n.nspname = $1 and c.relname = $2 and c.relkind = 'r')
+           and has_table_privilege(con.conrelid, 'SELECT')
+         order by rn.nspname, rc.relname, con.conname, k.n`,
+        [realSchema, table],
+      );
+
+      return groupReferencedBy(
+        rows.map((r) => {
+          const entry: ReferencedByEntry = {
+            table: r.relname,
+            constraint: r.conname,
+            columns: [{ from: r.from_col, to: r.to_col }],
+          };
+          if (r.nspname !== realSchema) entry.schema = r.nspname;
+          return entry;
+        }),
+      );
     });
   }
 }

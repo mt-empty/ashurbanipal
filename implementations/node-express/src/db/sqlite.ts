@@ -9,9 +9,11 @@ import {
   cellToJson,
   type DbSource,
   findExact,
+  groupReferencedBy,
   opSql,
   opTakesValue,
   type QueryOpts,
+  type ReferencedByEntry,
   type TableData,
   type TableInfo,
 } from "./types.js";
@@ -281,5 +283,44 @@ export class SqliteSource implements DbSource {
     // statistics available" answer (spec/protocol.md §5.5), not a live
     // GROUP BY scan.
     return [];
+  }
+
+  async referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]> {
+    checkSchema(schema);
+    const tables = await allowedTables(this.db, timeoutMs);
+    if (!findExact(tables, table)) {
+      throw new NotAllowedError(`table "${table}"`);
+    }
+
+    // No reverse-FK index and no information_schema: walk every table's
+    // pragma_foreign_key_list (the schema is parsed in memory on open).
+    // The TVF argument m.name is a column reference — not spliced;
+    // fkl."table" is bound. COLLATE NOCASE because the pragma returns the
+    // referenced name as written in the DDL, which SQLite resolves
+    // case-insensitively. The sqlite_master predicate here matches
+    // allowedTables(), so every referrer is already allow-listed.
+    const rows = await bounded(this.db, timeoutMs, () =>
+      dbAll<{ name: string; id: number; from: string; to: string }>(
+        this.db,
+        `select m.name, fkl.id, fkl."from", fkl."to"
+         from sqlite_master m
+         join pragma_foreign_key_list(m.name) fkl
+         where m.type = 'table'
+           and m.name not like 'sqlite\\_%' escape '\\'
+           and fkl."table" = ? collate nocase
+         order by m.name, fkl.id, fkl.seq`,
+        [table],
+      ),
+    );
+
+    // SQLite FKs are unnamed; fk_<id> is a per-table-stable synthetic
+    // label (spec/protocol.md §5.9 permits this).
+    return groupReferencedBy(
+      rows.map((r) => ({
+        table: r.name,
+        constraint: `fk_${r.id}`,
+        columns: [{ from: r.from, to: r.to }],
+      })),
+    );
   }
 }

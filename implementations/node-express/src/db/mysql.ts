@@ -9,9 +9,11 @@ import {
   cellToJson,
   type DbSource,
   findExact,
+  groupReferencedBy,
   opSql,
   opTakesValue,
   type QueryOpts,
+  type ReferencedByEntry,
   type TableData,
   type TableInfo,
 } from "./types.js";
@@ -418,6 +420,50 @@ export class MySqlSource implements DbSource {
       }
       // MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
       return [];
+    });
+  }
+
+  async referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]> {
+    return this.withTx(async (conn, variant) => {
+      const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
+      // One allow-list read, shared by the target-table check and the
+      // referrer post-filter — MySQL/MariaDB have no cross-schema
+      // has_table_privilege gate (docs/adapter-decisions.md §5.9).
+      const allowed = new Set(await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs));
+      if (!allowed.has(table)) {
+        throw new NotAllowedError(`table "${table}"`);
+      }
+
+      // Read key_column_usage, not referential_constraints, whose
+      // referenced-name column MariaDB nulls for a role lacking privilege
+      // on the referenced table. table_schema = ? keeps referrers to the
+      // resolved database.
+      const rows = await queryRows(
+        conn,
+        timedSelect(
+          variant,
+          timeoutMs,
+          "kcu.table_name as table_name, kcu.constraint_name as constraint_name, " +
+            "kcu.column_name as column_name, kcu.referenced_column_name as referenced_column_name " +
+            "from information_schema.key_column_usage kcu " +
+            "where kcu.referenced_table_schema = ? and kcu.referenced_table_name = ? " +
+            "  and kcu.table_schema = ? " +
+            "order by kcu.table_name, kcu.constraint_name, kcu.ordinal_position",
+        ),
+        [realSchema, table, realSchema],
+      );
+
+      // Keep the referrer set inside the same allow-list every other route
+      // on this backend serves from.
+      return groupReferencedBy(
+        rows
+          .filter((r) => allowed.has(r.table_name as string))
+          .map((r) => ({
+            table: r.table_name as string,
+            constraint: r.constraint_name as string,
+            columns: [{ from: r.column_name as string, to: r.referenced_column_name as string }],
+          })),
+      );
     });
   }
 }
