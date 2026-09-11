@@ -9,8 +9,7 @@ import (
 )
 
 // GET /api/tables/referenced-by (spec/protocol.md §5.9) against the
-// devcontainer's live Postgres with conformance/seed/seed.sql. Mirrors the
-// Rust P5.9-* conformance checks (conformance/runner/referenced_by.rs):
+// devcontainer's live Postgres with conformance/seed/seed.sql:
 // public.users is referenced by several tables incl. cross-schema
 // warehouse.shipment_events; inventory_locations by exactly one composite
 // FK; feature_flags by nothing. Presence-based for users, since its exact

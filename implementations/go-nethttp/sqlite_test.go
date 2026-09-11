@@ -199,6 +199,130 @@ func TestSQLiteReferencedByListsIncomingFKsWithSynthesizedConstraintNames(t *tes
 	}
 }
 
+// "REFERENCES parent" with no parenthesised column list is valid DDL
+// meaning "the parent's primary key", but pragma_foreign_key_list reports
+// "to" as NULL for that form rather than filling in the PK name — the
+// query must resolve it itself.
+func TestSQLiteReferencedByResolvesShorthandFKWithNoNamedParentColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shorthand.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("opening sqlite db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(`
+		create table users (id integer primary key, email text not null);
+		create table pets (id integer primary key, owner_id integer references users);
+	`); err != nil {
+		t.Fatalf("creating schema: %v", err)
+	}
+
+	source := NewSQLiteSource(db, 5)
+	refs, err := source.ReferencedBy(context.Background(), nil, "users")
+	if err != nil {
+		t.Fatalf("ReferencedBy(users): %v", err)
+	}
+	var pets *ReferencedByEntry
+	for i := range refs {
+		if refs[i].Table == "pets" {
+			pets = &refs[i]
+		}
+	}
+	if pets == nil {
+		t.Fatalf("ReferencedBy(users) = %+v, want a pets entry", refs)
+	}
+	if len(pets.Columns) != 1 || pets.Columns[0] != (ColumnPair{From: "owner_id", To: "id"}) {
+		t.Errorf("pets columns = %+v, want [{owner_id id}] — an unnamed parent column must resolve to users' primary key, not empty", pets.Columns)
+	}
+}
+
+// Same shorthand-FK bug, forward direction: keyMetadata (which supplies
+// QueryTable's per-column References) shares ReferencedBy's pre-fix bug —
+// pragma_foreign_key_list.to is NULL for "REFERENCES parent" with no named
+// column, and until fixed keyMetadata doesn't resolve it the way
+// ReferencedBy now does.
+func TestSQLiteQueryTableResolvesShorthandFKWithNoNamedParentColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shorthand_forward.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("opening sqlite db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(`
+		create table users (id integer primary key, email text not null);
+		create table pets (id integer primary key, owner_id integer references users);
+	`); err != nil {
+		t.Fatalf("creating schema: %v", err)
+	}
+
+	source := NewSQLiteSource(db, 5)
+	data, err := source.QueryTable(context.Background(), nil, "pets", QueryOpts{Limit: 10})
+	if err != nil {
+		t.Fatalf("QueryTable: %v", err)
+	}
+	var ownerID *ColumnInfo
+	for i := range data.Columns {
+		if data.Columns[i].Name == "owner_id" {
+			ownerID = &data.Columns[i]
+		}
+	}
+	if ownerID == nil || ownerID.Key != KeyFK {
+		t.Fatalf("pets.owner_id = %+v, want key=fk", ownerID)
+	}
+	if ownerID.References == nil || ownerID.References.Table != "users" || ownerID.References.Column != "id" {
+		t.Errorf("pets.owner_id.references = %+v, want {users id} — an unnamed parent column must resolve to users' primary key, not empty", ownerID.References)
+	}
+}
+
+func TestSQLiteReferencedByResolvesShorthandFKAgainstCompositePrimaryKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shorthand_composite.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("opening sqlite db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(`
+		create table warehouse_bins (
+			warehouse_code text not null,
+			bin_code text not null,
+			primary key (warehouse_code, bin_code)
+		);
+		create table bin_counts (
+			id integer primary key,
+			warehouse_code text not null,
+			bin_code text not null,
+			qty integer not null,
+			foreign key (warehouse_code, bin_code) references warehouse_bins
+		);
+	`); err != nil {
+		t.Fatalf("creating schema: %v", err)
+	}
+
+	source := NewSQLiteSource(db, 5)
+	refs, err := source.ReferencedBy(context.Background(), nil, "warehouse_bins")
+	if err != nil {
+		t.Fatalf("ReferencedBy(warehouse_bins): %v", err)
+	}
+	var binCounts *ReferencedByEntry
+	for i := range refs {
+		if refs[i].Table == "bin_counts" {
+			binCounts = &refs[i]
+		}
+	}
+	if binCounts == nil || len(binCounts.Columns) != 2 {
+		t.Fatalf("ReferencedBy(warehouse_bins) = %+v, want a bin_counts entry with 2 column pairs", refs)
+	}
+	want := map[ColumnPair]bool{
+		{From: "warehouse_code", To: "warehouse_code"}: true,
+		{From: "bin_code", To: "bin_code"}:             true,
+	}
+	for _, pair := range binCounts.Columns {
+		if !want[pair] {
+			t.Errorf("unexpected column pair %+v", pair)
+		}
+	}
+}
+
 func TestSQLiteTableCountsReportsNoEstimateSentinel(t *testing.T) {
 	source := NewSQLiteSource(seededDB(t), 5)
 	counts, err := source.TableCounts(context.Background(), nil)

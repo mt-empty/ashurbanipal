@@ -79,12 +79,16 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 func (c *PostgresSource) allowedTables(ctx context.Context, db queryer, schema string) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	// Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
+	// Mirrors ListTables' own pg_class/relkind = 'r' predicate, not
+	// information_schema.tables' broader BASE TABLE (which also matches
+	// partitioned tables) — keeps this allow-list and ListTables in
+	// lockstep (docs/adapter-decisions.md §5.2/§5.3).
 	rows, err := db.QueryContext(ctx,
-		`select table_name from information_schema.tables
-		 where table_schema = $1 and table_type = 'BASE TABLE'
-		   and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT')
-		 order by table_name`, schema)
+		`select c.relname from pg_class c
+		 join pg_namespace n on n.oid = c.relnamespace
+		 where n.nspname = $1 and c.relkind = 'r'
+		   and has_table_privilege(c.oid, 'SELECT')
+		 order by c.relname`, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -628,22 +632,36 @@ func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table
 	if err != nil {
 		return nil, err
 	}
-	tables, err := c.allowedTables(ctx, tx, realSchema)
-	if err != nil {
-		return nil, err
-	}
-	if _, ok := findExact(tables, table); !ok {
-		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
-	}
 
 	qctx, cancel := c.bounded(ctx)
 	defer cancel()
+
+	// Resolved once and bound as $1 below (con.confrelid = $1) — the same
+	// pg_class/relkind = 'r'/has_table_privilege predicate allowedTables
+	// uses, so a partitioned or unknown table rejects here instead of a
+	// silent [] from the confrelid join finding zero rows
+	// (spec/protocol.md §5.2/§5.9).
+	var targetOID int
+	if err := tx.QueryRowContext(qctx,
+		`select c.oid from pg_class c
+		     join pg_namespace n on n.oid = c.relnamespace
+		     where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
+		       and has_table_privilege(c.oid, 'SELECT')`, realSchema, table).Scan(&targetOID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		}
+		return nil, err
+	}
 
 	// pg_catalog, not information_schema: the reverse (confrelid) filter
 	// over the standard-SQL views runs 20-40x slower on a large catalog
 	// (docs/adapter-decisions.md §5.9). has_table_privilege is the
 	// per-referrer read gate and works across schemas, so cross-schema
 	// referrers are reported and gated without a separate allow-list pass.
+	// conparentid = 0 excludes a partitioned referrer's per-partition
+	// constraint copies (Postgres clones the parent's FK onto each
+	// partition) — without it, one logical FK fans out into one entry per
+	// partition plus the parent.
 	rows, err := tx.QueryContext(qctx,
 		`select rn.nspname, rc.relname, con.conname, fa.attname as from_col, ta.attname as to_col
 		 from pg_constraint con
@@ -654,12 +672,10 @@ func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table
 		 join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum
 		 join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum
 		 where con.contype = 'f'
-		   and con.confrelid = (
-		     select c.oid from pg_class c
-		     join pg_namespace n on n.oid = c.relnamespace
-		     where n.nspname = $1 and c.relname = $2 and c.relkind = 'r')
+		   and con.conparentid = 0
+		   and con.confrelid = $1
 		   and has_table_privilege(con.conrelid, 'SELECT')
-		 order by rn.nspname, rc.relname, con.conname, k.n`, realSchema, table)
+		 order by rn.nspname, rc.relname, con.conname, k.n`, targetOID)
 	if err != nil {
 		return nil, err
 	}
