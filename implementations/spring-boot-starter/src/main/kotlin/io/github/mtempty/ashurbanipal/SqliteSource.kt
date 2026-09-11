@@ -127,8 +127,18 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         // "table"/"from"/"to" are pragma_foreign_key_list's own fixed output
         // column names (SQL keywords needing escape), not the caller-supplied
         // table.
+        //
+        // "REFERENCES parent" shorthand leaves "to" NULL; ppk resolves it by
+        // position against the parent's PK, correlated per FK row since each
+        // can reference a different parent — unlike referencedBy's single
+        // bound parent (docs/adapter-decisions.md §5.4.1).
         data class FkRow(val id: Long, val refTable: String, val from: String, val to: String)
-        val fks = query(conn, "select id, seq, \"table\", \"from\", \"to\" from pragma_foreign_key_list($quoted)") { rs ->
+        val fks = query(
+            conn,
+            "select fkl.id, fkl.seq, fkl.\"table\", fkl.\"from\", coalesce(fkl.\"to\", ppk.name, 'rowid') " +
+                "from pragma_foreign_key_list($quoted) fkl " +
+                "left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1",
+        ) { rs ->
             FkRow(rs.getLong(1), rs.getString(3), rs.getString(4), rs.getString(5))
         }
         val fkColumns = mutableMapOf<String, ColumnRef>()
@@ -245,17 +255,30 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         // The TVF argument is a column reference — not spliced; fkl."table" is
         // bound. COLLATE NOCASE because the pragma returns the referenced name
         // as written in the DDL, which SQLite itself resolves case-insensitively.
+        //
+        // "REFERENCES parent" with no parenthesised column list is valid DDL
+        // meaning "parent's own primary key", and for that form the pragma
+        // reports "to" as NULL rather than filling in the PK name. ppk
+        // resolves it: pragma_table_info(table)'s pk column is the
+        // 1-indexed position of a column within the parent's primary key,
+        // matching fkl.seq's 0-indexed position within the FK's column list
+        // — SQLite requires an omitted column list to align
+        // position-for-position with the parent PK, so this pairing holds
+        // for composite keys too. The 'rowid' fallback covers a parent with
+        // no declared primary key, where SQLite's parent key is the
+        // implicit rowid.
         val rows = bounded(queryTimeoutSecs) { conn ->
             query(
                 conn,
-                "select m.name, fkl.id, fkl.\"from\", fkl.\"to\" " +
+                "select m.name, fkl.id, fkl.\"from\", coalesce(fkl.\"to\", ppk.name, 'rowid') " +
                     "from sqlite_master m " +
                     "join pragma_foreign_key_list(m.name) fkl " +
+                    "left join pragma_table_info(?) ppk on ppk.pk = fkl.seq + 1 " +
                     "where m.type = 'table' " +
                     "  and m.name not like 'sqlite\\_%' escape '\\' " +
                     "  and fkl.\"table\" = ? collate nocase " +
                     "order by m.name, fkl.id, fkl.seq",
-                listOf(table),
+                listOf(table, table),
             ) { rs ->
                 // SQLite FKs are unnamed; fk_<id> is a per-table-stable
                 // synthetic label (spec/protocol.md §5.9 permits this). The

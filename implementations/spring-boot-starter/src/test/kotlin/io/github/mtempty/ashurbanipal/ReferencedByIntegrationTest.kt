@@ -10,11 +10,12 @@ import org.springframework.http.HttpStatus
 import org.springframework.web.client.HttpClientErrorException
 import java.net.URI
 import java.net.URLEncoder
+import java.sql.DriverManager
+import java.sql.Statement
 
 /**
  * `GET /api/tables/referenced-by` (`spec/protocol.md` §5.9) against the
- * devcontainer's live Postgres with `conformance/seed/seed.sql`. Mirrors the
- * Rust `P5.9-*` conformance checks (`conformance/runner/referenced_by.rs`):
+ * devcontainer's live Postgres with `conformance/seed/seed.sql`:
  * `public.users` is referenced by several tables incl. cross-schema
  * `warehouse.shipment_events`; `inventory_locations` by exactly one composite
  * FK; `feature_flags` by nothing.
@@ -119,5 +120,96 @@ class ReferencedByIntegrationTest : AshurbanipalHttpTestBase() {
     fun `the 200 response carries the protocol version header`() {
         val response = http.getForEntity(url("/api/tables/referenced-by?table=users"), String::class.java)
         assertEquals("1", response.headers.getFirst("x-ashurbanipal-protocol"))
+    }
+
+    /**
+     * Regression tests: Postgres copies an inherited FK constraint onto
+     * every partition, and `list_tables`' `information_schema` gate is
+     * broader than the `relkind = 'r'` filter §5.2 (and so §5.9's own
+     * table-gate) is meant to enforce. Each test uses its own schema —
+     * disjoint names, since JUnit may run these methods in any order and a
+     * shared schema stays open across the whole test class otherwise.
+     */
+    private fun withAdminConnection(databaseUrl: String, block: (Statement) -> Unit) {
+        val uri = URI(databaseUrl)
+        val (user, password) = (uri.userInfo ?: ":").split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+        val jdbcUrl = "jdbc:postgresql://${uri.host}:${uri.port}${uri.path}"
+        DriverManager.getConnection(jdbcUrl, user, password).use { conn ->
+            conn.createStatement().use(block)
+        }
+    }
+
+    private fun setupPartitionedSchema(schema: String) {
+        val databaseUrl = System.getenv("DATABASE_URL")
+            ?: error("DATABASE_URL must be set (the devcontainer sets it automatically)")
+        withAdminConnection(databaseUrl) { st ->
+            st.execute("drop schema if exists $schema cascade")
+            st.execute("create schema $schema")
+            st.execute("create table $schema.users (id int primary key)")
+            st.execute(
+                "create table $schema.events (" +
+                    "    id bigint not null, " +
+                    "    user_id int references $schema.users(id)" +
+                    ") partition by range (id)",
+            )
+            st.execute("create table $schema.events_p1 partition of $schema.events for values from (1) to (1000)")
+            st.execute("create table $schema.events_p2 partition of $schema.events for values from (1000) to (2000)")
+        }
+    }
+
+    private fun dropSchema(schema: String) {
+        val databaseUrl = System.getenv("DATABASE_URL") ?: return
+        withAdminConnection(databaseUrl) { st -> st.execute("drop schema if exists $schema cascade") }
+    }
+
+    @Test
+    fun `reports one entry for a partitioned referrer, not one per partition`() {
+        val schema = "ashb_test_spring_referenced_by_partitioning_dup"
+        setupPartitionedSchema(schema)
+        try {
+            val list = getJson("/api/tables/referenced-by?schema=$schema&table=users")["referenced_by"]
+            val events = (list as Iterable<JsonNode>).filter { it["table"].asText().startsWith("events") }
+            assertEquals(
+                1,
+                events.size,
+                "a partitioned referrer's inherited FK copies must collapse to one entry, got $events",
+            )
+            assertEquals("events", events.first()["table"].asText())
+        } finally {
+            dropSchema(schema)
+        }
+    }
+
+    @Test
+    fun `rejects a partitioned table as target the same as any other unlisted table`() {
+        val schema = "ashb_test_spring_referenced_by_partitioning_gate"
+        setupPartitionedSchema(schema)
+        try {
+            // spec/protocol.md §5.9 requires table to match a §5.2 entry,
+            // and list_tables' relkind = 'r' filter excludes partitioned
+            // tables — so this must reject the same way an unknown table
+            // name does, not silently answer [].
+            expectBadRequest("?schema=$schema&table=events")
+        } finally {
+            dropSchema(schema)
+        }
+    }
+
+    // finding #1: queryTable (and commonValues, same gate) validate table
+    // via allowedTables, which used to match information_schema.tables'
+    // broader BASE TABLE instead of listTables' relkind = 'r' — so a
+    // partitioned table must be rejected here too, not silently queried.
+    @Test
+    fun `query table rejects a partitioned table same as referenced-by does`() {
+        val schema = "ashb_test_spring_query_table_partitioning_gate"
+        setupPartitionedSchema(schema)
+        try {
+            val ex = assertThrows(HttpClientErrorException::class.java) {
+                http.getForObject(URI(url("/api/tables/data") + "?schema=$schema&table=events"), String::class.java)
+            }
+            assertEquals(HttpStatus.BAD_REQUEST, ex.statusCode)
+        } finally {
+            dropSchema(schema)
+        }
     }
 }
