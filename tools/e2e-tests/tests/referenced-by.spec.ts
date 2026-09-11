@@ -93,3 +93,71 @@ test("a table nothing references shows an empty 'referenced by' list", async ({ 
   await expect(section.getByText("nothing references this table")).toBeVisible();
   await expect(section.getByRole("button")).toHaveCount(0);
 });
+
+test("a cross-schema referrer absent from the target schema's own table list surfaces an error, not a mismatched filter", async ({
+  page,
+}) => {
+  // Regression test: navigateWithSeededFilter's cross-schema branch sets
+  // state.table to the drill-in target before loadTables() resolves;
+  // loadTables()'s stale-state fallback (meant for stale localStorage)
+  // silently resets state.table and, until fixed, still applies the seeded
+  // filter — to whatever table it fell back to, not the one clicked. This
+  // is reachable whenever a referenced_by entry names a table the target
+  // schema's /api/tables doesn't list (e.g. a partitioned referrer);
+  // mocked here rather than requiring a live partitioned-table fixture.
+  await gotoApp(page);
+  await selectTable(page, "users");
+
+  await page.route("**/api/tables/referenced-by*", (route) =>
+    route.fulfill({
+      json: {
+        referenced_by: [
+          { schema: "warehouse", table: "ghost_events", constraint: "fk_ghost", columns: [{ from: "user_id", to: "id" }] },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/tables*", (route) => {
+    const schema = new URL(route.request().url()).searchParams.get("schema");
+    if (schema === "warehouse") return route.fulfill({ json: { tables: [{ name: "shipment_events" }] } });
+    return route.continue();
+  });
+
+  const idCell = page.locator("#tbody tr").first().locator('td[data-col="id"] .cell-text.pk-cell');
+  await idCell.click();
+  const pop = page.locator("#refby-pop");
+  await expect(pop).toBeVisible();
+  await pop.getByRole("button", { name: /ghost_events/ }).click();
+
+  await expect(page.locator("#error")).not.toBeEmpty();
+  await expect(page.locator("#filter")).toHaveValue("");
+});
+
+test("an entry naming a column absent from the row (the referenced table has no primary key) is disabled with an accurate message", async ({
+  page,
+}) => {
+  // finding #7, option 1: SQLite's rowid fallback (spec/protocol.md §5.9)
+  // means `to` can name a column /api/tables/data never exposes — that must
+  // read as "no primary key to filter by", not "column is null" (row["rowid"]
+  // is genuinely undefined here, not a real column holding a null value).
+  await gotoApp(page);
+  await selectTable(page, "users");
+
+  await page.route("**/api/tables/referenced-by*", (route) =>
+    route.fulfill({
+      json: {
+        referenced_by: [
+          { table: "ghost_children", constraint: "fk_ghost", columns: [{ from: "parent_ref", to: "rowid" }] },
+        ],
+      },
+    }),
+  );
+
+  const idCell = page.locator("#tbody tr").first().locator('td[data-col="id"] .cell-text.pk-cell');
+  await idCell.click();
+  const pop = page.locator("#refby-pop");
+  await expect(pop).toBeVisible();
+  const btn = pop.getByRole("button", { name: /ghost_children/ });
+  await expect(btn).toBeDisabled();
+  await expect(btn).toHaveAttribute("title", "this table has no primary key — no filter is expressible");
+});

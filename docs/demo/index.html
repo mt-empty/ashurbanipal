@@ -2322,7 +2322,13 @@ function navigateWithSeededFilter(table, schema, applyFilter) {
   state.sort = null;
   if (schema && schema !== state.schema) {
     setSchema(schema);
-    loadTables().then(applyFilter).catch(reportError);
+    loadTables().then(() => {
+      if (state.table !== table) {
+        reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
+        return;
+      }
+      applyFilter();
+    }).catch(reportError);
     return;
   }
   persist();
@@ -2415,7 +2421,7 @@ function renderList(container, entries, row, dismiss) {
       const nullPair = entry.columns.find((c) => row[c.to] == null);
       if (nullPair) {
         btn.disabled = true;
-        btn.title = `${nullPair.to} is null in this row \u2014 no filter is expressible`;
+        btn.title = nullPair.to in row ? `${nullPair.to} is null in this row \u2014 no filter is expressible` : "this table has no primary key \u2014 no filter is expressible";
       } else {
         btn.title = `go to ${label} where ${entry.columns.map((c) => `${c.from} = ${row[c.to]}`).join(" AND ")}`;
         btn.onclick = () => drillIn(entry, row, dismiss);

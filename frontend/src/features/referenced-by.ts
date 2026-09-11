@@ -56,7 +56,15 @@ function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: R
       const nullPair = entry.columns.find((c) => row[c.to] == null);
       if (nullPair) {
         btn.disabled = true;
-        btn.title = `${nullPair.to} is null in this row — no filter is expressible`;
+        // `to` names a column absent from `row` itself (not merely null-valued)
+        // when the referenced table has no declared primary key — the backend
+        // falls back to SQLite's implicit rowid (spec/protocol.md §5.9), which
+        // /api/tables/data never exposes as a column. Distinct from a genuine
+        // NULL in a real column, which the row data does carry.
+        btn.title =
+          nullPair.to in row
+            ? `${nullPair.to} is null in this row — no filter is expressible`
+            : "this table has no primary key — no filter is expressible";
       } else {
         btn.title = `go to ${label} where ${entry.columns.map((c) => `${c.from} = ${row[c.to]}`).join(" AND ")}`;
         btn.onclick = () => drillIn(entry, row, dismiss);

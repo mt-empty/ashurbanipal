@@ -15,7 +15,20 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
   state.sort = null;
   if (schema && schema !== state.schema) {
     setSchema(schema);
-    loadTables().then(applyFilter).catch(reportError);
+    loadTables()
+      .then(() => {
+        // loadTables()'s stale-state fallback (sidebar.ts) silently resets
+        // state.table when `table` isn't in this schema's own /api/tables
+        // listing (e.g. a partitioned referrer, which list_tables excludes)
+        // — applying the filter here would seed it onto whatever table that
+        // fallback landed on instead.
+        if (state.table !== table) {
+          reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
+          return;
+        }
+        applyFilter();
+      })
+      .catch(reportError);
     return;
   }
   persist();
