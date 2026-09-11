@@ -95,9 +95,16 @@ async function keyMetadata(
     // "table"/"from"/"to" are pragma_foreign_key_list's own fixed output
     // column names (SQL keywords needing escape), not the caller-supplied
     // table.
+    //
+    // "REFERENCES parent" shorthand leaves "to" NULL; ppk resolves it by
+    // position against the parent's PK, correlated per FK row since each
+    // can reference a different parent — unlike referencedBy's single
+    // bound parent (docs/adapter-decisions.md §5.4.1).
     const fks = await dbAll<{ id: number; seq: number; table: string; from: string; to: string }>(
       db,
-      `select id, seq, "table", "from", "to" from pragma_foreign_key_list(${quoted})`,
+      `select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid') as "to"
+       from pragma_foreign_key_list(${quoted}) fkl
+       left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1`,
     );
     return { cols, fks };
   });
@@ -299,17 +306,29 @@ export class SqliteSource implements DbSource {
     // referenced name as written in the DDL, which SQLite resolves
     // case-insensitively. The sqlite_master predicate here matches
     // allowedTables(), so every referrer is already allow-listed.
+    //
+    // "REFERENCES parent" with no parenthesised column list is valid DDL
+    // meaning "parent's own primary key", and for that form the pragma
+    // reports "to" as NULL rather than filling in the PK name. ppk resolves
+    // it: pragma_table_info(table)'s pk column is the 1-indexed position of
+    // a column within the parent's primary key, matching fkl.seq's
+    // 0-indexed position within the FK's column list — SQLite requires an
+    // omitted column list to align position-for-position with the parent
+    // PK, so this pairing holds for composite keys too. The 'rowid'
+    // fallback covers a parent with no declared primary key, where
+    // SQLite's parent key is the implicit rowid.
     const rows = await bounded(this.db, timeoutMs, () =>
       dbAll<{ name: string; id: number; from: string; to: string }>(
         this.db,
-        `select m.name, fkl.id, fkl."from", fkl."to"
+        `select m.name, fkl.id, fkl."from", coalesce(fkl."to", ppk.name, 'rowid') as "to"
          from sqlite_master m
          join pragma_foreign_key_list(m.name) fkl
+         left join pragma_table_info(?) ppk on ppk.pk = fkl.seq + 1
          where m.type = 'table'
            and m.name not like 'sqlite\\_%' escape '\\'
            and fkl."table" = ? collate nocase
          order by m.name, fkl.id, fkl.seq`,
-        [table],
+        [table, table],
       ),
     );
 

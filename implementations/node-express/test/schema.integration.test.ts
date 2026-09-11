@@ -90,8 +90,7 @@ maybeDescribe("multi-schema support (live db)", () => {
   });
 
   // GET /api/tables/referenced-by (spec/protocol.md §5.9) — the reverse of
-  // the per-column `references` above. Mirrors the Rust P5.9-* conformance
-  // checks (conformance/runner/referenced_by.rs) against the same seed.
+  // the per-column `references` above, against the same seed.
   describe("referenced-by (§5.9)", () => {
     type RbEntry = { table: string; schema?: string; constraint: string; columns: { from: string; to: string }[] };
     const referencedBy = async (table: string): Promise<RbEntry[]> => {
@@ -176,6 +175,77 @@ maybeDescribe("multi-schema support (live db)", () => {
       const res = await fetch(`${testServer.baseUrl}/__ashurbanipal/api/tables/referenced-by?table=users`);
       expect(res.status).toBe(200);
       expect(res.headers.get("x-ashurbanipal-protocol")).toBe("1");
+    });
+
+    // Regression tests: Postgres copies an inherited FK constraint onto
+    // every partition, and list_tables' information_schema gate is broader
+    // than the relkind = 'r' filter §5.2 (and so §5.9's own table-gate) is
+    // meant to enforce. Each test uses its own schema — disjoint names,
+    // since vitest may run tests in this file concurrently and a shared
+    // schema would race two "create schema" calls.
+    const setupPartitionedSchema = async (schema: string) => {
+      await pool.query(`drop schema if exists ${schema} cascade`);
+      await pool.query(`create schema ${schema}`);
+      await pool.query(`create table ${schema}.users (id int primary key)`);
+      await pool.query(
+        `create table ${schema}.events (
+           id bigint not null,
+           user_id int references ${schema}.users(id)
+         ) partition by range (id)`,
+      );
+      await pool.query(`create table ${schema}.events_p1 partition of ${schema}.events for values from (1) to (1000)`);
+      await pool.query(
+        `create table ${schema}.events_p2 partition of ${schema}.events for values from (1000) to (2000)`,
+      );
+    };
+
+    const dropSchema = async (schema: string) => {
+      await pool.query(`drop schema if exists ${schema} cascade`);
+    };
+
+    it("reports one entry for a partitioned referrer, not one per partition", async () => {
+      const schema = "ashb_test_node_referenced_by_partitioning_dup";
+      await setupPartitionedSchema(schema);
+      try {
+        const { status, body } = await getJson(`/__ashurbanipal/api/tables/referenced-by?schema=${schema}&table=users`);
+        expect(status).toBe(200);
+        const list = (body as { referenced_by: RbEntry[] }).referenced_by;
+        const events = list.filter((e) => e.table.startsWith("events"));
+        expect(events, "a partitioned referrer's inherited FK copies must collapse to one entry").toHaveLength(1);
+        expect(events[0].table).toBe("events");
+      } finally {
+        await dropSchema(schema);
+      }
+    });
+
+    it("rejects a partitioned table as target the same as any other unlisted table", async () => {
+      const schema = "ashb_test_node_referenced_by_partitioning_gate";
+      await setupPartitionedSchema(schema);
+      try {
+        // spec/protocol.md §5.9 requires table to match a §5.2 entry, and
+        // list_tables' relkind = 'r' filter excludes partitioned tables —
+        // so this must reject the same way an unknown table name does, not
+        // silently answer [].
+        const { status } = await getJson(`/__ashurbanipal/api/tables/referenced-by?schema=${schema}&table=events`);
+        expect(status).toBe(400);
+      } finally {
+        await dropSchema(schema);
+      }
+    });
+
+    // finding #1: query_table (and common_values, same gate) validate table
+    // via allowedTables, which used to match information_schema.tables'
+    // broader BASE TABLE instead of list_tables' relkind = 'r' — so a
+    // partitioned table must be rejected here too, not silently queried.
+    it("query_table rejects a partitioned table same as referenced_by does", async () => {
+      const schema = "ashb_test_node_query_table_partitioning_gate";
+      await setupPartitionedSchema(schema);
+      try {
+        const { status } = await getJson(`/__ashurbanipal/api/tables/data?schema=${schema}&table=events`);
+        expect(status).toBe(400);
+      } finally {
+        await dropSchema(schema);
+      }
     });
   });
 

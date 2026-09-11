@@ -68,16 +68,20 @@ export class PostgresSource implements DbSource {
     return real;
   }
 
-  // Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
+  // Mirrors listTables' own pg_class/relkind = 'r' predicate, not
+  // information_schema.tables' broader BASE TABLE (which also matches
+  // partitioned tables) — keeps this allow-list and listTables in lockstep
+  // (docs/adapter-decisions.md §5.2/§5.3).
   private async allowedTables(client: PoolClient, schema: string): Promise<string[]> {
-    const { rows } = await client.query<{ table_name: string }>(
-      `select table_name from information_schema.tables
-       where table_schema = $1 and table_type = 'BASE TABLE'
-         and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT')
-       order by table_name`,
+    const { rows } = await client.query<{ relname: string }>(
+      `select c.relname from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = $1 and c.relkind = 'r'
+         and has_table_privilege(c.oid, 'SELECT')
+       order by c.relname`,
       [schema],
     );
-    return rows.map((r) => r.table_name);
+    return rows.map((r) => r.relname);
   }
 
   private async allowedColumns(client: PoolClient, schema: string, table: string): Promise<string[]> {
@@ -358,16 +362,33 @@ export class PostgresSource implements DbSource {
   async referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-      const tables = await this.allowedTables(client, realSchema);
-      if (!findExact(tables, table)) {
+
+      // Resolved once and bound as $1 below (con.confrelid = $1) — the same
+      // pg_class/relkind = 'r'/has_table_privilege predicate allowedTables
+      // uses, so a partitioned or unknown table rejects here instead of a
+      // silent [] from the confrelid join finding zero rows
+      // (spec/protocol.md §5.2/§5.9).
+      const { rows: oidRows } = await client.query<{ oid: number }>(
+        `select c.oid::int4 as oid from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+           where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
+             and has_table_privilege(c.oid, 'SELECT')`,
+        [realSchema, table],
+      );
+      if (oidRows.length === 0) {
         throw new NotAllowedError(`table "${table}"`);
       }
+      const targetOid = oidRows[0].oid;
 
       // pg_catalog, not information_schema: the reverse (confrelid) filter
       // over the standard-SQL views runs 20-40x slower on a large catalog
       // (docs/adapter-decisions.md §5.9). has_table_privilege is the
       // per-referrer read gate and works across schemas, so cross-schema
       // referrers are reported and gated without a separate allow-list pass.
+      // conparentid = 0 excludes a partitioned referrer's per-partition
+      // constraint copies (Postgres clones the parent's FK onto each
+      // partition) — without it, one logical FK fans out into one entry per
+      // partition plus the parent.
       const { rows } = await client.query<{
         nspname: string;
         relname: string;
@@ -384,13 +405,11 @@ export class PostgresSource implements DbSource {
          join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum
          join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum
          where con.contype = 'f'
-           and con.confrelid = (
-             select c.oid from pg_class c
-             join pg_namespace n on n.oid = c.relnamespace
-             where n.nspname = $1 and c.relname = $2 and c.relkind = 'r')
+           and con.conparentid = 0
+           and con.confrelid = $1
            and has_table_privilege(con.conrelid, 'SELECT')
          order by rn.nspname, rc.relname, con.conname, k.n`,
-        [realSchema, table],
+        [targetOid],
       );
 
       return groupReferencedBy(
