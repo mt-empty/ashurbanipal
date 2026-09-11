@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 
+import psycopg
 import pytest
 
 from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts
@@ -115,6 +117,64 @@ def test_referenced_by_rejects_unknown_or_malicious_table(source) -> None:
     for bad in ["no_such_table", 'users"; drop table users; --', "users' OR '1'='1"]:
         with pytest.raises(NotAllowed):
             source.referenced_by(None, bad)
+
+
+@contextmanager
+def _partitioned_schema(schema: str):
+    """Regression fixture: `events` is range-partitioned with two partitions
+    and one FK to `users`; Postgres inherits that constraint onto each
+    partition, so `pg_constraint` holds three rows (parent + 2 children) for
+    what is, to the API, a single relationship.
+    """
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(f"drop schema if exists {schema} cascade")
+        cur.execute(f"create schema {schema}")
+        cur.execute(f"create table {schema}.users (id int primary key)")
+        cur.execute(
+            f"create table {schema}.events ("
+            f"    id bigint not null,"
+            f"    user_id int references {schema}.users(id)"
+            f") partition by range (id)"
+        )
+        cur.execute(f"create table {schema}.events_p1 partition of {schema}.events for values from (1) to (1000)")
+        cur.execute(
+            f"create table {schema}.events_p2 partition of {schema}.events for values from (1000) to (2000)"
+        )
+        try:
+            yield
+        finally:
+            cur.execute(f"drop schema if exists {schema} cascade")
+
+
+def test_referenced_by_reports_one_entry_for_partitioned_referrer_not_one_per_partition(source) -> None:
+    schema = "ashb_test_flask_referenced_by_partitioning_dup"
+    with _partitioned_schema(schema):
+        entries = source.referenced_by(schema, "users")
+        events = [e for e in entries if e.table.startswith("events")]
+        assert len(events) == 1, (
+            f"a partitioned referrer's inherited FK copies must collapse to one entry, got {events!r}"
+        )
+        assert events[0].table == "events"
+
+
+def test_referenced_by_rejects_partitioned_table_as_target_same_as_any_unlisted_table(source) -> None:
+    schema = "ashb_test_flask_referenced_by_partitioning_gate"
+    # spec/protocol.md §5.9 requires table to match a §5.2 entry, and
+    # list_tables' relkind = 'r' filter excludes partitioned tables — so
+    # this must reject the same way an unknown table name does, not
+    # silently answer [].
+    with _partitioned_schema(schema), pytest.raises(NotAllowed):
+        source.referenced_by(schema, "events")
+
+
+def test_query_table_rejects_partitioned_table_same_as_referenced_by_does(source) -> None:
+    schema = "ashb_test_flask_query_table_partitioning_gate"
+    # finding #1: query_table (and common_values, same gate) validate table
+    # via _allowed_tables, which used to match information_schema.tables'
+    # broader BASE TABLE instead of list_tables' relkind = 'r' — so a
+    # partitioned table must be rejected here too, not silently queried.
+    with _partitioned_schema(schema), pytest.raises(NotAllowed):
+        source.query_table(schema, "events", QueryOpts(limit=10, offset=0, timeout_secs=5))
 
 
 def test_every_cell_is_string_or_null(source) -> None:

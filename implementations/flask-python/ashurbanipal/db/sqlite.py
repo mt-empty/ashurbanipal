@@ -123,7 +123,16 @@ class SqliteSource(DbSource):
 
         # (id, seq, table, from, to) — id groups columns belonging to the
         # same constraint (composite FKs share an id).
-        cur.execute(f'select id, seq, "table", "from", "to" from pragma_foreign_key_list({quoted})')
+        #
+        # "REFERENCES parent" shorthand leaves "to" NULL; ppk resolves it by
+        # position against the parent's PK, correlated per FK row since each
+        # can reference a different parent — unlike referenced_by's single
+        # bound parent (docs/adapter-decisions.md §5.4.1).
+        cur.execute(
+            f'select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, \'rowid\') '
+            f"from pragma_foreign_key_list({quoted}) fkl "
+            f'left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1'
+        )
         by_constraint: dict[int, list[tuple[str, str, str]]] = {}
         for constraint_id, _seq, ref_table, from_col, to_col in cur.fetchall():
             by_constraint.setdefault(constraint_id, []).append((from_col, ref_table, to_col))
@@ -292,15 +301,29 @@ class SqliteSource(DbSource):
                 # case-insensitively. The sqlite_master predicate here
                 # matches _allowed_tables, so every referrer is already
                 # allow-listed.
+                #
+                # "REFERENCES parent" with no parenthesised column list is
+                # valid DDL meaning "parent's own primary key", and for that
+                # form the pragma reports "to" as NULL rather than filling
+                # in the PK name. ppk resolves it: pragma_table_info(table)'s
+                # pk column is the 1-indexed position of a column within the
+                # parent's primary key, matching fkl.seq's 0-indexed
+                # position within the FK's column list — SQLite requires an
+                # omitted column list to align position-for-position with
+                # the parent PK, so this pairing holds for composite keys
+                # too. The 'rowid' fallback covers a parent with no declared
+                # primary key, where SQLite's parent key is the implicit
+                # rowid.
                 cur.execute(
-                    'select m.name, fkl.id, fkl."from", fkl."to" '
+                    'select m.name, fkl.id, fkl."from", coalesce(fkl."to", ppk.name, \'rowid\') '
                     "from sqlite_master m "
                     "join pragma_foreign_key_list(m.name) fkl "
+                    "left join pragma_table_info(?) ppk on ppk.pk = fkl.seq + 1 "
                     "where m.type = 'table' "
                     "  and m.name not like 'sqlite\\_%' escape '\\' "
                     '  and fkl."table" = ? collate nocase '
                     "order by m.name, fkl.id, fkl.seq",
-                    (table,),
+                    (table, table),
                 )
                 rows = cur.fetchall()
             finally:

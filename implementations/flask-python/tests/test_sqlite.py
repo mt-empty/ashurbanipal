@@ -103,6 +103,94 @@ def test_referenced_by_lists_incoming_fks_with_synthesized_constraint_names(seed
         source.referenced_by("other", "users")
 
 
+def _tmp_sqlite_path(schema_sql: str):
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.executescript(schema_sql)
+    conn.commit()
+    conn.close()
+    return path
+
+
+# "REFERENCES parent" with no parenthesised column list is valid DDL meaning
+# "the parent's primary key", but pragma_foreign_key_list reports "to" as
+# NULL for that form rather than filling in the PK name — the query must
+# resolve it itself.
+def test_referenced_by_resolves_shorthand_fk_with_no_named_parent_column() -> None:
+    path = _tmp_sqlite_path(
+        """
+        create table users (id integer primary key, email text not null);
+        create table pets (id integer primary key, owner_id integer references users);
+        """
+    )
+    try:
+        source = SqliteSource(path)
+        refs = source.referenced_by(None, "users")
+        pets = next((r for r in refs if r.table == "pets"), None)
+        assert pets is not None, "pets' FK to users must be reported"
+        assert [(p.from_, p.to) for p in pets.columns] == [("owner_id", "id")], (
+            "an unnamed parent column must resolve to users' primary key, not None"
+        )
+    finally:
+        Path(path).unlink()
+
+
+# Same shorthand-FK bug, forward direction: _key_metadata (which supplies
+# query_table's per-column references) shares referenced_by's pre-fix bug —
+# pragma_foreign_key_list.to is NULL for "REFERENCES parent" with no named
+# column, and until fixed _key_metadata doesn't resolve it the way
+# referenced_by now does.
+def test_query_table_resolves_shorthand_fk_with_no_named_parent_column() -> None:
+    path = _tmp_sqlite_path(
+        """
+        create table users (id integer primary key, email text not null);
+        create table pets (id integer primary key, owner_id integer references users);
+        """
+    )
+    try:
+        source = SqliteSource(path)
+        data = source.query_table(None, "pets", QueryOpts(limit=10, offset=0, timeout_secs=5))
+        owner_id_col = next(c for c in data.columns if c.name == "owner_id")
+        assert owner_id_col.key == KeyKind.FK
+        assert owner_id_col.references.table == "users"
+        assert owner_id_col.references.column == "id", (
+            "an unnamed parent column must resolve to users' primary key, not None"
+        )
+    finally:
+        Path(path).unlink()
+
+
+def test_referenced_by_resolves_shorthand_fk_against_composite_primary_key() -> None:
+    path = _tmp_sqlite_path(
+        """
+        create table warehouse_bins (
+            warehouse_code text not null,
+            bin_code text not null,
+            primary key (warehouse_code, bin_code)
+        );
+        create table bin_counts (
+            id integer primary key,
+            warehouse_code text not null,
+            bin_code text not null,
+            qty integer not null,
+            foreign key (warehouse_code, bin_code) references warehouse_bins
+        );
+        """
+    )
+    try:
+        source = SqliteSource(path)
+        refs = source.referenced_by(None, "warehouse_bins")
+        bin_counts = next((r for r in refs if r.table == "bin_counts"), None)
+        assert bin_counts is not None
+        pairs = {(p.from_, p.to) for p in bin_counts.columns}
+        assert pairs == {("warehouse_code", "warehouse_code"), ("bin_code", "bin_code")}, (
+            "a composite FK must resolve every parent PK column"
+        )
+    finally:
+        Path(path).unlink()
+
+
 def test_table_counts_reports_no_estimate_sentinel(seeded_path) -> None:
     source = SqliteSource(seeded_path)
     assert source.table_counts(None) == [("order_extra", -1), ("orders", -1), ("users", -1)]
