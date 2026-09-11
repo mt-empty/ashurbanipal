@@ -15,7 +15,8 @@ pub use db::PgPoolSource;
 #[cfg(feature = "sqlite")]
 pub use db::SqliteSource;
 pub use db::{
-    resolve_source, ColumnInfo, DbError, DbSource, QueryOpts, ReferencedBy, TableData, TableInfo,
+    resolve_source, ColumnInfo, ColumnPair, DbError, DbSource, QueryOpts, ReferencedBy, TableData,
+    TableInfo,
 };
 pub use filter::{Condition, FilterError, FilterOp, Logic};
 

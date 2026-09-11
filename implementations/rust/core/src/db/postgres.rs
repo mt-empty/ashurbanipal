@@ -135,12 +135,16 @@ impl PgPoolSource {
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
     ) -> Result<Vec<String>, DbError> {
-        // Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
+        // Mirrors `list_tables`'s own `pg_class`/`relkind = 'r'` predicate,
+        // not `information_schema.tables`'s broader `BASE TABLE` (which also
+        // matches partitioned tables) — keeps this allow-list and
+        // `list_tables` in lockstep (`docs/adapter-decisions.md` §5.2/§5.3).
         let rows = sqlx::query_scalar::<_, String>(
-            "select table_name from information_schema.tables \
-             where table_schema = $1 and table_type = 'BASE TABLE' \
-               and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT') \
-             order by table_name",
+            "select c.relname::text from pg_class c \
+             join pg_namespace n on n.oid = c.relnamespace \
+             where n.nspname = $1 and c.relkind = 'r' \
+               and has_table_privilege(c.oid, 'SELECT') \
+             order by c.relname",
         )
         .bind(schema)
         .fetch_all(&mut **tx)
@@ -542,17 +546,33 @@ impl DbSource for PgPoolSource {
     ) -> Result<Vec<ReferencedBy>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        let tables = self.allowed_tables_in_tx(&mut tx, &schema).await?;
-        if !tables.iter().any(|t| t.as_str() == table) {
-            return Err(DbError::NotAllowed(format!("table {table:?}")));
-        }
+
+        // Resolved once and bound as `$1` below (`con.confrelid = $1`) — the
+        // same `pg_class`/`relkind = 'r'`/`has_table_privilege` predicate
+        // `allowed_tables_in_tx` uses, so a partitioned or unknown `table`
+        // rejects here instead of a silent `[]` from the confrelid join
+        // finding zero rows (spec/protocol.md §5.2/§5.9).
+        let target_oid = sqlx::query_scalar::<_, i32>(
+            "select c.oid::int4 from pg_class c \
+             join pg_namespace n on n.oid = c.relnamespace \
+             where n.nspname = $1 and c.relname = $2 and c.relkind = 'r' \
+               and has_table_privilege(c.oid, 'SELECT')",
+        )
+        .bind(&schema)
+        .bind(table)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?;
 
         // `pg_catalog`, not `information_schema`: the reverse (`confrelid`)
         // filter over the standard-SQL views runs 20–40x slower on a large
         // catalog (`docs/adapter-decisions.md` §5.9). `has_table_privilege`
         // is the per-referrer read gate — it works across schemas, so
         // cross-schema referrers are reported and gated without a separate
-        // allow-list pass.
+        // allow-list pass. `conparentid = 0` excludes a partitioned
+        // referrer's per-partition constraint copies (Postgres clones the
+        // parent's FK onto each partition) — without it, one logical FK
+        // fans out into one entry per partition plus the parent.
         let rows = sqlx::query_as::<_, (String, String, String, String, String)>(
             "select rn.nspname, rc.relname, con.conname, fa.attname, ta.attname \
              from pg_constraint con \
@@ -563,15 +583,12 @@ impl DbSource for PgPoolSource {
              join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum \
              join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum \
              where con.contype = 'f' \
-               and con.confrelid = ( \
-                 select c.oid from pg_class c \
-                 join pg_namespace n on n.oid = c.relnamespace \
-                 where n.nspname = $1 and c.relname = $2 and c.relkind = 'r') \
+               and con.conparentid = 0 \
+               and con.confrelid = $1 \
                and has_table_privilege(con.conrelid, 'SELECT') \
              order by rn.nspname, rc.relname, con.conname, k.n",
         )
-        .bind(&schema)
-        .bind(table)
+        .bind(target_oid)
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
