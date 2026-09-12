@@ -130,26 +130,32 @@ impl PgPoolSource {
             .ok_or_else(|| DbError::NotAllowed(format!("schema {resolved:?}")))
     }
 
-    async fn allowed_tables_in_tx(
+    /// Resolves `table` to its OID iff it's a readable base table in
+    /// `schema` — the single existence-and-privilege check every
+    /// table-scoped operation needs before touching request-supplied SQL.
+    /// Mirrors `list_tables`'s own `pg_class`/`relkind = 'r'` predicate, not
+    /// `information_schema.tables`'s broader `BASE TABLE` (which also
+    /// matches partitioned tables) — keeps this gate and `list_tables` in
+    /// lockstep (`docs/adapter-decisions.md` §5.2/§5.3). One targeted row
+    /// instead of fetching every table name in the schema to check
+    /// membership of one.
+    async fn readable_table_oid_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
-    ) -> Result<Vec<String>, DbError> {
-        // Mirrors `list_tables`'s own `pg_class`/`relkind = 'r'` predicate,
-        // not `information_schema.tables`'s broader `BASE TABLE` (which also
-        // matches partitioned tables) — keeps this allow-list and
-        // `list_tables` in lockstep (`docs/adapter-decisions.md` §5.2/§5.3).
-        let rows = sqlx::query_scalar::<_, String>(
-            "select c.relname::text from pg_class c \
+        table: &str,
+    ) -> Result<i32, DbError> {
+        sqlx::query_scalar::<_, i32>(
+            "select c.oid::int4 from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = $1 and c.relkind = 'r' \
-               and has_table_privilege(c.oid, 'SELECT') \
-             order by c.relname",
+             where n.nspname = $1 and c.relname = $2 and c.relkind = 'r' \
+               and has_table_privilege(c.oid, 'SELECT')",
         )
         .bind(schema)
-        .fetch_all(&mut **tx)
-        .await?;
-        Ok(rows)
+        .bind(table)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))
     }
 
     async fn allowed_columns_in_tx(
@@ -294,9 +300,9 @@ impl DbSource for PgPoolSource {
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        // `has_table_privilege` keeps this listing equal to the allow-list
-        // `allowed_tables_in_tx` enforces — a table the role can't SELECT is
-        // never offered as a row it would then have to reject.
+        // `has_table_privilege` keeps this listing equal to the gate
+        // `readable_table_oid_in_tx` enforces — a table the role can't
+        // SELECT is never offered as a row it would then have to reject.
         let rows = sqlx::query_as::<_, (String, Option<String>)>(
             "select c.relname::text, obj_description(c.oid, 'pg_class') \
              from pg_class c \
@@ -343,12 +349,9 @@ impl DbSource for PgPoolSource {
     ) -> Result<TableData, DbError> {
         let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        let tables = self.allowed_tables_in_tx(&mut tx, &schema).await?;
-        let table = tables
-            .iter()
-            .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
-            .clone();
+        self.readable_table_oid_in_tx(&mut tx, &schema, table)
+            .await?;
+        let table = table.to_string();
 
         let column_names = self.allowed_columns_in_tx(&mut tx, &schema, &table).await?;
         let sort = match &opts.sort {
@@ -481,12 +484,9 @@ impl DbSource for PgPoolSource {
     ) -> Result<Vec<(String, f32)>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        let tables = self.allowed_tables_in_tx(&mut tx, &schema).await?;
-        let table = tables
-            .iter()
-            .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
-            .clone();
+        self.readable_table_oid_in_tx(&mut tx, &schema, table)
+            .await?;
+        let table = table.to_string();
         let columns = self.allowed_columns_in_tx(&mut tx, &schema, &table).await?;
         let column = columns
             .iter()
@@ -547,22 +547,13 @@ impl DbSource for PgPoolSource {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
 
-        // Resolved once and bound as `$1` below (`con.confrelid = $1`) — the
-        // same `pg_class`/`relkind = 'r'`/`has_table_privilege` predicate
-        // `allowed_tables_in_tx` uses, so a partitioned or unknown `table`
-        // rejects here instead of a silent `[]` from the confrelid join
-        // finding zero rows (spec/protocol.md §5.2/§5.9).
-        let target_oid = sqlx::query_scalar::<_, i32>(
-            "select c.oid::int4 from pg_class c \
-             join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = $1 and c.relname = $2 and c.relkind = 'r' \
-               and has_table_privilege(c.oid, 'SELECT')",
-        )
-        .bind(&schema)
-        .bind(table)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?;
+        // Bound as `$1` below (`con.confrelid = $1`) — same gate query_table/
+        // common_values use, so a partitioned or unknown `table` rejects
+        // here instead of a silent `[]` from the confrelid join finding
+        // zero rows (spec/protocol.md §5.2/§5.9).
+        let target_oid = self
+            .readable_table_oid_in_tx(&mut tx, &schema, table)
+            .await?;
 
         // `pg_catalog`, not `information_schema`: the reverse (`confrelid`)
         // filter over the standard-SQL views runs 20–40x slower on a large

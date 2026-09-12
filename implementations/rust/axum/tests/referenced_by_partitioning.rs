@@ -110,7 +110,7 @@ async fn referenced_by_rejects_a_partitioned_table_as_target_same_as_any_unliste
 #[tokio::test]
 async fn query_table_rejects_a_partitioned_table_same_as_referenced_by_does() {
     // `query_table` (and `common_values`, same gate) validate `table`
-    // against `allowed_tables_in_tx`, which shares `list_tables`' own
+    // against `readable_table_oid_in_tx`, which shares `list_tables`' own
     // `relkind = 'r'` predicate — a partitioned table must be rejected here
     // too, not silently queried.
     let database_url = std::env::var("DATABASE_URL")
