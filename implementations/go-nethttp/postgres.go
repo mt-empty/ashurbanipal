@@ -661,7 +661,11 @@ func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table
 	// conparentid = 0 excludes a partitioned referrer's per-partition
 	// constraint copies (Postgres clones the parent's FK onto each
 	// partition) — without it, one logical FK fans out into one entry per
-	// partition plus the parent.
+	// partition plus the parent. relkind = 'r' gates the referrer itself the
+	// same way targetOID above gates the target: a partitioned table's own
+	// (non-inherited) FK constraint survives conparentid = 0 and would
+	// otherwise be reported as a referrer name that queryTable/commonValues/
+	// referencedBy-as-target then all reject, since none accept relkind = 'p'.
 	rows, err := tx.QueryContext(qctx,
 		`select rn.nspname, rc.relname, con.conname, fa.attname as from_col, ta.attname as to_col
 		 from pg_constraint con
@@ -674,6 +678,7 @@ func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table
 		 where con.contype = 'f'
 		   and con.conparentid = 0
 		   and con.confrelid = $1
+		   and rc.relkind = 'r'
 		   and has_table_privilege(con.conrelid, 'SELECT')
 		 order by rn.nspname, rc.relname, con.conname, k.n`, targetOID)
 	if err != nil {

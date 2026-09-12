@@ -55,7 +55,16 @@ func setupPartitionedSchema(t *testing.T, schema string) {
 	})
 }
 
-func TestReferencedByReportsOneEntryForPartitionedReferrerNotOnePerPartition(t *testing.T) {
+func TestReferencedByExcludesPartitionedReferrerAndItsPartitionCopies(t *testing.T) {
+	// Two predicates do independent work here: conparentid = 0 collapses
+	// events_p1/events_p2's inherited constraint copies onto the parent
+	// (else one logical FK fans out into one entry per partition); rc.relkind
+	// = 'r' then drops that parent too, since events itself is relkind = 'p'
+	// and every other endpoint (query_table, common_values, referenced_by-
+	// as-target) already rejects it as NotAllowed the same way an unlisted
+	// table is rejected. A referrer name the frontend can't drill into is
+	// worse than not reporting it. Asserting zero rather than one keeps both
+	// predicates covered: losing either one reintroduces an events* entry.
 	const schema = "ashb_test_go_referenced_by_partitioning_dup"
 	setupPartitionedSchema(t, schema)
 
@@ -69,11 +78,8 @@ func TestReferencedByReportsOneEntryForPartitionedReferrerNotOnePerPartition(t *
 			events = append(events, m)
 		}
 	}
-	if len(events) != 1 {
-		t.Fatalf("got %d entries for the partitioned referrer, want 1 (collapsed): %+v", len(events), events)
-	}
-	if events[0]["table"] != "events" {
-		t.Errorf("reported referrer = %v, want the partitioned parent \"events\", not a child partition", events[0]["table"])
+	if len(events) != 0 {
+		t.Fatalf("a partitioned referrer must be excluded entirely, got %d entries: %+v", len(events), events)
 	}
 }
 
@@ -100,10 +106,9 @@ func TestQueryTableRejectsPartitionedTableSameAsReferencedByDoes(t *testing.T) {
 	const schema = "ashb_test_go_query_table_partitioning_gate"
 	setupPartitionedSchema(t, schema)
 
-	// allowedTables (finding #1) used to gate table via
-	// information_schema.tables' BASE TABLE, a broader set than
-	// list_tables' own relkind = 'r' that includes partitioned tables —
-	// this must reject the same way ReferencedBy already does.
+	// allowedTables gates table via list_tables' own relkind = 'r'
+	// predicate — a partitioned table must reject the same way
+	// ReferencedBy already does.
 	path := "/api/tables/data?schema=" + url.QueryEscape(schema) + "&table=events"
 	resp, err := http.Get(testServer(t) + "/__ashurbanipal" + path)
 	if err != nil {
