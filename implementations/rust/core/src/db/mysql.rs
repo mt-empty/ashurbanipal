@@ -590,10 +590,12 @@ impl DbSource for MySqlSource {
         let schema = self
             .resolve_schema_in_tx(&mut tx, variant, schema, CATALOG_TIMEOUT_SECS)
             .await?;
-        let allowed = self
+        let allowed: HashSet<String> = self
             .allowed_tables_in_tx(&mut tx, variant, &schema, CATALOG_TIMEOUT_SECS)
-            .await?;
-        if !allowed.iter().any(|t| t.as_str() == table) {
+            .await?
+            .into_iter()
+            .collect();
+        if !allowed.contains(table) {
             return Err(DbError::NotAllowed(format!("table {table:?}")));
         }
 
@@ -626,7 +628,7 @@ impl DbSource for MySqlSource {
         // table the rest of the API won't.
         Ok(group_referenced_by(
             rows.into_iter()
-                .filter(|(ref_table, ..)| allowed.iter().any(|t| t == ref_table))
+                .filter(|(ref_table, ..)| allowed.contains(ref_table))
                 .map(|(ref_table, constraint, from, to)| ReferencedBy {
                     table: ref_table,
                     schema: None,

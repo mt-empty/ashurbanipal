@@ -573,6 +573,11 @@ impl DbSource for PgPoolSource {
         // referrer's per-partition constraint copies (Postgres clones the
         // parent's FK onto each partition) — without it, one logical FK
         // fans out into one entry per partition plus the parent.
+        // `rc.relkind = 'r'` gates the referrer itself the same way `target_oid`
+        // above gates the target: a partitioned table's own (non-inherited) FK
+        // constraint survives `conparentid = 0` and would otherwise be reported
+        // as a referrer name that query_table/common_values/referenced_by-as-
+        // target then all reject, since none of them accept `relkind = 'p'`.
         let rows = sqlx::query_as::<_, (String, String, String, String, String)>(
             "select rn.nspname, rc.relname, con.conname, fa.attname, ta.attname \
              from pg_constraint con \
@@ -585,6 +590,7 @@ impl DbSource for PgPoolSource {
              where con.contype = 'f' \
                and con.conparentid = 0 \
                and con.confrelid = $1 \
+               and rc.relkind = 'r' \
                and has_table_privilege(con.conrelid, 'SELECT') \
              order by rn.nspname, rc.relname, con.conname, k.n",
         )

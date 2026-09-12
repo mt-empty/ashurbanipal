@@ -51,7 +51,17 @@ async fn teardown(pool: &PgPool, schema: &str) {
 }
 
 #[tokio::test]
-async fn referenced_by_reports_one_entry_for_a_partitioned_referrer_not_one_per_partition() {
+async fn referenced_by_excludes_a_partitioned_referrer_and_its_partition_copies() {
+    // Two predicates do independent work here: `conparentid = 0` collapses
+    // events_p1/events_p2's inherited constraint copies onto the parent
+    // (else one logical FK fans out into one entry per partition); `rc.relkind
+    // = 'r'` then drops that parent too, since `events` itself is relkind =
+    // 'p' and every other endpoint (query_table, common_values,
+    // referenced_by-as-target) already rejects it as NotAllowed the same way
+    // an unlisted table is rejected. A referrer name the frontend can't
+    // drill into is worse than not reporting it. Asserting zero rather than
+    // one keeps both predicates covered: losing either one reintroduces an
+    // `events*` entry.
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
     let admin_pool = setup(&database_url, SCHEMA_DUP).await;
@@ -65,15 +75,11 @@ async fn referenced_by_reports_one_entry_for_a_partitioned_referrer_not_one_per_
         .iter()
         .filter(|r| r.table.starts_with("events"))
         .collect();
-    assert_eq!(
-        events.len(),
-        1,
-        "a partitioned referrer's inherited FK copies must collapse to one \
-         logical entry, got {events:?}"
-    );
-    assert_eq!(
-        events[0].table, "events",
-        "the reported referrer must be the partitioned parent, not a child partition"
+    assert!(
+        events.is_empty(),
+        "a partitioned referrer must be excluded entirely: relkind = 'r' drops \
+         the parent `events`, conparentid = 0 drops the per-partition copies; \
+         got {events:?}"
     );
 
     teardown(&admin_pool, SCHEMA_DUP).await;
@@ -103,11 +109,10 @@ async fn referenced_by_rejects_a_partitioned_table_as_target_same_as_any_unliste
 
 #[tokio::test]
 async fn query_table_rejects_a_partitioned_table_same_as_referenced_by_does() {
-    // finding #1: `query_table` (and `common_values`, same gate) validate
-    // `table` against `allowed_tables_in_tx`, which — unlike `list_tables`'
-    // own `relkind = 'r'` filter — matches `information_schema.tables`'
-    // `BASE TABLE`, a broader set that includes partitioned tables. So a
-    // partitioned table must be rejected here too, not silently queried.
+    // `query_table` (and `common_values`, same gate) validate `table`
+    // against `allowed_tables_in_tx`, which shares `list_tables`' own
+    // `relkind = 'r'` predicate — a partitioned table must be rejected here
+    // too, not silently queried.
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
     let admin_pool = setup(&database_url, SCHEMA_QUERY_TABLE_GATE).await;
