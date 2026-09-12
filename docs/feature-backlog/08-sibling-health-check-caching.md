@@ -1,5 +1,7 @@
 # Sibling health-check caching / background polling
 
+> **Status:** OPEN · **Area:** ports
+
 **Where logged:** `design.md` §4 (`GET /siblings`), §9 (deferred, with a
 concrete trigger).
 

@@ -1,7 +1,8 @@
 # Inline column type, nullability, default, and enum values
 
-Status: proposed 2026-09-01. Read-only — catalog metadata only. Not
-scheduled.
+> **Status:** PARTIAL · **Area:** spec, frontend · **Ref:** raw column type now renders inline (via story 32); `nullable`, `default`, `enum_values` fields and the header/record-view popover remain
+
+Read-only — catalog metadata only.
 
 ## 1. The ask
 
@@ -49,3 +50,14 @@ Divergence in what "type" and "enum" mean across the three belongs in
   helper apply.
 - Does the enum list feed the filter's value autocomplete (currently
   column-name only)? Natural follow-on, separate story.
+
+## 5. Partially shipped
+
+The raw engine type string now renders in the grid header and record view
+— but that landed with
+`docs/feature-backlog/32-cross-engine-column-type-rendering.md`, not as
+work on this story, and `type` was already on the wire (`spec/protocol.md`
+§5.4.1). Still open here: the `nullable`, `default`, and `enum_values`
+fields on the §5.4.1 column shape, the per-backend catalog queries that
+populate them, the conformance schema-test assertions, and the header
+popover / record-view block that surfaces all four attributes together.

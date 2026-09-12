@@ -1,11 +1,12 @@
 # `AnySource` enum for cross-backend source mixing (Postgres + SQLite in one process)
 
-**Status:** discussed 2026-08-20, during the multi-source support rollout
+> **Status:** OPEN · **Area:** rust, spec
+
+Deliberately deferred during the multi-source support rollout
 (`spec/protocol.md` §1 "Resolved source", new `GET api/sources` route,
-`source` param on §5.2–§5.5/§5.7). Deliberately deferred, not designed —
-capturing the shape of the gap and why it was left out of the initial
-rollout, per `docs/design.md`'s `GET /sources` section and
-`conformance/runner/COVERAGE.md`'s Known gaps.
+`source` param on §5.2–§5.5/§5.7) — capturing the shape of the gap and why
+it was left out of the initial rollout, per `docs/design.md`'s
+`GET /sources` section and `conformance/runner/COVERAGE.md`'s Known gaps.
 
 **Ask:** today, one Rust `router()` call (axum or actix-web) registers N
 named sources, but every source in that call MUST be the same concrete

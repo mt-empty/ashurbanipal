@@ -1,5 +1,7 @@
 # Incoming FK references ("referenced by")
 
+> **Status:** OPEN · **Area:** spec, frontend
+
 **Ask:** alongside the outgoing `references` Ashurbanipal already reports
 per column (`spec/protocol.md` §5.4.1 — "this column points at
 `table.column`"), also surface the reverse direction: which rows in

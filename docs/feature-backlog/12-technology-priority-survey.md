@@ -1,8 +1,10 @@
 # Prioritize new ports/backends by 2025 Stack Overflow survey usage
 
-**Status:** 2026-08 snapshot. Since written, the Flask port and a
-MySQL/MariaDB backend (all ports) have shipped; the rankings below are
-kept as the dated survey data they are.
+> **Status:** REFERENCE · **Area:** ports · **Ref:** 2026-08 survey snapshot, kept as dated data
+
+A 2026-08 snapshot. Since written, the Flask port and a MySQL/MariaDB
+backend (all ports) have shipped; the rankings below are kept as the dated
+survey data they are.
 
 **Ask:** rank candidate new language ports and DB backends by actual
 developer usage share (not guesswork) against what this project already

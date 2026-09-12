@@ -1,7 +1,9 @@
 # Copy row as INSERT statement
 
-Status: shipped 2026-09-02 (record-view button; single dialect, quoted
-string literals). Read-only — generates text, executes nothing.
+> **Status:** DONE · **Area:** frontend · **Ref:** shipped 2026-09-02
+
+Shipped as a record-view button (single dialect, quoted string literals).
+Read-only — generates text, executes nothing.
 
 ## 1. The ask
 

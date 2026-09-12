@@ -1,7 +1,9 @@
 # Filter operators: IN, NOT IN, BETWEEN
 
-Status: proposed 2026-09-01. Read-only — extends the existing filter, no
-change to the read/write posture. Not scheduled.
+> **Status:** OPEN · **Area:** spec, frontend
+
+Read-only — extends the existing filter, no change to the read/write
+posture.
 
 ## 1. The ask
 

@@ -1,5 +1,7 @@
 # Diff viewer for comparing two rows
 
+> **Status:** OPEN · **Area:** frontend
+
 **Where logged:** `design.md` §9.
 
 **What it is:** the originally-scoped feature — a diff editor for comparing

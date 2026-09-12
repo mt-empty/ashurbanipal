@@ -1,10 +1,12 @@
 # Structured filter builder UI (Airtable/Notion/Linear-style)
 
-Status: the client-side-AST filter decision this builds on (resolved
-2026-07-22) has since shipped — the wire format is the JSON AST, and
-`filter.rs` no longer parses DSL text at all (`spec/protocol.md` §5.4.2). The builder UI itself remains not designed, not scheduled.
-Captured as the natural follow-on so the option doesn't need to be
-reconstructed from scratch later.
+> **Status:** OPEN · **Area:** frontend
+
+The client-side-AST filter decision this builds on has since shipped — the
+wire format is the JSON AST, and `filter.rs` no longer parses DSL text at
+all (`spec/protocol.md` §5.4.2). The builder UI itself is captured as the
+natural follow-on so the option doesn't need to be reconstructed from
+scratch later.
 
 ## 1. The ask
 

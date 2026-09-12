@@ -1,5 +1,7 @@
 # WASM SQLite backend for the GitHub Pages demo
 
+> **Status:** OPEN · **Area:** frontend
+
 **What it is:** replace `docs/demo/`'s fetch-shim backend
 (`frontend/src/demo-shim.ts` answering `/api/*` from JS-array fixtures in
 `demo-fixtures.ts`) with a real SQLite database compiled to WebAssembly

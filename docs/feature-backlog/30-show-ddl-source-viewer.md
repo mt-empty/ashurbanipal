@@ -1,9 +1,10 @@
 # "Show DDL" source viewer for a table or view
 
-Status: proposed 2026-09-02. Read-only — introspects system catalogs and
-prints text; never executes DDL. Split out of
-`docs/feature-backlog/28-feature-expansion-triage-remainder.md`. Not
-scheduled.
+> **Status:** OPEN · **Area:** spec, frontend
+
+Read-only — introspects system catalogs and prints text; never executes
+DDL. Split out of
+`docs/feature-backlog/28-feature-expansion-triage-remainder.md`.
 
 ## 1. The ask
 

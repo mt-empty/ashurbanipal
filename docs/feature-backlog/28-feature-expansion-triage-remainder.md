@@ -1,11 +1,13 @@
 # Feature-expansion triage — remaining candidates
 
-Status: captured 2026-09-01. A list of "become more of a DB client"
-features was triaged this day. The ones worth their own entry were split
-out as stories 21–27 (and the shareable-filter item is 20). This doc holds
-the remainder: items already tracked elsewhere, read-only items judged
-lower priority for now, and the write-track items that cannot be built
-without relaxing the read-only constraint.
+> **Status:** REFERENCE · **Area:** docs · **Ref:** triage log; spawned stories 20–27, 30
+
+A list of "become more of a DB client" features was triaged on 2026-09-01.
+The ones worth their own entry were split out as stories 21–27 (and the
+shareable-filter item is 20). This doc holds the remainder: items already
+tracked elsewhere, read-only items judged lower priority for now, and the
+write-track items that cannot be built without relaxing the read-only
+constraint.
 
 Context for the whole list: expanding scope while keeping five co-equal
 ports in lockstep is the binding constraint, not any single feature. The

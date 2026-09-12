@@ -1,5 +1,7 @@
 # Multi-column sort
 
+> **Status:** OPEN · **Area:** frontend, spec
+
 **Where logged:** `design.md` §2 (non-goal), §9 (deferred).
 
 **What it is:** v1 sorts by exactly one column (`state.sort`/`opts.sort` are

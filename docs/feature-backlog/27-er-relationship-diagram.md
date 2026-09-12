@@ -1,7 +1,9 @@
 # ER / relationship diagram for the current schema
 
-Status: proposed 2026-09-01. Read-only. The single-file / no-CDN frontend
-constraint is the bulk of the work. Not scheduled.
+> **Status:** OPEN · **Area:** spec, frontend
+
+Read-only. The single-file / no-CDN frontend constraint is the bulk of the
+work.
 
 ## 1. The ask
 

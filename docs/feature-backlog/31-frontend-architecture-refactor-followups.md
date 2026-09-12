@@ -1,12 +1,14 @@
 # Frontend architecture refactor — deferred follow-ups
 
-Status: captured 2026-09-06. The nine-phase `frontend/src/` refactor (commits
-`47d10a7`..`7d86976`) landed the import-cycle break, the Biome adoption, the
-`state.ts` split, the drift guard, the DSL-parser unit tests, and the
-guidelines pass. This doc holds the items that were consciously left out of
-that series — either because they are their own kind of change (a `spec/`
-governance decision, a design split, a directory move) or because a phase's
-premise turned out narrower than planned. Each is independent.
+> **Status:** PARTIAL · **Area:** frontend · **Ref:** items 2, 3, 7, 9 done; 1, 4, 5, 6, 8 open
+
+The nine-phase `frontend/src/` refactor (commits `47d10a7`..`7d86976`)
+landed the import-cycle break, the Biome adoption, the `state.ts` split,
+the drift guard, the DSL-parser unit tests, and the guidelines pass. This
+doc holds the items that were consciously left out of that series — either
+because they are their own kind of change (a `spec/` governance decision,
+a design split, a directory move) or because a phase's premise turned out
+narrower than planned. Each is independent.
 
 The two consolidated review documents this refactor executed against were
 scratch notes and have been removed; their action list is fully accounted for

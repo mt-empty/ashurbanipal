@@ -1,8 +1,9 @@
 # JSONB / JSON path filter
 
-Status: proposed 2026-09-01. Read-only, but it widens the filter's SQL
-surface — treat the security review as the main body of work, not the SQL.
-Not scheduled.
+> **Status:** OPEN · **Area:** spec, ports
+
+Read-only, but it widens the filter's SQL surface — treat the security
+review as the main body of work, not the SQL.
 
 ## 1. The ask
 

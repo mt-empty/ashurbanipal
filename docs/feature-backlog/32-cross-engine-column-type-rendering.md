@@ -1,7 +1,9 @@
 # Cross-engine column-type rendering
 
-Status: implemented 2026-09-06 (Option A). Frontend-only. §§1–7 are the
-plan as proposed; §8 records what actually shipped and where it diverged.
+> **Status:** DONE · **Area:** frontend · **Ref:** implemented 2026-09-06
+
+Shipped as Option A. §§1–7 are the plan as proposed; §8 records what
+actually shipped and where it diverged.
 
 `frontend/dbviewer.html` is one shared artifact across five ports and three
 DB engines (Postgres, MySQL, SQLite), but its type-aware rendering was
