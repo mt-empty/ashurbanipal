@@ -146,15 +146,22 @@ def _partitioned_schema(schema: str):
             cur.execute(f"drop schema if exists {schema} cascade")
 
 
-def test_referenced_by_reports_one_entry_for_partitioned_referrer_not_one_per_partition(source) -> None:
+def test_referenced_by_excludes_partitioned_referrer_and_its_partition_copies(source) -> None:
+    # Two predicates do independent work here: conparentid = 0 collapses
+    # events_p1/events_p2's inherited constraint copies onto the parent
+    # (else one logical FK fans out into one entry per partition);
+    # rc.relkind = 'r' then drops that parent too, since events itself is
+    # relkind = 'p' and every other endpoint (query_table, common_values,
+    # referenced_by-as-target) already rejects it as NotAllowed the same way
+    # an unlisted table is rejected. A referrer name the frontend can't
+    # drill into is worse than not reporting it. Asserting zero rather than
+    # one keeps both predicates covered: losing either one reintroduces an
+    # events* entry.
     schema = "ashb_test_flask_referenced_by_partitioning_dup"
     with _partitioned_schema(schema):
         entries = source.referenced_by(schema, "users")
         events = [e for e in entries if e.table.startswith("events")]
-        assert len(events) == 1, (
-            f"a partitioned referrer's inherited FK copies must collapse to one entry, got {events!r}"
-        )
-        assert events[0].table == "events"
+        assert len(events) == 0, f"a partitioned referrer must be excluded entirely, got {events!r}"
 
 
 def test_referenced_by_rejects_partitioned_table_as_target_same_as_any_unlisted_table(source) -> None:
@@ -169,10 +176,9 @@ def test_referenced_by_rejects_partitioned_table_as_target_same_as_any_unlisted_
 
 def test_query_table_rejects_partitioned_table_same_as_referenced_by_does(source) -> None:
     schema = "ashb_test_flask_query_table_partitioning_gate"
-    # finding #1: query_table (and common_values, same gate) validate table
-    # via _allowed_tables, which used to match information_schema.tables'
-    # broader BASE TABLE instead of list_tables' relkind = 'r' — so a
-    # partitioned table must be rejected here too, not silently queried.
+    # query_table (and common_values, same gate) validate table via
+    # _allowed_tables, which shares list_tables' own relkind = 'r' predicate
+    # — a partitioned table must be rejected here too, not silently queried.
     with _partitioned_schema(schema), pytest.raises(NotAllowed):
         source.query_table(schema, "events", QueryOpts(limit=10, offset=0, timeout_secs=5))
 
