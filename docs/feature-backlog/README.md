@@ -47,7 +47,7 @@ Each row links its rationale doc. Status lives in that doc's
 | # | Title | Area | Shipped |
 |---|---|---|---|
 | [13](13-pk-that-is-also-fk-loses-references.md) | A column that's both PK and FK never reports `references` | spec, ports | PR #36 (commit 07070db) |
-| [14](14-incoming-fk-references.md) | Incoming FK references ("referenced by") | spec, ports, frontend, docs | PR #118 (open) |
+| [14](14-incoming-fk-references.md) | Incoming FK references ("referenced by") | spec, ports, frontend, docs | PR #119 (open) |
 | [19](19-two-source-conformance-round-trip.md) | True two-source round-trip in CI conformance | conformance | resolved 2026-08-25 |
 | [20](20-persisted-and-shareable-filter-state.md) | Persisted and shareable filter state | frontend, docs | shipped 2026-09-05 |
 | [22](22-copy-row-as-insert-statement.md) | Copy row as INSERT statement | frontend | shipped 2026-09-02 |
