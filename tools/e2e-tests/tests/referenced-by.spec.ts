@@ -136,10 +136,10 @@ test("a cross-schema referrer absent from the target schema's own table list sur
 test("an entry naming a column absent from the row (the referenced table has no primary key) is disabled with an accurate message", async ({
   page,
 }) => {
-  // finding #7, option 1: SQLite's rowid fallback (spec/protocol.md §5.9)
-  // means `to` can name a column /api/tables/data never exposes — that must
-  // read as "no primary key to filter by", not "column is null" (row["rowid"]
-  // is genuinely undefined here, not a real column holding a null value).
+  // SQLite's rowid fallback (spec/protocol.md §5.9) means `to` can name a
+  // column /api/tables/data never exposes — that must read as "no primary
+  // key to filter by", not "column is null" (row["rowid"] is genuinely
+  // undefined here, not a real column holding a null value).
   await gotoApp(page);
   await selectTable(page, "users");
 

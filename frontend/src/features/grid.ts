@@ -176,7 +176,9 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
     // column took the branch above; those rows, and no-PK tables, reach the
     // same list through the record dialog instead.
     cellText.classList.add("pk-cell");
-    cellText.title = "what references this row";
+    // Embeds `raw` so a truncated PK stays readable via hover, same as the
+    // fk-cell title above — the overflow-expand skip below relies on it.
+    cellText.title = `${raw} — what references this row`;
     cellText.onclick = (e) => openReferencedByPopover(e, row);
   } else {
     const jsonAtRender = rendersAsJson(col, raw);

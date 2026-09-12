@@ -2394,7 +2394,7 @@ window.addEventListener("popstate", (ev) => {
 // src/features/referenced-by.ts
 var cache = /* @__PURE__ */ new Map();
 var cacheKey = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
-var refbyToken = 0;
+var renderTokens = /* @__PURE__ */ new Map();
 function msg(text) {
   const p = document.createElement("p");
   p.className = "refby-empty";
@@ -2431,7 +2431,8 @@ function renderList(container, entries, row, dismiss) {
   );
 }
 function renderReferencedBy(container, row, dismiss) {
-  const token = ++refbyToken;
+  const token = (renderTokens.get(container) ?? 0) + 1;
+  renderTokens.set(container, token);
   const table = state.table ?? "";
   const key = cacheKey(table);
   const hit = cache.get(key);
@@ -2444,10 +2445,10 @@ function renderReferencedBy(container, row, dismiss) {
   applyScopeParams(params);
   api(`/tables/referenced-by?${params}`).then((data) => {
     cache.set(key, data.referenced_by);
-    if (token !== refbyToken) return;
+    if (renderTokens.get(container) !== token) return;
     renderList(container, data.referenced_by, row, dismiss);
   }).catch((e) => {
-    if (token !== refbyToken) return;
+    if (renderTokens.get(container) !== token) return;
     container.replaceChildren(msg(e.message));
   });
 }
@@ -2657,7 +2658,7 @@ function buildCell(col, row, hidden) {
     );
   } else if (col.key === "pk") {
     cellText.classList.add("pk-cell");
-    cellText.title = "what references this row";
+    cellText.title = `${raw} \u2014 what references this row`;
     cellText.onclick = (e) => openReferencedByPopover(e, row);
   } else {
     const jsonAtRender = rendersAsJson(col, raw);

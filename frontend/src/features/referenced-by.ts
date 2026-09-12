@@ -21,10 +21,14 @@ import { navigateWithSeededFilter } from "./nav.js";
 const cache = new Map<string, ReferencedByEntry[]>();
 const cacheKey = (table: string) => `${state.source ?? ""}\x1f${state.schema ?? ""}\x1f${table}`;
 
-// Same staleness guard as cvRequestToken: a second PK cell clicked before
-// the first response lands must not overwrite the list now on screen. One
-// module token is enough — both surfaces share this renderer.
-let refbyToken = 0;
+// Same staleness guard as cvRequestToken: a second call targeting the same
+// container before the first response lands must not overwrite the list
+// now on screen. Keyed per container, not one module-wide counter — the
+// popover and the record dialog are two independent containers that can
+// each be triggered while the other's fetch is still in flight, and a
+// shared counter would let opening one discard the other's completed
+// response, leaving it stuck on "loading…".
+const renderTokens = new Map<HTMLElement, number>();
 
 function msg(text: string): HTMLParagraphElement {
   const p = document.createElement("p");
@@ -75,7 +79,8 @@ function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: R
 }
 
 export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: () => void): void {
-  const token = ++refbyToken;
+  const token = (renderTokens.get(container) ?? 0) + 1;
+  renderTokens.set(container, token);
   const table = state.table ?? "";
   // Key captured now, alongside applyScopeParams' read of the same scope,
   // so a mid-flight scope switch can't file the result under the wrong key.
@@ -92,11 +97,11 @@ export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: ()
   api<{ referenced_by: ReferencedByEntry[] }>(`/tables/referenced-by?${params}`)
     .then((data) => {
       cache.set(key, data.referenced_by);
-      if (token !== refbyToken) return;
+      if (renderTokens.get(container) !== token) return;
       renderList(container, data.referenced_by, row, dismiss);
     })
     .catch((e) => {
-      if (token !== refbyToken) return;
+      if (renderTokens.get(container) !== token) return;
       container.replaceChildren(msg((e as Error).message));
     });
 }
