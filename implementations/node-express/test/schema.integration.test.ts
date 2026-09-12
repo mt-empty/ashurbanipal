@@ -203,7 +203,17 @@ maybeDescribe("multi-schema support (live db)", () => {
       await pool.query(`drop schema if exists ${schema} cascade`);
     };
 
-    it("reports one entry for a partitioned referrer, not one per partition", async () => {
+    it("excludes a partitioned referrer and its partition copies", async () => {
+      // Two predicates do independent work here: conparentid = 0 collapses
+      // events_p1/events_p2's inherited constraint copies onto the parent
+      // (else one logical FK fans out into one entry per partition);
+      // rc.relkind = 'r' then drops that parent too, since events itself is
+      // relkind = 'p' and every other endpoint (query_table, common_values,
+      // referenced_by-as-target) already rejects it as NotAllowed the same
+      // way an unlisted table is rejected. A referrer name the frontend
+      // can't drill into is worse than not reporting it. Asserting zero
+      // rather than one keeps both predicates covered: losing either one
+      // reintroduces an events* entry.
       const schema = "ashb_test_node_referenced_by_partitioning_dup";
       await setupPartitionedSchema(schema);
       try {
@@ -211,8 +221,7 @@ maybeDescribe("multi-schema support (live db)", () => {
         expect(status).toBe(200);
         const list = (body as { referenced_by: RbEntry[] }).referenced_by;
         const events = list.filter((e) => e.table.startsWith("events"));
-        expect(events, "a partitioned referrer's inherited FK copies must collapse to one entry").toHaveLength(1);
-        expect(events[0].table).toBe("events");
+        expect(events, "a partitioned referrer must be excluded entirely").toHaveLength(0);
       } finally {
         await dropSchema(schema);
       }
@@ -233,10 +242,9 @@ maybeDescribe("multi-schema support (live db)", () => {
       }
     });
 
-    // finding #1: query_table (and common_values, same gate) validate table
-    // via allowedTables, which used to match information_schema.tables'
-    // broader BASE TABLE instead of list_tables' relkind = 'r' — so a
-    // partitioned table must be rejected here too, not silently queried.
+    // query_table (and common_values, same gate) validate table via
+    // allowedTables, which shares list_tables' own relkind = 'r' predicate
+    // — a partitioned table must be rejected here too, not silently queried.
     it("query_table rejects a partitioned table same as referenced_by does", async () => {
       const schema = "ashb_test_node_query_table_partitioning_gate";
       await setupPartitionedSchema(schema);
