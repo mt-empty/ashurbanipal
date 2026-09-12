@@ -98,11 +98,14 @@ run = "mise watch rust:demo --restart"
 ["rust:demo-sqlite"]
 description = "run the demo host app against SQLite (DB_BACKEND=sqlite) at http://localhost:4000/__ashurbanipal — seeds tools/seed-gen's `sqlite` dialect into implementations/rust/target/demo-sqlite.db on first run (override the path with SQLITE_PATH), then reuses it on later runs"
 # tools/seed-gen isn't part of this Cargo workspace (own Cargo.toml/lock, see
-# CLAUDE.md) — `cargo run` in its own dir, piped straight into sqlite3. Only
+# CLAUDE.md) — `cargo run` in its own dir, redirected to a file and only then
+# fed to sqlite3 (same generate-then-load idiom as conformance:seed-gen),
+# not piped straight in: a failed `cargo run` would otherwise feed sqlite3
+# empty stdin, which exits 0 and silently leaves an empty/stale db. Only
 # seeds when the file is absent: reseeding is ~30k+ audit_log rows and would
 # make every dev-loop restart slow for no reason once the db already exists.
 run = [
-    "test -f \"$SQLITE_PATH\" || (cd ../../../tools/seed-gen && cargo run --quiet -- sqlite) | sqlite3 \"$SQLITE_PATH\"",
+    "mkdir -p \"$(dirname \"$SQLITE_PATH\")\" && test -f \"$SQLITE_PATH\" || { (cd ../../../tools/seed-gen && cargo run --quiet -- sqlite) > \"$SQLITE_PATH.sql\" && sqlite3 \"$SQLITE_PATH\" < \"$SQLITE_PATH.sql\" && rm -f \"$SQLITE_PATH.sql\"; }",
     "cargo run -p ashurbanipal-axum --example demo --features sqlite",
 ]
 env = { DB_BACKEND = "sqlite", SQLITE_PATH = "../target/demo-sqlite.db" }
