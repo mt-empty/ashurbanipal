@@ -3,6 +3,7 @@ package io.github.mtempty.ashurbanipal
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -218,6 +219,25 @@ class MySqlSourceTest {
             assertEquals("pk", orderIdCol.key, "[$envVar]")
             assertEquals("orders", orderIdCol.references?.table, "[$envVar]")
             assertEquals("id", orderIdCol.references?.column, "[$envVar]")
+        }
+    }
+
+    @Test
+    fun `referenced-by lists incoming FKs`() = forEachReachableInstance { envVar ->
+        SeededDb(envVar).use { db ->
+            val source = MySqlSource(db.dataSource, 5)
+
+            val toUsers = source.referencedBy(null, "users")
+            assertEquals(1, toUsers.size, "[$envVar]")
+            assertEquals("orders", toUsers.first().table, "[$envVar]")
+            assertEquals("fk_orders_user", toUsers.first().constraint, "[$envVar]")
+            assertEquals(listOf(ColumnPair("user_id", "id")), toUsers.first().columns, "[$envVar]")
+            assertNull(toUsers.first().schema, "[$envVar] single-database referrer omits schema")
+
+            assertEquals(listOf("order_extra"), source.referencedBy(null, "orders").map { it.table }, "[$envVar]")
+            assertTrue(source.referencedBy(null, "order_extra").isEmpty(), "[$envVar] nothing references order_extra")
+
+            assertThrows(NotAllowedException::class.java) { source.referencedBy(null, "no_such_table") }
         }
     }
 

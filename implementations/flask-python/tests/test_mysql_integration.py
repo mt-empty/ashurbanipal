@@ -133,6 +133,21 @@ def test_pk_and_fk_column_reports_both(seeded) -> None:
     assert order_id_col.references.column == "id"
 
 
+def test_referenced_by_lists_incoming_fks_single_database(seeded) -> None:
+    to_users = seeded.referenced_by(None, "users")
+    assert len(to_users) == 1
+    assert to_users[0].table == "orders"
+    assert to_users[0].constraint == "fk_orders_user"
+    assert to_users[0].schema is None
+    assert [(p.from_, p.to) for p in to_users[0].columns] == [("user_id", "id")]
+
+    assert [e.table for e in seeded.referenced_by(None, "orders")] == ["order_extra"]
+    assert seeded.referenced_by(None, "order_extra") == []
+
+    with pytest.raises(NotAllowed):
+        seeded.referenced_by(None, "no_such_table")
+
+
 def test_table_counts_reports_a_real_estimate(seeded) -> None:
     conn = pymysql.connect(**seeded.kwargs)
     with conn.cursor() as cur:

@@ -9,7 +9,9 @@ import {
   cellToJson,
   type DbSource,
   findExact,
+  groupReferencedBy,
   type QueryOpts,
+  type ReferencedByEntry,
   type TableData,
   type TableInfo,
 } from "./types.js";
@@ -66,16 +68,20 @@ export class PostgresSource implements DbSource {
     return real;
   }
 
-  // Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
+  // Mirrors listTables' own pg_class/relkind = 'r' predicate, not
+  // information_schema.tables' broader BASE TABLE (which also matches
+  // partitioned tables) — keeps this allow-list and listTables in lockstep
+  // (docs/adapter-decisions.md §5.2/§5.3).
   private async allowedTables(client: PoolClient, schema: string): Promise<string[]> {
-    const { rows } = await client.query<{ table_name: string }>(
-      `select table_name from information_schema.tables
-       where table_schema = $1 and table_type = 'BASE TABLE'
-         and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT')
-       order by table_name`,
+    const { rows } = await client.query<{ relname: string }>(
+      `select c.relname from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = $1 and c.relkind = 'r'
+         and has_table_privilege(c.oid, 'SELECT')
+       order by c.relname`,
       [schema],
     );
-    return rows.map((r) => r.table_name);
+    return rows.map((r) => r.relname);
   }
 
   private async allowedColumns(client: PoolClient, schema: string, table: string): Promise<string[]> {
@@ -350,6 +356,79 @@ export class PostgresSource implements DbSource {
         }
         return { value, freq: r.freq };
       });
+    });
+  }
+
+  async referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]> {
+    return this.withTimeout(timeoutMs, async (client) => {
+      const realSchema = await this.resolveSchema(client, schema);
+
+      // Resolved once and bound as $1 below (con.confrelid = $1) — the same
+      // pg_class/relkind = 'r'/has_table_privilege predicate allowedTables
+      // uses, so a partitioned or unknown table rejects here instead of a
+      // silent [] from the confrelid join finding zero rows
+      // (spec/protocol.md §5.2/§5.9).
+      const { rows: oidRows } = await client.query<{ oid: number }>(
+        `select c.oid::int4 as oid from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+           where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
+             and has_table_privilege(c.oid, 'SELECT')`,
+        [realSchema, table],
+      );
+      if (oidRows.length === 0) {
+        throw new NotAllowedError(`table "${table}"`);
+      }
+      const targetOid = oidRows[0].oid;
+
+      // pg_catalog, not information_schema: the reverse (confrelid) filter
+      // over the standard-SQL views runs 20-40x slower on a large catalog
+      // (docs/adapter-decisions.md §5.9). has_table_privilege is the
+      // per-referrer read gate and works across schemas, so cross-schema
+      // referrers are reported and gated without a separate allow-list pass.
+      // conparentid = 0 excludes a partitioned referrer's per-partition
+      // constraint copies (Postgres clones the parent's FK onto each
+      // partition) — without it, one logical FK fans out into one entry per
+      // partition plus the parent. relkind = 'r' gates the referrer itself
+      // the same way targetOid above gates the target: a partitioned
+      // table's own (non-inherited) FK constraint survives conparentid = 0
+      // and would otherwise be reported as a referrer name that
+      // queryTable/commonValues/referencedBy-as-target then all reject,
+      // since none accept relkind = 'p'.
+      const { rows } = await client.query<{
+        nspname: string;
+        relname: string;
+        conname: string;
+        from_col: string;
+        to_col: string;
+      }>(
+        `select rn.nspname, rc.relname, con.conname, fa.attname as from_col, ta.attname as to_col
+         from pg_constraint con
+         join pg_class rc on rc.oid = con.conrelid
+         join pg_namespace rn on rn.oid = rc.relnamespace
+         join lateral unnest(con.conkey, con.confkey) with ordinality
+              as k(from_attnum, to_attnum, n) on true
+         join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum
+         join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum
+         where con.contype = 'f'
+           and con.conparentid = 0
+           and con.confrelid = $1
+           and rc.relkind = 'r'
+           and has_table_privilege(con.conrelid, 'SELECT')
+         order by rn.nspname, rc.relname, con.conname, k.n`,
+        [targetOid],
+      );
+
+      return groupReferencedBy(
+        rows.map((r) => {
+          const entry: ReferencedByEntry = {
+            table: r.relname,
+            constraint: r.conname,
+            columns: [{ from: r.from_col, to: r.to_col }],
+          };
+          if (r.nspname !== realSchema) entry.schema = r.nspname;
+          return entry;
+        }),
+      );
     });
   }
 }

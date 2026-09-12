@@ -155,6 +155,16 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         values = source.common_values(schema, table, column)
         return jsonify({"values": [{"value": value, "freq": freq} for value, freq in values]})
 
+    @bp.get("/api/tables/referenced-by")
+    def referenced_by() -> Response:
+        source = resolve_source(request.args.get("source"))
+        schema = request.args.get("schema")
+        table = request.args.get("table")
+        if table is None:
+            return Response('missing required "table" parameter', status=400, mimetype="text/plain")
+        entries = source.referenced_by(schema, table)
+        return jsonify({"referenced_by": [_referenced_by_to_dict(e) for e in entries]})
+
     @bp.get("/api/siblings")
     def siblings() -> Response:
         results = _check_siblings(config.siblings)
@@ -181,6 +191,18 @@ def _column_to_dict(c) -> dict:
         d["references"] = ref
     if c.comment is not None:
         d["comment"] = c.comment
+    return d
+
+
+def _referenced_by_to_dict(e) -> dict:
+    d = {
+        "table": e.table,
+        "constraint": e.constraint,
+        "columns": [{"from": p.from_, "to": p.to} for p in e.columns],
+    }
+    # Present only for a cross-schema referrer (spec/protocol.md §5.9).
+    if e.schema is not None:
+        d["schema"] = e.schema
     return d
 
 

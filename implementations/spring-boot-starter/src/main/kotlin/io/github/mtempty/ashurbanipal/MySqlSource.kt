@@ -364,4 +364,43 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             ?: throw NotAllowedException("not allowed: column $column")
         emptyList()
     }
+
+    override fun referencedBy(schema: String?, table: String): List<ReferencedByEntry> = inReadOnlyTransaction {
+        val variant = variant()
+        val realSchema = resolveSchema(variant, schema)
+        // One allow-list read, shared by the target-table check and the
+        // referrer post-filter below — MySQL/MariaDB have no cross-schema
+        // has_table_privilege gate (docs/adapter-decisions.md §5.9).
+        val allowed = allowedTables(variant, realSchema).toSet()
+        if (table !in allowed) throw NotAllowedException("not allowed: table $table")
+
+        // Read key_column_usage, not referential_constraints, whose
+        // referenced-name column MariaDB nulls for a role lacking privilege on
+        // the referenced table. table_schema = ? keeps referrers to the
+        // resolved database.
+        val rows = query(
+            dataSource,
+            timedSelect(
+                variant,
+                queryTimeoutSecs,
+                "kcu.table_name, kcu.constraint_name, kcu.column_name, kcu.referenced_column_name " +
+                    "from information_schema.key_column_usage kcu " +
+                    "where kcu.referenced_table_schema = ? and kcu.referenced_table_name = ? " +
+                    "  and kcu.table_schema = ? " +
+                    "order by kcu.table_name, kcu.constraint_name, kcu.ordinal_position",
+            ),
+            listOf(realSchema, table, realSchema),
+        ) { rs ->
+            ReferencedByEntry(
+                table = rs.getString(1),
+                schema = null,
+                constraint = rs.getString(2),
+                columns = listOf(ColumnPair(rs.getString(3), rs.getString(4))),
+            )
+        }
+
+        // Keep the referrer set inside the same allow-list every other route
+        // on this backend serves from.
+        groupReferencedBy(rows.filter { it.table in allowed })
+    }
 }

@@ -20,6 +20,22 @@ export interface ColumnInfo {
   comment?: string;
 }
 
+/** One `{from, to}` pairing of an incoming FK (`spec/protocol.md` §5.9): `from` is the referencing column, `to` the referenced column; a composite FK has more than one. */
+export interface ColumnPair {
+  from: string;
+  to: string;
+}
+
+/** One FK constraint elsewhere in the source whose target is the requested table (`spec/protocol.md` §5.9 — the reverse of {@link ColumnRef}). */
+export interface ReferencedByEntry {
+  table: string;
+  // Set only when the referencing table's schema differs from the resolved
+  // one — the opposite end of the relationship from ColumnRef.schema.
+  schema?: string;
+  constraint: string;
+  columns: ColumnPair[];
+}
+
 export interface TableInfo {
   name: string;
   comment?: string;
@@ -61,10 +77,30 @@ export interface DbSource {
     column: string,
     timeoutMs: number,
   ): Promise<CommonValueEntry[]>;
+  /** Incoming FK references: every FK constraint elsewhere in the source whose target is `table` (`spec/protocol.md` §5.9). */
+  referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]>;
 }
 
 export function findExact(haystack: string[], needle: string): string | undefined {
   return haystack.find((s) => s === needle);
+}
+
+// Merges single-pair ReferencedByEntry rows into one entry per
+// (schema, table, constraint). Relies on the caller's catalog ORDER BY
+// putting a constraint's columns adjacent — a run-length merge, not a full
+// group-by. Each backend maps its own row shape (and applies any
+// allow-list filter) before calling this.
+export function groupReferencedBy(rows: ReferencedByEntry[]): ReferencedByEntry[] {
+  const out: ReferencedByEntry[] = [];
+  for (const row of rows) {
+    const last = out[out.length - 1];
+    if (last && last.table === row.table && last.schema === row.schema && last.constraint === row.constraint) {
+      last.columns.push(...row.columns);
+    } else {
+      out.push(row);
+    }
+  }
+  return out;
 }
 
 // Every SELECTed column is already cast to a text representation in the

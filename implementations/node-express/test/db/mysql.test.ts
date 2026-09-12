@@ -157,6 +157,23 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       expect(orderIdCol?.references?.column).toBe("id");
     });
 
+    it("referenced_by lists incoming FKs, single-database (no schema field)", async () => {
+      const db = await fresh();
+      const source = new MySqlSource(db.pool);
+
+      const toUsers = await source.referencedBy(undefined, "users", 5000);
+      expect(toUsers).toHaveLength(1);
+      expect(toUsers[0].table).toBe("orders");
+      expect(toUsers[0].constraint).toBe("fk_orders_user");
+      expect(toUsers[0].schema).toBeUndefined();
+      expect(toUsers[0].columns).toEqual([{ from: "user_id", to: "id" }]);
+
+      expect((await source.referencedBy(undefined, "orders", 5000)).map((e) => e.table)).toEqual(["order_extra"]);
+      expect(await source.referencedBy(undefined, "order_extra", 5000)).toEqual([]);
+
+      await expect(source.referencedBy(undefined, "no_such_table", 5000)).rejects.toBeInstanceOf(NotAllowedError);
+    });
+
     it("table_counts reports a real estimate, not the no-mechanism sentinel", async () => {
       const db = await fresh();
       // InnoDB's background stats recalculation may not have run yet

@@ -1,5 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { CommonValueEntry, CountEntry, DbSource, QueryOpts, TableData, TableInfo } from "../src/db/types.js";
+import type {
+  CommonValueEntry,
+  CountEntry,
+  DbSource,
+  QueryOpts,
+  ReferencedByEntry,
+  TableData,
+  TableInfo,
+} from "../src/db/types.js";
 import { createRouter, type NamedSource } from "../src/routes.js";
 import { getJson as sharedGetJson, startServer, type TestServer } from "./helpers.js";
 
@@ -30,6 +38,10 @@ class FakeDbSource implements DbSource {
 
   async commonValues(): Promise<CommonValueEntry[]> {
     return [{ value: this.label, freq: 1 }];
+  }
+
+  async referencedBy(): Promise<ReferencedByEntry[]> {
+    return [{ table: `${this.label}-referrer`, constraint: `${this.label}_fk`, columns: [{ from: "a", to: "b" }] }];
   }
 }
 

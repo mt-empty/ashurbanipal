@@ -3,6 +3,7 @@ import { state } from "../core/state.js";
 import type { Column, Row } from "../core/types.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
 import { renderJsonTree } from "../lib/json-tree.js";
+import { renderReferencedBy } from "./referenced-by.js";
 
 // ---- record / vertical view: one already-fetched row as a stacked
 // column:value list, for tables too wide to scan across ----
@@ -81,6 +82,7 @@ function sqlLiteral(col: Column, raw: string | null): string {
 
 export function openRecordView(columns: Column[], row: Row): void {
   $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
+  renderReferencedBy($("record-referenced-by"), row, () => $<HTMLDialogElement>("record-dialog").close());
   const copyRowBtn = $("record-copy-row");
   copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
   const copyInsertBtn = $("record-copy-insert");

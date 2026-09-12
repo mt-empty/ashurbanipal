@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 
+import psycopg
 import pytest
 
 from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts
@@ -61,6 +63,124 @@ def test_pk_and_fk_column_reports_both(source) -> None:
     assert order_id_col.key == KeyKind.PK
     assert order_id_col.references.table == "orders"
     assert order_id_col.references.column == "id"
+
+
+def test_referenced_by_lists_incoming_fk_constraints_with_explicit_column_pairs(source) -> None:
+    entries = source.referenced_by(None, "users")
+
+    orders = [e for e in entries if e.table == "orders"]
+    assert len(orders) == 1
+    assert [(p.from_, p.to) for p in orders[0].columns] == [("user_id", "id")]
+    assert orders[0].constraint
+    assert orders[0].schema is None, "a same-schema referrer must omit schema"
+
+    # support_tickets has two separate FKs into users -> two entries.
+    tickets = [e for e in entries if e.table == "support_tickets"]
+    assert len(tickets) == 2
+    assert {(e.columns[0].from_, e.columns[0].to) for e in tickets} == {
+        ("user_id", "id"),
+        ("assigned_admin_id", "id"),
+    }
+    assert all(e.schema is None for e in tickets)
+
+    # (table, constraint) is unique within one response.
+    keys = [(e.table, e.constraint) for e in entries]
+    assert len(keys) == len(set(keys))
+
+
+def test_referenced_by_includes_composite_foreign_keys_with_every_column_pair(source) -> None:
+    entries = source.referenced_by(None, "inventory_locations")
+    assert len(entries) == 1
+    assert entries[0].table == "inventory_counts"
+    assert [(p.from_, p.to) for p in entries[0].columns] == [
+        ("warehouse_code", "warehouse_code"),
+        ("bin_code", "bin_code"),
+    ]
+
+
+def test_referenced_by_returns_empty_list_when_nothing_references_the_table(source) -> None:
+    assert source.referenced_by(None, "feature_flags") == []
+
+
+def test_referenced_by_carries_schema_for_cross_schema_referrers(source) -> None:
+    se = [e for e in source.referenced_by(None, "users") if e.table == "shipment_events"]
+    assert len(se) == 1
+    assert se[0].schema == "warehouse"
+    assert (se[0].columns[0].from_, se[0].columns[0].to) == ("handled_by_user_id", "id")
+
+
+def test_referenced_by_explicit_public_schema_matches_implicit_default(source) -> None:
+    assert source.referenced_by("public", "users") == source.referenced_by(None, "users")
+
+
+def test_referenced_by_rejects_unknown_or_malicious_table(source) -> None:
+    for bad in ["no_such_table", 'users"; drop table users; --', "users' OR '1'='1"]:
+        with pytest.raises(NotAllowed):
+            source.referenced_by(None, bad)
+
+
+@contextmanager
+def _partitioned_schema(schema: str):
+    """Regression fixture: `events` is range-partitioned with two partitions
+    and one FK to `users`; Postgres inherits that constraint onto each
+    partition, so `pg_constraint` holds three rows (parent + 2 children) for
+    what is, to the API, a single relationship.
+    """
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(f"drop schema if exists {schema} cascade")
+        cur.execute(f"create schema {schema}")
+        cur.execute(f"create table {schema}.users (id int primary key)")
+        cur.execute(
+            f"create table {schema}.events ("
+            f"    id bigint not null,"
+            f"    user_id int references {schema}.users(id)"
+            f") partition by range (id)"
+        )
+        cur.execute(f"create table {schema}.events_p1 partition of {schema}.events for values from (1) to (1000)")
+        cur.execute(
+            f"create table {schema}.events_p2 partition of {schema}.events for values from (1000) to (2000)"
+        )
+        try:
+            yield
+        finally:
+            cur.execute(f"drop schema if exists {schema} cascade")
+
+
+def test_referenced_by_excludes_partitioned_referrer_and_its_partition_copies(source) -> None:
+    # Two predicates do independent work here: conparentid = 0 collapses
+    # events_p1/events_p2's inherited constraint copies onto the parent
+    # (else one logical FK fans out into one entry per partition);
+    # rc.relkind = 'r' then drops that parent too, since events itself is
+    # relkind = 'p' and every other endpoint (query_table, common_values,
+    # referenced_by-as-target) already rejects it as NotAllowed the same way
+    # an unlisted table is rejected. A referrer name the frontend can't
+    # drill into is worse than not reporting it. Asserting zero rather than
+    # one keeps both predicates covered: losing either one reintroduces an
+    # events* entry.
+    schema = "ashb_test_flask_referenced_by_partitioning_dup"
+    with _partitioned_schema(schema):
+        entries = source.referenced_by(schema, "users")
+        events = [e for e in entries if e.table.startswith("events")]
+        assert len(events) == 0, f"a partitioned referrer must be excluded entirely, got {events!r}"
+
+
+def test_referenced_by_rejects_partitioned_table_as_target_same_as_any_unlisted_table(source) -> None:
+    schema = "ashb_test_flask_referenced_by_partitioning_gate"
+    # spec/protocol.md §5.9 requires table to match a §5.2 entry, and
+    # list_tables' relkind = 'r' filter excludes partitioned tables — so
+    # this must reject the same way an unknown table name does, not
+    # silently answer [].
+    with _partitioned_schema(schema), pytest.raises(NotAllowed):
+        source.referenced_by(schema, "events")
+
+
+def test_query_table_rejects_partitioned_table_same_as_referenced_by_does(source) -> None:
+    schema = "ashb_test_flask_query_table_partitioning_gate"
+    # query_table (and common_values, same gate) validate table via
+    # _allowed_tables, which shares list_tables' own relkind = 'r' predicate
+    # — a partitioned table must be rejected here too, not silently queried.
+    with _partitioned_schema(schema), pytest.raises(NotAllowed):
+        source.query_table(schema, "events", QueryOpts(limit=10, offset=0, timeout_secs=5))
 
 
 def test_every_cell_is_string_or_null(source) -> None:

@@ -71,13 +71,17 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         )
     }
 
-    // Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
+    // Mirrors listTables' own pg_class/relkind = 'r' predicate, not
+    // information_schema.tables' broader BASE TABLE (which also matches
+    // partitioned tables) — keeps this allow-list and listTables in
+    // lockstep (docs/adapter-decisions.md §5.2/§5.3).
     private fun allowedTables(schema: String): List<String> =
         jdbcTemplate.queryForList(
-            "select table_name from information_schema.tables " +
-                "where table_schema = ? and table_type = 'BASE TABLE' " +
-                "  and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT') " +
-                "order by table_name",
+            "select c.relname from pg_class c " +
+                "join pg_namespace n on n.oid = c.relnamespace " +
+                "where n.nspname = ? and c.relkind = 'r' " +
+                "  and has_table_privilege(c.oid, 'SELECT') " +
+                "order by c.relname",
             String::class.java,
             schema,
         ).filterNotNull()
@@ -318,5 +322,68 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             }
             CommonValueEntry(normalized, freq)
         }
+    }
+
+    override fun referencedBy(schema: String?, table: String): List<ReferencedByEntry> =
+        inReadOnlyTransaction { referencedByInTransaction(schema, table) }
+
+    private fun referencedByInTransaction(schema: String?, table: String): List<ReferencedByEntry> {
+        val realSchema = resolveSchema(schema)
+
+        // Resolved once and bound below (con.confrelid = ?) — the same
+        // pg_class/relkind = 'r'/has_table_privilege predicate allowedTables
+        // uses, so a partitioned or unknown table rejects here instead of a
+        // silent [] from the confrelid join finding zero rows
+        // (spec/protocol.md §5.2/§5.9).
+        val targetOid = jdbcTemplate.query(
+            "select c.oid from pg_class c " +
+                "join pg_namespace n on n.oid = c.relnamespace " +
+                "where n.nspname = ? and c.relname = ? and c.relkind = 'r' " +
+                "  and has_table_privilege(c.oid, 'SELECT')",
+            RowMapper { rs, _ -> rs.getLong("oid") },
+            realSchema,
+            table,
+        ).firstOrNull() ?: throw NotAllowedException("not allowed: table $table")
+
+        // pg_catalog, not information_schema: the reverse (confrelid) filter
+        // over the standard-SQL views runs 20-40x slower on a large catalog
+        // (docs/adapter-decisions.md §5.9). has_table_privilege is the
+        // per-referrer read gate and works across schemas, so cross-schema
+        // referrers are reported and gated without a separate allow-list pass.
+        // conparentid = 0 excludes a partitioned referrer's per-partition
+        // constraint copies (Postgres clones the parent's FK onto each
+        // partition) — without it, one logical FK fans out into one entry
+        // per partition plus the parent. relkind = 'r' gates the referrer
+        // itself the same way targetOid above gates the target: a
+        // partitioned table's own (non-inherited) FK constraint survives
+        // conparentid = 0 and would otherwise be reported as a referrer
+        // name that queryTable/commonValues/referencedBy-as-target then all
+        // reject, since none accept relkind = 'p'.
+        val rows = jdbcTemplate.query(
+            "select rn.nspname, rc.relname, con.conname, fa.attname as from_col, ta.attname as to_col " +
+                "from pg_constraint con " +
+                "join pg_class rc on rc.oid = con.conrelid " +
+                "join pg_namespace rn on rn.oid = rc.relnamespace " +
+                "join lateral unnest(con.conkey, con.confkey) with ordinality " +
+                "     as k(from_attnum, to_attnum, n) on true " +
+                "join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum " +
+                "join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum " +
+                "where con.contype = 'f' " +
+                "  and con.conparentid = 0 " +
+                "  and con.confrelid = ? " +
+                "  and rc.relkind = 'r' " +
+                "  and has_table_privilege(con.conrelid, 'SELECT') " +
+                "order by rn.nspname, rc.relname, con.conname, k.n",
+            RowMapper { rs, _ ->
+                ReferencedByEntry(
+                    table = rs.getString("relname"),
+                    schema = rs.getString("nspname").takeIf { it != realSchema },
+                    constraint = rs.getString("conname"),
+                    columns = listOf(ColumnPair(rs.getString("from_col"), rs.getString("to_col"))),
+                )
+            },
+            targetOid,
+        )
+        return groupReferencedBy(rows)
     }
 }

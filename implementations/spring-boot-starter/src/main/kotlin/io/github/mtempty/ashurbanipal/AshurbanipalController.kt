@@ -37,6 +37,7 @@ data class TableDataResponse(
     @JsonProperty("total_approx") val totalApprox: Long,
 )
 data class CommonValuesResponse(val values: List<CommonValueEntry>)
+data class ReferencedByResponse(@JsonProperty("referenced_by") val referencedBy: List<ReferencedByEntry>)
 data class SiblingStatus(val name: String, @JsonProperty("base_url") val baseUrl: String, val healthy: Boolean)
 data class SiblingsResponse(val siblings: List<SiblingStatus>)
 
@@ -144,6 +145,14 @@ class AshurbanipalController(
         @RequestParam column: String,
     ): ResponseEntity<CommonValuesResponse> =
         apiOk(CommonValuesResponse(resolveSource(source).commonValues(schema, table, column)))
+
+    @GetMapping("/api/tables/referenced-by")
+    fun referencedBy(
+        @RequestParam(required = false) schema: String?,
+        @RequestParam(required = false) source: String?,
+        @RequestParam table: String,
+    ): ResponseEntity<ReferencedByResponse> =
+        apiOk(ReferencedByResponse(resolveSource(source).referencedBy(schema, table)))
 
     @GetMapping("/api/siblings")
     fun siblings(): ResponseEntity<SiblingsResponse> {

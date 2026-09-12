@@ -8,14 +8,17 @@ from psycopg.types.string import TextLoader
 from ..filter import Condition
 from . import (
     ColumnInfo,
+    ColumnPair,
     ColumnRef,
     DbSource,
     FilterParseError,
     KeyKind,
     NotAllowed,
     QueryOpts,
+    ReferencedBy,
     TableData,
     TableInfo,
+    group_referenced_by,
     quote_ident,
     wrap_driver_errors,
 )
@@ -91,12 +94,16 @@ class PgSource(DbSource):
         return resolved
 
     def _allowed_tables(self, cur: psycopg.Cursor, schema: str) -> list[str]:
-        # Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
+        # Mirrors list_tables' own pg_class/relkind = 'r' predicate, not
+        # information_schema.tables' broader BASE TABLE (which also matches
+        # partitioned tables) — keeps this allow-list and list_tables in
+        # lockstep (docs/adapter-decisions.md §5.2/§5.3).
         cur.execute(
-            "select table_name from information_schema.tables "
-            "where table_schema = %s and table_type = 'BASE TABLE' "
-            "  and has_table_privilege(format('%%I.%%I', table_schema, table_name), 'SELECT') "
-            "order by table_name",
+            "select c.relname from pg_class c "
+            "join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = %s and c.relkind = 'r' "
+            "  and has_table_privilege(c.oid, 'SELECT') "
+            "order by c.relname",
             (schema,),
         )
         return [row[0] for row in cur.fetchall()]
@@ -320,3 +327,72 @@ class PgSource(DbSource):
         if data_type == "boolean":
             rows = [({"t": "true", "f": "false"}.get(val, val), freq) for val, freq in rows]
         return [(val, float(freq)) for val, freq in rows]
+
+    @wrap_driver_errors(psycopg.Error)
+    def referenced_by(self, schema: str | None, table: str) -> list[ReferencedBy]:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
+            resolved_schema = self._resolve_schema(cur, schema)
+
+            # Resolved once and bound as %s below (con.confrelid = %s) — the
+            # same pg_class/relkind = 'r'/has_table_privilege predicate
+            # _allowed_tables uses, so a partitioned or unknown table
+            # rejects here instead of a silent [] from the confrelid join
+            # finding zero rows (spec/protocol.md §5.2/§5.9).
+            cur.execute(
+                "select c.oid from pg_class c "
+                "join pg_namespace n on n.oid = c.relnamespace "
+                "where n.nspname = %s and c.relname = %s and c.relkind = 'r' "
+                "  and has_table_privilege(c.oid, 'SELECT')",
+                (resolved_schema, table),
+            )
+            target_oid_row = cur.fetchone()
+            if target_oid_row is None:
+                raise NotAllowed(f"table {table!r}")
+            target_oid = target_oid_row[0]
+
+            # pg_catalog, not information_schema: the reverse (confrelid)
+            # filter over the standard-SQL views runs 20-40x slower on a
+            # large catalog (docs/adapter-decisions.md §5.9).
+            # has_table_privilege is the per-referrer read gate and works
+            # across schemas, so cross-schema referrers are reported and
+            # gated without a separate allow-list pass. conparentid = 0
+            # excludes a partitioned referrer's per-partition constraint
+            # copies (Postgres clones the parent's FK onto each partition)
+            # — without it, one logical FK fans out into one entry per
+            # partition plus the parent. relkind = 'r' gates the referrer
+            # itself the same way target_oid above gates the target: a
+            # partitioned table's own (non-inherited) FK constraint survives
+            # conparentid = 0 and would otherwise be reported as a referrer
+            # name that query_table/common_values/referenced_by-as-target
+            # then all reject, since none accept relkind = 'p'.
+            cur.execute(
+                "select rn.nspname, rc.relname, con.conname, fa.attname, ta.attname "
+                "from pg_constraint con "
+                "join pg_class rc on rc.oid = con.conrelid "
+                "join pg_namespace rn on rn.oid = rc.relnamespace "
+                "join lateral unnest(con.conkey, con.confkey) with ordinality "
+                "     as k(from_attnum, to_attnum, n) on true "
+                "join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum "
+                "join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum "
+                "where con.contype = 'f' "
+                "  and con.conparentid = 0 "
+                "  and con.confrelid = %s "
+                "  and rc.relkind = 'r' "
+                "  and has_table_privilege(con.conrelid, 'SELECT') "
+                "order by rn.nspname, rc.relname, con.conname, k.n",
+                (target_oid,),
+            )
+            rows = list(cur.fetchall())
+
+        return group_referenced_by(
+            [
+                ReferencedBy(
+                    table=ref_table,
+                    constraint=constraint,
+                    columns=[ColumnPair(from_=from_col, to=to_col)],
+                    schema=ref_schema if ref_schema != resolved_schema else None,
+                )
+                for ref_schema, ref_table, constraint, from_col, to_col in rows
+            ]
+        )

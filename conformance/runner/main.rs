@@ -11,6 +11,7 @@ mod common_values;
 mod filter_dsl;
 mod html_and_siblings;
 mod protocol;
+mod referenced_by;
 mod schemas;
 mod sources;
 mod table_data;

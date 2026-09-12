@@ -3,6 +3,12 @@
 # serialization (implementations/rust/axum/src/routes.rs,
 # implementations/rust/core/src/db/); identical across the Postgres,
 # MySQL, and SQLite backends.
+#
+# Exception: the error responses below list both text/plain and RFC 9457
+# application/problem+json while the migration in
+# docs/feature-backlog/34-rfc9457-problem-details.md is in flight
+# (spec/protocol.md §2 is normative: problem+json is the target). text/plain
+# is dropped once every port has moved over.
 openapi: 3.1.0
 info:
   title: Ashurbanipal Protocol
@@ -30,9 +36,9 @@ paths:
         "200":
           description: >
             Live allow-list for the `source` param on /schemas, /tables,
-            /table-counts, /tables/data, and /tables/common-values
-            (spec/protocol.md §5.8). Exactly one entry for a
-            single-source deployment.
+            /table-counts, /tables/data, /tables/common-values, and
+            /tables/referenced-by (spec/protocol.md §5.8). Exactly one
+            entry for a single-source deployment.
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
@@ -53,8 +59,8 @@ paths:
         "200":
           description: >
             Live allow-list for the `schema` param on /tables,
-            /table-counts, /tables/data, and /tables/common-values
-            (spec/protocol.md §5.7).
+            /table-counts, /tables/data, /tables/common-values, and
+            /tables/referenced-by (spec/protocol.md §5.7).
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
@@ -282,6 +288,51 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
+  /tables/referenced-by:
+    get:
+      operationId: referencedBy
+      summary: Foreign keys elsewhere in the schema that target this table.
+      parameters:
+        - $ref: "#/components/parameters/Source"
+        - $ref: "#/components/parameters/Schema"
+        - name: table
+          in: query
+          required: true
+          description: >
+            Must exactly match (case-sensitive) a table name from /tables;
+            otherwise 400.
+          schema:
+            type: string
+          examples:
+            # Three named cases from conformance/seed/seed.sql exercising
+            # distinct 200 shapes (spec/protocol.md §5.9): a multi-referrer
+            # target (users — two of the entries share a referencing
+            # table), a composite-FK target (inventory_locations — one
+            # entry whose `columns` has two pairs), and a target nothing
+            # references (feature_flags — `referenced_by` is []).
+            users:
+              value: users
+            inventory_locations:
+              value: inventory_locations
+            feature_flags:
+              value: feature_flags
+      responses:
+        "200":
+          description: >
+            One entry per foreign-key constraint pointing at `table`;
+            `referenced_by` is [] when nothing does (not an error).
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferencedByResponse"
+        "400":
+          $ref: "#/components/responses/ClientError"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
   /siblings:
     get:
       operationId: siblings
@@ -334,24 +385,33 @@ components:
         const: "1"
 
   responses:
+    # Migration in flight (docs/feature-backlog/34-rfc9457-problem-details.md):
+    # the target error body is RFC 9457 application/problem+json (branch on
+    # `code`); implementations not yet migrated still emit text/plain. Both
+    # are listed until every port has moved over, then text/plain is dropped.
     ClientError:
       description: >
-        Client error — unknown table/column, invalid filter, invalid
-        order. Plain-text reason; wording is implementation-defined and
-        must not be parsed.
+        Client error — unknown source/schema/table/column, invalid
+        filter, invalid parameter, or a table the role can't read.
       headers:
         x-ashurbanipal-protocol:
           $ref: "#/components/headers/ProtocolVersion"
       content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
         text/plain:
           schema:
             type: string
     ServerError:
-      description: Database failure. Plain-text reason.
+      description: Server error — database failure or query timeout.
       headers:
         x-ashurbanipal-protocol:
           $ref: "#/components/headers/ProtocolVersion"
       content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
         text/plain:
           schema:
             type: string
@@ -512,6 +572,57 @@ components:
                 format: float
                 description: Fraction of rows, in (0, 1].
 
+    ReferencedByResponse:
+      type: object
+      required: [referenced_by]
+      properties:
+        referenced_by:
+          type: array
+          description: >
+            One object per foreign-key constraint whose referenced table
+            is the requested `table` (spec/protocol.md §5.9). A referencing
+            table with two FKs to the target appears twice. Empty array
+            when nothing references the target. SHOULD be ordered by
+            (schema, table, constraint).
+          items:
+            type: object
+            required: [table, constraint, columns]
+            properties:
+              table:
+                type: string
+                description: The referencing table (holds the FK). Bare name.
+              schema:
+                type: string
+                description: >
+                  The referencing table's schema; present only when it
+                  differs from the resolved schema (a cross-schema
+                  reference). This is the opposite end of the relationship
+                  from ColumnInfo.references.schema.
+              constraint:
+                type: string
+                description: >
+                  FK constraint name; (table, constraint) is unique within
+                  one response. MAY be a synthesized label on engines that
+                  don't name FK constraints (e.g. SQLite) — not a DDL
+                  identifier, not guaranteed stable.
+              columns:
+                type: array
+                description: >
+                  Column pairing, one entry per column in the constraint,
+                  in the constraint's own order. More than one entry for a
+                  composite FK (included here, unlike §5.4.1's per-column
+                  metadata).
+                items:
+                  type: object
+                  required: [from, to]
+                  properties:
+                    from:
+                      type: string
+                      description: Referencing column on `table`.
+                    to:
+                      type: string
+                      description: Referenced column on the target table.
+
     SiblingsResponse:
       type: object
       required: [siblings]
@@ -562,3 +673,48 @@ components:
             Required for every op except IS NULL / IS NOT NULL, for which
             it must be absent. Always bound as a query parameter;
             comparison applies to the column cast to text.
+
+    ProblemDetails:
+      type: object
+      description: >
+        RFC 9457 Problem Details (application/problem+json). Sent for
+        every 4xx/5xx (spec/protocol.md §2). Additional members beyond
+        those listed MAY appear; clients ignore unknown ones.
+      required: [status, title, code]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          default: about:blank
+          description: >
+            Ashurbanipal defines no problem-type URI namespace; this is
+            about:blank in practice. `code` is the discriminator.
+        title:
+          type: string
+          description: Short human-readable summary; implementation-defined, do not parse.
+        status:
+          type: integer
+          description: HTTP status code, repeated in the body (RFC 9457 §3.1).
+        detail:
+          type: string
+          description: Optional longer human-readable explanation; do not parse.
+        instance:
+          type: string
+          format: uri-reference
+          description: Optional; identifies the specific occurrence.
+        code:
+          type: string
+          description: >
+            Stable machine-readable problem token — the value clients
+            branch on. The set is open (additive); an unrecognized value
+            is treated as a generic error of the given `status`.
+          enum:
+            - unknown_source
+            - unknown_schema
+            - unknown_table
+            - unknown_column
+            - invalid_filter
+            - invalid_parameter
+            - not_readable
+            - database_error
+            - query_timeout

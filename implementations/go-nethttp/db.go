@@ -24,6 +24,27 @@ type ColumnRef struct {
 	Schema string `json:"schema,omitempty"`
 }
 
+// ColumnPair is one {from, to} pairing of an incoming FK (spec/protocol.md
+// §5.9): from is the referencing column, to the referenced column; a
+// composite FK has more than one.
+type ColumnPair struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// ReferencedByEntry is one FK constraint elsewhere in the source whose
+// target is the requested table (spec/protocol.md §5.9 — the reverse of
+// ColumnRef).
+type ReferencedByEntry struct {
+	Table string `json:"table"`
+	// Set only when the referencing table's schema differs from the
+	// resolved one — the opposite end of the relationship from
+	// ColumnRef.Schema.
+	Schema     string       `json:"schema,omitempty"`
+	Constraint string       `json:"constraint"`
+	Columns    []ColumnPair `json:"columns"`
+}
+
 // ColumnInfo is one column's metadata, sourced entirely from schema
 // catalogs (spec/protocol.md §5.4.1) — never used to build SQL itself.
 type ColumnInfo struct {
@@ -77,6 +98,9 @@ type DbSource interface {
 	TableCounts(ctx context.Context, schema *string) ([]CountEntry, error)
 	QueryTable(ctx context.Context, schema *string, table string, opts QueryOpts) (TableData, error)
 	CommonValues(ctx context.Context, schema *string, table, column string) ([]CommonValueEntry, error)
+	// ReferencedBy lists every FK constraint elsewhere in the source whose
+	// target is table (spec/protocol.md §5.9).
+	ReferencedBy(ctx context.Context, schema *string, table string) ([]ReferencedByEntry, error)
 }
 
 // queryer is satisfied by both *sql.DB and *sql.Tx — every backend's
@@ -124,6 +148,27 @@ func (c *cellValue) asJSON() *string {
 	}
 	s := c.str
 	return &s
+}
+
+// groupReferencedBy merges single-pair ReferencedByEntry rows into one
+// entry per (schema, table, constraint). It relies on the caller's catalog
+// ORDER BY putting a constraint's columns adjacent — a run-length merge,
+// not a full group-by. Each backend maps its own row shape (and applies
+// any allow-list filter) before calling this. The result is always
+// non-nil (empty, never null on the wire), so callers need no guard.
+func groupReferencedBy(rows []ReferencedByEntry) []ReferencedByEntry {
+	out := make([]ReferencedByEntry, 0, len(rows))
+	for _, row := range rows {
+		if n := len(out); n > 0 &&
+			out[n-1].Table == row.Table &&
+			out[n-1].Schema == row.Schema &&
+			out[n-1].Constraint == row.Constraint {
+			out[n-1].Columns = append(out[n-1].Columns, row.Columns...)
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func joinComma(parts []string) string {

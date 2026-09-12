@@ -7,7 +7,7 @@ use actix_web::{Error, HttpResponse, Scope};
 use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
-use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, TableInfo};
+use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, ReferencedBy, TableInfo};
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
@@ -67,6 +67,9 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
                 .service(web::resource("/tables/data").route(web::get().to(table_data::<S>)))
                 .service(
                     web::resource("/tables/common-values").route(web::get().to(common_values::<S>)),
+                )
+                .service(
+                    web::resource("/tables/referenced-by").route(web::get().to(referenced_by::<S>)),
                 )
                 .service(web::resource("/siblings").route(web::get().to(siblings::<S>))),
         )
@@ -339,6 +342,29 @@ async fn common_values<S: DbSource>(
     }))
 }
 
+#[derive(Deserialize)]
+struct ReferencedByParams {
+    schema: Option<String>,
+    source: Option<String>,
+    table: String,
+}
+
+#[derive(Serialize)]
+struct ReferencedByResponse {
+    referenced_by: Vec<ReferencedBy>,
+}
+
+async fn referenced_by<S: DbSource>(
+    state: Data<AppState<S>>,
+    params: web::Query<ReferencedByParams>,
+) -> Result<HttpResponse, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let referenced_by = source
+        .referenced_by(params.schema.as_deref(), &params.table)
+        .await?;
+    Ok(HttpResponse::Ok().json(ReferencedByResponse { referenced_by }))
+}
+
 #[derive(Serialize)]
 struct SiblingStatus {
     name: String,
@@ -453,6 +479,13 @@ mod kill_switch_tests {
             _table: &str,
             _column: &str,
         ) -> Result<Vec<(String, f32)>, DbError> {
+            unreachable!("kill switch must 404 before reaching the handler")
+        }
+        async fn referenced_by(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+        ) -> Result<Vec<ReferencedBy>, DbError> {
             unreachable!("kill switch must 404 before reaching the handler")
         }
     }

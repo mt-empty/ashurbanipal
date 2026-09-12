@@ -122,19 +122,26 @@ func (c *SQLiteSource) keyMetadata(ctx context.Context, table string) (map[strin
 	// constraint (composite FKs share an id). The quoted "table"/"from"/"to"
 	// are pragma_foreign_key_list's own fixed output column names (SQL
 	// keywords needing escape), not the caller-supplied table.
+	//
+	// REFERENCES parent shorthand leaves "to" NULL; ppk resolves it by
+	// position against the parent's PK, correlated per FK row since each
+	// can reference a different parent — unlike ReferencedBy's single
+	// bound parent (docs/adapter-decisions.md §5.4.1).
 	fkRows, err := c.db.QueryContext(ctx,
-		fmt.Sprintf(`select id, "table", "from", "to" from pragma_foreign_key_list(%s)`, quoted))
+		fmt.Sprintf(`select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid')
+		 from pragma_foreign_key_list(%s) fkl
+		 left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1`, quoted))
 	if err != nil {
 		return nil, nil, err
 	}
 	type fkRow struct {
-		id                 int64
+		id, seq            int64
 		refTable, from, to string
 	}
 	byConstraint := map[int64][]fkRow{}
 	for fkRows.Next() {
 		var r fkRow
-		if err := fkRows.Scan(&r.id, &r.refTable, &r.from, &r.to); err != nil {
+		if err := fkRows.Scan(&r.id, &r.seq, &r.refTable, &r.from, &r.to); err != nil {
 			fkRows.Close()
 			return nil, nil, err
 		}
@@ -432,4 +439,74 @@ func (c *SQLiteSource) CommonValues(ctx context.Context, schema *string, table, 
 	// statistics available" answer (spec/protocol.md §5.5), not a live
 	// GROUP BY scan. See docs/adapter-decisions.md.
 	return []CommonValueEntry{}, nil
+}
+
+// ReferencedBy serves GET /api/tables/referenced-by (spec/protocol.md §5.9).
+func (c *SQLiteSource) ReferencedBy(ctx context.Context, schema *string, table string) ([]ReferencedByEntry, error) {
+	if err := checkSchema(schema); err != nil {
+		return nil, err
+	}
+	tables, err := c.allowedTables(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := findExact(tables, table); !ok {
+		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+	}
+
+	qctx, cancel := c.bounded(ctx)
+	defer cancel()
+
+	// No reverse-FK index and no information_schema: walk every table's
+	// pragma_foreign_key_list (the schema is parsed in memory on open). The
+	// TVF argument m.name is a column reference — not spliced; fkl."table"
+	// is bound. COLLATE NOCASE because the pragma returns the referenced
+	// name as written in the DDL, which SQLite resolves case-insensitively.
+	// The sqlite_master predicate here matches allowedTables(), so every
+	// referrer is already allow-listed.
+	//
+	// "REFERENCES parent" with no parenthesised column list is valid DDL
+	// meaning "parent's own primary key", and for that form the pragma
+	// reports "to" as NULL rather than filling in the PK name. ppk resolves
+	// it: pragma_table_info(table)'s pk column is the 1-indexed position of
+	// a column within the parent's primary key, matching fkl.seq's
+	// 0-indexed position within the FK's column list — SQLite requires an
+	// omitted column list to align position-for-position with the parent
+	// PK, so this pairing holds for composite keys too. The 'rowid'
+	// fallback covers a parent with no declared primary key, where
+	// SQLite's parent key is the implicit rowid.
+	rows, err := c.db.QueryContext(qctx,
+		`select m.name, fkl.id, fkl."from", coalesce(fkl."to", ppk.name, 'rowid')
+		 from sqlite_master m
+		 join pragma_foreign_key_list(m.name) fkl
+		 left join pragma_table_info(?) ppk on ppk.pk = fkl.seq + 1
+		 where m.type = 'table'
+		   and m.name not like 'sqlite\_%' escape '\'
+		   and fkl."table" = ? collate nocase
+		 order by m.name, fkl.id, fkl.seq`, table, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mapped []ReferencedByEntry
+	for rows.Next() {
+		var refTable, fromCol, toCol string
+		var fkID int64
+		if err := rows.Scan(&refTable, &fkID, &fromCol, &toCol); err != nil {
+			return nil, err
+		}
+		// SQLite FKs are unnamed; fk_<id> is a per-table-stable synthetic
+		// label (spec/protocol.md §5.9 permits this).
+		mapped = append(mapped, ReferencedByEntry{
+			Table:      refTable,
+			Constraint: fmt.Sprintf("fk_%d", fkID),
+			Columns:    []ColumnPair{{From: fromCol, To: toCol}},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return groupReferencedBy(mapped), nil
 }
