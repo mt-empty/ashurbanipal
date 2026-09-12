@@ -353,7 +353,12 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         // conparentid = 0 excludes a partitioned referrer's per-partition
         // constraint copies (Postgres clones the parent's FK onto each
         // partition) — without it, one logical FK fans out into one entry
-        // per partition plus the parent.
+        // per partition plus the parent. relkind = 'r' gates the referrer
+        // itself the same way targetOid above gates the target: a
+        // partitioned table's own (non-inherited) FK constraint survives
+        // conparentid = 0 and would otherwise be reported as a referrer
+        // name that queryTable/commonValues/referencedBy-as-target then all
+        // reject, since none accept relkind = 'p'.
         val rows = jdbcTemplate.query(
             "select rn.nspname, rc.relname, con.conname, fa.attname as from_col, ta.attname as to_col " +
                 "from pg_constraint con " +
@@ -366,6 +371,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
                 "where con.contype = 'f' " +
                 "  and con.conparentid = 0 " +
                 "  and con.confrelid = ? " +
+                "  and rc.relkind = 'r' " +
                 "  and has_table_privilege(con.conrelid, 'SELECT') " +
                 "order by rn.nspname, rc.relname, con.conname, k.n",
             RowMapper { rs, _ ->

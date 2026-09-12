@@ -163,18 +163,23 @@ class ReferencedByIntegrationTest : AshurbanipalHttpTestBase() {
     }
 
     @Test
-    fun `reports one entry for a partitioned referrer, not one per partition`() {
+    fun `excludes a partitioned referrer and its partition copies`() {
+        // Two predicates do independent work here: conparentid = 0 collapses
+        // events_p1/events_p2's inherited constraint copies onto the parent
+        // (else one logical FK fans out into one entry per partition);
+        // rc.relkind = 'r' then drops that parent too, since events itself
+        // is relkind = 'p' and every other endpoint (queryTable,
+        // commonValues, referencedBy-as-target) already rejects it as
+        // NotAllowed the same way an unlisted table is rejected. A referrer
+        // name the frontend can't drill into is worse than not reporting
+        // it. Asserting zero rather than one keeps both predicates covered:
+        // losing either one reintroduces an events* entry.
         val schema = "ashb_test_spring_referenced_by_partitioning_dup"
         setupPartitionedSchema(schema)
         try {
             val list = getJson("/api/tables/referenced-by?schema=$schema&table=users")["referenced_by"]
             val events = (list as Iterable<JsonNode>).filter { it["table"].asText().startsWith("events") }
-            assertEquals(
-                1,
-                events.size,
-                "a partitioned referrer's inherited FK copies must collapse to one entry, got $events",
-            )
-            assertEquals("events", events.first()["table"].asText())
+            assertEquals(0, events.size, "a partitioned referrer must be excluded entirely, got $events")
         } finally {
             dropSchema(schema)
         }
@@ -195,10 +200,9 @@ class ReferencedByIntegrationTest : AshurbanipalHttpTestBase() {
         }
     }
 
-    // finding #1: queryTable (and commonValues, same gate) validate table
-    // via allowedTables, which used to match information_schema.tables'
-    // broader BASE TABLE instead of listTables' relkind = 'r' — so a
-    // partitioned table must be rejected here too, not silently queried.
+    // queryTable (and commonValues, same gate) validate table via
+    // allowedTables, which shares listTables' own relkind = 'r' predicate —
+    // a partitioned table must be rejected here too, not silently queried.
     @Test
     fun `query table rejects a partitioned table same as referenced-by does`() {
         val schema = "ashb_test_spring_query_table_partitioning_gate"

@@ -65,14 +65,28 @@ data class ReferencedByEntry(
  */
 internal fun groupReferencedBy(rows: List<ReferencedByEntry>): List<ReferencedByEntry> {
     val out = ArrayList<ReferencedByEntry>()
+    // Accumulates into one mutable buffer per run instead of `copy`ing the
+    // whole immutable columns list on every additional pair (O(k) per
+    // constraint instead of O(k^2) for a k-column composite FK).
+    var pendingEntry: ReferencedByEntry? = null
+    var pendingColumns: MutableList<ColumnPair>? = null
+
+    fun flush() {
+        val entry = pendingEntry ?: return
+        out.add(entry.copy(columns = pendingColumns!!))
+    }
+
     for (row in rows) {
-        val last = out.lastOrNull()
-        if (last != null && last.table == row.table && last.schema == row.schema && last.constraint == row.constraint) {
-            out[out.lastIndex] = last.copy(columns = last.columns + row.columns)
+        val pending = pendingEntry
+        if (pending != null && pending.table == row.table && pending.schema == row.schema && pending.constraint == row.constraint) {
+            pendingColumns!!.addAll(row.columns)
         } else {
-            out.add(row)
+            flush()
+            pendingEntry = row
+            pendingColumns = row.columns.toMutableList()
         }
     }
+    flush()
     return out
 }
 
