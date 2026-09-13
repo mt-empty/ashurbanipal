@@ -78,11 +78,9 @@ async fn nul_byte_filter_value_is_rejected_as_filter_parse_not_a_500() {
         ..base_opts()
     };
 
+    let result = source.query_table(None, "users", opts).await;
     assert!(
-        matches!(
-            source.query_table(None, "users", opts).await,
-            Err(DbError::FilterParse(_))
-        ),
-        "a NUL byte in a filter value must be rejected as FilterParse, not reach the driver as a raw 500"
+        matches!(result, Err(DbError::FilterParse(_))),
+        "a NUL byte in a filter value must be rejected as FilterParse, not reach the driver as a raw 500: got {result:?}"
     );
 }
