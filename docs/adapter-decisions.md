@@ -88,6 +88,21 @@ case-sensitive `LIKE`, for every implementation.
 | MySQL    | `LOWER(...) LIKE LOWER(?)` | Unlike SQLite, MySQL's plain `LIKE` case-sensitivity depends on the column's/comparison's *collation* — a `_ci`-collation column is already case-insensitive, a `_bin`/`_cs` one isn't, and this crate has no control over a host table's collation. A bare keyword swap to `LIKE` (SQLite's approach) can't reliably hold the case-insensitive guarantee `ILIKE` promises, so `mysql.rs::build_where_clause` wraps both sides in `LOWER(...)` instead. Plain `LIKE` (non-`ILIKE`) is left alone, so its case-sensitivity still depends on the column's collation exactly as MySQL's native `LIKE` always has. |
 | SQLite   | Mapped to plain `LIKE` | SQLite's `LIKE` is already ASCII case-insensitive by default, so there's no separate keyword to map to — `ILIKE` and `LIKE` compile to the same SQL fragment (`sqlite.rs::build_where_clause`). The *observable* behavior (case-insensitive match) still holds; only the SQL-fragment mechanism collapses. Note this only covers ASCII case-folding — Postgres's `ILIKE` is more permissive on non-ASCII text, a known gap if a table has non-ASCII data. |
 
+### NUL bytes in a filter value
+
+| Backend  | Mechanism | Notes |
+|----------|-----------|-------|
+| Postgres | A NUL byte (`\0`) in a bound filter `value` is rejected and mapped to the existing filter-validation `FilterParse` (→ 400): Rust/Go/Node/Spring bind the raw value and catch the server's own rejection (SQLSTATE `22021`/`22P05`); Flask's driver (psycopg) validates client-side before the value ever reaches the server (a `psycopg.DataError` with no SQLSTATE at all) and is caught the same way. | Empirically probed (not assumed): binding a NUL byte as a text parameter against a live Postgres always fails — Postgres text can never hold `\0`, at the wire/encoding level, regardless of driver. The value can never match a real row on this backend, but the request itself is well-formed (spec/protocol.md §5.4.2 puts no restriction on `value`'s content), so it isn't a server fault either — 400, matching the treatment already given to other filter-value-shaped violations, not a raw 500. See each port's Postgres table-gate fix (`readable_table_oid_in_tx` / `readableTableOID` / `readableTableOid` / `_readable_table_oid`) for the identifier-side analog of this same NUL-byte issue — different code path, same underlying encoding limit. |
+| SQLite   | No special handling — none needed. | Empirically probed: SQLite stores and matches a NUL byte in a real text value with no error (`insert`/`select` round-trip cleanly). SQLite strings are length-prefixed, not NUL-terminated, so there's no encoding limit to work around. |
+| MySQL/MariaDB | No special handling — none needed. | Empirically probed against both engines: a NUL byte in a bound text parameter compares correctly with no error. Neither engine shares Postgres's text-encoding restriction. |
+
+This is a **protocol-level non-issue disguised as one**: `spec/protocol.md`
+§5.4.2 never restricts filter `value` content, and two of three backends
+need no special casing at all — only Postgres's own text representation
+forbids the byte, so only its drivers need the catch-and-remap. A port
+adding a new backend should probe empirically (as above) rather than assume
+either behavior.
+
 ### Boolean values in a filter comparison
 
 Every backend casts the target column to text before comparing a filter

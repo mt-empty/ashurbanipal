@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -85,6 +86,13 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 // (docs/adapter-decisions.md §5.2/§5.3). One targeted row instead of
 // fetching every table name in the schema to check membership of one.
 func (c *PostgresSource) readableTableOID(ctx context.Context, db queryer, schema, table string) (int, error) {
+	// Postgres text can never hold a NUL byte, so no real relname could ever
+	// match one; short-circuit before it reaches the driver, which otherwise
+	// throws its own encoding error ahead of the query ever getting a chance
+	// to just say "no match" (spec/protocol.md §5.2).
+	if strings.ContainsRune(table, 0) {
+		return 0, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+	}
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	var oid int
@@ -305,13 +313,20 @@ func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]Cou
 }
 
 // mapSelectDenied turns a residual "permission denied" (SQLSTATE 42501) at
-// the row fetch into a NotAllowedError (400). The allow-list already
-// rejects tables the role can't SELECT, so this only catches the edge —
-// keeping the raw driver error off the wire.
+// the row fetch into a NotAllowedError (400) — the allow-list already
+// rejects tables the role can't SELECT, so this only catches the edge. It
+// also maps a filter value Postgres's text encoding rejects (SQLSTATE
+// 22021/22P05) to a FilterError, also 400, never a raw 500
+// (docs/adapter-decisions.md §5.4.2 has the cross-backend rationale).
 func mapSelectDenied(err error, table string) error {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "42501" {
-		return &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "42501":
+			return &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		case "22021", "22P05":
+			return filterErr("value invalid for this backend: %s", pgErr.Message)
+		}
 	}
 	return err
 }
