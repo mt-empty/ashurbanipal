@@ -36,11 +36,19 @@ export class FilterError extends Error {
  * The allow-list already rejects tables the role can't SELECT, so a
  * `permission denied` (SQLSTATE 42501) reaching the row fetch is a
  * residual edge; report it as NotAllowedError (→ 400) rather than letting
- * the raw driver error surface as a 500.
+ * the raw driver error surface as a 500. Also maps a filter value
+ * Postgres's text encoding rejects (SQLSTATE 22021/22P05) to FilterError,
+ * also 400, never a raw 500 (docs/adapter-decisions.md §5.4.2 has the
+ * cross-backend rationale).
  */
 export function mapSelectDenied(err: unknown, table: string): unknown {
-  if (typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === "42501") {
+  const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
+  if (code === "42501") {
     return new NotAllowedError(`table "${table}"`);
+  }
+  if (code === "22021" || code === "22P05") {
+    const message = err instanceof Error ? err.message : String(err);
+    return new FilterError(`value invalid for this backend: ${message}`);
   }
   return err;
 }

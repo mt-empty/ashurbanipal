@@ -2,7 +2,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresSource } from "../src/db/postgres.js";
 import type { QueryOpts } from "../src/db/types.js";
-import { NotAllowedError } from "../src/errors.js";
+import { FilterError, NotAllowedError } from "../src/errors.js";
 
 // The table listing, the counts, and the `table` allow-list must all
 // Excludes non-selectable tables and maps residual SELECT denial to NotAllowed
@@ -73,5 +73,26 @@ maybeDescribe("table listing privilege gate (live db)", () => {
 
   it("a table the role has no privilege on is rejected as NotAllowed", async () => {
     await expect(source.queryTable(SCHEMA, "no_grant", opts, TIMEOUT_MS)).rejects.toBeInstanceOf(NotAllowedError);
+  });
+
+  // Postgres text can never hold a NUL byte, so this can never match a real
+  // table; it must be rejected as NotAllowed, not reach the driver as a raw
+  // encoding-error 500 (schemathesis's fuzzing phase found the 500 here).
+  it("a NUL byte in the table name is rejected as NotAllowed, not a driver error", async () => {
+    const bad = "ashb\0nul";
+    await expect(source.queryTable(SCHEMA, bad, opts, TIMEOUT_MS)).rejects.toBeInstanceOf(NotAllowedError);
+    await expect(source.commonValues(SCHEMA, bad, "id", TIMEOUT_MS)).rejects.toBeInstanceOf(NotAllowedError);
+    await expect(source.referencedBy(SCHEMA, bad, TIMEOUT_MS)).rejects.toBeInstanceOf(NotAllowedError);
+  });
+
+  // A NUL byte in a filter value is a Postgres-only limit, not a protocol
+  // one (docs/adapter-decisions.md §5.4.2) — still rejected as FilterError,
+  // not a raw 500.
+  it("a NUL byte in a filter value is rejected as FilterError, not a driver error", async () => {
+    const filterOpts: QueryOpts = {
+      ...opts,
+      filter: [{ column: "name", op: "=", value: "a\0b" }],
+    };
+    await expect(source.queryTable(SCHEMA, "readable", filterOpts, TIMEOUT_MS)).rejects.toBeInstanceOf(FilterError);
   });
 });

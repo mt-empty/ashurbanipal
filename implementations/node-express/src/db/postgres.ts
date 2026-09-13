@@ -77,6 +77,13 @@ export class PostgresSource implements DbSource {
   // §5.2/§5.3). One targeted row instead of fetching every table name in
   // the schema to check membership of one.
   private async readableTableOid(client: PoolClient, schema: string, table: string): Promise<number> {
+    // Postgres text can never hold a NUL byte, so no real relname could ever
+    // match one; short-circuit before it reaches the driver, which otherwise
+    // throws its own encoding error ahead of the query ever getting a chance
+    // to just say "no match" (spec/protocol.md §5.2).
+    if (table.includes("\0")) {
+      throw new NotAllowedError(`table "${table}"`);
+    }
     const { rows } = await client.query<{ oid: number }>(
       `select c.oid::int4 as oid from pg_class c
        join pg_namespace n on n.oid = c.relnamespace
