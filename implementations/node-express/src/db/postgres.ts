@@ -68,20 +68,26 @@ export class PostgresSource implements DbSource {
     return real;
   }
 
-  // Mirrors listTables' own pg_class/relkind = 'r' predicate, not
-  // information_schema.tables' broader BASE TABLE (which also matches
-  // partitioned tables) — keeps this allow-list and listTables in lockstep
-  // (docs/adapter-decisions.md §5.2/§5.3).
-  private async allowedTables(client: PoolClient, schema: string): Promise<string[]> {
-    const { rows } = await client.query<{ relname: string }>(
-      `select c.relname from pg_class c
+  // Resolves table to its OID iff it's a readable base table in schema —
+  // the single existence-and-privilege check every table-scoped operation
+  // needs before touching request-supplied SQL. Mirrors listTables' own
+  // pg_class/relkind = 'r' predicate, not information_schema.tables'
+  // broader BASE TABLE (which also matches partitioned tables) — keeps
+  // this gate and listTables in lockstep (docs/adapter-decisions.md
+  // §5.2/§5.3). One targeted row instead of fetching every table name in
+  // the schema to check membership of one.
+  private async readableTableOid(client: PoolClient, schema: string, table: string): Promise<number> {
+    const { rows } = await client.query<{ oid: number }>(
+      `select c.oid::int4 as oid from pg_class c
        join pg_namespace n on n.oid = c.relnamespace
-       where n.nspname = $1 and c.relkind = 'r'
-         and has_table_privilege(c.oid, 'SELECT')
-       order by c.relname`,
-      [schema],
+       where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
+         and has_table_privilege(c.oid, 'SELECT')`,
+      [schema, table],
     );
-    return rows.map((r) => r.relname);
+    if (rows.length === 0) {
+      throw new NotAllowedError(`table "${table}"`);
+    }
+    return rows[0].oid;
   }
 
   private async allowedColumns(client: PoolClient, schema: string, table: string): Promise<string[]> {
@@ -203,11 +209,8 @@ export class PostgresSource implements DbSource {
   async queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-      const tables = await this.allowedTables(client, realSchema);
-      const realTable = findExact(tables, table);
-      if (!realTable) {
-        throw new NotAllowedError(`table "${table}"`);
-      }
+      await this.readableTableOid(client, realSchema, table);
+      const realTable = table;
 
       const columnNames = await this.allowedColumns(client, realSchema, realTable);
 
@@ -317,11 +320,8 @@ export class PostgresSource implements DbSource {
   ): Promise<CommonValueEntry[]> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-      const tables = await this.allowedTables(client, realSchema);
-      const realTable = findExact(tables, table);
-      if (!realTable) {
-        throw new NotAllowedError(`table "${table}"`);
-      }
+      await this.readableTableOid(client, realSchema, table);
+      const realTable = table;
       const columnNames = await this.allowedColumns(client, realSchema, realTable);
       const realColumn = findExact(columnNames, column);
       if (!realColumn) {
@@ -362,23 +362,7 @@ export class PostgresSource implements DbSource {
   async referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-
-      // Resolved once and bound as $1 below (con.confrelid = $1) — the same
-      // pg_class/relkind = 'r'/has_table_privilege predicate allowedTables
-      // uses, so a partitioned or unknown table rejects here instead of a
-      // silent [] from the confrelid join finding zero rows
-      // (spec/protocol.md §5.2/§5.9).
-      const { rows: oidRows } = await client.query<{ oid: number }>(
-        `select c.oid::int4 as oid from pg_class c
-           join pg_namespace n on n.oid = c.relnamespace
-           where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
-             and has_table_privilege(c.oid, 'SELECT')`,
-        [realSchema, table],
-      );
-      if (oidRows.length === 0) {
-        throw new NotAllowedError(`table "${table}"`);
-      }
-      const targetOid = oidRows[0].oid;
+      const targetOid = await this.readableTableOid(client, realSchema, table);
 
       // pg_catalog, not information_schema: the reverse (confrelid) filter
       // over the standard-SQL views runs 20-40x slower on a large catalog

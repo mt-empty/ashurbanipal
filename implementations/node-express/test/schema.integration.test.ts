@@ -243,8 +243,9 @@ maybeDescribe("multi-schema support (live db)", () => {
     });
 
     // query_table (and common_values, same gate) validate table via
-    // allowedTables, which shares list_tables' own relkind = 'r' predicate
-    // — a partitioned table must be rejected here too, not silently queried.
+    // readableTableOid, which shares list_tables' own relkind = 'r'
+    // predicate — a partitioned table must be rejected here too, not
+    // silently queried.
     it("query_table rejects a partitioned table same as referenced_by does", async () => {
       const schema = "ashb_test_node_query_table_partitioning_gate";
       await setupPartitionedSchema(schema);
