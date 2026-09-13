@@ -5,6 +5,16 @@ Notable changes to the `ashurbanipal-actix-web` adapter. Format follows
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.6.0] - 2026-09-13
+
+### Bug Fixes
+
+- Reject a NUL byte in table/filter-value params, not a raw 500 (#120)
+
+### Security
+
+- Add incoming FK references endpoint (§5.9) (#119)
+
 ## [0.5.0] - 2026-09-08
 
 ### Features
