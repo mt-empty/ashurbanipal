@@ -327,6 +327,48 @@ func TestUnknownTableIsRejectedWith400(t *testing.T) {
 	}
 }
 
+// A NUL byte in a filter value is a Postgres-only limit, not a protocol one
+// (docs/adapter-decisions.md §5.4.2) — still must 400, not 500.
+func TestNulByteInFilterValueIsRejectedWith400(t *testing.T) {
+	// A raw 0x00 byte inside JSON string text is itself invalid JSON syntax
+	// (RFC 8259) and would 400 for that reason alone, never reaching the DB
+	// layer this test targets — the escape `\u0000` is what decodes to a
+	// real NUL character in the resulting Go string.
+	filter := `[{"column":"full_name","op":"=","value":"a\u0000b"}]`
+	q := url.Values{"table": {"users"}, "filter": {filter}}
+	resp, err := http.Get(testServer(t) + "/__ashurbanipal/api/tables/data?" + q.Encode())
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("got status %d, want 400", resp.StatusCode)
+	}
+}
+
+// Postgres text can never hold a NUL byte, so this can never match a real
+// table; it must come back as a clean 400, not a raw driver encoding-error
+// 500 (schemathesis's fuzzing phase found the 500 on this and referenced-by).
+func TestNulByteInTableIsRejectedWith400(t *testing.T) {
+	base := testServer(t)
+	table := url.QueryEscape("ashb\x00nul")
+	paths := []string{
+		"/__ashurbanipal/api/tables/data?table=" + table,
+		"/__ashurbanipal/api/tables/common-values?table=" + table + "&column=id",
+		"/__ashurbanipal/api/tables/referenced-by?table=" + table,
+	}
+	for _, path := range paths {
+		resp, err := http.Get(base + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: got status %d, want 400", path, resp.StatusCode)
+		}
+	}
+}
+
 func TestCommonValuesOnNeverAnalyzedColumnYieldsEmptyListNotAnError(t *testing.T) {
 	body := getJSON(t, testServer(t), "/api/tables/common-values?table=feature_flags&column=enabled")
 	values, _ := body["values"].([]interface{})
