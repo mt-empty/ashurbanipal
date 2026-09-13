@@ -76,32 +76,29 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 	return real, nil
 }
 
-func (c *PostgresSource) allowedTables(ctx context.Context, db queryer, schema string) ([]string, error) {
+// readableTableOID resolves table to its OID iff it's a readable base
+// table in schema — the single existence-and-privilege check every
+// table-scoped operation needs before touching request-supplied SQL.
+// Mirrors ListTables' own pg_class/relkind = 'r' predicate, not
+// information_schema.tables' broader BASE TABLE (which also matches
+// partitioned tables) — keeps this gate and ListTables in lockstep
+// (docs/adapter-decisions.md §5.2/§5.3). One targeted row instead of
+// fetching every table name in the schema to check membership of one.
+func (c *PostgresSource) readableTableOID(ctx context.Context, db queryer, schema, table string) (int, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	// Mirrors ListTables' own pg_class/relkind = 'r' predicate, not
-	// information_schema.tables' broader BASE TABLE (which also matches
-	// partitioned tables) — keeps this allow-list and ListTables in
-	// lockstep (docs/adapter-decisions.md §5.2/§5.3).
-	rows, err := db.QueryContext(ctx,
-		`select c.relname from pg_class c
+	var oid int
+	if err := db.QueryRowContext(ctx,
+		`select c.oid from pg_class c
 		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = $1 and c.relkind = 'r'
-		   and has_table_privilege(c.oid, 'SELECT')
-		 order by c.relname`, schema)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
+		 where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
+		   and has_table_privilege(c.oid, 'SELECT')`, schema, table).Scan(&oid); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
 		}
-		out = append(out, name)
+		return 0, err
 	}
-	return out, rows.Err()
+	return oid, nil
 }
 
 func (c *PostgresSource) allowedColumns(ctx context.Context, db queryer, schema, table string) ([]string, error) {
@@ -334,14 +331,10 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 		return TableData{}, err
 	}
 
-	tables, err := c.allowedTables(ctx, tx, realSchema)
-	if err != nil {
+	if _, err := c.readableTableOID(ctx, tx, realSchema, table); err != nil {
 		return TableData{}, err
 	}
-	realTable, ok := findExact(tables, table)
-	if !ok {
-		return TableData{}, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
-	}
+	realTable := table
 
 	columnNames, err := c.allowedColumns(ctx, tx, realSchema, realTable)
 	if err != nil {
@@ -544,14 +537,10 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 		return nil, err
 	}
 
-	tables, err := c.allowedTables(ctx, tx, realSchema)
-	if err != nil {
+	if _, err := c.readableTableOID(ctx, tx, realSchema, table); err != nil {
 		return nil, err
 	}
-	realTable, ok := findExact(tables, table)
-	if !ok {
-		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
-	}
+	realTable := table
 	columnNames, err := c.allowedColumns(ctx, tx, realSchema, realTable)
 	if err != nil {
 		return nil, err
@@ -633,25 +622,13 @@ func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table
 		return nil, err
 	}
 
-	qctx, cancel := c.bounded(ctx)
-	defer cancel()
-
-	// Resolved once and bound as $1 below (con.confrelid = $1) — the same
-	// pg_class/relkind = 'r'/has_table_privilege predicate allowedTables
-	// uses, so a partitioned or unknown table rejects here instead of a
-	// silent [] from the confrelid join finding zero rows
-	// (spec/protocol.md §5.2/§5.9).
-	var targetOID int
-	if err := tx.QueryRowContext(qctx,
-		`select c.oid from pg_class c
-		     join pg_namespace n on n.oid = c.relnamespace
-		     where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
-		       and has_table_privilege(c.oid, 'SELECT')`, realSchema, table).Scan(&targetOID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
-		}
+	targetOID, err := c.readableTableOID(ctx, tx, realSchema, table)
+	if err != nil {
 		return nil, err
 	}
+
+	qctx, cancel := c.bounded(ctx)
+	defer cancel()
 
 	// pg_catalog, not information_schema: the reverse (confrelid) filter
 	// over the standard-SQL views runs 20-40x slower on a large catalog

@@ -106,7 +106,7 @@ func TestQueryTableRejectsPartitionedTableSameAsReferencedByDoes(t *testing.T) {
 	const schema = "ashb_test_go_query_table_partitioning_gate"
 	setupPartitionedSchema(t, schema)
 
-	// allowedTables gates table via list_tables' own relkind = 'r'
+	// readableTableOID gates table via ListTables' own relkind = 'r'
 	// predicate — a partitioned table must reject the same way
 	// ReferencedBy already does.
 	path := "/api/tables/data?schema=" + url.QueryEscape(schema) + "&table=events"
