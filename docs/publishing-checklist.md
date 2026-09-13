@@ -1,9 +1,9 @@
 # Publishing checklist
 
-Status (2026-09-08): all six packaged ports are live on their registries and,
+Status (2026-09-13): all six packaged ports are live on their registries and,
 since the 0.3.0 reset, share one `major.minor` version line. The table below is
-staged at 0.5.0 ahead of tagging; each port goes live when its
-`<prefix>-v0.5.0` tag is pushed (0.4.0 was the last release to reach every
+staged at 0.6.0 ahead of tagging; each port goes live when its
+`<prefix>-v0.6.0` tag is pushed (0.5.0 was the last release to reach every
 registry).
 
 This doc governs *distribution* — whether a port's artifact can leave this repo
@@ -15,13 +15,13 @@ separate gates.
 
 | Port | Package / coordinate | Registry | Latest | Tag prefix | Publish workflow |
 |---|---|---|---|---|---|
-| Rust core | `ashurbanipal` | crates.io | 0.5.0 | `ashurbanipal-v*` | `rust-core-publish.yml` |
-| Rust / Axum | `ashurbanipal-axum` | crates.io | 0.5.0 | `ashurbanipal-axum-v*` | `rust-axum-publish.yml` |
-| Rust / Actix-web | `ashurbanipal-actix-web` | crates.io | 0.5.0 | `ashurbanipal-actix-web-v*` | `rust-actix-web-publish.yml` |
-| Node / Express | `ashurbanipal-node-express` | npm | 0.5.0 | `ashurbanipal-node-express-v*` | `node-express-publish.yml` |
-| Python / Flask | `ashurbanipal-flask` | PyPI | 0.5.0 | `ashurbanipal-flask-v*` | `flask-python-publish.yml` |
-| Spring Boot | `io.github.mt-empty:ashurbanipal-spring-boot-starter` | Maven Central | 0.5.0 | `ashurbanipal-spring-boot-starter-v*` | `spring-boot-starter-publish.yml` |
-| Go / net-http | `github.com/mt-empty/ashurbanipal/implementations/go-nethttp` | proxy.golang.org | 0.5.0 | `implementations/go-nethttp/v*` | `go-nethttp-publish.yml` |
+| Rust core | `ashurbanipal` | crates.io | 0.6.0 | `ashurbanipal-v*` | `rust-core-publish.yml` |
+| Rust / Axum | `ashurbanipal-axum` | crates.io | 0.6.0 | `ashurbanipal-axum-v*` | `rust-axum-publish.yml` |
+| Rust / Actix-web | `ashurbanipal-actix-web` | crates.io | 0.6.0 | `ashurbanipal-actix-web-v*` | `rust-actix-web-publish.yml` |
+| Node / Express | `ashurbanipal-node-express` | npm | 0.6.0 | `ashurbanipal-node-express-v*` | `node-express-publish.yml` |
+| Python / Flask | `ashurbanipal-flask` | PyPI | 0.6.0 | `ashurbanipal-flask-v*` | `flask-python-publish.yml` |
+| Spring Boot | `io.github.mt-empty:ashurbanipal-spring-boot-starter` | Maven Central | 0.6.0 | `ashurbanipal-spring-boot-starter-v*` | `spring-boot-starter-publish.yml` |
+| Go / net-http | `github.com/mt-empty/ashurbanipal/implementations/go-nethttp` | proxy.golang.org | 0.6.0 | `implementations/go-nethttp/v*` | `go-nethttp-publish.yml` |
 
 **Latest** is the target set in the release commit, not necessarily what's on
 the registries yet — a port goes live only when its tag is pushed, so
