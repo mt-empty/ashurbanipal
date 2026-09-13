@@ -145,6 +145,13 @@ impl PgPoolSource {
         schema: &str,
         table: &str,
     ) -> Result<i32, DbError> {
+        // Postgres text can never hold a NUL byte, so no real relname could
+        // ever match one; short-circuit before it reaches the driver, which
+        // otherwise throws its own encoding error ahead of `fetch_optional`
+        // ever getting a chance to just say "no match" (spec/protocol.md §5.2).
+        if table.contains('\0') {
+            return Err(DbError::NotAllowed(format!("table {table:?}")));
+        }
         sqlx::query_scalar::<_, i32>(
             "select c.oid::int4 from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
@@ -266,14 +273,24 @@ impl PgPoolSource {
     }
 }
 
-/// Maps residual SELECT-denied errors to `NotAllowed` (`spec/protocol.md` §2).
+/// Maps residual SELECT-denied errors to `NotAllowed`, and a filter value
+/// Postgres's text encoding rejects (e.g. a NUL byte) to `FilterParse` —
+/// both → 400, never a raw 500 (`spec/protocol.md` §2; `docs/adapter-decisions.md`
+/// §5.4.2 has the cross-backend rationale).
 fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
-    match &e {
-        sqlx::Error::Database(db) if db.code().as_deref() == Some("42501") => {
-            DbError::NotAllowed(format!("table {table:?}"))
+    if let sqlx::Error::Database(db) = &e {
+        match db.code().as_deref() {
+            Some("42501") => return DbError::NotAllowed(format!("table {table:?}")),
+            Some("22021") | Some("22P05") => {
+                return DbError::FilterParse(format!(
+                    "value invalid for this backend: {}",
+                    db.message()
+                ))
+            }
+            _ => {}
         }
-        _ => DbError::Sqlx(e),
     }
+    DbError::Sqlx(e)
 }
 
 fn row_to_json(row: &PgRow, columns: &[ColumnInfo]) -> serde_json::Map<String, serde_json::Value> {

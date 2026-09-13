@@ -31,14 +31,14 @@ run = "cargo test --lib --features mysql"
 dir = "implementations/rust"
 
 ["rust:integration-test"]
-description = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning: axum's own Postgres-backed integration tests (needs DATABASE_URL)"
+description = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning --test nul_byte_identifiers: axum's own Postgres-backed integration tests (needs DATABASE_URL)"
 # Separate from rust:test (--lib) for the same reason that task excludes
 # the conformance target: these open their own DB pools and would add
 # concurrent connection pressure if run alongside conformance:test.
 # Excludes schema_isolation_mysql.rs on purpose — that file requires the
 # mysql feature + MYSQL_TEST_URL and documents itself as not run in CI
 # (see its own module doc comment), same as the rest of the mysql feature.
-run = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning"
+run = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning --test nul_byte_identifiers"
 dir = "implementations/rust/axum"
 
 ["rust:integration-test-actix"]
