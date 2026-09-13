@@ -177,8 +177,9 @@ def test_referenced_by_rejects_partitioned_table_as_target_same_as_any_unlisted_
 def test_query_table_rejects_partitioned_table_same_as_referenced_by_does(source) -> None:
     schema = "ashb_test_flask_query_table_partitioning_gate"
     # query_table (and common_values, same gate) validate table via
-    # _allowed_tables, which shares list_tables' own relkind = 'r' predicate
-    # — a partitioned table must be rejected here too, not silently queried.
+    # _readable_table_oid, which shares list_tables' own relkind = 'r'
+    # predicate — a partitioned table must be rejected here too, not
+    # silently queried.
     with _partitioned_schema(schema), pytest.raises(NotAllowed):
         source.query_table(schema, "events", QueryOpts(limit=10, offset=0, timeout_secs=5))
 

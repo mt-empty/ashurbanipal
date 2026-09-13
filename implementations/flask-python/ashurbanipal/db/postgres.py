@@ -93,20 +93,27 @@ class PgSource(DbSource):
             raise NotAllowed(f"schema {resolved!r}")
         return resolved
 
-    def _allowed_tables(self, cur: psycopg.Cursor, schema: str) -> list[str]:
-        # Mirrors list_tables' own pg_class/relkind = 'r' predicate, not
-        # information_schema.tables' broader BASE TABLE (which also matches
-        # partitioned tables) — keeps this allow-list and list_tables in
-        # lockstep (docs/adapter-decisions.md §5.2/§5.3).
+    def _readable_table_oid(self, cur: psycopg.Cursor, schema: str, table: str) -> int:
+        # Resolves table to its OID iff it's a readable base table in
+        # schema — the single existence-and-privilege check every
+        # table-scoped operation needs before touching request-supplied
+        # SQL. Mirrors list_tables' own pg_class/relkind = 'r' predicate,
+        # not information_schema.tables' broader BASE TABLE (which also
+        # matches partitioned tables) — keeps this gate and list_tables in
+        # lockstep (docs/adapter-decisions.md §5.2/§5.3). One targeted row
+        # instead of fetching every table name in the schema to check
+        # membership of one.
         cur.execute(
-            "select c.relname from pg_class c "
+            "select c.oid from pg_class c "
             "join pg_namespace n on n.oid = c.relnamespace "
-            "where n.nspname = %s and c.relkind = 'r' "
-            "  and has_table_privilege(c.oid, 'SELECT') "
-            "order by c.relname",
-            (schema,),
+            "where n.nspname = %s and c.relname = %s and c.relkind = 'r' "
+            "  and has_table_privilege(c.oid, 'SELECT')",
+            (schema, table),
         )
-        return [row[0] for row in cur.fetchall()]
+        row = cur.fetchone()
+        if row is None:
+            raise NotAllowed(f"table {table!r}")
+        return row[0]
 
     def _allowed_columns(self, cur: psycopg.Cursor, schema: str, table: str) -> list[str]:
         cur.execute(
@@ -208,9 +215,7 @@ class PgSource(DbSource):
                 cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
 
                 resolved_schema = self._resolve_schema(cur, schema)
-                tables = self._allowed_tables(cur, resolved_schema)
-                if table not in tables:
-                    raise NotAllowed(f"table {table!r}")
+                self._readable_table_oid(cur, resolved_schema, table)
 
                 column_names = self._allowed_columns(cur, resolved_schema, table)
                 sort = None
@@ -294,9 +299,7 @@ class PgSource(DbSource):
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved_schema = self._resolve_schema(cur, schema)
-            tables = self._allowed_tables(cur, resolved_schema)
-            if table not in tables:
-                raise NotAllowed(f"table {table!r}")
+            self._readable_table_oid(cur, resolved_schema, table)
             columns = self._allowed_columns(cur, resolved_schema, table)
             if column not in columns:
                 raise NotAllowed(f"column {column!r}")
@@ -333,23 +336,7 @@ class PgSource(DbSource):
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
             resolved_schema = self._resolve_schema(cur, schema)
-
-            # Resolved once and bound as %s below (con.confrelid = %s) — the
-            # same pg_class/relkind = 'r'/has_table_privilege predicate
-            # _allowed_tables uses, so a partitioned or unknown table
-            # rejects here instead of a silent [] from the confrelid join
-            # finding zero rows (spec/protocol.md §5.2/§5.9).
-            cur.execute(
-                "select c.oid from pg_class c "
-                "join pg_namespace n on n.oid = c.relnamespace "
-                "where n.nspname = %s and c.relname = %s and c.relkind = 'r' "
-                "  and has_table_privilege(c.oid, 'SELECT')",
-                (resolved_schema, table),
-            )
-            target_oid_row = cur.fetchone()
-            if target_oid_row is None:
-                raise NotAllowed(f"table {table!r}")
-            target_oid = target_oid_row[0]
+            target_oid = self._readable_table_oid(cur, resolved_schema, table)
 
             # pg_catalog, not information_schema: the reverse (confrelid)
             # filter over the standard-SQL views runs 20-40x slower on a
