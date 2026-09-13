@@ -10,8 +10,49 @@
 
 use ashurbanipal_axum::{Condition, DbError, DbSource, FilterOp, PgPoolSource, QueryOpts};
 use sqlx::postgres::PgPoolOptions;
+use sqlx::Executor;
 
 const NUL_TABLE: &str = "ashb\0nul";
+const FILTER_SCHEMA: &str = "ashb_test_nul_byte_filter";
+
+// A throwaway fixture, not the devcontainer/CI-seeded `users` table — this
+// job's Postgres service (unlike the conformance jobs') never loads
+// `.devcontainer/db/init/01-seed.sql`, so every sibling integration test
+// here brings its own schema/table instead of assuming seed data exists.
+async fn setup_filter_schema(database_url: &str) {
+    let admin = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(database_url)
+        .await
+        .expect("connect for schema setup");
+    admin
+        .execute(sqlx::AssertSqlSafe(format!(
+            "drop schema if exists {FILTER_SCHEMA} cascade"
+        )))
+        .await
+        .unwrap();
+    admin
+        .execute(sqlx::AssertSqlSafe(format!(
+            "create schema {FILTER_SCHEMA}; \
+             create table {FILTER_SCHEMA}.probe_nul_byte (id int primary key, val text)"
+        )))
+        .await
+        .unwrap();
+}
+
+async fn teardown_filter_schema(database_url: &str) {
+    let admin = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(database_url)
+        .await
+        .expect("connect for schema teardown");
+    admin
+        .execute(sqlx::AssertSqlSafe(format!(
+            "drop schema if exists {FILTER_SCHEMA} cascade"
+        )))
+        .await
+        .ok();
+}
 
 async fn source() -> PgPoolSource {
     let database_url = std::env::var("DATABASE_URL")
@@ -66,21 +107,29 @@ async fn nul_byte_table_name_is_rejected_as_not_allowed_not_a_500() {
 
 #[tokio::test]
 async fn nul_byte_filter_value_is_rejected_as_filter_parse_not_a_500() {
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
+    setup_filter_schema(&database_url).await;
+
     let source = source().await;
     let opts = QueryOpts {
         filter: Some(vec![Condition {
             logic: None,
             not: false,
-            column: "full_name".to_string(),
+            column: "val".to_string(),
             op: FilterOp::Eq,
             value: Some("ashb\0nul".to_string()),
         }]),
         ..base_opts()
     };
 
-    let result = source.query_table(None, "users", opts).await;
+    let result = source
+        .query_table(Some(FILTER_SCHEMA), "probe_nul_byte", opts)
+        .await;
     assert!(
         matches!(result, Err(DbError::FilterParse(_))),
         "a NUL byte in a filter value must be rejected as FilterParse, not reach the driver as a raw 500: got {result:?}"
     );
+
+    teardown_filter_schema(&database_url).await;
 }
