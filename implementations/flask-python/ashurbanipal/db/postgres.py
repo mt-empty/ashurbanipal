@@ -103,6 +103,13 @@ class PgSource(DbSource):
         # lockstep (docs/adapter-decisions.md §5.2/§5.3). One targeted row
         # instead of fetching every table name in the schema to check
         # membership of one.
+        #
+        # Postgres text can never hold a NUL byte, so no real relname could
+        # ever match one; short-circuit before it reaches the driver, which
+        # otherwise throws its own encoding error ahead of fetchone() ever
+        # getting a chance to just say "no match" (spec/protocol.md §5.2).
+        if "\0" in table:
+            raise NotAllowed(f"table {table!r}")
         cur.execute(
             "select c.oid from pg_class c "
             "join pg_namespace n on n.oid = c.relnamespace "
@@ -275,6 +282,12 @@ class PgSource(DbSource):
                     # SELECT, so a permission denied here is a residual edge;
                     # report it as NotAllowed (400), not a driver 500.
                     raise NotAllowed(f"table {table!r}") from exc
+                except psycopg.DataError as exc:
+                    # psycopg's str dumper rejects a NUL byte client-side (no
+                    # SQLSTATE, unlike other drivers' server-side rejection);
+                    # mapped to FilterParseError, also 400, never a raw 500
+                    # (docs/adapter-decisions.md §5.4.2).
+                    raise FilterParseError(f"value invalid for this backend: {exc}") from exc
                 pg_rows = cur.fetchall()
                 rows = [
                     {
