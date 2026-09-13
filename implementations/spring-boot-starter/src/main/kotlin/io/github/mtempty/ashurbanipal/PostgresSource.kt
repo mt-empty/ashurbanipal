@@ -71,20 +71,24 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         )
     }
 
-    // Mirrors listTables' own pg_class/relkind = 'r' predicate, not
+    // Resolves table to its OID iff it's a readable base table in schema —
+    // the single existence-and-privilege check every table-scoped
+    // operation needs before touching request-supplied SQL. Mirrors
+    // listTables' own pg_class/relkind = 'r' predicate, not
     // information_schema.tables' broader BASE TABLE (which also matches
-    // partitioned tables) — keeps this allow-list and listTables in
-    // lockstep (docs/adapter-decisions.md §5.2/§5.3).
-    private fun allowedTables(schema: String): List<String> =
-        jdbcTemplate.queryForList(
-            "select c.relname from pg_class c " +
+    // partitioned tables) — keeps this gate and listTables in lockstep
+    // (docs/adapter-decisions.md §5.2/§5.3). One targeted row instead of
+    // fetching every table name in the schema to check membership of one.
+    private fun readableTableOid(schema: String, table: String): Long =
+        jdbcTemplate.query(
+            "select c.oid from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
-                "where n.nspname = ? and c.relkind = 'r' " +
-                "  and has_table_privilege(c.oid, 'SELECT') " +
-                "order by c.relname",
-            String::class.java,
+                "where n.nspname = ? and c.relname = ? and c.relkind = 'r' " +
+                "  and has_table_privilege(c.oid, 'SELECT')",
+            RowMapper { rs, _ -> rs.getLong("oid") },
             schema,
-        ).filterNotNull()
+            table,
+        ).firstOrNull() ?: throw NotAllowedException("not allowed: table $table")
 
     private fun allowedColumns(schema: String, table: String): List<String> =
         jdbcTemplate.queryForList(
@@ -96,8 +100,10 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             table,
         ).filterNotNull()
 
-    private fun requireTable(schema: String, table: String): String =
-        allowedTables(schema).find { it == table } ?: throw NotAllowedException("not allowed: table $table")
+    private fun requireTable(schema: String, table: String): String {
+        readableTableOid(schema, table)
+        return table
+    }
 
     private data class ConstraintRow(
         val constraintName: String,
@@ -329,21 +335,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     private fun referencedByInTransaction(schema: String?, table: String): List<ReferencedByEntry> {
         val realSchema = resolveSchema(schema)
-
-        // Resolved once and bound below (con.confrelid = ?) — the same
-        // pg_class/relkind = 'r'/has_table_privilege predicate allowedTables
-        // uses, so a partitioned or unknown table rejects here instead of a
-        // silent [] from the confrelid join finding zero rows
-        // (spec/protocol.md §5.2/§5.9).
-        val targetOid = jdbcTemplate.query(
-            "select c.oid from pg_class c " +
-                "join pg_namespace n on n.oid = c.relnamespace " +
-                "where n.nspname = ? and c.relname = ? and c.relkind = 'r' " +
-                "  and has_table_privilege(c.oid, 'SELECT')",
-            RowMapper { rs, _ -> rs.getLong("oid") },
-            realSchema,
-            table,
-        ).firstOrNull() ?: throw NotAllowedException("not allowed: table $table")
+        val targetOid = readableTableOid(realSchema, table)
 
         // pg_catalog, not information_schema: the reverse (confrelid) filter
         // over the standard-SQL views runs 20-40x slower on a large catalog

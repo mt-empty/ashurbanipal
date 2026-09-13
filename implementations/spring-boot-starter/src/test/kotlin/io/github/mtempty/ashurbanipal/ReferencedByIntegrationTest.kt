@@ -201,8 +201,9 @@ class ReferencedByIntegrationTest : AshurbanipalHttpTestBase() {
     }
 
     // queryTable (and commonValues, same gate) validate table via
-    // allowedTables, which shares listTables' own relkind = 'r' predicate —
-    // a partitioned table must be rejected here too, not silently queried.
+    // requireTable/readableTableOid, which shares listTables' own
+    // relkind = 'r' predicate — a partitioned table must be rejected here
+    // too, not silently queried.
     @Test
     fun `query table rejects a partitioned table same as referenced-by does`() {
         val schema = "ashb_test_spring_query_table_partitioning_gate"
