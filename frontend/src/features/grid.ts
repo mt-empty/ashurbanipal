@@ -1,6 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
-import { $, copyText, qs, reportError } from "../core/dom.js";
-import { hiddenColumnsForTable, persist, rememberSort, setSchema, state } from "../core/state.js";
+import { $, copyText, qs } from "../core/dom.js";
+import { hiddenColumnsForTable, persist, rememberSort, state } from "../core/state.js";
 import type { Column, Row, TableData } from "../core/types.js";
 import {
   APPROX_COUNT_TITLE,
@@ -12,8 +12,9 @@ import {
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
+import { navigateWithSeededFilter } from "./nav.js";
 import { openRecordView } from "./record-view.js";
-import { loadTables } from "./sidebar.js";
+import { openReferencedByPopover } from "./referenced-by.js";
 
 export function renderHeader(columns: Column[]): void {
   const hidden = hiddenColumnsForTable();
@@ -121,7 +122,8 @@ function showCellPop(e: MouseEvent, text: string, col: Column): void {
 
 // A real <button> as the click target so it's keyboard-focusable and
 // Enter/Space-activatable, matching the copy button one element over.
-function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTableCellElement {
+function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellElement {
+  const raw = row[col.name];
   const isNull = raw == null;
   // A null cell has no copy/expand affordance to clone, so it builds a bare
   // <td> rather than the template's.
@@ -161,36 +163,23 @@ function buildCell(col: Column, raw: string | null, hidden: Set<string>): HTMLTa
     applyFilterClause(col.name, "=", raw);
   };
   if (col.references) {
-    // In-app navigation: switch to the referenced table and seed a filter
-    // for the referenced row. Deliberately not switchTable() — that clears
-    // the filter, and this path is *setting* one; it also restores the
-    // target's remembered sort, whereas here sort must be cleared, since a
-    // stale stored column would defeat loadData's drop-and-retry against the
-    // filter submitted in the same fetch.
     const references = col.references;
     cellText.classList.add("fk-cell");
     const refLabel = references.schema ? `${references.schema}.${references.table}` : references.table;
     cellText.title = `go to ${refLabel}.${references.column} = ${raw}`;
-    cellText.onclick = () => {
-      state.table = references.table;
-      state.sort = null;
-      // `references.schema` is only present when it differs from the
-      // current schema (a cross-schema FK) — setSchema() switches it before
-      // navigating so the table lookup below lands in the right schema
-      // rather than a same-named table in the wrong one. loadTables()
-      // auto-loads a default view as a side effect (same as #schema-select's
-      // onchange); applyFilterClause's own load immediately supersedes it
-      // via loadDataToken, so the extra fetch is discarded, not shown.
-      if (references.schema && references.schema !== state.schema) {
-        setSchema(references.schema);
-        loadTables()
-          .then(() => applyFilterClause(references.column, "=", raw))
-          .catch(reportError);
-        return;
-      }
-      persist();
-      applyFilterClause(references.column, "=", raw);
-    };
+    cellText.onclick = () =>
+      navigateWithSeededFilter(references.table, references.schema, () =>
+        applyFilterClause(references.column, "=", raw),
+      );
+  } else if (col.key === "pk") {
+    // Reverse of the FK-cell click: what points *at* this row. A pk+fk
+    // column took the branch above; those rows, and no-PK tables, reach the
+    // same list through the record dialog instead.
+    cellText.classList.add("pk-cell");
+    // Embeds `raw` so a truncated PK stays readable via hover, same as the
+    // fk-cell title above — the overflow-expand skip below relies on it.
+    cellText.title = `${raw} — what references this row`;
+    cellText.onclick = (e) => openReferencedByPopover(e, row);
   } else {
     const jsonAtRender = rendersAsJson(col, raw);
     // scrollWidth > clientWidth is only known after layout, so decide
@@ -269,16 +258,16 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
       if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
       tr.appendChild(buildRowActionCell(data.columns, row));
       for (const col of data.columns) {
-        tr.appendChild(buildCell(col, row[col.name], hidden));
+        tr.appendChild(buildCell(col, row, hidden));
       }
       return tr;
     }),
   );
   // Overflow is only measurable after layout (JSON cells are marked at
-  // render instead). fk-cell is excluded: its title is already the escape
-  // hatch, and a click navigates rather than expands.
+  // render instead). fk-cell/pk-cell are excluded: their title is already
+  // the escape hatch, and a click navigates rather than expands.
   requestAnimationFrame(() => {
-    for (const el of tbody.querySelectorAll<HTMLElement>(".cell-text:not(.fk-cell)")) {
+    for (const el of tbody.querySelectorAll<HTMLElement>(".cell-text:not(.fk-cell):not(.pk-cell)")) {
       if (el.scrollWidth > el.clientWidth) el.closest("td")?.classList.add("expandable");
     }
   });

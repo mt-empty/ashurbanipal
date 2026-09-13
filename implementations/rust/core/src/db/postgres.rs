@@ -4,8 +4,8 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use super::{
-    op_sql, quote_ident, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData,
-    TableInfo,
+    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource,
+    KeyKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, Logic};
 
@@ -130,22 +130,32 @@ impl PgPoolSource {
             .ok_or_else(|| DbError::NotAllowed(format!("schema {resolved:?}")))
     }
 
-    async fn allowed_tables_in_tx(
+    /// Resolves `table` to its OID iff it's a readable base table in
+    /// `schema` — the single existence-and-privilege check every
+    /// table-scoped operation needs before touching request-supplied SQL.
+    /// Mirrors `list_tables`'s own `pg_class`/`relkind = 'r'` predicate, not
+    /// `information_schema.tables`'s broader `BASE TABLE` (which also
+    /// matches partitioned tables) — keeps this gate and `list_tables` in
+    /// lockstep (`docs/adapter-decisions.md` §5.2/§5.3). One targeted row
+    /// instead of fetching every table name in the schema to check
+    /// membership of one.
+    async fn readable_table_oid_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
-    ) -> Result<Vec<String>, DbError> {
-        // Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
-        let rows = sqlx::query_scalar::<_, String>(
-            "select table_name from information_schema.tables \
-             where table_schema = $1 and table_type = 'BASE TABLE' \
-               and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT') \
-             order by table_name",
+        table: &str,
+    ) -> Result<i32, DbError> {
+        sqlx::query_scalar::<_, i32>(
+            "select c.oid::int4 from pg_class c \
+             join pg_namespace n on n.oid = c.relnamespace \
+             where n.nspname = $1 and c.relname = $2 and c.relkind = 'r' \
+               and has_table_privilege(c.oid, 'SELECT')",
         )
         .bind(schema)
-        .fetch_all(&mut **tx)
-        .await?;
-        Ok(rows)
+        .bind(table)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))
     }
 
     async fn allowed_columns_in_tx(
@@ -290,9 +300,9 @@ impl DbSource for PgPoolSource {
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        // `has_table_privilege` keeps this listing equal to the allow-list
-        // `allowed_tables_in_tx` enforces — a table the role can't SELECT is
-        // never offered as a row it would then have to reject.
+        // `has_table_privilege` keeps this listing equal to the gate
+        // `readable_table_oid_in_tx` enforces — a table the role can't
+        // SELECT is never offered as a row it would then have to reject.
         let rows = sqlx::query_as::<_, (String, Option<String>)>(
             "select c.relname::text, obj_description(c.oid, 'pg_class') \
              from pg_class c \
@@ -339,12 +349,9 @@ impl DbSource for PgPoolSource {
     ) -> Result<TableData, DbError> {
         let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        let tables = self.allowed_tables_in_tx(&mut tx, &schema).await?;
-        let table = tables
-            .iter()
-            .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
-            .clone();
+        self.readable_table_oid_in_tx(&mut tx, &schema, table)
+            .await?;
+        let table = table.to_string();
 
         let column_names = self.allowed_columns_in_tx(&mut tx, &schema, &table).await?;
         let sort = match &opts.sort {
@@ -477,12 +484,9 @@ impl DbSource for PgPoolSource {
     ) -> Result<Vec<(String, f32)>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        let tables = self.allowed_tables_in_tx(&mut tx, &schema).await?;
-        let table = tables
-            .iter()
-            .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
-            .clone();
+        self.readable_table_oid_in_tx(&mut tx, &schema, table)
+            .await?;
+        let table = table.to_string();
         let columns = self.allowed_columns_in_tx(&mut tx, &schema, &table).await?;
         let column = columns
             .iter()
@@ -533,6 +537,67 @@ impl DbSource for PgPoolSource {
             rows
         };
         Ok(rows)
+    }
+
+    async fn referenced_by(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ReferencedBy>, DbError> {
+        let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
+        let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
+
+        // Bound as `$1` below (`con.confrelid = $1`) — same gate query_table/
+        // common_values use, so a partitioned or unknown `table` rejects
+        // here instead of a silent `[]` from the confrelid join finding
+        // zero rows (spec/protocol.md §5.2/§5.9).
+        let target_oid = self
+            .readable_table_oid_in_tx(&mut tx, &schema, table)
+            .await?;
+
+        // `pg_catalog`, not `information_schema`: the reverse (`confrelid`)
+        // filter over the standard-SQL views runs 20–40x slower on a large
+        // catalog (`docs/adapter-decisions.md` §5.9). `has_table_privilege`
+        // is the per-referrer read gate — it works across schemas, so
+        // cross-schema referrers are reported and gated without a separate
+        // allow-list pass. `conparentid = 0` excludes a partitioned
+        // referrer's per-partition constraint copies (Postgres clones the
+        // parent's FK onto each partition) — without it, one logical FK
+        // fans out into one entry per partition plus the parent.
+        // `rc.relkind = 'r'` gates the referrer itself the same way `target_oid`
+        // above gates the target: a partitioned table's own (non-inherited) FK
+        // constraint survives `conparentid = 0` and would otherwise be reported
+        // as a referrer name that query_table/common_values/referenced_by-as-
+        // target then all reject, since none of them accept `relkind = 'p'`.
+        let rows = sqlx::query_as::<_, (String, String, String, String, String)>(
+            "select rn.nspname, rc.relname, con.conname, fa.attname, ta.attname \
+             from pg_constraint con \
+             join pg_class rc on rc.oid = con.conrelid \
+             join pg_namespace rn on rn.oid = rc.relnamespace \
+             join lateral unnest(con.conkey, con.confkey) with ordinality \
+                  as k(from_attnum, to_attnum, n) on true \
+             join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum \
+             join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum \
+             where con.contype = 'f' \
+               and con.conparentid = 0 \
+               and con.confrelid = $1 \
+               and rc.relkind = 'r' \
+               and has_table_privilege(con.conrelid, 'SELECT') \
+             order by rn.nspname, rc.relname, con.conname, k.n",
+        )
+        .bind(target_oid)
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        Ok(group_referenced_by(rows.into_iter().map(
+            |(ref_schema, ref_table, constraint, from, to)| ReferencedBy {
+                schema: (ref_schema != schema).then_some(ref_schema),
+                table: ref_table,
+                constraint,
+                columns: vec![ColumnPair { from, to }],
+            },
+        )))
     }
 }
 

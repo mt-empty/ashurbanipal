@@ -196,6 +196,45 @@ func TestMySQLForeignKeyColumnReportsKeyAndReferences(t *testing.T) {
 	}
 }
 
+func TestMySQLReferencedByListsIncomingFKs(t *testing.T) {
+	db := seededMySQLDB(t, testURL(t))
+	source := NewMySQLSource(db, 5)
+	ctx := context.Background()
+
+	toUsers, err := source.ReferencedBy(ctx, nil, "users")
+	if err != nil {
+		t.Fatalf("ReferencedBy(users): %v", err)
+	}
+	if len(toUsers) != 1 || toUsers[0].Table != "orders" {
+		t.Fatalf("ReferencedBy(users) = %+v, want one orders entry", toUsers)
+	}
+	if toUsers[0].Constraint != "fk_orders_user" {
+		t.Errorf("constraint = %q, want fk_orders_user", toUsers[0].Constraint)
+	}
+	if toUsers[0].Schema != "" {
+		t.Errorf("single-database referrer must omit schema, got %q", toUsers[0].Schema)
+	}
+	if len(toUsers[0].Columns) != 1 || toUsers[0].Columns[0] != (ColumnPair{From: "user_id", To: "id"}) {
+		t.Errorf("orders columns = %+v, want [{user_id id}]", toUsers[0].Columns)
+	}
+
+	toOrders, err := source.ReferencedBy(ctx, nil, "orders")
+	if err != nil {
+		t.Fatalf("ReferencedBy(orders): %v", err)
+	}
+	if len(toOrders) != 1 || toOrders[0].Table != "order_extra" {
+		t.Errorf("ReferencedBy(orders) = %+v, want one order_extra entry", toOrders)
+	}
+
+	if leaf, err := source.ReferencedBy(ctx, nil, "order_extra"); err != nil || len(leaf) != 0 {
+		t.Errorf("ReferencedBy(order_extra) = %+v, %v, want []", leaf, err)
+	}
+
+	if _, err := source.ReferencedBy(ctx, nil, "no_such_table"); !errors.As(err, new(*NotAllowedError)) {
+		t.Errorf("ReferencedBy(no_such_table) = %v, want NotAllowedError", err)
+	}
+}
+
 func TestMySQLPKAndFKColumnReportsBoth(t *testing.T) {
 	db := seededMySQLDB(t, testURL(t))
 	source := NewMySQLSource(db, 5)

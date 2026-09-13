@@ -11,14 +11,17 @@ import time
 from ..filter import Condition
 from . import (
     ColumnInfo,
+    ColumnPair,
     ColumnRef,
     DbSource,
     FilterParseError,
     KeyKind,
     NotAllowed,
     QueryOpts,
+    ReferencedBy,
     TableData,
     TableInfo,
+    group_referenced_by,
     quote_ident,
     wrap_driver_errors,
 )
@@ -120,7 +123,16 @@ class SqliteSource(DbSource):
 
         # (id, seq, table, from, to) — id groups columns belonging to the
         # same constraint (composite FKs share an id).
-        cur.execute(f'select id, seq, "table", "from", "to" from pragma_foreign_key_list({quoted})')
+        #
+        # "REFERENCES parent" shorthand leaves "to" NULL; ppk resolves it by
+        # position against the parent's PK, correlated per FK row since each
+        # can reference a different parent — unlike referenced_by's single
+        # bound parent (docs/adapter-decisions.md §5.4.1).
+        cur.execute(
+            f'select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, \'rowid\') '
+            f"from pragma_foreign_key_list({quoted}) fkl "
+            f'left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1'
+        )
         by_constraint: dict[int, list[tuple[str, str, str]]] = {}
         for constraint_id, _seq, ref_table, from_col, to_col in cur.fetchall():
             by_constraint.setdefault(constraint_id, []).append((from_col, ref_table, to_col))
@@ -268,3 +280,67 @@ class SqliteSource(DbSource):
         # "no statistics available" answer (spec/protocol.md §5.5), not a
         # live GROUP BY scan. See docs/adapter-decisions.md.
         return []
+
+    @wrap_driver_errors(sqlite3.Error)
+    def referenced_by(self, schema: str | None, table: str) -> list[ReferencedBy]:
+        _check_schema(schema)
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            self._bounded(conn, CATALOG_TIMEOUT_SECS)
+            try:
+                if table not in self._allowed_tables(cur):
+                    raise NotAllowed(f"table {table!r}")
+
+                # No reverse-FK index and no information_schema: walk every
+                # table's pragma_foreign_key_list (the schema is parsed in
+                # memory on open). The TVF argument m.name is a column
+                # reference — not spliced; fkl."table" is bound. COLLATE
+                # NOCASE because the pragma returns the referenced name as
+                # written in the DDL, which SQLite resolves
+                # case-insensitively. The sqlite_master predicate here
+                # matches _allowed_tables, so every referrer is already
+                # allow-listed.
+                #
+                # "REFERENCES parent" with no parenthesised column list is
+                # valid DDL meaning "parent's own primary key", and for that
+                # form the pragma reports "to" as NULL rather than filling
+                # in the PK name. ppk resolves it: pragma_table_info(table)'s
+                # pk column is the 1-indexed position of a column within the
+                # parent's primary key, matching fkl.seq's 0-indexed
+                # position within the FK's column list — SQLite requires an
+                # omitted column list to align position-for-position with
+                # the parent PK, so this pairing holds for composite keys
+                # too. The 'rowid' fallback covers a parent with no declared
+                # primary key, where SQLite's parent key is the implicit
+                # rowid.
+                cur.execute(
+                    'select m.name, fkl.id, fkl."from", coalesce(fkl."to", ppk.name, \'rowid\') '
+                    "from sqlite_master m "
+                    "join pragma_foreign_key_list(m.name) fkl "
+                    "left join pragma_table_info(?) ppk on ppk.pk = fkl.seq + 1 "
+                    "where m.type = 'table' "
+                    "  and m.name not like 'sqlite\\_%' escape '\\' "
+                    '  and fkl."table" = ? collate nocase '
+                    "order by m.name, fkl.id, fkl.seq",
+                    (table, table),
+                )
+                rows = cur.fetchall()
+            finally:
+                self._clear_bound(conn)
+        finally:
+            conn.close()
+
+        # SQLite FKs are unnamed; fk_<id> is a per-table-stable synthetic
+        # label (spec/protocol.md §5.9 permits this).
+        return group_referenced_by(
+            [
+                ReferencedBy(
+                    table=ref_table,
+                    constraint=f"fk_{fk_id}",
+                    columns=[ColumnPair(from_=from_col, to=to_col)],
+                    schema=None,
+                )
+                for ref_table, fk_id, from_col, to_col in rows
+            ]
+        )

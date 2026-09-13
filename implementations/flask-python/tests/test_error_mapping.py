@@ -32,6 +32,9 @@ class _FailingSource(DbSource):
     def common_values(self, schema, table, column):
         raise self._exc
 
+    def referenced_by(self, schema, table):
+        raise self._exc
+
 
 def _client(exc: Exception):
     app = Flask(__name__)

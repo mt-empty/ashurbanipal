@@ -31,14 +31,14 @@ run = "cargo test --lib --features mysql"
 dir = "implementations/rust"
 
 ["rust:integration-test"]
-description = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges: axum's own Postgres-backed integration tests (needs DATABASE_URL)"
+description = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning: axum's own Postgres-backed integration tests (needs DATABASE_URL)"
 # Separate from rust:test (--lib) for the same reason that task excludes
 # the conformance target: these open their own DB pools and would add
 # concurrent connection pressure if run alongside conformance:test.
 # Excludes schema_isolation_mysql.rs on purpose — that file requires the
 # mysql feature + MYSQL_TEST_URL and documents itself as not run in CI
 # (see its own module doc comment), same as the rest of the mysql feature.
-run = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges"
+run = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning"
 dir = "implementations/rust/axum"
 
 ["rust:integration-test-actix"]
@@ -94,3 +94,35 @@ sources = ["src/**/*", "../core/src/**/*", "examples/**/*.rs", "Cargo.toml", "..
 ["rust:dev"]
 description = "run the demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"
 run = "mise watch rust:demo --restart"
+
+["rust:demo-sqlite"]
+description = "run the demo host app against SQLite (DB_BACKEND=sqlite) at http://localhost:4000/__ashurbanipal — seeds tools/seed-gen's `sqlite` dialect into implementations/rust/target/demo-sqlite.db on first run (override the path with SQLITE_PATH), then reuses it on later runs"
+# tools/seed-gen isn't part of this Cargo workspace (own Cargo.toml/lock, see
+# CLAUDE.md) — `cargo run` in its own dir, redirected to a file and only then
+# fed to sqlite3 (same generate-then-load idiom as conformance:seed-gen),
+# not piped straight in: a failed `cargo run` would otherwise feed sqlite3
+# empty stdin, which exits 0 and silently leaves an empty/stale db. Only
+# seeds when the file is absent: reseeding is ~30k+ audit_log rows and would
+# make every dev-loop restart slow for no reason once the db already exists.
+run = [
+    "mkdir -p \"$(dirname \"$SQLITE_PATH\")\" && test -f \"$SQLITE_PATH\" || { (cd ../../../tools/seed-gen && cargo run --quiet -- sqlite) > \"$SQLITE_PATH.sql\" && sqlite3 \"$SQLITE_PATH\" < \"$SQLITE_PATH.sql\" && rm -f \"$SQLITE_PATH.sql\"; }",
+    "cargo run -p ashurbanipal-axum --example demo --features sqlite",
+]
+env = { DB_BACKEND = "sqlite", SQLITE_PATH = "../target/demo-sqlite.db" }
+dir = "implementations/rust/axum"
+sources = ["src/**/*", "../core/src/**/*", "examples/**/*.rs", "Cargo.toml", "../core/Cargo.toml", "frontend/dbviewer.html"]
+
+["rust:dev-sqlite"]
+description = "run the SQLite-backed demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"
+run = "mise watch rust:demo-sqlite --restart"
+
+["rust:demo-mysql"]
+description = "run the demo host app against MySQL (DB_BACKEND=mysql, DATABASE_URL from MYSQL_TEST_URL) at http://localhost:4000/__ashurbanipal — needs the devcontainer's mysql service (MYSQL_TEST_URL)"
+run = "DATABASE_URL=\"$MYSQL_TEST_URL\" cargo run -p ashurbanipal-axum --example demo --features mysql"
+env = { DB_BACKEND = "mysql" }
+dir = "implementations/rust/axum"
+sources = ["src/**/*", "../core/src/**/*", "examples/**/*.rs", "Cargo.toml", "../core/Cargo.toml", "frontend/dbviewer.html"]
+
+["rust:dev-mysql"]
+description = "run the MySQL-backed demo host app, auto-rebuilding and restarting on src/ or dbviewer.html changes"
+run = "mise watch rust:demo-mysql --restart"

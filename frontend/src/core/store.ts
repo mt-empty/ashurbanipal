@@ -36,8 +36,9 @@ export interface State {
 //
 // Feature modules mutate scope through the named transitions below
 // (switchSource / switchSchema / switchTable), not by assigning fields
-// ad hoc; a site that deliberately diverges (grid.ts's FK navigation)
-// says why inline.
+// ad hoc; the one sanctioned divergence is nav.ts's
+// navigateWithSeededFilter (FK-cell nav and the referenced-by drill-in),
+// which seeds a filter rather than clearing one.
 export const state: State = {
   source: null,
   schema: null,
@@ -250,16 +251,15 @@ export function rememberSchema(): void {
 
 // ---- named scope transitions ----
 // Each of the three sidebar scope switches has exactly one caller, so they take
-// no options.
-// grid.ts's FK navigation deliberately does not use switchTable — it seeds a
-// filter rather than clearing one, drops the remembered sort (a stale one
-// would defeat loadData's drop-and-retry against the same-fetch filter), and
-// lets submitFilter own the offset reset — so it stays explicit there.
+// no options. nav.ts's navigateWithSeededFilter is the sanctioned bypass —
+// it seeds a filter rather than clearing one, drops the remembered sort (a
+// stale one would defeat loadData's drop-and-retry against the same-fetch
+// filter), and lets submitFilter own the offset reset.
 
 // Pins state.schema to a concrete name and syncs the #schema-select value +
 // the per-source memory (R12). The step shared by an explicit schema switch
-// and grid.ts's cross-schema FK navigation, which then diverge on what
-// resets afterward.
+// and navigateWithSeededFilter's cross-schema path, which then diverge on
+// what resets afterward.
 export function setSchema(name: string): void {
   state.schema = name;
   $<HTMLSelectElement>("schema-select").value = name;

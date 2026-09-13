@@ -221,6 +221,27 @@ function handleCommonValues(params: URLSearchParams): Response {
     .map(([value, count]) => ({ value, freq: count / rows.length }));
   return jsonResponse({ values });
 }
+// Reverse of a column's `references`: every FK column in the resolved
+// schema that points at `table` (spec/protocol.md §5.9). Scan is
+// same-schema only — demo fixtures have no cross-schema or composite FK,
+// so entries carry no `schema` field and one pair each; revisit if a
+// cross-schema FK is ever added to demo-fixtures.
+function handleReferencedBy(params: URLSearchParams): Response {
+  const s = resolveSchema(params);
+  if ("error" in s) return badRequest(s.error);
+  const target = params.get("table");
+  const tables = tablesFor(s.schema);
+  if (!tables.some((t) => t.name === target)) return badRequest(`unknown table: ${target}`);
+  const referenced_by = tables.flatMap((t) =>
+    t.columns.flatMap((c) => {
+      const ref = c.references;
+      return ref && ref.table === target
+        ? [{ table: t.name, constraint: `${t.name}_${c.name}_fkey`, columns: [{ from: c.name, to: ref.column }] }]
+        : [];
+    }),
+  );
+  return jsonResponse({ referenced_by });
+}
 function handleSiblings(): Response {
   return jsonResponse({ siblings: SIBLINGS });
 }
@@ -253,6 +274,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       return handleTableData(params);
     case "/tables/common-values":
       return handleCommonValues(params);
+    case "/tables/referenced-by":
+      return handleReferencedBy(params);
     case "/siblings":
       return handleSiblings();
     default:

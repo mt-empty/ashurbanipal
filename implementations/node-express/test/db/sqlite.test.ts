@@ -85,6 +85,114 @@ describe("SqliteSource", () => {
     expect(userIdCol?.references).toEqual({ table: "users", column: "id" });
   });
 
+  it("referenced_by lists incoming FKs with synthesized constraint names", async () => {
+    db = await seededDb();
+    const source = new SqliteSource(db);
+
+    const toUsers = await source.referencedBy(undefined, "users", 5000);
+    expect(toUsers).toHaveLength(1);
+    expect(toUsers[0].table).toBe("orders");
+    expect(toUsers[0].schema).toBeUndefined();
+    expect(toUsers[0].columns).toEqual([{ from: "user_id", to: "id" }]);
+    // SQLite FKs are unnamed — the label is synthesized fk_<id>.
+    expect(toUsers[0].constraint).toMatch(/^fk_\d+$/);
+
+    expect((await source.referencedBy(undefined, "orders", 5000)).map((e) => e.table)).toEqual(["order_extra"]);
+    expect(await source.referencedBy(undefined, "order_extra", 5000)).toEqual([]);
+
+    await expect(source.referencedBy(undefined, "no_such_table", 5000)).rejects.toBeInstanceOf(NotAllowedError);
+    await expect(source.referencedBy("other", "users", 5000)).rejects.toBeInstanceOf(NotAllowedError);
+  });
+
+  // "REFERENCES parent" with no parenthesised column list is valid DDL
+  // meaning "the parent's primary key", but pragma_foreign_key_list reports
+  // "to" as NULL for that form rather than filling in the PK name — the
+  // query must resolve it itself.
+  it("referenced_by resolves a shorthand FK with no named parent column", async () => {
+    db = await new Promise<Database>((resolve, reject) => {
+      const conn = new Database(":memory:", (err) => {
+        if (err) return reject(err);
+        conn.exec(
+          `create table users (id integer primary key, email text not null);
+           create table pets (id integer primary key, owner_id integer references users);`,
+          (execErr) => (execErr ? reject(execErr) : resolve(conn)),
+        );
+      });
+    });
+    const source = new SqliteSource(db);
+
+    const refs = await source.referencedBy(undefined, "users", 5000);
+    const pets = refs.find((r) => r.table === "pets");
+    expect(pets, "pets' FK to users must be reported").toBeDefined();
+    expect(pets?.columns, "an unnamed parent column must resolve to users' primary key, not null/empty").toEqual([
+      { from: "owner_id", to: "id" },
+    ]);
+  });
+
+  // Same shorthand-FK bug, forward direction: keyMetadata (which supplies
+  // query_table's per-column references) shares referencedBy's pre-fix
+  // bug — pragma_foreign_key_list.to is NULL for "REFERENCES parent" with
+  // no named column, and until fixed keyMetadata doesn't resolve it the
+  // way referencedBy now does.
+  it("query_table resolves a shorthand FK with no named parent column", async () => {
+    db = await new Promise<Database>((resolve, reject) => {
+      const conn = new Database(":memory:", (err) => {
+        if (err) return reject(err);
+        conn.exec(
+          `create table users (id integer primary key, email text not null);
+           create table pets (id integer primary key, owner_id integer references users);`,
+          (execErr) => (execErr ? reject(execErr) : resolve(conn)),
+        );
+      });
+    });
+    const source = new SqliteSource(db);
+
+    const data = await source.queryTable(undefined, "pets", baseOpts, 5000);
+    const ownerIdCol = data.columns.find((c) => c.name === "owner_id");
+    expect(ownerIdCol?.key).toBe("fk");
+    expect(
+      ownerIdCol?.references,
+      "an unnamed parent column must resolve to users' primary key, not null/empty",
+    ).toEqual({
+      table: "users",
+      column: "id",
+    });
+  });
+
+  it("referenced_by resolves a shorthand FK against a composite primary key", async () => {
+    db = await new Promise<Database>((resolve, reject) => {
+      const conn = new Database(":memory:", (err) => {
+        if (err) return reject(err);
+        conn.exec(
+          `create table warehouse_bins (
+             warehouse_code text not null,
+             bin_code text not null,
+             primary key (warehouse_code, bin_code)
+           );
+           create table bin_counts (
+             id integer primary key,
+             warehouse_code text not null,
+             bin_code text not null,
+             qty integer not null,
+             foreign key (warehouse_code, bin_code) references warehouse_bins
+           );`,
+          (execErr) => (execErr ? reject(execErr) : resolve(conn)),
+        );
+      });
+    });
+    const source = new SqliteSource(db);
+
+    const refs = await source.referencedBy(undefined, "warehouse_bins", 5000);
+    const binCounts = refs.find((r) => r.table === "bin_counts");
+    expect(binCounts?.columns, "a composite FK must resolve every parent PK column").toHaveLength(2);
+    expect(binCounts?.columns).toEqual(
+      expect.arrayContaining([
+        { from: "warehouse_code", to: "warehouse_code" },
+        { from: "bin_code", to: "bin_code" },
+      ]),
+    );
+  });
+
   it("reports both key and references for a column that is its own PK and an FK", async () => {
     db = await seededDb();
     const source = new SqliteSource(db);

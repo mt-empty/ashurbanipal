@@ -5,8 +5,8 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
 use super::{
-    op_sql, quote_ident, ColumnInfo, ColumnRef, DbError, DbSource, KeyKind, QueryOpts, TableData,
-    TableInfo,
+    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource,
+    KeyKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -118,10 +118,17 @@ impl SqliteSource {
             // "table"/"from"/"to" are pragma_foreign_key_list's own fixed
             // output column names (SQL keywords needing escape), not the
             // caller-supplied table.
+            //
+            // `REFERENCES parent` shorthand leaves `to` NULL; `ppk` resolves
+            // it by position against the parent's PK, correlated per FK row
+            // since each can reference a different parent — unlike
+            // `referenced_by`'s single bound parent (docs/adapter-decisions.md §5.4.1).
             let fks = sqlx::query_as::<_, (i64, i64, String, String, String)>(sqlx::AssertSqlSafe(
                 format!(
-                    "select id, seq, \"table\", \"from\", \"to\" \
-                     from pragma_foreign_key_list({table})"
+                    "select fkl.id, fkl.seq, fkl.\"table\", fkl.\"from\", \
+                            coalesce(fkl.\"to\", ppk.name, 'rowid') \
+                     from pragma_foreign_key_list({table}) fkl \
+                     left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1"
                 ),
             ))
             .fetch_all(&mut *conn)
@@ -400,6 +407,72 @@ impl DbSource for SqliteSource {
         // live GROUP BY scan. See docs/adapter-decisions.md.
         Ok(Vec::new())
     }
+
+    async fn referenced_by(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+    ) -> Result<Vec<ReferencedBy>, DbError> {
+        check_schema(schema)?;
+        let allowed = self.allowed_tables().await?;
+        if !allowed.iter().any(|t| t.as_str() == table) {
+            return Err(DbError::NotAllowed(format!("table {table:?}")));
+        }
+        let table = table.to_string();
+
+        // No reverse-FK index and no `information_schema`: walk every
+        // table's `pragma_foreign_key_list` (the schema is already parsed
+        // in memory). The TVF argument is a column reference — not spliced;
+        // `fkl."table"` is bound. `COLLATE NOCASE` because the pragma
+        // returns the referenced name as written in the DDL, which SQLite
+        // itself resolves case-insensitively.
+        //
+        // `REFERENCES parent` with no parenthesised column list is valid
+        // DDL meaning "parent's own primary key", and for that form the
+        // pragma reports `to` as NULL rather than filling in the PK name.
+        // `ppk` resolves it: `pragma_table_info(table)`'s `pk` column is the
+        // 1-indexed position of a column within the parent's primary key,
+        // matching `fkl.seq`'s 0-indexed position within the FK's column
+        // list — SQLite requires an omitted column list to align
+        // position-for-position with the parent PK, so this pairing holds
+        // for composite keys too. The `'rowid'` fallback covers a parent
+        // with no declared primary key, where SQLite's parent key is the
+        // implicit rowid.
+        let rows = self
+            .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
+                let rows = sqlx::query_as::<_, (String, i64, String, String)>(sqlx::AssertSqlSafe(
+                    "select m.name, fkl.id, fkl.\"from\", \
+                            coalesce(fkl.\"to\", ppk.name, 'rowid') \
+                     from sqlite_master m \
+                     join pragma_foreign_key_list(m.name) fkl \
+                     left join pragma_table_info(?) ppk on ppk.pk = fkl.seq + 1 \
+                     where m.type = 'table' \
+                       and m.name not like 'sqlite\\_%' escape '\\' \
+                       and fkl.\"table\" = ? collate nocase \
+                     order by m.name, fkl.id, fkl.seq"
+                        .to_string(),
+                ))
+                .bind(&table)
+                .bind(&table)
+                .fetch_all(&mut *conn)
+                .await?;
+                Ok(rows)
+            })
+            .await?;
+
+        // SQLite FKs are unnamed; `fk_<id>` is a per-table-stable synthetic
+        // label (`spec/protocol.md` §5.9 permits this). The query's
+        // `sqlite_master` predicate matches `allowed_tables`, so every
+        // referrer is already allow-listed.
+        Ok(group_referenced_by(rows.into_iter().map(
+            |(ref_table, fk_id, from, to)| ReferencedBy {
+                table: ref_table,
+                schema: None,
+                constraint: format!("fk_{fk_id}"),
+                columns: vec![ColumnPair { from, to }],
+            },
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -417,6 +490,7 @@ mod tests {
              create table orders (\
                 id integer primary key, \
                 user_id integer references users(id), \
+                approved_by integer references users(id), \
                 status text not null\
              );\
              create table order_extra (\
@@ -522,6 +596,159 @@ mod tests {
         assert_eq!(user_id_col.key, Some(KeyKind::Fk));
         assert_eq!(user_id_col.references.as_ref().unwrap().table, "users");
         assert_eq!(user_id_col.references.as_ref().unwrap().column, "id");
+    }
+
+    #[tokio::test]
+    async fn referenced_by_lists_incoming_fks() {
+        let source = SqliteSource::new(seeded_pool().await);
+
+        let refs = source.referenced_by(None, "users").await.unwrap();
+        // orders references users via two FKs (user_id, approved_by).
+        let orders: Vec<&ReferencedBy> = refs.iter().filter(|r| r.table == "orders").collect();
+        assert_eq!(orders.len(), 2, "one entry per FK constraint");
+        assert!(orders.iter().all(|r| r.schema.is_none()));
+        assert!(orders.iter().all(|r| r.constraint.starts_with("fk_")));
+        assert!(orders
+            .iter()
+            .all(|r| r.columns.len() == 1 && r.columns[0].to == "id"));
+        let from: Vec<&str> = orders.iter().map(|r| r.columns[0].from.as_str()).collect();
+        assert!(from.contains(&"user_id") && from.contains(&"approved_by"));
+
+        // A table nothing points at is `[]`, not an error.
+        assert!(source
+            .referenced_by(None, "order_extra")
+            .await
+            .unwrap()
+            .is_empty());
+
+        // Unknown table → NotAllowed.
+        assert!(matches!(
+            source.referenced_by(None, "nope").await,
+            Err(DbError::NotAllowed(_))
+        ));
+    }
+
+    // Regression tests: `REFERENCES parent` with no named parent column is
+    // valid SQLite DDL meaning "the parent's primary key", but
+    // `pragma_foreign_key_list` reports `to` as NULL for that form rather
+    // than filling in the PK name —
+    // the query must resolve it itself, not assume `to` is always present.
+
+    #[tokio::test]
+    async fn referenced_by_resolves_shorthand_fk_with_no_named_parent_column() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "create table users (id integer primary key, email text not null); \
+             create table pets (id integer primary key, owner_id integer references users);"
+                .to_string(),
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let source = SqliteSource::new(pool);
+        let refs = source.referenced_by(None, "users").await.unwrap();
+
+        let pets = refs
+            .iter()
+            .find(|r| r.table == "pets")
+            .expect("pets' FK to users must be reported");
+        assert_eq!(pets.columns.len(), 1);
+        assert_eq!(pets.columns[0].from, "owner_id");
+        assert_eq!(
+            pets.columns[0].to, "id",
+            "an unnamed parent column must resolve to users' primary key, not NULL/empty"
+        );
+    }
+
+    // Same shorthand-FK bug, forward direction: `key_metadata` (which
+    // supplies `query_table`'s per-column `references`) shares
+    // `referenced_by`'s pre-fix bug — `pragma_foreign_key_list.to` is NULL
+    // for `REFERENCES parent` with no named column, and until fixed
+    // `key_metadata` doesn't resolve it the way `referenced_by` now does.
+    #[tokio::test]
+    async fn query_table_resolves_shorthand_fk_with_no_named_parent_column() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "create table users (id integer primary key, email text not null); \
+             create table pets (id integer primary key, owner_id integer references users);"
+                .to_string(),
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let source = SqliteSource::new(pool);
+        let data = source
+            .query_table(
+                None,
+                "pets",
+                QueryOpts {
+                    limit: 10,
+                    offset: 0,
+                    sort: None,
+                    descending: false,
+                    timeout_secs: 5,
+                    filter: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let owner_id_col = data.columns.iter().find(|c| c.name == "owner_id").unwrap();
+        assert_eq!(owner_id_col.key, Some(KeyKind::Fk));
+        let refs = owner_id_col
+            .references
+            .as_ref()
+            .expect("owner_id must report a references entry");
+        assert_eq!(refs.table, "users");
+        assert_eq!(
+            refs.column, "id",
+            "an unnamed parent column must resolve to users' primary key, not NULL/empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn referenced_by_resolves_shorthand_fk_against_a_composite_primary_key() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "create table warehouse_bins ( \
+                warehouse_code text not null, \
+                bin_code text not null, \
+                primary key (warehouse_code, bin_code) \
+             ); \
+             create table bin_counts ( \
+                id integer primary key, \
+                warehouse_code text not null, \
+                bin_code text not null, \
+                qty integer not null, \
+                foreign key (warehouse_code, bin_code) references warehouse_bins \
+             );"
+            .to_string(),
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let source = SqliteSource::new(pool);
+        let refs = source.referenced_by(None, "warehouse_bins").await.unwrap();
+
+        let bin_counts = refs
+            .iter()
+            .find(|r| r.table == "bin_counts")
+            .expect("bin_counts' composite FK must be reported");
+        assert_eq!(
+            bin_counts.columns.len(),
+            2,
+            "a composite FK must resolve every parent PK column, not just the first"
+        );
+        let pairs: Vec<(&str, &str)> = bin_counts
+            .columns
+            .iter()
+            .map(|c| (c.from.as_str(), c.to.as_str()))
+            .collect();
+        assert!(pairs.contains(&("warehouse_code", "warehouse_code")));
+        assert!(pairs.contains(&("bin_code", "bin_code")));
     }
 
     #[tokio::test]

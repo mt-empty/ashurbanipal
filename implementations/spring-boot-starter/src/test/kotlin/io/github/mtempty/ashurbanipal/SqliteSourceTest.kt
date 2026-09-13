@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -142,6 +143,126 @@ class SqliteSourceTest {
             assertEquals("pk", orderIdCol.key)
             assertEquals("orders", orderIdCol.references?.table)
             assertEquals("id", orderIdCol.references?.column)
+        } finally {
+            ds.close()
+        }
+    }
+
+    @Test
+    fun `referenced-by lists incoming FKs with synthesized constraint names`() {
+        val ds = seededDataSource()
+        try {
+            val source = SqliteSource(ds, 5)
+
+            val toUsers = source.referencedBy(null, "users")
+            assertEquals(1, toUsers.size)
+            assertEquals("orders", toUsers.first().table)
+            assertNull(toUsers.first().schema)
+            assertEquals(listOf(ColumnPair("user_id", "id")), toUsers.first().columns)
+            // SQLite FKs are unnamed — the label is synthesized fk_<id>.
+            assertTrue(toUsers.first().constraint.matches(Regex("fk_\\d+")), toUsers.first().constraint)
+
+            assertEquals(listOf("order_extra"), source.referencedBy(null, "orders").map { it.table })
+            assertTrue(source.referencedBy(null, "order_extra").isEmpty())
+
+            assertThrows(NotAllowedException::class.java) { source.referencedBy(null, "no_such_table") }
+            assertThrows(NotAllowedException::class.java) { source.referencedBy("other", "users") }
+        } finally {
+            ds.close()
+        }
+    }
+
+    // Xerial's SQLite driver only runs the first statement of a
+    // semicolon-joined batch passed to a single execute() call — each DDL
+    // statement needs its own execute(), same as seededDataSource above.
+    private fun dataSourceFor(vararg statements: String): HikariDataSource {
+        val file = File.createTempFile("ashurbanipal-sqlite-shorthand-fk-test", ".db")
+        val jdbcUrl = "jdbc:sqlite:${file.absolutePath}"
+        DriverManager.getConnection(jdbcUrl).use { conn ->
+            conn.createStatement().use { st -> statements.forEach { st.execute(it) } }
+        }
+        return HikariDataSource(
+            HikariConfig().apply {
+                this.jdbcUrl = jdbcUrl
+                maximumPoolSize = 2
+                poolName = "sqlite-shorthand-fk-test"
+            },
+        )
+    }
+
+    // "REFERENCES parent" with no parenthesised column list is valid DDL
+    // meaning "the parent's primary key", but pragma_foreign_key_list
+    // reports "to" as NULL for that form rather than filling in the PK
+    // name — the query must resolve it itself.
+    @Test
+    fun `referenced-by resolves a shorthand FK with no named parent column`() {
+        val ds = dataSourceFor(
+            "create table users (id integer primary key, email text not null)",
+            "create table pets (id integer primary key, owner_id integer references users)",
+        )
+        try {
+            val source = SqliteSource(ds, 5)
+            val refs = source.referencedBy(null, "users")
+            val pets = refs.find { it.table == "pets" }
+            assertTrue(pets != null, "pets' FK to users must be reported")
+            assertEquals(
+                listOf(ColumnPair("owner_id", "id")),
+                pets!!.columns,
+                "an unnamed parent column must resolve to users' primary key, not null",
+            )
+        } finally {
+            ds.close()
+        }
+    }
+
+    // Same shorthand-FK bug, forward direction: keyMetadata (which supplies
+    // queryTable's per-column references) shares referencedBy's pre-fix
+    // bug — pragma_foreign_key_list.to is NULL for "REFERENCES parent" with
+    // no named column, and until fixed keyMetadata doesn't resolve it the
+    // way referencedBy now does.
+    @Test
+    fun `query table resolves a shorthand FK with no named parent column`() {
+        val ds = dataSourceFor(
+            "create table users (id integer primary key, email text not null)",
+            "create table pets (id integer primary key, owner_id integer references users)",
+        )
+        try {
+            val source = SqliteSource(ds, 5)
+            val data = source.queryTable(null, "pets", QueryOpts(10, 0, null, false, null))
+            val ownerIdCol = data.columns.find { it.name == "owner_id" }!!
+            assertEquals("fk", ownerIdCol.key)
+            assertEquals("users", ownerIdCol.references?.table)
+            assertEquals(
+                "id",
+                ownerIdCol.references?.column,
+                "an unnamed parent column must resolve to users' primary key, not null",
+            )
+        } finally {
+            ds.close()
+        }
+    }
+
+    @Test
+    fun `referenced-by resolves a shorthand FK against a composite primary key`() {
+        val ds = dataSourceFor(
+            "create table warehouse_bins (" +
+                "warehouse_code text not null, bin_code text not null, " +
+                "primary key (warehouse_code, bin_code))",
+            "create table bin_counts (" +
+                "id integer primary key, warehouse_code text not null, bin_code text not null, " +
+                "qty integer not null, " +
+                "foreign key (warehouse_code, bin_code) references warehouse_bins)",
+        )
+        try {
+            val source = SqliteSource(ds, 5)
+            val refs = source.referencedBy(null, "warehouse_bins")
+            val binCounts = refs.find { it.table == "bin_counts" }
+            assertTrue(binCounts != null)
+            assertEquals(2, binCounts!!.columns.size, "a composite FK must resolve every parent PK column")
+            assertEquals(
+                setOf(ColumnPair("warehouse_code", "warehouse_code"), ColumnPair("bin_code", "bin_code")),
+                binCounts.columns.toSet(),
+            )
         } finally {
             ds.close()
         }

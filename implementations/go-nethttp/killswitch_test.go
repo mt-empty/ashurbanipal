@@ -34,19 +34,21 @@ func TestEnabledTrueWithNoSourcesPanics(t *testing.T) {
 	Router(Config{Enabled: true}, nil)
 }
 
-// assertDisabled checks that every one of the seven mount routes 404s —
-// indistinguishable from the viewer never having been mounted at all
-// (spec/protocol.md §4) — using the default base path, since a disabled
-// Config{} carries no BasePath override of its own to probe instead.
+// assertDisabled checks that every mount route 404s — indistinguishable
+// from the viewer never having been mounted at all (spec/protocol.md §4) —
+// using the default base path, since a disabled Config{} carries no
+// BasePath override of its own to probe instead.
 func assertDisabled(t *testing.T, handler http.Handler) {
 	t.Helper()
 	for _, path := range []string{
 		"/__ashurbanipal",
 		"/__ashurbanipal/api/sources",
+		"/__ashurbanipal/api/schemas",
 		"/__ashurbanipal/api/tables",
 		"/__ashurbanipal/api/table-counts",
 		"/__ashurbanipal/api/tables/data",
 		"/__ashurbanipal/api/tables/common-values",
+		"/__ashurbanipal/api/tables/referenced-by",
 		"/__ashurbanipal/api/siblings",
 	} {
 		rec := httptest.NewRecorder()

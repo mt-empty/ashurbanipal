@@ -28,7 +28,9 @@ pub use ashurbanipal::MySqlSource;
 pub use ashurbanipal::PgPoolSource;
 #[cfg(feature = "sqlite")]
 pub use ashurbanipal::SqliteSource;
-pub use ashurbanipal::{ColumnInfo, DbError, DbSource, QueryOpts, TableData, TableInfo};
+pub use ashurbanipal::{
+    ColumnInfo, ColumnPair, DbError, DbSource, QueryOpts, ReferencedBy, TableData, TableInfo,
+};
 pub use ashurbanipal::{Condition, FilterError, FilterOp, Logic};
 pub use ashurbanipal::{Config, ConfigError, Limits, Sibling};
 pub use routes::router;

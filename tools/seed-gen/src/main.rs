@@ -11,6 +11,11 @@
 //!
 //! Deterministic (fixed RNG seed) so regenerating without edits produces an
 //! identical file — diffs only show up when the generator itself changes.
+//!
+//! `cargo run -- sqlite` emits a reduced, SQLite-flavored seed instead (no
+//! schemas/enums/uuid/jsonb/array/inet/comments — see `generate_sqlite`),
+//! consumed by `mise run rust:demo-sqlite`. `cargo run` / `cargo run --
+//! postgres` is the default and stays byte-identical to before this existed.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -65,6 +70,10 @@ const CONFORMANCE_VERSION: &str = include_str!("../../../conformance/seed/VERSIO
 /// app's own future writes, not this script's own INSERT values.
 const ANCHOR_TS: &str = "2026-07-19 00:00:00+00";
 const ANCHOR_DATE: &str = "2026-07-19";
+/// Same instant as `ANCHOR_TS`, without the `+00` suffix — SQLite's
+/// `datetime()`/`date()` modifier functions (used by the `sqlite` dialect
+/// in place of Postgres `interval` arithmetic) don't parse a timezone offset.
+const ANCHOR_TS_SQLITE: &str = "2026-07-19 00:00:00";
 
 const ROLE_POOL: [&str; 6] = ["admin", "user", "user", "user", "support", "moderator"];
 /// Roles treated as "staff" for picking a plausible assignee/processor on
@@ -157,23 +166,41 @@ fn fnv1a64(data: &str) -> u64 {
 }
 
 fn main() {
+    let dialect = std::env::args().nth(1).unwrap_or_else(|| "postgres".to_string());
     let mut rng = StdRng::seed_from_u64(SEED);
+    let out = match dialect.as_str() {
+        "postgres" => generate_postgres(&mut rng),
+        "sqlite" => generate_sqlite(&mut rng),
+        other => {
+            eprintln!("unknown dialect {other:?} (expected \"postgres\" or \"sqlite\")");
+            std::process::exit(1);
+        }
+    };
+    print!("{out}");
+}
+
+/// The original, Postgres-flavored seed — unchanged from before the `sqlite`
+/// dialect existed, so `mise run conformance:seed-check` keeps passing
+/// byte-for-byte. Never branch on dialect inside this function or anything
+/// it calls that draws from `rng` — that would shift every later RNG draw
+/// and re-diff both committed seed files for no content reason.
+fn generate_postgres(rng: &mut StdRng) -> String {
     let mut out = String::new();
 
     write_header(&mut out);
     write_schema(&mut out);
 
-    let users = gen_users(&mut rng);
+    let users = gen_users(rng);
     write_users(&mut out, &users);
 
-    let orders = gen_orders(&mut rng, &users);
+    let orders = gen_orders(rng, &users);
     write_orders(&mut out, &orders);
-    gen_and_write_order_extra(&mut out, &mut rng, &orders);
+    gen_and_write_order_extra(&mut out, rng, &orders);
 
-    write_products(&mut out, &mut rng);
-    write_events(&mut out, &mut rng, &users);
+    write_products(&mut out, rng);
+    write_events(&mut out, rng, &users);
 
-    let sessions = gen_sessions(&mut rng, &users);
+    let sessions = gen_sessions(rng, &users);
     write_sessions(&mut out, &sessions);
 
     // Index used by the new tables below to pick a *plausible* FK target
@@ -188,22 +215,22 @@ fn main() {
         .filter(|u| STAFF_ROLES.contains(&u.role))
         .collect();
 
-    write_reviews(&mut out, &mut rng, &users, &orders_by_user);
-    write_support_tickets(&mut out, &mut rng, &users, &staff_users, &orders_by_user);
-    write_payments(&mut out, &mut rng, &orders, &staff_users);
-    write_audit_log(&mut out, &mut rng, &users, &sessions);
+    write_reviews(&mut out, rng, &users, &orders_by_user);
+    write_support_tickets(&mut out, rng, &users, &staff_users, &orders_by_user);
+    write_payments(&mut out, rng, &orders, &staff_users);
+    write_audit_log(&mut out, rng, &users, &sessions);
     // saved_reports gets zero rows on purpose (see write_schema) — no
     // insert statement at all, just the `analyze` below so its
     // `pg_class.reltuples` reads back as 0 rather than -1.
 
-    let locations = write_inventory_locations(&mut out, &mut rng);
-    write_inventory_counts(&mut out, &mut rng, &locations);
-    write_feature_flags(&mut out, &mut rng);
+    let locations = write_inventory_locations(&mut out, rng);
+    write_inventory_counts(&mut out, rng, &locations);
+    write_feature_flags(&mut out, rng);
     // feature_flags is deliberately excluded from analyze below.
 
-    write_carriers(&mut out, &mut rng);
-    let shipped_offsets_mins = write_shipments(&mut out, &mut rng, &orders);
-    write_shipment_events(&mut out, &mut rng, &shipped_offsets_mins, &staff_users);
+    write_carriers(&mut out, rng);
+    let shipped_offsets_mins = write_shipments(&mut out, rng, &orders);
+    write_shipment_events(&mut out, rng, &shipped_offsets_mins, &staff_users);
 
     out.push_str(
         "\n-- pg_class.reltuples is only populated by ANALYZE/autovacuum; without this,\n\
@@ -231,7 +258,7 @@ fn main() {
 
     write_conformance_meta(&mut out);
 
-    print!("{out}");
+    out
 }
 
 fn write_header(out: &mut String) {
@@ -1544,4 +1571,802 @@ fn write_conformance_meta(out: &mut String) {
         q(&checksum),
     )
     .unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// SQLite dialect
+//
+// A reduced translation of the Postgres seed above for `rust:demo-sqlite`:
+// real multi-table data with FKs (including the composite one), not the
+// conformance fixtures. Dropped entirely, since SQLite can't express them or
+// they exist purely to probe Postgres-specific behavior: `other_schema` /
+// `warehouse` (no schema concept), `_conformance_meta` (not a conformance
+// target), `comment on` (no comment mechanism, docs/adapter-decisions.md
+// §SQLite), and the `analyze` block (SqliteSource::table_counts always
+// returns the -1 "no estimate" sentinel regardless — core/src/db/sqlite.rs).
+// Reuses the Postgres dialect's pure data generators (`gen_users`,
+// `gen_orders`, `gen_sessions`) and any `write_*` whose SQL happens to
+// already be dialect-neutral (`gen_and_write_order_extra`,
+// `write_inventory_locations` — no jsonb/array/bytea/interval syntax in
+// either); only functions that emit a `::cast`, `array[...]`, or a Postgres
+// `interval`/enum-type literal get a `_sqlite` twin below.
+
+/// `datetime('anchor', '-N minutes')` — SQLite's offset-from-literal
+/// modifier syntax, the equivalent of Postgres's `TIMESTAMPTZ 'x' - interval`
+/// used by `ts_minus_mins`.
+fn sqlite_ts_minus_mins(mins: u32) -> String {
+    format!("datetime('{ANCHOR_TS_SQLITE}', '-{mins} minutes')")
+}
+
+/// `datetime('anchor', '-N days')` — the sqlite equivalent of `ts_minus_days`.
+fn sqlite_ts_minus_days(days: u32) -> String {
+    format!("datetime('{ANCHOR_TS_SQLITE}', '-{days} days')")
+}
+
+/// `date('anchor', '-N days')` — the sqlite equivalent of `date_minus_days`.
+fn sqlite_date_minus_days(days: u32) -> String {
+    format!("date('{ANCHOR_DATE}', '-{days} days')")
+}
+
+/// SQLite blob literal (`X'...'`), or `NULL` — the equivalent of `bytea_sql`.
+fn sqlite_blob_sql(bytes: Option<&[u8]>) -> String {
+    match bytes {
+        Some(b) => {
+            let hex: String = b.iter().map(|byte| format!("{byte:02x}")).collect();
+            format!("X'{hex}'")
+        }
+        None => "NULL".into(),
+    }
+}
+
+fn generate_sqlite(rng: &mut StdRng) -> String {
+    let mut out = String::new();
+
+    write_header_sqlite(&mut out);
+    write_schema_sqlite(&mut out);
+
+    let users = gen_users(rng);
+    write_users_sqlite(&mut out, &users);
+
+    let orders = gen_orders(rng, &users);
+    write_orders_sqlite(&mut out, &orders);
+    gen_and_write_order_extra(&mut out, rng, &orders);
+
+    write_products_sqlite(&mut out, rng);
+    write_events_sqlite(&mut out, rng, &users);
+
+    let sessions = gen_sessions(rng, &users);
+    write_sessions_sqlite(&mut out, &sessions);
+
+    let mut orders_by_user: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for o in &orders {
+        orders_by_user.entry(o.user_id).or_default().push(o.id);
+    }
+    let staff_users: Vec<&GenUser> = users
+        .iter()
+        .filter(|u| STAFF_ROLES.contains(&u.role))
+        .collect();
+
+    write_reviews_sqlite(&mut out, rng, &users, &orders_by_user);
+    write_support_tickets_sqlite(&mut out, rng, &users, &staff_users, &orders_by_user);
+    write_payments_sqlite(&mut out, rng, &orders, &staff_users);
+    write_audit_log_sqlite(&mut out, rng, &users, &sessions);
+
+    let locations = write_inventory_locations(&mut out, rng);
+    write_inventory_counts_sqlite(&mut out, rng, &locations);
+    write_feature_flags_sqlite(&mut out, rng);
+
+    out
+}
+
+fn write_header_sqlite(out: &mut String) {
+    out.push_str(
+        "-- GENERATED FILE — do not hand-edit.\n\
+         -- Source: tools/seed-gen (`cargo run -- sqlite`), applied by `mise run rust:demo-sqlite`.\n\
+         -- A reduced translation of tools/seed-gen's Postgres demo seed: SQLite has no\n\
+         -- schema, enum, uuid, jsonb, array, or inet types and no COMMENT ON, so those\n\
+         -- fixtures are either dropped or flattened to text/blob columns. Real multi-table\n\
+         -- data with FKs, including one composite FK, for exercising the SQLite DbSource —\n\
+         -- not a conformance fixture. Idempotent (drops first).\n\n\
+         drop table if exists feature_flags;\n\
+         drop table if exists inventory_counts;\n\
+         drop table if exists inventory_locations;\n\
+         drop table if exists audit_log;\n\
+         drop table if exists payments;\n\
+         drop table if exists support_tickets;\n\
+         drop table if exists reviews;\n\
+         drop table if exists sessions;\n\
+         drop table if exists events;\n\
+         drop table if exists order_extra;\n\
+         drop table if exists orders;\n\
+         drop table if exists products;\n\
+         drop table if exists users;\n\n",
+    );
+}
+
+fn write_schema_sqlite(out: &mut String) {
+    out.push_str(
+        "create table users (\n\
+         \x20   id text primary key default (lower(hex(randomblob(16)))),\n\
+         \x20   email text not null unique,\n\
+         \x20   full_name text not null,\n\
+         \x20   age integer,\n\
+         \x20   is_active integer not null default 1,\n\
+         \x20   login_count integer not null default 0,\n\
+         \x20   metadata text not null default '{}',\n\
+         \x20   last_login_at text,\n\
+         \x20   created_at text not null default (datetime('now'))\n\
+         );\n\n\
+         create table orders (\n\
+         \x20   id text primary key default (lower(hex(randomblob(16)))),\n\
+         \x20   user_id text not null references users(id),\n\
+         \x20   status text not null default 'pending' \
+         check (status in ('pending', 'completed', 'cancelled', 'refunded')),\n\
+         \x20   total_cents integer not null,\n\
+         \x20   discount_pct numeric(5,2),\n\
+         \x20   tags text,\n\
+         \x20   line_items text not null default '[]',\n\
+         \x20   created_at text not null default (datetime('now'))\n\
+         );\n\n\
+         -- 1:1 detail table: order_id is both this table's own PK and an FK into orders(id).\n\
+         create table order_extra (\n\
+         \x20   order_id text primary key references orders(id),\n\
+         \x20   gift_message text,\n\
+         \x20   is_gift integer not null default 0,\n\
+         \x20   created_at text not null default (datetime('now'))\n\
+         );\n\n\
+         create table products (\n\
+         \x20   id integer primary key autoincrement,\n\
+         \x20   sku varchar(20) not null unique,\n\
+         \x20   name text not null,\n\
+         \x20   category text not null \
+         check (category in ('electronics', 'books', 'home', 'toys', 'apparel')),\n\
+         \x20   price numeric(10,2) not null,\n\
+         \x20   weight_kg real,\n\
+         \x20   in_stock integer not null default 1,\n\
+         \x20   description text,\n\
+         \x20   created_on text not null default (date('now'))\n\
+         );\n\n\
+         create table events (\n\
+         \x20   id integer primary key autoincrement,\n\
+         \x20   user_id text references users(id),\n\
+         \x20   event_type text not null,\n\
+         \x20   payload text not null default '{}',\n\
+         \x20   ip_address text,\n\
+         \x20   duration_ms integer,\n\
+         \x20   occurred_at text not null default (datetime('now')),\n\
+         \x20   is_test integer not null default 0\n\
+         );\n\n\
+         create table sessions (\n\
+         \x20   id text primary key default (lower(hex(randomblob(16)))),\n\
+         \x20   user_id text not null references users(id),\n\
+         \x20   device_type varchar(20) not null,\n\
+         \x20   user_agent text not null,\n\
+         \x20   ip_address text,\n\
+         \x20   started_at text not null,\n\
+         \x20   ended_at text\n\
+         );\n\n\
+         create table reviews (\n\
+         \x20   id integer primary key autoincrement,\n\
+         \x20   user_id text not null references users(id),\n\
+         \x20   product_id integer not null references products(id),\n\
+         \x20   order_id text references orders(id),\n\
+         \x20   rating integer not null,\n\
+         \x20   title text,\n\
+         \x20   body text,\n\
+         \x20   is_verified_purchase integer not null default 0,\n\
+         \x20   created_at text not null default (datetime('now'))\n\
+         );\n\n\
+         create table support_tickets (\n\
+         \x20   id integer primary key autoincrement,\n\
+         \x20   user_id text not null references users(id),\n\
+         \x20   assigned_admin_id text references users(id),\n\
+         \x20   order_id text references orders(id),\n\
+         \x20   subject text not null,\n\
+         \x20   description text not null,\n\
+         \x20   status text not null default 'open' \
+         check (status in ('open', 'in_progress', 'resolved', 'closed')),\n\
+         \x20   created_at text not null,\n\
+         \x20   resolved_at text\n\
+         );\n\n\
+         create table payments (\n\
+         \x20   id integer primary key autoincrement,\n\
+         \x20   order_id text not null references orders(id),\n\
+         \x20   processed_by_user_id text references users(id),\n\
+         \x20   related_event_id integer references events(id),\n\
+         \x20   amount_cents integer not null,\n\
+         \x20   status text not null default 'pending' \
+         check (status in ('pending', 'succeeded', 'failed', 'refunded')),\n\
+         \x20   gateway_response text not null default '{}',\n\
+         \x20   created_at text not null\n\
+         );\n\n\
+         create table audit_log (\n\
+         \x20   id integer primary key autoincrement,\n\
+         \x20   actor_user_id text references users(id),\n\
+         \x20   session_id text references sessions(id),\n\
+         \x20   event_id integer references events(id),\n\
+         \x20   action text not null,\n\
+         \x20   details text not null default '{}',\n\
+         \x20   occurred_at text not null\n\
+         );\n\n\
+         -- Composite primary key: inventory_counts' (warehouse_code, bin_code) FK\n\
+         -- below references this pair together, never either column alone.\n\
+         create table inventory_locations (\n\
+         \x20   warehouse_code varchar(10) not null,\n\
+         \x20   bin_code varchar(10) not null,\n\
+         \x20   label text,\n\
+         \x20   capacity integer not null default 100,\n\
+         \x20   primary key (warehouse_code, bin_code)\n\
+         );\n\n\
+         -- product_id is an ordinary single-column FK (contrast with the composite\n\
+         -- one below); photo is the blob fixture.\n\
+         create table inventory_counts (\n\
+         \x20   id integer primary key autoincrement,\n\
+         \x20   warehouse_code varchar(10) not null,\n\
+         \x20   bin_code varchar(10) not null,\n\
+         \x20   product_id integer references products(id),\n\
+         \x20   quantity integer not null,\n\
+         \x20   photo blob,\n\
+         \x20   counted_at text not null default (datetime('now')),\n\
+         \x20   foreign key (warehouse_code, bin_code) references inventory_locations(warehouse_code, bin_code)\n\
+         );\n\n\
+         create table feature_flags (\n\
+         \x20   id integer primary key autoincrement,\n\
+         \x20   key text not null unique,\n\
+         \x20   enabled integer not null default 1,\n\
+         \x20   rollout_pct integer,\n\
+         \x20   created_at text not null default (datetime('now'))\n\
+         );\n\n",
+    );
+}
+
+fn write_users_sqlite(out: &mut String, users: &[GenUser]) {
+    out.push_str("insert into users (id, email, full_name, age, is_active, login_count, metadata, last_login_at, created_at) values\n");
+    for (i, u) in users.iter().enumerate() {
+        let age = u.age.map(|a| a.to_string()).unwrap_or_else(|| "NULL".into());
+        let last_login = match u.last_login_offset_mins {
+            Some(mins) => sqlite_ts_minus_mins(mins),
+            None => "NULL".into(),
+        };
+        let sep = if i + 1 == users.len() { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ('{id}', {email}, {name}, {age}, {active}, {logins}, {meta}, {last_login}, {created}){sep}",
+            id = u.id,
+            email = q(&u.email),
+            name = q(&u.full_name),
+            active = u.is_active,
+            logins = u.login_count,
+            meta = q(&u.metadata),
+            created = sqlite_ts_minus_days(u.created_offset_days),
+        )
+        .unwrap();
+    }
+}
+
+fn write_orders_sqlite(out: &mut String, orders: &[GenOrder]) {
+    out.push_str("insert into orders (id, user_id, status, total_cents, discount_pct, tags, line_items, created_at) values\n");
+    let n = orders.len();
+    for (i, o) in orders.iter().enumerate() {
+        let discount_sql = o
+            .discount_pct
+            .map(|d| format!("{d:.2}"))
+            .unwrap_or_else(|| "NULL".into());
+        let tags_sql = match &o.tags {
+            Some(t) => q(&format!(
+                "[{}]",
+                t.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(", ")
+            )),
+            None => "NULL".into(),
+        };
+        let items_sql = q(&format!("[{}]", o.line_items.join(", ")));
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ('{id}', '{user_id}', '{status}', {total_cents}, {discount_sql}, {tags_sql}, {items_sql}, {created}){sep}",
+            id = o.id,
+            user_id = o.user_id,
+            status = o.status,
+            total_cents = o.total_cents,
+            created = sqlite_ts_minus_mins(o.created_offset_mins),
+        )
+        .unwrap();
+    }
+}
+
+fn write_products_sqlite(out: &mut String, rng: &mut StdRng) {
+    let categories: [(&str, &str, &[&str]); 5] = [
+        ("electronics", "ELEC", &["Mouse", "Keyboard", "Monitor", "Webcam", "Speaker", "Charger", "Router", "Headphones"]),
+        ("books", "BOOK", &["Programming Guide", "Design Handbook", "Field Notes", "Reference Manual", "Anthology"]),
+        ("home", "HOME", &["Mug", "Desk Lamp", "Blanket", "Organizer", "Candle", "Planter"]),
+        ("toys", "TOYS", &["Building Blocks", "Puzzle", "Action Figure", "Board Game", "Plush Toy"]),
+        ("apparel", "APRL", &["Socks", "Jacket", "Tote Bag", "Cap", "Scarf", "Gloves"]),
+    ];
+    let mut counters = [1000u32; 5];
+
+    out.push_str("insert into products (sku, name, category, price, weight_kg, in_stock, description, created_on) values\n");
+    for i in 0..PRODUCT_COUNT {
+        let cat_idx = rng.random_range(0..categories.len());
+        let (category, prefix, nouns) = categories[cat_idx];
+        counters[cat_idx] += 1;
+        let sku = format!("{prefix}-{}", counters[cat_idx]);
+        let buzzword: String = Buzzword().fake_with_rng(rng);
+        let noun = nouns.choose(rng).unwrap();
+        let name = format!("{buzzword} {noun}");
+        let price = rng.random_range(500..50_000) as f64 / 100.0;
+        let weight = if rng.random_bool(0.1) {
+            None
+        } else {
+            Some(rng.random_range(5..1500) as f32 / 100.0)
+        };
+        let in_stock = rng.random_bool(0.8);
+        let description = if rng.random_bool(0.5) {
+            let p: String = Paragraph(1..3).fake_with_rng(rng);
+            Some(p)
+        } else {
+            None
+        };
+        let created_days_ago = rng.random_range(1..400);
+
+        let weight_sql = weight
+            .map(|w| format!("{w:.2}"))
+            .unwrap_or_else(|| "NULL".into());
+        let desc_sql = description.map(|d| q(&d)).unwrap_or_else(|| "NULL".into());
+        let sep = if i + 1 == PRODUCT_COUNT { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ({sku}, {name}, {category}, {price:.2}, {weight_sql}, {in_stock}, {desc_sql}, {created}){sep}",
+            sku = q(&sku),
+            name = q(&name),
+            category = q(category),
+            created = sqlite_date_minus_days(created_days_ago),
+        )
+        .unwrap();
+    }
+}
+
+fn write_events_sqlite(out: &mut String, rng: &mut StdRng, users: &[GenUser]) {
+    let event_types = [
+        "page_view",
+        "click",
+        "signup",
+        "purchase",
+        "error",
+        "logout",
+        "search",
+        "add_to_cart",
+    ];
+    let paths = ["/app/dashboard", "/app/settings", "/app/billing", "/app/profile", "/app/search"];
+
+    out.push_str("insert into events (user_id, event_type, payload, ip_address, duration_ms, occurred_at, is_test) values\n");
+    for i in 0..EVENT_COUNT {
+        let user_id = if rng.random_bool(0.12) {
+            None
+        } else {
+            Some(users.choose(rng).unwrap().id)
+        };
+        let event_type = *event_types.choose(rng).unwrap();
+        let path = *paths.choose(rng).unwrap();
+        let ip: String = IPv4().fake_with_rng(rng);
+        let duration = if rng.random_bool(0.2) {
+            None
+        } else {
+            Some(rng.random_range(5..5000))
+        };
+        let occurred_mins_ago = rng.random_range(1..130_000);
+        let is_test = rng.random_bool(0.05);
+
+        let user_sql = user_id
+            .map(|id| format!("'{id}'"))
+            .unwrap_or_else(|| "NULL".into());
+        let duration_sql = duration
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "NULL".into());
+        let payload = format!(r#"'{{"path": "{path}", "n": {i}}}'"#);
+        let sep = if i + 1 == EVENT_COUNT { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ({user_sql}, {et}, {payload}, {ip_sql}, {duration_sql}, {occurred}, {is_test}){sep}",
+            et = q(event_type),
+            ip_sql = q(&ip),
+            occurred = sqlite_ts_minus_mins(occurred_mins_ago),
+        )
+        .unwrap();
+    }
+}
+
+fn write_sessions_sqlite(out: &mut String, sessions: &[GenSession]) {
+    out.push_str("insert into sessions (id, user_id, device_type, user_agent, ip_address, started_at, ended_at) values\n");
+    let n = sessions.len();
+    for (i, s) in sessions.iter().enumerate() {
+        let ended_sql = s
+            .ended_offset_mins
+            .map(sqlite_ts_minus_mins)
+            .unwrap_or_else(|| "NULL".into());
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ('{id}', '{user_id}', {device}, {ua}, {ip}, {started}, {ended_sql}){sep}",
+            id = s.id,
+            user_id = s.user_id,
+            device = q(s.device),
+            ua = q(s.user_agent),
+            ip = q(&s.ip),
+            started = sqlite_ts_minus_mins(s.started_offset_mins),
+        )
+        .unwrap();
+    }
+}
+
+fn write_reviews_sqlite(
+    out: &mut String,
+    rng: &mut StdRng,
+    users: &[GenUser],
+    orders_by_user: &HashMap<Uuid, Vec<Uuid>>,
+) {
+    let rating_pool: [i16; 8] = [5, 5, 5, 4, 4, 3, 2, 1];
+    let title_pool = [
+        "Exceeded expectations",
+        "Does the job",
+        "Would buy again",
+        "Not what I expected",
+        "Solid value",
+        "Mixed feelings",
+        "Highly recommend",
+        "Fell short",
+    ];
+
+    struct Row {
+        user_id: Uuid,
+        product_id: i64,
+        order_id: Option<Uuid>,
+        rating: i16,
+        title: Option<&'static str>,
+        body: Option<String>,
+        verified: bool,
+        created_offset_mins: u32,
+    }
+
+    let mut rows: Vec<Row> = Vec::new();
+    for product_id in 1i64..=(PRODUCT_COUNT as i64) {
+        let n_reviews = rng.random_range(REVIEWS_PER_PRODUCT_MIN..=REVIEWS_PER_PRODUCT_MAX);
+        for _ in 0..n_reviews {
+            let user = users.choose(rng).unwrap();
+            let rating = *rating_pool.choose(rng).unwrap();
+            let title = if rng.random_bool(0.6) {
+                Some(*title_pool.choose(rng).unwrap())
+            } else {
+                None
+            };
+            let body = if rng.random_bool(0.75) {
+                let p: String = Paragraph(1..3).fake_with_rng(rng);
+                Some(p)
+            } else {
+                None
+            };
+            let (order_id, verified) = if rng.random_bool(0.4) {
+                match orders_by_user.get(&user.id).filter(|v| !v.is_empty()) {
+                    Some(user_orders) => (Some(*user_orders.choose(rng).unwrap()), true),
+                    None => (None, false),
+                }
+            } else {
+                (None, false)
+            };
+            let created_offset_mins = rng.random_range(10..200_000);
+            rows.push(Row {
+                user_id: user.id,
+                product_id,
+                order_id,
+                rating,
+                title,
+                body,
+                verified,
+                created_offset_mins,
+            });
+        }
+    }
+
+    out.push_str(
+        "insert into reviews \
+         (user_id, product_id, order_id, rating, title, body, is_verified_purchase, created_at) values\n",
+    );
+    let n = rows.len();
+    for (i, r) in rows.iter().enumerate() {
+        let order_sql = uuid_sql(r.order_id);
+        let title_sql = r.title.map(q).unwrap_or_else(|| "NULL".into());
+        let body_sql = r.body.as_ref().map(|b| q(b)).unwrap_or_else(|| "NULL".into());
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ('{user_id}', {product_id}, {order_sql}, {rating}, {title_sql}, {body_sql}, {verified}, {created}){sep}",
+            user_id = r.user_id,
+            product_id = r.product_id,
+            rating = r.rating,
+            verified = r.verified,
+            created = sqlite_ts_minus_mins(r.created_offset_mins),
+        )
+        .unwrap();
+    }
+}
+
+fn write_support_tickets_sqlite(
+    out: &mut String,
+    rng: &mut StdRng,
+    users: &[GenUser],
+    staff_users: &[&GenUser],
+    orders_by_user: &HashMap<Uuid, Vec<Uuid>>,
+) {
+    let statuses = ["open", "open", "in_progress", "resolved", "resolved", "closed"];
+    let subjects = [
+        "Order has not arrived",
+        "Unable to log in",
+        "Requesting a refund",
+        "Charged twice for one order",
+        "Question about my account",
+        "Product arrived damaged",
+        "How do I change my email",
+        "App keeps crashing at checkout",
+        "Missing item from order",
+        "Need to update shipping address",
+    ];
+
+    out.push_str(
+        "insert into support_tickets \
+         (user_id, assigned_admin_id, order_id, subject, description, status, created_at, resolved_at) values\n",
+    );
+    for i in 0..SUPPORT_TICKET_COUNT {
+        let user = users.choose(rng).unwrap();
+        let assigned = if !staff_users.is_empty() && rng.random_bool(0.75) {
+            Some(staff_users.choose(rng).unwrap().id)
+        } else {
+            None
+        };
+        let order_id = if rng.random_bool(0.5) {
+            orders_by_user
+                .get(&user.id)
+                .filter(|v| !v.is_empty())
+                .map(|v| *v.choose(rng).unwrap())
+        } else {
+            None
+        };
+        let subject = *subjects.choose(rng).unwrap();
+        let description = if i % 4 == 0 {
+            let paras: Vec<String> = Paragraphs(3..6).fake_with_rng(rng);
+            paras.join("\n\n")
+        } else {
+            Paragraph(1..2).fake_with_rng(rng)
+        };
+        let status = *statuses.choose(rng).unwrap();
+        let created_offset_mins = rng.random_range(60..300_000);
+        let resolved_offset_mins = if matches!(status, "resolved" | "closed") {
+            Some(rng.random_range(0..created_offset_mins))
+        } else {
+            None
+        };
+
+        let assigned_sql = uuid_sql(assigned);
+        let order_sql = uuid_sql(order_id);
+        let resolved_sql = resolved_offset_mins
+            .map(sqlite_ts_minus_mins)
+            .unwrap_or_else(|| "NULL".into());
+        let sep = if i + 1 == SUPPORT_TICKET_COUNT { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ('{user_id}', {assigned_sql}, {order_sql}, {subject}, {description}, {status}, {created}, {resolved_sql}){sep}",
+            user_id = user.id,
+            subject = q(subject),
+            description = q(&description),
+            status = q(status),
+            created = sqlite_ts_minus_mins(created_offset_mins),
+        )
+        .unwrap();
+    }
+}
+
+fn write_payments_sqlite(out: &mut String, rng: &mut StdRng, orders: &[GenOrder], staff_users: &[&GenUser]) {
+    struct Row {
+        order_id: Uuid,
+        processed_by: Option<Uuid>,
+        related_event: Option<i64>,
+        amount_cents: i32,
+        status: &'static str,
+        gateway_response: String,
+        offset_mins: u32,
+    }
+
+    let mut rows: Vec<Row> = Vec::new();
+    for o in orders {
+        if o.status == "pending" && rng.random_bool(0.4) {
+            continue; // no payment attempt recorded yet
+        }
+        let primary_status = match o.status {
+            "completed" => *["succeeded", "succeeded", "succeeded", "failed"].choose(rng).unwrap(),
+            "refunded" => "succeeded",
+            "cancelled" => "failed",
+            _ => *["pending", "failed"].choose(rng).unwrap(),
+        };
+        let gap = rng.random_range(1..2000).min(o.created_offset_mins);
+        let primary_offset = o.created_offset_mins - gap;
+        let processed_by = if matches!(primary_status, "failed" | "refunded")
+            && !staff_users.is_empty()
+            && rng.random_bool(0.5)
+        {
+            Some(staff_users.choose(rng).unwrap().id)
+        } else {
+            None
+        };
+        let related_event = if rng.random_bool(0.3) {
+            Some(rng.random_range(1..=(EVENT_COUNT as i64)))
+        } else {
+            None
+        };
+        let gateway_response = if primary_status == "failed" {
+            large_gateway_response(rng)
+        } else {
+            small_gateway_response(rng)
+        };
+        rows.push(Row {
+            order_id: o.id,
+            processed_by,
+            related_event,
+            amount_cents: o.total_cents,
+            status: primary_status,
+            gateway_response,
+            offset_mins: primary_offset,
+        });
+
+        if o.status == "refunded" {
+            let refund_gap = rng.random_range(1..1000).min(primary_offset);
+            let refund_offset = primary_offset - refund_gap;
+            let refund_processed_by = if !staff_users.is_empty() {
+                Some(staff_users.choose(rng).unwrap().id)
+            } else {
+                None
+            };
+            rows.push(Row {
+                order_id: o.id,
+                processed_by: refund_processed_by,
+                related_event,
+                amount_cents: -o.total_cents,
+                status: "refunded",
+                gateway_response: large_gateway_response(rng),
+                offset_mins: refund_offset,
+            });
+        }
+    }
+
+    out.push_str(
+        "insert into payments \
+         (order_id, processed_by_user_id, related_event_id, amount_cents, status, gateway_response, created_at) values\n",
+    );
+    let n = rows.len();
+    for (i, r) in rows.iter().enumerate() {
+        let processed_sql = uuid_sql(r.processed_by);
+        let event_sql = int_sql(r.related_event);
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ('{order_id}', {processed_sql}, {event_sql}, {amount}, {status_sql}, {gateway}, {created}){sep}",
+            order_id = r.order_id,
+            amount = r.amount_cents,
+            status_sql = q(r.status),
+            gateway = q(&r.gateway_response),
+            created = sqlite_ts_minus_mins(r.offset_mins),
+        )
+        .unwrap();
+    }
+}
+
+fn write_audit_log_sqlite(out: &mut String, rng: &mut StdRng, users: &[GenUser], sessions: &[GenSession]) {
+    let actions = [
+        "user.login",
+        "user.logout",
+        "user.password_reset",
+        "order.created",
+        "order.status_changed",
+        "order.refunded",
+        "product.updated",
+        "payment.processed",
+        "payment.failed",
+        "permission.changed",
+        "export.requested",
+        "admin.impersonation_started",
+        "settings.updated",
+        "ticket.assigned",
+        "ticket.resolved",
+    ];
+
+    out.push_str("insert into audit_log (actor_user_id, session_id, event_id, action, details, occurred_at) values\n");
+    for i in 0..AUDIT_LOG_COUNT {
+        let actor = if rng.random_bool(0.7) {
+            Some(users.choose(rng).unwrap().id)
+        } else {
+            None
+        };
+        let session = if rng.random_bool(0.4) {
+            Some(sessions.choose(rng).unwrap().id)
+        } else {
+            None
+        };
+        let event = if rng.random_bool(0.5) {
+            Some(rng.random_range(1..=(EVENT_COUNT as i64)))
+        } else {
+            None
+        };
+        let action = *actions.choose(rng).unwrap();
+        let occurred_offset_mins = rng.random_range(1..500_000);
+
+        let actor_sql = uuid_sql(actor);
+        let session_sql = uuid_sql(session);
+        let event_sql = int_sql(event);
+        let sep = if i + 1 == AUDIT_LOG_COUNT { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ({actor_sql}, {session_sql}, {event_sql}, {action_sql}, '{{\"seq\": {i}}}', {occurred}){sep}",
+            action_sql = q(action),
+            occurred = sqlite_ts_minus_mins(occurred_offset_mins),
+        )
+        .unwrap();
+    }
+}
+
+fn write_inventory_counts_sqlite(out: &mut String, rng: &mut StdRng, locations: &[(String, String)]) {
+    out.push_str(
+        "insert into inventory_counts \
+         (warehouse_code, bin_code, product_id, quantity, photo, counted_at) values\n",
+    );
+    for i in 0..INVENTORY_COUNT_ROWS {
+        let (wh, bin) = locations.choose(rng).unwrap();
+        let product_id = rng.random_range(1..=(PRODUCT_COUNT as i64));
+        let quantity = rng.random_range(0..2000);
+        let photo = if rng.random_bool(0.3) {
+            let len = rng.random_range(4..12);
+            let mut bytes = vec![0u8; len];
+            rng.fill(bytes.as_mut_slice());
+            Some(bytes)
+        } else {
+            None
+        };
+        let counted_offset_days = rng.random_range(0..200);
+        let sep = if i + 1 == INVENTORY_COUNT_ROWS { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ({}, {}, {product_id}, {quantity}, {}, {}){sep}",
+            q(wh),
+            q(bin),
+            sqlite_blob_sql(photo.as_deref()),
+            sqlite_ts_minus_days(counted_offset_days),
+        )
+        .unwrap();
+    }
+}
+
+fn write_feature_flags_sqlite(out: &mut String, rng: &mut StdRng) {
+    let keys = [
+        "new_dashboard",
+        "beta_checkout",
+        "dark_mode_default",
+        "export_v2",
+        "inline_editing",
+        "sibling_health_badges",
+    ];
+    out.push_str("insert into feature_flags (key, enabled, rollout_pct, created_at) values\n");
+    let n = keys.len().min(FEATURE_FLAG_COUNT);
+    for (i, key) in keys.iter().take(n).enumerate() {
+        let enabled = rng.random_bool(0.6);
+        let rollout = if enabled {
+            format!("{}", rng.random_range(0..=100))
+        } else {
+            "NULL".into()
+        };
+        let created_days_ago = rng.random_range(1..300);
+        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
+        write!(
+            out,
+            "    ({}, {enabled}, {rollout}, {}){sep}",
+            q(key),
+            sqlite_date_minus_days(created_days_ago),
+        )
+        .unwrap();
+    }
 }

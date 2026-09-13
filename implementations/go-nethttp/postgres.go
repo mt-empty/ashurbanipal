@@ -76,28 +76,29 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 	return real, nil
 }
 
-func (c *PostgresSource) allowedTables(ctx context.Context, db queryer, schema string) ([]string, error) {
+// readableTableOID resolves table to its OID iff it's a readable base
+// table in schema — the single existence-and-privilege check every
+// table-scoped operation needs before touching request-supplied SQL.
+// Mirrors ListTables' own pg_class/relkind = 'r' predicate, not
+// information_schema.tables' broader BASE TABLE (which also matches
+// partitioned tables) — keeps this gate and ListTables in lockstep
+// (docs/adapter-decisions.md §5.2/§5.3). One targeted row instead of
+// fetching every table name in the schema to check membership of one.
+func (c *PostgresSource) readableTableOID(ctx context.Context, db queryer, schema, table string) (int, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	// Keep the allow-list aligned with tables the role can SELECT (spec/protocol.md §5).
-	rows, err := db.QueryContext(ctx,
-		`select table_name from information_schema.tables
-		 where table_schema = $1 and table_type = 'BASE TABLE'
-		   and has_table_privilege(format('%I.%I', table_schema, table_name), 'SELECT')
-		 order by table_name`, schema)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
+	var oid int
+	if err := db.QueryRowContext(ctx,
+		`select c.oid from pg_class c
+		 join pg_namespace n on n.oid = c.relnamespace
+		 where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
+		   and has_table_privilege(c.oid, 'SELECT')`, schema, table).Scan(&oid); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
 		}
-		out = append(out, name)
+		return 0, err
 	}
-	return out, rows.Err()
+	return oid, nil
 }
 
 func (c *PostgresSource) allowedColumns(ctx context.Context, db queryer, schema, table string) ([]string, error) {
@@ -330,14 +331,10 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 		return TableData{}, err
 	}
 
-	tables, err := c.allowedTables(ctx, tx, realSchema)
-	if err != nil {
+	if _, err := c.readableTableOID(ctx, tx, realSchema, table); err != nil {
 		return TableData{}, err
 	}
-	realTable, ok := findExact(tables, table)
-	if !ok {
-		return TableData{}, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
-	}
+	realTable := table
 
 	columnNames, err := c.allowedColumns(ctx, tx, realSchema, realTable)
 	if err != nil {
@@ -540,14 +537,10 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 		return nil, err
 	}
 
-	tables, err := c.allowedTables(ctx, tx, realSchema)
-	if err != nil {
+	if _, err := c.readableTableOID(ctx, tx, realSchema, table); err != nil {
 		return nil, err
 	}
-	realTable, ok := findExact(tables, table)
-	if !ok {
-		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
-	}
+	realTable := table
 	columnNames, err := c.allowedColumns(ctx, tx, realSchema, realTable)
 	if err != nil {
 		return nil, err
@@ -614,4 +607,84 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 		return nil, err
 	}
 	return entries, nil
+}
+
+// ReferencedBy serves GET /api/tables/referenced-by (spec/protocol.md §5.9).
+func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table string) ([]ReferencedByEntry, error) {
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	realSchema, err := c.resolveSchema(ctx, tx, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	targetOID, err := c.readableTableOID(ctx, tx, realSchema, table)
+	if err != nil {
+		return nil, err
+	}
+
+	qctx, cancel := c.bounded(ctx)
+	defer cancel()
+
+	// pg_catalog, not information_schema: the reverse (confrelid) filter
+	// over the standard-SQL views runs 20-40x slower on a large catalog
+	// (docs/adapter-decisions.md §5.9). has_table_privilege is the
+	// per-referrer read gate and works across schemas, so cross-schema
+	// referrers are reported and gated without a separate allow-list pass.
+	// conparentid = 0 excludes a partitioned referrer's per-partition
+	// constraint copies (Postgres clones the parent's FK onto each
+	// partition) — without it, one logical FK fans out into one entry per
+	// partition plus the parent. relkind = 'r' gates the referrer itself the
+	// same way targetOID above gates the target: a partitioned table's own
+	// (non-inherited) FK constraint survives conparentid = 0 and would
+	// otherwise be reported as a referrer name that queryTable/commonValues/
+	// referencedBy-as-target then all reject, since none accept relkind = 'p'.
+	rows, err := tx.QueryContext(qctx,
+		`select rn.nspname, rc.relname, con.conname, fa.attname as from_col, ta.attname as to_col
+		 from pg_constraint con
+		 join pg_class rc on rc.oid = con.conrelid
+		 join pg_namespace rn on rn.oid = rc.relnamespace
+		 join lateral unnest(con.conkey, con.confkey) with ordinality
+		      as k(from_attnum, to_attnum, n) on true
+		 join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum
+		 join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum
+		 where con.contype = 'f'
+		   and con.conparentid = 0
+		   and con.confrelid = $1
+		   and rc.relkind = 'r'
+		   and has_table_privilege(con.conrelid, 'SELECT')
+		 order by rn.nspname, rc.relname, con.conname, k.n`, targetOID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mapped []ReferencedByEntry
+	for rows.Next() {
+		var refSchema, refTable, constraint, fromCol, toCol string
+		if err := rows.Scan(&refSchema, &refTable, &constraint, &fromCol, &toCol); err != nil {
+			return nil, err
+		}
+		entry := ReferencedByEntry{
+			Table:      refTable,
+			Constraint: constraint,
+			Columns:    []ColumnPair{{From: fromCol, To: toCol}},
+		}
+		if refSchema != realSchema {
+			entry.Schema = refSchema
+		}
+		mapped = append(mapped, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return groupReferencedBy(mapped), nil
 }
