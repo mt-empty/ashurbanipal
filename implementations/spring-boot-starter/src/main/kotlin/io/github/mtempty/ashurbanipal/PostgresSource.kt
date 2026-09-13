@@ -79,8 +79,15 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
     // partitioned tables) — keeps this gate and listTables in lockstep
     // (docs/adapter-decisions.md §5.2/§5.3). One targeted row instead of
     // fetching every table name in the schema to check membership of one.
-    private fun readableTableOid(schema: String, table: String): Long =
-        jdbcTemplate.query(
+    private fun readableTableOid(schema: String, table: String): Long {
+        // Postgres text can never hold a NUL byte, so no real relname could
+        // ever match one; short-circuit before it reaches the driver, which
+        // otherwise throws its own encoding error ahead of the query ever
+        // getting a chance to just say "no match" (spec/protocol.md §5.2).
+        if (table.contains('\u0000')) {
+            throw NotAllowedException("not allowed: table $table")
+        }
+        return jdbcTemplate.query(
             "select c.oid from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
                 "where n.nspname = ? and c.relname = ? and c.relkind = 'r' " +
@@ -89,6 +96,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             schema,
             table,
         ).firstOrNull() ?: throw NotAllowedException("not allowed: table $table")
+    }
 
     private fun allowedColumns(schema: String, table: String): List<String> =
         jdbcTemplate.queryForList(
@@ -251,8 +259,16 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             jdbcTemplate.query(sql, RowMapper { rs, _ -> rowToJson(rs, columns) }, *bindArgs.toTypedArray())
         } catch (e: DataAccessException) {
             // Map residual SELECT-denied errors to NotAllowed (spec/protocol.md §2).
-            if ((e.mostSpecificCause as? SQLException)?.sqlState == "42501") {
+            val sqlState = (e.mostSpecificCause as? SQLException)?.sqlState
+            if (sqlState == "42501") {
                 throw NotAllowedException("not allowed: table $realTable")
+            }
+            // A filter value Postgres's text encoding rejects (SQLSTATE
+            // 22021/22P05) maps to FilterException, also 400, never a raw
+            // 500 (docs/adapter-decisions.md §5.4.2 has the cross-backend
+            // rationale).
+            if (sqlState == "22021" || sqlState == "22P05") {
+                throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
             }
             throw e
         }

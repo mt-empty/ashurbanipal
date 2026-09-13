@@ -101,6 +101,32 @@ class TableListingPrivilegesTest {
                 assertThrows<NotAllowedException>("a table the role has no privilege on must be rejected") {
                     source.queryTable(SCHEMA, "no_grant", opts)
                 }
+
+                // Postgres text can never hold a NUL byte, so this can never
+                // match a real table; it must be rejected as NotAllowed, not
+                // reach the driver as a raw encoding-error 500 (schemathesis's
+                // fuzzing phase found the 500 here).
+                val nulByteTable = "ashb\u0000nul"
+                assertThrows<NotAllowedException>("a NUL byte in the table name must be rejected, not reach the driver") {
+                    source.queryTable(SCHEMA, nulByteTable, opts)
+                }
+                assertThrows<NotAllowedException>("commonValues must reject a NUL byte table the same way") {
+                    source.commonValues(SCHEMA, nulByteTable, "id")
+                }
+                assertThrows<NotAllowedException>("referencedBy must reject a NUL byte table the same way") {
+                    source.referencedBy(SCHEMA, nulByteTable)
+                }
+
+                // A NUL byte in a filter value is a Postgres-only limit, not
+                // a protocol one (docs/adapter-decisions.md §5.4.2) — still
+                // rejected as FilterException, not a raw 500.
+                assertThrows<FilterException>("a NUL byte in a filter value must be rejected, not reach the driver") {
+                    source.queryTable(
+                        SCHEMA,
+                        "readable",
+                        opts.copy(filter = listOf(Condition(column = "name", op = "=", value = "ashb\u0000nul"))),
+                    )
+                }
             } finally {
                 setupDs.connection.use { conn ->
                     conn.createStatement().use { st ->
