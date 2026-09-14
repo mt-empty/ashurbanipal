@@ -17,6 +17,7 @@ from . import (
     FilterParseError,
     KeyKind,
     NotAllowed,
+    NotAllowedKind,
     QueryOpts,
     ReferencedBy,
     TableData,
@@ -52,7 +53,7 @@ def _lenient_text_factory(data: bytes) -> str:
 
 def _check_schema(schema: str | None) -> None:
     if schema is not None and schema != ONLY_SCHEMA:
-        raise NotAllowed(f"schema {schema!r}")
+        raise NotAllowed(f"schema {schema!r}", kind=NotAllowedKind.SCHEMA)
 
 
 def _build_where_clause(conditions: list[Condition], column_names: list[str]) -> tuple[str, list[str]]:
@@ -63,7 +64,7 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
     clause_parts: list[str] = []
     for i, cond in enumerate(conditions):
         if cond.column not in column_names:
-            raise NotAllowed(f"column {cond.column!r}")
+            raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
         keyword = _KEYWORD.get(cond.op, cond.op)
         quoted_column = quote_ident(cond.column)
         if cond.op in ("IS NULL", "IS NOT NULL"):
@@ -190,13 +191,13 @@ class SqliteSource(DbSource):
             try:
                 tables = self._allowed_tables(cur)
                 if table not in tables:
-                    raise NotAllowed(f"table {table!r}")
+                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
 
                 column_names = self._allowed_columns(cur, table)
                 sort = None
                 if opts.sort is not None:
                     if opts.sort not in column_names:
-                        raise NotAllowed(f"column {opts.sort!r}")
+                        raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
                     sort = opts.sort
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
@@ -268,10 +269,10 @@ class SqliteSource(DbSource):
             try:
                 tables = self._allowed_tables(cur)
                 if table not in tables:
-                    raise NotAllowed(f"table {table!r}")
+                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
                 columns = self._allowed_columns(cur, table)
                 if column not in columns:
-                    raise NotAllowed(f"column {column!r}")
+                    raise NotAllowed(f"column {column!r}", kind=NotAllowedKind.COLUMN)
             finally:
                 self._clear_bound(conn)
         finally:
@@ -290,7 +291,7 @@ class SqliteSource(DbSource):
             self._bounded(conn, CATALOG_TIMEOUT_SECS)
             try:
                 if table not in self._allowed_tables(cur):
-                    raise NotAllowed(f"table {table!r}")
+                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
 
                 # No reverse-FK index and no information_schema: walk every
                 # table's pragma_foreign_key_list (the schema is parsed in

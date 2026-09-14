@@ -15,7 +15,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from . import filter as filter_module
 from .config import Config
-from .db import DbError, DbSource, FilterParseError, NotAllowed, QueryOpts
+from .db import DbError, DbSource, FilterParseError, NotAllowed, NotAllowedKind, QueryOpts
 from .embed import DBVIEWER_HTML
 
 PROTOCOL_HEADER = "x-ashurbanipal-protocol"
@@ -51,14 +51,24 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         for n, s in sources:
             if n == name:
                 return s
-        raise NotAllowed(f'source "{name}"')
+        raise NotAllowed(f'source "{name}"', kind=NotAllowedKind.SOURCE)
+
+    def _problem_response(status: int, code: str, title: str) -> Response:
+        # RFC 9457 Problem Details (spec/protocol.md §2) — never plain
+        # text, and never plain application/json (that content-type is
+        # reserved for success bodies).
+        return Response(
+            jsonify({"type": "about:blank", "title": title, "status": status, "code": code}).get_data(),
+            status=status,
+            mimetype="application/problem+json",
+        )
 
     def _error_response(err: DbError) -> Response:
         if isinstance(err, NotAllowed):
-            return Response(f"not allowed: {err}", status=400, mimetype="text/plain")
+            return _problem_response(400, err.kind.value, f"not allowed: {err}")
         if isinstance(err, FilterParseError):
-            return Response(f"invalid filter: {err}", status=400, mimetype="text/plain")
-        return Response(f"database error: {err}", status=500, mimetype="text/plain")
+            return _problem_response(400, "invalid_filter", f"invalid filter: {err}")
+        return _problem_response(500, "database_error", f"database error: {err}")
 
     @bp.errorhandler(DbError)
     def _handle_db_error(err: DbError) -> Response:
@@ -97,7 +107,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         schema = request.args.get("schema")
         table = request.args.get("table")
         if table is None:
-            return Response('missing required "table" parameter', status=400, mimetype="text/plain")
+            return _problem_response(400, "invalid_parameter", 'missing required "table" parameter')
 
         raw_filter = request.args.get("filter")
         parsed_filter = None
@@ -113,10 +123,10 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
             request.args.get("limit"), default=limits.default_page_size, lo=1, hi=limits.max_page_size
         )
         if limit is None:
-            return Response('"limit" must be a number', status=400, mimetype="text/plain")
+            return _problem_response(400, "invalid_parameter", '"limit" must be a number')
         offset = _clamp_int(request.args.get("offset"), default=0, lo=0, hi=_MAX_I64)
         if offset is None:
-            return Response('"offset" must be a number', status=400, mimetype="text/plain")
+            return _problem_response(400, "invalid_parameter", '"offset" must be a number')
 
         order = request.args.get("order")
         if order is None or order == "asc":
@@ -125,7 +135,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
             descending = True
         else:
             msg = f'invalid order {order!r} (expected "asc" or "desc")'
-            return Response(msg, status=400, mimetype="text/plain")
+            return _problem_response(400, "invalid_parameter", msg)
 
         opts = QueryOpts(
             limit=limit,
@@ -151,7 +161,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         table = request.args.get("table")
         column = request.args.get("column")
         if table is None or column is None:
-            return Response('missing required "table"/"column" parameter', status=400, mimetype="text/plain")
+            return _problem_response(400, "invalid_parameter", 'missing required "table"/"column" parameter')
         values = source.common_values(schema, table, column)
         return jsonify({"values": [{"value": value, "freq": freq} for value, freq in values]})
 
@@ -161,7 +171,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         schema = request.args.get("schema")
         table = request.args.get("table")
         if table is None:
-            return Response('missing required "table" parameter', status=400, mimetype="text/plain")
+            return _problem_response(400, "invalid_parameter", 'missing required "table" parameter')
         entries = source.referenced_by(schema, table)
         return jsonify({"referenced_by": [_referenced_by_to_dict(e) for e in entries]})
 

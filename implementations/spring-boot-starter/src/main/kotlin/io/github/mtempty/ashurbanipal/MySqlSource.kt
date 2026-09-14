@@ -31,7 +31,7 @@ private fun buildWhereClauseMysql(conditions: List<Condition>, columnNames: List
     val clause = StringBuilder()
     conditions.forEachIndexed { i, condition ->
         val column = columnNames.find { it == condition.column }
-            ?: throw NotAllowedException("not allowed: column ${condition.column}")
+            ?: throw NotAllowedException("not allowed: column ${condition.column}", NotAllowedKind.COLUMN)
         val cast = "CAST(${quoteIdentMysql(column)} AS CHAR)"
 
         val inner = if (condition.op == "ILIKE") {
@@ -141,8 +141,8 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             dataSource,
             timedSelect(variant, queryTimeoutSecs, "database()"),
         ) { rs -> rs.getString(1) }.first()
-            ?: throw NotAllowedException("no schema requested and this connection has no default database")
-        return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved")
+            ?: throw NotAllowedException("no schema requested and this connection has no default database", NotAllowedKind.SCHEMA)
+        return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved", NotAllowedKind.SCHEMA)
     }
 
     private fun allowedTables(variant: Variant, schema: String): List<String> =
@@ -172,7 +172,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         ) { rs -> rs.getString(1) }
 
     private fun requireTable(variant: Variant, schema: String, table: String): String =
-        allowedTables(variant, schema).find { it == table } ?: throw NotAllowedException("not allowed: table $table")
+        allowedTables(variant, schema).find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
     /** Join MySQL's repeating PRIMARY name on table name; omit composite FKs (`spec/protocol.md` §5.4.1). */
     private fun keyMetadata(variant: Variant, schema: String, table: String): Pair<Set<String>, Map<String, ColumnRef>> {
@@ -272,7 +272,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val columnNames = allowedColumns(variant, realSchema, realTable)
 
         val sort = opts.sort?.let { requested ->
-            columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested")
+            columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
         val whereClause = opts.filter?.let { buildWhereClauseMysql(it, columnNames) } ?: WhereClause("", emptyList())
@@ -321,7 +321,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         } catch (e: SQLException) {
             // MySQL has no SELECT privilege gate; map residual 1142 to NotAllowed.
             if (e.errorCode == 1142) {
-                throw NotAllowedException("not allowed: table $realTable")
+                throw NotAllowedException("not allowed: table $realTable", NotAllowedKind.NOT_READABLE)
             }
             throw e
         }
@@ -361,7 +361,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val realSchema = resolveSchema(variant, schema)
         val realTable = requireTable(variant, realSchema, table)
         allowedColumns(variant, realSchema, realTable).find { it == column }
-            ?: throw NotAllowedException("not allowed: column $column")
+            ?: throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
         emptyList()
     }
 
@@ -372,7 +372,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         // referrer post-filter below — MySQL/MariaDB have no cross-schema
         // has_table_privilege gate (docs/adapter-decisions.md §5.9).
         val allowed = allowedTables(variant, realSchema).toSet()
-        if (table !in allowed) throw NotAllowedException("not allowed: table $table")
+        if (table !in allowed) throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
         // Read key_column_usage, not referential_constraints, whose
         // referenced-name column MariaDB nulls for a role lacking privilege on

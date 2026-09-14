@@ -14,8 +14,14 @@ private val VALID_OPS = setOf("=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", 
 /** Operators that do not take a value (`spec/protocol.md` §5.4.2). */
 internal val OPS_WITHOUT_VALUE = setOf("IS NULL", "IS NOT NULL")
 
-/** Invalid filter input (`spec/protocol.md` §2). */
-class FilterException(message: String) : RuntimeException(message)
+/**
+ * Invalid filter input (`spec/protocol.md` §2) — `code` defaults to
+ * `invalid_filter` for a structural/parse/oversize AST problem, but the
+ * controller overrides it to `invalid_parameter` at the two call sites
+ * (`order`, non-numeric `limit`/`offset`) that reuse this exception for a
+ * plain bad-request rather than a filter-AST one.
+ */
+class FilterException(message: String, val code: String = "invalid_filter") : RuntimeException(message)
 
 /** Untrusted filter input; [DbSource] validates columns before SQL (`spec/protocol.md` §5.4.2). */
 data class Condition(
@@ -81,8 +87,12 @@ class FilterValidator {
         val values = mutableListOf<String>()
         val clause = StringBuilder()
         conditions.forEachIndexed { i, condition ->
+            // Unknown column: matches sort's own unknown_column handling
+            // (spec/protocol.md §2), not a structural filter-AST problem —
+            // mirrors MySqlSource/SqliteSource's own buildWhereClause*, which
+            // already throw NotAllowedException here, not FilterException.
             val column = columnNames.find { it == condition.column }
-                ?: throw FilterException("not allowed: column ${condition.column}")
+                ?: throw NotAllowedException("not allowed: column ${condition.column}", NotAllowedKind.COLUMN)
 
             val inner = if (condition.op !in OPS_WITHOUT_VALUE) {
                 val value = condition.value

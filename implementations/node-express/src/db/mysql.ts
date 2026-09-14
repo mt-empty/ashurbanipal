@@ -50,7 +50,7 @@ export function buildWhereClauseMysql(
 
   conditions.forEach((cond, i) => {
     if (!allowed.has(cond.column)) {
-      throw new NotAllowedError(`column "${cond.column}"`);
+      throw new NotAllowedError(`column "${cond.column}"`, "column");
     }
     const cast = `CAST(${quoteIdentMysql(cond.column)} AS CHAR)`;
 
@@ -164,13 +164,13 @@ export class MySqlSource implements DbSource {
       // Reject a missing default database instead of casting it to "null".
       const defaultDatabase = rows[0]?.db as string | null | undefined;
       if (defaultDatabase === null || defaultDatabase === undefined) {
-        throw new NotAllowedError("no schema requested and this connection has no default database");
+        throw new NotAllowedError("no schema requested and this connection has no default database", "schema");
       }
       resolved = defaultDatabase;
     }
     const real = findExact(schemas, resolved);
     if (!real) {
-      throw new NotAllowedError(`schema "${resolved}"`);
+      throw new NotAllowedError(`schema "${resolved}"`, "schema");
     }
     return real;
   }
@@ -321,7 +321,7 @@ export class MySqlSource implements DbSource {
       const tables = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
       const realTable = findExact(tables, table);
       if (!realTable) {
-        throw new NotAllowedError(`table "${table}"`);
+        throw new NotAllowedError(`table "${table}"`, "table");
       }
 
       const columnNames = await this.allowedColumnsInTx(conn, variant, realSchema, realTable, timeoutMs);
@@ -329,7 +329,7 @@ export class MySqlSource implements DbSource {
       if (opts.sort !== undefined) {
         sort = findExact(columnNames, opts.sort);
         if (!sort) {
-          throw new NotAllowedError(`column "${opts.sort}"`);
+          throw new NotAllowedError(`column "${opts.sort}"`, "column");
         }
       }
 
@@ -412,11 +412,11 @@ export class MySqlSource implements DbSource {
       const tables = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
       const realTable = findExact(tables, table);
       if (!realTable) {
-        throw new NotAllowedError(`table "${table}"`);
+        throw new NotAllowedError(`table "${table}"`, "table");
       }
       const columnNames = await this.allowedColumnsInTx(conn, variant, realSchema, realTable, timeoutMs);
       if (!findExact(columnNames, column)) {
-        throw new NotAllowedError(`column "${column}"`);
+        throw new NotAllowedError(`column "${column}"`, "column");
       }
       // MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
       return [];
@@ -431,7 +431,7 @@ export class MySqlSource implements DbSource {
       // has_table_privilege gate (docs/adapter-decisions.md §5.9).
       const allowed = new Set(await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs));
       if (!allowed.has(table)) {
-        throw new NotAllowedError(`table "${table}"`);
+        throw new NotAllowedError(`table "${table}"`, "table");
       }
 
       // Read key_column_usage, not referential_constraints, whose

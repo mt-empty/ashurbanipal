@@ -67,11 +67,7 @@ interpreted as described in RFC 2119.
   which is `text/html`.
 - Error responses are `application/problem+json` — RFC 9457 Problem
   Details (the current revision of the format first published as RFC
-  7807). Earlier revisions of this document specified plain-text
-  (`text/plain`) bodies; the migration to problem+json across the
-  reference implementation and every port is tracked in
-  `docs/feature-backlog/34-rfc9457-problem-details.md`. The body is a JSON
-  object carrying at least:
+  7807). The body is a JSON object carrying at least:
   - `status` — the HTTP status code, repeated (RFC 9457 §3.1).
   - `title` — a short human-readable summary; wording is
     implementation-defined and MUST NOT be parsed.

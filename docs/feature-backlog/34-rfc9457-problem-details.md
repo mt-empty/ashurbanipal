@@ -1,13 +1,13 @@
 # RFC 9457 problem+json error bodies
 
-> **Status:** OPEN · **Area:** spec, ports, frontend, conformance
+> **Status:** DONE · **Area:** spec, ports, frontend, conformance · **Ref:** migrated in one pass across spec + all five ports + frontend + conformance (no production consumers existed, so the incremental dual-format rollout below was skipped)
 
-**Done:** `spec/protocol.md` §2 and `spec/openapi.yaml` now specify error
-responses as `application/problem+json` (RFC 9457 Problem Details, the
-current revision of RFC 7807) with a stable machine-readable `code`
-member. `spec/protocol.md` §7 records why this serialization change did
-not bump the protocol version (no external consumer existed). This story
-tracks the implementation rollout.
+`spec/protocol.md` §2 and `spec/openapi.yaml` specify error responses as
+`application/problem+json` (RFC 9457 Problem Details, the current revision
+of RFC 7807) with a stable machine-readable `code` member — `text/plain`
+is no longer offered. `spec/protocol.md` §7 records why this
+serialization change did not bump the protocol version (no external
+consumer existed).
 
 **Why:** the previous contract — plain text, "clients MUST NOT parse it" —
 gave the frontend no way to tell *why* a 400 happened. A drill-in to a
@@ -22,36 +22,45 @@ failure modes are exactly the ones the frontend needs to name.
 `invalid_parameter`, `not_readable` (400); `database_error`,
 `query_timeout` (500). Open set — new codes are additive.
 
-**Remaining work:**
-- **Rust reference** — `DbError` (`implementations/rust/core/src/db/mod.rs`)
-  gains the discriminant needed to pick a `code` (today `NotAllowed`
-  alone covers source/schema/table/column/permission); the axum and
-  actix `ApiError` bridges emit a problem+json body with the version
-  header, replacing the `(StatusCode, String)` responses. Split
-  `query_timeout` out of the generic `Sqlx` → 500 path (§6).
-- **go-nethttp / node-express / flask-python / spring-boot** — same
-  change in each port's error mapper (`errors.go` / `errors.ts` /
-  `db/__init__.py` error classes / `@ExceptionHandler` methods) and its
-  `writeError`/equivalent.
-- **Frontend** — `frontend/src/core/api.ts` currently does
-  `throw new Error(await resp.text())`. Parse problem+json, expose `code`,
-  and let callers (the filter UI, FK/referenced-by drill-in) branch —
-  e.g. a `not_readable` drill-in shows "you don't have access to that
-  table" instead of a raw string. `docs/ui-guidelines.md` R9 (every async
-  action surfaces a meaningful error) is the driver.
-- **Conformance** — `conformance/runner/assert.rs`'s `assert_status`
-  deliberately checks status code only, "never body text". Add an
-  opt-in body assertion for `code`, and cover it in each route's module
-  (at least the 400 paths in `table_data.rs`, `schemas.rs`, `sources.rs`,
-  `referenced_by.rs`). `conformance/runner/schema-check.sh` (schemathesis)
-  will start enforcing the `application/problem+json` content-type once
-  the servers emit it — until every port is migrated, that leg is red for
-  the lagging ports.
-- **Docs** — `PORTING.md` error-handling section; each port README if it
-  documents the error shape.
-
-**Rollout:** `spec/openapi.yaml` lists *both* `text/plain` and
-`application/problem+json` on the error responses for now, so
-`conformance:schema-test` stays green while ports migrate one at a time.
-Drop `text/plain` from `ClientError`/`ServerError` once every port emits
-problem+json; that flip is the last step of this story.
+**Shipped:**
+- **Rust reference** — `DbError::NotAllowed` (`implementations/rust/core/src/db/mod.rs`)
+  now carries a `NotAllowedKind` (`Source`/`Schema`/`Table`/`Column`/`NotReadable`),
+  and a `DbError::problem()` maps every variant to `(status, code)`, shared
+  by both adapters. The axum and actix `ApiError` bridges emit
+  `application/problem+json` with the version header. Axum's and Actix's
+  own `Query<T>` extractor rejections (missing/duplicate/malformed
+  parameters) previously bypassed `ApiError` entirely with their own
+  plain-text bodies — both adapters now route those through the same
+  problem+json path too (a wrapper `FromRequestParts` impl in axum,
+  `web::QueryConfig::error_handler` in actix), since that rejection
+  happens inside the framework's own request-dispatch layer, not the
+  pre-dispatch server rejections `PORTING.md`'s "Request-boundary
+  rejections" section carves out as an accepted per-port gap.
+  `query_timeout` is populated only where detection was a one-line
+  addition to code that already extracts the driver error code
+  (Postgres SQLSTATE `57014` in `map_select_denied`); see the `§6` note
+  in `docs/adapter-decisions.md` for why every other engine/port still
+  reports a timeout as `database_error`.
+- **go-nethttp / node-express / flask-python / spring-boot** — same kind-
+  tagging in each port's own error type (`NotAllowedError.Kind` in Go,
+  a `code` field in Node's error classes, `NotAllowedKind` in Flask and
+  Spring), each port's error writer emitting problem+json. Spring Boot's
+  migration also fixed a pre-existing bug where an unknown filter column
+  raised `FilterException` (`invalid_filter`) instead of `NotAllowedException`
+  (`unknown_column`), inconsistent with its own MySQL/SQLite sources and
+  with every other port.
+- **Frontend** — `frontend/src/core/api.ts` exposes an `ApiError` class
+  with a `.code` field parsed from the problem+json body (falling back to
+  a generic message on an unrecognized/absent code, per spec). The one
+  caller that branches on it: `bootstrap/controller.ts`'s `loadData` shows
+  "you don't have access to `<table>`" for `not_readable` instead of the
+  server's implementation-defined title text (`docs/ui-guidelines.md` R9).
+- **Conformance** — `assert.rs` gained `assert_problem_code`, an opt-in
+  helper on top of the status-only tier that also pins the
+  `application/problem+json` content-type and the `code` field. Used at
+  one representative site per reachable code across `table_data.rs`,
+  `schemas.rs`, `sources.rs`, and `filter_dsl.rs`; `not_readable` stays
+  covered only by the existing port-local `table_listing_privileges*`
+  tests (it needs a restricted role, which the shared seed doesn't have).
+  `schema-check.sh` (schemathesis) now enforces the
+  `application/problem+json` content-type against all seven adapters.

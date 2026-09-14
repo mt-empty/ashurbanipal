@@ -1,4 +1,4 @@
-use crate::assert::{assert_exact, assert_row_estimate, assert_status};
+use crate::assert::{assert_exact, assert_problem_code, assert_row_estimate, assert_status};
 use crate::backend::{Backend, Comments};
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
@@ -427,7 +427,8 @@ async fn invalid_order_value_is_rejected() {
         .send()
         .await
         .unwrap();
-    assert_status(&resp, 400, "order=sideways");
+    // Representative site for `invalid_parameter` — see assert.rs's tier doc.
+    assert_problem_code(resp, 400, "invalid_parameter", "order=sideways").await;
 }
 
 /// spec/protocol.md §5.4: `table` MUST match a table from §5.2 exactly
@@ -443,11 +444,14 @@ async fn table_param_match_is_case_sensitive() {
         .send()
         .await
         .unwrap();
-    assert_status(
-        &resp,
+    // Representative site for `unknown_table`.
+    assert_problem_code(
+        resp,
         400,
+        "unknown_table",
         "table=Users (real table is lowercase \"users\")",
-    );
+    )
+    .await;
 }
 
 /// The crux of this suite: no unvalidated identifier ever reaches SQL.
@@ -502,6 +506,7 @@ async fn malicious_sort_value_against_a_valid_table_is_rejected_cleanly() {
             .send()
             .await
             .unwrap();
-        assert_status(&resp, 400, &format!("sort={evil:?}"));
+        // Representative site for `unknown_column`.
+        assert_problem_code(resp, 400, "unknown_column", &format!("sort={evil:?}")).await;
     }
 }

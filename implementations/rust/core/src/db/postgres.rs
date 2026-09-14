@@ -5,7 +5,7 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use super::{
     group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource,
-    KeyKind, QueryOpts, ReferencedBy, TableData, TableInfo,
+    KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, Logic};
 
@@ -28,7 +28,12 @@ fn build_where_clause(
         let column = column_names
             .iter()
             .find(|c| c.as_str() == condition.column)
-            .ok_or_else(|| DbError::NotAllowed(format!("column {:?}", condition.column)))?;
+            .ok_or_else(|| {
+                DbError::not_allowed(
+                    NotAllowedKind::Column,
+                    format!("column {:?}", condition.column),
+                )
+            })?;
 
         // Defend the SQL boundary if a caller bypasses filter::parse.
         let inner = if condition.op.takes_value() {
@@ -124,10 +129,9 @@ impl PgPoolSource {
                     .await?
             }
         };
-        schemas
-            .into_iter()
-            .find(|s| s == &resolved)
-            .ok_or_else(|| DbError::NotAllowed(format!("schema {resolved:?}")))
+        schemas.into_iter().find(|s| s == &resolved).ok_or_else(|| {
+            DbError::not_allowed(NotAllowedKind::Schema, format!("schema {resolved:?}"))
+        })
     }
 
     /// Resolves `table` to its OID iff it's a readable base table in
@@ -150,7 +154,10 @@ impl PgPoolSource {
         // otherwise throws its own encoding error ahead of `fetch_optional`
         // ever getting a chance to just say "no match" (spec/protocol.md §5.2).
         if table.contains('\0') {
-            return Err(DbError::NotAllowed(format!("table {table:?}")));
+            return Err(DbError::not_allowed(
+                NotAllowedKind::Table,
+                format!("table {table:?}"),
+            ));
         }
         sqlx::query_scalar::<_, i32>(
             "select c.oid::int4 from pg_class c \
@@ -162,7 +169,7 @@ impl PgPoolSource {
         .bind(table)
         .fetch_optional(&mut **tx)
         .await?
-        .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))
+        .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))
     }
 
     async fn allowed_columns_in_tx(
@@ -273,14 +280,22 @@ impl PgPoolSource {
     }
 }
 
-/// Maps residual SELECT-denied errors to `NotAllowed`, and a filter value
-/// Postgres's text encoding rejects (e.g. a NUL byte) to `FilterParse` —
-/// both → 400, never a raw 500 (`spec/protocol.md` §2; `docs/adapter-decisions.md`
-/// §5.4.2 has the cross-backend rationale).
+/// Maps residual SELECT-denied errors to `NotAllowed(NotReadable)`, a
+/// canceled statement (SQLSTATE 57014 — the timeout set by `bounded_tx`
+/// firing) to `QueryTimeout`, and a filter value Postgres's text encoding
+/// rejects (e.g. a NUL byte) to `FilterParse` — all → a defined
+/// `spec/protocol.md` §2 code, never a raw 500 (`docs/adapter-decisions.md`
+/// §5.4.2 has the cross-backend filter-value rationale).
 fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
     if let sqlx::Error::Database(db) = &e {
         match db.code().as_deref() {
-            Some("42501") => return DbError::NotAllowed(format!("table {table:?}")),
+            Some("42501") => {
+                return DbError::not_allowed(
+                    NotAllowedKind::NotReadable,
+                    format!("table {table:?}"),
+                )
+            }
+            Some("57014") => return DbError::QueryTimeout,
             Some("22021") | Some("22P05") => {
                 return DbError::FilterParse(format!(
                     "value invalid for this backend: {}",
@@ -376,7 +391,12 @@ impl DbSource for PgPoolSource {
                 column_names
                     .iter()
                     .find(|c| c.as_str() == requested)
-                    .ok_or_else(|| DbError::NotAllowed(format!("column {requested:?}")))?
+                    .ok_or_else(|| {
+                        DbError::not_allowed(
+                            NotAllowedKind::Column,
+                            format!("column {requested:?}"),
+                        )
+                    })?
                     .clone(),
             ),
             None => None,
@@ -508,7 +528,9 @@ impl DbSource for PgPoolSource {
         let column = columns
             .iter()
             .find(|c| c.as_str() == column)
-            .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?
+            .ok_or_else(|| {
+                DbError::not_allowed(NotAllowedKind::Column, format!("column {column:?}"))
+            })?
             .clone();
 
         // most_common_vals is anyarray; ::text::text[] reads it uniformly

@@ -36,7 +36,16 @@ test("a remembered sort column the backend rejects is dropped and the view recov
   });
   await page.route("**/api/tables/data*", (r) => {
     if (new URL(r.request().url()).searchParams.get("sort") === "ghost_col") {
-      return r.fulfill({ status: 400, body: 'unknown sort column "ghost_col"' });
+      return r.fulfill({
+        status: 400,
+        contentType: "application/problem+json",
+        body: JSON.stringify({
+          type: "about:blank",
+          title: 'not allowed: column "ghost_col"',
+          status: 400,
+          code: "unknown_column",
+        }),
+      });
     }
     return r.continue();
   });
@@ -67,7 +76,16 @@ test("a stale remembered sort is dropped without discarding a shared link's filt
   });
   await page.route("**/api/tables/data*", (r) => {
     if (new URL(r.request().url()).searchParams.get("sort") === "ghost_col") {
-      return r.fulfill({ status: 400, body: 'unknown sort column "ghost_col"' });
+      return r.fulfill({
+        status: 400,
+        contentType: "application/problem+json",
+        body: JSON.stringify({
+          type: "about:blank",
+          title: 'not allowed: column "ghost_col"',
+          status: 400,
+          code: "unknown_column",
+        }),
+      });
     }
     return r.continue();
   });

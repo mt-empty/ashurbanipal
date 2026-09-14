@@ -3,8 +3,24 @@ package io.github.mtempty.ashurbanipal
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 
+/**
+ * Which allow-list (or privilege check) rejected a request — maps 1:1 onto
+ * `spec/protocol.md` §2's `unknown_source`/`unknown_schema`/`unknown_table`/
+ * `unknown_column`/`not_readable` error codes. Mirrors the Rust reference's
+ * `NotAllowedKind` (`implementations/rust/core/src/db/mod.rs`).
+ */
+enum class NotAllowedKind(val code: String) {
+    SOURCE("unknown_source"),
+    SCHEMA("unknown_schema"),
+    TABLE("unknown_table"),
+    COLUMN("unknown_column"),
+
+    /** Cleared the allow-list but the connected role can't actually `SELECT` it (Postgres 42501, MySQL/MariaDB residual 1142). */
+    NOT_READABLE("not_readable"),
+}
+
 /** Table/column/schema not in the live allow-list; the controller maps this to 400 (`spec/protocol.md` §6 — no unvalidated identifier ever reaches SQL text). */
-class NotAllowedException(message: String) : RuntimeException(message)
+class NotAllowedException(message: String, val kind: NotAllowedKind) : RuntimeException(message)
 
 /**
  * Escapes an identifier for splicing into SQL text by doubling embedded `"`

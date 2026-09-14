@@ -238,6 +238,24 @@ a host-pool connection indefinitely.
 | MySQL/MariaDB (Spring Boot) | Same `timedSelect`-wrapped SQL text as the Rust rows above (`MySqlSource.kt::timedSelect`, identical branch logic) | The JDBC layer needs one extra step the Rust `sqlx` driver doesn't: Connector/J's `PreparedStatement.executeQuery()` rejects any SQL that doesn't *textually* start with a query keyword, and MariaDB's `SET STATEMENT ... FOR SELECT ...` wrapping trips this even though the server would return a result set (`Statement.executeQuery() cannot issue statements that do not produce result sets`, verified empirically). `MySqlSource.kt`'s `query()` helper uses `PreparedStatement.execute()` + `getResultSet()` instead, which has no such restriction. |
 | SQLite (Spring Boot) | `org.sqlite.ProgressHandler` (Xerial `sqlite-jdbc`'s public binding to `sqlite3_progress_handler`), checked every 1000 VM opcodes, explicitly cleared after each query — `SqliteSource.kt::bounded` | Verified empirically (not trusted from documented intent) that plain JDBC `Statement.setQueryTimeout()` does **not** cancel a running query on this driver — decompiling `JDBC3Statement.withConnectionTimeout` shows it only calls `SQLiteConnection.setBusyTimeout()`, the *lock-wait* timeout, not a query-execution bound; a first version of the timeout test using `setQueryTimeout` ran a genuinely slow query to completion in ~11s instead of aborting near a 1s budget. The real mechanism is Xerial's own `org.sqlite.ProgressHandler.setHandler(Connection, int, ProgressHandler)`/`clearHandler(Connection)` static API, which requires the connection to be (or unwrap to) `org.sqlite.SQLiteConnection` — a pooled connection (HikariCP) hands back a proxy that fails that `instanceof` check directly, so `SqliteSource.kt::bounded` calls `Connection.unwrap(SQLiteConnection::class.java)` before registering/clearing the handler. |
 
+**`query_timeout` vs `database_error` (§2's error `code`):** a timed-out
+query is always a 500 (the invariant above), but `spec/protocol.md` §2
+doesn't require every port to *name* the cause — `query_timeout` is one of
+two available 500 codes, not a mandatory classification. Only the Rust
+Postgres backend distinguishes it today: `postgres.rs::map_select_denied`
+already extracts the driver's SQLSTATE to catch `42501`
+(SELECT-denied → `not_readable`), so matching `57014` (`query_canceled`,
+what `SET LOCAL statement_timeout` produces) there is a one-line addition
+on data already in hand. Every other backend/port — MySQL/MariaDB (both
+the Rust and every other language's adapter), every SQLite binding across
+all five languages, and Spring's JDBC layer — reports a timeout as the
+generic `database_error` instead. Each would need its own empirical
+detection path (a distinct driver exception type or error code per engine
+per language, mirroring the mechanism differences already tabulated
+above), which is deliberately out of scope for the initial problem+json
+rollout (`docs/feature-backlog/34-rfc9457-problem-details.md`) — a
+narrower, single-code gap, not a spec violation.
+
 ## Status note
 
 The SQLite adapter (`implementations/rust/core/src/db/sqlite.rs`, gated behind

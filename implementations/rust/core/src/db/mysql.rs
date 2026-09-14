@@ -6,7 +6,7 @@ use sqlx::{MySql, MySqlPool, Row, Transaction};
 
 use super::{
     group_referenced_by, op_sql, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource, KeyKind,
-    QueryOpts, ReferencedBy, TableData, TableInfo,
+    NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -55,7 +55,12 @@ fn build_where_clause(
         let column = column_names
             .iter()
             .find(|c| c.as_str() == condition.column)
-            .ok_or_else(|| DbError::NotAllowed(format!("column {:?}", condition.column)))?;
+            .ok_or_else(|| {
+                DbError::not_allowed(
+                    NotAllowedKind::Column,
+                    format!("column {:?}", condition.column),
+                )
+            })?;
         let cast = format!("CAST({} AS CHAR)", quote_ident_mysql(column));
 
         let inner = if condition.op == FilterOp::Ilike {
@@ -171,10 +176,9 @@ impl MySqlSource {
                 .await?
             }
         };
-        schemas
-            .into_iter()
-            .find(|s| s == &resolved)
-            .ok_or_else(|| DbError::NotAllowed(format!("schema {resolved:?}")))
+        schemas.into_iter().find(|s| s == &resolved).ok_or_else(|| {
+            DbError::not_allowed(NotAllowedKind::Schema, format!("schema {resolved:?}"))
+        })
     }
 
     async fn allowed_tables_in_tx(
@@ -318,7 +322,7 @@ fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
                 .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
                 .is_some_and(|m| m.number() == 1142) =>
         {
-            DbError::NotAllowed(format!("table {table:?}"))
+            DbError::not_allowed(NotAllowedKind::NotReadable, format!("table {table:?}"))
         }
         _ => DbError::Sqlx(e),
     }
@@ -421,7 +425,7 @@ impl DbSource for MySqlSource {
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
+            .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
             .clone();
 
         let column_names = self
@@ -432,7 +436,12 @@ impl DbSource for MySqlSource {
                 column_names
                     .iter()
                     .find(|c| c.as_str() == requested)
-                    .ok_or_else(|| DbError::NotAllowed(format!("column {requested:?}")))?
+                    .ok_or_else(|| {
+                        DbError::not_allowed(
+                            NotAllowedKind::Column,
+                            format!("column {requested:?}"),
+                        )
+                    })?
                     .clone(),
             ),
             None => None,
@@ -565,7 +574,7 @@ impl DbSource for MySqlSource {
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
+            .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
             .clone();
         let columns = self
             .allowed_columns_in_tx(&mut tx, variant, &schema, &table, CATALOG_TIMEOUT_SECS)
@@ -573,7 +582,9 @@ impl DbSource for MySqlSource {
         columns
             .iter()
             .find(|c| c.as_str() == column)
-            .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?;
+            .ok_or_else(|| {
+                DbError::not_allowed(NotAllowedKind::Column, format!("column {column:?}"))
+            })?;
         tx.commit().await?;
 
         // MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
@@ -596,7 +607,10 @@ impl DbSource for MySqlSource {
             .into_iter()
             .collect();
         if !allowed.contains(table) {
-            return Err(DbError::NotAllowed(format!("table {table:?}")));
+            return Err(DbError::not_allowed(
+                NotAllowedKind::Table,
+                format!("table {table:?}"),
+            ));
         }
 
         // `table_schema = ?` keeps referrers to the same database — MySQL /

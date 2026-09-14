@@ -72,7 +72,7 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 	}
 	real, ok := findExact(schemas, resolved)
 	if !ok {
-		return "", &NotAllowedError{What: fmt.Sprintf("schema %q", resolved)}
+		return "", &NotAllowedError{Kind: NotAllowedSchema, What: fmt.Sprintf("schema %q", resolved)}
 	}
 	return real, nil
 }
@@ -91,7 +91,7 @@ func (c *PostgresSource) readableTableOID(ctx context.Context, db queryer, schem
 	// throws its own encoding error ahead of the query ever getting a chance
 	// to just say "no match" (spec/protocol.md §5.2).
 	if strings.ContainsRune(table, 0) {
-		return 0, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		return 0, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
@@ -102,7 +102,7 @@ func (c *PostgresSource) readableTableOID(ctx context.Context, db queryer, schem
 		 where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'
 		   and has_table_privilege(c.oid, 'SELECT')`, schema, table).Scan(&oid); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+			return 0, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 		}
 		return 0, err
 	}
@@ -323,7 +323,7 @@ func mapSelectDenied(err error, table string) error {
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case "42501":
-			return &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+			return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
 		case "22021", "22P05":
 			return filterErr("value invalid for this backend: %s", pgErr.Message)
 		}
@@ -360,7 +360,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	if opts.Sort != nil {
 		found, ok := findExact(columnNames, *opts.Sort)
 		if !ok {
-			return TableData{}, &NotAllowedError{What: fmt.Sprintf("column %q", *opts.Sort)}
+			return TableData{}, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", *opts.Sort)}
 		}
 		sort = &found
 	}
@@ -562,7 +562,7 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 	}
 	realColumn, ok := findExact(columnNames, column)
 	if !ok {
-		return nil, &NotAllowedError{What: fmt.Sprintf("column %q", column)}
+		return nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", column)}
 	}
 
 	ctx, cancel := c.bounded(ctx)

@@ -23,7 +23,7 @@ const ONLY_SCHEMA = "main";
 
 function checkSchema(schema: string | undefined): void {
   if (schema !== undefined && schema !== ONLY_SCHEMA) {
-    throw new NotAllowedError(`schema "${schema}"`);
+    throw new NotAllowedError(`schema "${schema}"`, "schema");
   }
 }
 
@@ -140,7 +140,7 @@ function buildWhereClauseSqlite(conditions: Condition[], columnNames: string[]):
 
   conditions.forEach((cond, i) => {
     if (!allowed.has(cond.column)) {
-      throw new NotAllowedError(`column "${cond.column}"`);
+      throw new NotAllowedError(`column "${cond.column}"`, "column");
     }
     const keyword = cond.op === "ILIKE" ? "LIKE" : opSql(cond.op);
     const cast = `CAST(${quoteIdent(cond.column)} AS TEXT)`;
@@ -200,7 +200,7 @@ export class SqliteSource implements DbSource {
     const tables = await allowedTables(this.db, timeoutMs);
     const realTable = findExact(tables, table);
     if (!realTable) {
-      throw new NotAllowedError(`table "${table}"`);
+      throw new NotAllowedError(`table "${table}"`, "table");
     }
 
     const columnNames = await allowedColumns(this.db, realTable, timeoutMs);
@@ -208,7 +208,7 @@ export class SqliteSource implements DbSource {
     if (opts.sort !== undefined) {
       sort = findExact(columnNames, opts.sort);
       if (!sort) {
-        throw new NotAllowedError(`column "${opts.sort}"`);
+        throw new NotAllowedError(`column "${opts.sort}"`, "column");
       }
     }
 
@@ -280,11 +280,11 @@ export class SqliteSource implements DbSource {
     const tables = await allowedTables(this.db, timeoutMs);
     const realTable = findExact(tables, table);
     if (!realTable) {
-      throw new NotAllowedError(`table "${table}"`);
+      throw new NotAllowedError(`table "${table}"`, "table");
     }
     const columnNames = await allowedColumns(this.db, realTable, timeoutMs);
     if (!findExact(columnNames, column)) {
-      throw new NotAllowedError(`column "${column}"`);
+      throw new NotAllowedError(`column "${column}"`, "column");
     }
     // No pg_stats equivalent to read; an empty list is the documented "no
     // statistics available" answer (spec/protocol.md §5.5), not a live
@@ -296,7 +296,7 @@ export class SqliteSource implements DbSource {
     checkSchema(schema);
     const tables = await allowedTables(this.db, timeoutMs);
     if (!findExact(tables, table)) {
-      throw new NotAllowedError(`table "${table}"`);
+      throw new NotAllowedError(`table "${table}"`, "table");
     }
 
     // No reverse-FK index and no information_schema: walk every table's

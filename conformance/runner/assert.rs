@@ -14,6 +14,14 @@
 //!   an exact value).
 //! - [`assert_status`] — error responses: status code only, never body
 //!   text.
+//! - [`assert_problem_code`] — opt-in, on top of the status tier: also
+//!   pins the RFC 9457 `application/problem+json` content-type and the
+//!   stable `code` member (`spec/protocol.md` §2). Used at one
+//!   representative call site per reachable code, not everywhere
+//!   `assert_status` already covers a 400/500 — the taxonomy is a
+//!   cross-port agreement to spot-check, not a body-text assertion to
+//!   sprinkle everywhere (`title` stays implementation-defined and
+//!   unchecked).
 //! - Not checked at all: HTTP framing beyond the headers the spec actually
 //!   requires. No helper — just don't assert on it.
 
@@ -64,5 +72,47 @@ pub fn assert_status(resp: &reqwest::Response, expected: u16, what: &str) {
         resp.status().as_u16(),
         expected,
         "{what}: expected status {expected} (tier: status code only)"
+    );
+}
+
+/// Tier: status + RFC 9457 shape (`spec/protocol.md` §2) — opt-in, on top
+/// of the status-only tier above. Pins the `application/problem+json`
+/// content-type and the stable `code` member; `title` stays
+/// implementation-defined and unchecked, same as the status-only tier.
+/// Consumes `resp`: reading a JSON body needs ownership, unlike
+/// `assert_status`'s `&Response`. No `#[track_caller]` — it's a no-op on
+/// an async fn (rustc `ungated_async_fn_track_caller`); the `what` string
+/// is the failure-site pointer instead.
+pub async fn assert_problem_code(
+    resp: reqwest::Response,
+    expected_status: u16,
+    expected_code: &str,
+    what: &str,
+) {
+    assert_eq!(
+        resp.status().as_u16(),
+        expected_status,
+        "{what}: expected status {expected_status} (tier: status + problem code)"
+    );
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        content_type.starts_with("application/problem+json"),
+        "{what}: expected application/problem+json, got {content_type:?} \
+         (tier: status + problem code)"
+    );
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .unwrap_or_else(|e| panic!("{what}: error body wasn't valid JSON: {e}"));
+    assert_eq!(
+        body.get("code").and_then(|c| c.as_str()),
+        Some(expected_code),
+        "{what}: expected code {expected_code:?}, got {:?} (tier: status + problem code)",
+        body.get("code")
     );
 }

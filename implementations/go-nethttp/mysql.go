@@ -51,7 +51,7 @@ func mysqlBuildWhereClause(conditions []Condition, columnNames []string) (string
 	var clause []byte
 	for i, cond := range conditions {
 		if !allowed[cond.Column] {
-			return "", nil, &NotAllowedError{What: fmt.Sprintf("column %q", cond.Column)}
+			return "", nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", cond.Column)}
 		}
 		if !validOps[cond.Op] {
 			return "", nil, filterErr("condition %d has invalid op %q", i, cond.Op)
@@ -186,7 +186,7 @@ func (c *MySQLSource) resolveSchemaInTx(ctx context.Context, tx queryer, variant
 	}
 	real, ok := findExact(schemas, resolved)
 	if !ok {
-		return "", &NotAllowedError{What: fmt.Sprintf("schema %q", resolved)}
+		return "", &NotAllowedError{Kind: NotAllowedSchema, What: fmt.Sprintf("schema %q", resolved)}
 	}
 	return real, nil
 }
@@ -428,7 +428,7 @@ func (c *MySQLSource) TableCounts(ctx context.Context, schema *string) ([]CountE
 func mapSelectDeniedMySQL(err error, table string) error {
 	var myErr *mysql.MySQLError
 	if errors.As(err, &myErr) && myErr.Number == 1142 {
-		return &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
 	}
 	return err
 }
@@ -454,7 +454,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	}
 	realTable, ok := findExact(tables, table)
 	if !ok {
-		return TableData{}, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		return TableData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 
 	columnNames, err := c.allowedColumnsInTx(ctx, tx, variant, realSchema, realTable)
@@ -465,7 +465,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	if opts.Sort != nil {
 		found, ok := findExact(columnNames, *opts.Sort)
 		if !ok {
-			return TableData{}, &NotAllowedError{What: fmt.Sprintf("column %q", *opts.Sort)}
+			return TableData{}, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", *opts.Sort)}
 		}
 		sort = &found
 	}
@@ -639,14 +639,14 @@ func (c *MySQLSource) CommonValues(ctx context.Context, schema *string, table, c
 	}
 	realTable, ok := findExact(tables, table)
 	if !ok {
-		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		return nil, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 	columns, err := c.allowedColumnsInTx(ctx, tx, variant, realSchema, realTable)
 	if err != nil {
 		return nil, err
 	}
 	if _, ok := findExact(columns, column); !ok {
-		return nil, &NotAllowedError{What: fmt.Sprintf("column %q", column)}
+		return nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", column)}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -683,7 +683,7 @@ func (c *MySQLSource) ReferencedBy(ctx context.Context, schema *string, table st
 		allowedSet[t] = true
 	}
 	if !allowedSet[table] {
-		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		return nil, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 
 	qctx, cancel := c.bounded(ctx)

@@ -7,7 +7,9 @@ use actix_web::{Error, HttpResponse, Scope};
 use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
-use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, ReferencedBy, TableInfo};
+use ashurbanipal::{
+    resolve_source, Config, DbError, DbSource, ProblemDetails, QueryOpts, ReferencedBy, TableInfo,
+};
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
@@ -60,6 +62,12 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
         .service(
             web::scope("/api")
                 .wrap(from_fn(stamp_protocol_version))
+                // Actix's default `Query<T>` rejection is its own plain-text
+                // body; this routes it through `ApiError` instead so a
+                // missing/duplicate/malformed query param still comes back
+                // as `application/problem+json` (spec/protocol.md §2) —
+                // scoped to this `/api` sub-scope, not host-global.
+                .app_data(web::QueryConfig::default().error_handler(query_error_handler))
                 .service(web::resource("/sources").route(web::get().to(list_sources::<S>)))
                 .service(web::resource("/schemas").route(web::get().to(list_schemas::<S>)))
                 .service(web::resource("/tables").route(web::get().to(list_tables::<S>)))
@@ -87,8 +95,6 @@ async fn stamp_protocol_version(
     Ok(res)
 }
 
-const TEXT_PLAIN: &str = "text/plain; charset=utf-8";
-
 /// Bridges `ashurbanipal-core`'s framework-agnostic `DbError` (and this
 /// crate's own bad-request cases, e.g. an invalid `order` value) into
 /// Actix's `?`-operator error handling via `ResponseError`. A wrapper, not
@@ -107,33 +113,54 @@ impl From<DbError> for ApiError {
     }
 }
 
+/// `(status, code, title)` per `spec/protocol.md` §2 — shared by
+/// `status_code()` and `error_response()` so the two can't disagree.
+impl ApiError {
+    fn problem(&self) -> (u16, &'static str, String) {
+        match self {
+            ApiError::BadRequest(msg) => (400, "invalid_parameter", msg.clone()),
+            ApiError::Db(err) => err.problem(),
+        }
+    }
+}
+
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ApiError::BadRequest(msg) => write!(f, "{msg}"),
-            ApiError::Db(DbError::NotAllowed(what)) => write!(f, "not allowed: {what}"),
-            ApiError::Db(DbError::FilterParse(reason)) => write!(f, "invalid filter: {reason}"),
-            ApiError::Db(DbError::Sqlx(e)) => write!(f, "database error: {e}"),
-        }
+        write!(f, "{}", self.problem().2)
     }
 }
 
 impl actix_web::ResponseError for ApiError {
     fn status_code(&self) -> actix_web::http::StatusCode {
-        match self {
-            ApiError::BadRequest(_)
-            | ApiError::Db(DbError::NotAllowed(_) | DbError::FilterParse(_)) => {
-                actix_web::http::StatusCode::BAD_REQUEST
-            }
-            ApiError::Db(DbError::Sqlx(_)) => actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-        }
+        actix_web::http::StatusCode::from_u16(self.problem().0)
+            .expect("problem() only returns valid HTTP statuses")
     }
 
     fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code())
-            .content_type(TEXT_PLAIN)
-            .body(self.to_string())
+        let (status, code, title) = self.problem();
+        // Built from `status` directly rather than calling `self.status_code()`
+        // again — that would re-run `self.problem()` a second time for the
+        // one response this method is already building.
+        let http_status = actix_web::http::StatusCode::from_u16(status)
+            .expect("problem() only returns valid HTTP statuses");
+        // Never `.json()` alone — `spec/protocol.md` §2 requires
+        // `application/problem+json`, not plain `application/json`.
+        HttpResponse::build(http_status)
+            .content_type("application/problem+json")
+            .body(
+                serde_json::to_vec(&ProblemDetails::new(status, code, title))
+                    .expect("ProblemDetails serialization is infallible"),
+            )
     }
+}
+
+/// `web::QueryConfig`'s error hook (`spec/protocol.md` §2: every error
+/// response is `application/problem+json`, extractor rejections included).
+fn query_error_handler(
+    err: actix_web::error::QueryPayloadError,
+    _req: &actix_web::HttpRequest,
+) -> actix_web::Error {
+    ApiError::BadRequest(err.to_string()).into()
 }
 
 async fn serve_html() -> HttpResponse {

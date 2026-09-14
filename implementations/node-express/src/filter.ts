@@ -162,7 +162,7 @@ export function buildWhereClause(conditions: Condition[], columnNames: string[],
 
   conditions.forEach((cond, i) => {
     if (!allowed.has(cond.column)) {
-      throw new NotAllowedError(`column "${cond.column}"`);
+      throw new NotAllowedError(`column "${cond.column}"`, "column");
     }
     // Defense in depth: buildWhereClause is only ever fed parseFilter's
     // already-op-validated output in production, but it's an exported

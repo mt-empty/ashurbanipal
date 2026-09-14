@@ -60,7 +60,8 @@ def test_unrecognized_source_is_rejected(two_sources) -> None:
     client = _client(two_sources)
     resp = client.get("/__ashurbanipal/api/schemas?source=no_such_source")
     assert resp.status_code == 400
-    assert resp.content_type == "text/plain; charset=utf-8"
+    assert resp.content_type == "application/problem+json"
+    assert resp.get_json()["code"] == "unknown_source"
 
 
 def test_omitted_source_resolves_to_first_registered(two_sources) -> None:

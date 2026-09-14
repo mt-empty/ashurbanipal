@@ -2,7 +2,7 @@ import express, { type Router as ExpressRouter, type Request, type Response } fr
 import { basePath, type Config, isEnabled, type ResolvedLimits, withDefaults } from "./config.js";
 import type { DbSource } from "./db/types.js";
 import { dbviewerHtml } from "./embed.js";
-import { FilterError, NotAllowedError } from "./errors.js";
+import { FilterError, NOT_ALLOWED_CODE, NotAllowedError } from "./errors.js";
 import { type Condition, parseFilter } from "./filter.js";
 import { checkSiblings } from "./siblings.js";
 
@@ -74,7 +74,7 @@ function resolveSource(sources: NamedSource[], requested: string | undefined): D
   if (requested === undefined) return sources[0].source;
   const found = sources.find((s) => s.name === requested);
   if (found === undefined) {
-    throw new NotAllowedError(`source ${JSON.stringify(requested)}`);
+    throw new NotAllowedError(`source ${JSON.stringify(requested)}`, "source");
   }
   return found.source;
 }
@@ -107,21 +107,31 @@ function serveHtml(_req: Request, res: Response): void {
   res.status(200).send(dbviewerHtml);
 }
 
-function httpTextError(res: Response, status: number, message: string): void {
-  res.status(status).type("text/plain; charset=utf-8").send(message);
+// RFC 9457 Problem Details (spec/protocol.md §2) — `type` is always
+// "about:blank", Ashurbanipal defines no problem-type URI namespace.
+function httpProblemError(res: Response, status: number, code: string, title: string): void {
+  res
+    .status(status)
+    .type("application/problem+json")
+    .send(JSON.stringify({ type: "about:blank", title, status, code }));
 }
 
-// Maps a DbSource/filter error to the wire's two error classes
-// (spec/protocol.md §2): NotAllowedError/FilterError is a client mistake
-// (400, plain text); anything else is a database failure (500). Status
-// code is the contract — wording is implementation-defined.
+// Maps a DbSource/filter error to the wire's error taxonomy
+// (spec/protocol.md §2): NotAllowedError's kind picks the exact
+// unknown_*/not_readable code; FilterError is always invalid_filter;
+// anything else is a database failure (500). Status code + code are the
+// contract — `title` wording is implementation-defined.
 function writeError(res: Response, err: unknown): void {
-  if (err instanceof NotAllowedError || err instanceof FilterError) {
-    httpTextError(res, 400, err.message);
+  if (err instanceof NotAllowedError) {
+    httpProblemError(res, 400, NOT_ALLOWED_CODE[err.kind], err.message);
+    return;
+  }
+  if (err instanceof FilterError) {
+    httpProblemError(res, 400, "invalid_filter", err.message);
     return;
   }
   const message = err instanceof Error ? err.message : String(err);
-  httpTextError(res, 500, `database error: ${message}`);
+  httpProblemError(res, 500, "database_error", `database error: ${message}`);
 }
 
 function listSourcesHandler(sources: NamedSource[]) {
@@ -162,7 +172,7 @@ function tableDataHandler(sources: NamedSource[], limits: ResolvedLimits, timeou
     const schema = firstQueryValue(req, "schema");
     const table = firstQueryValue(req, "table");
     if (table === undefined) {
-      httpTextError(res, 400, "table parameter is required");
+      httpProblemError(res, 400, "invalid_parameter", "table parameter is required");
       return;
     }
 
@@ -185,7 +195,7 @@ function tableDataHandler(sources: NamedSource[], limits: ResolvedLimits, timeou
       const requested = parseSaturating(req, "limit");
       limit = clamp(requested ?? limits.defaultPageSize, 1, limits.maxPageSize);
     } catch (err) {
-      httpTextError(res, 400, err instanceof Error ? err.message : String(err));
+      httpProblemError(res, 400, "invalid_parameter", err instanceof Error ? err.message : String(err));
       return;
     }
 
@@ -194,7 +204,7 @@ function tableDataHandler(sources: NamedSource[], limits: ResolvedLimits, timeou
       offset = parseSaturating(req, "offset") ?? 0;
       if (offset < 0) offset = 0;
     } catch (err) {
-      httpTextError(res, 400, err instanceof Error ? err.message : String(err));
+      httpProblemError(res, 400, "invalid_parameter", err instanceof Error ? err.message : String(err));
       return;
     }
 
@@ -207,7 +217,7 @@ function tableDataHandler(sources: NamedSource[], limits: ResolvedLimits, timeou
     } else if (order === "desc") {
       descending = true;
     } else {
-      httpTextError(res, 400, `invalid order "${order}" (expected "asc" or "desc")`);
+      httpProblemError(res, 400, "invalid_parameter", `invalid order "${order}" (expected "asc" or "desc")`);
       return;
     }
 
@@ -234,7 +244,7 @@ function commonValuesHandler(sources: NamedSource[], timeoutMs: number) {
     const table = firstQueryValue(req, "table");
     const column = firstQueryValue(req, "column");
     if (table === undefined || column === undefined) {
-      httpTextError(res, 400, "table and column parameters are required");
+      httpProblemError(res, 400, "invalid_parameter", "table and column parameters are required");
       return;
     }
     const values = await source.commonValues(schema, table, column, timeoutMs);
@@ -248,7 +258,7 @@ function referencedByHandler(sources: NamedSource[], timeoutMs: number) {
     const schema = firstQueryValue(req, "schema");
     const table = firstQueryValue(req, "table");
     if (table === undefined) {
-      httpTextError(res, 400, "table parameter is required");
+      httpProblemError(res, 400, "invalid_parameter", "table parameter is required");
       return;
     }
     const entries = await source.referencedBy(schema, table, timeoutMs);

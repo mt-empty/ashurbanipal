@@ -98,18 +98,85 @@ pub struct ReferencedBy {
     pub columns: Vec<ColumnPair>,
 }
 
+/// Which allow-list (or privilege check) rejected a request — maps 1:1 onto
+/// `spec/protocol.md` §2's `unknown_source`/`unknown_schema`/`unknown_table`/
+/// `unknown_column`/`not_readable` error codes. Kept as a field on
+/// `DbError::NotAllowed` (rather than a new top-level `DbError` variant per
+/// kind) so every existing `matches!(_, Err(DbError::NotAllowed(_)))` call
+/// site across the test suites keeps compiling unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotAllowedKind {
+    Source,
+    Schema,
+    Table,
+    Column,
+    /// Cleared the allow-list but the connected role can't actually
+    /// `SELECT` it (Postgres 42501, MySQL/MariaDB residual 1142).
+    NotReadable,
+}
+
+impl NotAllowedKind {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Source => "unknown_source",
+            Self::Schema => "unknown_schema",
+            Self::Table => "unknown_table",
+            Self::Column => "unknown_column",
+            Self::NotReadable => "not_readable",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct NotAllowedDetail {
+    pub kind: NotAllowedKind,
+    pub what: String,
+}
+
 #[derive(Debug)]
 pub enum DbError {
-    NotAllowed(String),
+    NotAllowed(NotAllowedDetail),
     FilterParse(String),
+    /// Detected only where a backend's driver error already exposes an
+    /// unambiguous engine-native code for it (today: Postgres SQLSTATE
+    /// `57014`, `postgres.rs::map_select_denied`) — everywhere else a
+    /// timeout surfaces as `Sqlx`/`database_error`, which
+    /// `spec/protocol.md` §2/§6 permits (see `docs/adapter-decisions.md` §6).
+    QueryTimeout,
     Sqlx(sqlx::Error),
+}
+
+impl DbError {
+    pub fn not_allowed(kind: NotAllowedKind, what: impl Into<String>) -> Self {
+        Self::NotAllowed(NotAllowedDetail {
+            kind,
+            what: what.into(),
+        })
+    }
+
+    /// `(HTTP status, spec/protocol.md §2 code, human-readable title)` —
+    /// framework-agnostic so both `ashurbanipal-axum` and
+    /// `ashurbanipal-actix-web` share one match instead of each also
+    /// re-deriving `title` from `DbError` on its own (the title is just
+    /// `Display`'s own rendering, kept in this one tuple so a caller never
+    /// needs a second call to get it).
+    pub fn problem(&self) -> (u16, &'static str, String) {
+        let (status, code) = match self {
+            Self::NotAllowed(d) => (400, d.kind.code()),
+            Self::FilterParse(_) => (400, "invalid_filter"),
+            Self::QueryTimeout => (500, "query_timeout"),
+            Self::Sqlx(_) => (500, "database_error"),
+        };
+        (status, code, self.to_string())
+    }
 }
 
 impl std::fmt::Display for DbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotAllowed(what) => write!(f, "not in schema allow-list: {what}"),
+            Self::NotAllowed(d) => write!(f, "not allowed: {}", d.what),
             Self::FilterParse(reason) => write!(f, "invalid filter: {reason}"),
+            Self::QueryTimeout => write!(f, "query timed out"),
             Self::Sqlx(e) => write!(f, "database error: {e}"),
         }
     }
@@ -120,6 +187,28 @@ impl std::error::Error for DbError {}
 impl From<sqlx::Error> for DbError {
     fn from(e: sqlx::Error) -> Self {
         Self::Sqlx(e)
+    }
+}
+
+/// RFC 9457 Problem Details body (`spec/protocol.md` §2). Shared by both
+/// Rust adapters so the JSON shape can't drift between them.
+#[derive(Debug, Serialize)]
+pub struct ProblemDetails {
+    #[serde(rename = "type")]
+    pub type_: &'static str,
+    pub title: String,
+    pub status: u16,
+    pub code: &'static str,
+}
+
+impl ProblemDetails {
+    pub fn new(status: u16, code: &'static str, title: impl Into<String>) -> Self {
+        Self {
+            type_: "about:blank",
+            title: title.into(),
+            status,
+            code,
+        }
     }
 }
 
@@ -173,7 +262,9 @@ pub fn resolve_source<'a, S>(
             .iter()
             .find(|(n, _)| n == name)
             .map(|(_, s)| s)
-            .ok_or_else(|| DbError::NotAllowed(format!("source {name:?}"))),
+            .ok_or_else(|| {
+                DbError::not_allowed(NotAllowedKind::Source, format!("source {name:?}"))
+            }),
     }
 }
 
@@ -269,10 +360,13 @@ mod tests {
     #[test]
     fn resolve_source_unknown_name_is_rejected() {
         let sources = sources(&["primary", "reporting"]);
-        assert!(matches!(
-            resolve_source(&sources, Some("bogus")),
-            Err(DbError::NotAllowed(_))
-        ));
+        match resolve_source(&sources, Some("bogus")) {
+            Err(DbError::NotAllowed(d)) => {
+                assert_eq!(d.kind, super::NotAllowedKind::Source);
+                assert_eq!(d.kind.code(), "unknown_source");
+            }
+            other => panic!("expected NotAllowed(Source), got {other:?}"),
+        }
     }
 
     #[test]

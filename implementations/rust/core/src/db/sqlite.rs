@@ -6,7 +6,7 @@ use sqlx::{Row, SqlitePool};
 
 use super::{
     group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource,
-    KeyKind, QueryOpts, ReferencedBy, TableData, TableInfo,
+    KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -20,7 +20,10 @@ const ONLY_SCHEMA: &str = "main";
 fn check_schema(schema: Option<&str>) -> Result<(), DbError> {
     match schema {
         None | Some(ONLY_SCHEMA) => Ok(()),
-        Some(other) => Err(DbError::NotAllowed(format!("schema {other:?}"))),
+        Some(other) => Err(DbError::not_allowed(
+            NotAllowedKind::Schema,
+            format!("schema {other:?}"),
+        )),
     }
 }
 
@@ -198,7 +201,12 @@ fn build_where_clause(
         let column = column_names
             .iter()
             .find(|c| c.as_str() == condition.column)
-            .ok_or_else(|| DbError::NotAllowed(format!("column {:?}", condition.column)))?;
+            .ok_or_else(|| {
+                DbError::not_allowed(
+                    NotAllowedKind::Column,
+                    format!("column {:?}", condition.column),
+                )
+            })?;
 
         let keyword = if condition.op == FilterOp::Ilike {
             "LIKE"
@@ -274,7 +282,7 @@ impl DbSource for SqliteSource {
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
+            .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
             .clone();
 
         let column_names = self.allowed_columns(&table).await?;
@@ -283,7 +291,12 @@ impl DbSource for SqliteSource {
                 column_names
                     .iter()
                     .find(|c| c.as_str() == requested)
-                    .ok_or_else(|| DbError::NotAllowed(format!("column {requested:?}")))?
+                    .ok_or_else(|| {
+                        DbError::not_allowed(
+                            NotAllowedKind::Column,
+                            format!("column {requested:?}"),
+                        )
+                    })?
                     .clone(),
             ),
             None => None,
@@ -394,13 +407,15 @@ impl DbSource for SqliteSource {
         let table = tables
             .iter()
             .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::NotAllowed(format!("table {table:?}")))?
+            .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
             .clone();
         let columns = self.allowed_columns(&table).await?;
         columns
             .iter()
             .find(|c| c.as_str() == column)
-            .ok_or_else(|| DbError::NotAllowed(format!("column {column:?}")))?;
+            .ok_or_else(|| {
+                DbError::not_allowed(NotAllowedKind::Column, format!("column {column:?}"))
+            })?;
 
         // No pg_stats equivalent to read; an empty list is the documented
         // "no statistics available" answer (spec/protocol.md §5.5), not a
@@ -416,7 +431,10 @@ impl DbSource for SqliteSource {
         check_schema(schema)?;
         let allowed = self.allowed_tables().await?;
         if !allowed.iter().any(|t| t.as_str() == table) {
-            return Err(DbError::NotAllowed(format!("table {table:?}")));
+            return Err(DbError::not_allowed(
+                NotAllowedKind::Table,
+                format!("table {table:?}"),
+            ));
         }
         let table = table.to_string();
 

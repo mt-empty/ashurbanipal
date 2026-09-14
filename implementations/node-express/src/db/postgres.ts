@@ -63,7 +63,7 @@ export class PostgresSource implements DbSource {
     }
     const real = findExact(schemas, resolved);
     if (!real) {
-      throw new NotAllowedError(`schema "${resolved}"`);
+      throw new NotAllowedError(`schema "${resolved}"`, "schema");
     }
     return real;
   }
@@ -82,7 +82,7 @@ export class PostgresSource implements DbSource {
     // throws its own encoding error ahead of the query ever getting a chance
     // to just say "no match" (spec/protocol.md §5.2).
     if (table.includes("\0")) {
-      throw new NotAllowedError(`table "${table}"`);
+      throw new NotAllowedError(`table "${table}"`, "table");
     }
     const { rows } = await client.query<{ oid: number }>(
       `select c.oid::int4 as oid from pg_class c
@@ -92,7 +92,7 @@ export class PostgresSource implements DbSource {
       [schema, table],
     );
     if (rows.length === 0) {
-      throw new NotAllowedError(`table "${table}"`);
+      throw new NotAllowedError(`table "${table}"`, "table");
     }
     return rows[0].oid;
   }
@@ -225,7 +225,7 @@ export class PostgresSource implements DbSource {
       if (opts.sort !== undefined) {
         sort = findExact(columnNames, opts.sort);
         if (!sort) {
-          throw new NotAllowedError(`column "${opts.sort}"`);
+          throw new NotAllowedError(`column "${opts.sort}"`, "column");
         }
       }
 
@@ -332,7 +332,7 @@ export class PostgresSource implements DbSource {
       const columnNames = await this.allowedColumns(client, realSchema, realTable);
       const realColumn = findExact(columnNames, column);
       if (!realColumn) {
-        throw new NotAllowedError(`column "${column}"`);
+        throw new NotAllowedError(`column "${column}"`, "column");
       }
 
       // most_common_vals is anyarray; ::text::text[] reads it uniformly.

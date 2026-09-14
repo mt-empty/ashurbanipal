@@ -78,7 +78,7 @@ func resolveSource(sources []NamedSource, requested *string) (DbSource, error) {
 			return s.Source, nil
 		}
 	}
-	return nil, &NotAllowedError{What: fmt.Sprintf("source %q", *requested)}
+	return nil, &NotAllowedError{Kind: NotAllowedSource, What: fmt.Sprintf("source %q", *requested)}
 }
 
 // querySource returns the "source" query param as a *string, nil when
@@ -128,26 +128,38 @@ func writeJSON(w http.ResponseWriter, v interface{}) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func httpTextError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(status)
-	fmt.Fprintln(w, msg)
+// problemDetails is an RFC 9457 Problem Details body (spec/protocol.md §2).
+type problemDetails struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Code   string `json:"code"`
 }
 
-// writeError maps a DbSource error to the wire's two error classes
-// (spec/protocol.md §2): a *NotAllowedError or *FilterError is a client
-// mistake (400, plain text); anything else is a database failure (500).
-// Status code is the contract — wording is implementation-defined and
-// asserted nowhere else.
+func httpProblemError(w http.ResponseWriter, status int, code, title string) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(problemDetails{Type: "about:blank", Title: title, Status: status, Code: code})
+}
+
+// writeError maps a DbSource error to the wire's error codes
+// (spec/protocol.md §2): a *NotAllowedError carries its own kind/code; a
+// *FilterError is always invalid_filter; anything else is a database
+// failure (database_error, 500). query_timeout detection is out of scope
+// for this port — a timeout falls through to database_error, which the
+// spec permits (docs/adapter-decisions.md §6).
 func writeError(w http.ResponseWriter, err error) {
 	var notAllowed *NotAllowedError
-	var filter *FilterError
-	switch {
-	case errors.As(err, &notAllowed), errors.As(err, &filter):
-		httpTextError(w, http.StatusBadRequest, err.Error())
-	default:
-		httpTextError(w, http.StatusInternalServerError, fmt.Sprintf("database error: %s", err))
+	if errors.As(err, &notAllowed) {
+		httpProblemError(w, http.StatusBadRequest, notAllowed.Kind.Code(), err.Error())
+		return
 	}
+	var filter *FilterError
+	if errors.As(err, &filter) {
+		httpProblemError(w, http.StatusBadRequest, "invalid_filter", err.Error())
+		return
+	}
+	httpProblemError(w, http.StatusInternalServerError, "database_error", fmt.Sprintf("database error: %s", err))
 }
 
 // querySchema returns the "schema" query param as a *string, nil when
@@ -227,7 +239,7 @@ func tableDataHandler(sources []NamedSource, limits Limits) http.HandlerFunc {
 			return
 		}
 		if !q.Has("table") {
-			httpTextError(w, http.StatusBadRequest, "table parameter is required")
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", "table parameter is required")
 			return
 		}
 		table := q.Get("table")
@@ -249,7 +261,7 @@ func tableDataHandler(sources []NamedSource, limits Limits) http.HandlerFunc {
 
 		requestedLimit, err := parseSaturating(q, "limit")
 		if err != nil {
-			httpTextError(w, http.StatusBadRequest, err.Error())
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 			return
 		}
 		limit := int64(limits.DefaultPageSize)
@@ -260,7 +272,7 @@ func tableDataHandler(sources []NamedSource, limits Limits) http.HandlerFunc {
 
 		requestedOffset, err := parseSaturating(q, "offset")
 		if err != nil {
-			httpTextError(w, http.StatusBadRequest, err.Error())
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 			return
 		}
 		offset := int64(0)
@@ -279,7 +291,7 @@ func tableDataHandler(sources []NamedSource, limits Limits) http.HandlerFunc {
 		case "desc":
 			descending = true
 		default:
-			httpTextError(w, http.StatusBadRequest, fmt.Sprintf("invalid order %q (expected \"asc\" or \"desc\")", order))
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", fmt.Sprintf("invalid order %q (expected \"asc\" or \"desc\")", order))
 			return
 		}
 
@@ -307,7 +319,7 @@ func commonValuesHandler(sources []NamedSource) http.HandlerFunc {
 			return
 		}
 		if !q.Has("table") || !q.Has("column") {
-			httpTextError(w, http.StatusBadRequest, "table and column parameters are required")
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", "table and column parameters are required")
 			return
 		}
 		values, err := c.CommonValues(r.Context(), querySchema(q), q.Get("table"), q.Get("column"))
@@ -330,7 +342,7 @@ func referencedByHandler(sources []NamedSource) http.HandlerFunc {
 			return
 		}
 		if !q.Has("table") {
-			httpTextError(w, http.StatusBadRequest, "table parameter is required")
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", "table parameter is required")
 			return
 		}
 		entries, err := c.ReferencedBy(r.Context(), querySchema(q), q.Get("table"))
