@@ -19,7 +19,7 @@
 //! that matter: equality narrowing, AND-tighter-than-OR precedence, NOT
 //! negation, IS NULL, and injection values staying inert bind params.
 
-use crate::assert::{assert_exact, assert_row_estimate, assert_status};
+use crate::assert::{assert_exact, assert_problem_code, assert_row_estimate, assert_status};
 use crate::backend::Backend;
 use crate::common::TestServer;
 
@@ -91,11 +91,14 @@ async fn builder_fixture_cases_over_http() {
 async fn dsl_text_in_filter_param_is_rejected() {
     let srv = TestServer::spawn().await;
     let resp = fetch(&srv, "orders", "status = completed").await;
-    assert_status(
-        &resp,
+    // Representative site for `invalid_filter`.
+    assert_problem_code(
+        resp,
         400,
+        "invalid_filter",
         "DSL text must no longer be understood by the server",
-    );
+    )
+    .await;
 }
 
 /// Empty param and empty JSON array both mean "no filter" (§5.4.2).
@@ -281,9 +284,15 @@ async fn unknown_column_rejection_is_a_400() {
     let srv = TestServer::spawn().await;
     let ast = serde_json::json!([{"column": "pg_sleep", "op": "=", "value": "1"}]);
     let resp = fetch(&srv, "users", &serde_json::to_string(&ast).unwrap()).await;
-    assert_status(
-        &resp,
+    // A filter condition naming a nonexistent column is `unknown_column`,
+    // not `invalid_filter` — the AST is structurally valid, only the
+    // column fails the live allow-list (spec/protocol.md §2), same rule as
+    // `sort`'s own unknown-column case.
+    assert_problem_code(
+        resp,
         400,
+        "unknown_column",
         "filter column=pg_sleep (not a real users column)",
-    );
+    )
+    .await;
 }

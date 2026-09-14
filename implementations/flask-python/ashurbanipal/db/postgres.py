@@ -14,6 +14,7 @@ from . import (
     FilterParseError,
     KeyKind,
     NotAllowed,
+    NotAllowedKind,
     QueryOpts,
     ReferencedBy,
     TableData,
@@ -46,7 +47,7 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
     clause_parts: list[str] = []
     for i, cond in enumerate(conditions):
         if cond.column not in column_names:
-            raise NotAllowed(f"column {cond.column!r}")
+            raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
         quoted = quote_ident(cond.column)
         if cond.op in ("IS NULL", "IS NOT NULL"):
             inner = f"{quoted}::text {cond.op}"
@@ -90,7 +91,7 @@ class PgSource(DbSource):
             cur.execute("select current_schema()")
             resolved = cur.fetchone()[0]
         if resolved not in schemas:
-            raise NotAllowed(f"schema {resolved!r}")
+            raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
         return resolved
 
     def _readable_table_oid(self, cur: psycopg.Cursor, schema: str, table: str) -> int:
@@ -109,7 +110,7 @@ class PgSource(DbSource):
         # otherwise throws its own encoding error ahead of fetchone() ever
         # getting a chance to just say "no match" (spec/protocol.md §5.2).
         if "\0" in table:
-            raise NotAllowed(f"table {table!r}")
+            raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
         cur.execute(
             "select c.oid from pg_class c "
             "join pg_namespace n on n.oid = c.relnamespace "
@@ -119,7 +120,7 @@ class PgSource(DbSource):
         )
         row = cur.fetchone()
         if row is None:
-            raise NotAllowed(f"table {table!r}")
+            raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
         return row[0]
 
     def _allowed_columns(self, cur: psycopg.Cursor, schema: str, table: str) -> list[str]:
@@ -228,7 +229,7 @@ class PgSource(DbSource):
                 sort = None
                 if opts.sort is not None:
                     if opts.sort not in column_names:
-                        raise NotAllowed(f"column {opts.sort!r}")
+                        raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
                     sort = opts.sort
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
@@ -280,8 +281,9 @@ class PgSource(DbSource):
                 except psycopg.errors.InsufficientPrivilege as exc:
                     # The allow-list already rejects tables the role can't
                     # SELECT, so a permission denied here is a residual edge;
-                    # report it as NotAllowed (400), not a driver 500.
-                    raise NotAllowed(f"table {table!r}") from exc
+                    # report it as NotAllowed(NOT_READABLE) (400), not a
+                    # driver 500.
+                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
                 except psycopg.DataError as exc:
                     # psycopg's str dumper rejects a NUL byte client-side (no
                     # SQLSTATE, unlike other drivers' server-side rejection);
@@ -315,7 +317,7 @@ class PgSource(DbSource):
             self._readable_table_oid(cur, resolved_schema, table)
             columns = self._allowed_columns(cur, resolved_schema, table)
             if column not in columns:
-                raise NotAllowed(f"column {column!r}")
+                raise NotAllowed(f"column {column!r}", kind=NotAllowedKind.COLUMN)
 
             # most_common_vals is anyarray; ::text::text[] reads it
             # uniformly. NULL (no ANALYZE stats yet) unnests to zero rows,

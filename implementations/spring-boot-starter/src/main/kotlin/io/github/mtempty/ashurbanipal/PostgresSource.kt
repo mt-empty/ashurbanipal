@@ -40,7 +40,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val schemas = listAllowedSchemas()
         val resolved = requested
             ?: jdbcTemplate.queryForObject("select current_schema()", String::class.java)!!
-        return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved")
+        return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved", NotAllowedKind.SCHEMA)
     }
 
     override fun listTables(schema: String?): List<TableInfo> {
@@ -85,7 +85,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         // otherwise throws its own encoding error ahead of the query ever
         // getting a chance to just say "no match" (spec/protocol.md §5.2).
         if (table.contains('\u0000')) {
-            throw NotAllowedException("not allowed: table $table")
+            throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
         }
         return jdbcTemplate.query(
             "select c.oid from pg_class c " +
@@ -95,7 +95,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             RowMapper { rs, _ -> rs.getLong("oid") },
             schema,
             table,
-        ).firstOrNull() ?: throw NotAllowedException("not allowed: table $table")
+        ).firstOrNull() ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
     }
 
     private fun allowedColumns(schema: String, table: String): List<String> =
@@ -194,7 +194,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val columnNames = allowedColumns(realSchema, realTable)
 
         val sort = opts.sort?.let { requested ->
-            columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested")
+            columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
         val whereClause = opts.filter?.let { filterValidator.buildWhereClause(it, columnNames) }
@@ -261,7 +261,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             // Map residual SELECT-denied errors to NotAllowed (spec/protocol.md §2).
             val sqlState = (e.mostSpecificCause as? SQLException)?.sqlState
             if (sqlState == "42501") {
-                throw NotAllowedException("not allowed: table $realTable")
+                throw NotAllowedException("not allowed: table $realTable", NotAllowedKind.NOT_READABLE)
             }
             // A filter value Postgres's text encoding rejects (SQLSTATE
             // 22021/22P05) maps to FilterException, also 400, never a raw
@@ -305,7 +305,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val realSchema = resolveSchema(schema)
         val realTable = requireTable(realSchema, table)
         val realColumn = allowedColumns(realSchema, realTable).find { it == column }
-            ?: throw NotAllowedException("not allowed: column $column")
+            ?: throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
 
         // most_common_vals is anyarray; ::text::text[] reads it uniformly.
         // NULL (no ANALYZE stats yet) unnests to zero rows, not an error.

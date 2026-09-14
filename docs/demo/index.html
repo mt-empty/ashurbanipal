@@ -1116,10 +1116,29 @@ function checkProtocolVersion(resp) {
   skewMessage = `protocol version mismatch: this UI speaks v${PROTOCOL_VERSION}, the server reports ${got ? `v${got}` : "no version"} \u2014 some features may misbehave`;
   skewSubscriber?.(skewMessage);
 }
+var ApiError = class extends Error {
+  code;
+  constructor(message, code) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
+};
+async function errorFromResponse(resp) {
+  try {
+    const body = await resp.json();
+    if (body && typeof body === "object" && "title" in body && typeof body.title === "string") {
+      const code = "code" in body && typeof body.code === "string" ? body.code : void 0;
+      return new ApiError(body.title, code);
+    }
+  } catch {
+  }
+  return new ApiError(`request failed with status ${resp.status}`, void 0);
+}
 async function api(path) {
   const resp = await fetch(API + path);
   if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
-  if (!resp.ok) throw new Error(await resp.text());
+  if (!resp.ok) throw await errorFromResponse(resp);
   return resp.json();
 }
 
@@ -2821,6 +2840,10 @@ async function loadData2({
   } catch (e) {
     if (token !== loadDataToken) return;
     if (dropOneStaleInput()) return loadData2({ resetScroll, highlightNew });
+    if (e instanceof ApiError && e.code === "not_readable") {
+      reportError(new Error(`you don't have access to ${state.table}`));
+      return;
+    }
     reportError(e);
     return;
   }

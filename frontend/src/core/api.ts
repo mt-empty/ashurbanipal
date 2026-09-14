@@ -32,11 +32,40 @@ function checkProtocolVersion(resp: Response): void {
   skewSubscriber?.(skewMessage);
 }
 
+// spec/protocol.md §2: error bodies are RFC 9457 application/problem+json
+// carrying a stable `code`. `code` is exposed for callers that want to
+// branch on it (e.g. a `not_readable` drill-in); everything else can keep
+// treating a thrown ApiError as a plain Error and read `.message`.
+export class ApiError extends Error {
+  readonly code: string | undefined;
+
+  constructor(message: string, code: string | undefined) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
+}
+
+async function errorFromResponse(resp: Response): Promise<ApiError> {
+  // An unrecognized/absent `code` still yields a usable message — clients
+  // MUST treat it as a generic error of the given status (spec/protocol.md §2).
+  try {
+    const body: unknown = await resp.json();
+    if (body && typeof body === "object" && "title" in body && typeof body.title === "string") {
+      const code = "code" in body && typeof body.code === "string" ? body.code : undefined;
+      return new ApiError(body.title, code);
+    }
+  } catch {
+    /* fall through to the generic message below */
+  }
+  return new ApiError(`request failed with status ${resp.status}`, undefined);
+}
+
 export async function api<T = unknown>(path: string): Promise<T> {
   const resp = await fetch(API + path);
   // path may carry a query string (e.g. "/tables?schema=…") — compare just
   // the route, not the whole path, so the version check still fires.
   if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
-  if (!resp.ok) throw new Error(await resp.text());
+  if (!resp.ok) throw await errorFromResponse(resp);
   return resp.json();
 }

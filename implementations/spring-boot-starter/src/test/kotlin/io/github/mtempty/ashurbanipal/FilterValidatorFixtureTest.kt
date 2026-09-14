@@ -68,7 +68,12 @@ class FilterValidatorFixtureTest {
                 expectError == "unknown_column" -> {
                     val conditions = runCatching { validator.parse(raw) }
                         .getOrElse { throw AssertionError("case $name: should parse (rejection is builder-stage): ${it.message}", it) }
-                    assertThrows(FilterException::class.java, { validator.buildWhereClause(conditions, seedColumns(table)) }, "case $name")
+                    // Matches spec/protocol.md §2's unknown_column code (and
+                    // MySqlSource/SqliteSource's own buildWhereClause*, which
+                    // already threw NotAllowedException here) — not a
+                    // structural filter-AST problem.
+                    val thrown = assertThrows(NotAllowedException::class.java, { validator.buildWhereClause(conditions, seedColumns(table)) }, "case $name")
+                    assertEquals(NotAllowedKind.COLUMN, thrown.kind, "case $name")
                 }
                 expectError != null -> {
                     assertThrows(FilterException::class.java, { validator.parse(raw) }, "case $name: expected structural rejection ($expectError)")

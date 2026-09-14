@@ -1,4 +1,4 @@
-import { api } from "../core/api.js";
+import { ApiError, api } from "../core/api.js";
 import { $, clearError, flashIcon, reportError, setStatus } from "../core/dom.js";
 import {
   applyScopeParams,
@@ -106,6 +106,15 @@ export async function loadData({
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
     if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
+    // The one code the frontend branches on (ui-guidelines R9): a table
+    // that cleared the sidebar's own listing but the role can't actually
+    // read (e.g. a stale MySQL/MariaDB listing, docs/adapter-decisions.md
+    // §5.2/§5.3) gets a plain-language message instead of the server's
+    // implementation-defined title text.
+    if (e instanceof ApiError && e.code === "not_readable") {
+      reportError(new Error(`you don't have access to ${state.table}`));
+      return;
+    }
     reportError(e);
     return;
   }

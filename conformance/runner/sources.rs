@@ -7,7 +7,7 @@
 //! default resolution) lives in `two_source.rs` instead, since it needs a
 //! target started with a second source registered.
 
-use crate::assert::{assert_exact, assert_status};
+use crate::assert::{assert_exact, assert_problem_code, assert_status};
 use crate::common::TestServer;
 
 #[tokio::test]
@@ -111,7 +111,14 @@ async fn unrecognized_source_values_are_rejected_cleanly_on_every_route() {
             .send()
             .await
             .unwrap();
-        assert_status(&resp, 400, &format!("GET /api/schemas?source={evil:?}"));
+        // Representative site for `unknown_source`.
+        assert_problem_code(
+            resp,
+            400,
+            "unknown_source",
+            &format!("GET /api/schemas?source={evil:?}"),
+        )
+        .await;
 
         let resp = srv
             .client()

@@ -86,8 +86,28 @@ class DbError(Exception):
     """Base class every DbSource raises; routes.py maps subclasses to HTTP status."""
 
 
+class NotAllowedKind(StrEnum):
+    """Which allow-list (or privilege check) rejected a request — maps 1:1
+    onto spec/protocol.md §2's unknown_source/unknown_schema/unknown_table/
+    unknown_column/not_readable error codes.
+    """
+
+    SOURCE = "unknown_source"
+    SCHEMA = "unknown_schema"
+    TABLE = "unknown_table"
+    COLUMN = "unknown_column"
+    # Cleared the allow-list but the connected role can't actually SELECT
+    # it (Postgres InsufficientPrivilege, MySQL/MariaDB residual 1142).
+    NOT_READABLE = "not_readable"
+
+
 class NotAllowed(DbError):
-    """A table/column/schema name failed the live allow-list check."""
+    """A table/column/schema/source name failed the live allow-list check
+    (or, NOT_READABLE, cleared it but isn't actually readable)."""
+
+    def __init__(self, message: str, kind: NotAllowedKind):
+        super().__init__(message)
+        self.kind = kind
 
 
 class FilterParseError(DbError):

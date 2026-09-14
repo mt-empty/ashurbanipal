@@ -11,7 +11,7 @@ private const val ONLY_SCHEMA = "main"
 
 private fun checkSchema(schema: String?) {
     if (schema != null && schema != ONLY_SCHEMA) {
-        throw NotAllowedException("not allowed: schema $schema")
+        throw NotAllowedException("not allowed: schema $schema", NotAllowedKind.SCHEMA)
     }
 }
 
@@ -24,7 +24,7 @@ private fun buildWhereClauseSqlite(conditions: List<Condition>, columnNames: Lis
     val clause = StringBuilder()
     conditions.forEachIndexed { i, condition ->
         val column = columnNames.find { it == condition.column }
-            ?: throw NotAllowedException("not allowed: column ${condition.column}")
+            ?: throw NotAllowedException("not allowed: column ${condition.column}", NotAllowedKind.COLUMN)
         val keyword = if (condition.op == "ILIKE") "LIKE" else opSqlKeyword(condition.op)
         val cast = "CAST(${quoteIdent(column)} AS TEXT)"
 
@@ -112,7 +112,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
     }
 
     private fun requireTable(table: String): String =
-        allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table")
+        allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
     /** Composite FKs are dropped, mirroring [PostgresSource]/[MySqlSource]. */
     private fun keyMetadata(table: String): Pair<List<String>, Map<String, ColumnRef>> = bounded(queryTimeoutSecs) { conn ->
@@ -173,7 +173,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         val columnNames = allowedColumns(realTable)
 
         val sort = opts.sort?.let { requested ->
-            columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested")
+            columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
         val whereClause = opts.filter?.let { buildWhereClauseSqlite(it, columnNames) } ?: WhereClause("", emptyList())
@@ -242,7 +242,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
     override fun commonValues(schema: String?, table: String, column: String): List<CommonValueEntry> {
         checkSchema(schema)
         val realTable = requireTable(table)
-        allowedColumns(realTable).find { it == column } ?: throw NotAllowedException("not allowed: column $column")
+        allowedColumns(realTable).find { it == column } ?: throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
         return emptyList()
     }
 

@@ -1,15 +1,17 @@
 """HTTP-level DbError -> response-shape mapping (spec/protocol.md §2: every
-error response, 500s included, must be text/plain). Regression coverage for
-a real driver failure specifically: before `wrap_driver_errors` (db/__init__.py),
-none of the three backends' DbSource methods ever raised DatabaseError, so
-@bp.errorhandler(DbError) never fired for one and Flask's default HTML error
-page leaked through instead.
+error response, 500s included, must be application/problem+json). Regression
+coverage for a real driver failure specifically: before `wrap_driver_errors`
+(db/__init__.py), none of the three backends' DbSource methods ever raised
+DatabaseError, so @bp.errorhandler(DbError) never fired for one and Flask's
+default HTML error page leaked through instead.
 """
+
+import json
 
 from flask import Flask
 
 from ashurbanipal.config import Config
-from ashurbanipal.db import DatabaseError, DbSource, FilterParseError, NotAllowed
+from ashurbanipal.db import DatabaseError, DbSource, FilterParseError, NotAllowed, NotAllowedKind
 from ashurbanipal.routes import router
 
 
@@ -43,23 +45,30 @@ def _client(exc: Exception):
     return app.test_client()
 
 
-def test_database_error_is_a_plain_text_500_not_flasks_default_html_page() -> None:
+def test_database_error_is_a_problem_json_500_not_flasks_default_html_page() -> None:
     client = _client(DatabaseError("connection reset"))
     resp = client.get("/__ashurbanipal/api/schemas")
     assert resp.status_code == 500
-    assert resp.content_type == "text/plain; charset=utf-8"
-    assert resp.data == b"database error: connection reset"
+    assert resp.content_type == "application/problem+json"
+    body = json.loads(resp.data)
+    assert body["code"] == "database_error"
+    assert body["status"] == 500
+    assert body["title"] == "database error: connection reset"
 
 
 def test_not_allowed_is_a_400() -> None:
-    client = _client(NotAllowed("table 'secrets'"))
+    client = _client(NotAllowed("table 'secrets'", kind=NotAllowedKind.NOT_READABLE))
     resp = client.get("/__ashurbanipal/api/schemas")
     assert resp.status_code == 400
-    assert resp.content_type == "text/plain; charset=utf-8"
+    assert resp.content_type == "application/problem+json"
+    body = json.loads(resp.data)
+    assert body["code"] == "not_readable"
 
 
 def test_filter_parse_error_is_a_400() -> None:
     client = _client(FilterParseError("condition 0 is missing logic"))
     resp = client.get("/__ashurbanipal/api/schemas")
     assert resp.status_code == 400
-    assert resp.content_type == "text/plain; charset=utf-8"
+    assert resp.content_type == "application/problem+json"
+    body = json.loads(resp.data)
+    assert body["code"] == "invalid_filter"

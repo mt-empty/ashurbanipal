@@ -15,6 +15,7 @@ from . import (
     FilterParseError,
     KeyKind,
     NotAllowed,
+    NotAllowedKind,
     QueryOpts,
     ReferencedBy,
     TableData,
@@ -76,7 +77,7 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
     clause_parts: list[str] = []
     for i, cond in enumerate(conditions):
         if cond.column not in column_names:
-            raise NotAllowed(f"column {cond.column!r}")
+            raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
         cast = f"CAST({_quote_ident(cond.column)} AS CHAR)"
 
         if cond.op == "ILIKE":
@@ -136,7 +137,7 @@ class MySqlSource(DbSource):
             cur.execute(_timed_select(variant, timeout_secs, "database()"))
             (resolved,) = cur.fetchone()
         if resolved not in schemas:
-            raise NotAllowed(f"schema {resolved!r}")
+            raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
         return resolved
 
     def _allowed_tables(self, cur, variant: str, schema: str, timeout_secs: int) -> list[str]:
@@ -281,13 +282,13 @@ class MySqlSource(DbSource):
                 resolved_schema = self._resolve_schema(cur, variant, schema, timeout)
                 tables = self._allowed_tables(cur, variant, resolved_schema, timeout)
                 if table not in tables:
-                    raise NotAllowed(f"table {table!r}")
+                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
 
                 column_names = self._allowed_columns(cur, variant, resolved_schema, table, timeout)
                 sort = None
                 if opts.sort is not None:
                     if opts.sort not in column_names:
-                        raise NotAllowed(f"column {opts.sort!r}")
+                        raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
                     sort = opts.sort
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
@@ -335,9 +336,10 @@ class MySqlSource(DbSource):
                     cur.execute(sql, (*filter_values, opts.limit, opts.offset))
                     mysql_rows = cur.fetchall()
                 except pymysql.Error as exc:
-                    # MySQL has no SELECT privilege gate; map residual 1142 to NotAllowed.
+                    # MySQL has no SELECT privilege gate; map residual 1142
+                    # to NotAllowed(NOT_READABLE).
                     if exc.args and exc.args[0] == 1142:
-                        raise NotAllowed(f"table {table!r}") from exc
+                        raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
                     raise
                 finally:
                     conn.use_unicode = True
@@ -371,10 +373,10 @@ class MySqlSource(DbSource):
                 resolved_schema = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
                 tables = self._allowed_tables(cur, variant, resolved_schema, CATALOG_TIMEOUT_SECS)
                 if table not in tables:
-                    raise NotAllowed(f"table {table!r}")
+                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
                 columns = self._allowed_columns(cur, variant, resolved_schema, table, CATALOG_TIMEOUT_SECS)
                 if column not in columns:
-                    raise NotAllowed(f"column {column!r}")
+                    raise NotAllowed(f"column {column!r}", kind=NotAllowedKind.COLUMN)
             conn.commit()
             # MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
             return []
@@ -394,7 +396,7 @@ class MySqlSource(DbSource):
                 # (docs/adapter-decisions.md §5.9).
                 allowed = set(self._allowed_tables(cur, variant, resolved_schema, CATALOG_TIMEOUT_SECS))
                 if table not in allowed:
-                    raise NotAllowed(f"table {table!r}")
+                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
 
                 # Read key_column_usage, not referential_constraints, whose
                 # referenced-name column MariaDB nulls for a role lacking

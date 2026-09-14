@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{Query, State};
+use axum::extract::{FromRequestParts, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::map_response;
 use axum::response::{Html, IntoResponse, Json, Response};
@@ -10,7 +11,9 @@ use axum::Router;
 use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
-use ashurbanipal::{resolve_source, Config, DbError, DbSource, QueryOpts, ReferencedBy, TableInfo};
+use ashurbanipal::{
+    resolve_source, Config, DbError, DbSource, ProblemDetails, QueryOpts, ReferencedBy, TableInfo,
+};
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
 
@@ -98,20 +101,47 @@ impl From<DbError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        match self {
-            ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg).into_response(),
-            ApiError::Db(DbError::NotAllowed(what)) => {
-                (StatusCode::BAD_REQUEST, format!("not allowed: {what}")).into_response()
-            }
-            ApiError::Db(DbError::FilterParse(reason)) => {
-                (StatusCode::BAD_REQUEST, format!("invalid filter: {reason}")).into_response()
-            }
-            ApiError::Db(DbError::Sqlx(e)) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("database error: {e}"),
+        let (status, code, title) = match self {
+            ApiError::BadRequest(msg) => (400, "invalid_parameter", msg),
+            ApiError::Db(err) => err.problem(),
+        };
+        // Never `Json<ProblemDetails>` — that sets `application/json`, and
+        // `spec/protocol.md` §2 requires `application/problem+json`.
+        let body = serde_json::to_vec(&ProblemDetails::new(status, code, title))
+            .expect("ProblemDetails serialization is infallible");
+        Response::builder()
+            .status(
+                StatusCode::from_u16(status).expect("problem() only returns valid HTTP statuses"),
             )
-                .into_response(),
-        }
+            .header(axum::http::header::CONTENT_TYPE, "application/problem+json")
+            .body(axum::body::Body::from(body))
+            .expect("a status + one header + a byte body always builds")
+    }
+}
+
+/// Wraps `axum::extract::Query` so a malformed query string — a missing
+/// required field, a duplicate key, a value the target type can't parse —
+/// surfaces through this crate's own `application/problem+json` path
+/// instead of axum's default plain-text extractor rejection.
+/// `spec/protocol.md` §2 requires every error response use problem+json,
+/// and this rejection happens inside axum's own request-dispatch layer
+/// (unlike the pre-dispatch, server-level rejections `PORTING.md`'s
+/// "Request-boundary rejections" section carves out), so it's this crate's
+/// to fix, not an accepted per-port gap.
+struct Query<T>(T);
+
+impl<T, S> FromRequestParts<S> for Query<T>
+where
+    T: serde::de::DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        axum::extract::Query::<T>::from_request_parts(parts, state)
+            .await
+            .map(|axum::extract::Query(value)| Query(value))
+            .map_err(|rejection| ApiError::BadRequest(rejection.to_string()))
     }
 }
 

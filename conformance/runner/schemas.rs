@@ -2,7 +2,7 @@
 //! against `other_schema.decoy_items`, the seed's dedicated fixture for
 //! exactly this (`conformance/seed/README.md`).
 
-use crate::assert::{assert_exact, assert_status};
+use crate::assert::{assert_exact, assert_problem_code, assert_status};
 use crate::backend::{Backend, SchemaModel};
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
@@ -149,7 +149,14 @@ async fn unrecognized_schema_values_are_rejected_cleanly_on_every_route() {
             .send()
             .await
             .unwrap();
-        assert_status(&resp, 400, &format!("GET /api/tables?schema={evil:?}"));
+        // Representative site for `unknown_schema`.
+        assert_problem_code(
+            resp,
+            400,
+            "unknown_schema",
+            &format!("GET /api/tables?schema={evil:?}"),
+        )
+        .await;
 
         let resp = srv
             .client()

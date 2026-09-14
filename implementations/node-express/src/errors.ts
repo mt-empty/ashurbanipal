@@ -16,11 +16,29 @@ export function assertSafeTimeoutMs(timeoutMs: number): void {
   }
 }
 
+/**
+ * Which allow-list (or privilege check) rejected the request — maps 1:1
+ * onto spec/protocol.md §2's `unknown_source`/`unknown_schema`/
+ * `unknown_table`/`unknown_column`/`not_readable` error codes.
+ */
+export type NotAllowedKind = "source" | "schema" | "table" | "column" | "not_readable";
+
+export const NOT_ALLOWED_CODE: Record<NotAllowedKind, string> = {
+  source: "unknown_source",
+  schema: "unknown_schema",
+  table: "unknown_table",
+  column: "unknown_column",
+  not_readable: "not_readable",
+};
+
 /** A table/column/sort name did not match the live schema allow-list (spec/protocol.md §6). Maps to 400. */
 export class NotAllowedError extends Error {
-  constructor(what: string) {
+  readonly kind: NotAllowedKind;
+
+  constructor(what: string, kind: NotAllowedKind) {
     super(`not allowed: ${what}`);
     this.name = "NotAllowedError";
+    this.kind = kind;
   }
 }
 
@@ -44,7 +62,7 @@ export class FilterError extends Error {
 export function mapSelectDenied(err: unknown, table: string): unknown {
   const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
   if (code === "42501") {
-    return new NotAllowedError(`table "${table}"`);
+    return new NotAllowedError(`table "${table}"`, "not_readable");
   }
   if (code === "22021" || code === "22P05") {
     const message = err instanceof Error ? err.message : String(err);
@@ -63,7 +81,7 @@ export function mapSelectDenied(err: unknown, table: string): unknown {
  */
 export function mapSelectDeniedMysql(err: unknown, table: string): unknown {
   if (typeof err === "object" && err !== null && "errno" in err && (err as { errno?: unknown }).errno === 1142) {
-    return new NotAllowedError(`table "${table}"`);
+    return new NotAllowedError(`table "${table}"`, "not_readable");
   }
   return err;
 }

@@ -67,7 +67,7 @@ class AshurbanipalController(
     /** Absent means the first-registered default; present requires an exact match (spec/protocol.md §1). */
     private fun resolveSource(name: String?): DbSource =
         if (name == null) dbSources.values.first()
-        else dbSources[name] ?: throw NotAllowedException("source \"$name\"")
+        else dbSources[name] ?: throw NotAllowedException("source \"$name\"", NotAllowedKind.SOURCE)
 
     @GetMapping(produces = [MediaType.TEXT_HTML_VALUE])
     fun serveHtml(): ResponseEntity<ByteArray> =
@@ -120,7 +120,7 @@ class AshurbanipalController(
         val descending = when (order) {
             null, "asc" -> false
             "desc" -> true
-            else -> throw FilterException("invalid order \"$order\" (expected \"asc\" or \"desc\")")
+            else -> throw FilterException("invalid order \"$order\" (expected \"asc\" or \"desc\")", code = "invalid_parameter")
         }
 
         val data = resolveSource(source).queryTable(
@@ -182,31 +182,32 @@ class AshurbanipalController(
     private fun <T : Any> apiOk(body: T): ResponseEntity<T> =
         ResponseEntity.ok().header(PROTOCOL_HEADER, PROTOCOL_VERSION).body(body)
 
-    private fun errorResponse(status: HttpStatus, message: String): ResponseEntity<String> =
+    /** RFC 9457 Problem Details (`spec/protocol.md` §2). */
+    private fun problemResponse(status: HttpStatus, code: String, title: String): ResponseEntity<ProblemDetails> =
         ResponseEntity.status(status)
             .header(PROTOCOL_HEADER, PROTOCOL_VERSION)
-            .contentType(MediaType.TEXT_PLAIN)
-            .body(message)
+            .contentType(MediaType.valueOf("application/problem+json"))
+            .body(ProblemDetails(title = title, status = status.value(), code = code))
 
     @ExceptionHandler(FilterException::class)
-    fun handleFilterError(e: FilterException): ResponseEntity<String> =
-        errorResponse(HttpStatus.BAD_REQUEST, e.message ?: "bad request")
+    fun handleFilterError(e: FilterException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.BAD_REQUEST, e.code, e.message ?: "bad request")
 
     @ExceptionHandler(NotAllowedException::class)
-    fun handleNotAllowedError(e: NotAllowedException): ResponseEntity<String> =
-        errorResponse(HttpStatus.BAD_REQUEST, e.message ?: "bad request")
+    fun handleNotAllowedError(e: NotAllowedException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.BAD_REQUEST, e.kind.code, e.message ?: "bad request")
 
     @ExceptionHandler(MissingServletRequestParameterException::class)
-    fun handleMissingParam(e: MissingServletRequestParameterException): ResponseEntity<String> =
-        errorResponse(HttpStatus.BAD_REQUEST, e.message)
+    fun handleMissingParam(e: MissingServletRequestParameterException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.BAD_REQUEST, "invalid_parameter", e.message)
 
     @ExceptionHandler(MethodArgumentTypeMismatchException::class)
-    fun handleTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<String> =
-        errorResponse(HttpStatus.BAD_REQUEST, e.message)
+    fun handleTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.BAD_REQUEST, "invalid_parameter", e.message)
 
     @ExceptionHandler(DataAccessException::class)
-    fun handleDatabaseError(e: DataAccessException): ResponseEntity<String> =
-        errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database error: ${e.message}")
+    fun handleDatabaseError(e: DataAccessException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", "database error: ${e.message}")
 
     // A query string the servlet container itself can't parse (e.g. a stray
     // `=value` with no parameter name) surfaces here as an IllegalStateException
@@ -214,13 +215,21 @@ class AshurbanipalController(
     // body runs — a malformed request from the client, not a server fault, so
     // it must not fall through to the 500 catch-all below.
     @ExceptionHandler(IllegalStateException::class)
-    fun handleMalformedQueryString(e: IllegalStateException): ResponseEntity<String> =
-        errorResponse(HttpStatus.BAD_REQUEST, "malformed query string")
+    fun handleMalformedQueryString(e: IllegalStateException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.BAD_REQUEST, "invalid_parameter", "malformed query string")
 
     @ExceptionHandler(Exception::class)
-    fun handleUnexpectedError(e: Exception): ResponseEntity<String> =
-        errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, e.message ?: "internal error")
+    fun handleUnexpectedError(e: Exception): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", e.message ?: "internal error")
 }
+
+/** RFC 9457 Problem Details body (`spec/protocol.md` §2). */
+data class ProblemDetails(
+    @JsonProperty("type") val type: String = "about:blank",
+    val title: String,
+    val status: Int,
+    val code: String,
+)
 
 /** Saturates numeric values before clamping; only non-numeric text is rejected (`spec/protocol.md` §5.4). */
 private fun parseSaturating(raw: String?): Long? {
@@ -229,7 +238,7 @@ private fun parseSaturating(raw: String?): Long? {
     val big = try {
         BigInteger(trimmed)
     } catch (e: NumberFormatException) {
-        throw FilterException("invalid integer parameter: \"$raw\"")
+        throw FilterException("invalid integer parameter: \"$raw\"", code = "invalid_parameter")
     }
     return big.coerceIn(BigInteger.ZERO, BigInteger.valueOf(Long.MAX_VALUE)).toLong()
 }

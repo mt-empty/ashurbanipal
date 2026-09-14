@@ -138,7 +138,7 @@ func BuildWhereClause(conditions []Condition, columnNames []string) (string, []s
 	nextParam := 3
 	for i, cond := range conditions {
 		if !allowed[cond.Column] {
-			return "", nil, &NotAllowedError{What: fmt.Sprintf("column %q", cond.Column)}
+			return "", nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", cond.Column)}
 		}
 		// Defense in depth: BuildWhereClause is exported, so a future
 		// caller could feed it conditions straight from JSON without

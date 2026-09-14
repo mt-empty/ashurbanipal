@@ -20,7 +20,7 @@ func checkSchema(schema *string) error {
 	if schema == nil || *schema == onlySchema {
 		return nil
 	}
-	return &NotAllowedError{What: fmt.Sprintf("schema %q", *schema)}
+	return &NotAllowedError{Kind: NotAllowedSchema, What: fmt.Sprintf("schema %q", *schema)}
 }
 
 // SQLiteSource is optional; SQLite has no per-session schema state, so its
@@ -182,7 +182,7 @@ func sqliteBuildWhereClause(conditions []Condition, columnNames []string) (strin
 	var clause []byte
 	for i, cond := range conditions {
 		if !allowed[cond.Column] {
-			return "", nil, &NotAllowedError{What: fmt.Sprintf("column %q", cond.Column)}
+			return "", nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", cond.Column)}
 		}
 		if !validOps[cond.Op] {
 			return "", nil, filterErr("condition %d has invalid op %q", i, cond.Op)
@@ -269,7 +269,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	}
 	realTable, ok := findExact(tables, table)
 	if !ok {
-		return TableData{}, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		return TableData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 
 	columnNames, err := c.allowedColumns(ctx, realTable)
@@ -280,7 +280,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	if opts.Sort != nil {
 		found, ok := findExact(columnNames, *opts.Sort)
 		if !ok {
-			return TableData{}, &NotAllowedError{What: fmt.Sprintf("column %q", *opts.Sort)}
+			return TableData{}, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", *opts.Sort)}
 		}
 		sort = &found
 	}
@@ -426,14 +426,14 @@ func (c *SQLiteSource) CommonValues(ctx context.Context, schema *string, table, 
 	}
 	realTable, ok := findExact(tables, table)
 	if !ok {
-		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		return nil, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 	columns, err := c.allowedColumns(ctx, realTable)
 	if err != nil {
 		return nil, err
 	}
 	if _, ok := findExact(columns, column); !ok {
-		return nil, &NotAllowedError{What: fmt.Sprintf("column %q", column)}
+		return nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", column)}
 	}
 	// No pg_stats equivalent to read; an empty list is the documented "no
 	// statistics available" answer (spec/protocol.md §5.5), not a live
@@ -451,7 +451,7 @@ func (c *SQLiteSource) ReferencedBy(ctx context.Context, schema *string, table s
 		return nil, err
 	}
 	if _, ok := findExact(tables, table); !ok {
-		return nil, &NotAllowedError{What: fmt.Sprintf("table %q", table)}
+		return nil, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 
 	qctx, cancel := c.bounded(ctx)
