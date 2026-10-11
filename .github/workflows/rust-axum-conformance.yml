@@ -128,7 +128,7 @@ jobs:
       MARIADB_TEST_URL: mysql://root:ashurbanipal@127.0.0.1:3307/ashurbanipal
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.7.13
           install: false
@@ -160,7 +160,7 @@ jobs:
       DATABASE_URL: mysql://root:ashurbanipal@127.0.0.1:3306/ashurbanipal
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.7.13
           install: false
@@ -203,7 +203,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.7.13
           install: false
