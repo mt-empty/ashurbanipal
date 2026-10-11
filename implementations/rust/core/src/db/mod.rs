@@ -70,6 +70,69 @@ pub struct TableData {
     pub columns: Vec<ColumnInfo>,
     pub rows: Vec<serde_json::Map<String, serde_json::Value>>,
     pub total_approx: i64,
+    pub indexes: Vec<IndexInfo>,
+    pub constraints: Constraints,
+}
+
+/// One index on the queried table (prototype — story 26,
+/// `docs/feature-backlog/26-index-and-constraint-metadata-panel.md`; not
+/// yet spec'd in `spec/protocol.md`). `columns` lists all member columns in
+/// index order; a single-column index has one entry.
+#[derive(Debug, Serialize)]
+pub struct IndexInfo {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub unique: bool,
+    pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConstraintPk {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConstraintUnique {
+    pub name: String,
+    pub columns: Vec<String>,
+}
+
+/// An outgoing foreign key on the queried table, including composite FKs
+/// (which `ColumnInfo::references` cannot express — see this struct's
+/// callers). `table`/`schema` name the referenced table, same
+/// present-only-when-different convention as `ColumnRef::schema` — a
+/// composite FK has no other field that could carry this.
+/// `on_delete`/`on_update` are one of `CASCADE`/`RESTRICT`/`SET NULL`/
+/// `SET DEFAULT`/`NO ACTION`.
+#[derive(Debug, Serialize)]
+pub struct ConstraintFk {
+    pub name: String,
+    pub table: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    pub columns: Vec<ColumnPair>,
+    pub on_delete: String,
+    pub on_update: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConstraintCheck {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Constraints {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_key: Option<ConstraintPk>,
+    pub unique: Vec<ConstraintUnique>,
+    pub foreign_keys: Vec<ConstraintFk>,
+    pub check: Vec<ConstraintCheck>,
 }
 
 /// One `{from, to}` column pairing of an incoming FK (`spec/protocol.md`

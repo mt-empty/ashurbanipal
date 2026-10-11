@@ -971,6 +971,16 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #record-dialog #record-dl { max-height: none; }
 #record-referenced-by-wrap { padding: 0 var(--gap-lg) var(--gap-lg); }
 
+/* Structure dialog (indexes/constraints, story 26 prototype): sections
+   scroll together as one region, same shape as #record-body. Rows reuse
+   .refby-entry's box model but are plain text, not buttons — read-only,
+   no drill-in. */
+#structure-body { overflow: auto; max-height: var(--dialog-body-max-h);
+                  padding: var(--gap-lg); display: flex; flex-direction: column; gap: var(--gap-lg); }
+.structure-section > div { display: flex; flex-direction: column; }
+.structure-row { padding: .3rem .5rem; margin: 0; }
+.structure-row-detail { opacity: .7; font-size: .9em; }
+
 /* Same shape as #cv-pop, but the anchor is a single static button
    rather than one per header, so anchor-name is set once in CSS. */
 #columns-btn { anchor-name: --columns-anchor; }
@@ -1045,6 +1055,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
         <button id="apply">apply</button>
       </form>
       <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
+      <button id="structure-btn" type="button" disabled title="indexes and constraints for this table">structure</button>
       <button id="payload" disabled title="raw JSON response for the current view">payload</button>
       <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
     </search>
@@ -1079,6 +1090,20 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
   <div id="record-body">
     <dl id="record-dl"></dl>
     <div id="record-referenced-by-wrap"><span class="section-label">referenced by</span><div id="record-referenced-by"></div></div>
+  </div>
+</dialog>
+
+<dialog id="structure-dialog" closedby="any">
+  <div class="dialog-head">
+    <span class="dialog-head-title"><strong>structure</strong></span>
+    <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
+  </div>
+  <div id="structure-body">
+    <div class="structure-section"><span class="section-label">indexes</span><div id="structure-indexes"></div></div>
+    <div class="structure-section"><span class="section-label">primary key</span><div id="structure-pk"></div></div>
+    <div class="structure-section"><span class="section-label">unique</span><div id="structure-unique"></div></div>
+    <div class="structure-section"><span class="section-label">foreign keys</span><div id="structure-fk"></div></div>
+    <div class="structure-section"><span class="section-label">check</span><div id="structure-check"></div></div>
   </div>
 </dialog>
 
@@ -1537,8 +1562,8 @@ function quoteFilterValue(value) {
 }
 
 // src/lib/row-diff.ts
-function rowKey(pkNames, row) {
-  return JSON.stringify(pkNames.map((n) => row[n]));
+function rowKey(pkNames, row2) {
+  return JSON.stringify(pkNames.map((n) => row2[n]));
 }
 function collectNewRowKeys(prev, next, opts) {
   if (!opts.highlightNew || !prev || !opts.sameScope) return { pkNames: [] };
@@ -2420,12 +2445,12 @@ function msg(text) {
   p.textContent = text;
   return p;
 }
-function drillIn(entry, row, dismiss) {
-  const clauses = entry.columns.map((c) => ({ column: c.from, value: row[c.to] }));
+function drillIn(entry, row2, dismiss) {
+  const clauses = entry.columns.map((c) => ({ column: c.from, value: row2[c.to] }));
   dismiss();
   navigateWithSeededFilter(entry.table, entry.schema, () => applyFilterClauses(clauses));
 }
-function renderList(container, entries, row, dismiss) {
+function renderList(container, entries, row2, dismiss) {
   if (entries.length === 0) {
     container.replaceChildren(msg("nothing references this table"));
     return;
@@ -2437,26 +2462,26 @@ function renderList(container, entries, row, dismiss) {
       btn.type = "button";
       btn.className = "refby-entry";
       btn.textContent = `\u2192 ${label} (${entry.columns.map((c) => c.from).join(", ")})`;
-      const nullPair = entry.columns.find((c) => row[c.to] == null);
+      const nullPair = entry.columns.find((c) => row2[c.to] == null);
       if (nullPair) {
         btn.disabled = true;
-        btn.title = nullPair.to in row ? `${nullPair.to} is null in this row \u2014 no filter is expressible` : "this table has no primary key \u2014 no filter is expressible";
+        btn.title = nullPair.to in row2 ? `${nullPair.to} is null in this row \u2014 no filter is expressible` : "this table has no primary key \u2014 no filter is expressible";
       } else {
-        btn.title = `go to ${label} where ${entry.columns.map((c) => `${c.from} = ${row[c.to]}`).join(" AND ")}`;
-        btn.onclick = () => drillIn(entry, row, dismiss);
+        btn.title = `go to ${label} where ${entry.columns.map((c) => `${c.from} = ${row2[c.to]}`).join(" AND ")}`;
+        btn.onclick = () => drillIn(entry, row2, dismiss);
       }
       return btn;
     })
   );
 }
-function renderReferencedBy(container, row, dismiss) {
+function renderReferencedBy(container, row2, dismiss) {
   const token = (renderTokens.get(container) ?? 0) + 1;
   renderTokens.set(container, token);
   const table = state.table ?? "";
   const key = cacheKey(table);
   const hit = cache.get(key);
   if (hit) {
-    renderList(container, hit, row, dismiss);
+    renderList(container, hit, row2, dismiss);
     return;
   }
   container.replaceChildren(msg("loading\u2026"));
@@ -2465,29 +2490,29 @@ function renderReferencedBy(container, row, dismiss) {
   api(`/tables/referenced-by?${params}`).then((data) => {
     cache.set(key, data.referenced_by);
     if (renderTokens.get(container) !== token) return;
-    renderList(container, data.referenced_by, row, dismiss);
+    renderList(container, data.referenced_by, row2, dismiss);
   }).catch((e) => {
     if (renderTokens.get(container) !== token) return;
     container.replaceChildren(msg(e.message));
   });
 }
 var refbyAnchor = null;
-function openReferencedByPopover(e, row) {
+function openReferencedByPopover(e, row2) {
   if (refbyAnchor) refbyAnchor.style.anchorName = "";
   refbyAnchor = e.currentTarget;
   refbyAnchor.style.anchorName = "--refby-anchor";
   $("refby-pop").showPopover();
-  renderReferencedBy($("refby-pop-list"), row, () => $("refby-pop").hidePopover());
+  renderReferencedBy($("refby-pop-list"), row2, () => $("refby-pop").hidePopover());
 }
 
 // src/features/record-view.ts
-function buildRecordEntries(columns, row) {
+function buildRecordEntries(columns, row2) {
   const nodes = [];
   for (const col of columns) {
     const dt = document.createElement("dt");
     dt.textContent = col.name;
     const dd = document.createElement("dd");
-    const raw = row[col.name];
+    const raw = row2[col.name];
     let action = document.createElement("span");
     if (raw == null) dd.textContent = "\u2205";
     else {
@@ -2519,18 +2544,18 @@ function parseJsonOrRaw(col, raw) {
     return raw;
   }
 }
-function recordAsJson(columns, row) {
+function recordAsJson(columns, row2) {
   const obj = {};
   for (const col of columns) {
-    const raw = row[col.name];
+    const raw = row2[col.name];
     obj[col.name] = raw != null && rendersAsJson(col, raw) ? parseJsonOrRaw(col, raw) : raw;
   }
   return JSON.stringify(obj, null, 2);
 }
-function recordAsInsert(columns, row) {
+function recordAsInsert(columns, row2) {
   const target = state.schema ? `${state.schema}.${state.table}` : state.table;
   const cols = columns.map((c) => c.name).join(", ");
-  const vals = columns.map((c) => sqlLiteral(c, row[c.name])).join(", ");
+  const vals = columns.map((c) => sqlLiteral(c, row2[c.name])).join(", ");
   return `INSERT INTO ${target} (${cols})
 VALUES (${vals});`;
 }
@@ -2539,13 +2564,13 @@ function sqlLiteral(col, raw) {
   if (columnTypeClass(col.type) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
   return `'${raw.replace(/'/g, "''")}'`;
 }
-function openRecordView(columns, row) {
-  $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
-  renderReferencedBy($("record-referenced-by"), row, () => $("record-dialog").close());
+function openRecordView(columns, row2) {
+  $("record-dl").replaceChildren(...buildRecordEntries(columns, row2));
+  renderReferencedBy($("record-referenced-by"), row2, () => $("record-dialog").close());
   const copyRowBtn = $("record-copy-row");
-  copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
+  copyRowBtn.onclick = () => copyText(recordAsJson(columns, row2), copyRowBtn);
   const copyInsertBtn = $("record-copy-insert");
-  copyInsertBtn.onclick = () => copyText(recordAsInsert(columns, row), copyInsertBtn);
+  copyInsertBtn.onclick = () => copyText(recordAsInsert(columns, row2), copyInsertBtn);
   const open = () => $("record-dialog").showModal();
   document.startViewTransition ? document.startViewTransition(open) : open();
 }
@@ -2631,8 +2656,8 @@ function showCellPop(e, text, col) {
   cellPopAnchor.style.anchorName = "--cell-anchor";
   $("cell-pop").showPopover();
 }
-function buildCell(col, row, hidden) {
-  const raw = row[col.name];
+function buildCell(col, row2, hidden) {
+  const raw = row2[col.name];
   const isNull = raw == null;
   const td = isNull ? document.createElement("td") : cellTemplate.content.cloneNode(true).firstElementChild;
   td.dataset.col = col.name;
@@ -2678,7 +2703,7 @@ function buildCell(col, row, hidden) {
   } else if (col.key === "pk") {
     cellText.classList.add("pk-cell");
     cellText.title = `${raw} \u2014 what references this row`;
-    cellText.onclick = (e) => openReferencedByPopover(e, row);
+    cellText.onclick = (e) => openReferencedByPopover(e, row2);
   } else {
     const jsonAtRender = rendersAsJson(col, raw);
     cellText.onclick = (e) => {
@@ -2720,9 +2745,9 @@ function renderColumnMenu(columns) {
     })
   );
 }
-function buildRowActionCell(columns, row) {
+function buildRowActionCell(columns, row2) {
   const td = rowActionTemplate.content.cloneNode(true).firstElementChild;
-  qs(td, ".record-btn").onclick = () => openRecordView(columns, row);
+  qs(td, ".record-btn").onclick = () => openRecordView(columns, row2);
   return td;
 }
 function renderRows(data, newRowKeys, pkNames = []) {
@@ -2734,12 +2759,12 @@ function renderRows(data, newRowKeys, pkNames = []) {
   }
   const tbody = $("tbody");
   tbody.replaceChildren(
-    ...data.rows.map((row) => {
+    ...data.rows.map((row2) => {
       const tr = document.createElement("tr");
-      if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
-      tr.appendChild(buildRowActionCell(data.columns, row));
+      if (newRowKeys?.has(rowKey(pkNames, row2))) tr.classList.add("row-new");
+      tr.appendChild(buildRowActionCell(data.columns, row2));
       for (const col of data.columns) {
-        tr.appendChild(buildCell(col, row, hidden));
+        tr.appendChild(buildCell(col, row2, hidden));
       }
       return tr;
     })
@@ -2854,6 +2879,7 @@ async function loadData2({
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
   $("payload").disabled = false;
   $("columns-btn").disabled = false;
+  $("structure-btn").disabled = false;
   $("refresh").disabled = false;
   updateColumnsButtonLabel();
   syncUrl();
@@ -2956,6 +2982,79 @@ async function loadSiblings() {
   );
 }
 
+// src/features/structure.ts
+function empty(text) {
+  const p = document.createElement("p");
+  p.className = "refby-empty";
+  p.textContent = text;
+  return p;
+}
+function row(text, detail) {
+  const div = document.createElement("div");
+  div.className = "structure-row";
+  div.textContent = text;
+  if (detail) {
+    const d = document.createElement("div");
+    d.className = "structure-row-detail";
+    d.textContent = detail;
+    div.appendChild(d);
+  }
+  return div;
+}
+function renderIndexes(container, indexes) {
+  if (indexes.length === 0) {
+    container.replaceChildren(empty("no indexes"));
+    return;
+  }
+  container.replaceChildren(
+    ...indexes.map((idx) => {
+      const flags = idx.unique ? `unique, ${idx.method}` : idx.method;
+      return row(`${idx.name}  (${idx.columns.join(", ")})  \u2014 ${flags}`, idx.predicate ? `WHERE ${idx.predicate}` : void 0);
+    })
+  );
+}
+function renderPk(container, pk) {
+  if (!pk) {
+    container.replaceChildren(empty("no primary key"));
+    return;
+  }
+  container.replaceChildren(row(`${pk.name ?? "(unnamed)"}  (${pk.columns.join(", ")})`));
+}
+function renderUnique(container, unique) {
+  if (unique.length === 0) {
+    container.replaceChildren(empty("none"));
+    return;
+  }
+  container.replaceChildren(...unique.map((u) => row(`${u.name}  (${u.columns.join(", ")})`)));
+}
+function renderForeignKeys(container, fks) {
+  if (fks.length === 0) {
+    container.replaceChildren(empty("none"));
+    return;
+  }
+  container.replaceChildren(
+    ...fks.map((fk) => {
+      const target = fk.schema ? `${fk.schema}.${fk.table}` : fk.table;
+      const pairing = `${fk.columns.map((c) => c.from).join(", ")} \u2192 ${target}(${fk.columns.map((c) => c.to).join(", ")})`;
+      return row(`${fk.name}  ${pairing}`, `ON DELETE ${fk.on_delete}  ON UPDATE ${fk.on_update}`);
+    })
+  );
+}
+function renderCheck(container, check) {
+  if (check.length === 0) {
+    container.replaceChildren(empty("none"));
+    return;
+  }
+  container.replaceChildren(...check.map((c) => row(c.name, c.expression)));
+}
+function renderStructure(data) {
+  renderIndexes($("structure-indexes"), data.indexes);
+  renderPk($("structure-pk"), data.constraints.primary_key);
+  renderUnique($("structure-unique"), data.constraints.unique);
+  renderForeignKeys($("structure-fk"), data.constraints.foreign_keys);
+  renderCheck($("structure-check"), data.constraints.check);
+}
+
 // src/features/theme.ts
 var THEME_KEY = "ashurbanipal_theme";
 function currentTheme() {
@@ -2990,6 +3089,12 @@ onProtocolSkew((message) => {
 $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $("payload-dialog").showModal();
+};
+$("structure-btn").onclick = () => {
+  const data = getLastPayload();
+  if (!data) return;
+  renderStructure(data);
+  $("structure-dialog").showModal();
 };
 $("prev").onclick = () => {
   state.offset = Math.max(0, state.offset - state.limit);

@@ -9,7 +9,13 @@ import { collectNewRowKeys, rowKey } from "../src/lib/row-diff.ts";
 
 const pk = (name: string): Column => ({ name, type: "int4", key: "pk" });
 const plain = (name: string): Column => ({ name, type: "text" });
-const data = (columns: Column[], rows: Row[]): TableData => ({ columns, rows, total_approx: rows.length });
+const data = (columns: Column[], rows: Row[]): TableData => ({
+  columns,
+  rows,
+  total_approx: rows.length,
+  indexes: [],
+  constraints: { unique: [], foreign_keys: [], check: [] },
+});
 
 test("rowKey follows pkNames order and is stable for equal values", () => {
   assert.equal(rowKey(["id"], { id: "1", x: "a" }), rowKey(["id"], { id: "1", x: "b" }));

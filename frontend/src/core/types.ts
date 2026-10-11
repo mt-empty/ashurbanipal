@@ -27,6 +27,49 @@ export interface TableData {
   columns: Column[];
   rows: Row[];
   total_approx: number;
+  indexes: IndexInfo[];
+  constraints: Constraints;
+}
+
+// Story 26 prototype (docs/feature-backlog/26-index-and-constraint-metadata-panel.md)
+// — not yet in spec/openapi.yaml. Mirrors core/src/db/mod.rs's IndexInfo/Constraints.
+export interface IndexInfo {
+  name: string;
+  columns: string[];
+  unique: boolean;
+  method: string;
+  predicate?: string;
+}
+
+export interface ConstraintPk {
+  name?: string;
+  columns: string[];
+}
+
+export interface ConstraintUnique {
+  name: string;
+  columns: string[];
+}
+
+export interface ConstraintFk {
+  name: string;
+  table: string;
+  schema?: string;
+  columns: ColumnPair[];
+  on_delete: string;
+  on_update: string;
+}
+
+export interface ConstraintCheck {
+  name: string;
+  expression?: string;
+}
+
+export interface Constraints {
+  primary_key?: ConstraintPk;
+  unique: ConstraintUnique[];
+  foreign_keys: ConstraintFk[];
+  check: ConstraintCheck[];
 }
 
 export type FilterOp = "=" | "!=" | ">" | ">=" | "<" | "<=" | "LIKE" | "ILIKE" | "IS NULL" | "IS NOT NULL";

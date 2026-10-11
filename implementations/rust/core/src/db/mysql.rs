@@ -5,8 +5,8 @@ use sqlx::mysql::MySqlRow;
 use sqlx::{MySql, MySqlPool, Row, Transaction};
 
 use super::{
-    group_referenced_by, op_sql, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource, KeyKind,
-    NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
+    group_referenced_by, op_sql, ColumnInfo, ColumnPair, ColumnRef, Constraints, DbError, DbSource,
+    KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -554,6 +554,15 @@ impl DbSource for MySqlSource {
             columns,
             rows,
             total_approx,
+            // Story 26 prototype is Postgres-only (see postgres.rs); not
+            // implemented here.
+            indexes: Vec::new(),
+            constraints: Constraints {
+                primary_key: None,
+                unique: Vec::new(),
+                foreign_keys: Vec::new(),
+                check: Vec::new(),
+            },
         })
     }
 

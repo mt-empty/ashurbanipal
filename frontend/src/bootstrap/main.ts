@@ -7,6 +7,7 @@ import { registerLoadData } from "./reload.js";
 import "../features/sidebar-resize.js";
 import { getLastPayload, initState, state } from "../core/state.js";
 import { loadSiblings } from "../features/siblings.js";
+import { renderStructure } from "../features/structure.js";
 import "../features/theme.js";
 
 // Entry point: wiring only. Restore state (storage, then URL layered over
@@ -38,6 +39,14 @@ onProtocolSkew((message) => {
 $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $<HTMLDialogElement>("payload-dialog").showModal();
+};
+
+// ---- structure dialog (indexes/constraints) ----
+$("structure-btn").onclick = () => {
+  const data = getLastPayload();
+  if (!data) return;
+  renderStructure(data);
+  $<HTMLDialogElement>("structure-dialog").showModal();
 };
 
 $<HTMLButtonElement>("prev").onclick = () => {

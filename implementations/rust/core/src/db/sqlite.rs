@@ -5,8 +5,8 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
 use super::{
-    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource,
-    KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
+    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, Constraints,
+    DbError, DbSource, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -393,6 +393,15 @@ impl DbSource for SqliteSource {
             // documented "no estimate" sentinel (spec/protocol.md §5.4.4),
             // not a second COUNT(*) scan on every page load.
             total_approx: -1,
+            // Story 26 prototype is Postgres-only (see postgres.rs); not
+            // implemented here.
+            indexes: Vec::new(),
+            constraints: Constraints {
+                primary_key: None,
+                unique: Vec::new(),
+                foreign_keys: Vec::new(),
+                check: Vec::new(),
+            },
         })
     }
 

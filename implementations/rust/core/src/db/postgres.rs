@@ -4,7 +4,8 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use super::{
-    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource,
+    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, Constraints,
+    ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, DbError, DbSource, IndexInfo,
     KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
 };
 use crate::filter::{Condition, Logic};
@@ -278,6 +279,173 @@ impl PgPoolSource {
         }
         Ok((pk_columns, fk_columns))
     }
+
+    /// Prototype for story 26 — indexes on `table_oid`, one row per member
+    /// column (`unnest` + `WITH ORDINALITY`, same technique `referenced_by`
+    /// uses). `indkey` is the special `int2vector` type, not a real array,
+    /// so it needs an explicit `::int2[]` cast before `unnest` accepts it
+    /// (unlike `pg_constraint.conkey`, already `int2[]`). Expression-index
+    /// columns (`indkey` entry `0`, e.g. an index on `lower(email)`) have no
+    /// `pg_attribute` row and are silently dropped by the join — an
+    /// accepted prototype gap, not spec-final. No partitioned-index dedup
+    /// (`docs/adapter-decisions.md` §5.9's Postgres row has the pattern);
+    /// the seed has no partitioned tables so it isn't needed to try this
+    /// locally.
+    async fn indexes_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        table_oid: i32,
+    ) -> Result<Vec<IndexInfo>, DbError> {
+        let rows = sqlx::query_as::<_, (String, String, bool, Option<String>, String)>(
+            "select ic.relname::text, am.amname::text, ix.indisunique, \
+                    pg_get_expr(ix.indpred, ix.indrelid), a.attname::text \
+             from pg_index ix \
+             join pg_class ic on ic.oid = ix.indexrelid \
+             join pg_am am on am.oid = ic.relam \
+             join lateral unnest(ix.indkey::int2[]) with ordinality as k(attnum, n) on true \
+             join pg_attribute a on a.attrelid = ix.indrelid and a.attnum = k.attnum \
+             where ix.indrelid = $1 \
+             order by ic.relname, k.n",
+        )
+        .bind(table_oid)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        let mut out: Vec<IndexInfo> = Vec::new();
+        for (name, method, unique, predicate, column) in rows {
+            match out.last_mut() {
+                Some(last) if last.name == name => last.columns.push(column),
+                _ => out.push(IndexInfo {
+                    name,
+                    columns: vec![column],
+                    unique,
+                    method,
+                    predicate,
+                }),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Prototype for story 26 — primary key, unique, foreign key (including
+    /// composite, with `ON DELETE`/`ON UPDATE`), and check constraints on
+    /// `table_oid`. Each constraint kind is its own query (`pg_constraint`
+    /// filtered by `contype`) since PK/UNIQUE need only `conkey`, FK needs
+    /// both `conkey` and `confkey` paired (mirrors `referenced_by`'s
+    /// two-array `unnest`), and CHECK needs neither — just
+    /// `pg_get_constraintdef` for the expression text.
+    async fn constraints_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        schema: &str,
+        table_oid: i32,
+    ) -> Result<Constraints, DbError> {
+        fn fk_action(code: &str) -> String {
+            match code {
+                "c" => "CASCADE",
+                "r" => "RESTRICT",
+                "n" => "SET NULL",
+                "d" => "SET DEFAULT",
+                _ => "NO ACTION",
+            }
+            .to_string()
+        }
+
+        let pk_rows = sqlx::query_as::<_, (String, String)>(
+            "select con.conname::text, a.attname::text \
+             from pg_constraint con \
+             join lateral unnest(con.conkey) with ordinality as k(attnum, n) on true \
+             join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum \
+             where con.conrelid = $1 and con.contype = 'p' \
+             order by k.n",
+        )
+        .bind(table_oid)
+        .fetch_all(&mut **tx)
+        .await?;
+        let primary_key = pk_rows.first().map(|(name, _)| ConstraintPk {
+            name: Some(name.clone()),
+            columns: pk_rows.iter().map(|(_, c)| c.clone()).collect(),
+        });
+
+        let unique_rows = sqlx::query_as::<_, (String, String)>(
+            "select con.conname::text, a.attname::text \
+             from pg_constraint con \
+             join lateral unnest(con.conkey) with ordinality as k(attnum, n) on true \
+             join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum \
+             where con.conrelid = $1 and con.contype = 'u' \
+             order by con.conname, k.n",
+        )
+        .bind(table_oid)
+        .fetch_all(&mut **tx)
+        .await?;
+        let mut unique: Vec<ConstraintUnique> = Vec::new();
+        for (name, column) in unique_rows {
+            match unique.last_mut() {
+                Some(last) if last.name == name => last.columns.push(column),
+                _ => unique.push(ConstraintUnique {
+                    name,
+                    columns: vec![column],
+                }),
+            }
+        }
+
+        let fk_rows = sqlx::query_as::<_, (String, String, String, String, String, String, String)>(
+            "select con.conname::text, rn.nspname::text, rc.relname::text, \
+                    fa.attname::text, ta.attname::text, \
+                    con.confdeltype::text, con.confupdtype::text \
+             from pg_constraint con \
+             join pg_class rc on rc.oid = con.confrelid \
+             join pg_namespace rn on rn.oid = rc.relnamespace \
+             join lateral unnest(con.conkey, con.confkey) with ordinality \
+                  as k(from_attnum, to_attnum, n) on true \
+             join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum \
+             join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum \
+             where con.conrelid = $1 and con.contype = 'f' \
+             order by con.conname, k.n",
+        )
+        .bind(table_oid)
+        .fetch_all(&mut **tx)
+        .await?;
+        let mut foreign_keys: Vec<ConstraintFk> = Vec::new();
+        for (name, ref_schema, ref_table, from, to, del, upd) in fk_rows {
+            match foreign_keys.last_mut() {
+                Some(last) if last.name == name => last.columns.push(ColumnPair { from, to }),
+                _ => foreign_keys.push(ConstraintFk {
+                    name,
+                    table: ref_table,
+                    // Same-schema references omit `schema` (spec/protocol.md §5.4.1's convention).
+                    schema: (ref_schema != schema).then_some(ref_schema),
+                    columns: vec![ColumnPair { from, to }],
+                    on_delete: fk_action(&del),
+                    on_update: fk_action(&upd),
+                }),
+            }
+        }
+
+        let check_rows = sqlx::query_as::<_, (String, String)>(
+            "select con.conname::text, pg_get_constraintdef(con.oid) \
+             from pg_constraint con \
+             where con.conrelid = $1 and con.contype = 'c' \
+             order by con.conname",
+        )
+        .bind(table_oid)
+        .fetch_all(&mut **tx)
+        .await?;
+        let check = check_rows
+            .into_iter()
+            .map(|(name, def)| ConstraintCheck {
+                name,
+                expression: Some(def),
+            })
+            .collect();
+
+        Ok(Constraints {
+            primary_key,
+            unique,
+            foreign_keys,
+            check,
+        })
+    }
 }
 
 /// Maps residual SELECT-denied errors to `NotAllowed(NotReadable)`, a
@@ -381,7 +549,8 @@ impl DbSource for PgPoolSource {
     ) -> Result<TableData, DbError> {
         let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        self.readable_table_oid_in_tx(&mut tx, &schema, table)
+        let table_oid = self
+            .readable_table_oid_in_tx(&mut tx, &schema, table)
             .await?;
         let table = table.to_string();
 
@@ -503,6 +672,8 @@ impl DbSource for PgPoolSource {
         .bind(&table)
         .fetch_one(&mut *tx)
         .await?;
+        let indexes = self.indexes_in_tx(&mut tx, table_oid).await?;
+        let constraints = self.constraints_in_tx(&mut tx, &schema, table_oid).await?;
         tx.commit().await?;
 
         let rows = pg_rows.iter().map(|r| row_to_json(r, &columns)).collect();
@@ -510,6 +681,8 @@ impl DbSource for PgPoolSource {
             columns,
             rows,
             total_approx,
+            indexes,
+            constraints,
         })
     }
 

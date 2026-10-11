@@ -127,6 +127,7 @@ export async function loadData({
 
   $<HTMLButtonElement>("payload").disabled = false;
   $<HTMLButtonElement>("columns-btn").disabled = false;
+  $<HTMLButtonElement>("structure-btn").disabled = false;
   $<HTMLButtonElement>("refresh").disabled = false;
   updateColumnsButtonLabel();
   syncUrl();
