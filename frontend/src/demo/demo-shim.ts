@@ -242,6 +242,38 @@ function handleReferencedBy(params: URLSearchParams): Response {
   );
   return jsonResponse({ referenced_by });
 }
+// Derived from the fixtures' column keys: a primary-key index and
+// single-column FKs only (the fixtures carry no composite, unique, or check
+// structure), with the engine-default `NO ACTION`.
+function handleStructure(params: URLSearchParams): Response {
+  const s = resolveSchema(params);
+  if ("error" in s) return badRequest(s.error);
+  const name = params.get("table");
+  const table = tablesFor(s.schema).find((t) => t.name === name);
+  if (!table) return badRequest(`unknown table: ${name}`);
+  const pk = table.columns.filter((c) => c.key === "pk").map((c) => c.name);
+  return jsonResponse({
+    indexes: pk.length ? [{ name: `${name}_pkey`, columns: pk, unique: true, method: "btree" }] : [],
+    constraints: {
+      ...(pk.length ? { primary_key: { name: `${name}_pkey`, columns: pk } } : {}),
+      unique: [],
+      foreign_keys: table.columns.flatMap((c) =>
+        c.references
+          ? [
+              {
+                name: `${name}_${c.name}_fkey`,
+                table: c.references.table,
+                columns: [{ from: c.name, to: c.references.column }],
+                on_delete: "NO ACTION",
+                on_update: "NO ACTION",
+              },
+            ]
+          : [],
+      ),
+      check: [],
+    },
+  });
+}
 function handleSiblings(): Response {
   return jsonResponse({ siblings: SIBLINGS });
 }
@@ -276,6 +308,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       return handleCommonValues(params);
     case "/tables/referenced-by":
       return handleReferencedBy(params);
+    case "/tables/structure":
+      return handleStructure(params);
     case "/siblings":
       return handleSiblings();
     default:

@@ -7,6 +7,7 @@ import { registerLoadData } from "./reload.js";
 import "../features/sidebar-resize.js";
 import { getLastPayload, initState, state } from "../core/state.js";
 import { loadSiblings } from "../features/siblings.js";
+import { openStructure } from "../features/structure.js";
 import "../features/theme.js";
 
 // Entry point: wiring only. Restore state (storage, then URL layered over
@@ -39,6 +40,8 @@ $("payload").onclick = () => {
   $("payload-pre").textContent = JSON.stringify(getLastPayload(), null, 2);
   $<HTMLDialogElement>("payload-dialog").showModal();
 };
+
+$("structure-btn").onclick = openStructure;
 
 $<HTMLButtonElement>("prev").onclick = () => {
   state.offset = Math.max(0, state.offset - state.limit);

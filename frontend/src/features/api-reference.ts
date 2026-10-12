@@ -128,6 +128,34 @@ function buildApiReference() {
       },
       {
         method: "GET",
+        path: `${base}/tables/structure`,
+        summary:
+          "Indexes and constraints of one table. `indexes` lists key columns in order (an expression entry is its text; INCLUDE columns are omitted), with `predicate` only for a partial index. `constraints` carries `primary_key` (omitted when none), and `unique`, `foreign_keys`, `check` (each `[]` when empty). A foreign key — single-column or composite — names the referenced `table` (and `schema` when it differs), pairs `{from, to}` columns, and has `on_delete`/`on_update` of CASCADE, RESTRICT, SET NULL, SET DEFAULT or NO ACTION. `check` is `[]` on SQLite. A table with no structure returns empty lists, not an error.",
+        params: [
+          { name: "source", required: false, notes: "same as GET /schemas" },
+          { name: "schema", required: false, notes: "same as GET /tables" },
+          { name: "table", required: true, notes: "must be a name returned by GET /tables" },
+        ],
+        example_response: {
+          indexes: [{ name: "orders_pkey", columns: ["id"], unique: true, method: "btree" }],
+          constraints: {
+            primary_key: { name: "orders_pkey", columns: ["id"] },
+            unique: [],
+            foreign_keys: [
+              {
+                name: "orders_user_id_fkey",
+                table: "users",
+                columns: [{ from: "user_id", to: "id" }],
+                on_delete: "CASCADE",
+                on_update: "NO ACTION",
+              },
+            ],
+            check: [],
+          },
+        },
+      },
+      {
+        method: "GET",
         path: `${base}/siblings`,
         summary: "Other related services configured for this instance, with live health status.",
         params: [],
