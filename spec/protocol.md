@@ -24,7 +24,7 @@ interpreted as described in RFC 2119.
   UI and API (see §3).
 - **Resolved source** — which registered `DbSource` one operation targets,
   for implementations that register more than one (§5.8). Every route
-  that takes a `source` parameter (§5.2–§5.5, §5.7, §5.9) resolves it the same
+  that takes a `source` parameter (§5.2–§5.5, §5.7, §5.9, §5.10) resolves it the same
   way:
   - **Absent** — resolves to the first-registered source, the same order
     §5.8's list returns.
@@ -41,7 +41,7 @@ interpreted as described in RFC 2119.
 - **Resolved schema** — the namespace of tables one operation browses,
   within that operation's resolved source, for engines that have a
   schema concept above a single database. Every route that takes a
-  `schema` parameter (§5.2–§5.5, §5.9) resolves it the same way:
+  `schema` parameter (§5.2–§5.5, §5.9, §5.10) resolves it the same way:
   - **Absent** — resolves to the connection's own default (on Postgres:
     `current_schema()`).
   - **Present** — MUST match an entry from §5.7's live list exactly
@@ -85,12 +85,12 @@ interpreted as described in RFC 2119.
     — a table that cleared §5.2's allow-list but the connected role cannot
     actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
   - **500** — server error: `database_error`, or `query_timeout` (§6).
-- Every API response (§5.2–§5.9), success or error, MUST carry the
+- Every API response (§5.2–§5.10), success or error, MUST carry the
   protocol version header (§7).
 
 ## 3. Mount contract
 
-- The UI is served at `{mount}`; the eight API routes live at
+- The UI is served at `{mount}`; the nine API routes live at
   `{mount}/api/...`.
 - `{mount}` is implementation-defined. `/__ashurbanipal` is the Rust
   implementation's default, not a requirement.
@@ -426,8 +426,8 @@ Response:
 
 ### 5.7 `GET {mount}/api/schemas`
 
-Lists the schema names selectable as the `schema` parameter on §5.2–§5.5
-and §5.9, for the resolved source (§1).
+Lists the schema names selectable as the `schema` parameter on §5.2–§5.5,
+§5.9, and §5.10, for the resolved source (§1).
 
 | Param    | Required | Rules                                             |
 |----------|----------|----------------------------------------------------|
@@ -450,7 +450,7 @@ Response:
   namespace) — this route lists browsable schemas, not every namespace
   the engine happens to expose.
 - SHOULD exclude any schema the connected role cannot access, so nothing
-  offered here would be rejected by §5.2–§5.5's or §5.9's schema check for
+  offered here would be rejected by §5.2–§5.5's, §5.9's, or §5.10's schema check for
   lack of privilege.
 - Engines with no schema concept above a single database (e.g. SQLite)
   MUST return exactly one entry — see `docs/adapter-decisions.md`.
@@ -460,7 +460,7 @@ Response:
 ### 5.8 `GET {mount}/api/sources`
 
 Lists the source names selectable as the `source` parameter on
-§5.2–§5.5, §5.7, and §5.9. This is the live allow-list §1's "present" case
+§5.2–§5.5, §5.7, §5.9, and §5.10. This is the live allow-list §1's "present" case
 validates against.
 
 Response:
@@ -558,6 +558,84 @@ Response:
   `table` (and `schema`), filtered on the `from` columns; the count comes
   back as that response's `total_approx`.
 
+### 5.10 `GET {mount}/api/tables/structure`
+
+Reports a table's indexes and constraints. Catalog-only: like §5.2/§5.3
+and §5.9 it reads schema catalogs, never table data. Structure is a
+property of the table, not of any page of rows, so it has its own route
+rather than riding on §5.4; a client fetches it when it needs it.
+
+| Param    | Required | Rules                                                        |
+|----------|----------|------------------------------------------------------------|
+| `source` | no       | See §1's resolution rules; unrecognized value → 400.        |
+| `schema` | no       | See §1's resolution rules; unrecognized value → 400.        |
+| `table`  | yes      | MUST match a table from §5.2 (resolved against the same `source`/`schema`) exactly (case-sensitive); otherwise 400. |
+
+Response:
+
+```json
+{
+  "indexes": [
+    { "name": "orders_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+    { "name": "orders_active_idx", "columns": ["status"], "unique": false, "method": "btree",
+      "predicate": "status = 'active'" }
+  ],
+  "constraints": {
+    "primary_key": { "name": "orders_pkey", "columns": ["id"] },
+    "unique": [{ "name": "orders_external_ref_key", "columns": ["external_ref"] }],
+    "foreign_keys": [
+      { "name": "orders_user_id_fkey", "table": "users",
+        "columns": [{ "from": "user_id", "to": "id" }],
+        "on_delete": "CASCADE", "on_update": "NO ACTION" },
+      { "name": "order_items_order_fkey", "table": "orders", "schema": "sales",
+        "columns": [{ "from": "order_id", "to": "id" }, { "from": "order_region", "to": "region" }],
+        "on_delete": "RESTRICT", "on_update": "NO ACTION" }
+    ],
+    "check": [{ "name": "orders_total_nonneg", "expression": "total >= 0" }]
+  }
+}
+```
+
+- `indexes` is `[]` when the table has none. Each entry has `name`,
+  `columns`, `unique`, and `method` (the engine's access-method name, e.g.
+  `btree`). Indexes that back a primary-key or unique constraint are
+  indexes and are listed.
+- `indexes[].columns` lists the key columns in index order. An expression
+  entry appears in its position as its expression text, never dropped. A
+  covering (`INCLUDE`) column is not a key column and is not listed.
+- `indexes[].predicate` is the partial-index `WHERE` text. It is omitted
+  (never `null`) for a non-partial index and on an engine with no
+  partial-index concept.
+- `constraints` MUST always carry `unique`, `foreign_keys`, and `check`,
+  each `[]` when empty. `primary_key` is omitted when the table has none.
+  `primary_key.name` is omitted when the engine reports none.
+- `foreign_keys` covers single-column and composite FKs uniformly, one
+  entry per constraint, nothing omitted. `columns` is the `{from, to}`
+  pairing as in §5.9, in the constraint's own column order: `from` is a
+  column of this table, `to` the referenced column. `table` is the
+  referenced table. `schema` is its schema, present only when it differs
+  from the resolved one, the same rule as §5.4.1's `references.schema`.
+  On an engine that does not name FK constraints (e.g. SQLite) `name` MAY
+  be a synthesized label; clients MUST NOT treat it as a DDL identifier,
+  nor assume it is stable across schema changes.
+- `on_delete` and `on_update` are present on every `foreign_keys` entry,
+  one of `CASCADE`, `RESTRICT`, `SET NULL`, `SET DEFAULT`, `NO ACTION`,
+  mapped from the engine's native terms.
+- `check[].expression` is the constraint's SQL text where the engine can
+  supply it, and is omitted where it cannot. `check` is `[]` on an engine
+  that cannot introspect check constraints (SQLite); this is a documented,
+  permanent gap, not an error.
+- A table with no structure is not an error: `indexes` is `[]` and
+  `constraints` carries its empty lists.
+- An index or constraint is reported once per logical definition. A
+  partitioned table itself is not a valid `table` (§5.2), so a partition
+  child reports its own indexes and constraints.
+- Entries SHOULD be returned in a stable order, e.g. by `name`; the
+  collation is unspecified. A SHOULD, not a MUST, same as §5.2.
+- Unlike §5.9, entries are not filtered by what the role may `SELECT`: a
+  foreign key names its target table whether or not the role can read it.
+  See `docs/adapter-decisions.md`.
+
 ## 6. Server invariants
 
 These hold across all routes:
@@ -599,7 +677,7 @@ These hold across all routes:
 
 ## 7. Protocol version
 
-- Every API response (§5.2–§5.9) MUST carry the header
+- Every API response (§5.2–§5.10) MUST carry the header
   `x-ashurbanipal-protocol: 1`.
 - **Versioning policy**: adding an optional response field, an optional
   request parameter, or a wholly new route is still the same version —
@@ -612,7 +690,8 @@ These hold across all routes:
   this: purely additive, so v1 stands. §5.8 and the `source` parameter on
   §5.2–§5.5 and §5.7 are the second instance, for the same reason. §5.9
   (`/api/tables/referenced-by`) is the third — a wholly new route that
-  changes nothing an existing caller observes, so v1 stands again.
+  changes nothing an existing caller observes, so v1 stands again. §5.10
+  (`/api/tables/structure`) is the fourth, for the same reason.
   The §2 change from plain-text error bodies to problem+json *is* a
   serialization change, and would bump the version under the rule above —
   but it landed before any external consumer existed, so this document
