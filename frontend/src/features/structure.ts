@@ -6,11 +6,15 @@ import type { ConstraintFk, StructureResponse } from "../core/types.js";
 // ---- structure dialog: a table's indexes and constraints
 // (spec/protocol.md §5.10). Catalog-only and independent of rows, so the
 // result is memoised per (source, schema, table) like referenced-by.ts —
-// reopening costs nothing, a scope switch invalidates through the key, and
-// errors are never cached. Rows are plain text: read-only, no drill-in. ----
+// reopening costs nothing, a scope switch invalidates through the key, the
+// refresh button clears it, and errors are never cached. Rows are plain text: read-only, no drill-in. ----
 
 const cache = new Map<string, StructureResponse>();
 const cacheKey = (table: string) => `${state.source ?? ""}\x1f${state.schema ?? ""}\x1f${table}`;
+
+export function clearStructureCache(): void {
+  cache.clear();
+}
 
 // A second open before the first response lands must not overwrite the
 // body now on screen.

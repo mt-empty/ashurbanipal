@@ -797,18 +797,27 @@ impl DbSource for MySqlSource {
         .fetch_one(&mut *tx)
         .await?
             > 0;
+        // MariaDB names unnamed table-level checks per table, so two tables
+        // can both have `CONSTRAINT_1`; its view carries `table_name` for
+        // that. MySQL's view has none and keeps check names schema-unique.
+        let cc_table = match variant {
+            Variant::MariaDb => "and cc.table_name = tc.table_name ",
+            Variant::MySql => "",
+        };
         let check = if has_checks {
             sqlx::query_as::<_, (String, Option<String>)>(sqlx::AssertSqlSafe(timed_select(
                 variant,
                 CATALOG_TIMEOUT_SECS,
-                "tc.constraint_name, cc.check_clause \
-                 from information_schema.table_constraints tc \
-                 join information_schema.check_constraints cc \
-                   on cc.constraint_schema = tc.constraint_schema \
-                  and cc.constraint_name = tc.constraint_name \
-                 where tc.table_schema = ? and tc.table_name = ? \
-                   and tc.constraint_type = 'CHECK' \
-                 order by tc.constraint_name",
+                &format!(
+                    "tc.constraint_name, cc.check_clause \
+                     from information_schema.table_constraints tc \
+                     join information_schema.check_constraints cc \
+                       on cc.constraint_schema = tc.constraint_schema \
+                      and cc.constraint_name = tc.constraint_name {cc_table}\
+                     where tc.table_schema = ? and tc.table_name = ? \
+                       and tc.constraint_type = 'CHECK' \
+                     order by tc.constraint_name"
+                ),
             )))
             .bind(&schema)
             .bind(table)

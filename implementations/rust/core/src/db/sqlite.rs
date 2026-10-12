@@ -166,6 +166,46 @@ impl SqliteSource {
     }
 }
 
+/// The text after a `CREATE INDEX` statement's top-level `WHERE`, ignoring
+/// quoted text and anything inside parentheses (the column list and
+/// expression key parts). Only called for indexes `pragma_index_list`
+/// flags as partial.
+fn partial_index_predicate(sql: &str) -> Option<String> {
+    let bytes = sql.as_bytes();
+    let mut quote: Option<u8> = None;
+    let mut depth = 0i32;
+    for (i, &b) in bytes.iter().enumerate() {
+        match quote {
+            Some(q) => {
+                if b == q {
+                    quote = None;
+                }
+            }
+            None => match b {
+                b'\'' | b'"' | b'`' => quote = Some(b),
+                b'[' => quote = Some(b']'),
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ if depth == 0 && b.is_ascii_whitespace() => {
+                    let rest = &sql[i + 1..];
+                    let is_where = rest
+                        .get(..5)
+                        .is_some_and(|kw| kw.eq_ignore_ascii_case("where"))
+                        && rest
+                            .get(5..)
+                            .and_then(|r| r.chars().next())
+                            .is_some_and(|c| c.is_whitespace() || c == '(');
+                    if is_where {
+                        return Some(rest[5..].trim().to_string());
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+    None
+}
+
 fn row_to_json(
     row: &SqliteRow,
     columns: &[ColumnInfo],
@@ -510,9 +550,9 @@ impl DbSource for SqliteSource {
         self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
             // `key = 1` drops the trailing rowid/auxiliary entries. An
             // expression key part has a NULL `name` and no recoverable text.
-            let index_rows = sqlx::query_as::<_, (String, i64, String, Option<String>)>(
+            let index_rows = sqlx::query_as::<_, (String, i64, String, i64, Option<String>)>(
                 sqlx::AssertSqlSafe(format!(
-                    "select il.name, il.\"unique\", il.origin, ix.name \
+                    "select il.name, il.\"unique\", il.origin, il.partial, ix.name \
                      from pragma_index_list({quoted}) il \
                      join pragma_index_xinfo(il.name) ix \
                      where ix.key = 1 \
@@ -536,7 +576,7 @@ impl DbSource for SqliteSource {
 
             let mut indexes: Vec<IndexInfo> = Vec::new();
             let mut unique_origin: Vec<String> = Vec::new();
-            for (name, unique, origin, column) in index_rows {
+            for (name, unique, origin, partial, column) in index_rows {
                 let column = column.unwrap_or_else(|| "<expression>".to_string());
                 match indexes.last_mut() {
                     Some(last) if last.name == name => last.columns.push(column),
@@ -544,12 +584,13 @@ impl DbSource for SqliteSource {
                         if origin == "u" {
                             unique_origin.push(name.clone());
                         }
-                        let predicate = sql_of.get(&name).and_then(|sql| {
-                            let lower = sql.to_ascii_lowercase();
-                            lower
-                                .rfind(" where ")
-                                .map(|at| sql[at + " where ".len()..].trim().to_string())
-                        });
+                        let predicate = if partial != 0 {
+                            sql_of
+                                .get(&name)
+                                .and_then(|sql| partial_index_predicate(sql))
+                        } else {
+                            None
+                        };
                         indexes.push(IndexInfo {
                             name,
                             columns: vec![column],
@@ -746,6 +787,25 @@ mod tests {
         assert_eq!(user_id_col.key, Some(KeyKind::Fk));
         assert_eq!(user_id_col.references.as_ref().unwrap().table, "users");
         assert_eq!(user_id_col.references.as_ref().unwrap().column, "id");
+    }
+
+    #[test]
+    fn partial_index_predicate_finds_the_top_level_where_only() {
+        let p = partial_index_predicate;
+        assert_eq!(
+            p("CREATE INDEX i ON t(a) WHERE status = 'open'").as_deref(),
+            Some("status = 'open'")
+        );
+        assert_eq!(
+            p("CREATE INDEX i ON t(a)\nwhere\n  b > 1").as_deref(),
+            Some("b > 1")
+        );
+        assert_eq!(
+            p("CREATE INDEX i ON t(a) WHERE note = ' where '").as_deref(),
+            Some("note = ' where '")
+        );
+        assert_eq!(p("CREATE INDEX i ON t(a || ' where ')"), None);
+        assert_eq!(p("CREATE INDEX i ON t(lower(a) )"), None);
     }
 
     #[tokio::test]

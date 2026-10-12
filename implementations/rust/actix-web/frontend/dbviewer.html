@@ -2468,6 +2468,9 @@ async function loadSiblings() {
 // src/features/structure.ts
 var cache2 = /* @__PURE__ */ new Map();
 var cacheKey2 = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
+function clearStructureCache() {
+  cache2.clear();
+}
 var requestToken = 0;
 function msg2(text) {
   const p = document.createElement("p");
@@ -2601,6 +2604,7 @@ $("nav-back").onclick = () => history.back();
 $("nav-forward").onclick = () => history.forward();
 $("refresh").onclick = () => {
   const btn = $("refresh");
+  clearStructureCache();
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });

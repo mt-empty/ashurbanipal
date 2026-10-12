@@ -7,7 +7,7 @@ import { registerLoadData } from "./reload.js";
 import "../features/sidebar-resize.js";
 import { getLastPayload, initState, state } from "../core/state.js";
 import { loadSiblings } from "../features/siblings.js";
-import { openStructure } from "../features/structure.js";
+import { clearStructureCache, openStructure } from "../features/structure.js";
 import "../features/theme.js";
 
 // Entry point: wiring only. Restore state (storage, then URL layered over
@@ -57,6 +57,7 @@ $<HTMLButtonElement>("nav-forward").onclick = () => history.forward();
 // tints any row that wasn't in the previous result.
 $<HTMLButtonElement>("refresh").onclick = () => {
   const btn = $<HTMLButtonElement>("refresh");
+  clearStructureCache();
   // Guaranteed one rotation even on a few-ms fetch; the timer (not
   // animationend, which never fires under prefers-reduced-motion) clears it.
   btn.classList.add("spinning");
