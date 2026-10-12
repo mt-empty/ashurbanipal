@@ -175,6 +175,25 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.9-SOURCE-PARAM` | Unrecognized `source` → 400 | `referenced_by::unknown_source_is_rejected` |
 | `P5.9-HEADER` | Carries the protocol version header on 200 and 400 | `referenced_by::every_response_carries_the_protocol_version_header` |
 
+## §5.10 `GET /api/tables/structure`
+
+| ID | Requirement | Test |
+|---|---|---|
+| `P5.10-SHAPE` | `indexes` and `constraints.{unique,foreign_keys,check}` always present; `primary_key` and a single-column unique constraint carry their columns | `structure::reports_primary_key_unique_and_always_present_lists` |
+| `P5.10-EMPTY-LISTS` | A table with no FKs or checks reports `[]` for both, not an error | `structure::a_table_without_fks_or_checks_reports_empty_lists` |
+| `P5.10-COMPOSITE-FK` | A composite FK is one entry with every column pair in constraint order and the referenced `table`; same-schema omits `schema` | `structure::composite_foreign_keys_are_one_entry_with_every_column_pair` |
+| `P5.10-FK-ACTIONS` | `on_delete`/`on_update` use the fixed vocabulary; an FK with no action clause reports the engine default | `structure::foreign_key_actions_use_the_fixed_vocabulary` |
+| `P5.10-INDEX-COLUMNS` | Key columns in index order; `INCLUDE` columns are not listed | `structure::index_columns_are_the_key_columns_in_order` |
+| `P5.10-INDEX-UNIQUE` | An index backing a UNIQUE constraint is listed with `unique: true` | `structure::a_unique_constraint_backing_index_is_listed_as_unique` |
+| `P5.10-INDEX-PARTIAL` | A partial index carries `predicate` (Postgres, SQLite); never emitted on MySQL/MariaDB, nor `null` for a non-partial index | `structure::partial_index_predicate_is_reported_where_supported` |
+| `P5.10-INDEX-EXPRESSION` | An expression entry stays in position as its expression text (Postgres seed only; others self-skip) | `structure::expression_index_entries_are_kept_as_expression_text` |
+| `P5.10-CHECK` | A named check carries its SQL text (Postgres, MySQL/MariaDB); `[]` on SQLite | `structure::check_constraints_are_reported_where_introspectable` |
+| `P5.10-CROSS-SCHEMA` | An FK into another schema carries the referenced `schema` (Postgres; MySQL/SQLite self-skip) | `structure::cross_schema_foreign_keys_carry_the_referenced_schema` |
+| `P5.10-TABLE-EXACT-MATCH` | `table` matched against §5.2 exactly; unknown or injection-shaped input → 400, never reaches SQL; `table` required | `structure::unknown_or_malicious_table_values_are_rejected_cleanly` |
+| `P5.10-SCHEMA-PARAM` | Explicit default `schema` resolves like an absent one; unrecognized → 400 | `structure::schema_param_resolves_like_the_other_routes` |
+| `P5.10-SOURCE-PARAM` | Unrecognized `source` → 400 | `structure::unknown_source_is_rejected` |
+| `P5.10-HEADER` | Carries the protocol version header on 200 and 400 | `structure::every_response_carries_the_protocol_version_header` |
+
 ## §6 Server invariants
 
 | ID | Requirement | Test |

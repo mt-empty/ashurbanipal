@@ -48,7 +48,7 @@ CREATE TABLE users (
 
 CREATE TABLE orders (
   id           INTEGER PRIMARY KEY,
-  user_id      INTEGER NOT NULL REFERENCES users(id),
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   status       TEXT NOT NULL DEFAULT 'pending',
   total_cents  INTEGER NOT NULL,
   discount_pct REAL,
@@ -76,7 +76,7 @@ CREATE TABLE products (
 
 CREATE TABLE events (
   id          INTEGER PRIMARY KEY,
-  user_id     INTEGER REFERENCES users(id),
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE,
   event_type  TEXT NOT NULL,
   payload     TEXT NOT NULL,
   occurred_at TEXT NOT NULL,
@@ -96,7 +96,7 @@ CREATE TABLE reviews (
   user_id    INTEGER NOT NULL REFERENCES users(id),
   product_id INTEGER NOT NULL REFERENCES products(id),
   order_id   INTEGER REFERENCES orders(id),
-  rating     INTEGER NOT NULL,
+  rating     INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
   title      TEXT,
   body       TEXT,
   created_at TEXT NOT NULL
@@ -157,6 +157,11 @@ CREATE TABLE inventory_counts (
   FOREIGN KEY (warehouse_code, bin_code)
     REFERENCES inventory_locations(warehouse_code, bin_code)
 );
+
+-- Structure fixtures for GET /api/tables/structure (spec/protocol.md §5.10).
+CREATE INDEX users_active_login_idx ON users(is_active, last_login_at);
+CREATE INDEX orders_pending_idx ON orders(user_id) WHERE status = 'pending';
+CREATE INDEX reviews_product_created_idx ON reviews(product_id, created_at);
 
 -- SQLite has no cardinality catalog, so table-counts is always -1 and
 -- common-values always empty regardless of ANALYZE — feature_flags stays
@@ -333,4 +338,4 @@ INSERT INTO feature_flags (key, enabled, rollout_pct, created_at) VALUES
 ANALYZE;
 
 INSERT INTO _conformance_meta (seed_version, dialect, checksum, generated_at)
-VALUES ('4', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');
+VALUES ('5', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');

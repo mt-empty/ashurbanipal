@@ -56,7 +56,8 @@ CREATE TABLE `users` (
   `login_count`   int NOT NULL DEFAULT 0,
   `metadata`      json NOT NULL,
   `last_login_at` datetime,
-  `created_at`    datetime NOT NULL
+  `created_at`    datetime NOT NULL,
+  KEY `users_active_login_idx` (`is_active`, `last_login_at`)
 ) COMMENT = 'Registered application users.';
 
 CREATE TABLE `orders` (
@@ -66,7 +67,8 @@ CREATE TABLE `orders` (
   `total_cents`  int NOT NULL,
   `discount_pct` decimal(5,2) COMMENT 'Percentage discount applied at checkout, if any.',
   `created_at`   datetime NOT NULL,
-  CONSTRAINT `orders_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+  KEY `orders_status_user_idx` (`status`, `user_id`),
+  CONSTRAINT `orders_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) COMMENT = 'Customer orders placed against the product catalog.';
 
 CREATE TABLE `order_extra` (
@@ -96,7 +98,7 @@ CREATE TABLE `events` (
   `payload`     json NOT NULL,
   `occurred_at` datetime NOT NULL,
   `is_test`     boolean NOT NULL DEFAULT FALSE,
-  CONSTRAINT `events_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+  CONSTRAINT `events_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 CREATE TABLE `sessions` (
@@ -117,6 +119,8 @@ CREATE TABLE `reviews` (
   `title`      text,
   `body`       text,
   `created_at` datetime NOT NULL,
+  KEY `reviews_product_created_idx` (`product_id`, `created_at`),
+  CONSTRAINT `reviews_rating_check` CHECK (`rating` BETWEEN 1 AND 5),
   CONSTRAINT `reviews_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
   CONSTRAINT `reviews_product_id_fk` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`),
   CONSTRAINT `reviews_order_id_fk` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`)
@@ -366,4 +370,4 @@ ANALYZE TABLE `users`, `orders`, `order_extra`, `products`, `events`, `sessions`
   `inventory_locations`, `inventory_counts`;
 
 INSERT INTO `_conformance_meta` (`seed_version`, `dialect`, `checksum`, `generated_at`)
-VALUES ('4', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));
+VALUES ('5', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));

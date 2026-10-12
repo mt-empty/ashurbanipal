@@ -14,6 +14,7 @@ mod protocol;
 mod referenced_by;
 mod schemas;
 mod sources;
+mod structure;
 mod table_data;
 mod tables;
 mod two_source;

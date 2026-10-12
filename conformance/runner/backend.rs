@@ -84,6 +84,29 @@ pub enum UnanalyzedCount {
     AnyValidEstimate,
 }
 
+/// Whether `/api/tables/structure` (§5.10) can report a partial index.
+pub enum PartialIndexes {
+    /// Postgres and SQLite: an index with a `WHERE` carries `predicate`.
+    Reported,
+    /// MySQL/MariaDB have no partial indexes; `predicate` is never emitted.
+    NeverEmitted,
+}
+
+/// Whether `/api/tables/structure` (§5.10) lists check constraints.
+pub enum CheckConstraints {
+    /// Postgres and MySQL/MariaDB: named checks with their SQL text.
+    Introspected,
+    /// SQLite: not introspectable through a pragma; `check` is always `[]`.
+    AlwaysEmpty,
+}
+
+/// Whether the dialect's seed carries an expression index
+/// (`users_email_lower_idx`); MySQL/MariaDB and SQLite seeds do not.
+pub enum ExpressionIndexes {
+    Seeded,
+    NotSeeded,
+}
+
 impl Backend {
     pub(crate) fn parse(raw: &str) -> Option<Backend> {
         match raw.trim().to_ascii_lowercase().as_str() {
@@ -160,6 +183,37 @@ impl Backend {
         match self {
             Backend::Postgres => CrossSchemaReferrers::Reported,
             Backend::Mysql | Backend::Sqlite => CrossSchemaReferrers::ScopedToResolvedSchema,
+        }
+    }
+
+    pub fn partial_indexes(self) -> PartialIndexes {
+        match self {
+            Backend::Postgres | Backend::Sqlite => PartialIndexes::Reported,
+            Backend::Mysql => PartialIndexes::NeverEmitted,
+        }
+    }
+
+    pub fn check_constraints(self) -> CheckConstraints {
+        match self {
+            Backend::Postgres | Backend::Mysql => CheckConstraints::Introspected,
+            Backend::Sqlite => CheckConstraints::AlwaysEmpty,
+        }
+    }
+
+    pub fn expression_indexes(self) -> ExpressionIndexes {
+        match self {
+            Backend::Postgres => ExpressionIndexes::Seeded,
+            Backend::Mysql | Backend::Sqlite => ExpressionIndexes::NotSeeded,
+        }
+    }
+
+    /// The `on_delete`/`on_update` labels an FK declared with no action
+    /// clause may report. MySQL and MariaDB differ on whether the catalog
+    /// says `NO ACTION` or `RESTRICT` (`docs/adapter-decisions.md` §5.10).
+    pub fn default_fk_actions(self) -> &'static [&'static str] {
+        match self {
+            Backend::Postgres | Backend::Sqlite => &["NO ACTION"],
+            Backend::Mysql => &["NO ACTION", "RESTRICT"],
         }
     }
 
