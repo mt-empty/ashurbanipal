@@ -136,6 +136,7 @@ async fn unknown_source_is_rejected_with_400() {
         "/__ashurbanipal/api/tables?source=nonexistent",
         "/__ashurbanipal/api/table-counts?source=nonexistent",
         "/__ashurbanipal/api/tables/data?source=nonexistent&table=probe",
+        "/__ashurbanipal/api/tables/structure?source=nonexistent&table=probe",
     ] {
         assert_eq!(
             get_status(&app, path).await,

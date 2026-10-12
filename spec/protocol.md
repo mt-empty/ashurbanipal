@@ -601,7 +601,8 @@ Response:
   `btree`). Indexes that back a primary-key or unique constraint are
   indexes and are listed.
 - `indexes[].columns` lists the key columns in index order. An expression
-  entry appears in its position as its expression text, never dropped. A
+  entry appears in its position as its expression text, never dropped; an
+  engine that cannot recover the text MAY use a placeholder string there. A
   covering (`INCLUDE`) column is not a key column and is not listed.
 - `indexes[].predicate` is the partial-index `WHERE` text. It is omitted
   (never `null`) for a non-partial index and on an engine with no

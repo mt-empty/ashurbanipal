@@ -79,6 +79,7 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
                 .service(
                     web::resource("/tables/referenced-by").route(web::get().to(referenced_by::<S>)),
                 )
+                .service(web::resource("/tables/structure").route(web::get().to(structure::<S>)))
                 .service(web::resource("/siblings").route(web::get().to(siblings::<S>))),
         )
 }
@@ -392,6 +393,24 @@ async fn referenced_by<S: DbSource>(
     Ok(HttpResponse::Ok().json(ReferencedByResponse { referenced_by }))
 }
 
+#[derive(Deserialize)]
+struct StructureParams {
+    schema: Option<String>,
+    source: Option<String>,
+    table: String,
+}
+
+async fn structure<S: DbSource>(
+    state: Data<AppState<S>>,
+    params: web::Query<StructureParams>,
+) -> Result<HttpResponse, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let structure = source
+        .structure(params.schema.as_deref(), &params.table)
+        .await?;
+    Ok(HttpResponse::Ok().json(structure))
+}
+
 #[derive(Serialize)]
 struct SiblingStatus {
     name: String,
@@ -475,7 +494,7 @@ mod kill_switch_tests {
     use actix_web::{test, App};
 
     use super::*;
-    use ashurbanipal::TableData;
+    use ashurbanipal::{Structure, TableData};
 
     /// Routing-only double — the disabled-config kill switch must reject
     /// every request before any handler runs, so none of these bodies are
@@ -513,6 +532,13 @@ mod kill_switch_tests {
             _schema: Option<&str>,
             _table: &str,
         ) -> Result<Vec<ReferencedBy>, DbError> {
+            unreachable!("kill switch must 404 before reaching the handler")
+        }
+        async fn structure(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+        ) -> Result<Structure, DbError> {
             unreachable!("kill switch must 404 before reaching the handler")
         }
     }

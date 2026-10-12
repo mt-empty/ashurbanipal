@@ -5,8 +5,9 @@ use sqlx::mysql::MySqlRow;
 use sqlx::{MySql, MySqlPool, Row, Transaction};
 
 use super::{
-    group_referenced_by, op_sql, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource, KeyKind,
-    NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
+    group_referenced_by, op_sql, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck, ConstraintFk,
+    ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, IndexInfo, KeyKind,
+    NotAllowedKind, QueryOpts, ReferencedBy, Structure, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -651,6 +652,186 @@ impl DbSource for MySqlSource {
                 }),
         ))
     }
+
+    async fn structure(&self, schema: Option<&str>, table: &str) -> Result<Structure, DbError> {
+        let variant = self.variant().await?;
+        let mut tx = self.pinned_tx().await?;
+        let schema = self
+            .resolve_schema_in_tx(&mut tx, variant, schema, CATALOG_TIMEOUT_SECS)
+            .await?;
+        let allowed = self
+            .allowed_tables_in_tx(&mut tx, variant, &schema, CATALOG_TIMEOUT_SECS)
+            .await?;
+        if !allowed.iter().any(|t| t == table) {
+            return Err(DbError::not_allowed(
+                NotAllowedKind::Table,
+                format!("table {table:?}"),
+            ));
+        }
+
+        // MariaDB's `statistics` has no `expression` column; MySQL 8.0.13+
+        // reports a functional key part there with a NULL `column_name`.
+        let key_part = match variant {
+            Variant::MySql => "coalesce(s.column_name, s.expression)",
+            Variant::MariaDb => "s.column_name",
+        };
+        let index_rows = sqlx::query_as::<_, (String, i64, String, Option<String>)>(
+            sqlx::AssertSqlSafe(timed_select(
+                variant,
+                CATALOG_TIMEOUT_SECS,
+                &format!(
+                    "s.index_name, cast(s.non_unique as signed), s.index_type, {key_part} \
+                     from information_schema.statistics s \
+                     where s.table_schema = ? and s.table_name = ? \
+                     order by s.index_name, s.seq_in_index"
+                ),
+            )),
+        )
+        .bind(&schema)
+        .bind(table)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut indexes: Vec<IndexInfo> = Vec::new();
+        for (name, non_unique, method, column) in index_rows {
+            let column = column.unwrap_or_default();
+            match indexes.last_mut() {
+                Some(last) if last.name == name => last.columns.push(column),
+                _ => indexes.push(IndexInfo {
+                    name,
+                    columns: vec![column],
+                    unique: non_unique == 0,
+                    method: method.to_ascii_lowercase(),
+                    predicate: None,
+                }),
+            }
+        }
+
+        let key_rows =
+            sqlx::query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(timed_select(
+                variant,
+                CATALOG_TIMEOUT_SECS,
+                "tc.constraint_type, tc.constraint_name, kcu.column_name \
+                 from information_schema.table_constraints tc \
+                 join information_schema.key_column_usage kcu \
+                   on kcu.constraint_schema = tc.constraint_schema \
+                  and kcu.constraint_name = tc.constraint_name \
+                  and kcu.table_schema = tc.table_schema \
+                  and kcu.table_name = tc.table_name \
+                 where tc.table_schema = ? and tc.table_name = ? \
+                   and tc.constraint_type in ('PRIMARY KEY', 'UNIQUE') \
+                 order by tc.constraint_type desc, tc.constraint_name, kcu.ordinal_position",
+            )))
+            .bind(&schema)
+            .bind(table)
+            .fetch_all(&mut *tx)
+            .await?;
+        let mut primary_key: Option<ConstraintPk> = None;
+        let mut unique: Vec<ConstraintUnique> = Vec::new();
+        for (kind, name, column) in key_rows {
+            if kind == "PRIMARY KEY" {
+                match primary_key.as_mut() {
+                    Some(pk) => pk.columns.push(column),
+                    None => {
+                        primary_key = Some(ConstraintPk {
+                            name: Some(name),
+                            columns: vec![column],
+                        })
+                    }
+                }
+            } else {
+                match unique.last_mut() {
+                    Some(last) if last.name == name => last.columns.push(column),
+                    _ => unique.push(ConstraintUnique {
+                        name,
+                        columns: vec![column],
+                    }),
+                }
+            }
+        }
+
+        // Read `key_column_usage` for the referenced table, not
+        // `referential_constraints`, which MariaDB nulls for a role lacking
+        // privilege on it (same reason as `referenced_by`).
+        let fk_rows = sqlx::query_as::<_, (String, String, String, String, String, String, String)>(
+            sqlx::AssertSqlSafe(timed_select(
+                variant,
+                CATALOG_TIMEOUT_SECS,
+                "kcu.constraint_name, kcu.referenced_table_schema, kcu.referenced_table_name, \
+                        kcu.column_name, kcu.referenced_column_name, rc.delete_rule, rc.update_rule \
+                 from information_schema.key_column_usage kcu \
+                 join information_schema.referential_constraints rc \
+                   on rc.constraint_schema = kcu.constraint_schema \
+                  and rc.constraint_name = kcu.constraint_name \
+                  and rc.table_name = kcu.table_name \
+                 where kcu.table_schema = ? and kcu.table_name = ? \
+                   and kcu.referenced_table_name is not null \
+                 order by kcu.constraint_name, kcu.ordinal_position",
+            )),
+        )
+        .bind(&schema)
+        .bind(table)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut foreign_keys: Vec<ConstraintFk> = Vec::new();
+        for (name, ref_schema, ref_table, from, to, on_delete, on_update) in fk_rows {
+            match foreign_keys.last_mut() {
+                Some(last) if last.name == name => last.columns.push(ColumnPair { from, to }),
+                _ => foreign_keys.push(ConstraintFk {
+                    name,
+                    table: ref_table,
+                    schema: (ref_schema != schema).then_some(ref_schema),
+                    columns: vec![ColumnPair { from, to }],
+                    on_delete: on_delete.to_ascii_uppercase(),
+                    on_update: on_update.to_ascii_uppercase(),
+                }),
+            }
+        }
+
+        // MySQL before 8.0.16 has no `check_constraints` view: report `[]`.
+        let has_checks = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(timed_select(
+            variant,
+            CATALOG_TIMEOUT_SECS,
+            "count(*) from information_schema.tables \
+             where table_schema = 'information_schema' and table_name = 'CHECK_CONSTRAINTS'",
+        )))
+        .fetch_one(&mut *tx)
+        .await?
+            > 0;
+        let check = if has_checks {
+            sqlx::query_as::<_, (String, Option<String>)>(sqlx::AssertSqlSafe(timed_select(
+                variant,
+                CATALOG_TIMEOUT_SECS,
+                "tc.constraint_name, cc.check_clause \
+                 from information_schema.table_constraints tc \
+                 join information_schema.check_constraints cc \
+                   on cc.constraint_schema = tc.constraint_schema \
+                  and cc.constraint_name = tc.constraint_name \
+                 where tc.table_schema = ? and tc.table_name = ? \
+                   and tc.constraint_type = 'CHECK' \
+                 order by tc.constraint_name",
+            )))
+            .bind(&schema)
+            .bind(table)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .map(|(name, expression)| ConstraintCheck { name, expression })
+            .collect()
+        } else {
+            Vec::new()
+        };
+        tx.commit().await?;
+
+        Ok(Structure {
+            indexes,
+            constraints: Constraints {
+                primary_key,
+                unique,
+                foreign_keys,
+                check,
+            },
+        })
+    }
 }
 
 #[cfg(test)]
@@ -875,6 +1056,30 @@ mod tests {
         assert_eq!(user_id_col.key, Some(KeyKind::Fk));
         assert_eq!(user_id_col.references.as_ref().unwrap().table, "users");
         assert_eq!(user_id_col.references.as_ref().unwrap().column, "id");
+    }
+
+    #[tokio::test]
+    async fn structure_lists_indexes_and_foreign_keys() {
+        let db = seeded_db().await;
+        let source = MySqlSource::new(db.pool.clone());
+
+        let s = source.structure(None, "orders").await.unwrap();
+        assert!(s.indexes.iter().any(|i| i.name == "PRIMARY" && i.unique));
+        assert_eq!(s.constraints.primary_key.as_ref().unwrap().columns, ["id"]);
+        // orders references users via two FKs (user_id, approved_by).
+        let to_users: Vec<_> = s
+            .constraints
+            .foreign_keys
+            .iter()
+            .filter(|f| f.table == "users")
+            .collect();
+        assert_eq!(to_users.len(), 2);
+        assert!(to_users.iter().all(|f| f.schema.is_none()));
+
+        assert!(matches!(
+            source.structure(None, "nope").await,
+            Err(DbError::NotAllowed(_))
+        ));
     }
 
     #[tokio::test]

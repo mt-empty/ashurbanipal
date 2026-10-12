@@ -10,7 +10,7 @@ use crate::backend::{
     Backend, CheckConstraints, CrossSchemaReferrers, ExpressionIndexes, PartialIndexes,
 };
 use crate::common::TestServer;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 async fn structure(srv: &TestServer, table: &str) -> Value {
     srv.client()
@@ -129,7 +129,11 @@ async fn foreign_key_actions_use_the_fixed_vocabulary() {
 
     let orders = structure(&srv, "orders").await;
     let e = fk(&orders, &["user_id"]);
-    assert_exact(e["on_delete"].clone(), json!("CASCADE"), "orders.user_id on_delete");
+    assert_exact(
+        e["on_delete"].clone(),
+        json!("CASCADE"),
+        "orders.user_id on_delete",
+    );
     assert!(
         defaults.contains(&e["on_update"].as_str().unwrap()),
         "orders.user_id on_update must be the engine default {defaults:?}: {e:#?}"
@@ -137,8 +141,16 @@ async fn foreign_key_actions_use_the_fixed_vocabulary() {
 
     let events = structure(&srv, "events").await;
     let e = fk(&events, &["user_id"]);
-    assert_exact(e["on_delete"].clone(), json!("SET NULL"), "events.user_id on_delete");
-    assert_exact(e["on_update"].clone(), json!("CASCADE"), "events.user_id on_update");
+    assert_exact(
+        e["on_delete"].clone(),
+        json!("SET NULL"),
+        "events.user_id on_delete",
+    );
+    assert_exact(
+        e["on_update"].clone(),
+        json!("CASCADE"),
+        "events.user_id on_update",
+    );
 
     let counts = structure(&srv, "inventory_counts").await;
     let e = fk(&counts, &["product_id"]);
@@ -162,9 +174,15 @@ async fn index_columns_are_the_key_columns_in_order() {
         json!(["is_active", "last_login_at"]),
         "users_active_login_idx key columns",
     );
-    assert_exact(idx["unique"].clone(), json!(false), "users_active_login_idx unique");
+    assert_exact(
+        idx["unique"].clone(),
+        json!(false),
+        "users_active_login_idx unique",
+    );
     assert!(
-        idx["method"].as_str().is_some_and(|m| m.eq_ignore_ascii_case("btree")),
+        idx["method"]
+            .as_str()
+            .is_some_and(|m| m.eq_ignore_ascii_case("btree")),
         "method must be btree: {idx:#?}"
     );
 
@@ -197,9 +215,15 @@ async fn partial_index_predicate_is_reported_where_supported() {
     match Backend::current().partial_indexes() {
         PartialIndexes::Reported => {
             let idx = index(&body, "orders_pending_idx");
-            assert_exact(idx["columns"].clone(), json!(["user_id"]), "orders_pending_idx columns");
+            assert_exact(
+                idx["columns"].clone(),
+                json!(["user_id"]),
+                "orders_pending_idx columns",
+            );
             assert!(
-                idx["predicate"].as_str().is_some_and(|p| p.contains("pending")),
+                idx["predicate"]
+                    .as_str()
+                    .is_some_and(|p| p.contains("pending")),
                 "predicate must carry the WHERE text: {idx:#?}"
             );
         }
@@ -263,7 +287,11 @@ async fn check_constraints_are_reported_where_introspectable() {
             );
         }
         CheckConstraints::AlwaysEmpty => {
-            assert_exact(body["constraints"]["check"].clone(), json!([]), "SQLite check");
+            assert_exact(
+                body["constraints"]["check"].clone(),
+                json!([]),
+                "SQLite check",
+            );
         }
     }
 }
@@ -274,9 +302,12 @@ async fn check_constraints_are_reported_where_introspectable() {
 #[tokio::test]
 async fn cross_schema_foreign_keys_carry_the_referenced_schema() {
     let srv = TestServer::spawn().await;
-    if let CrossSchemaReferrers::ScopedToResolvedSchema = Backend::current().cross_schema_referrers()
+    if let CrossSchemaReferrers::ScopedToResolvedSchema =
+        Backend::current().cross_schema_referrers()
     {
-        eprintln!("structure: skipping cross-schema check — this backend has no cross-schema FK fixture");
+        eprintln!(
+            "structure: skipping cross-schema check — this backend has no cross-schema FK fixture"
+        );
         return;
     }
     let body: Value = srv
@@ -291,7 +322,11 @@ async fn cross_schema_foreign_keys_carry_the_referenced_schema() {
         .unwrap();
     let e = fk(&body, &["order_id"]);
     assert_exact(e["table"].clone(), json!("orders"), "cross-schema FK table");
-    assert_exact(e["schema"].clone(), json!("public"), "cross-schema FK schema");
+    assert_exact(
+        e["schema"].clone(),
+        json!("public"),
+        "cross-schema FK schema",
+    );
 }
 
 /// P5.10-TABLE-EXACT-MATCH: `table` must match §5.2 exactly; anything else,
@@ -312,7 +347,11 @@ async fn unknown_or_malicious_table_values_are_rejected_cleanly() {
             .send()
             .await
             .unwrap();
-        assert_status(&resp, 400, &format!("GET /api/tables/structure?table={evil:?}"));
+        assert_status(
+            &resp,
+            400,
+            &format!("GET /api/tables/structure?table={evil:?}"),
+        );
     }
     let resp = srv
         .client()
@@ -320,7 +359,11 @@ async fn unknown_or_malicious_table_values_are_rejected_cleanly() {
         .send()
         .await
         .unwrap();
-    assert_status(&resp, 400, "GET /api/tables/structure with no `table` param");
+    assert_status(
+        &resp,
+        400,
+        "GET /api/tables/structure with no `table` param",
+    );
 }
 
 /// P5.10-SCHEMA-PARAM: an explicit default `schema` resolves identically to
@@ -341,7 +384,11 @@ async fn schema_param_resolves_like_the_other_routes() {
         .json()
         .await
         .unwrap();
-    assert_exact(explicit, implicit, "explicit default schema resolves like an absent one");
+    assert_exact(
+        explicit,
+        implicit,
+        "explicit default schema resolves like an absent one",
+    );
 
     let resp = srv
         .client()
