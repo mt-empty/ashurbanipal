@@ -649,7 +649,7 @@ main { height: 100%; overflow: auto; }
    travel — its containing block (#content) is only as wide as the
    viewport, so once scrolled past that it runs out of stickiness and gets
    dragged along horizontally. */
-#content { padding: 0 var(--gap-xl) var(--gap-lg); width: max-content; min-width: 100%; }
+#content { box-sizing: border-box; padding: 0 var(--gap-xl) var(--gap-lg); width: max-content; min-width: 100%; }
 
 /* ==== Top bar ==== */
 #topbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-lg); }
@@ -721,7 +721,9 @@ ul { list-style: none; margin: 0; padding: 0; }
 /* separate/0, not collapse: verified that collapsed borders let
    scrolled-under row content bleed through a sticky <th>'s background at
    the collapsed border seams in Chromium. Horizontal rules only. */
-table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: var(--gap-lg); }
+/* max-content, not auto: inside #content's own max-content box, auto lets the
+   table inflate far past its natural width (a 5-column table rendered 3x wide). */
+table { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
 th, td { padding: .45rem .75rem .45rem 0; text-align: left; }
 td { position: relative; border-bottom: 1px solid var(--rule);
      font-family: var(--font-mono); font-size: .8125rem; }
@@ -737,15 +739,18 @@ thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
    column: keeps every th's width stable across sort changes and shows
    sortability before the first click. "↑" default previews the real
    first-click behavior (ascending — see th.onclick). */
-th[aria-sort]::after { content: " ↑"; opacity: .35; }
-th[aria-sort="ascending"]::after { content: " ↑"; opacity: 1; }
-th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
+th[aria-sort] .th-name::after { content: " ↑"; opacity: .35; }
+th[aria-sort="ascending"] .th-name::after { content: " ↑"; opacity: 1; }
+th[aria-sort="descending"] .th-name::after { content: " ↓"; opacity: 1; }
 /* Decorative (aria-hidden) — the th carries an aria-label with the text
    equivalent. */
 .key-icon { margin-right: .2rem; }
-/* The engine-native column type, rendered as inline code in the header. */
-th code.col-type { font-family: var(--font-mono); font-size: .85em;
-            font-weight: normal; background: color-mix(in srgb, currentColor 10%, transparent);
+/* The engine-native column type, on its own line under the name so a long
+   spelling ("timestamp with time zone") doesn't set the column's width. */
+th code.col-type { display: block; width: fit-content; max-width: 10rem; overflow: hidden;
+            text-overflow: ellipsis; margin-top: .1rem; font-family: var(--font-mono);
+            font-size: .7rem; font-weight: normal; opacity: .75;
+            background: color-mix(in srgb, currentColor 10%, transparent);
             padding: 0 .25em; border-radius: 3px; }
 /* Not part of the sort click target — its onclick stops propagation so
    it doesn't also trigger th's sort handler. */
@@ -2797,6 +2802,9 @@ function renderHeader(columns) {
     const typeCode = document.createElement("code");
     typeCode.className = "col-type";
     typeCode.textContent = col.type;
+    typeCode.title = col.type;
+    const head = document.createElement("span");
+    head.className = "th-name";
     if (col.key === "pk" || col.key === "fk") {
       const keyLabel = col.key === "pk" ? col.references ? `primary key, also references ${col.references.table}.${col.references.column}` : "primary key" : `foreign key, references ${col.references.table}.${col.references.column}`;
       const icon = document.createElement("span");
@@ -2804,10 +2812,10 @@ function renderHeader(columns) {
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "\u{1F511}" : "\u{1F517}";
-      th.append(icon, `${col.name} `, typeCode);
+      head.append(icon, `${col.name} `);
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
-      th.append(`${col.name} `, typeCode);
+      head.append(`${col.name} `);
     }
     if (col.comment) th.title = col.comment;
     th.setAttribute(
@@ -2830,7 +2838,8 @@ function renderHeader(columns) {
       e.stopPropagation();
       showCommonValues(e, col.name);
     };
-    th.appendChild(cvBtn);
+    head.appendChild(cvBtn);
+    th.append(head, typeCode);
     tr.appendChild(th);
   }
   $("thead").replaceChildren(tr);

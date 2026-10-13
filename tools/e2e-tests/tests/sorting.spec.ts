@@ -4,7 +4,7 @@ import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 test("clicking an unsorted column sorts it ascending", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  await page.locator('th[data-col="price"]').click();
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   await expect(page.locator('th[data-col="price"]')).toHaveAttribute("aria-sort", "ascending");
 });
@@ -13,10 +13,10 @@ test("clicking the same column again toggles to descending", async ({ page }) =>
   await gotoApp(page);
   await selectTable(page, "products");
   const priceHeader = page.locator('th[data-col="price"]');
-  await priceHeader.click();
+  await priceHeader.click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   await expect(priceHeader).toHaveAttribute("aria-sort", "ascending");
-  await priceHeader.click();
+  await priceHeader.click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   await expect(priceHeader).toHaveAttribute("aria-sort", "descending");
 });
@@ -28,14 +28,14 @@ test("switching to a different column always starts ascending, and unsorts the o
   await selectTable(page, "products");
   const priceHeader = page.locator('th[data-col="price"]');
   const categoryHeader = page.locator('th[data-col="category"]');
-  await priceHeader.click();
+  await priceHeader.click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   await expect(priceHeader).toHaveAttribute("aria-sort", "ascending");
-  await priceHeader.click(); // now descending
+  await priceHeader.click({ position: { x: 6, y: 6 } }); // now descending
   await waitForIdle(page);
   await expect(priceHeader).toHaveAttribute("aria-sort", "descending");
 
-  await categoryHeader.click();
+  await categoryHeader.click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   await expect(categoryHeader).toHaveAttribute("aria-sort", "ascending");
   await expect(priceHeader).toHaveAttribute("aria-sort", "none");
@@ -48,7 +48,7 @@ test("ascending sort actually reorders rows by value", async ({ page }) => {
   // ("107.92" < "11.18") instead of numerically.
   await gotoApp(page);
   await selectTable(page, "products");
-  await page.locator('th[data-col="price"]').click();
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   await expect(page.locator('th[data-col="price"]')).toHaveAttribute("aria-sort", "ascending");
 

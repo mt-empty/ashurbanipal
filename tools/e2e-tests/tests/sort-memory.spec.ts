@@ -4,7 +4,7 @@ import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 test("a table keeps the sort last chosen on it when you leave and come back", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  await page.locator('th[data-col="price"]').click();
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   await expect(page.locator('th[data-col="price"]')).toHaveAttribute("aria-sort", "ascending");
 
@@ -18,7 +18,7 @@ test("a table keeps the sort last chosen on it when you leave and come back", as
 test("switching to a table that was never sorted carries no sort", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  await page.locator('th[data-col="price"]').click();
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
 
   await selectTable(page, "orders");

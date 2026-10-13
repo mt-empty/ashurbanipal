@@ -32,6 +32,10 @@ export function renderHeader(columns: Column[]): void {
     const typeCode = document.createElement("code");
     typeCode.className = "col-type";
     typeCode.textContent = col.type;
+    typeCode.title = col.type; // the chip ellipsizes a long spelling (R8)
+    // Name, ▾ and the sort arrow share one line; the type chip sits under it.
+    const head = document.createElement("span");
+    head.className = "th-name";
     if (col.key === "pk" || col.key === "fk") {
       // A column can be its own table's PK and an FK at once (1:1 detail
       // table shape) — key still reports "pk", but references is populated
@@ -47,12 +51,12 @@ export function renderHeader(columns: Column[]): void {
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "🔑" : "🔗";
-      th.append(icon, `${col.name} `, typeCode);
+      head.append(icon, `${col.name} `);
       // Layers onto the accessible name rather than replacing the key
       // description — the icon keeps its own `title` above.
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
-      th.append(`${col.name} `, typeCode);
+      head.append(`${col.name} `);
     }
     if (col.comment) th.title = col.comment;
     th.setAttribute(
@@ -77,7 +81,8 @@ export function renderHeader(columns: Column[]): void {
       e.stopPropagation();
       showCommonValues(e, col.name);
     };
-    th.appendChild(cvBtn);
+    head.appendChild(cvBtn);
+    th.append(head, typeCode);
     tr.appendChild(th);
   }
   $("thead").replaceChildren(tr);

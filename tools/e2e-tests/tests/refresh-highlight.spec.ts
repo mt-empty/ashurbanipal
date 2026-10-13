@@ -86,7 +86,7 @@ test("a sort change is not treated as new rows", async ({ page }) => {
   // Different rows AND a scope change — a sort click never passes
   // highlightNew, and scopeKey no longer matches, so neither path tints.
   body = payload([[3, "c"], [1, "a"], [2, "b"]]);
-  await page.locator('th[data-col="label"]').click();
+  await page.locator('th[data-col="label"]').click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
 
   await expect(page.locator("#tbody tr.row-new")).toHaveCount(0);
