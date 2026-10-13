@@ -739,6 +739,9 @@ thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
    column: keeps every th's width stable across sort changes and shows
    sortability before the first click. "↑" default previews the real
    first-click behavior (ascending — see th.onclick). */
+/* Capped like the table chips' names; the title carries the full name. */
+.col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
+            vertical-align: bottom; }
 th[aria-sort] .th-name::after { content: " ↑"; opacity: .35; }
 th[aria-sort="ascending"] .th-name::after { content: " ↑"; opacity: 1; }
 th[aria-sort="descending"] .th-name::after { content: " ↓"; opacity: 1; }
@@ -2805,6 +2808,10 @@ function renderHeader(columns) {
     typeCode.title = col.type;
     const head = document.createElement("span");
     head.className = "th-name";
+    const nameEl = document.createElement("span");
+    nameEl.className = "col-name";
+    nameEl.textContent = col.name;
+    nameEl.title = col.comment ? `${col.name} \u2014 ${col.comment}` : col.name;
     if (col.key === "pk" || col.key === "fk") {
       const keyLabel = col.key === "pk" ? col.references ? `primary key, also references ${col.references.table}.${col.references.column}` : "primary key" : `foreign key, references ${col.references.table}.${col.references.column}`;
       const icon = document.createElement("span");
@@ -2812,10 +2819,10 @@ function renderHeader(columns) {
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "\u{1F511}" : "\u{1F517}";
-      head.append(icon, `${col.name} `);
+      head.append(icon, nameEl, " ");
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
-      head.append(`${col.name} `);
+      head.append(nameEl, " ");
     }
     if (col.comment) th.title = col.comment;
     th.setAttribute(

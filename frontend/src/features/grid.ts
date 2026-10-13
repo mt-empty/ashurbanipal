@@ -36,6 +36,12 @@ export function renderHeader(columns: Column[]): void {
     // Name, ▾ and the sort arrow share one line; the type chip sits under it.
     const head = document.createElement("span");
     head.className = "th-name";
+    // Capped in CSS (a 63-char identifier would otherwise set the column's
+    // width); the title is the escape hatch (R8).
+    const nameEl = document.createElement("span");
+    nameEl.className = "col-name";
+    nameEl.textContent = col.name;
+    nameEl.title = col.comment ? `${col.name} — ${col.comment}` : col.name;
     if (col.key === "pk" || col.key === "fk") {
       // A column can be its own table's PK and an FK at once (1:1 detail
       // table shape) — key still reports "pk", but references is populated
@@ -51,12 +57,12 @@ export function renderHeader(columns: Column[]): void {
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "🔑" : "🔗";
-      head.append(icon, `${col.name} `);
+      head.append(icon, nameEl, " ");
       // Layers onto the accessible name rather than replacing the key
       // description — the icon keeps its own `title` above.
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
-      head.append(`${col.name} `);
+      head.append(nameEl, " ");
     }
     if (col.comment) th.title = col.comment;
     th.setAttribute(

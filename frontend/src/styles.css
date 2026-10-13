@@ -152,6 +152,9 @@ thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
    column: keeps every th's width stable across sort changes and shows
    sortability before the first click. "↑" default previews the real
    first-click behavior (ascending — see th.onclick). */
+/* Capped like the table chips' names; the title carries the full name. */
+.col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
+            vertical-align: bottom; }
 th[aria-sort] .th-name::after { content: " ↑"; opacity: .35; }
 th[aria-sort="ascending"] .th-name::after { content: " ↑"; opacity: 1; }
 th[aria-sort="descending"] .th-name::after { content: " ↓"; opacity: 1; }

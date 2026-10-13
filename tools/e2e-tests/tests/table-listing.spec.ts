@@ -93,6 +93,20 @@ test("a wide window shows every table with no cap control", async ({ page }) => 
   await expect(page.locator("#tables-more")).toBeHidden();
 });
 
+test("a column name is capped with an ellipsis and keeps its full name in a title", async ({
+  page,
+}) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const name = page.locator('th[data-col="total_cents"] .col-name');
+  const style = await name.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { overflow: cs.overflow, textOverflow: cs.textOverflow, maxWidth: cs.maxWidth };
+  });
+  expect(style).toEqual({ overflow: "hidden", textOverflow: "ellipsis", maxWidth: "256px" });
+  await expect(name).toHaveAttribute("title", /^total_cents/);
+});
+
 test("selecting a table updates the current-table chrome", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
