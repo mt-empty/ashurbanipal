@@ -171,8 +171,8 @@ export function persist(): void {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
   // Best-effort: a throw here (quota, private mode) must not abort the caller,
   // which almost always follows persist() with a loadData()/loadTables() the
-  // user still needs. Unlike the single-string writes in theme.ts /
-  // sidebar-resize.ts, this blob grows per table/source touched, so a quota
+  // user still needs. Unlike the single-string write in theme.ts, this
+  // blob grows per table/source touched, so a quota
   // failure is plausible on a long session — warn so it isn't wholly invisible.
   try {
     localStorage.setItem(

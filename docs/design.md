@@ -140,8 +140,8 @@ Two components, same as the original concept:
     maintain — if revisited, do it as a `contenteditable`-based rewrite,
     not a transparent-input-plus-overlay.)
   - *Table/column comments* — `COMMENT ON TABLE`/`COMMENT ON COLUMN` text
-    (§4) is surfaced as native `title` tooltips on the sidebar table
-    buttons and column headers.
+    (§4) is surfaced as native `title` tooltips on the table chips
+    and column headers.
   - *PK/FK header icons* — a column's `key` role (§4) gets a small icon in
     its header, with a text alternative (not color-only).
 - **Grid customization**:
@@ -152,8 +152,10 @@ Two components, same as the original concept:
     (`docs/feature-backlog/09-column-reorder-and-resize.md`).
   - *Sticky table header* — the header row stays pinned while scrolling a
     long result set vertically.
-  - *Sidebar table search* — a search box above the table list filters it
-    live, client-side, as the user types.
+  - *Table chips* — every table is a chip above the filter. A list that
+    wraps past two lines collapses behind a "+ N more" control that
+    expands it in place; the active table is never left behind the cap.
+    There is no table search box.
 - **UI state persistence**: `localStorage` remembers lightweight UI state
   across visits — currently selected source, schema (remembered per
   source), table, sort column/direction (remembered per table, like

@@ -140,14 +140,17 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
     // Nothing to copy or expand for a null cell, but "filter by this
     // value" is still meaningful (IS NULL).
     const filterBtn = document.createElement("button");
-    filterBtn.className = "filter-eq only-action";
+    filterBtn.className = "filter-eq";
     filterBtn.setAttribute("aria-label", "filter by null");
     filterBtn.textContent = "=";
     filterBtn.onclick = (e) => {
       e.stopPropagation();
       applyFilterClause(col.name, "IS NULL");
     };
-    td.appendChild(filterBtn);
+    const actions = document.createElement("span");
+    actions.className = "cell-actions";
+    actions.appendChild(filterBtn);
+    td.appendChild(actions);
     return td;
   }
   const cellText = qs<HTMLElement>(td, ".cell-text");
@@ -275,8 +278,9 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
 
 export function updatePager(data: TableData): void {
   const page = Math.floor(state.offset / state.limit) + 1;
-  $("page").textContent = `page ${page} · ${formatApproxCount(data.total_approx)} rows`;
-  $("page").title = APPROX_COUNT_TITLE;
+  $("page").textContent = `page ${page}`;
+  $("row-meta").textContent = ` · ${formatApproxCount(data.total_approx)} rows · ${data.columns.length} columns`;
+  $("row-meta").title = APPROX_COUNT_TITLE;
   $<HTMLButtonElement>("prev").disabled = state.offset === 0;
   $<HTMLButtonElement>("next").disabled = data.rows.length < state.limit;
 }

@@ -25,7 +25,7 @@ test("clicking a null cell's filter button composes IS NULL", async ({ page }) =
   await gotoApp(page);
   await selectTable(page, "users");
   const nullAgeButton = page
-    .locator('#tbody td[data-col="age"] button.filter-eq.only-action')
+    .locator('#tbody td[data-col="age"] button.filter-eq[aria-label="filter by null"]')
     .first();
   await expect(nullAgeButton).toHaveAttribute("aria-label", "filter by null");
   await nullAgeButton.hover();

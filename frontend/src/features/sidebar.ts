@@ -14,38 +14,45 @@ import {
 import type { SourceEntry, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
 
-// ---- sidebar table search-as-you-type: transient, session-local state,
-// not part of `state`/localStorage — resets on reload ----
+// ---- table chips: transient, session-local state, not part of
+// `state`/localStorage — resets on reload ----
 interface TableEntry {
   name: string;
   li: HTMLLIElement;
   btn: HTMLButtonElement;
-  textNode: Text;
 }
 let tableEntries: TableEntry[] = [];
 const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
-const tableMatchHighlight = CSS.highlights ? new Highlight() : null;
-if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
 
-function filterTables(): void {
-  const q = $<HTMLInputElement>("table-filter").value.trim().toLowerCase();
-  tableMatchHighlight?.clear();
-  let visible = 0;
-  for (const { name, li, textNode } of tableEntries) {
-    const idx = q ? name.toLowerCase().indexOf(q) : -1;
-    const match = !q || idx !== -1;
-    li.hidden = !match;
-    if (match) visible++;
-    if (tableMatchHighlight && idx !== -1) {
-      const range = new Range();
-      range.setStart(textNode, idx);
-      range.setEnd(textNode, idx + q.length);
-      tableMatchHighlight.add(range);
-    }
+// ---- two-line cap: a long table list collapses behind "+ N more" ----
+const TABLE_CAP_LINES = 2;
+const tablesMore = $<HTMLButtonElement>("tables-more");
+let tablesExpanded = false;
+
+// Measures the uncapped layout (offsetTop per chip), so the cap is by
+// rendered lines and tracks window width without a per-chip width model.
+function updateTablesCap(): void {
+  const ul = $("tables");
+  ul.classList.remove("capped");
+  const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
+  if (tops.length <= TABLE_CAP_LINES) {
+    tablesMore.hidden = true;
+    return;
   }
-  $("tables-empty").hidden = visible > 0 || tableEntries.length === 0;
+  const lastVisibleTop = tops[TABLE_CAP_LINES - 1];
+  const hidden = tableEntries.filter((e) => e.li.offsetTop > lastVisibleTop);
+  // The active table must never sit behind the cap.
+  if (hidden.some((e) => e.btn.classList.contains("active"))) tablesExpanded = true;
+  tablesMore.hidden = false;
+  tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
+  tablesMore.textContent = tablesExpanded ? "show fewer" : `+ ${hidden.length} more`;
+  ul.classList.toggle("capped", !tablesExpanded);
 }
-$<HTMLInputElement>("table-filter").oninput = filterTables;
+tablesMore.onclick = () => {
+  tablesExpanded = !tablesExpanded;
+  updateTablesCap();
+};
+window.addEventListener("resize", updateTablesCap);
 
 // ==== Source selector ====
 // Same hide-when-singular shape as the schema selector below it (and drawn
@@ -139,7 +146,7 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 
 // A slower earlier loadTables() (e.g. from a schema switch quickly
 // followed by another) resolving after a faster later one would otherwise
-// clobber the sidebar with the wrong schema's table list — same shape of
+// clobber the chip row with the wrong schema's table list — same shape of
 // guard as loadDataToken/cvRequestToken/siblingsRequestToken.
 let loadTablesToken = 0;
 
@@ -158,8 +165,7 @@ export async function loadTables(): Promise<void> {
   for (const t of tables) {
     const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
     const btn = qs<HTMLButtonElement>(li, "button");
-    const textNode = document.createTextNode(t.name);
-    qs<HTMLElement>(li, ".row-name").appendChild(textNode);
+    qs<HTMLElement>(li, ".row-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     countEl.title = APPROX_COUNT_TITLE;
@@ -172,9 +178,9 @@ export async function loadTables(): Promise<void> {
       loadData();
     };
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn, textNode });
+    tableEntries.push({ name: t.name, li, btn });
   }
-  filterTables();
+  updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
   if (!tableNames.includes(state.table ?? "")) {
@@ -212,4 +218,5 @@ export function setActiveTable(name: string | null): void {
     if (isActive) e.btn.setAttribute("aria-current", "true");
     else e.btn.removeAttribute("aria-current");
   }
+  updateTablesCap();
 }

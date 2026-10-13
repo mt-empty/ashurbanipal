@@ -13,8 +13,8 @@ oversight.
 Playwright E2E suite (`docs/browser-quirks.md` didn't exist yet — logged
 here once cross-browser testing surfaced it).
 
-**What happens:** `#table-filter` and `#filter` are both `<input
-type="search">`. Chromium and legacy WebKit render a native clear icon
+**What happens:** `#filter` is an `<input type="search">` (the table
+search box that once shared this quirk no longer exists). Chromium and legacy WebKit render a native clear icon
 inside the field once it has a value; Firefox has never implemented this
 — there's no visual clear affordance at all, in any Firefox version.
 
@@ -33,7 +33,7 @@ hand-rolled clear button). Reasoning:
   `ui-guidelines.md` R2 asks for a specific reason to do, not just parity.
 
 **Related:** a second, separate Firefox-only issue was found alongside
-this one — `#table-filter` missing `autocomplete="off"` let Firefox
+this one — the old table search box missing `autocomplete="off"` let Firefox
 restore its value across a plain page reload (Chromium didn't exhibit
 this under Playwright's automation, but the mechanism is a documented
 Firefox form-restore behavior, not an artifact of testing). That one *was*

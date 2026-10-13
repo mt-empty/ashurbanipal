@@ -9,7 +9,8 @@ test("an empty table renders the empty-state row and a real 0 count, not -1", as
 
   await selectTable(page, "saved_reports");
   await expect(page.locator("#error")).toBeEmpty();
-  await expect(page.locator("#page")).toHaveText("page 1 · ~0 rows");
+  await expect(page.locator("#page")).toHaveText("page 1");
+  await expect(page.locator("#row-meta")).toHaveText(/^ · ~0 rows · \d+ columns$/);
   const emptyRow = page.locator("#tbody tr.empty td");
   await expect(emptyRow).toHaveText("No rows match this view.");
   await expect(page.locator("#next")).toBeDisabled();

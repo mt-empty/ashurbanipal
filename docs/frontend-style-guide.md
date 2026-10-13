@@ -28,7 +28,7 @@ value-import cycle, which a back-edge would create.
 src/
   index.html   styles.css
   bootstrap/   main, controller, reload, table-focus
-  features/    grid, filter-ui, sidebar (+ sidebar-resize, sidebar-bounds),
+  features/    grid, filter-ui, sidebar (source/schema selectors + table chips),
                nav, record-view, siblings, api-reference, theme
   core/        api, dom, types, state (+ store, url)
   lib/         filter-dsl, json-tree, format, row-diff
@@ -199,7 +199,7 @@ a broken page.
   for routine status, `role="alert"` for errors.
 - Every state conveyed by color also has a non-color equivalent:
   `aria-sort` on sortable headers, `aria-current="true"` on the active
-  sidebar table, `aria-label` on icon-only buttons, text alternatives on
+  table chip, `aria-label` on icon-only buttons, text alternatives on
   the sibling health dots (never color-only status).
 - Every interactive affordance is keyboard-reachable — a real `<button>` as
   the click target, not a bare `onclick` on a `<div>`/`<td>`.

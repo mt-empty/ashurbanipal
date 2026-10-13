@@ -19,7 +19,7 @@ const SEEDED_TABLES = [
   "users",
 ];
 
-test("sidebar lists all seeded tables alphabetically with approx row counts", async ({ page }) => {
+test("table chips list all seeded tables alphabetically with approx row counts", async ({ page }) => {
   await gotoApp(page);
   const buttons = page.locator("#tables button");
   await expect(buttons).toHaveCount(SEEDED_TABLES.length);
@@ -63,24 +63,34 @@ test("a long table name truncates instead of pushing the row count out", async (
   ).toBeVisible();
 });
 
-test("sidebar search filters the table list live and is case-insensitive", async ({ page }) => {
+test("a long table list collapses to two lines behind '+ N more' and expands in place", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 500, height: 800 });
   await gotoApp(page);
-  await page.locator("#table-filter").fill("PAY");
-  const visible = page.locator("#tables li:not([hidden])");
-  await expect(visible).toHaveCount(1);
-  await expect(visible.locator("button")).toContainText("payments");
-  await expect(page.locator("#tables-empty")).toBeHidden();
-
-  await page.locator("#table-filter").fill("");
-  await expect(page.locator("#tables li:not([hidden])")).toHaveCount(SEEDED_TABLES.length);
+  const more = page.locator("#tables-more");
+  await expect(more).toHaveText(/^\+ \d+ more$/);
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  const capped = await page.locator("#tables").evaluate((el) => el.getBoundingClientRect().height);
+  await more.click();
+  await expect(more).toHaveText("show fewer");
+  await expect(more).toHaveAttribute("aria-expanded", "true");
+  const expanded = await page.locator("#tables").evaluate((el) => el.getBoundingClientRect().height);
+  expect(expanded).toBeGreaterThan(capped);
 });
 
-test("sidebar search with no matches shows the empty-state message", async ({ page }) => {
+test("the active table is never hidden behind the cap", async ({ page }) => {
+  await page.setViewportSize({ width: 500, height: 800 });
+  // users is the last chip, so it lands past line two at this width.
+  await gotoApp(page, "?table=users");
+  await expect(page.locator("#tables-more")).toHaveText("show fewer");
+  await expect(page.locator('#tables button[data-table="users"]')).toHaveClass(/active/);
+});
+
+test("a wide window shows every table with no cap control", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 800 });
   await gotoApp(page);
-  await page.locator("#table-filter").fill("zzz-no-such-table");
-  await expect(page.locator("#tables li:not([hidden])")).toHaveCount(0);
-  await expect(page.locator("#tables-empty")).toBeVisible();
-  await expect(page.locator("#tables-empty")).toHaveText("no matching tables");
+  await expect(page.locator("#tables-more")).toBeHidden();
 });
 
 test("selecting a table updates the current-table chrome", async ({ page }) => {
