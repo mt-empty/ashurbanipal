@@ -36,6 +36,43 @@ export interface ReferencedByEntry {
   columns: ColumnPair[];
 }
 
+/** One index of a table (`spec/protocol.md` §5.10); `columns` are the key columns in index order, an expression entry being its expression text. */
+export interface IndexInfo {
+  name: string;
+  columns: string[];
+  unique: boolean;
+  method: string;
+  /** Partial-index `WHERE` text; omitted for a non-partial index. */
+  predicate?: string;
+}
+
+/** An outgoing foreign key, single-column or composite. `table`/`schema` name the referenced table; `schema` is set only when it differs from the resolved one. */
+export interface ConstraintFk {
+  name: string;
+  table: string;
+  schema?: string;
+  columns: ColumnPair[];
+  on_delete: string;
+  on_update: string;
+}
+
+export interface Constraints {
+  primary_key?: { name?: string; columns: string[] };
+  unique: { name: string; columns: string[] }[];
+  foreign_keys: ConstraintFk[];
+  check: { name: string; expression?: string }[];
+}
+
+/** Response body of `GET /api/tables/structure` (`spec/protocol.md` §5.10). */
+export interface Structure {
+  indexes: IndexInfo[];
+  constraints: Constraints;
+}
+
+export function emptyStructure(): Structure {
+  return { indexes: [], constraints: { unique: [], foreign_keys: [], check: [] } };
+}
+
 export interface TableInfo {
   name: string;
   comment?: string;
@@ -79,6 +116,8 @@ export interface DbSource {
   ): Promise<CommonValueEntry[]>;
   /** Incoming FK references: every FK constraint elsewhere in the source whose target is `table` (`spec/protocol.md` §5.9). */
   referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]>;
+  /** Indexes and constraints of `table` (`spec/protocol.md` §5.10). */
+  structure(schema: string | undefined, table: string, timeoutMs: number): Promise<Structure>;
 }
 
 export function findExact(haystack: string[], needle: string): string | undefined {

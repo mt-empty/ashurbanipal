@@ -157,6 +157,22 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       expect(orderIdCol?.references?.column).toBe("id");
     });
 
+    it("structure lists indexes and foreign keys", async () => {
+      const db = await fresh();
+      const source = new MySqlSource(db.pool);
+
+      const s = await source.structure(undefined, "orders", 5000);
+      expect(s.indexes.some((i) => i.name === "PRIMARY" && i.unique)).toBe(true);
+      expect(s.constraints.primary_key?.columns).toEqual(["id"]);
+      expect(s.constraints.foreign_keys).toHaveLength(1);
+      expect(s.constraints.foreign_keys[0].table).toBe("users");
+      expect(s.constraints.foreign_keys[0].schema).toBeUndefined();
+      expect(s.constraints.unique).toEqual([]);
+      expect(s.constraints.check).toEqual([]);
+
+      await expect(source.structure(undefined, "no_such_table", 5000)).rejects.toBeInstanceOf(NotAllowedError);
+    });
+
     it("referenced_by lists incoming FKs, single-database (no schema field)", async () => {
       const db = await fresh();
       const source = new MySqlSource(db.pool);
