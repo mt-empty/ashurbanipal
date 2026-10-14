@@ -154,6 +154,14 @@ class AshurbanipalController(
     ): ResponseEntity<ReferencedByResponse> =
         apiOk(ReferencedByResponse(resolveSource(source).referencedBy(schema, table)))
 
+    @GetMapping("/api/tables/structure")
+    fun structure(
+        @RequestParam(required = false) schema: String?,
+        @RequestParam(required = false) source: String?,
+        @RequestParam table: String,
+    ): ResponseEntity<Structure> =
+        apiOk(resolveSource(source).structure(schema, table))
+
     @GetMapping("/api/siblings")
     fun siblings(): ResponseEntity<SiblingsResponse> {
         val checks: List<CompletableFuture<SiblingStatus>> = properties.siblings.map { sibling ->

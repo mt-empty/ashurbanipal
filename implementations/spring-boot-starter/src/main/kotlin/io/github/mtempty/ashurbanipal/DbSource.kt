@@ -106,6 +106,54 @@ internal fun groupReferencedBy(rows: List<ReferencedByEntry>): List<ReferencedBy
     return out
 }
 
+/** One index of a table (`spec/protocol.md` §5.10); `columns` are the key columns in index order, an expression entry being its expression text. */
+data class IndexInfo(
+    val name: String,
+    val columns: List<String>,
+    val unique: Boolean,
+    val method: String,
+    // Partial-index WHERE text; omitted for a non-partial index.
+    @JsonInclude(JsonInclude.Include.NON_NULL) val predicate: String? = null,
+)
+
+data class ConstraintPk(
+    @JsonInclude(JsonInclude.Include.NON_NULL) val name: String? = null,
+    val columns: List<String>,
+)
+
+data class ConstraintUnique(val name: String, val columns: List<String>)
+
+/**
+ * An outgoing foreign key, single-column or composite. [table]/[schema] name
+ * the referenced table; [schema] is set only when it differs from the
+ * resolved one. [onDelete]/[onUpdate] are one of CASCADE, RESTRICT,
+ * SET NULL, SET DEFAULT, NO ACTION.
+ */
+data class ConstraintFk(
+    val name: String,
+    val table: String,
+    @JsonInclude(JsonInclude.Include.NON_NULL) val schema: String? = null,
+    val columns: List<ColumnPair>,
+    @JsonProperty("on_delete") val onDelete: String,
+    @JsonProperty("on_update") val onUpdate: String,
+)
+
+data class ConstraintCheck(
+    val name: String,
+    // SQL text where the engine can supply it.
+    @JsonInclude(JsonInclude.Include.NON_NULL) val expression: String? = null,
+)
+
+data class Constraints(
+    @JsonProperty("primary_key") @JsonInclude(JsonInclude.Include.NON_NULL) val primaryKey: ConstraintPk? = null,
+    val unique: List<ConstraintUnique> = emptyList(),
+    @JsonProperty("foreign_keys") val foreignKeys: List<ConstraintFk> = emptyList(),
+    val check: List<ConstraintCheck> = emptyList(),
+)
+
+/** A table's indexes and constraints (`spec/protocol.md` §5.10). */
+data class Structure(val indexes: List<IndexInfo> = emptyList(), val constraints: Constraints = Constraints())
+
 data class QueryOpts(
     val limit: Long,
     val offset: Long,
@@ -124,4 +172,7 @@ interface DbSource {
 
     /** Incoming FK references: every FK constraint elsewhere in the source whose target is `table` (`spec/protocol.md` §5.9). */
     fun referencedBy(schema: String?, table: String): List<ReferencedByEntry>
+
+    /** Indexes and constraints of `table` (`spec/protocol.md` §5.10). */
+    fun structure(schema: String?, table: String): Structure
 }
