@@ -84,6 +84,11 @@ Two components, same as the original concept:
 - Served by the backend as its own route, gated by the same kill switch as
     the API routes.
 - Talks to the backend exclusively through the REST endpoints in §4.
+- **Stable column widths** — a column's min-width only grows while you stay
+  on a table, so a sort, filter or page change can widen it but never
+  shrinks it and shifts the columns after it. The refresh button, or
+  switching table, schema or source, starts over from the content's widths
+  (`features/column-widths.ts`).
 - **Inspection affordances** (native elements, no library):
   - *Raw payload viewer* — a "payload" button opens a native `<dialog>`
     (`showModal()`: backdrop, Esc-to-close, focus trap for free) showing the

@@ -2,6 +2,7 @@ import { onProtocolSkew } from "../core/api.js";
 import "../features/api-reference.js";
 import { $, reportError } from "../core/dom.js";
 import { getLastPayload, initState, state } from "../core/state.js";
+import { resetColumnWidths } from "../features/column-widths.js";
 import { loadSiblings } from "../features/siblings.js";
 import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";
@@ -57,6 +58,7 @@ $<HTMLButtonElement>("nav-forward").onclick = () => history.forward();
 $<HTMLButtonElement>("refresh").onclick = () => {
   const btn = $<HTMLButtonElement>("refresh");
   clearStructureCache();
+  resetColumnWidths();
   // Guaranteed one rotation even on a few-ms fetch; the timer (not
   // animationend, which never fires under prefers-reduced-motion) clears it.
   btn.classList.add("spinning");

@@ -10,6 +10,7 @@ import {
   state,
 } from "../core/state.js";
 import type { TableData } from "../core/types.js";
+import { rememberColumnWidths } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
@@ -135,6 +136,7 @@ export async function loadData({
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
     renderRows(data, newRowKeys, pkNames);
+    rememberColumnWidths();
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };

@@ -11,6 +11,7 @@ import {
 } from "../lib/format.js";
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
+import { columnMinWidth } from "./column-widths.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { navigateWithSeededFilter } from "./nav.js";
 import { openRecordView } from "./record-view.js";
@@ -25,6 +26,8 @@ export function renderHeader(columns: Column[]): void {
   for (const col of columns) {
     const th = document.createElement("th");
     th.dataset.col = col.name;
+    const minWidth = columnMinWidth(col.name);
+    if (minWidth) th.style.minWidth = `${minWidth}px`;
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
     // The visible header renders the engine-native type spelling as inline

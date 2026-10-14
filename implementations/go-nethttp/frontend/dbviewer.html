@@ -160,6 +160,9 @@ ul { list-style: none; margin: 0; padding: 0; }
    table inflate far past its natural width (a 5-column table rendered 3x wide). */
 table { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
 th, td { padding: .45rem .75rem .45rem 0; text-align: left; }
+/* Border-box so the min-width from features/column-widths.ts is the column's
+   measured width, not that plus padding (which would grow it every render). */
+th { box-sizing: border-box; }
 td { position: relative; border-bottom: 1px solid var(--rule);
      font-family: var(--font-mono); font-size: .8125rem; }
 tbody tr:hover { background: var(--hover); }
@@ -1311,6 +1314,30 @@ function initState() {
   applyUrlOverlay(new URLSearchParams(location.search));
 }
 
+// src/features/column-widths.ts
+var scope = "";
+var widths = /* @__PURE__ */ new Map();
+function syncScope() {
+  const current = `${state.source}|${state.schema}|${state.table}`;
+  if (current === scope) return;
+  scope = current;
+  widths.clear();
+}
+function columnMinWidth(name) {
+  syncScope();
+  return widths.get(name);
+}
+function rememberColumnWidths() {
+  syncScope();
+  for (const th of $("thead").querySelectorAll("th[data-col]:not(.col-hidden)")) {
+    const name = th.dataset.col;
+    widths.set(name, Math.max(widths.get(name) ?? 0, th.getBoundingClientRect().width));
+  }
+}
+function resetColumnWidths() {
+  widths.clear();
+}
+
 // src/features/siblings.ts
 var siblingsRequestToken = 0;
 var siblingsWarned = false;
@@ -2235,6 +2262,8 @@ function renderHeader(columns) {
   for (const col of columns) {
     const th = document.createElement("th");
     th.dataset.col = col.name;
+    const minWidth = columnMinWidth(col.name);
+    if (minWidth) th.style.minWidth = `${minWidth}px`;
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
     const typeCode = document.createElement("code");
@@ -2549,6 +2578,7 @@ async function loadData2({
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
     renderRows(data, newRowKeys, pkNames);
+    rememberColumnWidths();
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
@@ -2619,6 +2649,7 @@ $("nav-forward").onclick = () => history.forward();
 $("refresh").onclick = () => {
   const btn = $("refresh");
   clearStructureCache();
+  resetColumnWidths();
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });

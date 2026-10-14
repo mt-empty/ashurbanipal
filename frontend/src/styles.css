@@ -138,6 +138,9 @@ ul { list-style: none; margin: 0; padding: 0; }
    table inflate far past its natural width (a 5-column table rendered 3x wide). */
 table { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
 th, td { padding: .45rem .75rem .45rem 0; text-align: left; }
+/* Border-box so the min-width from features/column-widths.ts is the column's
+   measured width, not that plus padding (which would grow it every render). */
+th { box-sizing: border-box; }
 td { position: relative; border-bottom: 1px solid var(--rule);
      font-family: var(--font-mono); font-size: .8125rem; }
 tbody tr:hover { background: var(--hover); }
