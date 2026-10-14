@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -509,4 +510,205 @@ func (c *SQLiteSource) ReferencedBy(ctx context.Context, schema *string, table s
 	}
 
 	return groupReferencedBy(mapped), nil
+}
+
+// partialIndexPredicate returns the text after a CREATE INDEX statement's
+// top-level WHERE, ignoring quoted text and anything inside parentheses
+// (the column list and expression key parts). Only called for indexes
+// pragma_index_list flags as partial.
+func partialIndexPredicate(sqlText string) (string, bool) {
+	var quote byte
+	depth := 0
+	for i := 0; i < len(sqlText); i++ {
+		b := sqlText[i]
+		if quote != 0 {
+			if b == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch b {
+		case '\'', '"', '`':
+			quote = b
+		case '[':
+			quote = ']'
+		case '(':
+			depth++
+		case ')':
+			depth--
+		default:
+			if depth != 0 || !isASCIISpace(b) {
+				continue
+			}
+			rest := sqlText[i+1:]
+			if len(rest) > 5 && strings.EqualFold(rest[:5], "where") && (isASCIISpace(rest[5]) || rest[5] == '(') {
+				return strings.TrimSpace(rest[5:]), true
+			}
+		}
+	}
+	return "", false
+}
+
+func isASCIISpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'
+}
+
+// Structure serves GET /api/tables/structure (spec/protocol.md §5.10).
+func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table string) (Structure, error) {
+	if err := checkSchema(schema); err != nil {
+		return Structure{}, err
+	}
+	tables, err := c.allowedTables(ctx)
+	if err != nil {
+		return Structure{}, err
+	}
+	if _, ok := findExact(tables, table); !ok {
+		return Structure{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	}
+
+	qctx, cancel := c.bounded(ctx)
+	defer cancel()
+	out := newStructure()
+	quoted := quoteIdent(table)
+
+	// key = 1 drops trailing rowid/auxiliary entries. An expression key
+	// part has a NULL name and no recoverable text.
+	rows, err := c.db.QueryContext(qctx,
+		fmt.Sprintf(`select il.name, il."unique", il.origin, il.partial, ix.name
+		 from pragma_index_list(%s) il
+		 join pragma_index_xinfo(il.name) ix
+		 where ix.key = 1
+		 order by il.name, ix.seqno`, quoted))
+	if err != nil {
+		return Structure{}, err
+	}
+	partial := map[string]bool{}
+	var uniqueOrigin []string
+	for rows.Next() {
+		var name, origin string
+		var unique, isPartial int64
+		var column sql.NullString
+		if err := rows.Scan(&name, &unique, &origin, &isPartial, &column); err != nil {
+			rows.Close()
+			return Structure{}, err
+		}
+		col := column.String
+		if !column.Valid {
+			col = "<expression>"
+		}
+		if n := len(out.Indexes); n > 0 && out.Indexes[n-1].Name == name {
+			out.Indexes[n-1].Columns = append(out.Indexes[n-1].Columns, col)
+			continue
+		}
+		if origin == "u" {
+			uniqueOrigin = append(uniqueOrigin, name)
+		}
+		if isPartial != 0 {
+			partial[name] = true
+		}
+		out.Indexes = append(out.Indexes, IndexInfo{
+			Name: name, Columns: []string{col}, Unique: unique != 0, Method: "btree",
+		})
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Structure{}, err
+	}
+
+	rows, err = c.db.QueryContext(qctx,
+		`select name, sql from sqlite_master where type = 'index' and tbl_name = ?`, table)
+	if err != nil {
+		return Structure{}, err
+	}
+	sqlOf := map[string]string{}
+	for rows.Next() {
+		var name string
+		var text sql.NullString
+		if err := rows.Scan(&name, &text); err != nil {
+			rows.Close()
+			return Structure{}, err
+		}
+		if text.Valid {
+			sqlOf[name] = text.String
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Structure{}, err
+	}
+	for i := range out.Indexes {
+		idx := &out.Indexes[i]
+		if partial[idx.Name] {
+			if p, ok := partialIndexPredicate(sqlOf[idx.Name]); ok {
+				idx.Predicate = p
+			}
+		}
+	}
+	for _, name := range uniqueOrigin {
+		for _, idx := range out.Indexes {
+			if idx.Name == name {
+				out.Constraints.Unique = append(out.Constraints.Unique, ConstraintUnique{Name: name, Columns: idx.Columns})
+			}
+		}
+	}
+
+	rows, err = c.db.QueryContext(qctx,
+		fmt.Sprintf(`select name from pragma_table_info(%s) where pk > 0 order by pk`, quoted))
+	if err != nil {
+		return Structure{}, err
+	}
+	var pk []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return Structure{}, err
+		}
+		pk = append(pk, name)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Structure{}, err
+	}
+	if len(pk) > 0 {
+		out.Constraints.PrimaryKey = &ConstraintPK{Columns: pk}
+	}
+
+	// "to" is NULL for REFERENCES parent shorthand; ppk resolves it from the
+	// parent's primary key (docs/adapter-decisions.md §5.4.1).
+	rows, err = c.db.QueryContext(qctx,
+		fmt.Sprintf(`select fkl.id, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid'),
+		        fkl.on_delete, fkl.on_update
+		 from pragma_foreign_key_list(%s) fkl
+		 left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1
+		 order by fkl.id, fkl.seq`, quoted))
+	if err != nil {
+		return Structure{}, err
+	}
+	defer rows.Close()
+	lastID := int64(-1)
+	for rows.Next() {
+		var id int64
+		var refTable, from, to, del, upd string
+		if err := rows.Scan(&id, &refTable, &from, &to, &del, &upd); err != nil {
+			return Structure{}, err
+		}
+		if n := len(out.Constraints.ForeignKeys); n > 0 && lastID == id {
+			out.Constraints.ForeignKeys[n-1].Columns = append(out.Constraints.ForeignKeys[n-1].Columns, ColumnPair{From: from, To: to})
+			continue
+		}
+		lastID = id
+		out.Constraints.ForeignKeys = append(out.Constraints.ForeignKeys, ConstraintFK{
+			Name: fmt.Sprintf("fk_%d", id), Table: refTable,
+			Columns:  []ColumnPair{{From: from, To: to}},
+			OnDelete: strings.ToUpper(del), OnUpdate: strings.ToUpper(upd),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return Structure{}, err
+	}
+	return out, nil
 }

@@ -45,6 +45,77 @@ type ReferencedByEntry struct {
 	Columns    []ColumnPair `json:"columns"`
 }
 
+// IndexInfo is one index of a table (spec/protocol.md §5.10). Columns are
+// the key columns in index order; an expression entry is its expression text.
+type IndexInfo struct {
+	Name    string   `json:"name"`
+	Columns []string `json:"columns"`
+	Unique  bool     `json:"unique"`
+	Method  string   `json:"method"`
+	// Predicate is the partial-index WHERE text; omitted for a non-partial index.
+	Predicate string `json:"predicate,omitempty"`
+}
+
+// ConstraintPK is a table's primary key; Name is omitted when the engine
+// reports none.
+type ConstraintPK struct {
+	Name    string   `json:"name,omitempty"`
+	Columns []string `json:"columns"`
+}
+
+// ConstraintUnique is one unique constraint.
+type ConstraintUnique struct {
+	Name    string   `json:"name"`
+	Columns []string `json:"columns"`
+}
+
+// ConstraintFK is an outgoing foreign key, single-column or composite.
+// Table/Schema name the referenced table; Schema is set only when it
+// differs from the resolved one. OnDelete/OnUpdate are one of CASCADE,
+// RESTRICT, SET NULL, SET DEFAULT, NO ACTION.
+type ConstraintFK struct {
+	Name     string       `json:"name"`
+	Table    string       `json:"table"`
+	Schema   string       `json:"schema,omitempty"`
+	Columns  []ColumnPair `json:"columns"`
+	OnDelete string       `json:"on_delete"`
+	OnUpdate string       `json:"on_update"`
+}
+
+// ConstraintCheck is one check constraint; Expression is omitted where the
+// engine cannot supply the SQL text.
+type ConstraintCheck struct {
+	Name       string `json:"name"`
+	Expression string `json:"expression,omitempty"`
+}
+
+// Constraints groups a table's whole-object constraints. The slices are
+// always non-nil so they encode as [] rather than null.
+type Constraints struct {
+	PrimaryKey  *ConstraintPK      `json:"primary_key,omitempty"`
+	Unique      []ConstraintUnique `json:"unique"`
+	ForeignKeys []ConstraintFK     `json:"foreign_keys"`
+	Check       []ConstraintCheck  `json:"check"`
+}
+
+// Structure is the response body of GET /api/tables/structure (§5.10).
+type Structure struct {
+	Indexes     []IndexInfo `json:"indexes"`
+	Constraints Constraints `json:"constraints"`
+}
+
+// newStructure returns a Structure whose slices are non-nil.
+func newStructure() Structure {
+	return Structure{
+		Indexes: []IndexInfo{},
+		Constraints: Constraints{
+			Unique:      []ConstraintUnique{},
+			ForeignKeys: []ConstraintFK{},
+			Check:       []ConstraintCheck{},
+		},
+	}
+}
+
 // ColumnInfo is one column's metadata, sourced entirely from schema
 // catalogs (spec/protocol.md §5.4.1) — never used to build SQL itself.
 type ColumnInfo struct {
@@ -101,6 +172,8 @@ type DbSource interface {
 	// ReferencedBy lists every FK constraint elsewhere in the source whose
 	// target is table (spec/protocol.md §5.9).
 	ReferencedBy(ctx context.Context, schema *string, table string) ([]ReferencedByEntry, error)
+	// Structure reports table's indexes and constraints (spec/protocol.md §5.10).
+	Structure(ctx context.Context, schema *string, table string) (Structure, error)
 }
 
 // queryer is satisfied by both *sql.DB and *sql.Tx — every backend's

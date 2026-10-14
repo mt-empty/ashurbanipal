@@ -49,6 +49,7 @@ func assertDisabled(t *testing.T, handler http.Handler) {
 		"/__ashurbanipal/api/tables/data",
 		"/__ashurbanipal/api/tables/common-values",
 		"/__ashurbanipal/api/tables/referenced-by",
+		"/__ashurbanipal/api/tables/structure",
 		"/__ashurbanipal/api/siblings",
 	} {
 		rec := httptest.NewRecorder()

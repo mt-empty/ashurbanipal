@@ -703,3 +703,186 @@ func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table
 
 	return groupReferencedBy(mapped), nil
 }
+
+// fkActionPG maps pg_constraint.confdeltype/confupdtype to the fixed
+// vocabulary of spec/protocol.md §5.10.
+func fkActionPG(code string) string {
+	switch code {
+	case "c":
+		return "CASCADE"
+	case "r":
+		return "RESTRICT"
+	case "n":
+		return "SET NULL"
+	case "d":
+		return "SET DEFAULT"
+	}
+	return "NO ACTION"
+}
+
+// Structure serves GET /api/tables/structure (spec/protocol.md §5.10).
+func (c *PostgresSource) Structure(ctx context.Context, schema *string, table string) (Structure, error) {
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Structure{}, err
+	}
+	defer tx.Rollback()
+
+	realSchema, err := c.resolveSchema(ctx, tx, schema)
+	if err != nil {
+		return Structure{}, err
+	}
+	oid, err := c.readableTableOID(ctx, tx, realSchema, table)
+	if err != nil {
+		return Structure{}, err
+	}
+
+	qctx, cancel := c.bounded(ctx)
+	defer cancel()
+	out := newStructure()
+
+	// Key columns only (indnkeyatts): trailing indkey entries are INCLUDE
+	// columns. An indkey entry of 0 is an expression with no pg_attribute
+	// row, so the join is a left join and the entry renders through
+	// pg_get_indexdef instead of vanishing.
+	rows, err := tx.QueryContext(qctx,
+		`select ic.relname::text, am.amname::text, ix.indisunique,
+		        pg_get_expr(ix.indpred, ix.indrelid),
+		        coalesce(a.attname::text, pg_get_indexdef(ix.indexrelid, k.n::int, true))
+		 from pg_index ix
+		 join pg_class ic on ic.oid = ix.indexrelid
+		 join pg_am am on am.oid = ic.relam
+		 join lateral unnest(ix.indkey::int2[]) with ordinality as k(attnum, n) on true
+		 left join pg_attribute a on a.attrelid = ix.indrelid and a.attnum = k.attnum
+		 where ix.indrelid = $1 and k.n <= ix.indnkeyatts
+		 order by ic.relname, k.n`, oid)
+	if err != nil {
+		return Structure{}, err
+	}
+	for rows.Next() {
+		var name, method, column string
+		var unique bool
+		var predicate sql.NullString
+		if err := rows.Scan(&name, &method, &unique, &predicate, &column); err != nil {
+			rows.Close()
+			return Structure{}, err
+		}
+		if n := len(out.Indexes); n > 0 && out.Indexes[n-1].Name == name {
+			out.Indexes[n-1].Columns = append(out.Indexes[n-1].Columns, column)
+			continue
+		}
+		out.Indexes = append(out.Indexes, IndexInfo{
+			Name: name, Columns: []string{column}, Unique: unique, Method: method,
+			Predicate: predicate.String,
+		})
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Structure{}, err
+	}
+
+	// PK and UNIQUE need only conkey.
+	rows, err = tx.QueryContext(qctx,
+		`select con.contype::text, con.conname::text, a.attname::text
+		 from pg_constraint con
+		 join lateral unnest(con.conkey) with ordinality as k(attnum, n) on true
+		 join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum
+		 where con.conrelid = $1 and con.contype in ('p', 'u')
+		 order by con.contype desc, con.conname, k.n`, oid)
+	if err != nil {
+		return Structure{}, err
+	}
+	for rows.Next() {
+		var kind, name, column string
+		if err := rows.Scan(&kind, &name, &column); err != nil {
+			rows.Close()
+			return Structure{}, err
+		}
+		if kind == "p" {
+			if out.Constraints.PrimaryKey == nil {
+				out.Constraints.PrimaryKey = &ConstraintPK{Name: name}
+			}
+			out.Constraints.PrimaryKey.Columns = append(out.Constraints.PrimaryKey.Columns, column)
+			continue
+		}
+		if n := len(out.Constraints.Unique); n > 0 && out.Constraints.Unique[n-1].Name == name {
+			out.Constraints.Unique[n-1].Columns = append(out.Constraints.Unique[n-1].Columns, column)
+			continue
+		}
+		out.Constraints.Unique = append(out.Constraints.Unique, ConstraintUnique{Name: name, Columns: []string{column}})
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Structure{}, err
+	}
+
+	// FK pairs conkey with confkey; the referenced table comes from confrelid.
+	rows, err = tx.QueryContext(qctx,
+		`select con.conname::text, rn.nspname::text, rc.relname::text,
+		        fa.attname::text, ta.attname::text,
+		        con.confdeltype::text, con.confupdtype::text
+		 from pg_constraint con
+		 join pg_class rc on rc.oid = con.confrelid
+		 join pg_namespace rn on rn.oid = rc.relnamespace
+		 join lateral unnest(con.conkey, con.confkey) with ordinality
+		      as k(from_attnum, to_attnum, n) on true
+		 join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum
+		 join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum
+		 where con.conrelid = $1 and con.contype = 'f'
+		 order by con.conname, k.n`, oid)
+	if err != nil {
+		return Structure{}, err
+	}
+	for rows.Next() {
+		var name, refSchema, refTable, from, to, del, upd string
+		if err := rows.Scan(&name, &refSchema, &refTable, &from, &to, &del, &upd); err != nil {
+			rows.Close()
+			return Structure{}, err
+		}
+		if n := len(out.Constraints.ForeignKeys); n > 0 && out.Constraints.ForeignKeys[n-1].Name == name {
+			out.Constraints.ForeignKeys[n-1].Columns = append(out.Constraints.ForeignKeys[n-1].Columns, ColumnPair{From: from, To: to})
+			continue
+		}
+		fk := ConstraintFK{
+			Name: name, Table: refTable,
+			Columns:  []ColumnPair{{From: from, To: to}},
+			OnDelete: fkActionPG(del), OnUpdate: fkActionPG(upd),
+		}
+		if refSchema != realSchema {
+			fk.Schema = refSchema
+		}
+		out.Constraints.ForeignKeys = append(out.Constraints.ForeignKeys, fk)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Structure{}, err
+	}
+
+	rows, err = tx.QueryContext(qctx,
+		`select con.conname::text, pg_get_constraintdef(con.oid)
+		 from pg_constraint con
+		 where con.conrelid = $1 and con.contype = 'c'
+		 order by con.conname`, oid)
+	if err != nil {
+		return Structure{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, def string
+		if err := rows.Scan(&name, &def); err != nil {
+			return Structure{}, err
+		}
+		out.Constraints.Check = append(out.Constraints.Check, ConstraintCheck{Name: name, Expression: def})
+	}
+	if err := rows.Err(); err != nil {
+		return Structure{}, err
+	}
+	rows.Close()
+	if err := tx.Commit(); err != nil {
+		return Structure{}, err
+	}
+	return out, nil
+}

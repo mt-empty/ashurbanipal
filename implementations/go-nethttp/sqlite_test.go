@@ -156,6 +156,95 @@ func TestSQLitePKAndFKColumnReportsBoth(t *testing.T) {
 	}
 }
 
+func TestSQLitePartialIndexPredicateFindsTheTopLevelWhereOnly(t *testing.T) {
+	cases := []struct {
+		sql    string
+		want   string
+		wantOK bool
+	}{
+		{"CREATE INDEX i ON t(a) WHERE status = 'open'", "status = 'open'", true},
+		{"CREATE INDEX i ON t(a)\nwhere\n  b > 1", "b > 1", true},
+		{"CREATE INDEX i ON t(a) WHERE note = ' where '", "note = ' where '", true},
+		{"CREATE INDEX i ON t(a || ' where ')", "", false},
+		{"CREATE INDEX i ON t(lower(a) )", "", false},
+	}
+	for _, c := range cases {
+		got, ok := partialIndexPredicate(c.sql)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("partialIndexPredicate(%q) = %q, %v; want %q, %v", c.sql, got, ok, c.want, c.wantOK)
+		}
+	}
+}
+
+func TestSQLiteStructureReportsIndexesPartialPredicateUniqueAndFKActions(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "structure.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(`
+		create table users (id integer primary key, email text unique);
+		create table orders (
+			id integer primary key,
+			user_id integer not null references users on delete cascade,
+			kind text,
+			status text
+		);
+		create index orders_kind_status_idx on orders(kind, status);
+		create index orders_open_idx on orders(user_id) where status = 'open';`); err != nil {
+		t.Fatal(err)
+	}
+	source := NewSQLiteSource(db, 5)
+	ctx := context.Background()
+
+	s, err := source.Structure(ctx, nil, "orders")
+	if err != nil {
+		t.Fatalf("Structure(orders): %v", err)
+	}
+	byName := map[string]IndexInfo{}
+	for _, idx := range s.Indexes {
+		byName[idx.Name] = idx
+	}
+	if got := byName["orders_kind_status_idx"].Columns; len(got) != 2 || got[0] != "kind" || got[1] != "status" {
+		t.Errorf("kind/status index columns = %v", got)
+	}
+	if got := byName["orders_open_idx"].Predicate; got != "status = 'open'" {
+		t.Errorf("partial predicate = %q", got)
+	}
+	if got := byName["orders_kind_status_idx"].Predicate; got != "" {
+		t.Errorf("non-partial index predicate = %q, want empty", got)
+	}
+	if s.Constraints.PrimaryKey == nil || s.Constraints.PrimaryKey.Columns[0] != "id" {
+		t.Errorf("primary_key = %+v", s.Constraints.PrimaryKey)
+	}
+	if len(s.Constraints.ForeignKeys) != 1 {
+		t.Fatalf("foreign_keys = %+v", s.Constraints.ForeignKeys)
+	}
+	fk := s.Constraints.ForeignKeys[0]
+	if fk.Table != "users" || fk.Columns[0].To != "id" || fk.OnDelete != "CASCADE" || fk.OnUpdate != "NO ACTION" {
+		t.Errorf("fk = %+v, want users(id) CASCADE / NO ACTION (shorthand resolves the parent PK)", fk)
+	}
+	if s.Constraints.Check == nil || len(s.Constraints.Check) != 0 {
+		t.Errorf("check = %v, want non-nil empty", s.Constraints.Check)
+	}
+
+	users, err := source.Structure(ctx, nil, "users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users.Constraints.Unique) != 1 || users.Constraints.Unique[0].Columns[0] != "email" {
+		t.Errorf("unique = %+v, want one on email", users.Constraints.Unique)
+	}
+
+	if _, err := source.Structure(ctx, nil, "no_such_table"); !errors.As(err, new(*NotAllowedError)) {
+		t.Errorf("Structure(no_such_table) = %v, want NotAllowedError", err)
+	}
+	other := "other"
+	if _, err := source.Structure(ctx, &other, "users"); !errors.As(err, new(*NotAllowedError)) {
+		t.Errorf("Structure(other, users) = %v, want NotAllowedError", err)
+	}
+}
+
 func TestSQLiteReferencedByListsIncomingFKsWithSynthesizedConstraintNames(t *testing.T) {
 	source := NewSQLiteSource(seededDB(t), 5)
 	ctx := context.Background()
