@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts
-from ashurbanipal.db.sqlite import SqliteSource
+from ashurbanipal.db.sqlite import SqliteSource, partial_index_predicate
 
 
 @pytest.fixture
@@ -117,6 +117,56 @@ def _tmp_sqlite_path(schema_sql: str):
 # "the parent's primary key", but pragma_foreign_key_list reports "to" as
 # NULL for that form rather than filling in the PK name — the query must
 # resolve it itself.
+def test_partial_index_predicate_finds_the_top_level_where_only() -> None:
+    assert partial_index_predicate("CREATE INDEX i ON t(a) WHERE status = 'open'") == "status = 'open'"
+    assert partial_index_predicate("CREATE INDEX i ON t(a)\nwhere\n  b > 1") == "b > 1"
+    assert partial_index_predicate("CREATE INDEX i ON t(a) WHERE note = ' where '") == "note = ' where '"
+    assert partial_index_predicate("CREATE INDEX i ON t(a || ' where ')") is None
+    assert partial_index_predicate("CREATE INDEX i ON t(lower(a) )") is None
+
+
+def test_structure_reports_indexes_partial_predicate_unique_and_fk_actions() -> None:
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        conn = sqlite3.connect(path)
+        conn.executescript(
+            """
+            create table users (id integer primary key, email text unique);
+            create table orders (
+                id integer primary key,
+                user_id integer not null references users on delete cascade,
+                kind text,
+                status text
+            );
+            create index orders_kind_status_idx on orders(kind, status);
+            create index orders_open_idx on orders(user_id) where status = 'open';
+            """
+        )
+        conn.close()
+        source = SqliteSource(path)
+
+        s = source.structure(None, "orders")
+        by_name = {i.name: i for i in s.indexes}
+        assert by_name["orders_kind_status_idx"].columns == ["kind", "status"]
+        assert by_name["orders_open_idx"].predicate == "status = 'open'"
+        assert by_name["orders_kind_status_idx"].predicate is None
+        assert s.constraints.primary_key.columns == ["id"]
+        (fk,) = s.constraints.foreign_keys
+        assert (fk.table, fk.columns[0].to, fk.on_delete, fk.on_update) == ("users", "id", "CASCADE", "NO ACTION")
+        assert s.constraints.check == []
+
+        users = source.structure(None, "users")
+        assert [u.columns for u in users.constraints.unique] == [["email"]]
+
+        with pytest.raises(NotAllowed):
+            source.structure(None, "no_such_table")
+        with pytest.raises(NotAllowed):
+            source.structure("other", "users")
+    finally:
+        Path(path).unlink()
+
+
 def test_referenced_by_resolves_shorthand_fk_with_no_named_parent_column() -> None:
     path = _tmp_sqlite_path(
         """

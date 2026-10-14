@@ -5,7 +5,7 @@ from __future__ import annotations
 import abc
 import functools
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TypeVar
 
@@ -57,6 +57,71 @@ class ReferencedBy:
     # resolved one — the opposite end of the relationship from
     # ColumnRef.schema.
     schema: str | None = None
+
+
+@dataclass
+class IndexInfo:
+    """One index of a table (spec/protocol.md §5.10). `columns` are the key
+    columns in index order; an expression entry is its expression text.
+    """
+
+    name: str
+    columns: list[str]
+    unique: bool
+    method: str
+    # Partial-index WHERE text; omitted from the wire for a non-partial index.
+    predicate: str | None = None
+
+
+@dataclass
+class ConstraintPk:
+    columns: list[str]
+    name: str | None = None
+
+
+@dataclass
+class ConstraintUnique:
+    name: str
+    columns: list[str]
+
+
+@dataclass
+class ConstraintFk:
+    """An outgoing foreign key, single-column or composite. `table`/`schema`
+    name the referenced table; `schema` is set only when it differs from the
+    resolved one. `on_delete`/`on_update` are one of CASCADE, RESTRICT,
+    SET NULL, SET DEFAULT, NO ACTION.
+    """
+
+    name: str
+    table: str
+    columns: list[ColumnPair]
+    on_delete: str
+    on_update: str
+    schema: str | None = None
+
+
+@dataclass
+class ConstraintCheck:
+    name: str
+    # SQL text where the engine can supply it.
+    expression: str | None = None
+
+
+@dataclass
+class Constraints:
+    primary_key: ConstraintPk | None = None
+    unique: list[ConstraintUnique] = field(default_factory=list)
+    foreign_keys: list[ConstraintFk] = field(default_factory=list)
+    check: list[ConstraintCheck] = field(default_factory=list)
+
+
+@dataclass
+class Structure:
+    """A table's indexes and constraints (spec/protocol.md §5.10)."""
+
+    indexes: list[IndexInfo] = field(default_factory=list)
+    constraints: Constraints = field(default_factory=Constraints)
 
 
 @dataclass
@@ -162,6 +227,11 @@ class DbSource(abc.ABC):
     @abc.abstractmethod
     def referenced_by(self, schema: str | None, table: str) -> list[ReferencedBy]:
         """Every FK constraint elsewhere in the source whose target is `table` (spec/protocol.md §5.9)."""
+        ...
+
+    @abc.abstractmethod
+    def structure(self, schema: str | None, table: str) -> Structure:
+        """Indexes and constraints of `table` (spec/protocol.md §5.10)."""
         ...
 
 

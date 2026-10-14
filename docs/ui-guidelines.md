@@ -143,7 +143,7 @@ should block on.
   "what changed" affordance.** A user-clicked re-fetch of the current view;
   rows absent from the previous same-scope response briefly wash
   (`--row-new-bg`, faded/static per `prefers-reduced-motion`). Constraints:
-  it is manual only (no polling timer — that fights R9 and heuristic #7);
+  it runs on a user click or on the opt-in auto-refresh interval (story 38);
   row identity is the primary key, so a PK-less table gets no tint rather
   than a guessed one; the previous row set lives in memory only and is
   never persisted (R6); and the fetch itself reports through the normal

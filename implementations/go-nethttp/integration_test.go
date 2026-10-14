@@ -356,6 +356,7 @@ func TestNulByteInTableIsRejectedWith400(t *testing.T) {
 		"/__ashurbanipal/api/tables/data?table=" + table,
 		"/__ashurbanipal/api/tables/common-values?table=" + table + "&column=id",
 		"/__ashurbanipal/api/tables/referenced-by?table=" + table,
+		"/__ashurbanipal/api/tables/structure?table=" + table,
 	}
 	for _, path := range paths {
 		resp, err := http.Get(base + path)

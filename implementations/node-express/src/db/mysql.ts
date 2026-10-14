@@ -8,12 +8,14 @@ import {
   type CountEntry,
   cellToJson,
   type DbSource,
+  emptyStructure,
   findExact,
   groupReferencedBy,
   opSql,
   opTakesValue,
   type QueryOpts,
   type ReferencedByEntry,
+  type Structure,
   type TableData,
   type TableInfo,
 } from "./types.js";
@@ -464,6 +466,159 @@ export class MySqlSource implements DbSource {
             columns: [{ from: r.column_name as string, to: r.referenced_column_name as string }],
           })),
       );
+    });
+  }
+
+  async structure(schema: string | undefined, table: string, timeoutMs: number): Promise<Structure> {
+    return this.withTx(async (conn, variant) => {
+      const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
+      const allowed = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
+      if (!allowed.includes(table)) {
+        throw new NotAllowedError(`table "${table}"`, "table");
+      }
+      const out = emptyStructure();
+
+      // MariaDB's statistics view has no expression column; MySQL 8.0.13+
+      // reports a functional key part there with a NULL column_name.
+      const keyPart = variant === "mariadb" ? "s.column_name" : "coalesce(s.column_name, s.expression)";
+      const indexRows = await queryRows(
+        conn,
+        timedSelect(
+          variant,
+          timeoutMs,
+          "s.index_name as index_name, cast(s.non_unique as signed) as non_unique, " +
+            `s.index_type as index_type, ${keyPart} as key_part ` +
+            "from information_schema.statistics s " +
+            "where s.table_schema = ? and s.table_name = ? " +
+            "order by s.index_name, s.seq_in_index",
+        ),
+        [realSchema, table],
+      );
+      for (const r of indexRows) {
+        const name = r.index_name as string;
+        const last = out.indexes[out.indexes.length - 1];
+        if (last && last.name === name) {
+          last.columns.push((r.key_part as string | null) ?? "");
+          continue;
+        }
+        out.indexes.push({
+          name,
+          columns: [(r.key_part as string | null) ?? ""],
+          unique: Number(r.non_unique) === 0,
+          method: (r.index_type as string).toLowerCase(),
+        });
+      }
+
+      const keyRows = await queryRows(
+        conn,
+        timedSelect(
+          variant,
+          timeoutMs,
+          "tc.constraint_type as constraint_type, tc.constraint_name as constraint_name, " +
+            "kcu.column_name as column_name " +
+            "from information_schema.table_constraints tc " +
+            "join information_schema.key_column_usage kcu " +
+            "  on kcu.constraint_schema = tc.constraint_schema " +
+            " and kcu.constraint_name = tc.constraint_name " +
+            " and kcu.table_schema = tc.table_schema " +
+            " and kcu.table_name = tc.table_name " +
+            "where tc.table_schema = ? and tc.table_name = ? " +
+            "  and tc.constraint_type in ('PRIMARY KEY', 'UNIQUE') " +
+            "order by tc.constraint_type desc, tc.constraint_name, kcu.ordinal_position",
+        ),
+        [realSchema, table],
+      );
+      for (const r of keyRows) {
+        const name = r.constraint_name as string;
+        const column = r.column_name as string;
+        if (r.constraint_type === "PRIMARY KEY") {
+          out.constraints.primary_key ??= { name, columns: [] };
+          out.constraints.primary_key.columns.push(column);
+          continue;
+        }
+        const last = out.constraints.unique[out.constraints.unique.length - 1];
+        if (last && last.name === name) last.columns.push(column);
+        else out.constraints.unique.push({ name, columns: [column] });
+      }
+
+      // Read key_column_usage for the referenced table, not
+      // referential_constraints, which MariaDB nulls for a role lacking
+      // privilege on it (same reason as referencedBy).
+      const fkRows = await queryRows(
+        conn,
+        timedSelect(
+          variant,
+          timeoutMs,
+          "kcu.constraint_name as constraint_name, kcu.referenced_table_schema as ref_schema, " +
+            "kcu.referenced_table_name as ref_table, kcu.column_name as column_name, " +
+            "kcu.referenced_column_name as ref_column, rc.delete_rule as delete_rule, " +
+            "rc.update_rule as update_rule " +
+            "from information_schema.key_column_usage kcu " +
+            "join information_schema.referential_constraints rc " +
+            "  on rc.constraint_schema = kcu.constraint_schema " +
+            " and rc.constraint_name = kcu.constraint_name " +
+            " and rc.table_name = kcu.table_name " +
+            "where kcu.table_schema = ? and kcu.table_name = ? " +
+            "  and kcu.referenced_table_name is not null " +
+            "order by kcu.constraint_name, kcu.ordinal_position",
+        ),
+        [realSchema, table],
+      );
+      for (const r of fkRows) {
+        const name = r.constraint_name as string;
+        const pair = { from: r.column_name as string, to: r.ref_column as string };
+        const last = out.constraints.foreign_keys[out.constraints.foreign_keys.length - 1];
+        if (last && last.name === name) {
+          last.columns.push(pair);
+          continue;
+        }
+        out.constraints.foreign_keys.push({
+          name,
+          table: r.ref_table as string,
+          ...(r.ref_schema === realSchema ? {} : { schema: r.ref_schema as string }),
+          columns: [pair],
+          on_delete: (r.delete_rule as string).toUpperCase(),
+          on_update: (r.update_rule as string).toUpperCase(),
+        });
+      }
+
+      // MySQL before 8.0.16 has no check_constraints view: report [].
+      const hasChecks = await queryRows(
+        conn,
+        timedSelect(
+          variant,
+          timeoutMs,
+          "count(*) as n from information_schema.tables " +
+            "where table_schema = 'information_schema' and table_name = 'CHECK_CONSTRAINTS'",
+        ),
+        [],
+      );
+      if (Number(hasChecks[0]?.n) > 0) {
+        // MariaDB names unnamed table-level checks per table, so its view
+        // carries table_name for the join; MySQL's has none.
+        const ccTable = variant === "mariadb" ? "and cc.table_name = tc.table_name " : "";
+        const checkRows = await queryRows(
+          conn,
+          timedSelect(
+            variant,
+            timeoutMs,
+            "tc.constraint_name as constraint_name, cc.check_clause as check_clause " +
+              "from information_schema.table_constraints tc " +
+              "join information_schema.check_constraints cc " +
+              "  on cc.constraint_schema = tc.constraint_schema " +
+              ` and cc.constraint_name = tc.constraint_name ${ccTable}` +
+              "where tc.table_schema = ? and tc.table_name = ? " +
+              "  and tc.constraint_type = 'CHECK' " +
+              "order by tc.constraint_name",
+          ),
+          [realSchema, table],
+        );
+        out.constraints.check = checkRows.map((r) => ({
+          name: r.constraint_name as string,
+          ...(r.check_clause == null ? {} : { expression: r.check_clause as string }),
+        }));
+      }
+      return out;
     });
   }
 }

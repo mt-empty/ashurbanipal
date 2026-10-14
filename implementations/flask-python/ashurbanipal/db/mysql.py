@@ -11,13 +11,19 @@ from . import (
     ColumnInfo,
     ColumnPair,
     ColumnRef,
+    ConstraintCheck,
+    ConstraintFk,
+    ConstraintPk,
+    ConstraintUnique,
     DbSource,
     FilterParseError,
+    IndexInfo,
     KeyKind,
     NotAllowed,
     NotAllowedKind,
     QueryOpts,
     ReferencedBy,
+    Structure,
     TableData,
     TableInfo,
     group_referenced_by,
@@ -433,3 +439,141 @@ class MySqlSource(DbSource):
                 if ref_table in allowed
             ]
         )
+
+    @wrap_driver_errors(pymysql.Error)
+    def structure(self, schema: str | None, table: str) -> Structure:
+        out = Structure()
+        conn = self._connect()
+        try:
+            variant = self._variant_of(conn)
+            with conn.cursor() as cur:
+                resolved_schema = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
+                allowed = set(self._allowed_tables(cur, variant, resolved_schema, CATALOG_TIMEOUT_SECS))
+                if table not in allowed:
+                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
+
+                # MariaDB's statistics view has no expression column; MySQL
+                # 8.0.13+ reports a functional key part there with a NULL
+                # column_name.
+                key_part = "s.column_name" if variant == _MARIADB else "coalesce(s.column_name, s.expression)"
+                cur.execute(
+                    _timed_select(
+                        variant,
+                        CATALOG_TIMEOUT_SECS,
+                        "s.index_name, cast(s.non_unique as signed), s.index_type, "
+                        + key_part
+                        + " from information_schema.statistics s "
+                        "where s.table_schema = %s and s.table_name = %s "
+                        "order by s.index_name, s.seq_in_index",
+                    ),
+                    (resolved_schema, table),
+                )
+                for name, non_unique, method, column in cur.fetchall():
+                    column = column or ""
+                    if out.indexes and out.indexes[-1].name == name:
+                        out.indexes[-1].columns.append(column)
+                    else:
+                        out.indexes.append(
+                            IndexInfo(
+                                name=name, columns=[column], unique=int(non_unique) == 0, method=method.lower()
+                            )
+                        )
+
+                cur.execute(
+                    _timed_select(
+                        variant,
+                        CATALOG_TIMEOUT_SECS,
+                        "tc.constraint_type, tc.constraint_name, kcu.column_name "
+                        "from information_schema.table_constraints tc "
+                        "join information_schema.key_column_usage kcu "
+                        "  on kcu.constraint_schema = tc.constraint_schema "
+                        " and kcu.constraint_name = tc.constraint_name "
+                        " and kcu.table_schema = tc.table_schema "
+                        " and kcu.table_name = tc.table_name "
+                        "where tc.table_schema = %s and tc.table_name = %s "
+                        "  and tc.constraint_type in ('PRIMARY KEY', 'UNIQUE') "
+                        "order by tc.constraint_type desc, tc.constraint_name, kcu.ordinal_position",
+                    ),
+                    (resolved_schema, table),
+                )
+                for kind, name, column in cur.fetchall():
+                    if kind == "PRIMARY KEY":
+                        if out.constraints.primary_key is None:
+                            out.constraints.primary_key = ConstraintPk(name=name, columns=[])
+                        out.constraints.primary_key.columns.append(column)
+                    elif out.constraints.unique and out.constraints.unique[-1].name == name:
+                        out.constraints.unique[-1].columns.append(column)
+                    else:
+                        out.constraints.unique.append(ConstraintUnique(name=name, columns=[column]))
+
+                # Read key_column_usage for the referenced table, not
+                # referential_constraints, which MariaDB nulls for a role
+                # lacking privilege on it (same reason as referenced_by).
+                cur.execute(
+                    _timed_select(
+                        variant,
+                        CATALOG_TIMEOUT_SECS,
+                        "kcu.constraint_name, kcu.referenced_table_schema, kcu.referenced_table_name, "
+                        "       kcu.column_name, kcu.referenced_column_name, rc.delete_rule, rc.update_rule "
+                        "from information_schema.key_column_usage kcu "
+                        "join information_schema.referential_constraints rc "
+                        "  on rc.constraint_schema = kcu.constraint_schema "
+                        " and rc.constraint_name = kcu.constraint_name "
+                        " and rc.table_name = kcu.table_name "
+                        "where kcu.table_schema = %s and kcu.table_name = %s "
+                        "  and kcu.referenced_table_name is not null "
+                        "order by kcu.constraint_name, kcu.ordinal_position",
+                    ),
+                    (resolved_schema, table),
+                )
+                for name, ref_schema, ref_table, from_col, to_col, delete_rule, update_rule in cur.fetchall():
+                    pair = ColumnPair(from_=from_col, to=to_col)
+                    fks = out.constraints.foreign_keys
+                    if fks and fks[-1].name == name:
+                        fks[-1].columns.append(pair)
+                    else:
+                        fks.append(
+                            ConstraintFk(
+                                name=name,
+                                table=ref_table,
+                                schema=ref_schema if ref_schema != resolved_schema else None,
+                                columns=[pair],
+                                on_delete=delete_rule.upper(),
+                                on_update=update_rule.upper(),
+                            )
+                        )
+
+                # MySQL before 8.0.16 has no check_constraints view: report [].
+                cur.execute(
+                    _timed_select(
+                        variant,
+                        CATALOG_TIMEOUT_SECS,
+                        "count(*) from information_schema.tables "
+                        "where table_schema = 'information_schema' and table_name = 'CHECK_CONSTRAINTS'",
+                    )
+                )
+                if cur.fetchone()[0] > 0:
+                    # MariaDB names unnamed table-level checks per table, so
+                    # its view carries table_name for the join; MySQL's has none.
+                    cc_table = "and cc.table_name = tc.table_name " if variant == _MARIADB else ""
+                    cur.execute(
+                        _timed_select(
+                            variant,
+                            CATALOG_TIMEOUT_SECS,
+                            "tc.constraint_name, cc.check_clause "
+                            "from information_schema.table_constraints tc "
+                            "join information_schema.check_constraints cc "
+                            "  on cc.constraint_schema = tc.constraint_schema "
+                            " and cc.constraint_name = tc.constraint_name "
+                            + cc_table
+                            + "where tc.table_schema = %s "
+                            "  and tc.table_name = %s and tc.constraint_type = 'CHECK' "
+                            "order by tc.constraint_name",
+                        ),
+                        (resolved_schema, table),
+                    )
+                    out.constraints.check = [ConstraintCheck(name=n, expression=c) for n, c in cur.fetchall()]
+            conn.commit()
+        finally:
+            conn.close()
+        return out

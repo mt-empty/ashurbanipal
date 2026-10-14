@@ -242,6 +242,23 @@ class MySqlSourceTest {
     }
 
     @Test
+    fun `structure lists indexes and foreign keys`() = forEachReachableInstance { envVar ->
+        SeededDb(envVar).use { db ->
+            val source = MySqlSource(db.dataSource, 5)
+
+            val s = source.structure(null, "orders")
+            assertTrue(s.indexes.any { it.name == "PRIMARY" && it.unique }, "[$envVar]")
+            assertEquals(listOf("id"), s.constraints.primaryKey?.columns, "[$envVar]")
+            val fk = s.constraints.foreignKeys.single()
+            assertEquals("users", fk.table, "[$envVar]")
+            assertNull(fk.schema, "[$envVar] same-database FK omits schema")
+            assertTrue(s.constraints.unique.isEmpty() && s.constraints.check.isEmpty(), "[$envVar]")
+
+            assertThrows(NotAllowedException::class.java) { source.structure(null, "no_such_table") }
+        }
+    }
+
+    @Test
     fun `table counts reports a real estimate`() = forEachReachableInstance { envVar ->
         SeededDb(envVar).use { db ->
             db.dataSource.connection.use { conn ->

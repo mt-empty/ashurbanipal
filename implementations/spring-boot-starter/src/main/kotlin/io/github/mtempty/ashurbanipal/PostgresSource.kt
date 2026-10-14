@@ -394,4 +394,129 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         )
         return groupReferencedBy(rows)
     }
+
+    override fun structure(schema: String?, table: String): Structure =
+        inReadOnlyTransaction { structureInTransaction(schema, table) }
+
+    private fun structureInTransaction(schema: String?, table: String): Structure {
+        val realSchema = resolveSchema(schema)
+        val oid = readableTableOid(realSchema, table)
+
+        // Key columns only (indnkeyatts): trailing indkey entries are INCLUDE
+        // columns. An indkey entry of 0 is an expression with no pg_attribute
+        // row, so the join is a left join and the entry renders through
+        // pg_get_indexdef instead of vanishing.
+        val indexRows = jdbcTemplate.query(
+            "select ic.relname::text, am.amname::text, ix.indisunique, " +
+                "       pg_get_expr(ix.indpred, ix.indrelid), " +
+                "       coalesce(a.attname::text, pg_get_indexdef(ix.indexrelid, k.n::int, true)) " +
+                "from pg_index ix " +
+                "join pg_class ic on ic.oid = ix.indexrelid " +
+                "join pg_am am on am.oid = ic.relam " +
+                "join lateral unnest(ix.indkey::int2[]) with ordinality as k(attnum, n) on true " +
+                "left join pg_attribute a on a.attrelid = ix.indrelid and a.attnum = k.attnum " +
+                "where ix.indrelid = ? and k.n <= ix.indnkeyatts " +
+                "order by ic.relname, k.n",
+            RowMapper { rs, _ ->
+                Triple(
+                    listOf(rs.getString(1), rs.getString(2), rs.getString(4)),
+                    rs.getBoolean(3),
+                    rs.getString(5),
+                )
+            },
+            oid,
+        )
+        val indexes = ArrayList<IndexInfo>()
+        for ((head, unique, column) in indexRows) {
+            val last = indexes.lastOrNull()
+            if (last != null && last.name == head[0]) {
+                indexes[indexes.size - 1] = last.copy(columns = last.columns + column)
+            } else {
+                indexes.add(IndexInfo(name = head[0]!!, columns = listOf(column), unique = unique, method = head[1]!!, predicate = head[2]))
+            }
+        }
+
+        // PK and UNIQUE need only conkey.
+        val keyRows = jdbcTemplate.query(
+            "select con.contype::text, con.conname::text, a.attname::text " +
+                "from pg_constraint con " +
+                "join lateral unnest(con.conkey) with ordinality as k(attnum, n) on true " +
+                "join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum " +
+                "where con.conrelid = ? and con.contype in ('p', 'u') " +
+                "order by con.contype desc, con.conname, k.n",
+            RowMapper { rs, _ -> Triple(rs.getString(1), rs.getString(2), rs.getString(3)) },
+            oid,
+        )
+        var primaryKey: ConstraintPk? = null
+        val unique = ArrayList<ConstraintUnique>()
+        for ((kind, name, column) in keyRows) {
+            if (kind == "p") {
+                primaryKey = ConstraintPk(name = name, columns = (primaryKey?.columns ?: emptyList()) + column)
+            } else {
+                val last = unique.lastOrNull()
+                if (last != null && last.name == name) {
+                    unique[unique.size - 1] = last.copy(columns = last.columns + column)
+                } else {
+                    unique.add(ConstraintUnique(name, listOf(column)))
+                }
+            }
+        }
+
+        // FK pairs conkey with confkey; the referenced table is confrelid.
+        val fkRows = jdbcTemplate.query(
+            "select con.conname::text, rn.nspname::text, rc.relname::text, " +
+                "       fa.attname::text, ta.attname::text, " +
+                "       con.confdeltype::text, con.confupdtype::text " +
+                "from pg_constraint con " +
+                "join pg_class rc on rc.oid = con.confrelid " +
+                "join pg_namespace rn on rn.oid = rc.relnamespace " +
+                "join lateral unnest(con.conkey, con.confkey) with ordinality " +
+                "     as k(from_attnum, to_attnum, n) on true " +
+                "join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum " +
+                "join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum " +
+                "where con.conrelid = ? and con.contype = 'f' " +
+                "and not exists (select 1 from pg_constraint par where par.oid = con.conparentid and par.conrelid = con.conrelid) " +
+                "order by con.conname, k.n",
+            RowMapper { rs, _ -> (1..7).map { rs.getString(it) } },
+            oid,
+        )
+        val foreignKeys = ArrayList<ConstraintFk>()
+        for (r in fkRows) {
+            val pair = ColumnPair(r[3]!!, r[4]!!)
+            val last = foreignKeys.lastOrNull()
+            if (last != null && last.name == r[0]) {
+                foreignKeys[foreignKeys.size - 1] = last.copy(columns = last.columns + pair)
+            } else {
+                foreignKeys.add(
+                    ConstraintFk(
+                        name = r[0]!!,
+                        table = r[2]!!,
+                        schema = r[1]!!.takeIf { it != realSchema },
+                        columns = listOf(pair),
+                        onDelete = fkAction(r[5]!!),
+                        onUpdate = fkAction(r[6]!!),
+                    ),
+                )
+            }
+        }
+
+        val check = jdbcTemplate.query(
+            "select con.conname::text, pg_get_expr(con.conbin, con.conrelid) " +
+                "from pg_constraint con " +
+                "where con.conrelid = ? and con.contype = 'c' " +
+                "order by con.conname",
+            RowMapper { rs, _ -> ConstraintCheck(rs.getString(1), rs.getString(2)) },
+            oid,
+        )
+        return Structure(indexes, Constraints(primaryKey, unique, foreignKeys, check))
+    }
+
+    /** Maps pg_constraint.confdeltype/confupdtype to the vocabulary of `spec/protocol.md` §5.10. */
+    private fun fkAction(code: String): String = when (code) {
+        "c" -> "CASCADE"
+        "r" -> "RESTRICT"
+        "n" -> "SET NULL"
+        "d" -> "SET DEFAULT"
+        else -> "NO ACTION"
+    }
 }

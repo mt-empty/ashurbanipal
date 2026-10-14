@@ -8,10 +8,12 @@ import {
   type CountEntry,
   cellToJson,
   type DbSource,
+  emptyStructure,
   findExact,
   groupReferencedBy,
   type QueryOpts,
   type ReferencedByEntry,
+  type Structure,
   type TableData,
   type TableInfo,
 } from "./types.js";
@@ -421,5 +423,137 @@ export class PostgresSource implements DbSource {
         }),
       );
     });
+  }
+
+  async structure(schema: string | undefined, table: string, timeoutMs: number): Promise<Structure> {
+    return this.withTimeout(timeoutMs, async (client) => {
+      const realSchema = await this.resolveSchema(client, schema);
+      const oid = await this.readableTableOid(client, realSchema, table);
+      const out = emptyStructure();
+
+      // Key columns only (indnkeyatts): trailing indkey entries are INCLUDE
+      // columns. An indkey entry of 0 is an expression with no pg_attribute
+      // row, so the join is a left join and the entry renders through
+      // pg_get_indexdef instead of vanishing.
+      const indexRows = await client.query<{
+        relname: string;
+        amname: string;
+        indisunique: boolean;
+        predicate: string | null;
+        col: string;
+      }>(
+        `select ic.relname::text, am.amname::text, ix.indisunique,
+                pg_get_expr(ix.indpred, ix.indrelid) as predicate,
+                coalesce(a.attname::text, pg_get_indexdef(ix.indexrelid, k.n::int, true)) as col
+         from pg_index ix
+         join pg_class ic on ic.oid = ix.indexrelid
+         join pg_am am on am.oid = ic.relam
+         join lateral unnest(ix.indkey::int2[]) with ordinality as k(attnum, n) on true
+         left join pg_attribute a on a.attrelid = ix.indrelid and a.attnum = k.attnum
+         where ix.indrelid = $1 and k.n <= ix.indnkeyatts
+         order by ic.relname, k.n`,
+        [oid],
+      );
+      for (const r of indexRows.rows) {
+        const last = out.indexes[out.indexes.length - 1];
+        if (last && last.name === r.relname) {
+          last.columns.push(r.col);
+          continue;
+        }
+        out.indexes.push({
+          name: r.relname,
+          columns: [r.col],
+          unique: r.indisunique,
+          method: r.amname,
+          ...(r.predicate === null ? {} : { predicate: r.predicate }),
+        });
+      }
+
+      const keyRows = await client.query<{ contype: string; conname: string; attname: string }>(
+        `select con.contype::text, con.conname::text, a.attname::text
+         from pg_constraint con
+         join lateral unnest(con.conkey) with ordinality as k(attnum, n) on true
+         join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum
+         where con.conrelid = $1 and con.contype in ('p', 'u')
+         order by con.contype desc, con.conname, k.n`,
+        [oid],
+      );
+      for (const r of keyRows.rows) {
+        if (r.contype === "p") {
+          out.constraints.primary_key ??= { name: r.conname, columns: [] };
+          out.constraints.primary_key.columns.push(r.attname);
+          continue;
+        }
+        const last = out.constraints.unique[out.constraints.unique.length - 1];
+        if (last && last.name === r.conname) last.columns.push(r.attname);
+        else out.constraints.unique.push({ name: r.conname, columns: [r.attname] });
+      }
+
+      const fkRows = await client.query<{
+        conname: string;
+        nspname: string;
+        relname: string;
+        from_col: string;
+        to_col: string;
+        confdeltype: string;
+        confupdtype: string;
+      }>(
+        `select con.conname::text, rn.nspname::text, rc.relname::text,
+                fa.attname::text as from_col, ta.attname::text as to_col,
+                con.confdeltype::text, con.confupdtype::text
+         from pg_constraint con
+         join pg_class rc on rc.oid = con.confrelid
+         join pg_namespace rn on rn.oid = rc.relnamespace
+         join lateral unnest(con.conkey, con.confkey) with ordinality
+              as k(from_attnum, to_attnum, n) on true
+         join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum
+         join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum
+         where con.conrelid = $1 and con.contype = 'f'
+          and not exists (select 1 from pg_constraint par where par.oid = con.conparentid and par.conrelid = con.conrelid)
+         order by con.conname, k.n`,
+        [oid],
+      );
+      for (const r of fkRows.rows) {
+        const last = out.constraints.foreign_keys[out.constraints.foreign_keys.length - 1];
+        if (last && last.name === r.conname) {
+          last.columns.push({ from: r.from_col, to: r.to_col });
+          continue;
+        }
+        out.constraints.foreign_keys.push({
+          name: r.conname,
+          table: r.relname,
+          ...(r.nspname === realSchema ? {} : { schema: r.nspname }),
+          columns: [{ from: r.from_col, to: r.to_col }],
+          on_delete: fkAction(r.confdeltype),
+          on_update: fkAction(r.confupdtype),
+        });
+      }
+
+      const checkRows = await client.query<{ conname: string; def: string }>(
+        `select con.conname::text, pg_get_expr(con.conbin, con.conrelid) as def
+         from pg_constraint con
+         where con.conrelid = $1 and con.contype = 'c'
+         order by con.conname`,
+        [oid],
+      );
+      out.constraints.check = checkRows.rows.map((r) => ({ name: r.conname, expression: r.def }));
+      return out;
+    });
+  }
+}
+
+/** Maps pg_constraint.confdeltype/confupdtype to the fixed vocabulary of `spec/protocol.md` §5.10. */
+function fkAction(code: string): string {
+  switch (code) {
+    case "c":
+      return "CASCADE";
+    case "r":
+      return "RESTRICT";
+    case "n":
+      return "SET NULL";
+    case "d":
+      return "SET DEFAULT";
+    default:
+      return "NO ACTION";
   }
 }

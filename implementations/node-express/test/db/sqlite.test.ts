@@ -1,6 +1,6 @@
 import { Database } from "sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { SqliteSource } from "../../src/db/sqlite.js";
+import { partialIndexPredicate, SqliteSource } from "../../src/db/sqlite.js";
 import type { QueryOpts } from "../../src/db/types.js";
 import { NotAllowedError } from "../../src/errors.js";
 
@@ -102,6 +102,48 @@ describe("SqliteSource", () => {
 
     await expect(source.referencedBy(undefined, "no_such_table", 5000)).rejects.toBeInstanceOf(NotAllowedError);
     await expect(source.referencedBy("other", "users", 5000)).rejects.toBeInstanceOf(NotAllowedError);
+  });
+
+  it("structure reports indexes, partial predicate, unique and FK actions", async () => {
+    db = await new Promise<Database>((resolve, reject) => {
+      const d = new Database(":memory:", (err) => {
+        if (err) return reject(err);
+        d.exec(
+          `create table users (id integer primary key, email text unique);
+           create table orders (
+             id integer primary key,
+             user_id integer not null references users on delete cascade,
+             kind text,
+             status text
+           );
+           create index orders_kind_status_idx on orders(kind, status);
+           create index orders_open_idx on orders(user_id) where status = 'open';`,
+          (e) => (e ? reject(e) : resolve(d)),
+        );
+      });
+    });
+    const source = new SqliteSource(db);
+
+    const s = await source.structure(undefined, "orders", 5000);
+    const byName = new Map(s.indexes.map((i) => [i.name, i]));
+    expect(byName.get("orders_kind_status_idx")?.columns).toEqual(["kind", "status"]);
+    expect(byName.get("orders_open_idx")?.predicate).toBe("status = 'open'");
+    expect(byName.get("orders_kind_status_idx")?.predicate).toBeUndefined();
+    expect(s.constraints.primary_key?.columns).toEqual(["id"]);
+    expect(s.constraints.foreign_keys).toHaveLength(1);
+    expect(s.constraints.foreign_keys[0]).toMatchObject({
+      table: "users",
+      columns: [{ from: "user_id", to: "id" }],
+      on_delete: "CASCADE",
+      on_update: "NO ACTION",
+    });
+    expect(s.constraints.check).toEqual([]);
+
+    const users = await source.structure(undefined, "users", 5000);
+    expect(users.constraints.unique.map((u) => u.columns)).toEqual([["email"]]);
+
+    await expect(source.structure(undefined, "no_such_table", 5000)).rejects.toBeInstanceOf(NotAllowedError);
+    await expect(source.structure("other", "users", 5000)).rejects.toBeInstanceOf(NotAllowedError);
   });
 
   // "REFERENCES parent" with no parenthesised column list is valid DDL
@@ -266,5 +308,15 @@ describe("SqliteSource", () => {
     // interrupt is self-clearing per query, not a stuck poisoned state.
     const stillWorks = await source.tableCounts(undefined, 5000);
     expect(stillWorks.length).toBeGreaterThan(0);
+  });
+});
+
+describe("partialIndexPredicate", () => {
+  it("finds the top-level WHERE only", () => {
+    expect(partialIndexPredicate("CREATE INDEX i ON t(a) WHERE status = 'open'")).toBe("status = 'open'");
+    expect(partialIndexPredicate("CREATE INDEX i ON t(a)\nwhere\n  b > 1")).toBe("b > 1");
+    expect(partialIndexPredicate("CREATE INDEX i ON t(a) WHERE note = ' where '")).toBe("note = ' where '");
+    expect(partialIndexPredicate("CREATE INDEX i ON t(a || ' where ')")).toBeUndefined();
+    expect(partialIndexPredicate("CREATE INDEX i ON t(lower(a) )")).toBeUndefined();
   });
 });

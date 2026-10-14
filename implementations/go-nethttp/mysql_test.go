@@ -235,6 +235,42 @@ func TestMySQLReferencedByListsIncomingFKs(t *testing.T) {
 	}
 }
 
+func TestMySQLStructureListsIndexesAndForeignKeys(t *testing.T) {
+	db := seededMySQLDB(t, testURL(t))
+	source := NewMySQLSource(db, 5)
+	ctx := context.Background()
+
+	s, err := source.Structure(ctx, nil, "orders")
+	if err != nil {
+		t.Fatalf("Structure(orders): %v", err)
+	}
+	foundPrimary := false
+	for _, idx := range s.Indexes {
+		if idx.Name == "PRIMARY" && idx.Unique {
+			foundPrimary = true
+		}
+	}
+	if !foundPrimary {
+		t.Errorf("indexes = %+v, want a unique PRIMARY", s.Indexes)
+	}
+	if s.Constraints.PrimaryKey == nil || len(s.Constraints.PrimaryKey.Columns) != 1 || s.Constraints.PrimaryKey.Columns[0] != "id" {
+		t.Errorf("primary_key = %+v, want [id]", s.Constraints.PrimaryKey)
+	}
+	if len(s.Constraints.ForeignKeys) != 1 || s.Constraints.ForeignKeys[0].Table != "users" {
+		t.Fatalf("foreign_keys = %+v, want one to users", s.Constraints.ForeignKeys)
+	}
+	if s.Constraints.ForeignKeys[0].Schema != "" {
+		t.Errorf("same-database FK must omit schema, got %q", s.Constraints.ForeignKeys[0].Schema)
+	}
+	if s.Constraints.Check == nil || s.Constraints.Unique == nil {
+		t.Errorf("unique/check must be non-nil empty slices: %+v", s.Constraints)
+	}
+
+	if _, err := source.Structure(ctx, nil, "no_such_table"); !errors.As(err, new(*NotAllowedError)) {
+		t.Errorf("Structure(no_such_table) = %v, want NotAllowedError", err)
+	}
+}
+
 func TestMySQLPKAndFKColumnReportsBoth(t *testing.T) {
 	db := seededMySQLDB(t, testURL(t))
 	source := NewMySQLSource(db, 5)

@@ -294,4 +294,127 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         }
         return groupReferencedBy(rows)
     }
+
+    override fun structure(schema: String?, table: String): Structure {
+        checkSchema(schema)
+        requireTable(table)
+        // The validated name is quoted into the pragma's table-valued-function
+        // argument, never bound (pragma functions cannot bind it).
+        val quoted = quoteIdent(table)
+
+        return bounded(queryTimeoutSecs) { conn ->
+            // key = 1 drops trailing rowid/auxiliary entries. An expression key
+            // part has a NULL name and no recoverable text.
+            val indexRows = query(
+                conn,
+                "select il.name, il.\"unique\", il.origin, il.partial, ix.name " +
+                    "from pragma_index_list($quoted) il " +
+                    "join pragma_index_xinfo(il.name) ix " +
+                    "where ix.key = 1 " +
+                    "order by il.name, ix.seqno",
+            ) { rs ->
+                listOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5))
+            }
+            val sqlOf = query(
+                conn,
+                "select name, sql from sqlite_master where type = 'index' and tbl_name = ?",
+                listOf(table),
+            ) { rs -> rs.getString(1) to rs.getString(2) }.filter { it.second != null }.toMap()
+
+            val indexes = ArrayList<IndexInfo>()
+            val partial = HashSet<String>()
+            val uniqueOrigin = ArrayList<String>()
+            for (r in indexRows) {
+                val name = r[0]!!
+                val column = r[4] ?: "<expression>"
+                val last = indexes.lastOrNull()
+                if (last != null && last.name == name) {
+                    indexes[indexes.size - 1] = last.copy(columns = last.columns + column)
+                    continue
+                }
+                if (r[2] == "u") uniqueOrigin.add(name)
+                if (r[3] != "0") partial.add(name)
+                indexes.add(IndexInfo(name, listOf(column), unique = r[1] != "0", method = "btree"))
+            }
+            for (i in indexes.indices) {
+                val idx = indexes[i]
+                if (idx.name in partial) {
+                    sqlOf[idx.name]?.let { indexes[i] = idx.copy(predicate = partialIndexPredicate(it)) }
+                }
+            }
+            val unique = uniqueOrigin.mapNotNull { name ->
+                indexes.find { it.name == name }?.let { ConstraintUnique(name, it.columns) }
+            }
+
+            val pk = query(conn, "select name from pragma_table_info($quoted) where pk > 0 order by pk") { rs ->
+                rs.getString(1)
+            }
+            val primaryKey = if (pk.isEmpty()) null else ConstraintPk(columns = pk)
+
+            // "to" is NULL for REFERENCES parent shorthand; ppk resolves it from
+            // the parent's primary key (docs/adapter-decisions.md §5.4.1).
+            val fkRows = query(
+                conn,
+                "select fkl.id, fkl.\"table\", fkl.\"from\", coalesce(fkl.\"to\", ppk.name, 'rowid'), " +
+                    "       fkl.on_delete, fkl.on_update " +
+                    "from pragma_foreign_key_list($quoted) fkl " +
+                    "left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1 " +
+                    "order by fkl.id, fkl.seq",
+            ) { rs -> (1..6).map { rs.getString(it) } }
+            val foreignKeys = ArrayList<ConstraintFk>()
+            var lastId: String? = null
+            for (r in fkRows) {
+                val pair = ColumnPair(r[2]!!, r[3]!!)
+                val last = foreignKeys.lastOrNull()
+                if (last != null && lastId == r[0]) {
+                    foreignKeys[foreignKeys.size - 1] = last.copy(columns = last.columns + pair)
+                    continue
+                }
+                lastId = r[0]
+                foreignKeys.add(
+                    ConstraintFk(
+                        name = "fk_" + r[0],
+                        table = r[1]!!,
+                        columns = listOf(pair),
+                        onDelete = r[4]!!.uppercase(),
+                        onUpdate = r[5]!!.uppercase(),
+                    ),
+                )
+            }
+            Structure(indexes, Constraints(primaryKey, unique, foreignKeys, emptyList()))
+        }
+    }
+}
+
+/**
+ * The text after a CREATE INDEX statement's top-level WHERE, ignoring quoted
+ * text and anything inside parentheses (the column list and expression key
+ * parts). Only called for indexes `pragma_index_list` flags as partial.
+ */
+internal fun partialIndexPredicate(sql: String): String? {
+    var quote: Char? = null
+    var depth = 0
+    for (i in sql.indices) {
+        val ch = sql[i]
+        val q = quote
+        if (q != null) {
+            if (ch == q) quote = null
+            continue
+        }
+        when {
+            ch == '\'' || ch == '"' || ch == '`' -> quote = ch
+            ch == '[' -> quote = ']'
+            ch == '(' -> depth++
+            ch == ')' -> depth--
+            depth == 0 && ch.isWhitespace() -> {
+                val rest = sql.substring(i + 1)
+                if (rest.length > 5 && rest.substring(0, 5).equals("where", ignoreCase = true) &&
+                    (rest[5].isWhitespace() || rest[5] == '(')
+                ) {
+                    return rest.substring(5).trim()
+                }
+            }
+        }
+    }
+    return null
 }

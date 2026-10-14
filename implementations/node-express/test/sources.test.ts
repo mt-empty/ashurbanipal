@@ -5,6 +5,7 @@ import type {
   DbSource,
   QueryOpts,
   ReferencedByEntry,
+  Structure,
   TableData,
   TableInfo,
 } from "../src/db/types.js";
@@ -42,6 +43,10 @@ class FakeDbSource implements DbSource {
 
   async referencedBy(): Promise<ReferencedByEntry[]> {
     return [{ table: `${this.label}-referrer`, constraint: `${this.label}_fk`, columns: [{ from: "a", to: "b" }] }];
+  }
+
+  async structure(): Promise<Structure> {
+    return { indexes: [], constraints: { unique: [], foreign_keys: [], check: [] } };
   }
 }
 

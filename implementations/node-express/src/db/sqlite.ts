@@ -8,12 +8,14 @@ import {
   type CountEntry,
   cellToJson,
   type DbSource,
+  emptyStructure,
   findExact,
   groupReferencedBy,
   opSql,
   opTakesValue,
   type QueryOpts,
   type ReferencedByEntry,
+  type Structure,
   type TableData,
   type TableInfo,
 } from "./types.js";
@@ -25,6 +27,32 @@ function checkSchema(schema: string | undefined): void {
   if (schema !== undefined && schema !== ONLY_SCHEMA) {
     throw new NotAllowedError(`schema "${schema}"`, "schema");
   }
+}
+
+/**
+ * The text after a CREATE INDEX statement's top-level WHERE, ignoring quoted
+ * text and anything inside parentheses (the column list and expression key
+ * parts). Only called for indexes `pragma_index_list` flags as partial.
+ */
+export function partialIndexPredicate(sql: string): string | undefined {
+  let quote = "";
+  let depth = 0;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i] as string;
+    if (quote) {
+      if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") quote = ch;
+    else if (ch === "[") quote = "]";
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (depth === 0 && /\s/.test(ch)) {
+      const rest = sql.slice(i + 1);
+      if (/^where[\s(]/i.test(rest)) return rest.slice(5).trim();
+    }
+  }
+  return undefined;
 }
 
 function dbAll<T extends Record<string, unknown>>(db: Database, sql: string, params: unknown[] = []): Promise<T[]> {
@@ -341,5 +369,96 @@ export class SqliteSource implements DbSource {
         columns: [{ from: r.from, to: r.to }],
       })),
     );
+  }
+
+  async structure(schema: string | undefined, table: string, timeoutMs: number): Promise<Structure> {
+    checkSchema(schema);
+    const tables = await allowedTables(this.db, timeoutMs);
+    if (!findExact(tables, table)) {
+      throw new NotAllowedError(`table "${table}"`, "table");
+    }
+    const out = emptyStructure();
+    // The validated name is quoted into the pragma's table-valued-function
+    // argument, never bound (pragma functions cannot bind it).
+    const quoted = quoteIdent(table);
+
+    // key = 1 drops trailing rowid/auxiliary entries. An expression key part
+    // has a NULL name and no recoverable text.
+    const indexRows = await bounded(this.db, timeoutMs, () =>
+      dbAll<{ name: string; unique: number; origin: string; partial: number; col: string | null }>(
+        this.db,
+        `select il.name as name, il."unique" as "unique", il.origin as origin, il.partial as partial, ix.name as col
+         from pragma_index_list(${quoted}) il
+         join pragma_index_xinfo(il.name) ix
+         where ix.key = 1
+         order by il.name, ix.seqno`,
+      ),
+    );
+    const sqlRows = await bounded(this.db, timeoutMs, () =>
+      dbAll<{ name: string; sql: string | null }>(
+        this.db,
+        "select name, sql from sqlite_master where type = 'index' and tbl_name = ?",
+        [table],
+      ),
+    );
+    const sqlOf = new Map(sqlRows.map((r) => [r.name, r.sql]));
+    const partial = new Set<string>();
+    const uniqueOrigin: string[] = [];
+    for (const r of indexRows) {
+      const col = r.col ?? "<expression>";
+      const last = out.indexes[out.indexes.length - 1];
+      if (last && last.name === r.name) {
+        last.columns.push(col);
+        continue;
+      }
+      if (r.origin === "u") uniqueOrigin.push(r.name);
+      if (r.partial !== 0) partial.add(r.name);
+      out.indexes.push({ name: r.name, columns: [col], unique: r.unique !== 0, method: "btree" });
+    }
+    for (const idx of out.indexes) {
+      const text = partial.has(idx.name) ? sqlOf.get(idx.name) : undefined;
+      const predicate = text ? partialIndexPredicate(text) : undefined;
+      if (predicate !== undefined) idx.predicate = predicate;
+    }
+    for (const name of uniqueOrigin) {
+      const idx = out.indexes.find((i) => i.name === name);
+      if (idx) out.constraints.unique.push({ name, columns: idx.columns });
+    }
+
+    const pk = await bounded(this.db, timeoutMs, () =>
+      dbAll<{ name: string }>(this.db, `select name from pragma_table_info(${quoted}) where pk > 0 order by pk`),
+    );
+    if (pk.length > 0) out.constraints.primary_key = { columns: pk.map((r) => r.name) };
+
+    // "to" is NULL for REFERENCES parent shorthand; ppk resolves it from the
+    // parent's primary key (docs/adapter-decisions.md §5.4.1).
+    const fkRows = await bounded(this.db, timeoutMs, () =>
+      dbAll<{ id: number; table: string; from: string; to: string; on_delete: string; on_update: string }>(
+        this.db,
+        `select fkl.id as id, fkl."table" as "table", fkl."from" as "from",
+                coalesce(fkl."to", ppk.name, 'rowid') as "to", fkl.on_delete as on_delete, fkl.on_update as on_update
+         from pragma_foreign_key_list(${quoted}) fkl
+         left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1
+         order by fkl.id, fkl.seq`,
+      ),
+    );
+    let lastId: number | undefined;
+    for (const r of fkRows) {
+      const pair = { from: r.from, to: r.to };
+      const last = out.constraints.foreign_keys[out.constraints.foreign_keys.length - 1];
+      if (last && lastId === r.id) {
+        last.columns.push(pair);
+        continue;
+      }
+      lastId = r.id;
+      out.constraints.foreign_keys.push({
+        name: `fk_${r.id}`,
+        table: r.table,
+        columns: [pair],
+        on_delete: r.on_delete.toUpperCase(),
+        on_update: r.on_update.toUpperCase(),
+      });
+    }
+    return out;
   }
 }

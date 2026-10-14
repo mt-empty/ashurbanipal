@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import time
 
@@ -13,13 +14,18 @@ from . import (
     ColumnInfo,
     ColumnPair,
     ColumnRef,
+    ConstraintFk,
+    ConstraintPk,
+    ConstraintUnique,
     DbSource,
     FilterParseError,
+    IndexInfo,
     KeyKind,
     NotAllowed,
     NotAllowedKind,
     QueryOpts,
     ReferencedBy,
+    Structure,
     TableData,
     TableInfo,
     group_referenced_by,
@@ -28,6 +34,36 @@ from . import (
 )
 
 CATALOG_TIMEOUT_SECS = 5
+
+_WHERE = re.compile(r"where[\s(]", re.IGNORECASE)
+
+
+def partial_index_predicate(sql: str) -> str | None:
+    """The text after a CREATE INDEX statement's top-level WHERE, ignoring
+    quoted text and anything inside parentheses (the column list and
+    expression key parts). Only called for indexes `pragma_index_list`
+    flags as partial.
+    """
+    quote = ""
+    depth = 0
+    for i, ch in enumerate(sql):
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"`":
+            quote = ch
+        elif ch == "[":
+            quote = "]"
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0 and ch.isspace():
+            rest = sql[i + 1 :]
+            if _WHERE.match(rest):
+                return rest[5:].strip()
+    return None
+
 
 # SQLite has no schema namespace above a single database file (ignoring
 # ATTACH, which this backend doesn't use) — this is the only name
@@ -345,3 +381,88 @@ class SqliteSource(DbSource):
                 for ref_table, fk_id, from_col, to_col in rows
             ]
         )
+
+    @wrap_driver_errors(sqlite3.Error)
+    def structure(self, schema: str | None, table: str) -> Structure:
+        _check_schema(schema)
+        out = Structure()
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            self._bounded(conn, CATALOG_TIMEOUT_SECS)
+            try:
+                if table not in self._allowed_tables(cur):
+                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
+                # The validated name is quoted into the pragma's
+                # table-valued-function argument, never bound (pragma
+                # functions cannot bind it).
+                quoted = quote_ident(table)
+
+                # key = 1 drops trailing rowid/auxiliary entries. An
+                # expression key part has a NULL name and no recoverable text.
+                cur.execute(
+                    'select il.name, il."unique", il.origin, il.partial, ix.name '
+                    f"from pragma_index_list({quoted}) il "
+                    "join pragma_index_xinfo(il.name) ix "
+                    "where ix.key = 1 "
+                    "order by il.name, ix.seqno"
+                )
+                partial: set[str] = set()
+                unique_origin: list[str] = []
+                for name, unique, origin, is_partial, column in cur.fetchall():
+                    column = column if column is not None else "<expression>"
+                    if out.indexes and out.indexes[-1].name == name:
+                        out.indexes[-1].columns.append(column)
+                        continue
+                    if origin == "u":
+                        unique_origin.append(name)
+                    if is_partial:
+                        partial.add(name)
+                    out.indexes.append(IndexInfo(name=name, columns=[column], unique=bool(unique), method="btree"))
+
+                cur.execute("select name, sql from sqlite_master where type = 'index' and tbl_name = ?", (table,))
+                sql_of = {name: text for name, text in cur.fetchall() if text is not None}
+                for idx in out.indexes:
+                    if idx.name in partial and idx.name in sql_of:
+                        idx.predicate = partial_index_predicate(sql_of[idx.name])
+                for name in unique_origin:
+                    idx = next(i for i in out.indexes if i.name == name)
+                    out.constraints.unique.append(ConstraintUnique(name=name, columns=list(idx.columns)))
+
+                cur.execute(f"select name from pragma_table_info({quoted}) where pk > 0 order by pk")
+                pk = [row[0] for row in cur.fetchall()]
+                if pk:
+                    out.constraints.primary_key = ConstraintPk(columns=pk)
+
+                # "to" is NULL for REFERENCES parent shorthand; ppk resolves
+                # it from the parent's primary key
+                # (docs/adapter-decisions.md §5.4.1).
+                cur.execute(
+                    'select fkl.id, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, \'rowid\'), '
+                    "       fkl.on_delete, fkl.on_update "
+                    f"from pragma_foreign_key_list({quoted}) fkl "
+                    'left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1 '
+                    "order by fkl.id, fkl.seq"
+                )
+                last_id = None
+                for fk_id, ref_table, from_col, to_col, on_delete, on_update in cur.fetchall():
+                    pair = ColumnPair(from_=from_col, to=to_col)
+                    fks = out.constraints.foreign_keys
+                    if fks and last_id == fk_id:
+                        fks[-1].columns.append(pair)
+                        continue
+                    last_id = fk_id
+                    fks.append(
+                        ConstraintFk(
+                            name=f"fk_{fk_id}",
+                            table=ref_table,
+                            columns=[pair],
+                            on_delete=on_delete.upper(),
+                            on_update=on_update.upper(),
+                        )
+                    )
+            finally:
+                self._clear_bound(conn)
+        finally:
+            conn.close()
+        return out

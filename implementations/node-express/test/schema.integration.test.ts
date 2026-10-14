@@ -258,6 +258,87 @@ maybeDescribe("multi-schema support (live db)", () => {
     });
   });
 
+  // GET /api/tables/structure (spec/protocol.md §5.10) against Postgres
+  // catalog quirks: partitioned tables and index shapes. Each test uses its
+  // own schema so they cannot race each other's "create schema".
+  describe("structure (§5.10)", () => {
+    type Idx = { name: string; columns: string[]; predicate?: string };
+    const structure = async (schema: string, table: string) =>
+      getJson(
+        `/__ashurbanipal/api/tables/structure?schema=${encodeURIComponent(schema)}&table=${encodeURIComponent(table)}`,
+      );
+    const withSchema = async (schema: string, ddl: string, fn: () => Promise<void>) => {
+      await pool.query(`drop schema if exists ${schema} cascade; create schema ${schema}; ${ddl}`);
+      try {
+        await fn();
+      } finally {
+        await pool.query(`drop schema if exists ${schema} cascade`);
+      }
+    };
+
+    it("rejects a partitioned parent and reports a child's own inherited copies", async () => {
+      const s = "ashb_test_node_structure_partitions";
+      await withSchema(
+        s,
+        `create table ${s}.users (id int primary key);
+         create table ${s}.events (id bigint not null, user_id int references ${s}.users(id)) partition by range (id);
+         create index events_user_idx on ${s}.events (user_id);
+         create table ${s}.events_p1 partition of ${s}.events for values from (1) to (1000);`,
+        async () => {
+          expect((await structure(s, "events")).status).toBe(400);
+          const { status, body } = await structure(s, "events_p1");
+          expect(status).toBe(200);
+          const b = body as { indexes: Idx[]; constraints: { foreign_keys: { table: string }[] } };
+          expect(b.indexes.some((i) => i.columns.length === 1 && i.columns[0] === "user_id")).toBe(true);
+          expect(b.constraints.foreign_keys.map((f) => f.table)).toEqual(["users"]);
+        },
+      );
+    });
+
+    it("reports a FK to a partitioned table once, not per referenced partition", async () => {
+      const s = "ashb_test_node_structure_fk_to_partitioned";
+      await withSchema(
+        s,
+        `create table ${s}.events (id int primary key) partition by range (id);
+         create table ${s}.events_p1 partition of ${s}.events for values from (0) to (100);
+         create table ${s}.events_p2 partition of ${s}.events for values from (100) to (200);
+         create table ${s}.orders (id int primary key, event_id int,
+           constraint orders_event_fk foreign key (event_id) references ${s}.events(id));`,
+        async () => {
+          const { body } = await structure(s, "orders");
+          const fks = (body as { constraints: { foreign_keys: { name: string; table: string }[] } }).constraints
+            .foreign_keys;
+          expect(fks.map((f) => [f.name, f.table])).toEqual([["orders_event_fk", "events"]]);
+        },
+      );
+    });
+
+    it("excludes INCLUDE columns and keeps expression entries in position", async () => {
+      const s = "ashb_test_node_structure_indexes";
+      await withSchema(
+        s,
+        `create table ${s}.items (id int primary key, email text, a int, b int, status text);
+         create index items_cover_idx on ${s}.items (a) include (b);
+         create index items_expr_only_idx on ${s}.items (lower(email));
+         create index items_mixed_idx on ${s}.items (lower(email), a);
+         create index items_partial_idx on ${s}.items (a) where status = 'open';`,
+        async () => {
+          const { body } = await structure(s, "items");
+          const byName = new Map((body as { indexes: Idx[] }).indexes.map((i) => [i.name, i]));
+          expect(byName.get("items_cover_idx")?.columns).toEqual(["a"]);
+          expect(byName.get("items_expr_only_idx")?.columns).toHaveLength(1);
+          expect(byName.get("items_expr_only_idx")?.columns[0]).toContain("lower");
+          const mixed = byName.get("items_mixed_idx")?.columns ?? [];
+          expect(mixed).toHaveLength(2);
+          expect(mixed[0]).toContain("lower");
+          expect(mixed[1]).toBe("a");
+          expect(byName.get("items_partial_idx")?.predicate).toContain("open");
+          expect(byName.get("items_cover_idx")?.predicate).toBeUndefined();
+        },
+      );
+    });
+  });
+
   // Pool sessions with different search_path values must not drift mid-operation
   // (spec/protocol.md §1, §5).
   //

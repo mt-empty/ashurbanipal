@@ -98,6 +98,71 @@ pub struct ReferencedBy {
     pub columns: Vec<ColumnPair>,
 }
 
+/// One index on a table (`spec/protocol.md` §5.10). `columns` are key
+/// columns in index order; an expression entry is its expression text.
+#[derive(Debug, Serialize)]
+pub struct IndexInfo {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub unique: bool,
+    pub method: String,
+    /// Partial-index `WHERE` text; omitted for a non-partial index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConstraintPk {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConstraintUnique {
+    pub name: String,
+    pub columns: Vec<String>,
+}
+
+/// An outgoing foreign key, single-column or composite. `table`/`schema`
+/// name the referenced table; `schema` is set only when it differs from the
+/// resolved one. `on_delete`/`on_update` are one of `CASCADE`, `RESTRICT`,
+/// `SET NULL`, `SET DEFAULT`, `NO ACTION`.
+#[derive(Debug, Serialize)]
+pub struct ConstraintFk {
+    pub name: String,
+    pub table: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    pub columns: Vec<ColumnPair>,
+    pub on_delete: String,
+    pub on_update: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConstraintCheck {
+    pub name: String,
+    /// SQL text where the engine can supply it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expression: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Constraints {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_key: Option<ConstraintPk>,
+    pub unique: Vec<ConstraintUnique>,
+    pub foreign_keys: Vec<ConstraintFk>,
+    pub check: Vec<ConstraintCheck>,
+}
+
+/// A table's indexes and constraints (`spec/protocol.md` §5.10).
+#[derive(Debug, Serialize)]
+pub struct Structure {
+    pub indexes: Vec<IndexInfo>,
+    pub constraints: Constraints,
+}
+
 /// Which allow-list (or privilege check) rejected a request — maps 1:1 onto
 /// `spec/protocol.md` §2's `unknown_source`/`unknown_schema`/`unknown_table`/
 /// `unknown_column`/`not_readable` error codes. Kept as a field on
@@ -243,6 +308,12 @@ pub trait DbSource: Send + Sync + 'static {
         schema: Option<&str>,
         table: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ReferencedBy>, DbError>> + Send;
+    /// Indexes and constraints of `table` (`spec/protocol.md` §5.10).
+    fn structure(
+        &self,
+        schema: Option<&str>,
+        table: &str,
+    ) -> impl std::future::Future<Output = Result<Structure, DbError>> + Send;
 }
 
 /// Resolves the `source` query param against a host's registered sources

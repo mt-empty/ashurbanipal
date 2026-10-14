@@ -172,6 +172,49 @@ class SqliteSourceTest {
         }
     }
 
+    @Test
+    fun `partialIndexPredicate finds the top-level WHERE only`() {
+        assertEquals("status = 'open'", partialIndexPredicate("CREATE INDEX i ON t(a) WHERE status = 'open'"))
+        assertEquals("b > 1", partialIndexPredicate("CREATE INDEX i ON t(a)\nwhere\n  b > 1"))
+        assertEquals("note = ' where '", partialIndexPredicate("CREATE INDEX i ON t(a) WHERE note = ' where '"))
+        assertNull(partialIndexPredicate("CREATE INDEX i ON t(a || ' where ')"))
+        assertNull(partialIndexPredicate("CREATE INDEX i ON t(lower(a) )"))
+    }
+
+    @Test
+    fun `structure reports indexes, partial predicate, unique and FK actions`() {
+        val ds = dataSourceFor(
+            "create table users (id integer primary key, email text unique)",
+            "create table orders (id integer primary key, user_id integer not null references users on delete cascade, " +
+                "kind text, status text)",
+            "create index orders_kind_status_idx on orders(kind, status)",
+            "create index orders_open_idx on orders(user_id) where status = 'open'",
+        )
+        try {
+            val source = SqliteSource(ds, 5)
+
+            val s = source.structure(null, "orders")
+            val byName = s.indexes.associateBy { it.name }
+            assertEquals(listOf("kind", "status"), byName.getValue("orders_kind_status_idx").columns)
+            assertEquals("status = 'open'", byName.getValue("orders_open_idx").predicate)
+            assertNull(byName.getValue("orders_kind_status_idx").predicate)
+            assertEquals(listOf("id"), s.constraints.primaryKey?.columns)
+            val fk = s.constraints.foreignKeys.single()
+            assertEquals("users", fk.table)
+            assertEquals(listOf(ColumnPair("user_id", "id")), fk.columns)
+            assertEquals("CASCADE", fk.onDelete)
+            assertEquals("NO ACTION", fk.onUpdate)
+            assertTrue(s.constraints.check.isEmpty())
+
+            assertEquals(listOf(listOf("email")), source.structure(null, "users").constraints.unique.map { it.columns })
+
+            assertThrows(NotAllowedException::class.java) { source.structure(null, "no_such_table") }
+            assertThrows(NotAllowedException::class.java) { source.structure("other", "users") }
+        } finally {
+            ds.close()
+        }
+    }
+
     // Xerial's SQLite driver only runs the first statement of a
     // semicolon-joined batch passed to a single execute() call — each DDL
     // statement needs its own execute(), same as seededDataSource above.

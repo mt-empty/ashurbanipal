@@ -30,8 +30,9 @@ paths:
         "200":
           description: >
             Live allow-list for the `source` param on /schemas, /tables,
-            /table-counts, /tables/data, /tables/common-values, and
-            /tables/referenced-by (spec/protocol.md §5.8). Exactly one
+            /table-counts, /tables/data, /tables/common-values,
+            /tables/referenced-by, and /tables/structure
+            (spec/protocol.md §5.8). Exactly one
             entry for a single-source deployment.
           headers:
             x-ashurbanipal-protocol:
@@ -53,8 +54,9 @@ paths:
         "200":
           description: >
             Live allow-list for the `schema` param on /tables,
-            /table-counts, /tables/data, /tables/common-values, and
-            /tables/referenced-by (spec/protocol.md §5.7).
+            /table-counts, /tables/data, /tables/common-values,
+            /tables/referenced-by, and /tables/structure
+            (spec/protocol.md §5.7).
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
@@ -322,6 +324,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReferencedByResponse"
+        "400":
+          $ref: "#/components/responses/ClientError"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /tables/structure:
+    get:
+      operationId: tableStructure
+      summary: Indexes and constraints of one table.
+      parameters:
+        - $ref: "#/components/parameters/Source"
+        - $ref: "#/components/parameters/Schema"
+        - name: table
+          in: query
+          required: true
+          description: >
+            Must exactly match (case-sensitive) a table name from /tables;
+            otherwise 400.
+          schema:
+            type: string
+          examples:
+            # Named cases from conformance/seed/seed.sql (spec/protocol.md
+            # §5.10): a table with unique, FK, check and partial/expression
+            # indexes (orders, users), and a composite-FK table
+            # (inventory_counts).
+            orders:
+              value: orders
+            users:
+              value: users
+            inventory_counts:
+              value: inventory_counts
+      responses:
+        "200":
+          description: >
+            The table's indexes and constraints. A table with no structure
+            returns empty lists, not an error.
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StructureResponse"
         "400":
           $ref: "#/components/responses/ClientError"
         "500":
@@ -597,15 +642,133 @@ components:
                   composite FK (included here, unlike §5.4.1's per-column
                   metadata).
                 items:
-                  type: object
-                  required: [from, to]
-                  properties:
-                    from:
+                  $ref: "#/components/schemas/ColumnPair"
+
+    ColumnPair:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          description: Column on the table that holds the foreign key.
+        to:
+          type: string
+          description: Referenced column on the target table.
+
+    StructureResponse:
+      type: object
+      required: [indexes, constraints]
+      description: >
+        Indexes and constraints of one table (spec/protocol.md §5.10).
+      properties:
+        indexes:
+          type: array
+          description: >
+            Every index on the table, including those backing a primary key
+            or unique constraint. [] when there are none. A partition
+            child reports its own.
+          items:
+            type: object
+            required: [name, columns, unique, method]
+            properties:
+              name:
+                type: string
+              columns:
+                type: array
+                description: >
+                  Key columns in index order. An expression entry appears
+                  in its position as its expression text. INCLUDE columns
+                  are not listed.
+                items:
+                  type: string
+              unique:
+                type: boolean
+              method:
+                type: string
+                description: Engine access-method name, e.g. btree.
+              predicate:
+                type: string
+                description: >
+                  Partial-index WHERE text. Omitted for a non-partial index
+                  and on engines with no partial indexes.
+        constraints:
+          type: object
+          required: [unique, foreign_keys, check]
+          properties:
+            primary_key:
+              type: object
+              description: Omitted when the table has no primary key.
+              required: [columns]
+              properties:
+                name:
+                  type: string
+                  description: Omitted when the engine reports none.
+                columns:
+                  type: array
+                  items:
+                    type: string
+            unique:
+              type: array
+              items:
+                type: object
+                required: [name, columns]
+                properties:
+                  name:
+                    type: string
+                  columns:
+                    type: array
+                    items:
                       type: string
-                      description: Referencing column on `table`.
-                    to:
-                      type: string
-                      description: Referenced column on the target table.
+            foreign_keys:
+              type: array
+              description: >
+                Outgoing foreign keys, single-column and composite alike.
+              items:
+                type: object
+                required: [name, table, columns, on_delete, on_update]
+                properties:
+                  name:
+                    type: string
+                    description: >
+                      MAY be a synthesized label on engines that don't name
+                      FK constraints (e.g. SQLite) — not a DDL identifier,
+                      not guaranteed stable.
+                  table:
+                    type: string
+                    description: The referenced table.
+                  schema:
+                    type: string
+                    description: >
+                      The referenced table's schema; present only when it
+                      differs from the resolved schema.
+                  columns:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ColumnPair"
+                  on_delete:
+                    $ref: "#/components/schemas/ForeignKeyAction"
+                  on_update:
+                    $ref: "#/components/schemas/ForeignKeyAction"
+            check:
+              type: array
+              description: >
+                [] on an engine that cannot introspect check constraints
+                (SQLite).
+              items:
+                type: object
+                required: [name]
+                properties:
+                  name:
+                    type: string
+                  expression:
+                    type: string
+                    description: >
+                      The constraint's SQL text; omitted where the engine
+                      cannot supply it.
+
+    ForeignKeyAction:
+      type: string
+      enum: [CASCADE, RESTRICT, SET NULL, SET DEFAULT, NO ACTION]
 
     SiblingsResponse:
       type: object

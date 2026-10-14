@@ -21,10 +21,10 @@ import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
 
-private const val PROTOCOL_HEADER = "x-ashurbanipal-protocol"
+internal const val PROTOCOL_HEADER = "x-ashurbanipal-protocol"
 
 /** Bumped only for non-additive wire changes (spec/protocol.md §7). */
-private const val PROTOCOL_VERSION = "1"
+internal const val PROTOCOL_VERSION = "1"
 
 data class SourceEntry(val name: String)
 data class SourcesResponse(val sources: List<SourceEntry>)
@@ -153,6 +153,14 @@ class AshurbanipalController(
         @RequestParam table: String,
     ): ResponseEntity<ReferencedByResponse> =
         apiOk(ReferencedByResponse(resolveSource(source).referencedBy(schema, table)))
+
+    @GetMapping("/api/tables/structure")
+    fun structure(
+        @RequestParam(required = false) schema: String?,
+        @RequestParam(required = false) source: String?,
+        @RequestParam table: String,
+    ): ResponseEntity<Structure> =
+        apiOk(resolveSource(source).structure(schema, table))
 
     @GetMapping("/api/siblings")
     fun siblings(): ResponseEntity<SiblingsResponse> {

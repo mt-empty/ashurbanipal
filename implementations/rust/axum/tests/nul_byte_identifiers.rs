@@ -103,6 +103,14 @@ async fn nul_byte_table_name_is_rejected_as_not_allowed_not_a_500() {
         ),
         "referenced_by must reject a NUL byte table the same way"
     );
+
+    assert!(
+        matches!(
+            source.structure(None, NUL_TABLE).await,
+            Err(DbError::NotAllowed(_))
+        ),
+        "structure must reject a NUL byte table the same way"
+    );
 }
 
 #[tokio::test]

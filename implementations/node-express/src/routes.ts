@@ -59,6 +59,7 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   registerGet(router, `${mount}/api/tables/data`, withProtocolHeader(tableDataHandler(sources, limits, timeoutMs)));
   registerGet(router, `${mount}/api/tables/common-values`, withProtocolHeader(commonValuesHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/referenced-by`, withProtocolHeader(referencedByHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/structure`, withProtocolHeader(structureHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/siblings`, withProtocolHeader(siblingsHandler(config.siblings ?? [])));
 
   return router;
@@ -263,6 +264,19 @@ function referencedByHandler(sources: NamedSource[], timeoutMs: number) {
     }
     const entries = await source.referencedBy(schema, table, timeoutMs);
     res.json({ referenced_by: entries });
+  };
+}
+
+function structureHandler(sources: NamedSource[], timeoutMs: number) {
+  return async (req: Request, res: Response): Promise<void> => {
+    const source = resolveSource(sources, firstQueryValue(req, "source"));
+    const schema = firstQueryValue(req, "schema");
+    const table = firstQueryValue(req, "table");
+    if (table === undefined) {
+      httpProblemError(res, 400, "invalid_parameter", "table parameter is required");
+      return;
+    }
+    res.json(await source.structure(schema, table, timeoutMs));
   };
 }
 

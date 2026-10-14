@@ -70,7 +70,7 @@ create table users (
 
 create table orders (
     id uuid primary key default gen_random_uuid(),
-    user_id uuid not null references users(id),
+    user_id uuid not null references users(id) on delete cascade,
     status order_status not null default 'pending',
     total_cents integer not null,
     discount_pct numeric(5,2),
@@ -101,7 +101,7 @@ create table products (
 
 create table events (
     id bigint generated always as identity primary key,
-    user_id uuid references users(id),
+    user_id uuid references users(id) on delete set null on update cascade,
     event_type text not null,
     payload jsonb not null default '{}',
     ip_address inet,
@@ -125,7 +125,7 @@ create table reviews (
     user_id uuid not null references users(id),
     product_id bigint not null references products(id),
     order_id uuid references orders(id),
-    rating smallint not null,
+    rating smallint not null constraint reviews_rating_check check (rating between 1 and 5),
     title text,
     body text,
     is_verified_purchase boolean not null default false,
@@ -217,6 +217,11 @@ create table _conformance_meta (
     checksum text not null,
     generated_at timestamptz not null default now()
 );
+
+create index users_email_lower_idx on users (lower(email));
+create index users_active_login_idx on users (is_active, last_login_at) include (login_count);
+create index orders_pending_idx on orders (user_id) where status = 'pending';
+create index reviews_product_created_idx on reviews (product_id, created_at);
 
 comment on table users is 'Registered application users.';
 comment on column users.metadata is 'Free-form per-user preferences and feature flags, stored as JSON.';
@@ -53553,4 +53558,4 @@ analyze inventory_counts;
 analyze warehouse.carriers;
 analyze warehouse.shipments;
 analyze warehouse.shipment_events;
-insert into _conformance_meta (seed_version, dialect, checksum) values ('4', 'postgres', '4dd6f9273f410e7e');
+insert into _conformance_meta (seed_version, dialect, checksum) values ('5', 'postgres', '5e2c916844cc1dc4');

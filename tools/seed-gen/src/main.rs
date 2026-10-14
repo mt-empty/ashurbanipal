@@ -333,7 +333,7 @@ fn write_schema(out: &mut String) {
          );\n\n\
          create table orders (\n\
          \x20   id uuid primary key default gen_random_uuid(),\n\
-         \x20   user_id uuid not null references users(id),\n\
+         \x20   user_id uuid not null references users(id) on delete cascade,\n\
          \x20   status order_status not null default 'pending',\n\
          \x20   total_cents integer not null,\n\
          \x20   discount_pct numeric(5,2),\n\
@@ -361,7 +361,7 @@ fn write_schema(out: &mut String) {
          );\n\n\
          create table events (\n\
          \x20   id bigint generated always as identity primary key,\n\
-         \x20   user_id uuid references users(id),\n\
+         \x20   user_id uuid references users(id) on delete set null on update cascade,\n\
          \x20   event_type text not null,\n\
          \x20   payload jsonb not null default '{}',\n\
          \x20   ip_address inet,\n\
@@ -383,7 +383,7 @@ fn write_schema(out: &mut String) {
          \x20   user_id uuid not null references users(id),\n\
          \x20   product_id bigint not null references products(id),\n\
          \x20   order_id uuid references orders(id),\n\
-         \x20   rating smallint not null,\n\
+         \x20   rating smallint not null constraint reviews_rating_check check (rating between 1 and 5),\n\
          \x20   title text,\n\
          \x20   body text,\n\
          \x20   is_verified_purchase boolean not null default false,\n\
@@ -467,6 +467,15 @@ fn write_schema(out: &mut String) {
          \x20   checksum text not null,\n\
          \x20   generated_at timestamptz not null default now()\n\
          );\n\n",
+    );
+    // Structure fixtures for GET /api/tables/structure (spec/protocol.md
+    // §5.10): expression, covering (INCLUDE) multi-column, partial, and
+    // plain multi-column indexes. Pure DDL — draws nothing from the RNG.
+    out.push_str(
+        "create index users_email_lower_idx on users (lower(email));\n\
+         create index users_active_login_idx on users (is_active, last_login_at) include (login_count);\n\
+         create index orders_pending_idx on orders (user_id) where status = 'pending';\n\
+         create index reviews_product_created_idx on reviews (product_id, created_at);\n\n",
     );
     // A deliberately partial set of `comment on` statements — most
     // tables/columns are left uncommented so the demo also exercises the

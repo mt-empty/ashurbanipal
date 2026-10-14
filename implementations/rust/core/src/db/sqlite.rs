@@ -5,8 +5,9 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
 use super::{
-    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, DbError, DbSource,
-    KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, TableData, TableInfo,
+    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, ConstraintFk,
+    ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, IndexInfo, KeyKind,
+    NotAllowedKind, QueryOpts, ReferencedBy, Structure, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 
@@ -163,6 +164,44 @@ impl SqliteSource {
         })
         .await
     }
+}
+
+/// The text after a `CREATE INDEX` statement's top-level `WHERE`, ignoring
+/// quoted text and parentheses. Only called for indexes flagged partial.
+fn partial_index_predicate(sql: &str) -> Option<String> {
+    let bytes = sql.as_bytes();
+    let mut quote: Option<u8> = None;
+    let mut depth = 0i32;
+    for (i, &b) in bytes.iter().enumerate() {
+        match quote {
+            Some(q) => {
+                if b == q {
+                    quote = None;
+                }
+            }
+            None => match b {
+                b'\'' | b'"' | b'`' => quote = Some(b),
+                b'[' => quote = Some(b']'),
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ if depth == 0 && b.is_ascii_whitespace() => {
+                    let rest = &sql[i + 1..];
+                    let is_where = rest
+                        .get(..5)
+                        .is_some_and(|kw| kw.eq_ignore_ascii_case("where"))
+                        && rest
+                            .get(5..)
+                            .and_then(|r| r.chars().next())
+                            .is_some_and(|c| c.is_whitespace() || c == '(');
+                    if is_where {
+                        return Some(rest[5..].trim().to_string());
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+    None
 }
 
 fn row_to_json(
@@ -491,6 +530,138 @@ impl DbSource for SqliteSource {
             },
         )))
     }
+
+    async fn structure(&self, schema: Option<&str>, table: &str) -> Result<Structure, DbError> {
+        check_schema(schema)?;
+        let allowed = self.allowed_tables().await?;
+        if !allowed.iter().any(|t| t.as_str() == table) {
+            return Err(DbError::not_allowed(
+                NotAllowedKind::Table,
+                format!("table {table:?}"),
+            ));
+        }
+        // PRAGMA table-valued functions take the table as a column-reference
+        // argument; the validated name is quoted, never bound.
+        let quoted = quote_ident(table);
+        let table = table.to_string();
+
+        self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
+            // `key = 1` drops the trailing rowid/auxiliary entries. An
+            // expression key part has a NULL `name` and no recoverable text.
+            let index_rows = sqlx::query_as::<_, (String, i64, String, i64, Option<String>)>(
+                sqlx::AssertSqlSafe(format!(
+                    "select il.name, il.\"unique\", il.origin, il.partial, ix.name \
+                     from pragma_index_list({quoted}) il \
+                     join pragma_index_xinfo(il.name) ix \
+                     where ix.key = 1 \
+                     order by il.name, ix.seqno"
+                )),
+            )
+            .fetch_all(&mut *conn)
+            .await?;
+
+            let sql_rows = sqlx::query_as::<_, (String, Option<String>)>(sqlx::AssertSqlSafe(
+                "select name, sql from sqlite_master where type = 'index' and tbl_name = ?"
+                    .to_string(),
+            ))
+            .bind(&table)
+            .fetch_all(&mut *conn)
+            .await?;
+            let sql_of: HashMap<String, String> = sql_rows
+                .into_iter()
+                .filter_map(|(name, sql)| sql.map(|s| (name, s)))
+                .collect();
+
+            let mut indexes: Vec<IndexInfo> = Vec::new();
+            let mut unique_origin: Vec<String> = Vec::new();
+            for (name, unique, origin, partial, column) in index_rows {
+                let column = column.unwrap_or_else(|| "<expression>".to_string());
+                match indexes.last_mut() {
+                    Some(last) if last.name == name => last.columns.push(column),
+                    _ => {
+                        if origin == "u" {
+                            unique_origin.push(name.clone());
+                        }
+                        let predicate = if partial != 0 {
+                            sql_of
+                                .get(&name)
+                                .and_then(|sql| partial_index_predicate(sql))
+                        } else {
+                            None
+                        };
+                        indexes.push(IndexInfo {
+                            name,
+                            columns: vec![column],
+                            unique: unique != 0,
+                            method: "btree".to_string(),
+                            predicate,
+                        });
+                    }
+                }
+            }
+
+            let unique = unique_origin
+                .into_iter()
+                .filter_map(|name| {
+                    let columns = indexes.iter().find(|i| i.name == name)?.columns.clone();
+                    Some(ConstraintUnique { name, columns })
+                })
+                .collect();
+
+            let pk_columns = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+                "select name from pragma_table_info({quoted}) where pk > 0 order by pk"
+            )))
+            .fetch_all(&mut *conn)
+            .await?;
+            let primary_key = (!pk_columns.is_empty()).then_some(ConstraintPk {
+                name: None,
+                columns: pk_columns,
+            });
+
+            // `to` is NULL for `REFERENCES parent` shorthand; `ppk` resolves
+            // it from the parent's primary key (`docs/adapter-decisions.md`
+            // §5.4.1).
+            let fk_rows = sqlx::query_as::<_, (i64, String, String, String, String, String)>(
+                sqlx::AssertSqlSafe(format!(
+                    "select fkl.id, fkl.\"table\", fkl.\"from\", \
+                            coalesce(fkl.\"to\", ppk.name, 'rowid'), \
+                            fkl.on_delete, fkl.on_update \
+                     from pragma_foreign_key_list({quoted}) fkl \
+                     left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1 \
+                     order by fkl.id, fkl.seq"
+                )),
+            )
+            .fetch_all(&mut *conn)
+            .await?;
+            let mut foreign_keys: Vec<ConstraintFk> = Vec::new();
+            let mut last_id: Option<i64> = None;
+            for (id, ref_table, from, to, on_delete, on_update) in fk_rows {
+                match foreign_keys.last_mut() {
+                    Some(last) if last_id == Some(id) => last.columns.push(ColumnPair { from, to }),
+                    _ => foreign_keys.push(ConstraintFk {
+                        name: format!("fk_{id}"),
+                        table: ref_table,
+                        schema: None,
+                        columns: vec![ColumnPair { from, to }],
+                        on_delete: on_delete.to_ascii_uppercase(),
+                        on_update: on_update.to_ascii_uppercase(),
+                    }),
+                }
+                last_id = Some(id);
+            }
+
+            Ok(Structure {
+                indexes,
+                constraints: Constraints {
+                    primary_key,
+                    unique,
+                    foreign_keys,
+                    check: Vec::new(),
+                },
+            })
+        })
+        .await
+    }
 }
 
 #[cfg(test)]
@@ -614,6 +785,83 @@ mod tests {
         assert_eq!(user_id_col.key, Some(KeyKind::Fk));
         assert_eq!(user_id_col.references.as_ref().unwrap().table, "users");
         assert_eq!(user_id_col.references.as_ref().unwrap().column, "id");
+    }
+
+    #[test]
+    fn partial_index_predicate_finds_the_top_level_where_only() {
+        let p = partial_index_predicate;
+        assert_eq!(
+            p("CREATE INDEX i ON t(a) WHERE status = 'open'").as_deref(),
+            Some("status = 'open'")
+        );
+        assert_eq!(
+            p("CREATE INDEX i ON t(a)\nwhere\n  b > 1").as_deref(),
+            Some("b > 1")
+        );
+        assert_eq!(
+            p("CREATE INDEX i ON t(a) WHERE note = ' where '").as_deref(),
+            Some("note = ' where '")
+        );
+        assert_eq!(p("CREATE INDEX i ON t(a || ' where ')"), None);
+        assert_eq!(p("CREATE INDEX i ON t(lower(a) )"), None);
+    }
+
+    #[tokio::test]
+    async fn structure_reports_indexes_partial_predicate_unique_and_fk_actions() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "create table users (id integer primary key, email text unique); \
+             create table orders (\
+                id integer primary key, \
+                user_id integer not null references users(id) on delete cascade, \
+                kind text, \
+                status text\
+             ); \
+             create index orders_kind_status_idx on orders(kind, status); \
+             create index orders_open_idx on orders(user_id) where status = 'open';"
+                .to_string(),
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let source = SqliteSource::new(pool);
+
+        let s = source.structure(None, "orders").await.unwrap();
+        let idx = |name: &str| s.indexes.iter().find(|i| i.name == name).unwrap();
+        assert_eq!(idx("orders_kind_status_idx").columns, ["kind", "status"]);
+        assert_eq!(
+            idx("orders_open_idx").predicate.as_deref(),
+            Some("status = 'open'")
+        );
+        assert!(idx("orders_kind_status_idx").predicate.is_none());
+        assert_eq!(s.constraints.primary_key.as_ref().unwrap().columns, ["id"]);
+        let fk = &s.constraints.foreign_keys[0];
+        assert_eq!(fk.table, "users");
+        assert_eq!(
+            fk.columns[0].to, "id",
+            "shorthand REFERENCES resolves the parent PK"
+        );
+        assert_eq!(
+            (fk.on_delete.as_str(), fk.on_update.as_str()),
+            ("CASCADE", "NO ACTION")
+        );
+        assert!(s.constraints.check.is_empty());
+
+        let users = source.structure(None, "users").await.unwrap();
+        assert_eq!(users.constraints.unique[0].columns, ["email"]);
+        assert!(users
+            .indexes
+            .iter()
+            .any(|i| i.unique && i.columns == ["email"]));
+
+        assert!(matches!(
+            source.structure(None, "nope").await,
+            Err(DbError::NotAllowed(_))
+        ));
+        assert!(matches!(
+            source.structure(Some("other"), "users").await,
+            Err(DbError::NotAllowed(_))
+        ));
     }
 
     #[tokio::test]

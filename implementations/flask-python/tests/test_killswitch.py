@@ -20,6 +20,7 @@ ALL_MOUNT_PATHS = [
     "/__ashurbanipal/api/tables/data",
     "/__ashurbanipal/api/tables/common-values",
     "/__ashurbanipal/api/tables/referenced-by",
+    "/__ashurbanipal/api/tables/structure",
     "/__ashurbanipal/api/siblings",
 ]
 
@@ -46,6 +47,9 @@ class _UnusedSource(DbSource):
         raise NotImplementedError
 
     def referenced_by(self, schema, table):
+        raise NotImplementedError
+
+    def structure(self, schema, table):
         raise NotImplementedError
 
 

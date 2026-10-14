@@ -63,6 +63,10 @@ class AshurbanipalAutoConfiguration {
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build()
 
     @Bean
+    fun ashurbanipalMultipartExceptionResolver(properties: AshurbanipalProperties): MultipartExceptionResolver =
+        MultipartExceptionResolver(properties.basePath)
+
+    @Bean
     fun ashurbanipalController(
         properties: AshurbanipalProperties,
         dbSources: Map<String, DbSource>,

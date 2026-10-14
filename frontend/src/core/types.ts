@@ -29,6 +29,36 @@ export interface TableData {
   total_approx: number;
 }
 
+// spec/openapi.yaml StructureResponse (§5.10): one table's indexes and
+// whole-object constraints. FK `schema` is the *referenced* table's schema,
+// present only when it differs from the resolved one.
+export interface IndexInfo {
+  name: string;
+  columns: string[];
+  unique: boolean;
+  method: string;
+  predicate?: string;
+}
+
+export interface ConstraintFk {
+  name: string;
+  table: string;
+  schema?: string;
+  columns: ColumnPair[];
+  on_delete: string;
+  on_update: string;
+}
+
+export interface StructureResponse {
+  indexes: IndexInfo[];
+  constraints: {
+    primary_key?: { name?: string; columns: string[] };
+    unique: { name: string; columns: string[] }[];
+    foreign_keys: ConstraintFk[];
+    check: { name: string; expression?: string }[];
+  };
+}
+
 export type FilterOp = "=" | "!=" | ">" | ">=" | "<" | "<=" | "LIKE" | "ILIKE" | "IS NULL" | "IS NOT NULL";
 
 export interface FilterCondition {

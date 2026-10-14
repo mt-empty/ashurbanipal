@@ -732,3 +732,197 @@ func (c *MySQLSource) ReferencedBy(ctx context.Context, schema *string, table st
 
 	return groupReferencedBy(mapped), nil
 }
+
+// Structure serves GET /api/tables/structure (spec/protocol.md §5.10).
+func (c *MySQLSource) Structure(ctx context.Context, schema *string, table string) (Structure, error) {
+	variant, err := c.variantOf(ctx)
+	if err != nil {
+		return Structure{}, err
+	}
+	tx, err := c.pinnedTx(ctx)
+	if err != nil {
+		return Structure{}, err
+	}
+	defer tx.Rollback()
+
+	realSchema, err := c.resolveSchemaInTx(ctx, tx, variant, schema)
+	if err != nil {
+		return Structure{}, err
+	}
+	allowed, err := c.allowedTablesInTx(ctx, tx, variant, realSchema)
+	if err != nil {
+		return Structure{}, err
+	}
+	if _, ok := findExact(allowed, table); !ok {
+		return Structure{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	}
+
+	qctx, cancel := c.bounded(ctx)
+	defer cancel()
+	out := newStructure()
+
+	// MariaDB's statistics view has no expression column; MySQL 8.0.13+
+	// reports a functional key part there with a NULL column_name.
+	keyPart := "coalesce(s.column_name, s.expression)"
+	if variant == variantMariaDB {
+		keyPart = "s.column_name"
+	}
+	rows, err := tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
+		`s.index_name, cast(s.non_unique as signed), s.index_type, `+keyPart+`
+		 from information_schema.statistics s
+		 where s.table_schema = ? and s.table_name = ?
+		 order by s.index_name, s.seq_in_index`), realSchema, table)
+	if err != nil {
+		return Structure{}, err
+	}
+	for rows.Next() {
+		var name, method string
+		var nonUnique int64
+		var column sql.NullString
+		if err := rows.Scan(&name, &nonUnique, &method, &column); err != nil {
+			rows.Close()
+			return Structure{}, err
+		}
+		if n := len(out.Indexes); n > 0 && out.Indexes[n-1].Name == name {
+			out.Indexes[n-1].Columns = append(out.Indexes[n-1].Columns, column.String)
+			continue
+		}
+		out.Indexes = append(out.Indexes, IndexInfo{
+			Name: name, Columns: []string{column.String}, Unique: nonUnique == 0,
+			Method: strings.ToLower(method),
+		})
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Structure{}, err
+	}
+
+	rows, err = tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
+		`tc.constraint_type, tc.constraint_name, kcu.column_name
+		 from information_schema.table_constraints tc
+		 join information_schema.key_column_usage kcu
+		   on kcu.constraint_schema = tc.constraint_schema
+		  and kcu.constraint_name = tc.constraint_name
+		  and kcu.table_schema = tc.table_schema
+		  and kcu.table_name = tc.table_name
+		 where tc.table_schema = ? and tc.table_name = ?
+		   and tc.constraint_type in ('PRIMARY KEY', 'UNIQUE')
+		 order by tc.constraint_type desc, tc.constraint_name, kcu.ordinal_position`),
+		realSchema, table)
+	if err != nil {
+		return Structure{}, err
+	}
+	for rows.Next() {
+		var kind, name, column string
+		if err := rows.Scan(&kind, &name, &column); err != nil {
+			rows.Close()
+			return Structure{}, err
+		}
+		if kind == "PRIMARY KEY" {
+			if out.Constraints.PrimaryKey == nil {
+				out.Constraints.PrimaryKey = &ConstraintPK{Name: name}
+			}
+			out.Constraints.PrimaryKey.Columns = append(out.Constraints.PrimaryKey.Columns, column)
+			continue
+		}
+		if n := len(out.Constraints.Unique); n > 0 && out.Constraints.Unique[n-1].Name == name {
+			out.Constraints.Unique[n-1].Columns = append(out.Constraints.Unique[n-1].Columns, column)
+			continue
+		}
+		out.Constraints.Unique = append(out.Constraints.Unique, ConstraintUnique{Name: name, Columns: []string{column}})
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Structure{}, err
+	}
+
+	// Read key_column_usage for the referenced table, not
+	// referential_constraints, which MariaDB nulls for a role lacking
+	// privilege on it (same reason as ReferencedBy).
+	rows, err = tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
+		`kcu.constraint_name, kcu.referenced_table_schema, kcu.referenced_table_name,
+		        kcu.column_name, kcu.referenced_column_name, rc.delete_rule, rc.update_rule
+		 from information_schema.key_column_usage kcu
+		 join information_schema.referential_constraints rc
+		   on rc.constraint_schema = kcu.constraint_schema
+		  and rc.constraint_name = kcu.constraint_name
+		  and rc.table_name = kcu.table_name
+		 where kcu.table_schema = ? and kcu.table_name = ?
+		   and kcu.referenced_table_name is not null
+		 order by kcu.constraint_name, kcu.ordinal_position`), realSchema, table)
+	if err != nil {
+		return Structure{}, err
+	}
+	for rows.Next() {
+		var name, refSchema, refTable, from, to, del, upd string
+		if err := rows.Scan(&name, &refSchema, &refTable, &from, &to, &del, &upd); err != nil {
+			rows.Close()
+			return Structure{}, err
+		}
+		if n := len(out.Constraints.ForeignKeys); n > 0 && out.Constraints.ForeignKeys[n-1].Name == name {
+			out.Constraints.ForeignKeys[n-1].Columns = append(out.Constraints.ForeignKeys[n-1].Columns, ColumnPair{From: from, To: to})
+			continue
+		}
+		fk := ConstraintFK{
+			Name: name, Table: refTable,
+			Columns:  []ColumnPair{{From: from, To: to}},
+			OnDelete: strings.ToUpper(del), OnUpdate: strings.ToUpper(upd),
+		}
+		if refSchema != realSchema {
+			fk.Schema = refSchema
+		}
+		out.Constraints.ForeignKeys = append(out.Constraints.ForeignKeys, fk)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return Structure{}, err
+	}
+
+	// MySQL before 8.0.16 has no check_constraints view: report [].
+	var hasChecks int64
+	if err := tx.QueryRowContext(qctx, timedSelect(variant, c.timeoutSec,
+		`count(*) from information_schema.tables
+		 where table_schema = 'information_schema' and table_name = 'CHECK_CONSTRAINTS'`)).Scan(&hasChecks); err != nil {
+		return Structure{}, err
+	}
+	if hasChecks > 0 {
+		// MariaDB names unnamed table-level checks per table, so its view
+		// carries table_name for the join; MySQL's has none.
+		ccTable := ""
+		if variant == variantMariaDB {
+			ccTable = "and cc.table_name = tc.table_name "
+		}
+		rows, err = tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
+			`tc.constraint_name, cc.check_clause
+			 from information_schema.table_constraints tc
+			 join information_schema.check_constraints cc
+			   on cc.constraint_schema = tc.constraint_schema
+			  and cc.constraint_name = tc.constraint_name `+ccTable+`
+			 where tc.table_schema = ? and tc.table_name = ?
+			   and tc.constraint_type = 'CHECK'
+			 order by tc.constraint_name`), realSchema, table)
+		if err != nil {
+			return Structure{}, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			var clause sql.NullString
+			if err := rows.Scan(&name, &clause); err != nil {
+				return Structure{}, err
+			}
+			out.Constraints.Check = append(out.Constraints.Check, ConstraintCheck{Name: name, Expression: clause.String})
+		}
+		if err := rows.Err(); err != nil {
+			return Structure{}, err
+		}
+		rows.Close()
+	}
+	if err := tx.Commit(); err != nil {
+		return Structure{}, err
+	}
+	return out, nil
+}

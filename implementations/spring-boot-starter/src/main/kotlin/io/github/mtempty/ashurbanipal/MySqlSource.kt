@@ -403,4 +403,147 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         // on this backend serves from.
         groupReferencedBy(rows.filter { it.table in allowed })
     }
+
+    override fun structure(schema: String?, table: String): Structure = inReadOnlyTransaction {
+        val variant = variant()
+        val realSchema = resolveSchema(variant, schema)
+        val allowed = allowedTables(variant, realSchema).toSet()
+        if (table !in allowed) throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
+
+        // MariaDB's statistics view has no expression column; MySQL 8.0.13+
+        // reports a functional key part there with a NULL column_name.
+        val keyPart = if (variant == Variant.MARIADB) "s.column_name" else "coalesce(s.column_name, s.expression)"
+        val indexRows = query(
+            dataSource,
+            timedSelect(
+                variant,
+                queryTimeoutSecs,
+                "s.index_name, cast(s.non_unique as signed), s.index_type, $keyPart " +
+                    "from information_schema.statistics s " +
+                    "where s.table_schema = ? and s.table_name = ? " +
+                    "order by s.index_name, s.seq_in_index",
+            ),
+            listOf(realSchema, table),
+        ) { rs -> listOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)) }
+        val indexes = ArrayList<IndexInfo>()
+        for (r in indexRows) {
+            val column = r[3] ?: ""
+            val last = indexes.lastOrNull()
+            if (last != null && last.name == r[0]) {
+                indexes[indexes.size - 1] = last.copy(columns = last.columns + column)
+            } else {
+                indexes.add(IndexInfo(r[0]!!, listOf(column), unique = r[1] == "0", method = r[2]!!.lowercase()))
+            }
+        }
+
+        val keyRows = query(
+            dataSource,
+            timedSelect(
+                variant,
+                queryTimeoutSecs,
+                "tc.constraint_type, tc.constraint_name, kcu.column_name " +
+                    "from information_schema.table_constraints tc " +
+                    "join information_schema.key_column_usage kcu " +
+                    "  on kcu.constraint_schema = tc.constraint_schema " +
+                    " and kcu.constraint_name = tc.constraint_name " +
+                    " and kcu.table_schema = tc.table_schema " +
+                    " and kcu.table_name = tc.table_name " +
+                    "where tc.table_schema = ? and tc.table_name = ? " +
+                    "  and tc.constraint_type in ('PRIMARY KEY', 'UNIQUE') " +
+                    "order by tc.constraint_type desc, tc.constraint_name, kcu.ordinal_position",
+            ),
+            listOf(realSchema, table),
+        ) { rs -> Triple(rs.getString(1), rs.getString(2), rs.getString(3)) }
+        var primaryKey: ConstraintPk? = null
+        val unique = ArrayList<ConstraintUnique>()
+        for ((kind, name, column) in keyRows) {
+            if (kind == "PRIMARY KEY") {
+                primaryKey = ConstraintPk(name = name, columns = (primaryKey?.columns ?: emptyList()) + column)
+            } else {
+                val last = unique.lastOrNull()
+                if (last != null && last.name == name) {
+                    unique[unique.size - 1] = last.copy(columns = last.columns + column)
+                } else {
+                    unique.add(ConstraintUnique(name, listOf(column)))
+                }
+            }
+        }
+
+        // Read key_column_usage for the referenced table, not
+        // referential_constraints, which MariaDB nulls for a role lacking
+        // privilege on it (same reason as referencedBy).
+        val fkRows = query(
+            dataSource,
+            timedSelect(
+                variant,
+                queryTimeoutSecs,
+                "kcu.constraint_name, kcu.referenced_table_schema, kcu.referenced_table_name, " +
+                    "       kcu.column_name, kcu.referenced_column_name, rc.delete_rule, rc.update_rule " +
+                    "from information_schema.key_column_usage kcu " +
+                    "join information_schema.referential_constraints rc " +
+                    "  on rc.constraint_schema = kcu.constraint_schema " +
+                    " and rc.constraint_name = kcu.constraint_name " +
+                    " and rc.table_name = kcu.table_name " +
+                    "where kcu.table_schema = ? and kcu.table_name = ? " +
+                    "  and kcu.referenced_table_name is not null " +
+                    "order by kcu.constraint_name, kcu.ordinal_position",
+            ),
+            listOf(realSchema, table),
+        ) { rs -> (1..7).map { rs.getString(it) } }
+        val foreignKeys = ArrayList<ConstraintFk>()
+        for (r in fkRows) {
+            val pair = ColumnPair(r[3]!!, r[4]!!)
+            val last = foreignKeys.lastOrNull()
+            if (last != null && last.name == r[0]) {
+                foreignKeys[foreignKeys.size - 1] = last.copy(columns = last.columns + pair)
+            } else {
+                foreignKeys.add(
+                    ConstraintFk(
+                        name = r[0]!!,
+                        table = r[2]!!,
+                        schema = r[1]!!.takeIf { it != realSchema },
+                        columns = listOf(pair),
+                        onDelete = r[5]!!.uppercase(),
+                        onUpdate = r[6]!!.uppercase(),
+                    ),
+                )
+            }
+        }
+
+        // MySQL before 8.0.16 has no check_constraints view: report [].
+        val hasChecks = query(
+            dataSource,
+            timedSelect(
+                variant,
+                queryTimeoutSecs,
+                "count(*) from information_schema.tables " +
+                    "where table_schema = 'information_schema' and table_name = 'CHECK_CONSTRAINTS'",
+            ),
+            emptyList(),
+        ) { rs -> rs.getLong(1) }.first() > 0
+        val check = if (hasChecks) {
+            // MariaDB names unnamed table-level checks per table, so its view
+            // carries table_name for the join; MySQL's has none.
+            val ccTable = if (variant == Variant.MARIADB) "and cc.table_name = tc.table_name " else ""
+            query(
+                dataSource,
+                timedSelect(
+                    variant,
+                    queryTimeoutSecs,
+                    "tc.constraint_name, cc.check_clause " +
+                        "from information_schema.table_constraints tc " +
+                        "join information_schema.check_constraints cc " +
+                        "  on cc.constraint_schema = tc.constraint_schema " +
+                        " and cc.constraint_name = tc.constraint_name " + ccTable +
+                        "where tc.table_schema = ? and tc.table_name = ? " +
+                        "  and tc.constraint_type = 'CHECK' " +
+                        "order by tc.constraint_name",
+                ),
+                listOf(realSchema, table),
+            ) { rs -> ConstraintCheck(rs.getString(1), rs.getString(2)) }
+        } else {
+            emptyList()
+        }
+        Structure(indexes, Constraints(primaryKey, unique, foreignKeys, check))
+    }
 }

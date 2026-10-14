@@ -31,7 +31,9 @@ pub use ashurbanipal::PgPoolSource;
 #[cfg(feature = "sqlite")]
 pub use ashurbanipal::SqliteSource;
 pub use ashurbanipal::{
-    ColumnInfo, ColumnPair, DbError, DbSource, QueryOpts, ReferencedBy, TableData, TableInfo,
+    ColumnInfo, ColumnPair, ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique,
+    Constraints, DbError, DbSource, IndexInfo, QueryOpts, ReferencedBy, Structure, TableData,
+    TableInfo,
 };
 pub use ashurbanipal::{Condition, FilterError, FilterOp, Logic};
 pub use ashurbanipal::{Config, ConfigError, Limits, Sibling};

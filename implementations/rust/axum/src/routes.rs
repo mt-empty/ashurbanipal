@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
 use ashurbanipal::{
-    resolve_source, Config, DbError, DbSource, ProblemDetails, QueryOpts, ReferencedBy, TableInfo,
+    resolve_source, Config, DbError, DbSource, ProblemDetails, QueryOpts, ReferencedBy, Structure,
+    TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -68,6 +69,7 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
             "/__ashurbanipal/api/tables/referenced-by",
             get(referenced_by::<S>),
         )
+        .route("/__ashurbanipal/api/tables/structure", get(structure::<S>))
         .route("/__ashurbanipal/api/siblings", get(siblings::<S>))
         .layer(map_response(stamp_protocol_version));
     Router::new()
@@ -371,6 +373,24 @@ async fn referenced_by<S: DbSource>(
     Ok(Json(ReferencedByResponse { referenced_by }))
 }
 
+#[derive(Deserialize)]
+struct StructureParams {
+    schema: Option<String>,
+    source: Option<String>,
+    table: String,
+}
+
+async fn structure<S: DbSource>(
+    State(state): State<Arc<AppState<S>>>,
+    Query(params): Query<StructureParams>,
+) -> Result<Json<Structure>, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let structure = source
+        .structure(params.schema.as_deref(), &params.table)
+        .await?;
+    Ok(Json(structure))
+}
+
 #[derive(Serialize)]
 struct SiblingStatus {
     name: String,
@@ -482,6 +502,13 @@ mod tests {
             _schema: Option<&str>,
             _table: &str,
         ) -> Result<Vec<ReferencedBy>, DbError> {
+            unreachable!()
+        }
+        async fn structure(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+        ) -> Result<Structure, DbError> {
             unreachable!()
         }
     }

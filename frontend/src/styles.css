@@ -401,6 +401,14 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #record-dialog #record-dl { max-height: none; }
 #record-referenced-by-wrap { padding: 0 var(--gap-lg) var(--gap-lg); }
 
+/* Structure dialog: sections scroll together as one region, same shape as
+   #record-body. Rows are plain read-only text; long expressions wrap. */
+#structure-body { overflow: auto; max-height: var(--dialog-body-max-h);
+                  padding: var(--gap-lg); display: flex; flex-direction: column; gap: var(--gap-lg); }
+.structure-section > div { display: flex; flex-direction: column; }
+.structure-row { padding: .3rem .5rem; overflow-wrap: anywhere; }
+.structure-row-detail { opacity: .7; font-size: .9em; }
+
 /* Same shape as #cv-pop, but the anchor is a single static button
    rather than one per header, so anchor-name is set once in CSS. */
 #columns-btn { anchor-name: --columns-anchor; }
