@@ -3105,7 +3105,7 @@ function openStructure() {
   const table = state.table;
   if (!table) return;
   const token = ++requestToken;
-  $("structure-title").textContent = `structure \u2014 ${table}`;
+  $("structure-title").textContent = `structure \u2014 ${state.schema ? `${state.schema}.${table}` : table}`;
   $("structure-dialog").showModal();
   const key = cacheKey2(table);
   const generation = cacheGeneration;

@@ -69,6 +69,24 @@ class StructureIntegrationTest : AshurbanipalHttpTestBase() {
     }
 
     @Test
+    fun `reports a FK to a partitioned table once, not per referenced partition`() {
+        val s = "ashb_test_spring_structure_fk_to_partitioned"
+        withSchema(
+            s,
+            "create table $s.events (id int primary key) partition by range (id)",
+            "create table $s.events_p1 partition of $s.events for values from (0) to (100)",
+            "create table $s.events_p2 partition of $s.events for values from (100) to (200)",
+            "create table $s.orders (id int primary key, event_id int, " +
+                "constraint orders_event_fk foreign key (event_id) references $s.events(id))",
+        ) {
+            val fks = getJson("/api/tables/structure?schema=$s&table=orders")["constraints"]["foreign_keys"]
+            assertEquals(1, fks.size(), "$fks")
+            assertEquals("orders_event_fk", fks[0]["name"].asText())
+            assertEquals("events", fks[0]["table"].asText())
+        }
+    }
+
+    @Test
     fun `index columns exclude INCLUDE columns and keep expression entries in position`() {
         val s = "ashb_test_spring_structure_indexes"
         withSchema(

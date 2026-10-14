@@ -295,6 +295,24 @@ maybeDescribe("multi-schema support (live db)", () => {
       );
     });
 
+    it("reports a FK to a partitioned table once, not per referenced partition", async () => {
+      const s = "ashb_test_node_structure_fk_to_partitioned";
+      await withSchema(
+        s,
+        `create table ${s}.events (id int primary key) partition by range (id);
+         create table ${s}.events_p1 partition of ${s}.events for values from (0) to (100);
+         create table ${s}.events_p2 partition of ${s}.events for values from (100) to (200);
+         create table ${s}.orders (id int primary key, event_id int,
+           constraint orders_event_fk foreign key (event_id) references ${s}.events(id));`,
+        async () => {
+          const { body } = await structure(s, "orders");
+          const fks = (body as { constraints: { foreign_keys: { name: string; table: string }[] } }).constraints
+            .foreign_keys;
+          expect(fks.map((f) => [f.name, f.table])).toEqual([["orders_event_fk", "events"]]);
+        },
+      );
+    });
+
     it("excludes INCLUDE columns and keeps expression entries in position", async () => {
       const s = "ashb_test_node_structure_indexes";
       await withSchema(

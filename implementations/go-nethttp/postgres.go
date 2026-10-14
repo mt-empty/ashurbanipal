@@ -831,6 +831,7 @@ func (c *PostgresSource) Structure(ctx context.Context, schema *string, table st
 		 join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum
 		 join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum
 		 where con.conrelid = $1 and con.contype = 'f'
+		 and not exists (select 1 from pg_constraint par where par.oid = con.conparentid and par.conrelid = con.conrelid)
 		 order by con.conname, k.n`, oid)
 	if err != nil {
 		return Structure{}, err

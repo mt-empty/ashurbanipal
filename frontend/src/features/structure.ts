@@ -92,7 +92,7 @@ export function openStructure(): void {
   const table = state.table;
   if (!table) return;
   const token = ++requestToken;
-  $("structure-title").textContent = `structure — ${table}`;
+  $("structure-title").textContent = `structure — ${state.schema ? `${state.schema}.${table}` : table}`;
   $<HTMLDialogElement>("structure-dialog").showModal();
 
   // Key captured now, alongside applyScopeParams' read of the same scope,

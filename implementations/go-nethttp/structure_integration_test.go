@@ -111,3 +111,23 @@ func TestStructureIndexColumnsExcludeIncludeAndKeepExpressionEntries(t *testing.
 		t.Errorf("non-partial index must omit predicate")
 	}
 }
+
+func TestStructureReportsFKToPartitionedTableOnce(t *testing.T) {
+	const schema = "ashb_test_go_structure_fk_to_partitioned"
+	setupSchemaDDL(t, schema, fmt.Sprintf(
+		`create table %[1]s.events (id int primary key) partition by range (id);
+		 create table %[1]s.events_p1 partition of %[1]s.events for values from (0) to (100);
+		 create table %[1]s.events_p2 partition of %[1]s.events for values from (100) to (200);
+		 create table %[1]s.orders (
+		     id int primary key,
+		     event_id int,
+		     constraint orders_event_fk foreign key (event_id) references %[1]s.events(id)
+		 );`, schema))
+	srv := testServer(t)
+
+	body := getJSON(t, srv, "/api/tables/structure?schema="+url.QueryEscape(schema)+"&table=orders")
+	fks, _ := body["constraints"].(map[string]interface{})["foreign_keys"].([]interface{})
+	if len(fks) != 1 || fks[0].(map[string]interface{})["name"] != "orders_event_fk" || fks[0].(map[string]interface{})["table"] != "events" {
+		t.Errorf("want only the logical FK orders_event_fk -> events, got %+v", fks)
+	}
+}

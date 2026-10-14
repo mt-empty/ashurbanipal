@@ -475,6 +475,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
                 "join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum " +
                 "join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum " +
                 "where con.conrelid = ? and con.contype = 'f' " +
+                "and not exists (select 1 from pg_constraint par where par.oid = con.conparentid and par.conrelid = con.conrelid) " +
                 "order by con.conname, k.n",
             RowMapper { rs, _ -> (1..7).map { rs.getString(it) } },
             oid,

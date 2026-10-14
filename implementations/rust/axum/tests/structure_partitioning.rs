@@ -10,6 +10,7 @@ use sqlx::{Executor, PgPool};
 // `create schema` calls against each other.
 const SCHEMA_PARTITIONS: &str = "ashb_test_structure_partitions";
 const SCHEMA_INDEXES: &str = "ashb_test_structure_indexes";
+const SCHEMA_FK_TARGET: &str = "ashb_test_structure_fk_to_partitioned";
 
 async fn setup(schema: &str, ddl: &str) -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
@@ -128,6 +129,44 @@ async fn index_columns_exclude_include_columns_and_keep_expression_entries() {
         .as_deref()
         .is_some_and(|p| p.contains("open")));
     assert!(index("items_cover_idx").predicate.is_none());
+
+    teardown(&pool, s).await;
+}
+
+#[tokio::test]
+async fn fk_to_a_partitioned_table_is_reported_once_not_per_referenced_partition() {
+    let s = SCHEMA_FK_TARGET;
+    let pool = setup(
+        s,
+        &format!(
+            "create table {s}.events (id int primary key) partition by range (id); \
+             create table {s}.events_p1 partition of {s}.events for values from (0) to (100); \
+             create table {s}.events_p2 partition of {s}.events for values from (100) to (200); \
+             create table {s}.orders ( \
+                 id int primary key, \
+                 event_id int, \
+                 constraint orders_event_fk foreign key (event_id) references {s}.events(id) \
+             );"
+        ),
+    )
+    .await;
+    let source = PgPoolSource::new(pool.clone());
+
+    let structure = source
+        .structure(Some(s), "orders")
+        .await
+        .expect("structure of a table referencing a partitioned table");
+    let names: Vec<_> = structure
+        .constraints
+        .foreign_keys
+        .iter()
+        .map(|f| (f.name.as_str(), f.table.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        [("orders_event_fk", "events")],
+        "Postgres clones the FK once per referenced partition; only the logical one counts"
+    );
 
     teardown(&pool, s).await;
 }

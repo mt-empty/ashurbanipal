@@ -20,7 +20,7 @@ test("structure shows a partial index and a non-default FK action", async ({ pag
 
   const body = page.locator("#structure-body");
   await expect(page.locator("#structure-dialog")).toBeVisible();
-  await expect(page.locator("#structure-title")).toHaveText("structure — orders");
+  await expect(page.locator("#structure-title")).toHaveText("structure — public.orders");
   await expect(body.getByText("orders_pending_idx")).toBeVisible();
   await expect(body.getByText(/WHERE .*pending/)).toBeVisible();
   await expect(body.getByText("ON DELETE CASCADE")).toBeVisible();
@@ -99,6 +99,6 @@ test("a slow response for a previous table never overwrites the current table's 
 
   await held?.continue();
   await waitForIdle(page);
-  await expect(page.locator("#structure-title")).toHaveText("structure — orders");
+  await expect(page.locator("#structure-title")).toHaveText("structure — public.orders");
   await expect(page.locator("#structure-body").getByText("orders_pending_idx")).toBeVisible();
 });

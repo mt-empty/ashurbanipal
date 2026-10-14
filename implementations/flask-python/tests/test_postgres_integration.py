@@ -197,6 +197,27 @@ def test_structure_rejects_partitioned_parent_and_child_reports_its_own_copies(s
         assert [fk.table for fk in child.constraints.foreign_keys] == ["users"]
 
 
+def test_structure_reports_fk_to_partitioned_table_once(source) -> None:
+    schema = "ashb_test_flask_structure_fk_to_partitioned"
+    ddl = [
+        f"create table {schema}.events (id int primary key) partition by range (id)",
+        f"create table {schema}.events_p1 partition of {schema}.events for values from (0) to (100)",
+        f"create table {schema}.events_p2 partition of {schema}.events for values from (100) to (200)",
+        f"create table {schema}.orders (id int primary key, event_id int, "
+        f"constraint orders_event_fk foreign key (event_id) references {schema}.events(id))",
+    ]
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(f"drop schema if exists {schema} cascade")
+        cur.execute(f"create schema {schema}")
+        try:
+            for stmt in ddl:
+                cur.execute(stmt)
+            fks = source.structure(schema, "orders").constraints.foreign_keys
+            assert [(fk.name, fk.table) for fk in fks] == [("orders_event_fk", "events")]
+        finally:
+            cur.execute(f"drop schema if exists {schema} cascade")
+
+
 def test_structure_index_columns_exclude_include_and_keep_expression_entries(source) -> None:
     schema = "ashb_test_flask_structure_indexes"
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:

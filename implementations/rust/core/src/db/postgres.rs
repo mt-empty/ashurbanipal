@@ -266,6 +266,8 @@ impl PgPoolSource {
             }
         }
 
+        // A FK to a partitioned table is cloned onto the same table once per referenced
+        // partition; the `not exists` drops those, but keeps a partition child's inherited FKs.
         let fk_rows =
             sqlx::query_as::<_, (String, String, String, String, String, String, String)>(
                 "select con.conname::text, rn.nspname::text, rc.relname::text, \
@@ -279,6 +281,7 @@ impl PgPoolSource {
              join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum \
              join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum \
              where con.conrelid = $1 and con.contype = 'f' \
+             and not exists (select 1 from pg_constraint par where par.oid = con.conparentid and par.conrelid = con.conrelid) \
              order by con.conname, k.n",
             )
             .bind(table_oid)
