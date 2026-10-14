@@ -1,5 +1,8 @@
 server:
   port: ${PORT:4100}
+  # Tomcat's 8KB default rejects a spec-legal filter (up to 8192 decoded bytes,
+  # percent-encoded) with an HTML 400 before the starter runs.
+  max-http-request-header-size: 64KB
 
 spring:
   application:

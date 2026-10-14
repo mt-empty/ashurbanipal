@@ -3,11 +3,9 @@ package io.github.mtempty.ashurbanipal
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.boot.context.properties.EnableConfigurationProperties
-import org.springframework.boot.web.servlet.FilterRegistrationBean
 import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Conditional
-import org.springframework.core.Ordered
 import java.net.http.HttpClient
 import java.time.Duration
 import javax.sql.DataSource
@@ -65,11 +63,8 @@ class AshurbanipalAutoConfiguration {
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build()
 
     @Bean
-    fun ashurbanipalMultipartGuard(properties: AshurbanipalProperties): FilterRegistrationBean<MultipartGuardFilter> =
-        FilterRegistrationBean(MultipartGuardFilter()).apply {
-            addUrlPatterns("${properties.basePath.trimEnd('/')}/*")
-            order = Ordered.HIGHEST_PRECEDENCE
-        }
+    fun ashurbanipalMultipartExceptionResolver(properties: AshurbanipalProperties): MultipartExceptionResolver =
+        MultipartExceptionResolver(properties.basePath)
 
     @Bean
     fun ashurbanipalController(

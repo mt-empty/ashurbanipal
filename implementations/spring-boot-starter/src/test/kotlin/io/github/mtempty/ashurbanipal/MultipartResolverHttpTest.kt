@@ -8,7 +8,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 
-class MultipartGuardTest : AshurbanipalHttpTestBase() {
+class MultipartResolverHttpTest : AshurbanipalHttpTestBase() {
 
     @Test
     fun `boundary-less multipart content type is a 400 problem, not a 500`() {

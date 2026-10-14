@@ -238,6 +238,23 @@ constraints; there is no per-partition dedup to do.
 | MySQL/MariaDB | `information_schema.statistics` for indexes; `table_constraints` + `key_column_usage` + `referential_constraints` for constraints (`update_rule`/`delete_rule` give the actions); `check_constraints` where the server has it | No partial indexes (`predicate` always omitted) and no `INCLUDE`. Check constraints exist only on MySQL 8.0.16+ and MariaDB 10.2+; older servers report `check: []`. A functional key part is reported as its expression text via `statistics.expression`, which exists from MySQL 8.0.13 (the port requires it; older servers are unsupported); MariaDB has none. The primary key is the index and constraint named `PRIMARY`; `method` is lowercased (`btree`). An FK with no action clause reports `NO ACTION` on MySQL and `RESTRICT` on MariaDB. InnoDB has no foreign keys on partitioned tables. |
 | SQLite   | `pragma_index_list` / `pragma_index_info` / `pragma_index_xinfo` for indexes; `pragma_foreign_key_list` for foreign keys, with the same `pragma_table_info` / `COALESCE(..., 'rowid')` parent-column resolution as the §5.4.1 and §5.9 rows | `check` is always `[]`: named check constraints are not introspectable through a pragma. FK constraints are unnamed, so `name` is synthesized as `fk_<id>` (stable within one catalog read, not across schema changes). `predicate` is the text after the first `WHERE` outside quotes and parentheses in the index's `sqlite_master.sql` (a comment containing `where`, or `WHERE` with no whitespace before it, is not recognised). An expression key part has a NULL `pragma_index_xinfo.name` and no recoverable text, so it is reported as the placeholder `<expression>` in its position. `unique` constraints are the origin-`u` indexes (named like `sqlite_autoindex_users_1`); the primary key has no name; `INTEGER PRIMARY KEY` is the rowid alias and has no index entry. `method` is always `btree`. |
 
+## §5.4.2 — request size limits (Spring Boot)
+
+Tomcat rejects a request line over 8 KB (`server.max-http-request-header-size`)
+with an HTML 400 before the starter runs, so a `filter` of a few KB decoded can
+fail with no Problem Details body even though §5.4.2 allows up to 8192 decoded
+bytes. The limit belongs to the host's connector, not the starter: a host that
+needs long filters raises it. The demo app sets 64 KB so the Schemathesis run is
+not decided by the random length of a fuzzed URL.
+
+## §2 — malformed multipart `Content-Type` (Spring Boot)
+
+DispatcherServlet parses a multipart `Content-Type` before choosing a handler, so
+a boundary-less header throws ahead of any controller `@ExceptionHandler` and
+Spring answers 500. `MultipartExceptionResolver` converts it to a 400 Problem
+Details response, only under the mount path and only when no host resolver has
+handled it. The other ports ignore `Content-Type` on these body-less GET routes.
+
 ## §6 — query timeouts
 
 Protocol property: every database query, catalog and metadata queries
