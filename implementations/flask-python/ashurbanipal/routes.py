@@ -175,6 +175,15 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         entries = source.referenced_by(schema, table)
         return jsonify({"referenced_by": [_referenced_by_to_dict(e) for e in entries]})
 
+    @bp.get("/api/tables/structure")
+    def structure() -> Response:
+        source = resolve_source(request.args.get("source"))
+        schema = request.args.get("schema")
+        table = request.args.get("table")
+        if table is None:
+            return _problem_response(400, "invalid_parameter", 'missing required "table" parameter')
+        return jsonify(_structure_to_dict(source.structure(schema, table)))
+
     @bp.get("/api/siblings")
     def siblings() -> Response:
         results = _check_siblings(config.siblings)
@@ -214,6 +223,40 @@ def _referenced_by_to_dict(e) -> dict:
     if e.schema is not None:
         d["schema"] = e.schema
     return d
+
+
+def _structure_to_dict(s) -> dict:
+    indexes = []
+    for i in s.indexes:
+        d = {"name": i.name, "columns": i.columns, "unique": i.unique, "method": i.method}
+        if i.predicate is not None:
+            d["predicate"] = i.predicate
+        indexes.append(d)
+    c = s.constraints
+    constraints: dict = {}
+    if c.primary_key is not None:
+        pk = {"columns": c.primary_key.columns}
+        if c.primary_key.name is not None:
+            pk["name"] = c.primary_key.name
+        constraints["primary_key"] = pk
+    constraints["unique"] = [{"name": u.name, "columns": u.columns} for u in c.unique]
+    foreign_keys = []
+    for fk in c.foreign_keys:
+        d = {
+            "name": fk.name,
+            "table": fk.table,
+            "columns": [{"from": p.from_, "to": p.to} for p in fk.columns],
+            "on_delete": fk.on_delete,
+            "on_update": fk.on_update,
+        }
+        if fk.schema is not None:
+            d["schema"] = fk.schema
+        foreign_keys.append(d)
+    constraints["foreign_keys"] = foreign_keys
+    constraints["check"] = [
+        {"name": k.name, **({"expression": k.expression} if k.expression is not None else {})} for k in c.check
+    ]
+    return {"indexes": indexes, "constraints": constraints}
 
 
 def _clamp_int(raw, *, default: int, lo: int, hi: int):

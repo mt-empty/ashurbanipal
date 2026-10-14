@@ -37,6 +37,9 @@ class _FailingSource(DbSource):
     def referenced_by(self, schema, table):
         raise self._exc
 
+    def structure(self, schema, table):
+        raise self._exc
+
 
 def _client(exc: Exception):
     app = Flask(__name__)

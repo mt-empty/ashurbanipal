@@ -148,6 +148,19 @@ def test_referenced_by_lists_incoming_fks_single_database(seeded) -> None:
         seeded.referenced_by(None, "no_such_table")
 
 
+def test_structure_lists_indexes_and_foreign_keys(seeded) -> None:
+    s = seeded.structure(None, "orders")
+    assert any(i.name == "PRIMARY" and i.unique for i in s.indexes)
+    assert s.constraints.primary_key.columns == ["id"]
+    assert [fk.table for fk in s.constraints.foreign_keys] == ["users"]
+    assert s.constraints.foreign_keys[0].schema is None
+    assert s.constraints.unique == []
+    assert s.constraints.check == []
+
+    with pytest.raises(NotAllowed):
+        seeded.structure(None, "no_such_table")
+
+
 def test_table_counts_reports_a_real_estimate(seeded) -> None:
     conn = pymysql.connect(**seeded.kwargs)
     with conn.cursor() as cur:

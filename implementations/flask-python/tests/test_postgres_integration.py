@@ -185,6 +185,41 @@ def test_query_table_rejects_partitioned_table_same_as_referenced_by_does(source
         source.query_table(schema, "events", QueryOpts(limit=10, offset=0, timeout_secs=5))
 
 
+def test_structure_rejects_partitioned_parent_and_child_reports_its_own_copies(source) -> None:
+    schema = "ashb_test_flask_structure_partitions"
+    with _partitioned_schema(schema):
+        with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(f"create index events_user_idx on {schema}.events (user_id)")
+        with pytest.raises(NotAllowed):
+            source.structure(schema, "events")
+        child = source.structure(schema, "events_p1")
+        assert any(i.columns == ["user_id"] for i in child.indexes), child.indexes
+        assert [fk.table for fk in child.constraints.foreign_keys] == ["users"]
+
+
+def test_structure_index_columns_exclude_include_and_keep_expression_entries(source) -> None:
+    schema = "ashb_test_flask_structure_indexes"
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(f"drop schema if exists {schema} cascade")
+        cur.execute(f"create schema {schema}")
+        cur.execute(f"create table {schema}.items (id int primary key, email text, a int, b int, status text)")
+        cur.execute(f"create index items_cover_idx on {schema}.items (a) include (b)")
+        cur.execute(f"create index items_expr_only_idx on {schema}.items (lower(email))")
+        cur.execute(f"create index items_mixed_idx on {schema}.items (lower(email), a)")
+        cur.execute(f"create index items_partial_idx on {schema}.items (a) where status = 'open'")
+        try:
+            by_name = {i.name: i for i in source.structure(schema, "items").indexes}
+            assert by_name["items_cover_idx"].columns == ["a"]
+            assert by_name["items_cover_idx"].predicate is None
+            assert len(by_name["items_expr_only_idx"].columns) == 1
+            assert "lower" in by_name["items_expr_only_idx"].columns[0]
+            mixed = by_name["items_mixed_idx"].columns
+            assert len(mixed) == 2 and "lower" in mixed[0] and mixed[1] == "a"
+            assert "open" in by_name["items_partial_idx"].predicate
+        finally:
+            cur.execute(f"drop schema if exists {schema} cascade")
+
+
 def test_every_cell_is_string_or_null(source) -> None:
     data = source.query_table(None, "orders", QueryOpts(limit=20, offset=0, timeout_secs=5))
     assert len(data.rows) > 0
@@ -228,6 +263,8 @@ def test_nul_byte_in_table_rejected(source) -> None:
         source.common_values(None, bad, "id")
     with pytest.raises(NotAllowed):
         source.referenced_by(None, bad)
+    with pytest.raises(NotAllowed):
+        source.structure(None, bad)
 
 
 def test_nul_byte_in_filter_value_rejected(source) -> None:

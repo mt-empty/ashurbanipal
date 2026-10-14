@@ -10,13 +10,19 @@ from . import (
     ColumnInfo,
     ColumnPair,
     ColumnRef,
+    ConstraintCheck,
+    ConstraintFk,
+    ConstraintPk,
+    ConstraintUnique,
     DbSource,
     FilterParseError,
+    IndexInfo,
     KeyKind,
     NotAllowed,
     NotAllowedKind,
     QueryOpts,
     ReferencedBy,
+    Structure,
     TableData,
     TableInfo,
     group_referenced_by,
@@ -398,3 +404,103 @@ class PgSource(DbSource):
                 for ref_schema, ref_table, constraint, from_col, to_col in rows
             ]
         )
+
+    @wrap_driver_errors(psycopg.Error)
+    def structure(self, schema: str | None, table: str) -> Structure:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
+            resolved_schema = self._resolve_schema(cur, schema)
+            oid = self._readable_table_oid(cur, resolved_schema, table)
+            out = Structure()
+
+            # Key columns only (indnkeyatts): trailing indkey entries are
+            # INCLUDE columns. An indkey entry of 0 is an expression with no
+            # pg_attribute row, so the join is a left join and the entry
+            # renders through pg_get_indexdef instead of vanishing.
+            cur.execute(
+                "select ic.relname::text, am.amname::text, ix.indisunique, "
+                "       pg_get_expr(ix.indpred, ix.indrelid), "
+                "       coalesce(a.attname::text, pg_get_indexdef(ix.indexrelid, k.n::int, true)) "
+                "from pg_index ix "
+                "join pg_class ic on ic.oid = ix.indexrelid "
+                "join pg_am am on am.oid = ic.relam "
+                "join lateral unnest(ix.indkey::int2[]) with ordinality as k(attnum, n) on true "
+                "left join pg_attribute a on a.attrelid = ix.indrelid and a.attnum = k.attnum "
+                "where ix.indrelid = %s and k.n <= ix.indnkeyatts "
+                "order by ic.relname, k.n",
+                (oid,),
+            )
+            for name, method, unique, predicate, column in cur.fetchall():
+                if out.indexes and out.indexes[-1].name == name:
+                    out.indexes[-1].columns.append(column)
+                else:
+                    out.indexes.append(
+                        IndexInfo(name=name, columns=[column], unique=unique, method=method, predicate=predicate)
+                    )
+
+            # PK and UNIQUE need only conkey.
+            cur.execute(
+                "select con.contype::text, con.conname::text, a.attname::text "
+                "from pg_constraint con "
+                "join lateral unnest(con.conkey) with ordinality as k(attnum, n) on true "
+                "join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum "
+                "where con.conrelid = %s and con.contype in ('p', 'u') "
+                "order by con.contype desc, con.conname, k.n",
+                (oid,),
+            )
+            for kind, name, column in cur.fetchall():
+                if kind == "p":
+                    if out.constraints.primary_key is None:
+                        out.constraints.primary_key = ConstraintPk(name=name, columns=[])
+                    out.constraints.primary_key.columns.append(column)
+                elif out.constraints.unique and out.constraints.unique[-1].name == name:
+                    out.constraints.unique[-1].columns.append(column)
+                else:
+                    out.constraints.unique.append(ConstraintUnique(name=name, columns=[column]))
+
+            # FK pairs conkey with confkey; the referenced table is confrelid.
+            cur.execute(
+                "select con.conname::text, rn.nspname::text, rc.relname::text, "
+                "       fa.attname::text, ta.attname::text, "
+                "       con.confdeltype::text, con.confupdtype::text "
+                "from pg_constraint con "
+                "join pg_class rc on rc.oid = con.confrelid "
+                "join pg_namespace rn on rn.oid = rc.relnamespace "
+                "join lateral unnest(con.conkey, con.confkey) with ordinality "
+                "     as k(from_attnum, to_attnum, n) on true "
+                "join pg_attribute fa on fa.attrelid = con.conrelid and fa.attnum = k.from_attnum "
+                "join pg_attribute ta on ta.attrelid = con.confrelid and ta.attnum = k.to_attnum "
+                "where con.conrelid = %s and con.contype = 'f' "
+                "order by con.conname, k.n",
+                (oid,),
+            )
+            for name, ref_schema, ref_table, from_col, to_col, del_code, upd_code in cur.fetchall():
+                pair = ColumnPair(from_=from_col, to=to_col)
+                fks = out.constraints.foreign_keys
+                if fks and fks[-1].name == name:
+                    fks[-1].columns.append(pair)
+                else:
+                    fks.append(
+                        ConstraintFk(
+                            name=name,
+                            table=ref_table,
+                            schema=ref_schema if ref_schema != resolved_schema else None,
+                            columns=[pair],
+                            on_delete=_FK_ACTIONS.get(del_code, "NO ACTION"),
+                            on_update=_FK_ACTIONS.get(upd_code, "NO ACTION"),
+                        )
+                    )
+
+            cur.execute(
+                "select con.conname::text, pg_get_constraintdef(con.oid) "
+                "from pg_constraint con "
+                "where con.conrelid = %s and con.contype = 'c' "
+                "order by con.conname",
+                (oid,),
+            )
+            out.constraints.check = [ConstraintCheck(name=n, expression=d) for n, d in cur.fetchall()]
+        return out
+
+
+# Maps pg_constraint.confdeltype/confupdtype to the vocabulary of spec/protocol.md §5.10.
+_FK_ACTIONS = {"c": "CASCADE", "r": "RESTRICT", "n": "SET NULL", "d": "SET DEFAULT", "a": "NO ACTION"}
