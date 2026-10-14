@@ -492,7 +492,7 @@ class PgSource(DbSource):
                     )
 
             cur.execute(
-                "select con.conname::text, pg_get_constraintdef(con.oid) "
+                "select con.conname::text, pg_get_expr(con.conbin, con.conrelid) "
                 "from pg_constraint con "
                 "where con.conrelid = %s and con.contype = 'c' "
                 "order by con.conname",

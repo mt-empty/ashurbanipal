@@ -279,11 +279,17 @@ async fn check_constraints_are_reported_where_introspectable() {
                 .iter()
                 .find(|c| c["name"] == "reviews_rating_check")
                 .unwrap_or_else(|| panic!("check missing reviews_rating_check: {checks:#?}"));
+            let expr = c["expression"]
+                .as_str()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
             assert!(
-                c["expression"]
-                    .as_str()
-                    .is_some_and(|e| e.to_ascii_lowercase().contains("rating")),
+                expr.contains("rating"),
                 "check expression must carry the SQL text: {c:#?}"
+            );
+            assert!(
+                !expr.starts_with("check"),
+                "expression is the bare clause, not a CHECK (...) definition: {c:#?}"
             );
         }
         CheckConstraints::AlwaysEmpty => {

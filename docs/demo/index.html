@@ -3033,8 +3033,10 @@ async function loadSiblings() {
 // src/features/structure.ts
 var cache2 = /* @__PURE__ */ new Map();
 var cacheKey2 = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
+var cacheGeneration = 0;
 function clearStructureCache() {
   cache2.clear();
+  cacheGeneration++;
 }
 var requestToken = 0;
 function msg2(text) {
@@ -3100,11 +3102,13 @@ function renderStructure(data) {
   );
 }
 function openStructure() {
-  const table = state.table ?? "";
+  const table = state.table;
+  if (!table) return;
   const token = ++requestToken;
   $("structure-title").textContent = `structure \u2014 ${table}`;
   $("structure-dialog").showModal();
   const key = cacheKey2(table);
+  const generation = cacheGeneration;
   const hit = cache2.get(key);
   if (hit) {
     renderStructure(hit);
@@ -3114,7 +3118,7 @@ function openStructure() {
   const params = new URLSearchParams({ table });
   applyScopeParams(params);
   api(`/tables/structure?${params}`).then((data) => {
-    cache2.set(key, data);
+    if (generation === cacheGeneration) cache2.set(key, data);
     if (token === requestToken) renderStructure(data);
   }).catch((e) => {
     if (token === requestToken) $("structure-body").replaceChildren(msg2(e.message));

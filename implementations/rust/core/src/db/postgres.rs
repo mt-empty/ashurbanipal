@@ -173,11 +173,8 @@ impl PgPoolSource {
         .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))
     }
 
-    /// Key columns only (`indnkeyatts`): trailing `indkey` entries are
-    /// `INCLUDE` columns. An `indkey` entry of `0` is an expression with no
-    /// `pg_attribute` row, so the join is a left join and the entry renders
-    /// through `pg_get_indexdef` instead of vanishing. `indkey` is an
-    /// `int2vector`, which `unnest` only accepts after the `::int2[]` cast.
+    /// Key columns only (`indnkeyatts`); an `indkey` of `0` is an expression
+    /// with no `pg_attribute` row, so it renders via `pg_get_indexdef`.
     async fn indexes_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -216,7 +213,7 @@ impl PgPoolSource {
     }
 
     /// One query per `contype`: PK/UNIQUE need only `conkey`, FK pairs
-    /// `conkey` with `confkey`, CHECK needs the `pg_get_constraintdef` text.
+    /// `conkey` with `confkey`, CHECK needs the bare `pg_get_expr(conbin)` text.
     async fn constraints_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -303,7 +300,7 @@ impl PgPoolSource {
         }
 
         let check = sqlx::query_as::<_, (String, String)>(
-            "select con.conname::text, pg_get_constraintdef(con.oid) \
+            "select con.conname::text, pg_get_expr(con.conbin, con.conrelid) \
              from pg_constraint con \
              where con.conrelid = $1 and con.contype = 'c' \
              order by con.conname",

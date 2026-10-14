@@ -862,7 +862,7 @@ func (c *PostgresSource) Structure(ctx context.Context, schema *string, table st
 	}
 
 	rows, err = tx.QueryContext(qctx,
-		`select con.conname::text, pg_get_constraintdef(con.oid)
+		`select con.conname::text, pg_get_expr(con.conbin, con.conrelid)
 		 from pg_constraint con
 		 where con.conrelid = $1 and con.contype = 'c'
 		 order by con.conname`, oid)

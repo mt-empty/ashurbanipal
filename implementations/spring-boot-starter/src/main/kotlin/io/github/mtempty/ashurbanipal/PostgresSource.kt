@@ -500,7 +500,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         }
 
         val check = jdbcTemplate.query(
-            "select con.conname::text, pg_get_constraintdef(con.oid) " +
+            "select con.conname::text, pg_get_expr(con.conbin, con.conrelid) " +
                 "from pg_constraint con " +
                 "where con.conrelid = ? and con.contype = 'c' " +
                 "order by con.conname",

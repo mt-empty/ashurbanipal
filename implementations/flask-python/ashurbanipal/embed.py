@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-PINNED_FRONTEND_SHA256 = "713444ba24c01b3cf896f5a449d326208ad09418ebd490c1933f8656445160fa"
+PINNED_FRONTEND_SHA256 = "f251453defecaf532d0056fd82f10a3a22a0cf74ea4caa090d83a8a4d85d77a1"
 
 _FRONTEND_PATH = Path(__file__).resolve().parent / "frontend" / "dbviewer.html"
 

@@ -3,17 +3,18 @@ import { $ } from "../core/dom.js";
 import { applyScopeParams, state } from "../core/state.js";
 import type { ConstraintFk, StructureResponse } from "../core/types.js";
 
-// ---- structure dialog: a table's indexes and constraints
-// (spec/protocol.md §5.10). Catalog-only and independent of rows, so the
-// result is memoised per (source, schema, table) like referenced-by.ts —
-// reopening costs nothing, a scope switch invalidates through the key, the
-// refresh button clears it, and errors are never cached. Rows are plain text: read-only, no drill-in. ----
+// ---- structure dialog: a table's indexes and constraints (spec/protocol.md
+// §5.10), cached per (source, schema, table); errors are never cached. ----
 
 const cache = new Map<string, StructureResponse>();
 const cacheKey = (table: string) => `${state.source ?? ""}\x1f${state.schema ?? ""}\x1f${table}`;
 
+// Bumped by the refresh button so a response already in flight cannot write
+// its pre-refresh result back into the cache.
+let cacheGeneration = 0;
 export function clearStructureCache(): void {
   cache.clear();
+  cacheGeneration++;
 }
 
 // A second open before the first response lands must not overwrite the
@@ -88,7 +89,8 @@ function renderStructure(data: StructureResponse): void {
 }
 
 export function openStructure(): void {
-  const table = state.table ?? "";
+  const table = state.table;
+  if (!table) return;
   const token = ++requestToken;
   $("structure-title").textContent = `structure — ${table}`;
   $<HTMLDialogElement>("structure-dialog").showModal();
@@ -96,6 +98,7 @@ export function openStructure(): void {
   // Key captured now, alongside applyScopeParams' read of the same scope,
   // so a mid-flight scope switch can't file the result under the wrong key.
   const key = cacheKey(table);
+  const generation = cacheGeneration;
   const hit = cache.get(key);
   if (hit) {
     renderStructure(hit);
@@ -107,7 +110,7 @@ export function openStructure(): void {
   applyScopeParams(params);
   api<StructureResponse>(`/tables/structure?${params}`)
     .then((data) => {
-      cache.set(key, data);
+      if (generation === cacheGeneration) cache.set(key, data);
       if (token === requestToken) renderStructure(data);
     })
     .catch((e) => {

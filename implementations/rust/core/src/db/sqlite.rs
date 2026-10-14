@@ -167,9 +167,7 @@ impl SqliteSource {
 }
 
 /// The text after a `CREATE INDEX` statement's top-level `WHERE`, ignoring
-/// quoted text and anything inside parentheses (the column list and
-/// expression key parts). Only called for indexes `pragma_index_list`
-/// flags as partial.
+/// quoted text and parentheses. Only called for indexes flagged partial.
 fn partial_index_predicate(sql: &str) -> Option<String> {
     let bytes = sql.as_bytes();
     let mut quote: Option<u8> = None;

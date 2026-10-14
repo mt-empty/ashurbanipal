@@ -529,7 +529,7 @@ export class PostgresSource implements DbSource {
       }
 
       const checkRows = await client.query<{ conname: string; def: string }>(
-        `select con.conname::text, pg_get_constraintdef(con.oid) as def
+        `select con.conname::text, pg_get_expr(con.conbin, con.conrelid) as def
          from pg_constraint con
          where con.conrelid = $1 and con.contype = 'c'
          order by con.conname`,

@@ -53,8 +53,8 @@ per-column hint keeps using §5.4.1.
 ## 3. Per-backend source
 
 - **Postgres** — `pg_index` / `pg_constraint` for the raw catalog data
-  (see §6's open question on whether to also surface `pg_get_indexdef`/
-  `pg_get_constraintdef` text). Postgres clones both indexes and FK
+  (`pg_get_indexdef` renders expression entries; `pg_get_expr(conbin, conrelid)`
+  gives a check's bare expression). Postgres clones both indexes and FK
   constraints onto every partition of a partitioned table — filter to the
   parent's own copy (`conparentid = 0` for constraints; the equivalent
   `pg_index` predicate for indexes), or a naive scan reports one entry per
