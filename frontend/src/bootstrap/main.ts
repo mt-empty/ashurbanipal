@@ -3,6 +3,7 @@ import "../features/api-reference.js";
 import { $, reportError } from "../core/dom.js";
 import { getLastPayload, initState, state } from "../core/state.js";
 import { resetColumnWidths } from "../features/column-widths.js";
+import "../features/filter-highlight.js";
 import { loadSiblings } from "../features/siblings.js";
 import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";

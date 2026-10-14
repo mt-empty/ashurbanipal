@@ -62,7 +62,10 @@
     <div id="toolbar">
       <search id="controls">
         <form id="filter-form">
-          <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+          <div id="filter-wrap">
+            <div id="filter-hl" aria-hidden="true"><span id="filter-hl-text"></span></div>
+            <input id="filter" type="search" spellcheck="false" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+          </div>
           <button id="apply">apply</button>
         </form>
       </search>

@@ -223,9 +223,31 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 /* ==== Controls / status ==== */
 #toolbar { margin-top: var(--gap-xl); }
 #filter-form { display: flex; gap: var(--gap); }
-#filter { flex: 1; min-width: 12rem; font-family: var(--font-mono); font-size: .8125rem;
-          padding: .6rem .85rem; border: none; border-radius: 8px; background: var(--surface);
-          color: inherit; appearance: none; }
+/* The wrap carries the field's look; the input's own text is transparent and
+   #filter-hl, behind it, draws the coloured copy (features/filter-highlight.ts).
+   The two must share font and padding exactly. */
+#filter-wrap { position: relative; flex: 1; min-width: 12rem; display: flex;
+               background: var(--surface); border-radius: 8px; }
+#filter, #filter-hl { font-family: var(--font-mono); font-size: .8125rem; padding: .6rem .85rem;
+                      box-sizing: border-box; }
+#filter { flex: 1; min-width: 0; border: none; border-radius: 8px; background: transparent;
+          color: transparent; caret-color: CanvasText; appearance: none; position: relative; }
+#filter::placeholder { color: var(--text-muted); opacity: 1; }
+#filter::selection { color: transparent; background: color-mix(in srgb, Highlight 40%, transparent); }
+#filter-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+             display: flex; align-items: center; white-space: pre; }
+#filter-wrap.plain #filter { color: inherit; }
+#filter-wrap.plain #filter::selection { color: inherit; }
+#filter-wrap.plain #filter-hl { display: none; }
+.t-op { color: var(--text-muted); }
+.t-keyword { color: var(--type-uuid); }
+.t-value { color: var(--json-number); }
+.t-err { text-decoration: underline wavy var(--danger); text-underline-offset: .2em; }
+/* Forced colors repaint the input's text anyway, so the copy would double it. */
+@media (forced-colors: active) {
+  #filter { color: CanvasText; }
+  #filter-hl { display: none; }
+}
 #apply { background: var(--chip-active-bg); color: var(--chip-active-fg); border: none;
          border-radius: 8px; padding: 0 1.1rem; font: inherit; cursor: pointer; }
 /* Visually hidden but still in the accessibility tree — the aria-live
@@ -465,6 +487,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
           border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
           overflow: auto; box-shadow: 0 4px 16px #0004; }
 #filter-suggest button { display: block; width: 100%; box-sizing: border-box;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           background: none; border: none; font: inherit; color: inherit;
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }

@@ -810,9 +810,31 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 /* ==== Controls / status ==== */
 #toolbar { margin-top: var(--gap-xl); }
 #filter-form { display: flex; gap: var(--gap); }
-#filter { flex: 1; min-width: 12rem; font-family: var(--font-mono); font-size: .8125rem;
-          padding: .6rem .85rem; border: none; border-radius: 8px; background: var(--surface);
-          color: inherit; appearance: none; }
+/* The wrap carries the field's look; the input's own text is transparent and
+   #filter-hl, behind it, draws the coloured copy (features/filter-highlight.ts).
+   The two must share font and padding exactly. */
+#filter-wrap { position: relative; flex: 1; min-width: 12rem; display: flex;
+               background: var(--surface); border-radius: 8px; }
+#filter, #filter-hl { font-family: var(--font-mono); font-size: .8125rem; padding: .6rem .85rem;
+                      box-sizing: border-box; }
+#filter { flex: 1; min-width: 0; border: none; border-radius: 8px; background: transparent;
+          color: transparent; caret-color: CanvasText; appearance: none; position: relative; }
+#filter::placeholder { color: var(--text-muted); opacity: 1; }
+#filter::selection { color: transparent; background: color-mix(in srgb, Highlight 40%, transparent); }
+#filter-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+             display: flex; align-items: center; white-space: pre; }
+#filter-wrap.plain #filter { color: inherit; }
+#filter-wrap.plain #filter::selection { color: inherit; }
+#filter-wrap.plain #filter-hl { display: none; }
+.t-op { color: var(--text-muted); }
+.t-keyword { color: var(--type-uuid); }
+.t-value { color: var(--json-number); }
+.t-err { text-decoration: underline wavy var(--danger); text-underline-offset: .2em; }
+/* Forced colors repaint the input's text anyway, so the copy would double it. */
+@media (forced-colors: active) {
+  #filter { color: CanvasText; }
+  #filter-hl { display: none; }
+}
 #apply { background: var(--chip-active-bg); color: var(--chip-active-fg); border: none;
          border-radius: 8px; padding: 0 1.1rem; font: inherit; cursor: pointer; }
 /* Visually hidden but still in the accessibility tree — the aria-live
@@ -1052,6 +1074,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
           border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
           overflow: auto; box-shadow: 0 4px 16px #0004; }
 #filter-suggest button { display: block; width: 100%; box-sizing: border-box;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           background: none; border: none; font: inherit; color: inherit;
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
@@ -1096,7 +1119,10 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
     <div id="toolbar">
       <search id="controls">
         <form id="filter-form">
-          <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+          <div id="filter-wrap">
+            <div id="filter-hl" aria-hidden="true"><span id="filter-hl-text"></span></div>
+            <input id="filter" type="search" spellcheck="false" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+          </div>
           <button id="apply">apply</button>
         </form>
       </search>
@@ -1465,17 +1491,17 @@ var FilterDslError = class extends Error {
     this.position = position;
   }
 };
-function parseFilterDsl(input) {
+function parseFilterDsl(input2) {
   const err = (message, index) => {
-    const position = new TextEncoder().encode(input.slice(0, index)).length;
+    const position = new TextEncoder().encode(input2.slice(0, index)).length;
     return new FilterDslError(message, position);
   };
-  if (new TextEncoder().encode(input).length > FILTER_MAX_DSL_BYTES)
+  if (new TextEncoder().encode(input2).length > FILTER_MAX_DSL_BYTES)
     throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
   let pos = 0;
   const peekAt = (i) => {
-    if (i >= input.length) return null;
-    const cp = input.codePointAt(i);
+    if (i >= input2.length) return null;
+    const cp = input2.codePointAt(i);
     return cp === void 0 ? null : String.fromCodePoint(cp);
   };
   const peek = () => peekAt(pos);
@@ -1494,7 +1520,7 @@ function parseFilterDsl(input) {
   };
   const matchKeyword = (keyword) => {
     for (let i = 0; i < keyword.length; i++) {
-      const c = input[pos + i];
+      const c = input2[pos + i];
       if (c === void 0) return false;
       const folded = c >= "a" && c <= "z" ? String.fromCharCode(c.charCodeAt(0) - 32) : c;
       if (folded !== keyword[i]) return false;
@@ -1517,7 +1543,7 @@ function parseFilterDsl(input) {
       pos += 1;
       c = peek();
     }
-    return input.slice(start, pos);
+    return input2.slice(start, pos);
   };
   const parseQuotedValue = () => {
     const start = pos;
@@ -1558,7 +1584,7 @@ function parseFilterDsl(input) {
     if (consumeKeyword("ILIKE")) return "ILIKE";
     if (consumeKeyword("LIKE")) return "LIKE";
     for (const sym of [">=", "<=", "!=", ">", "<", "="]) {
-      if (input.startsWith(sym, pos)) {
+      if (input2.startsWith(sym, pos)) {
         pos += sym.length;
         return sym;
       }
@@ -1605,9 +1631,9 @@ function parseFilterDsl(input) {
     };
     conditions.push(condition);
     if (conditions.length > FILTER_MAX_CONDITIONS) throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
-    if (pos >= input.length) break;
+    if (pos >= input2.length) break;
     skipWsRequired();
-    if (pos >= input.length) break;
+    if (pos >= input2.length) break;
     const logicStart = pos;
     if (consumeKeyword("AND")) pendingLogic = "AND";
     else if (consumeKeyword("OR")) pendingLogic = "OR";
@@ -1616,9 +1642,9 @@ function parseFilterDsl(input) {
   }
   return conditions;
 }
-function tryParseFilterDsl(input) {
+function tryParseFilterDsl(input2) {
   try {
-    return parseFilterDsl(input);
+    return parseFilterDsl(input2);
   } catch {
     return null;
   }
@@ -1626,6 +1652,23 @@ function tryParseFilterDsl(input) {
 function quoteFilterValue(value) {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return `'${value.replace(/'/g, "''")}'`;
+}
+function filterDslErrorAt(input2) {
+  try {
+    parseFilterDsl(input2);
+    return null;
+  } catch (e) {
+    if (!(e instanceof FilterDslError)) return null;
+    const encoder = new TextEncoder();
+    let bytes = 0;
+    let index = 0;
+    for (const ch of input2) {
+      if (bytes >= e.position) break;
+      bytes += encoder.encode(ch).length;
+      index += ch.length;
+    }
+    return { index, message: e.message };
+  }
 }
 
 // src/lib/row-diff.ts
@@ -1902,6 +1945,149 @@ function rememberColumnWidths() {
 function resetColumnWidths() {
   widths.clear();
 }
+
+// src/lib/filter-tokens.ts
+var SYMBOLS = [">=", "<=", "!=", ">", "<", "="];
+var IDENT = /[A-Za-z_][A-Za-z0-9_]*/y;
+var WORD_CHAR = /[\p{L}\p{N}_]/u;
+function keywordAt(text, i, keyword) {
+  if (text.slice(i, i + keyword.length).toUpperCase() !== keyword) return false;
+  const next = text[i + keyword.length];
+  return next === void 0 || !WORD_CHAR.test(next);
+}
+function tokenizeFilterDsl(text) {
+  const tokens = [];
+  let expect = "column";
+  let column = null;
+  let i = 0;
+  const push = (kind, start, end, next) => {
+    tokens.push({ kind, start, end, expect, column });
+    expect = next;
+    i = end;
+  };
+  const isSpace = (c) => /\s/.test(c);
+  while (i < text.length) {
+    const s = i;
+    if (isSpace(text[i])) {
+      let j2 = i;
+      while (j2 < text.length && isSpace(text[j2])) j2++;
+      tokens.push({ kind: "space", start: s, end: j2, expect, column });
+      i = j2;
+      continue;
+    }
+    if (expect === "column") {
+      if (keywordAt(text, i, "NOT")) {
+        push("keyword", s, i + 3, "column");
+        continue;
+      }
+      IDENT.lastIndex = i;
+      const m = IDENT.exec(text);
+      if (m) {
+        const name = m[0];
+        push("column", s, i + name.length, "operator");
+        column = name;
+        continue;
+      }
+    } else if (expect === "operator") {
+      if (keywordAt(text, i, "IS")) {
+        push("keyword", s, i + 2, "isTail");
+        continue;
+      }
+      const word = keywordAt(text, i, "ILIKE") ? "ILIKE" : keywordAt(text, i, "LIKE") ? "LIKE" : null;
+      const symbol = SYMBOLS.find((sym) => text.startsWith(sym, i));
+      const op = word ?? symbol;
+      if (op) {
+        push("op", s, i + op.length, "value");
+        continue;
+      }
+    } else if (expect === "isTail") {
+      if (keywordAt(text, i, "NOT")) {
+        push("keyword", s, i + 3, "isTail");
+        continue;
+      }
+      if (keywordAt(text, i, "NULL")) {
+        push("keyword", s, i + 4, "joiner");
+        continue;
+      }
+    } else if (expect === "value") {
+      let j2 = i;
+      if (text[i] === "'") {
+        j2 = i + 1;
+        while (j2 < text.length) {
+          if (text[j2] !== "'") j2++;
+          else if (text[j2 + 1] === "'") j2 += 2;
+          else {
+            j2++;
+            break;
+          }
+        }
+      } else {
+        while (j2 < text.length && !isSpace(text[j2]) && text[j2] !== "'") j2++;
+      }
+      push("value", s, j2, "joiner");
+      continue;
+    } else if (expect === "joiner") {
+      const word = keywordAt(text, i, "AND") ? "AND" : keywordAt(text, i, "OR") ? "OR" : null;
+      if (word) {
+        push("keyword", s, i + word.length, "column");
+        column = null;
+        continue;
+      }
+    }
+    let j = i;
+    while (j < text.length && !isSpace(text[j])) j++;
+    push("plain", s, j, "error");
+  }
+  return { tokens, expect, column };
+}
+function completionAt(text) {
+  const { tokens, expect, column } = tokenizeFilterDsl(text);
+  const last = tokens.at(-1);
+  if (!last || last.kind === "space") return { expect, partial: "", head: text, column };
+  return {
+    expect: last.expect,
+    partial: text.slice(last.start),
+    head: text.slice(0, last.start),
+    column: last.column
+  };
+}
+
+// src/features/filter-highlight.ts
+var input = $("filter");
+var wrap = $("filter-wrap");
+var textEl = $("filter-hl-text");
+function render() {
+  const text = input.value;
+  const { tokens } = tokenizeFilterDsl(text);
+  const error = filterDslErrorAt(text);
+  const at = error && error.index < text.length && !error.message.startsWith("unterminated") ? error.index : -1;
+  textEl.replaceChildren(
+    ...tokens.map((t) => {
+      const span = document.createElement("span");
+      span.className = `t-${t.kind}${t.start <= at && at < t.end ? " t-err" : ""}`;
+      span.textContent = text.slice(t.start, t.end);
+      return span;
+    })
+  );
+  wrap.classList.toggle("plain", input.scrollWidth > input.clientWidth);
+}
+var valueProp = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+if (valueProp?.get && valueProp.set) {
+  const { get, set } = valueProp;
+  Object.defineProperty(input, "value", {
+    configurable: true,
+    get() {
+      return get.call(this);
+    },
+    set(v) {
+      set.call(this, v);
+      render();
+    }
+  });
+}
+input.addEventListener("input", render);
+window.addEventListener("resize", render);
+render();
 
 // src/features/siblings.ts
 var siblingsRequestToken = 0;
@@ -2198,15 +2384,15 @@ function row(text, detail) {
   return div;
 }
 function section(label, rows, emptyText) {
-  const wrap = document.createElement("div");
-  wrap.className = "structure-section";
+  const wrap2 = document.createElement("div");
+  wrap2.className = "structure-section";
   const heading = document.createElement("span");
   heading.className = "section-label";
   heading.textContent = label;
   const list = document.createElement("div");
   list.replaceChildren(...rows.length ? rows : [msg(emptyText)]);
-  wrap.append(heading, list);
-  return wrap;
+  wrap2.append(heading, list);
+  return wrap2;
 }
 function fkRow(fk) {
   const target = fk.schema ? `${fk.schema}.${fk.table}` : fk.table;
@@ -2395,13 +2581,12 @@ function applyFilterClauses(pairs) {
 }
 $("filter-form").onsubmit = (e) => {
   e.preventDefault();
+  closeFilterSuggest();
   submitFilter($("filter").value.trim());
 };
 $("filter").addEventListener("search", () => {
   if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
 });
-var FILTER_COND_FIRST = /^\s*(?:NOT\s+)?$/i;
-var FILTER_COND_AFTER_LOGIC = /(^|\s)(?:AND|OR)\s+(?:NOT\s+)?$/i;
 var CARET_MIRROR_PROPS = [
   "boxSizing",
   "width",
@@ -2432,9 +2617,9 @@ var CARET_MIRROR_PROPS = [
   "textTransform",
   "wordSpacing"
 ];
-function measureCaretPosition(input) {
+function measureCaretPosition(input2) {
   const mirror = document.createElement("div");
-  const computed = getComputedStyle(input);
+  const computed = getComputedStyle(input2);
   Object.assign(mirror.style, {
     position: "absolute",
     visibility: "hidden",
@@ -2445,23 +2630,26 @@ function measureCaretPosition(input) {
   const mirrorStyle = mirror.style;
   const computedStyle = computed;
   for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
-  mirror.textContent = input.value.slice(0, input.selectionStart ?? 0);
+  mirror.textContent = input2.value.slice(0, input2.selectionStart ?? 0);
   const marker = document.createElement("span");
   marker.textContent = "\u200B";
   mirror.appendChild(marker);
   document.body.appendChild(mirror);
   try {
-    const inputRect = input.getBoundingClientRect();
+    const inputRect = input2.getBoundingClientRect();
     const offsetX = marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left;
-    return { x: inputRect.left + offsetX - input.scrollLeft, y: inputRect.bottom };
+    return { x: inputRect.left + offsetX - input2.scrollLeft, y: inputRect.bottom };
   } finally {
     mirror.remove();
   }
 }
+var FILTER_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"];
 var filterSuggestMatches = [];
 var filterSuggestIndex = -1;
 var filterSuggestHead = "";
+var filterSuggestToken = 0;
 function closeFilterSuggest() {
+  filterSuggestToken++;
   filterSuggestMatches = [];
   filterSuggestIndex = -1;
   filterSuggestHead = "";
@@ -2469,10 +2657,11 @@ function closeFilterSuggest() {
 }
 function renderFilterSuggest() {
   $("filter-suggest-list").replaceChildren(
-    ...filterSuggestMatches.map((name, i) => {
+    ...filterSuggestMatches.map((suggestion, i) => {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.textContent = name;
+      btn.textContent = suggestion.label;
+      btn.title = suggestion.label;
       btn.className = i === filterSuggestIndex ? "active" : "";
       btn.onmousedown = (e) => e.preventDefault();
       btn.onclick = () => acceptFilterSuggestion(i);
@@ -2482,57 +2671,91 @@ function renderFilterSuggest() {
   $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
 }
 function acceptFilterSuggestion(i) {
-  const input = $("filter");
-  input.value = filterSuggestHead + filterSuggestMatches[i];
-  input.setSelectionRange(input.value.length, input.value.length);
+  const input2 = $("filter");
+  input2.value = `${filterSuggestHead}${filterSuggestMatches[i].insert} `;
+  input2.setSelectionRange(input2.value.length, input2.value.length);
   closeFilterSuggest();
-  input.focus();
+  input2.focus();
+  updateFilterSuggestions();
 }
-function updateFilterSuggestions() {
-  const input = $("filter");
-  const pos = input.selectionStart;
-  if (pos !== input.value.length) {
+var commonValueCache = /* @__PURE__ */ new Map();
+function commonValuesFor(column) {
+  const params = new URLSearchParams({ table: state.table ?? "", column });
+  applyScopeParams(params);
+  const key = params.toString();
+  let values = commonValueCache.get(key);
+  if (!values) {
+    values = api(`/tables/common-values?${params}`).then((r) => r.values.map((v) => v.value)).catch((e) => {
+      console.warn("ashurbanipal: common values for suggestions failed", e);
+      return [];
+    });
+    commonValueCache.set(key, values);
+  }
+  return values;
+}
+function showFilterSuggestions(ctx, all, index) {
+  const input2 = $("filter");
+  const partial = ctx.partial.toLowerCase();
+  const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
+  const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
+  if (matches.length === 0 || done) {
     closeFilterSuggest();
     return;
   }
-  const before = input.value.slice(0, pos ?? 0);
-  const tokenStart = before.search(/\S*$/);
-  const head = before.slice(0, tokenStart);
-  const partial = before.slice(tokenStart);
-  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) {
-    closeFilterSuggest();
-    return;
-  }
-  const columns = (getLastPayload()?.columns ?? []).map((c) => c.name);
-  filterSuggestMatches = columns.filter((name) => name.toLowerCase().startsWith(partial.toLowerCase()));
-  if (filterSuggestMatches.length === 0) {
-    closeFilterSuggest();
-    return;
-  }
-  filterSuggestHead = head;
-  filterSuggestIndex = 0;
+  filterSuggestMatches = matches;
+  filterSuggestHead = ctx.head;
+  filterSuggestIndex = index;
   renderFilterSuggest();
-  const { x, y } = measureCaretPosition(input);
+  const { x, y } = measureCaretPosition(input2);
   $("filter-caret-anchor").style.left = `${x}px`;
   $("filter-caret-anchor").style.top = `${y}px`;
   $("filter-suggest").showPopover();
+}
+function updateFilterSuggestions() {
+  const input2 = $("filter");
+  if (input2.selectionStart !== input2.value.length) {
+    closeFilterSuggest();
+    return;
+  }
+  const ctx = completionAt(input2.value);
+  closeFilterSuggest();
+  if (ctx.partial.startsWith("'")) return;
+  const token = filterSuggestToken;
+  const plain = (labels) => labels.map((label) => ({ label, insert: label }));
+  if (ctx.expect === "column") {
+    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
+  } else if (ctx.expect === "operator") {
+    showFilterSuggestions(ctx, plain(FILTER_OPERATORS), -1);
+  } else if (ctx.expect === "joiner" && ctx.partial !== "") {
+    showFilterSuggestions(ctx, plain(["AND", "OR"]), -1);
+  } else if (ctx.expect === "value" && ctx.column && getLastPayload()?.columns.some((c) => c.name === ctx.column)) {
+    commonValuesFor(ctx.column).then((values) => {
+      if (token !== filterSuggestToken || document.activeElement !== input2) return;
+      const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
+      showFilterSuggestions(ctx, rows, -1);
+    });
+  }
 }
 $("filter").oninput = updateFilterSuggestions;
 $("filter").onfocus = updateFilterSuggestions;
 $("filter").onblur = closeFilterSuggest;
 $("filter").onkeydown = (e) => {
   if (filterSuggestMatches.length === 0) return;
+  const count = filterSuggestMatches.length;
   if (e.key === "ArrowDown") {
     e.preventDefault();
-    filterSuggestIndex = (filterSuggestIndex + 1) % filterSuggestMatches.length;
+    filterSuggestIndex = (filterSuggestIndex + 1) % count;
     renderFilterSuggest();
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
-    filterSuggestIndex = (filterSuggestIndex - 1 + filterSuggestMatches.length) % filterSuggestMatches.length;
+    filterSuggestIndex = filterSuggestIndex <= 0 ? count - 1 : filterSuggestIndex - 1;
     renderFilterSuggest();
-  } else if (e.key === "Enter" || e.key === "Tab") {
+  } else if (e.key === "Enter" && filterSuggestIndex >= 0) {
     e.preventDefault();
     acceptFilterSuggestion(filterSuggestIndex);
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    acceptFilterSuggestion(Math.max(filterSuggestIndex, 0));
   } else if (e.key === "Escape") {
     e.preventDefault();
     closeFilterSuggest();
@@ -2991,11 +3214,11 @@ function renderColumnMenu(columns) {
   $("columns-pop-list").replaceChildren(
     ...columns.map((col) => {
       const label = document.createElement("label");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = !hidden.includes(col.name);
-      input.onchange = () => setColumnVisibility(col.name, !input.checked);
-      label.append(input, col.name);
+      const input2 = document.createElement("input");
+      input2.type = "checkbox";
+      input2.checked = !hidden.includes(col.name);
+      input2.onchange = () => setColumnVisibility(col.name, !input2.checked);
+      label.append(input2, col.name);
       return label;
     })
   );

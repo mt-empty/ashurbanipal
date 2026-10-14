@@ -17,7 +17,7 @@ const RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 // frontend/test/filter-dsl.test.ts asserts `.position` off a caught error —
 // it must stay a real own property on the thrown object, not just baked into
 // the message string.
-class FilterDslError extends Error {
+export class FilterDslError extends Error {
   position: number;
   constructor(message: string, position: number) {
     super(`${message} at position ${position}`);
@@ -211,4 +211,24 @@ export function tryParseFilterDsl(input: string): FilterCondition[] | null {
 export function quoteFilterValue(value: string): string {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+// Where parseFilterDsl rejects `input`, as a string index (the error's own
+// position is a UTF-8 byte offset); null when it parses.
+export function filterDslErrorAt(input: string): { index: number; message: string } | null {
+  try {
+    parseFilterDsl(input);
+    return null;
+  } catch (e) {
+    if (!(e instanceof FilterDslError)) return null;
+    const encoder = new TextEncoder();
+    let bytes = 0;
+    let index = 0;
+    for (const ch of input) {
+      if (bytes >= e.position) break;
+      bytes += encoder.encode(ch).length;
+      index += ch.length;
+    }
+    return { index, message: e.message };
+  }
 }

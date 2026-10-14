@@ -126,12 +126,14 @@ test("column autocomplete suggests all columns at an empty/condition-start bound
   ]);
 });
 
-test("column autocomplete is not offered mid-condition (past a column into operator position)", async ({
+test("column names are not offered mid-condition (past a column the next word is an operator)", async ({
   page,
 }) => {
   await gotoApp(page);
   await selectTable(page, "users");
   const filter = page.locator("#filter");
   await filter.fill("age ");
-  await expect(page.locator("#filter-suggest")).toBeHidden();
+  const suggestions = await page.locator("#filter-suggest-list button").allTextContents();
+  expect(suggestions).not.toContain("email");
+  expect(suggestions).toContain("IS NULL");
 });

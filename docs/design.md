@@ -130,20 +130,31 @@ Two components, same as the original concept:
     referenced table and filters it to the matching row. Per §2's
     non-goal carve-out, this is two sequential single-table queries, never
     a join.
-  - *Filter autocomplete* — the filter input suggests column names via a
-    hand-rolled, caret-anchored popover that stays open while typing (see
-    `frontend/src/features/filter-ui.ts`) at condition-start boundaries (empty
-    input, or right after `AND `/`OR `/`NOT `). No value- or operator-level
-    autocomplete, and no *as-you-type* parsing of the filter text — both
-    would require understanding where the cursor sits in the grammar.
-    (The submit-time DSL parser — `spec/filter-dsl.md`,
-    `frontend-style-guide.md` §7 — is a separate concern, not
-    per-keystroke.) (An earlier
-    version of this also highlighted the typed clause's tokens via a
-    transparent-input-plus-overlay; removed after three rounds of
-    increasingly subtle scroll/stacking bugs made it too bug-prone to
-    maintain — if revisited, do it as a `contenteditable`-based rewrite,
-    not a transparent-input-plus-overlay.)
+  - *Filter autocomplete* — the filter input suggests whatever the grammar
+    allows next, via a hand-rolled, caret-anchored popover that stays open
+    while typing (`frontend/src/features/filter-ui.ts`): a column at
+    condition-start boundaries (empty, or after `AND `/`OR `/`NOT `), an
+    operator after a column, the column's common values (§4, same endpoint
+    as the header ▾) after an operator, and `AND`/`OR` once a letter is
+    typed after a finished condition. Accepting a row adds a space, so the
+    next list follows. Columns highlight their first row, so Enter accepts
+    it; the other lists highlight nothing, so Enter still submits what is
+    typed (Tab or an arrow key picks a row). What is allowed next comes from
+    a lenient tokenizer (`lib/filter-tokens.ts`) that only looks at the text
+    before the caret; `parseFilterDsl` (`spec/filter-dsl.md`) alone decides
+    what is accepted.
+  - *Filter colouring* — the typed text is coloured by part (column,
+    operator, keyword, value), and the part where `parseFilterDsl` stops
+    accepting it is underlined once the text has moved past that point
+    (`features/filter-highlight.ts`). It is a copy of the text drawn behind
+    a transparent-text input, so caret, selection, IME and copy/paste stay
+    native. An earlier overlay was removed for three bugs: a layer
+    positioned by anchor positioning that desynced on scroll, a z-index
+    clash with the then-sticky toolbar, and not following the input's own
+    horizontal scroll. This one is plainly positioned inside the field's
+    wrapper (the toolbar is no longer sticky), and when the text overflows
+    the field the copy is dropped and the input shows its own text, because
+    WebKit does not report a text field's horizontal scroll.
   - *Table/column comments* — `COMMENT ON TABLE`/`COMMENT ON COLUMN` text
     (§4) is surfaced as native `title` tooltips on the table chips
     and column headers.
