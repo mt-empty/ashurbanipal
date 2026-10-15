@@ -15,8 +15,9 @@ from flask import Blueprint, Response, jsonify, request
 
 from . import filter as filter_module
 from .config import Config
-from .db import DbError, DbSource, FilterParseError, NotAllowed, NotAllowedKind, QueryOpts
+from .db import BadJoin, DbError, DbSource, FilterParseError, NotAllowed, NotAllowedKind, QueryOpts, QueryTimeout
 from .embed import DBVIEWER_HTML
+from .join import JoinOpts, parse_join
 
 PROTOCOL_HEADER = "x-ashurbanipal-protocol"
 # Bumped only for non-additive wire changes; additive optional fields keep
@@ -68,6 +69,10 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
             return _problem_response(400, err.kind.value, f"not allowed: {err}")
         if isinstance(err, FilterParseError):
             return _problem_response(400, "invalid_filter", f"invalid filter: {err}")
+        if isinstance(err, BadJoin):
+            return _problem_response(400, "invalid_parameter", f"invalid join: {err}")
+        if isinstance(err, QueryTimeout):
+            return _problem_response(500, "query_timeout", "query timed out")
         return _problem_response(500, "database_error", f"database error: {err}")
 
     @bp.errorhandler(DbError)
@@ -154,6 +159,69 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
             }
         )
 
+    @bp.get("/api/tables/join")
+    def table_join() -> Response:
+        source = resolve_source(request.args.get("source"))
+        schema = request.args.get("schema")
+        raw_join = request.args.get("join")
+        if raw_join is None:
+            return _problem_response(400, "invalid_parameter", 'missing required "join" parameter')
+        spec = parse_join(raw_join)
+
+        raw_filter = request.args.get("filter")
+        parsed_filter = None
+        if raw_filter is not None and raw_filter.strip():
+            try:
+                conditions = filter_module.parse_for_join(raw_filter)
+            except filter_module.FilterError as e:
+                return _error_response(FilterParseError(str(e)))
+            parsed_filter = conditions or None
+
+        limits = config.limits
+        limit = _clamp_int(
+            request.args.get("limit"), default=limits.default_page_size, lo=1, hi=limits.max_page_size
+        )
+        if limit is None:
+            return _problem_response(400, "invalid_parameter", '"limit" must be a number')
+        offset = _clamp_int(request.args.get("offset"), default=0, lo=0, hi=_MAX_I64)
+        if offset is None:
+            return _problem_response(400, "invalid_parameter", '"offset" must be a number')
+
+        order = request.args.get("order")
+        if order is None or order == "asc":
+            descending = False
+        elif order == "desc":
+            descending = True
+        else:
+            msg = f'invalid order {order!r} (expected "asc" or "desc")'
+            return _problem_response(400, "invalid_parameter", msg)
+
+        sort_join = None
+        raw_sort_join = request.args.get("sort_join")
+        if raw_sort_join is not None:
+            if not raw_sort_join.strip().isascii() or not raw_sort_join.strip().isdigit():
+                msg = f"invalid sort_join {raw_sort_join!r} (expected a table position)"
+                return _problem_response(400, "invalid_parameter", msg)
+            sort_join = int(raw_sort_join)
+
+        opts = JoinOpts(
+            limit=limit,
+            offset=offset,
+            timeout_secs=limits.query_timeout_secs,
+            sort=request.args.get("sort") or None,
+            sort_join=sort_join,
+            descending=descending,
+            filter=parsed_filter,
+        )
+        data = source.query_join(schema, spec, opts)
+        return jsonify(
+            {
+                "columns": [_join_column_to_dict(c) for c in data.columns],
+                "rows": data.rows,
+                "has_more": data.has_more,
+            }
+        )
+
     @bp.get("/api/tables/common-values")
     def common_values() -> Response:
         source = resolve_source(request.args.get("source"))
@@ -201,6 +269,20 @@ def _table_to_dict(t) -> dict:
 
 def _column_to_dict(c) -> dict:
     d = {"name": c.name, "type": c.type_name}
+    if c.key is not None:
+        d["key"] = c.key.value
+    if c.references is not None:
+        ref = {"table": c.references.table, "column": c.references.column}
+        if c.references.schema is not None:
+            ref["schema"] = c.references.schema
+        d["references"] = ref
+    if c.comment is not None:
+        d["comment"] = c.comment
+    return d
+
+
+def _join_column_to_dict(c) -> dict:
+    d = {"name": c.name, "type": c.type_name, "join": c.join, "table": c.table, "column": c.column}
     if c.key is not None:
         d["key"] = c.key.value
     if c.references is not None:

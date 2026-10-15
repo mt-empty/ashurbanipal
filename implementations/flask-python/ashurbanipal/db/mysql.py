@@ -7,6 +7,24 @@ from urllib.parse import urlsplit
 import pymysql
 
 from ..filter import Condition
+from ..join import (
+    BINARY,
+    NUMBER,
+    TEMPORAL,
+    TEXT,
+    TIME,
+    UUID,
+    ColMeta,
+    Dialect,
+    JoinData,
+    JoinOpts,
+    JoinSpec,
+    TableMeta,
+    TypeClass,
+    build_select,
+    enum_class,
+    plan_join,
+)
 from . import (
     ColumnInfo,
     ColumnPair,
@@ -103,6 +121,34 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
         clause_parts.append(wrapped)
 
     return " where " + "".join(clause_parts), values
+
+
+_JOIN_DIALECT = Dialect(
+    quote=_quote_ident,
+    cast_text=lambda expr: f"CAST({expr} AS CHAR)",
+    placeholder="%s",
+    ilike="lowered-like",
+)
+
+
+def type_class(data_type: str, column_type: str) -> TypeClass | None:
+    """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
+    t = data_type.lower()
+    if t in ("tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric"):
+        return NUMBER
+    if t in ("char", "varchar", "tinytext", "text", "mediumtext", "longtext"):
+        return TEXT
+    if t in ("date", "datetime", "timestamp"):
+        return TEMPORAL
+    if t == "time":
+        return TIME
+    if t in ("binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob"):
+        return BINARY
+    if t == "uuid":
+        return UUID
+    if t == "enum":
+        return enum_class(column_type)
+    return None
 
 
 class MySqlSource(DbSource):
@@ -367,6 +413,74 @@ class MySqlSource(DbSource):
                 total_approx = count if count is not None else -1
             conn.commit()
             return TableData(columns=columns, rows=rows, total_approx=total_approx)
+        finally:
+            conn.close()
+
+    def _join_table_meta(self, cur, variant: str, schema: str, table: str, timeout_secs: int) -> TableMeta:
+        cur.execute(
+            _timed_select(
+                variant,
+                timeout_secs,
+                "column_name, data_type, column_comment, collation_name, column_type "
+                "from information_schema.columns "
+                "where table_schema = %s and table_name = %s "
+                "order by ordinal_position",
+            ),
+            (schema, table),
+        )
+        column_rows = cur.fetchall()
+        pk_columns, fk_columns = self._key_metadata(cur, variant, schema, table, timeout_secs)
+        return TableMeta(
+            name=table,
+            columns=[
+                ColMeta(
+                    name=name,
+                    type_name=data_type,
+                    cls=type_class(data_type, column_type),
+                    collation=collation or None,
+                    key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
+                    references=fk_columns.get(name),
+                    comment=(comment or None),
+                )
+                for name, data_type, comment, collation, column_type in column_rows
+            ],
+        )
+
+    @wrap_driver_errors(pymysql.Error)
+    def query_join(self, schema: str | None, spec: JoinSpec, opts: JoinOpts) -> JoinData:
+        conn = self._connect()
+        try:
+            variant = self._variant_of(conn)
+            timeout = opts.timeout_secs
+            with conn.cursor() as cur:
+                resolved_schema = self._resolve_schema(cur, variant, schema, timeout)
+                allowed = self._allowed_tables(cur, variant, resolved_schema, timeout)
+                names = spec.table_names()
+                metas: dict[str, TableMeta] = {}
+                for name in names:
+                    if name in metas:
+                        continue
+                    if name not in allowed:
+                        raise NotAllowed(f"table {name!r}", kind=NotAllowedKind.TABLE)
+                    metas[name] = self._join_table_meta(cur, variant, resolved_schema, name, timeout)
+                plan = plan_join(spec, [metas[n] for n in names], opts)
+
+                # The statement is built from catalog names and generated
+                # aliases only; every value is a bound parameter.
+                body, values = build_select(plan, _JOIN_DIALECT, resolved_schema)
+                conn.use_unicode = False
+                try:
+                    cur.execute(_timed_select(variant, timeout, body), (*values, opts.limit + 1, opts.offset))
+                    mysql_rows = cur.fetchall()
+                except pymysql.Error as exc:
+                    if exc.args and exc.args[0] == 1142:
+                        raise NotAllowed(f"table {spec.table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                    raise
+                finally:
+                    conn.use_unicode = True
+                rows, has_more = plan.rows_from(mysql_rows, opts.limit, lambda v: _decode_cell(v, conn.encoding))
+            conn.commit()
+            return JoinData(columns=plan.column_infos(), rows=rows, has_more=has_more)
         finally:
             conn.close()
 

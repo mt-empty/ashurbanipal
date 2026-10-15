@@ -6,6 +6,25 @@ import psycopg
 from psycopg.types.string import TextLoader
 
 from ..filter import Condition
+from ..join import (
+    BINARY,
+    BOOLEAN,
+    NUMBER,
+    TEMPORAL,
+    TEXT,
+    TIME,
+    UUID,
+    ColMeta,
+    Dialect,
+    JoinData,
+    JoinOpts,
+    JoinSpec,
+    TableMeta,
+    TypeClass,
+    build_select,
+    enum_class,
+    plan_join,
+)
 from . import (
     ColumnInfo,
     ColumnPair,
@@ -69,6 +88,38 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
         clause_parts.append(wrapped)
 
     return " where " + "".join(clause_parts), values
+
+
+_JOIN_DIALECT = Dialect(
+    quote=quote_ident,
+    cast_text=lambda expr: f"{expr}::text",
+    placeholder="%s",
+    ilike="native",
+)
+
+
+def type_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> TypeClass | None:
+    """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
+    if data_type in ("smallint", "integer", "bigint", "numeric"):
+        return NUMBER
+    if data_type in ("character varying", "character", "text"):
+        return TEXT
+    if data_type == "uuid":
+        return UUID
+    if data_type == "boolean":
+        return BOOLEAN
+    if data_type == "bytea":
+        return BINARY
+    if data_type in ("date", "timestamp without time zone", "timestamp with time zone"):
+        return TEMPORAL
+    if data_type in ("time without time zone", "time with time zone"):
+        return TIME
+    if data_type == "USER-DEFINED":
+        if is_enum:
+            return enum_class(f"{udt_schema}.{udt_name}")
+        if udt_name == "citext":
+            return TEXT
+    return None
 
 
 class PgSource(DbSource):
@@ -314,6 +365,75 @@ class PgSource(DbSource):
                 total_approx = cur.fetchone()[0]
 
                 return TableData(columns=columns, rows=rows, total_approx=total_approx)
+
+    def _join_table_meta(self, cur: psycopg.Cursor, schema: str, table: str) -> TableMeta:
+        """Column metadata of a table already cleared by `_readable_table_oid`."""
+        cur.execute(
+            "select c.column_name, c.data_type, c.udt_schema, c.udt_name, "
+            "       exists (select 1 from pg_type t "
+            "               join pg_namespace n on n.oid = t.typnamespace "
+            "               where n.nspname = c.udt_schema and t.typname = c.udt_name "
+            "                 and t.typtype = 'e') "
+            "from information_schema.columns c "
+            "where c.table_schema = %s and c.table_name = %s "
+            "order by c.ordinal_position",
+            (schema, table),
+        )
+        column_rows = list(cur.fetchall())
+        cur.execute(
+            "select a.attname::text, col_description(a.attrelid, a.attnum::int) "
+            "from pg_attribute a "
+            "join pg_class c on c.oid = a.attrelid "
+            "join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = %s and c.relname = %s "
+            "  and a.attnum > 0 and not a.attisdropped",
+            (schema, table),
+        )
+        comments = {name: comment for name, comment in cur.fetchall() if comment is not None}
+        pk_columns, fk_columns = self._key_metadata(cur, schema, table)
+        return TableMeta(
+            name=table,
+            columns=[
+                ColMeta(
+                    name=name,
+                    type_name=data_type,
+                    cls=type_class(data_type, udt_schema, udt_name, is_enum),
+                    key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
+                    references=fk_columns.get(name),
+                    comment=comments.get(name),
+                )
+                for name, data_type, udt_schema, udt_name, is_enum in column_rows
+            ],
+        )
+
+    @wrap_driver_errors(psycopg.Error)
+    def query_join(self, schema: str | None, spec: JoinSpec, opts: JoinOpts) -> JoinData:
+        with self._connect() as conn:
+            conn.adapters.register_loader("text", _LenientTextLoader)
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
+                resolved_schema = self._resolve_schema(cur, schema)
+                names = spec.table_names()
+                metas: dict[str, TableMeta] = {}
+                for name in names:
+                    if name not in metas:
+                        self._readable_table_oid(cur, resolved_schema, name)
+                        metas[name] = self._join_table_meta(cur, resolved_schema, name)
+                plan = plan_join(spec, [metas[n] for n in names], opts)
+
+                # The statement is built from catalog names and generated
+                # aliases only; every value is a bound parameter.
+                body, values = build_select(plan, _JOIN_DIALECT, resolved_schema)
+                try:
+                    cur.execute(f"select {body}", (*values, opts.limit + 1, opts.offset))
+                except psycopg.errors.InsufficientPrivilege as exc:
+                    raise NotAllowed(f"table {spec.table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                except psycopg.DataError as exc:
+                    raise FilterParseError(f"value invalid for this backend: {exc}") from exc
+                rows, has_more = plan.rows_from(
+                    cur.fetchall(), opts.limit, lambda v: None if v is None else str(v)
+                )
+                return JoinData(columns=plan.column_infos(), rows=rows, has_more=has_more)
 
     @wrap_driver_errors(psycopg.Error)
     def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]:

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import contextmanager
 
 import psycopg
 import pytest
 
-from ashurbanipal.db import FilterParseError, KeyKind, NotAllowed, QueryOpts
+from ashurbanipal.db import BadJoin, FilterParseError, KeyKind, NotAllowed, QueryOpts, QueryTimeout
 from ashurbanipal.db.postgres import PgSource
 from ashurbanipal.filter import Condition
+from ashurbanipal.join import JoinOpts, parse_join
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 pytestmark = [
@@ -366,3 +368,71 @@ def test_query_timeout_is_enforced(source) -> None:
     with pytest.raises(psycopg.Error), psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
         cur.execute("SET LOCAL statement_timeout = '1s'")
         cur.execute("select pg_sleep(5)")
+
+
+def _pair(left: str, left_col: str, right: str, right_col: str):
+    return parse_join(
+        json.dumps(
+            {
+                "table": left,
+                "joins": [
+                    {
+                        "type": "inner",
+                        "table": right,
+                        "on": [{"left": {"join": 0, "column": left_col}, "right": right_col}],
+                    }
+                ],
+            }
+        )
+    )
+
+
+@pytest.fixture
+def join_schemas():
+    types, slow = "ashb_test_flask_join_types", "ashb_test_flask_join_slow"
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
+        conn.execute(f"drop schema if exists {types} cascade; create schema {types}")
+        conn.execute(f"drop schema if exists {slow} cascade; create schema {slow}")
+        conn.execute(
+            f"create type {types}.mood as enum ('ok', 'sad'); "
+            f"create type {types}.size as enum ('s', 'm'); "
+            f"create table {types}.a (id int primary key, m {types}.mood, z {types}.size, "
+            "tags text[], n numeric); "
+            f"create table {types}.b (id int primary key, m {types}.mood, z {types}.size, tags text[], n bigint); "
+            f"insert into {types}.a values (1, 'ok', 's', '{{x}}', 1.0); "
+            f"insert into {types}.b values (1, 'ok', 's', '{{x}}', 1);"
+        )
+        conn.execute(
+            f"create table {slow}.a as select g as id, g % 2 as k from generate_series(1, 20000) g; "
+            f"create table {slow}.b as select g as id, g % 2 as k from generate_series(1, 20000) g;"
+        )
+    yield types, slow
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
+        conn.execute(f"drop schema if exists {types} cascade; drop schema if exists {slow} cascade")
+
+
+def test_join_enums_pair_only_within_one_type_and_arrays_never_join(source, join_schemas) -> None:
+    types, _ = join_schemas
+    opts = JoinOpts(limit=10, offset=0, timeout_secs=5)
+    assert len(source.query_join(types, _pair("a", "m", "b", "m"), opts).rows) == 1
+    with pytest.raises(BadJoin):
+        source.query_join(types, _pair("a", "m", "b", "z"), opts)
+    with pytest.raises(BadJoin):
+        source.query_join(types, _pair("a", "tags", "b", "tags"), opts)
+    assert len(source.query_join(types, _pair("a", "n", "b", "n"), opts).rows) == 1
+
+
+def test_a_slow_join_is_a_query_timeout_and_releases_the_connection(source, join_schemas) -> None:
+    import time
+
+    _, slow = join_schemas
+    started = time.monotonic()
+    with pytest.raises(QueryTimeout):
+        source.query_join(
+            slow,
+            _pair("a", "k", "b", "k"),
+            JoinOpts(limit=10, offset=0, timeout_secs=1, sort="id", descending=True),
+        )
+    assert time.monotonic() - started < 5
+    ok = source.query_join(slow, _pair("a", "id", "b", "id"), JoinOpts(limit=10, offset=0, timeout_secs=5))
+    assert len(ok.rows) == 10 and ok.has_more is True

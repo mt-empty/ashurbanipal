@@ -5,14 +5,17 @@ Each test uses an isolated throwaway database and skips unavailable services.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 
 import pymysql
 import pytest
 
-from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts
+from ashurbanipal.db import BadJoin, KeyKind, NotAllowed, QueryOpts, QueryTimeout, wrap_driver_errors
 from ashurbanipal.db.mysql import _MARIADB, MySqlSource, connect_kwargs_from_url
+from ashurbanipal.filter import Condition
+from ashurbanipal.join import JoinOpts, JoinSpec, parse_join
 
 pytestmark = pytest.mark.mysql
 
@@ -216,8 +219,14 @@ def test_slow_query_is_aborted_by_the_timeout_mechanism(seeded) -> None:
     conn = pymysql.connect(**seeded.kwargs)
     variant = seeded.source._variant_of(conn)
     with conn.cursor() as cur:
-        if variant == _MARIADB:
-            cur.execute("set session max_recursive_iterations = 100000000")
+        # Both forks cap WITH RECURSIVE far below the CTE's size (MariaDB
+        # max_recursive_iterations, MySQL cte_max_recursion_depth, default
+        # 1000), so the cap is raised or the timeout never gets to fire.
+        cur.execute(
+            "set session max_recursive_iterations = 100000000"
+            if variant == _MARIADB
+            else "set session cte_max_recursion_depth = 100000000"
+        )
 
         from ashurbanipal.db.mysql import _timed_select
 
@@ -230,12 +239,85 @@ def test_slow_query_is_aborted_by_the_timeout_mechanism(seeded) -> None:
             "  ) select x from slow"
             ") t",
         )
-        with pytest.raises(pymysql.err.OperationalError):
+
+        @wrap_driver_errors(pymysql.Error)
+        def run_slow():
             cur.execute(sql)
-            cur.fetchone()
+            return cur.fetchone()
+
+        with pytest.raises(QueryTimeout):
+            run_slow()
 
         # The same connection must still be usable afterward — proves both
         # forks' mechanisms are self-resetting.
         cur.execute("select 1")
         assert cur.fetchone() == (1,)
     conn.close()
+
+
+def _join(kind: str = "left", right: str = "user_id") -> JoinSpec:
+    return parse_join(
+        json.dumps(
+            {
+                "table": "users",
+                "joins": [
+                    {
+                        "type": kind,
+                        "table": "orders",
+                        "on": [{"left": {"join": 0, "column": "id"}, "right": right}],
+                    }
+                ],
+            }
+        )
+    )
+
+
+def test_join_left_keeps_unmatched_rows_and_ilike_filters_a_joined_column(seeded) -> None:
+    opts = JoinOpts(limit=10, offset=0, timeout_secs=5)
+    data = seeded.source.query_join(None, _join(), opts)
+    assert len(data.rows) == 3 and data.has_more is False
+    page = seeded.source.query_join(None, _join(), JoinOpts(limit=1, offset=0, timeout_secs=5))
+    assert len(page.rows) == 1 and page.has_more is True
+    one = seeded.source.query_join(
+        None,
+        _join(),
+        JoinOpts(
+            limit=10,
+            offset=0,
+            timeout_secs=5,
+            filter=[Condition(column="email", op="ILIKE", value="B@X.%", join=0)],
+        ),
+    )
+    assert len(one.rows) == 1
+
+
+def test_join_differing_text_collations_are_a_bad_join(seeded) -> None:
+    conn = pymysql.connect(**seeded.kwargs)
+    with conn.cursor() as cur:
+        cur.execute("create table ca (v varchar(20) collate utf8mb4_bin)")
+        cur.execute("create table cb (v varchar(20) collate utf8mb4_general_ci)")
+    conn.commit()
+    conn.close()
+    spec = parse_join(
+        json.dumps(
+            {
+                "table": "ca",
+                "joins": [
+                    {"type": "inner", "table": "cb", "on": [{"left": {"join": 0, "column": "v"}, "right": "v"}]}
+                ],
+            }
+        )
+    )
+    with pytest.raises(BadJoin, match="collation"):
+        seeded.source.query_join(None, spec, JoinOpts(limit=10, offset=0, timeout_secs=5))
+
+
+def test_join_type_classes() -> None:
+    from ashurbanipal.db.mysql import type_class
+    from ashurbanipal.join import NUMBER, TEXT, enum_class
+
+    assert type_class("bigint", "bigint") == NUMBER
+    assert type_class("VARCHAR", "varchar(20)") == TEXT
+    assert type_class("enum", "enum('a','b')") == enum_class("enum('a','b')")
+    assert type_class("json", "json") is None
+    assert type_class("double", "double") is None

@@ -22,6 +22,8 @@ class Condition:
     logic: str | None = None
     not_: bool = False
     value: str | None = None
+    # Table position, accepted only by `parse_for_join` (spec/protocol.md §5.11.3).
+    join: int | None = None
 
 
 class FilterError(Exception):
@@ -29,6 +31,15 @@ class FilterError(Exception):
 
 
 def parse(raw: str) -> list[Condition]:
+    return _parse(raw, allow_join=False)
+
+
+def parse_for_join(raw: str) -> list[Condition]:
+    """`parse` for GET /api/tables/join: a condition may carry a `join` table position."""
+    return _parse(raw, allow_join=True)
+
+
+def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
     if len(raw.encode("utf-8")) > MAX_FILTER_BYTES:
         raise FilterError(f"filter too long: {len(raw.encode('utf-8'))} bytes (max {MAX_FILTER_BYTES})")
 
@@ -45,7 +56,7 @@ def parse(raw: str) -> list[Condition]:
     for i, raw_cond in enumerate(raw_conditions):
         if not isinstance(raw_cond, dict):
             raise FilterError(f"condition {i} must be a JSON object")
-        unknown = set(raw_cond) - _CONDITION_FIELDS
+        unknown = set(raw_cond) - (_CONDITION_FIELDS | ({"join"} if allow_join else set()))
         if unknown:
             raise FilterError(f"condition {i} has unknown field(s): {sorted(unknown)}")
 
@@ -76,6 +87,10 @@ def parse(raw: str) -> list[Condition]:
         if not takes_value and value is not None:
             raise FilterError(f"op {op!r} takes no value")
 
-        conditions.append(Condition(column=column, op=op, logic=logic, not_=not_, value=value))
+        join = raw_cond.get("join")
+        if join is not None and (not isinstance(join, int) or isinstance(join, bool) or join < 0):
+            raise FilterError(f'condition {i} has an invalid "join" position')
+
+        conditions.append(Condition(column=column, op=op, logic=logic, not_=not_, value=value, join=join))
 
     return conditions
