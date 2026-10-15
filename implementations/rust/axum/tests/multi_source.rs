@@ -163,6 +163,7 @@ async fn unknown_source_is_rejected_with_400_on_every_source_aware_route() {
         "/__ashurbanipal/api/tables/common-values?source=nonexistent&table=whatever&column=id",
         "/__ashurbanipal/api/tables/referenced-by?source=nonexistent&table=whatever",
         "/__ashurbanipal/api/tables/structure?source=nonexistent&table=whatever",
+        "/__ashurbanipal/api/tables/join?source=nonexistent&join=%7B%7D",
     ] {
         assert_eq!(
             get_status(&app, path).await,
