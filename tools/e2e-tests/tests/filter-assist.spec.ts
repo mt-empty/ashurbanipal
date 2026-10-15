@@ -146,3 +146,36 @@ test("a typed filter still applies end to end", async ({ page }) => {
   await applyFilter(page, "status = completed");
   await expect(page.locator("#error")).toBeEmpty();
 });
+
+test("the suggestion popup is exposed as a combobox with the highlighted row active", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const input = page.locator("#filter");
+  await expect(input).toHaveAttribute("aria-expanded", "false");
+  await input.focus();
+  await expect(input).toHaveAttribute("aria-expanded", "true");
+  await expect(input).toHaveAttribute("aria-activedescendant", "filter-suggest-0");
+  await expect(suggestions(page).first()).toHaveAttribute("aria-selected", "true");
+  await input.press("Escape");
+  await expect(input).toHaveAttribute("aria-expanded", "false");
+  await expect(input).not.toHaveAttribute("aria-activedescendant");
+});
+
+test("a huge paste neither throws nor leaves stale colours behind", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#filter").fill("status = completed");
+  await page.locator("#filter").fill("a ".repeat(100_000));
+  await expect(page.locator("#filter-wrap")).toHaveClass(/plain/);
+  await expect(page.locator("#filter-hl-text span")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("leading spaces are not underlined as an error", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#filter").fill("  status = completed");
+  await expect(page.locator("#filter-hl-text .t-err")).toHaveCount(0);
+});

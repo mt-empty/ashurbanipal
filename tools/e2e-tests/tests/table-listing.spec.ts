@@ -87,6 +87,19 @@ test("the active table is never hidden behind the cap", async ({ page }) => {
   await expect(page.locator('#tables button[data-table="users"]')).toHaveClass(/active/);
 });
 
+test("'show fewer' stays collapsed and clipped chips are out of the tab order", async ({ page }) => {
+  await page.setViewportSize({ width: 500, height: 800 });
+  await gotoApp(page, "?table=users");
+  const more = page.locator("#tables-more");
+  await expect(more).toHaveText("show fewer");
+  await more.click();
+  await expect(more).toHaveText(/^\+ \d+ more$/);
+  await expect(page.locator("#tables")).toHaveClass(/capped/);
+  await expect(page.locator("#tables li[inert]").first()).toBeAttached();
+  await more.click();
+  await expect(page.locator("#tables li[inert]")).toHaveCount(0);
+});
+
 test("a wide window shows every table with no cap control", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 800 });
   await gotoApp(page);
