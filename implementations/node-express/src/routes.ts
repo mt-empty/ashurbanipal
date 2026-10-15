@@ -2,8 +2,9 @@ import express, { type Router as ExpressRouter, type Request, type Response } fr
 import { basePath, type Config, isEnabled, type ResolvedLimits, withDefaults } from "./config.js";
 import type { DbSource } from "./db/types.js";
 import { dbviewerHtml } from "./embed.js";
-import { FilterError, NOT_ALLOWED_CODE, NotAllowedError } from "./errors.js";
-import { type Condition, parseFilter } from "./filter.js";
+import { FilterError, isQueryTimeout, NOT_ALLOWED_CODE, NotAllowedError } from "./errors.js";
+import { type Condition, parseFilter, parseFilterForJoin } from "./filter.js";
+import { BadJoinError, parseJoin } from "./join.js";
 import { checkSiblings } from "./siblings.js";
 
 const PROTOCOL_HEADER = "x-ashurbanipal-protocol";
@@ -60,6 +61,7 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   registerGet(router, `${mount}/api/tables/common-values`, withProtocolHeader(commonValuesHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/referenced-by`, withProtocolHeader(referencedByHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/structure`, withProtocolHeader(structureHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/join`, withProtocolHeader(tableJoinHandler(sources, limits, timeoutMs)));
   registerGet(router, `${mount}/api/siblings`, withProtocolHeader(siblingsHandler(config.siblings ?? [])));
 
   return router;
@@ -120,7 +122,8 @@ function httpProblemError(res: Response, status: number, code: string, title: st
 // Maps a DbSource/filter error to the wire's error taxonomy
 // (spec/protocol.md §2): NotAllowedError's kind picks the exact
 // unknown_*/not_readable code; FilterError is always invalid_filter;
-// anything else is a database failure (500). Status code + code are the
+// BadJoinError is invalid_parameter; a statement stopped by the query
+// timeout is query_timeout; anything else is a database failure (500). Status code + code are the
 // contract — `title` wording is implementation-defined.
 function writeError(res: Response, err: unknown): void {
   if (err instanceof NotAllowedError) {
@@ -129,6 +132,14 @@ function writeError(res: Response, err: unknown): void {
   }
   if (err instanceof FilterError) {
     httpProblemError(res, 400, "invalid_filter", err.message);
+    return;
+  }
+  if (err instanceof BadJoinError) {
+    httpProblemError(res, 400, "invalid_parameter", err.message);
+    return;
+  }
+  if (isQueryTimeout(err)) {
+    httpProblemError(res, 500, "query_timeout", "query timed out");
     return;
   }
   const message = err instanceof Error ? err.message : String(err);
@@ -235,6 +246,73 @@ function tableDataHandler(sources: NamedSource[], limits: ResolvedLimits, timeou
       timeoutMs,
     );
     res.json(data);
+  };
+}
+
+function tableJoinHandler(sources: NamedSource[], limits: ResolvedLimits, timeoutMs: number) {
+  return async (req: Request, res: Response): Promise<void> => {
+    const source = resolveSource(sources, firstQueryValue(req, "source"));
+    const schema = firstQueryValue(req, "schema");
+    const rawJoin = firstQueryValue(req, "join");
+    if (rawJoin === undefined) {
+      httpProblemError(res, 400, "invalid_parameter", "join parameter is required");
+      return;
+    }
+    const spec = parseJoin(rawJoin);
+
+    let conditions: Condition[] = [];
+    const rawFilter = firstQueryValue(req, "filter");
+    if (rawFilter !== undefined && rawFilter.trim() !== "") {
+      conditions = parseFilterForJoin(rawFilter);
+    }
+
+    let limit: number;
+    let offset: number;
+    try {
+      limit = clamp(parseSaturating(req, "limit") ?? limits.defaultPageSize, 1, limits.maxPageSize);
+      offset = Math.max(parseSaturating(req, "offset") ?? 0, 0);
+    } catch (err) {
+      httpProblemError(res, 400, "invalid_parameter", err instanceof Error ? err.message : String(err));
+      return;
+    }
+
+    const sort = firstQueryValue(req, "sort");
+    let sortJoin: number | undefined;
+    const rawSortJoin = firstQueryValue(req, "sort_join");
+    if (rawSortJoin !== undefined) {
+      if (!/^\d+$/.test(rawSortJoin.trim())) {
+        httpProblemError(
+          res,
+          400,
+          "invalid_parameter",
+          `invalid sort_join "${rawSortJoin}" (expected a table position)`,
+        );
+        return;
+      }
+      sortJoin = Number(rawSortJoin.trim());
+    }
+
+    const order = firstQueryValue(req, "order") ?? "";
+    if (order !== "" && order !== "asc" && order !== "desc") {
+      httpProblemError(res, 400, "invalid_parameter", `invalid order "${order}" (expected "asc" or "desc")`);
+      return;
+    }
+
+    res.json(
+      await source.queryJoin(
+        schema,
+        spec,
+        {
+          limit,
+          offset,
+          sort: sort && sort !== "" ? sort : undefined,
+          sortJoin,
+          descending: order === "desc",
+          filter: conditions,
+        },
+        timeoutMs,
+      ),
+    );
   };
 }
 

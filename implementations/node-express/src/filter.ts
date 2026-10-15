@@ -20,10 +20,21 @@ export interface Condition {
   column: string;
   op: string;
   value?: string;
+  /** Table position, accepted only by {@link parseFilterForJoin} (spec/protocol.md §5.11.3). */
+  join?: number;
 }
 
 /** Validates JSON ASTs (spec/protocol.md §5.4.2); the frontend parses DSL text (spec/filter-dsl.md). */
 export function parseFilter(raw: string): Condition[] {
+  return parseFilterInner(raw, false);
+}
+
+/** {@link parseFilter} for GET /api/tables/join: a condition may carry a `join` table position. */
+export function parseFilterForJoin(raw: string): Condition[] {
+  return parseFilterInner(raw, true);
+}
+
+function parseFilterInner(raw: string, allowJoin: boolean): Condition[] {
   const byteLength = Buffer.byteLength(raw, "utf8");
   if (byteLength > MAX_FILTER_BYTES) {
     throw new FilterError(`filter too long: ${byteLength} bytes (max ${MAX_FILTER_BYTES})`);
@@ -44,7 +55,7 @@ export function parseFilter(raw: string): Condition[] {
     throw new FilterError(`too many conditions: ${parsed.length} (max ${MAX_CONDITIONS})`);
   }
 
-  const conditions: Condition[] = parsed.map((raw, i) => validateConditionShape(raw, i));
+  const conditions: Condition[] = parsed.map((raw, i) => validateConditionShape(raw, i, allowJoin));
 
   conditions.forEach((cond, i) => {
     if (i === 0 && cond.logic !== undefined) {
@@ -72,12 +83,12 @@ export function parseFilter(raw: string): Condition[] {
 }
 
 // Positional validation stays in parseFilter because it sees the full array.
-function validateConditionShape(raw: unknown, index: number): Condition {
+function validateConditionShape(raw: unknown, index: number, allowJoin: boolean): Condition {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new FilterError(`condition ${index} must be a JSON object`);
   }
   const obj = raw as Record<string, unknown>;
-  const allowedKeys = new Set(["logic", "not", "column", "op", "value"]);
+  const allowedKeys = new Set(["logic", "not", "column", "op", "value", ...(allowJoin ? ["join"] : [])]);
   for (const key of Object.keys(obj)) {
     if (!allowedKeys.has(key)) {
       throw new FilterError(`condition ${index} has unknown field "${key}"`);
@@ -98,12 +109,16 @@ function validateConditionShape(raw: unknown, index: number): Condition {
   if (obj.value !== undefined && typeof obj.value !== "string") {
     throw new FilterError(`condition ${index} has a non-string "value"`);
   }
+  if (obj.join !== undefined && (typeof obj.join !== "number" || !Number.isInteger(obj.join) || obj.join < 0)) {
+    throw new FilterError(`condition ${index} has an invalid "join" position`);
+  }
   return {
     logic: obj.logic as "AND" | "OR" | undefined,
     not: (obj.not as boolean | undefined) ?? false,
     column: obj.column,
     op: obj.op,
     value: obj.value as string | undefined,
+    ...(obj.join !== undefined ? { join: obj.join as number } : {}),
   };
 }
 

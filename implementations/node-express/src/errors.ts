@@ -9,6 +9,17 @@ export function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+/**
+ * Whether `err` is the engine stopping a slow statement (spec/protocol.md
+ * §6): Postgres SQLSTATE 57014, MySQL 3024, MariaDB 1969, or the SQLite
+ * interrupt the bounded() timer fires. Answered as 500 `query_timeout`.
+ */
+export function isQueryTimeout(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, errno } = err as { code?: unknown; errno?: unknown };
+  return code === "57014" || errno === 3024 || errno === 1969 || code === "SQLITE_INTERRUPT";
+}
+
 /** Guards a timeout interpolated into SQL syntax that cannot use bound parameters. */
 export function assertSafeTimeoutMs(timeoutMs: number): void {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 3_600_000) {

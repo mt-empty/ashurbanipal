@@ -2,6 +2,20 @@ import type { Pool, PoolClient } from "pg";
 import { assertSafeTimeoutMs, mapSelectDenied, NotAllowedError, quoteIdent } from "../errors.js";
 import { buildWhereClause } from "../filter.js";
 import {
+  buildJoinSelect,
+  type JoinColMeta,
+  type JoinData,
+  type JoinDialect,
+  type JoinOpts,
+  type JoinSpec,
+  type JoinTableMeta,
+  joinColumnInfos,
+  joinRows,
+  joinTableNames,
+  planJoin,
+  type TypeClass,
+} from "../join.js";
+import {
   type ColumnInfo,
   type ColumnRef,
   type CommonValueEntry,
@@ -17,6 +31,52 @@ import {
   type TableData,
   type TableInfo,
 } from "./types.js";
+
+const JOIN_DIALECT: JoinDialect = {
+  quote: quoteIdent,
+  castText: (expr) => `${expr}::text`,
+  numbered: true,
+  ilike: "native",
+};
+
+/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
+export function pgTypeClass(
+  dataType: string,
+  udtSchema: string,
+  udtName: string,
+  isEnum: boolean,
+): TypeClass | undefined {
+  switch (dataType) {
+    case "smallint":
+    case "integer":
+    case "bigint":
+    case "numeric":
+      return { kind: "number" };
+    case "character varying":
+    case "character":
+    case "text":
+      return { kind: "text" };
+    case "uuid":
+      return { kind: "uuid" };
+    case "boolean":
+      return { kind: "boolean" };
+    case "bytea":
+      return { kind: "binary" };
+    case "date":
+    case "timestamp without time zone":
+    case "timestamp with time zone":
+      return { kind: "temporal" };
+    case "time without time zone":
+    case "time with time zone":
+      return { kind: "time" };
+    case "USER-DEFINED":
+      if (isEnum) return { kind: "enum", id: `${udtSchema}.${udtName}` };
+      if (udtName === "citext") return { kind: "text" };
+      return undefined;
+    default:
+      return undefined;
+  }
+}
 
 /** Postgres `DbSource`; `SET LOCAL` scopes query timeouts (`spec/protocol.md` §6). */
 export class PostgresSource implements DbSource {
@@ -212,6 +272,86 @@ export class PostgresSource implements DbSource {
         [realSchema],
       );
       return rows.map((r) => ({ table: r.relname, approx_rows: Number(r.reltuples) }));
+    });
+  }
+
+  // Column metadata of a table already cleared by readableTableOid.
+  private async joinTableMeta(client: PoolClient, schema: string, table: string): Promise<JoinTableMeta> {
+    const { rows } = await client.query<{
+      column_name: string;
+      data_type: string;
+      udt_schema: string;
+      udt_name: string;
+      is_enum: boolean;
+    }>(
+      `select c.column_name, c.data_type, c.udt_schema, c.udt_name,
+              exists (select 1 from pg_type t
+                      join pg_namespace n on n.oid = t.typnamespace
+                      where n.nspname = c.udt_schema and t.typname = c.udt_name
+                        and t.typtype = 'e') as is_enum
+       from information_schema.columns c
+       where c.table_schema = $1 and c.table_name = $2
+       order by c.ordinal_position`,
+      [schema, table],
+    );
+    const { rows: commentRows } = await client.query<{ attname: string; comment: string | null }>(
+      `select a.attname::text, col_description(a.attrelid, a.attnum::int) as comment
+       from pg_attribute a
+       join pg_class c on c.oid = a.attrelid
+       join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = $1 and c.relname = $2
+         and a.attnum > 0 and not a.attisdropped`,
+      [schema, table],
+    );
+    const comments = new Map<string, string>();
+    for (const row of commentRows) if (row.comment !== null) comments.set(row.attname, row.comment);
+    const { pkColumns, fkColumns } = await this.keyMetadata(client, schema, table);
+    const columns = rows.map((r): JoinColMeta => {
+      const col: JoinColMeta = {
+        name: r.column_name,
+        type: r.data_type,
+        class: pgTypeClass(r.data_type, r.udt_schema, r.udt_name, r.is_enum),
+      };
+      if (pkColumns.has(r.column_name)) {
+        col.key = "pk";
+        if (fkColumns.has(r.column_name)) col.references = fkColumns.get(r.column_name);
+      } else if (fkColumns.has(r.column_name)) {
+        col.key = "fk";
+        col.references = fkColumns.get(r.column_name);
+      }
+      const comment = comments.get(r.column_name);
+      if (comment !== undefined) col.comment = comment;
+      return col;
+    });
+    return { name: table, columns };
+  }
+
+  async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
+    return this.withTimeout(timeoutMs, async (client) => {
+      const realSchema = await this.resolveSchema(client, schema);
+      const names = joinTableNames(spec);
+      const metas = new Map<string, JoinTableMeta>();
+      for (const name of names) {
+        if (metas.has(name)) continue;
+        await this.readableTableOid(client, realSchema, name);
+        metas.set(name, await this.joinTableMeta(client, realSchema, name));
+      }
+      const plan = planJoin(
+        spec,
+        names.map((n) => metas.get(n) as JoinTableMeta),
+        opts,
+      );
+
+      // The statement is built from catalog names and generated aliases
+      // only; every value is a bound $N parameter.
+      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT, realSchema);
+      const { rows } = await client
+        .query(`select ${body}`, [opts.limit + 1, opts.offset, ...values])
+        .catch((err: unknown) => {
+          throw mapSelectDenied(err, spec.table);
+        });
+      const out = joinRows(plan, rows as Record<string, unknown>[], opts.limit, cellToJson);
+      return { columns: joinColumnInfos(plan), rows: out.rows, has_more: out.hasMore };
     });
   }
 
