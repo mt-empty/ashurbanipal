@@ -30,6 +30,9 @@ type Condition struct {
 	Column string  `json:"column"`
 	Op     string  `json:"op"`
 	Value  *string `json:"value,omitempty"`
+	// Join is a table position, accepted only by ParseFilterForJoin
+	// (spec/protocol.md §5.11.3).
+	Join *int `json:"join,omitempty"`
 }
 
 type FilterError struct {
@@ -45,6 +48,16 @@ func filterErr(format string, args ...interface{}) *FilterError {
 // ParseFilter validates the JSON AST (spec/protocol.md §5.4.2); the frontend
 // parses DSL text (spec/filter-dsl.md).
 func ParseFilter(raw string) ([]Condition, error) {
+	return parseFilter(raw, false)
+}
+
+// ParseFilterForJoin is ParseFilter for GET /api/tables/join: a condition
+// may carry a join table position.
+func ParseFilterForJoin(raw string) ([]Condition, error) {
+	return parseFilter(raw, true)
+}
+
+func parseFilter(raw string, allowJoin bool) ([]Condition, error) {
 	if len(raw) > MaxFilterBytes {
 		return nil, filterErr("filter too long: %d bytes (max %d)", len(raw), MaxFilterBytes)
 	}
@@ -64,6 +77,9 @@ func ParseFilter(raw string) ([]Condition, error) {
 	}
 
 	for i, cond := range conditions {
+		if cond.Join != nil && !allowJoin {
+			return nil, filterErr("join is only valid on the join route")
+		}
 		if i == 0 && cond.Logic != nil {
 			return nil, filterErr("logic must be absent on the first condition")
 		}

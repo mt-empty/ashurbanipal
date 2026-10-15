@@ -5,6 +5,7 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -39,6 +40,181 @@ func NewSQLiteSource(db *sql.DB, queryTimeoutSecs int) *SQLiteSource {
 }
 
 var _ DbSource = (*SQLiteSource)(nil)
+
+func init() {
+	// SQLITE_INTERRUPT (9): what the driver returns when a canceled context
+	// aborts a running statement.
+	registerTimeoutDetector(func(err error) bool {
+		var coded interface{ Code() int }
+		return errors.As(err, &coded) && coded.Code() == 9
+	})
+}
+
+var sqliteJoinDialect = joinDialect{
+	quote:    quoteIdent,
+	castText: func(c string) string { return "CAST(" + c + " AS TEXT)" },
+	numbered: false,
+	ilike:    ilikeLike,
+}
+
+// sqliteTypeClass maps a declared type to a spec/protocol.md §5.11.2 class:
+// recognised names first, then SQLite's affinity rules
+// (docs/adapter-decisions.md §5.11).
+func sqliteTypeClass(declared string) *typeClass {
+	upper := strings.ToUpper(strings.TrimSpace(declared))
+	var c typeClass
+	switch base := strings.TrimSpace(strings.SplitN(upper, "(", 2)[0]); {
+	case upper == "":
+		c = classUntyped
+	case base == "UUID":
+		c = classUUID
+	case base == "BOOLEAN" || base == "BOOL":
+		c = classBoolean
+	case base == "DATE" || base == "DATETIME" || strings.HasPrefix(base, "TIMESTAMP"):
+		c = classTemporal
+	case base == "TIME":
+		c = classTime
+	case base == "JSON" || base == "JSONB":
+		return nil
+	case strings.Contains(upper, "INT"):
+		c = classNumber
+	case strings.Contains(upper, "CHAR") || strings.Contains(upper, "CLOB") || strings.Contains(upper, "TEXT"):
+		c = classText
+	case strings.Contains(upper, "BLOB"):
+		c = classBinary
+	case strings.Contains(upper, "REAL") || strings.Contains(upper, "FLOA") || strings.Contains(upper, "DOUB"):
+		return nil
+	default:
+		c = classNumber
+	}
+	return &c
+}
+
+func (c *SQLiteSource) joinTableMeta(ctx context.Context, q queryer, table string) (joinTableMeta, error) {
+	metaCtx, cancel := c.bounded(ctx)
+	rows, err := q.QueryContext(metaCtx,
+		fmt.Sprintf("select cid, name, type from pragma_table_info(%s) order by cid", quoteIdent(table)))
+	if err != nil {
+		cancel()
+		return joinTableMeta{}, err
+	}
+	meta := joinTableMeta{name: table}
+	for rows.Next() {
+		var cid int64
+		var name, declared string
+		if err := rows.Scan(&cid, &name, &declared); err != nil {
+			rows.Close()
+			cancel()
+			return joinTableMeta{}, err
+		}
+		typeName := declared
+		if typeName == "" {
+			typeName = "unknown"
+		}
+		meta.columns = append(meta.columns, joinColMeta{name: name, typeName: typeName, class: sqliteTypeClass(declared)})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		cancel()
+		return joinTableMeta{}, err
+	}
+	rows.Close()
+	cancel()
+
+	pk, fk, err := c.keyMetadata(ctx, q, table)
+	if err != nil {
+		return joinTableMeta{}, err
+	}
+	for i := range meta.columns {
+		col := &meta.columns[i]
+		col.key, col.references = joinKeyOf(col.name, pk, fk)
+	}
+	return meta, nil
+}
+
+// QueryJoin serves GET /api/tables/join (spec/protocol.md §5.11): every
+// lookup and the select run on one pinned connection.
+func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinSpec, opts JoinOpts) (JoinData, error) {
+	if err := checkSchema(schema); err != nil {
+		return JoinData{}, err
+	}
+	conn, err := c.db.Conn(ctx)
+	if err != nil {
+		return JoinData{}, err
+	}
+	defer conn.Close()
+
+	tableCtx, tableCancel := c.bounded(ctx)
+	rows, err := conn.QueryContext(tableCtx,
+		`select name from sqlite_master
+		 where type = 'table' and name not like 'sqlite\_%' escape '\'
+		 order by name`)
+	if err != nil {
+		tableCancel()
+		return JoinData{}, err
+	}
+	var allowed []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			tableCancel()
+			return JoinData{}, err
+		}
+		allowed = append(allowed, name)
+	}
+	rowsErr := rows.Err()
+	rows.Close()
+	tableCancel()
+	if rowsErr != nil {
+		return JoinData{}, rowsErr
+	}
+
+	names := spec.TableNames()
+	metas := map[string]joinTableMeta{}
+	for _, name := range names {
+		if _, ok := metas[name]; ok {
+			continue
+		}
+		if _, ok := findExact(allowed, name); !ok {
+			return JoinData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", name)}
+		}
+		meta, err := c.joinTableMeta(ctx, conn, name)
+		if err != nil {
+			return JoinData{}, err
+		}
+		metas[name] = meta
+	}
+	tables := make([]joinTableMeta, len(names))
+	for i, name := range names {
+		tables[i] = metas[name]
+	}
+	plan, err := planJoin(spec, tables, opts)
+	if err != nil {
+		return JoinData{}, err
+	}
+
+	// The statement is built from catalog names and generated aliases
+	// only; every value is a bound ? parameter.
+	body, values := buildJoinSelect(plan, sqliteJoinDialect, nil)
+	args := make([]interface{}, 0, len(values)+2)
+	for _, v := range values {
+		args = append(args, v)
+	}
+	args = append(args, opts.Limit+1, opts.Offset)
+	queryCtx, queryCancel := c.bounded(ctx)
+	defer queryCancel()
+	dataRows, err := conn.QueryContext(queryCtx, "select "+body, args...)
+	if err != nil {
+		return JoinData{}, err
+	}
+	defer dataRows.Close()
+	out, hasMore, err := scanJoinRows(dataRows, plan.labels, opts.Limit)
+	if err != nil {
+		return JoinData{}, err
+	}
+	return JoinData{Columns: plan.columnInfos(), Rows: out, HasMore: hasMore}, nil
+}
 
 // bounded relies on modernc.org/sqlite honoring database/sql context cancellation.
 func (c *SQLiteSource) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -91,12 +267,12 @@ func (c *SQLiteSource) allowedColumns(ctx context.Context, table string) ([]stri
 }
 
 // Composite FKs are omitted rather than risk mislabeling columns (spec/protocol.md §5.4.1).
-func (c *SQLiteSource) keyMetadata(ctx context.Context, table string) (map[string]bool, map[string]ColumnRef, error) {
+func (c *SQLiteSource) keyMetadata(ctx context.Context, q queryer, table string) (map[string]bool, map[string]ColumnRef, error) {
 	quoted := quoteIdent(table)
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 
-	pkRows, err := c.db.QueryContext(ctx,
+	pkRows, err := q.QueryContext(ctx,
 		fmt.Sprintf("select name, pk from pragma_table_info(%s)", quoted))
 	if err != nil {
 		return nil, nil, err
@@ -128,7 +304,7 @@ func (c *SQLiteSource) keyMetadata(ctx context.Context, table string) (map[strin
 	// position against the parent's PK, correlated per FK row since each
 	// can reference a different parent — unlike ReferencedBy's single
 	// bound parent (docs/adapter-decisions.md §5.4.1).
-	fkRows, err := c.db.QueryContext(ctx,
+	fkRows, err := q.QueryContext(ctx,
 		fmt.Sprintf(`select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid')
 		 from pragma_foreign_key_list(%s) fkl
 		 left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1`, quoted))
@@ -295,7 +471,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 		}
 	}
 
-	pkColumns, fkColumns, err := c.keyMetadata(ctx, realTable)
+	pkColumns, fkColumns, err := c.keyMetadata(ctx, c.db, realTable)
 	if err != nil {
 		return TableData{}, err
 	}

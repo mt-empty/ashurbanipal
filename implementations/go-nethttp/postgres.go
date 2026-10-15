@@ -24,6 +24,54 @@ func NewPostgresSource(db *sql.DB, queryTimeoutSecs int) *PostgresSource {
 
 var _ DbSource = (*PostgresSource)(nil)
 
+func init() {
+	registerTimeoutDetector(func(err error) bool {
+		var pgErr *pgconn.PgError
+		return errors.As(err, &pgErr) && pgErr.Code == "57014"
+	})
+}
+
+var pgJoinDialect = joinDialect{
+	quote:    quoteIdent,
+	castText: func(c string) string { return c + "::text" },
+	numbered: true,
+	ilike:    ilikeNative,
+}
+
+// pgTypeClass maps information_schema types to spec/protocol.md §5.11.2
+// classes (docs/adapter-decisions.md §5.11).
+func pgTypeClass(dataType, udtSchema, udtName string, isEnum bool) *typeClass {
+	var c typeClass
+	switch dataType {
+	case "smallint", "integer", "bigint", "numeric":
+		c = classNumber
+	case "character varying", "character", "text":
+		c = classText
+	case "uuid":
+		c = classUUID
+	case "boolean":
+		c = classBoolean
+	case "bytea":
+		c = classBinary
+	case "date", "timestamp without time zone", "timestamp with time zone":
+		c = classTemporal
+	case "time without time zone", "time with time zone":
+		c = classTime
+	case "USER-DEFINED":
+		switch {
+		case isEnum:
+			c = classEnum(udtSchema + "." + udtName)
+		case udtName == "citext":
+			c = classText
+		default:
+			return nil
+		}
+	default:
+		return nil
+	}
+	return &c
+}
+
 func (c *PostgresSource) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, c.timeout)
 }
@@ -203,6 +251,143 @@ func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, ta
 		}
 	}
 	return pkColumns, fkColumns, nil
+}
+
+// joinTableMeta reads a table already cleared by readableTableOID.
+func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, table string) (joinTableMeta, error) {
+	metaCtx, cancel := c.bounded(ctx)
+	defer cancel()
+	rows, err := tx.QueryContext(metaCtx,
+		`select c.column_name, c.data_type, c.udt_schema, c.udt_name,
+		        exists (select 1 from pg_type t
+		                join pg_namespace n on n.oid = t.typnamespace
+		                where n.nspname = c.udt_schema and t.typname = c.udt_name
+		                  and t.typtype = 'e')
+		 from information_schema.columns c
+		 where c.table_schema = $1 and c.table_name = $2
+		 order by c.ordinal_position`, schema, table)
+	if err != nil {
+		return joinTableMeta{}, err
+	}
+	meta := joinTableMeta{name: table}
+	for rows.Next() {
+		var name, dataType, udtSchema, udtName string
+		var isEnum bool
+		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum); err != nil {
+			rows.Close()
+			return joinTableMeta{}, err
+		}
+		meta.columns = append(meta.columns, joinColMeta{
+			name: name, typeName: dataType, class: pgTypeClass(dataType, udtSchema, udtName, isEnum),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return joinTableMeta{}, err
+	}
+	rows.Close()
+
+	commentRows, err := tx.QueryContext(metaCtx,
+		`select a.attname::text, col_description(a.attrelid, a.attnum::int)
+		 from pg_attribute a
+		 join pg_class c on c.oid = a.attrelid
+		 join pg_namespace n on n.oid = c.relnamespace
+		 where n.nspname = $1 and c.relname = $2
+		   and a.attnum > 0 and not a.attisdropped`, schema, table)
+	if err != nil {
+		return joinTableMeta{}, err
+	}
+	comments := map[string]string{}
+	for commentRows.Next() {
+		var name string
+		var comment sql.NullString
+		if err := commentRows.Scan(&name, &comment); err != nil {
+			commentRows.Close()
+			return joinTableMeta{}, err
+		}
+		if comment.Valid {
+			comments[name] = comment.String
+		}
+	}
+	if err := commentRows.Err(); err != nil {
+		commentRows.Close()
+		return joinTableMeta{}, err
+	}
+	commentRows.Close()
+
+	pk, fk, err := c.keyMetadata(ctx, tx, schema, table)
+	if err != nil {
+		return joinTableMeta{}, err
+	}
+	for i := range meta.columns {
+		col := &meta.columns[i]
+		col.key, col.references = joinKeyOf(col.name, pk, fk)
+		col.comment = comments[col.name]
+	}
+	return meta, nil
+}
+
+// QueryJoin serves GET /api/tables/join (spec/protocol.md §5.11): every
+// lookup and the select run on one read-only transaction.
+func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec JoinSpec, opts JoinOpts) (JoinData, error) {
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return JoinData{}, err
+	}
+	defer tx.Rollback()
+
+	realSchema, err := c.resolveSchema(ctx, tx, schema)
+	if err != nil {
+		return JoinData{}, err
+	}
+	names := spec.TableNames()
+	metas := map[string]joinTableMeta{}
+	for _, name := range names {
+		if _, ok := metas[name]; ok {
+			continue
+		}
+		if _, err := c.readableTableOID(ctx, tx, realSchema, name); err != nil {
+			return JoinData{}, err
+		}
+		meta, err := c.joinTableMeta(ctx, tx, realSchema, name)
+		if err != nil {
+			return JoinData{}, err
+		}
+		metas[name] = meta
+	}
+	tables := make([]joinTableMeta, len(names))
+	for i, name := range names {
+		tables[i] = metas[name]
+	}
+	plan, err := planJoin(spec, tables, opts)
+	if err != nil {
+		return JoinData{}, err
+	}
+
+	// The statement is built from catalog names and generated aliases
+	// only; every value is a bound $N parameter.
+	body, values := buildJoinSelect(plan, pgJoinDialect, &realSchema)
+	args := make([]interface{}, 0, 2+len(values))
+	args = append(args, opts.Limit+1, opts.Offset)
+	for _, v := range values {
+		args = append(args, v)
+	}
+	queryCtx, cancel := c.bounded(ctx)
+	defer cancel()
+	rows, err := tx.QueryContext(queryCtx, "select "+body, args...)
+	if err != nil {
+		return JoinData{}, mapSelectDenied(err, spec.Table)
+	}
+	defer rows.Close()
+	out, hasMore, err := scanJoinRows(rows, plan.labels, opts.Limit)
+	if err != nil {
+		return JoinData{}, mapSelectDenied(err, spec.Table)
+	}
+	rows.Close()
+	if err := tx.Commit(); err != nil {
+		return JoinData{}, err
+	}
+	return JoinData{Columns: plan.columnInfos(), Rows: out, HasMore: hasMore}, nil
 }
 
 func (c *PostgresSource) ListSchemas(ctx context.Context) ([]string, error) {

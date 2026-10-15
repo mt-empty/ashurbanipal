@@ -8,6 +8,7 @@ import (
 	"errors"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -466,6 +467,9 @@ func TestSQLiteSlowQueryIsAbortedNotLeftToRun(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected the slow query to be interrupted by the 1s timeout, got n=%d after %v", n, elapsed)
 	}
+	if !isQueryTimeout(err) {
+		t.Errorf("the abort must be recognised as a query timeout, got %v", err)
+	}
 	if elapsed > 3*time.Second {
 		t.Fatalf("slow query took %v to error, want close to the 1s deadline (abandoned wait, not real cancellation)", elapsed)
 	}
@@ -480,5 +484,116 @@ func TestSQLiteSlowQueryIsAbortedNotLeftToRun(t *testing.T) {
 	}
 	if probeElapsed := time.Since(probeStart); probeElapsed > 200*time.Millisecond {
 		t.Errorf("probe query took %v, want near-instant — suggests the slow query was still running", probeElapsed)
+	}
+}
+
+func sqliteJoin(t *testing.T, raw string) JoinSpec {
+	t.Helper()
+	spec, err := ParseJoin(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spec
+}
+
+const sqliteUsersOrders = `{"table":"users","joins":[{"type":"TYPE","table":"orders",
+	"on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}`
+
+func TestSQLiteJoinLeftKeepsUnmatchedRowsAndInnerDropsThem(t *testing.T) {
+	source := NewSQLiteSource(seededDB(t), 5)
+	ctx := context.Background()
+	left, err := source.QueryJoin(ctx, nil, sqliteJoin(t, strings.ReplaceAll(sqliteUsersOrders, "TYPE", "left")), JoinOpts{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left.Rows) != 3 || left.HasMore {
+		t.Fatalf("left join rows = %d hasMore = %v", len(left.Rows), left.HasMore)
+	}
+	unmatched := 0
+	for _, row := range left.Rows {
+		if row["status"] == nil {
+			unmatched++
+		}
+	}
+	if unmatched != 2 {
+		t.Errorf("unmatched users = %d, want 2", unmatched)
+	}
+	inner, err := source.QueryJoin(ctx, nil, sqliteJoin(t, strings.ReplaceAll(sqliteUsersOrders, "TYPE", "inner")), JoinOpts{Limit: 10})
+	if err != nil || len(inner.Rows) != 1 {
+		t.Errorf("inner join: %v %+v", err, inner)
+	}
+}
+
+func TestSQLiteJoinSelfJoinHasMoreAndDistinctLabels(t *testing.T) {
+	source := NewSQLiteSource(seededDB(t), 5)
+	self := sqliteJoin(t, `{"table":"users","joins":[{"type":"inner","table":"users",
+		"on":[{"left":{"join":0,"column":"age"},"right":"age"}]}],
+		"columns":[{"join":0,"column":"id"},{"join":1,"column":"id"}]}`)
+	page, err := source.QueryJoin(context.Background(), nil, self, JoinOpts{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Rows) != 2 || !page.HasMore {
+		t.Fatalf("rows = %d hasMore = %v, want 2 and true (5 pairs exist)", len(page.Rows), page.HasMore)
+	}
+	if page.Columns[0].Name != "id_0" || page.Columns[1].Name != "id_1" {
+		t.Errorf("labels = %s, %s", page.Columns[0].Name, page.Columns[1].Name)
+	}
+}
+
+func TestSQLiteJoinFilterSortAndRejections(t *testing.T) {
+	source := NewSQLiteSource(seededDB(t), 5)
+	ctx := context.Background()
+	three := sqliteJoin(t, `{"table":"orders","joins":[
+		{"type":"left","table":"users","on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]},
+		{"type":"left","table":"order_extra","on":[{"left":{"join":0,"column":"id"},"right":"order_id"}]}],
+		"columns":[{"join":0,"column":"id"},{"join":1,"column":"email"},{"join":2,"column":"gift_message"}]}`)
+	like, one, sort := "a@%", 1, "email"
+	data, err := source.QueryJoin(ctx, nil, three, JoinOpts{
+		Limit: 10, Sort: &sort, SortJoin: &one,
+		Filter: []Condition{{Column: "email", Op: "LIKE", Value: &like, Join: &one}},
+	})
+	if err != nil || len(data.Rows) != 1 || *data.Rows[0]["gift_message"] != "enjoy!" {
+		t.Fatalf("three-table join: %v %+v", err, data)
+	}
+
+	hostile := sqliteJoin(t, `{"table":"users\"; drop table users; --","joins":[{"type":"left","table":"orders",
+		"on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}`)
+	if _, err := source.QueryJoin(ctx, nil, hostile, JoinOpts{Limit: 10}); err == nil {
+		t.Error("hostile table name must be rejected")
+	} else if na, ok := err.(*NotAllowedError); !ok || na.Kind != NotAllowedTable {
+		t.Errorf("want NotAllowedTable, got %v", err)
+	}
+	mismatch := sqliteJoin(t, `{"table":"users","joins":[{"type":"left","table":"orders",
+		"on":[{"left":{"join":0,"column":"email"},"right":"user_id"}]}]}`)
+	if _, err := source.QueryJoin(ctx, nil, mismatch, JoinOpts{Limit: 10}); err == nil {
+		t.Error("text to integer must be rejected")
+	} else if _, ok := err.(*BadJoinError); !ok {
+		t.Errorf("want *BadJoinError, got %v", err)
+	}
+	other := "other"
+	if _, err := source.QueryJoin(ctx, &other, sqliteJoin(t, strings.ReplaceAll(sqliteUsersOrders, "TYPE", "left")), JoinOpts{Limit: 10}); err == nil {
+		t.Error("only the main schema exists")
+	}
+}
+
+func TestSQLiteTypeClassFollowsDeclaredNamesThenAffinity(t *testing.T) {
+	num, txt, blob, uuid, temporal, tm, untyped := classNumber, classText, classBinary, classUUID, classTemporal, classTime, classUntyped
+	boolean := classBoolean
+	cases := []struct {
+		declared string
+		want     *typeClass
+	}{
+		{"INTEGER", &num}, {"bigint", &num}, {"DECIMAL(10,2)", &num},
+		{"VARCHAR(20)", &txt}, {"TEXT", &txt}, {"BLOB", &blob},
+		{"REAL", nil}, {"DOUBLE PRECISION", nil}, {"JSON", nil},
+		{"UUID", &uuid}, {"BOOLEAN", &boolean}, {"DATETIME", &temporal},
+		{"TIMESTAMP(6)", &temporal}, {"TIME", &tm}, {"", &untyped},
+	}
+	for _, c := range cases {
+		got := sqliteTypeClass(c.declared)
+		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+			t.Errorf("%q: got %v want %v", c.declared, got, c.want)
+		}
 	}
 }

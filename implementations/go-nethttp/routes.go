@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -62,6 +63,7 @@ func Router(cfg Config, sources []NamedSource) http.Handler {
 	mux.Handle("GET "+base+"/api/tables/common-values", withProtocolHeader(commonValuesHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/referenced-by", withProtocolHeader(referencedByHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/structure", withProtocolHeader(structureHandler(sources)))
+	mux.Handle("GET "+base+"/api/tables/join", withProtocolHeader(tableJoinHandler(sources, limits)))
 	mux.Handle("GET "+base+"/api/siblings", withProtocolHeader(siblingsHandler(client, cfg.Siblings)))
 	return mux
 }
@@ -145,10 +147,10 @@ func httpProblemError(w http.ResponseWriter, status int, code, title string) {
 
 // writeError maps a DbSource error to the wire's error codes
 // (spec/protocol.md §2): a *NotAllowedError carries its own kind/code; a
-// *FilterError is always invalid_filter; anything else is a database
-// failure (database_error, 500). query_timeout detection is out of scope
-// for this port — a timeout falls through to database_error, which the
-// spec permits (docs/adapter-decisions.md §6).
+// *FilterError is always invalid_filter; a *BadJoinError is
+// invalid_parameter; a statement stopped by the query timeout is
+// query_timeout (500); anything else is a database failure (database_error,
+// 500) (docs/adapter-decisions.md §6).
 func writeError(w http.ResponseWriter, err error) {
 	var notAllowed *NotAllowedError
 	if errors.As(err, &notAllowed) {
@@ -158,6 +160,15 @@ func writeError(w http.ResponseWriter, err error) {
 	var filter *FilterError
 	if errors.As(err, &filter) {
 		httpProblemError(w, http.StatusBadRequest, "invalid_filter", err.Error())
+		return
+	}
+	var badJoinErr *BadJoinError
+	if errors.As(err, &badJoinErr) {
+		httpProblemError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
+		return
+	}
+	if isQueryTimeout(err) {
+		httpProblemError(w, http.StatusInternalServerError, "query_timeout", "query timed out")
 		return
 	}
 	httpProblemError(w, http.StatusInternalServerError, "database_error", fmt.Sprintf("database error: %s", err))
@@ -300,6 +311,98 @@ func tableDataHandler(sources []NamedSource, limits Limits) http.HandlerFunc {
 			Limit:      limit,
 			Offset:     offset,
 			Sort:       sort,
+			Descending: descending,
+			Filter:     conditions,
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, data)
+	}
+}
+
+func tableJoinHandler(sources []NamedSource, limits Limits) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		c, err := resolveSource(sources, querySource(q))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if !q.Has("join") {
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", "join parameter is required")
+			return
+		}
+		spec, err := ParseJoin(q.Get("join"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+
+		var conditions []Condition
+		if raw := q.Get("filter"); strings.TrimSpace(raw) != "" {
+			parsed, err := ParseFilterForJoin(raw)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			if len(parsed) > 0 {
+				conditions = parsed
+			}
+		}
+
+		requestedLimit, err := parseSaturating(q, "limit")
+		if err != nil {
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
+			return
+		}
+		limit := int64(limits.DefaultPageSize)
+		if requestedLimit != nil {
+			limit = *requestedLimit
+		}
+		limit = clamp64(limit, 1, int64(limits.MaxPageSize))
+
+		requestedOffset, err := parseSaturating(q, "offset")
+		if err != nil {
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
+			return
+		}
+		offset := int64(0)
+		if requestedOffset != nil {
+			offset = *requestedOffset
+		}
+
+		var sort *string
+		if s := q.Get("sort"); s != "" {
+			sort = &s
+		}
+		var sortJoin *int
+		if q.Has("sort_join") {
+			n, err := strconv.Atoi(q.Get("sort_join"))
+			if err != nil {
+				httpProblemError(w, http.StatusBadRequest, "invalid_parameter",
+					fmt.Sprintf("invalid sort_join %q (expected a table position)", q.Get("sort_join")))
+				return
+			}
+			sortJoin = &n
+		}
+
+		descending := false
+		switch order := q.Get("order"); order {
+		case "", "asc":
+		case "desc":
+			descending = true
+		default:
+			httpProblemError(w, http.StatusBadRequest, "invalid_parameter", fmt.Sprintf("invalid order %q (expected \"asc\" or \"desc\")", order))
+			return
+		}
+
+		data, err := c.QueryJoin(r.Context(), querySchema(q), spec, JoinOpts{
+			Limit:      limit,
+			Offset:     offset,
+			Sort:       sort,
+			SortJoin:   sortJoin,
 			Descending: descending,
 			Filter:     conditions,
 		})

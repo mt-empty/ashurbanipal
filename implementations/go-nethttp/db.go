@@ -174,6 +174,8 @@ type DbSource interface {
 	ReferencedBy(ctx context.Context, schema *string, table string) ([]ReferencedByEntry, error)
 	// Structure reports table's indexes and constraints (spec/protocol.md §5.10).
 	Structure(ctx context.Context, schema *string, table string) (Structure, error)
+	// QueryJoin serves GET /api/tables/join (spec/protocol.md §5.11).
+	QueryJoin(ctx context.Context, schema *string, spec JoinSpec, opts JoinOpts) (JoinData, error)
 }
 
 // queryer is satisfied by both *sql.DB and *sql.Tx — every backend's

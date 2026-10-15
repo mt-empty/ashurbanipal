@@ -116,6 +116,46 @@ func NewMySQLSource(db *sql.DB, queryTimeoutSecs int) *MySQLSource {
 
 var _ DbSource = (*MySQLSource)(nil)
 
+func init() {
+	// 3024: MySQL's MAX_EXECUTION_TIME; 1969: MariaDB's max_statement_time.
+	registerTimeoutDetector(func(err error) bool {
+		var myErr *mysql.MySQLError
+		return errors.As(err, &myErr) && (myErr.Number == 3024 || myErr.Number == 1969)
+	})
+}
+
+var mysqlJoinDialect = joinDialect{
+	quote:    quoteIdentMySQL,
+	castText: func(c string) string { return "CAST(" + c + " AS CHAR)" },
+	numbered: false,
+	ilike:    ilikeLoweredLike,
+}
+
+// mysqlTypeClass maps information_schema types to spec/protocol.md
+// §5.11.2 classes (docs/adapter-decisions.md §5.11).
+func mysqlTypeClass(dataType, columnType string) *typeClass {
+	var c typeClass
+	switch strings.ToLower(dataType) {
+	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric":
+		c = classNumber
+	case "char", "varchar", "tinytext", "text", "mediumtext", "longtext":
+		c = classText
+	case "date", "datetime", "timestamp":
+		c = classTemporal
+	case "time":
+		c = classTime
+	case "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob":
+		c = classBinary
+	case "uuid":
+		c = classUUID
+	case "enum":
+		c = classEnum(columnType)
+	default:
+		return nil
+	}
+	return &c
+}
+
 func (c *MySQLSource) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, c.timeout)
 }
@@ -301,6 +341,119 @@ func (c *MySQLSource) keyMetadataInTx(ctx context.Context, tx queryer, variant m
 		}
 	}
 	return pkColumns, fkColumns, nil
+}
+
+func (c *MySQLSource) joinTableMeta(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (joinTableMeta, error) {
+	metaCtx, cancel := c.bounded(ctx)
+	defer cancel()
+	rows, err := tx.QueryContext(metaCtx, timedSelect(variant, c.timeoutSec,
+		`column_name, data_type, column_comment, collation_name, column_type
+		 from information_schema.columns
+		 where table_schema = ? and table_name = ?
+		 order by ordinal_position`), schema, table)
+	if err != nil {
+		return joinTableMeta{}, err
+	}
+	meta := joinTableMeta{name: table}
+	for rows.Next() {
+		var name, dataType, comment, columnType string
+		var collation sql.NullString
+		if err := rows.Scan(&name, &dataType, &comment, &collation, &columnType); err != nil {
+			rows.Close()
+			return joinTableMeta{}, err
+		}
+		col := joinColMeta{name: name, typeName: dataType, class: mysqlTypeClass(dataType, columnType), comment: comment}
+		if collation.Valid {
+			cl := collation.String
+			col.collation = &cl
+		}
+		meta.columns = append(meta.columns, col)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return joinTableMeta{}, err
+	}
+	rows.Close()
+
+	pk, fk, err := c.keyMetadataInTx(ctx, tx, variant, schema, table)
+	if err != nil {
+		return joinTableMeta{}, err
+	}
+	for i := range meta.columns {
+		col := &meta.columns[i]
+		col.key, col.references = joinKeyOf(col.name, pk, fk)
+	}
+	return meta, nil
+}
+
+// QueryJoin serves GET /api/tables/join (spec/protocol.md §5.11): every
+// lookup and the select run on one pinned transaction.
+func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSpec, opts JoinOpts) (JoinData, error) {
+	variant, err := c.variantOf(ctx)
+	if err != nil {
+		return JoinData{}, err
+	}
+	tx, err := c.pinnedTx(ctx)
+	if err != nil {
+		return JoinData{}, err
+	}
+	defer tx.Rollback()
+	realSchema, err := c.resolveSchemaInTx(ctx, tx, variant, schema)
+	if err != nil {
+		return JoinData{}, err
+	}
+	allowed, err := c.allowedTablesInTx(ctx, tx, variant, realSchema)
+	if err != nil {
+		return JoinData{}, err
+	}
+	names := spec.TableNames()
+	metas := map[string]joinTableMeta{}
+	for _, name := range names {
+		if _, ok := metas[name]; ok {
+			continue
+		}
+		if _, ok := findExact(allowed, name); !ok {
+			return JoinData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", name)}
+		}
+		meta, err := c.joinTableMeta(ctx, tx, variant, realSchema, name)
+		if err != nil {
+			return JoinData{}, err
+		}
+		metas[name] = meta
+	}
+	tables := make([]joinTableMeta, len(names))
+	for i, name := range names {
+		tables[i] = metas[name]
+	}
+	plan, err := planJoin(spec, tables, opts)
+	if err != nil {
+		return JoinData{}, err
+	}
+
+	// The statement is built from catalog names and generated aliases
+	// only; every value is a bound ? parameter.
+	body, values := buildJoinSelect(plan, mysqlJoinDialect, &realSchema)
+	args := make([]interface{}, 0, len(values)+2)
+	for _, v := range values {
+		args = append(args, v)
+	}
+	args = append(args, opts.Limit+1, opts.Offset)
+	queryCtx, queryCancel := c.bounded(ctx)
+	defer queryCancel()
+	rows, err := tx.QueryContext(queryCtx, timedSelect(variant, c.timeoutSec, body), args...)
+	if err != nil {
+		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table)
+	}
+	defer rows.Close()
+	out, hasMore, err := scanJoinRows(rows, plan.labels, opts.Limit)
+	if err != nil {
+		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table)
+	}
+	rows.Close()
+	if err := tx.Commit(); err != nil {
+		return JoinData{}, err
+	}
+	return JoinData{Columns: plan.columnInfos(), Rows: out, HasMore: hasMore}, nil
 }
 
 func (c *MySQLSource) ListSchemas(ctx context.Context) ([]string, error) {
