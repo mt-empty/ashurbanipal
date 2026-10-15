@@ -1,6 +1,6 @@
 # Server-side table joins
 
-> **Status:** OPEN · **Area:** spec, ports, conformance, docs
+> **Status:** DONE · **Area:** spec, ports, conformance, docs · **Ref:** implemented 2026-10-15 in spec §5.11 and all five ports; the conformance cases pass on all five ports against Postgres, plus Rust and Flask on MySQL and SQLite and Node on MySQL; every other port and engine pair is covered by the port tests
 
 Read-only. The server builds a `SELECT` with joins from a structured
 description. No client text becomes SQL. The UI for building joins is
@@ -192,13 +192,17 @@ Conformance cases, run on all five ports and all three engines:
 - **Self-join test data.** Join `orders` to itself on a non-FK pair. No
   seed change.
 
-## Still to check
+## Left open after building
 
 - **Long URLs.** A large `join` plus `filter` in a GET may reach proxy URL
   limits. A read-only POST would need a spec decision; not part of this
   story.
-- **Timeout test.** Whether the conformance runner can set a low
-  `query_timeout_secs`; otherwise cover the label in per-port tests.
+- **Timeout label.** The black-box runner cannot provoke a slow query
+  (`conformance/runner/COVERAGE.md`), so each port covers `query_timeout`
+  in its own tests, on every engine it supports.
+- **Node SQLite.** The `sqlite3` native module does not load on this
+  devcontainer's glibc, so that path was exercised through a
+  `node:sqlite` stand-in; run `pnpm test` where the module loads.
 
 ## 9. Out of scope
 
