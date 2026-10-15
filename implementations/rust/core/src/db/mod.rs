@@ -15,6 +15,7 @@ pub use sqlite::SqliteSource;
 use serde::Serialize;
 
 use crate::filter::{Condition, FilterOp};
+use crate::join::{JoinData, JoinOpts, JoinSpec};
 
 #[derive(Debug, Clone)]
 pub struct QueryOpts {
@@ -202,11 +203,11 @@ pub struct NotAllowedDetail {
 pub enum DbError {
     NotAllowed(NotAllowedDetail),
     FilterParse(String),
-    /// Detected only where a backend's driver error already exposes an
-    /// unambiguous engine-native code for it (today: Postgres SQLSTATE
-    /// `57014`, `postgres.rs::map_select_denied`) — everywhere else a
-    /// timeout surfaces as `Sqlx`/`database_error`, which
-    /// `spec/protocol.md` §2/§6 permits (see `docs/adapter-decisions.md` §6).
+    /// A join request that is well-formed but not allowed by the catalog
+    /// (`spec/protocol.md` §5.11): an incompatible column pair, a position
+    /// out of range. Maps to `invalid_parameter`.
+    BadJoin(String),
+    /// The engine's own timeout signal (`impl From<sqlx::Error>`).
     QueryTimeout,
     Sqlx(sqlx::Error),
 }
@@ -229,6 +230,7 @@ impl DbError {
         let (status, code) = match self {
             Self::NotAllowed(d) => (400, d.kind.code()),
             Self::FilterParse(_) => (400, "invalid_filter"),
+            Self::BadJoin(_) => (400, "invalid_parameter"),
             Self::QueryTimeout => (500, "query_timeout"),
             Self::Sqlx(_) => (500, "database_error"),
         };
@@ -241,6 +243,7 @@ impl std::fmt::Display for DbError {
         match self {
             Self::NotAllowed(d) => write!(f, "not allowed: {}", d.what),
             Self::FilterParse(reason) => write!(f, "invalid filter: {reason}"),
+            Self::BadJoin(reason) => write!(f, "invalid join: {reason}"),
             Self::QueryTimeout => write!(f, "query timed out"),
             Self::Sqlx(e) => write!(f, "database error: {e}"),
         }
@@ -251,8 +254,37 @@ impl std::error::Error for DbError {}
 
 impl From<sqlx::Error> for DbError {
     fn from(e: sqlx::Error) -> Self {
-        Self::Sqlx(e)
+        if is_timeout(&e) {
+            Self::QueryTimeout
+        } else {
+            Self::Sqlx(e)
+        }
     }
+}
+
+/// Postgres SQLSTATE `57014`, MySQL 3024, MariaDB 1969, SQLite
+/// `SQLITE_INTERRUPT` (the progress handler's abort).
+#[allow(unused_variables)]
+fn is_timeout(e: &sqlx::Error) -> bool {
+    let sqlx::Error::Database(db) = e else {
+        return false;
+    };
+    #[cfg(feature = "postgres")]
+    if db
+        .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+        .is_some()
+    {
+        return db.code().as_deref() == Some("57014");
+    }
+    #[cfg(feature = "mysql")]
+    if let Some(my) = db.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>() {
+        return matches!(my.number(), 3024 | 1969);
+    }
+    #[cfg(feature = "sqlite")]
+    if db.try_downcast_ref::<sqlx::sqlite::SqliteError>().is_some() {
+        return db.code().as_deref() == Some("9");
+    }
+    false
 }
 
 /// RFC 9457 Problem Details body (`spec/protocol.md` §2). Shared by both
@@ -308,6 +340,13 @@ pub trait DbSource: Send + Sync + 'static {
         schema: Option<&str>,
         table: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ReferencedBy>, DbError>> + Send;
+    /// Rows from the tables a [`JoinSpec`] names (`spec/protocol.md` §5.11).
+    fn query_join(
+        &self,
+        schema: Option<&str>,
+        spec: &JoinSpec,
+        opts: JoinOpts,
+    ) -> impl std::future::Future<Output = Result<JoinData, DbError>> + Send;
     /// Indexes and constraints of `table` (`spec/protocol.md` §5.10).
     fn structure(
         &self,

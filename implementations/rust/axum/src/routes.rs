@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
 use ashurbanipal::{
-    resolve_source, Config, DbError, DbSource, ProblemDetails, QueryOpts, ReferencedBy, Structure,
-    TableInfo,
+    resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec, ProblemDetails,
+    QueryOpts, ReferencedBy, Structure, TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -70,6 +70,7 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
             get(referenced_by::<S>),
         )
         .route("/__ashurbanipal/api/tables/structure", get(structure::<S>))
+        .route("/__ashurbanipal/api/tables/join", get(table_join::<S>))
         .route("/__ashurbanipal/api/siblings", get(siblings::<S>))
         .layer(map_response(stamp_protocol_version));
     Router::new()
@@ -316,6 +317,79 @@ async fn table_data<S: DbSource>(
 }
 
 #[derive(Deserialize)]
+struct JoinParams {
+    schema: Option<String>,
+    source: Option<String>,
+    join: String,
+    filter: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_saturating_u32")]
+    limit: Option<u32>,
+    #[serde(default, deserialize_with = "deserialize_saturating_u32")]
+    offset: Option<u32>,
+    sort: Option<String>,
+    sort_join: Option<String>,
+    order: Option<String>,
+}
+
+fn join_request(
+    params: &JoinParams,
+    limits: &ashurbanipal::Limits,
+) -> Result<(JoinSpec, JoinOpts), ApiError> {
+    let spec = JoinSpec::parse(&params.join).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let filter = match params.filter.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => match filter::parse_for_join(raw) {
+            Ok(conditions) if conditions.is_empty() => None,
+            Ok(conditions) => Some(conditions),
+            Err(e) => return Err(DbError::FilterParse(e.to_string()).into()),
+        },
+        _ => None,
+    };
+    let descending = match params.order.as_deref() {
+        None | Some("asc") => false,
+        Some("desc") => true,
+        Some(other) => {
+            return Err(ApiError::BadRequest(format!(
+                "invalid order {other:?} (expected \"asc\" or \"desc\")"
+            )))
+        }
+    };
+    let sort_join = match params.sort_join.as_deref() {
+        None => None,
+        Some(raw) => Some(raw.parse::<usize>().map_err(|_| {
+            ApiError::BadRequest(format!(
+                "invalid sort_join {raw:?} (expected a table position)"
+            ))
+        })?),
+    };
+    let opts = JoinOpts {
+        limit: params
+            .limit
+            .unwrap_or(limits.default_page_size)
+            .clamp(1, limits.max_page_size),
+        offset: params.offset.unwrap_or(0),
+        sort: params.sort.clone(),
+        sort_join,
+        descending,
+        timeout_secs: limits.query_timeout_secs,
+        filter,
+    };
+    Ok((spec, opts))
+}
+
+async fn table_join<S: DbSource>(
+    State(state): State<Arc<AppState<S>>>,
+    Query(params): Query<JoinParams>,
+) -> Result<Json<JoinData>, ApiError> {
+    let source = resolve_source(&state.sources, params.source.as_deref())?;
+    let (spec, opts) = join_request(&params, &state.config.limits)?;
+    Ok(Json(
+        source
+            .query_join(params.schema.as_deref(), &spec, opts)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
 struct CommonValuesParams {
     schema: Option<String>,
     source: Option<String>,
@@ -509,6 +583,14 @@ mod tests {
             _schema: Option<&str>,
             _table: &str,
         ) -> Result<Structure, DbError> {
+            unreachable!()
+        }
+        async fn query_join(
+            &self,
+            _schema: Option<&str>,
+            _spec: &JoinSpec,
+            _opts: JoinOpts,
+        ) -> Result<JoinData, DbError> {
             unreachable!()
         }
     }

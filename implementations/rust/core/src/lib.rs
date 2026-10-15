@@ -6,6 +6,7 @@
 pub mod config;
 pub mod db;
 pub mod filter;
+pub mod join;
 
 pub use config::{Config, ConfigError, Limits, Sibling};
 #[cfg(feature = "mysql")]
@@ -20,6 +21,7 @@ pub use db::{
     ProblemDetails, QueryOpts, ReferencedBy, Structure, TableData, TableInfo,
 };
 pub use filter::{Condition, FilterError, FilterOp, Logic};
+pub use join::{JoinColumnInfo, JoinData, JoinError, JoinOpts, JoinSpec};
 
 #[cfg(not(any(feature = "postgres", feature = "sqlite", feature = "mysql")))]
 compile_error!(

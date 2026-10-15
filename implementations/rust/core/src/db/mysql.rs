@@ -10,6 +10,9 @@ use super::{
     NotAllowedKind, QueryOpts, ReferencedBy, Structure, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
+use crate::join::{
+    self, ColMeta, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta, TypeClass,
+};
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
 const CATALOG_TIMEOUT_SECS: u32 = 5;
@@ -97,6 +100,52 @@ fn build_where_clause(
         clause.push_str(&wrapped);
     }
     Ok((format!(" where {clause}"), values))
+}
+
+fn cast_text(column: &str) -> String {
+    format!("CAST({column} AS CHAR)")
+}
+
+const JOIN_DIALECT: Dialect = Dialect {
+    quote: quote_ident_mysql,
+    cast_text,
+    numbered: false,
+    ilike: IlikeStyle::LoweredLike,
+};
+
+/// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
+fn type_class(data_type: &str, column_type: &str) -> Option<TypeClass> {
+    match data_type.to_ascii_lowercase().as_str() {
+        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" | "decimal"
+        | "numeric" => Some(TypeClass::Number),
+        "char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" => {
+            Some(TypeClass::Text)
+        }
+        "date" | "datetime" | "timestamp" => Some(TypeClass::Temporal),
+        "time" => Some(TypeClass::Time),
+        "binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" => {
+            Some(TypeClass::Binary)
+        }
+        "uuid" => Some(TypeClass::Uuid),
+        "enum" => Some(TypeClass::Enum(column_type.to_string())),
+        _ => None,
+    }
+}
+
+fn labelled_row_to_json(
+    row: &MySqlRow,
+    labels: &[String],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::with_capacity(labels.len());
+    for (i, label) in labels.iter().enumerate() {
+        let value = match row.try_get::<Option<String>, _>(i) {
+            Ok(Some(text)) => serde_json::Value::String(text),
+            Ok(None) => serde_json::Value::Null,
+            Err(_) => serde_json::Value::String("<undecodable>".to_string()),
+        };
+        map.insert(label.clone(), value);
+    }
+    map
 }
 
 /// MySQL backend (`spec/protocol.md` §5).
@@ -224,6 +273,57 @@ impl MySqlSource {
         Ok(rows)
     }
 
+    async fn join_table_meta_in_tx(
+        &self,
+        tx: &mut Transaction<'_, MySql>,
+        variant: Variant,
+        schema: &str,
+        table: &str,
+        timeout_secs: u32,
+    ) -> Result<TableMeta, DbError> {
+        let columns = sqlx::query_as::<_, (String, String, String, Option<String>, String)>(
+            sqlx::AssertSqlSafe(timed_select(
+                variant,
+                timeout_secs,
+                "column_name, data_type, column_comment, collation_name, column_type \
+                 from information_schema.columns \
+                 where table_schema = ? and table_name = ? \
+                 order by ordinal_position",
+            )),
+        )
+        .bind(schema)
+        .bind(table)
+        .fetch_all(&mut **tx)
+        .await?;
+        let (pk_columns, fk_columns) = self
+            .key_metadata_in_tx(tx, variant, schema, table, timeout_secs)
+            .await?;
+        Ok(TableMeta {
+            name: table.to_string(),
+            columns: columns
+                .into_iter()
+                .map(|(name, type_name, comment, collation, column_type)| {
+                    let (key, references) = if pk_columns.contains(&name) {
+                        (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
+                    } else if let Some(r) = fk_columns.get(&name) {
+                        (Some(KeyKind::Fk), Some(r.clone()))
+                    } else {
+                        (None, None)
+                    };
+                    ColMeta {
+                        class: type_class(&type_name, &column_type),
+                        collation,
+                        comment: (!comment.is_empty()).then_some(comment),
+                        key,
+                        references,
+                        type_name,
+                        name,
+                    }
+                })
+                .collect(),
+        })
+    }
+
     /// MySQL's `PRIMARY` name repeats, so join on table name; omit composite
     /// FKs (`spec/protocol.md` §5.4.1).
     async fn key_metadata_in_tx(
@@ -325,7 +425,7 @@ fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
         {
             DbError::not_allowed(NotAllowedKind::NotReadable, format!("table {table:?}"))
         }
-        _ => DbError::Sqlx(e),
+        _ => DbError::from(e),
     }
 }
 
@@ -555,6 +655,67 @@ impl DbSource for MySqlSource {
             columns,
             rows,
             total_approx,
+        })
+    }
+
+    async fn query_join(
+        &self,
+        schema: Option<&str>,
+        spec: &JoinSpec,
+        opts: JoinOpts,
+    ) -> Result<JoinData, DbError> {
+        let variant = self.variant().await?;
+        let mut tx = self.pinned_tx().await?;
+        let timeout = opts.timeout_secs;
+        let schema = self
+            .resolve_schema_in_tx(&mut tx, variant, schema, timeout)
+            .await?;
+        let allowed = self
+            .allowed_tables_in_tx(&mut tx, variant, &schema, timeout)
+            .await?;
+        let names = spec.table_names();
+        let mut metas: HashMap<&str, TableMeta> = HashMap::new();
+        for name in &names {
+            if metas.contains_key(name) {
+                continue;
+            }
+            if !allowed.iter().any(|t| t == name) {
+                return Err(DbError::not_allowed(
+                    NotAllowedKind::Table,
+                    format!("table {name:?}"),
+                ));
+            }
+            let meta = self
+                .join_table_meta_in_tx(&mut tx, variant, &schema, name, timeout)
+                .await?;
+            metas.insert(name, meta);
+        }
+        let tables = names.iter().map(|n| metas[n].clone()).collect();
+        let plan = join::plan(spec, tables, &opts)?;
+        let (body, values) = join::build_select(&plan, &JOIN_DIALECT, Some(&schema));
+
+        // AssertSqlSafe: the statement is built from catalog names and
+        // generated aliases only; all values are bound.
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(timed_select(variant, timeout, &body)));
+        for value in &values {
+            query = query.bind(value);
+        }
+        query = query.bind(opts.limit as i64 + 1).bind(opts.offset as i64);
+        let mut mysql_rows = query
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| map_select_denied(e, &spec.table))?;
+        tx.commit().await?;
+
+        let has_more = mysql_rows.len() > opts.limit as usize;
+        mysql_rows.truncate(opts.limit as usize);
+        Ok(JoinData {
+            columns: plan.columns(),
+            rows: mysql_rows
+                .iter()
+                .map(|r| labelled_row_to_json(r, plan.labels()))
+                .collect(),
+            has_more,
         })
     }
 
@@ -1205,20 +1366,19 @@ mod tests {
         // getting a different idle connection back.
         let mut conn = db.pool.acquire().await.unwrap();
 
-        // MariaDB caps WITH RECURSIVE at `max_recursive_iterations` (default
-        // 1000) regardless of `max_statement_time` — the CTE below would
-        // otherwise finish in under a millisecond, long before the 1s
-        // timeout gets a chance to fire, making this a broken test rather
-        // than a passing one. MySQL has no such cap, so this is a no-op
-        // there; harmless either way since it only affects this connection.
-        if variant == Variant::MariaDb {
-            sqlx::query(sqlx::AssertSqlSafe(
-                "set session max_recursive_iterations = 100000000".to_string(),
-            ))
+        // Both forks cap WITH RECURSIVE far below the CTE's size (MariaDB
+        // `max_recursive_iterations`, MySQL `cte_max_recursion_depth`,
+        // default 1000), so the cap is raised or the 1s timeout never fires.
+        let raise_cap = match variant {
+            Variant::MariaDb => "set session max_recursive_iterations = 100000000",
+            // MySQL aborts the CTE at 1000 iterations with error 3636, which
+            // would pass an `is_err` check without ever reaching the timeout.
+            Variant::MySql => "set session cte_max_recursion_depth = 100000000",
+        };
+        sqlx::query(sqlx::AssertSqlSafe(raise_cap.to_string()))
             .execute(&mut *conn)
             .await
             .unwrap();
-        }
         // Timeout checks happen at row-iteration checkpoints on both
         // forks — empirically, a bare `SELECT SLEEP(n)` never hits one, so
         // this needs a query that actually iterates rows, mirroring the
@@ -1235,7 +1395,12 @@ mod tests {
         let err = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql))
             .fetch_one(&mut *conn)
             .await;
-        assert!(err.is_err(), "expected the slow query to be interrupted");
+        let err = err.expect_err("expected the slow query to be interrupted");
+        let err_dbg = format!("{err:?}");
+        assert!(
+            matches!(DbError::from(err), DbError::QueryTimeout),
+            "MySQL 3024 / MariaDB 1969 must surface as QueryTimeout, got {err_dbg}"
+        );
 
         // The same connection must still be usable afterward — proves both
         // forks' per-statement mechanisms are self-resetting, no stale
@@ -1247,5 +1412,90 @@ mod tests {
             .unwrap();
         assert_eq!(ok, 1);
         drop(conn);
+    }
+
+    fn join_opts() -> JoinOpts {
+        JoinOpts {
+            limit: 10,
+            offset: 0,
+            sort: None,
+            sort_join: None,
+            descending: false,
+            timeout_secs: 5,
+            filter: None,
+        }
+    }
+
+    fn spec(raw: &str) -> JoinSpec {
+        JoinSpec::parse(raw).unwrap()
+    }
+
+    #[tokio::test]
+    async fn left_join_keeps_unmatched_rows_and_filters_a_joined_column() {
+        let db = seeded_db().await;
+        let source = MySqlSource::new(db.pool.clone());
+        let left = spec(
+            r#"{"table":"users","joins":[{"type":"left","table":"orders",
+                "on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}"#,
+        );
+        let all = source.query_join(None, &left, join_opts()).await.unwrap();
+        assert_eq!(all.rows.len(), 3);
+        assert!(!all.has_more);
+
+        let mut opts = join_opts();
+        opts.limit = 1;
+        let page = source.query_join(None, &left, opts).await.unwrap();
+        assert_eq!(page.rows.len(), 1);
+        assert!(page.has_more);
+
+        let mut opts = join_opts();
+        opts.filter = Some(vec![crate::filter::Condition {
+            logic: None,
+            not: false,
+            column: "email".into(),
+            op: crate::filter::FilterOp::Ilike,
+            value: Some("B@X.%".into()),
+            join: Some(0),
+        }]);
+        let one = source.query_join(None, &left, opts).await.unwrap();
+        assert_eq!(one.rows.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn differing_text_collations_are_a_bad_join_not_a_database_error() {
+        let db = seeded_db().await;
+        for ddl in [
+            "create table ca (v varchar(20) collate utf8mb4_bin)",
+            "create table cb (v varchar(20) collate utf8mb4_general_ci)",
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(ddl.to_string()))
+                .execute(&db.pool)
+                .await
+                .unwrap();
+        }
+        let source = MySqlSource::new(db.pool.clone());
+        let clash = spec(
+            r#"{"table":"ca","joins":[{"type":"inner","table":"cb",
+                "on":[{"left":{"join":0,"column":"v"},"right":"v"}]}]}"#,
+        );
+        assert!(matches!(
+            source.query_join(None, &clash, join_opts()).await,
+            Err(DbError::BadJoin(_))
+        ));
+    }
+
+    #[test]
+    fn type_classes_follow_data_type() {
+        use TypeClass::*;
+        assert_eq!(type_class("bigint", "bigint"), Some(Number));
+        assert_eq!(type_class("VARCHAR", "varchar(20)"), Some(Text));
+        assert_eq!(type_class("datetime", "datetime"), Some(Temporal));
+        assert_eq!(
+            type_class("enum", "enum('a','b')"),
+            Some(Enum("enum('a','b')".into()))
+        );
+        assert_eq!(type_class("json", "json"), None);
+        assert_eq!(type_class("double", "double"), None);
+        assert_eq!(type_class("uuid", "uuid"), Some(Uuid));
     }
 }

@@ -9,6 +9,9 @@ use super::{
     KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, Structure, TableData, TableInfo,
 };
 use crate::filter::{Condition, Logic};
+use crate::join::{
+    self, ColMeta, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta, TypeClass,
+};
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
 const CATALOG_TIMEOUT_SECS: u32 = 5;
@@ -70,6 +73,40 @@ fn build_where_clause(
         clause.push_str(&wrapped);
     }
     Ok((format!(" where {clause}"), values))
+}
+
+fn cast_text(column: &str) -> String {
+    format!("{column}::text")
+}
+
+const JOIN_DIALECT: Dialect = Dialect {
+    quote: quote_ident,
+    cast_text,
+    numbered: true,
+    ilike: IlikeStyle::Native,
+};
+
+/// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
+fn type_class(
+    data_type: &str,
+    udt_schema: &str,
+    udt_name: &str,
+    is_enum: bool,
+) -> Option<TypeClass> {
+    match data_type {
+        "smallint" | "integer" | "bigint" | "numeric" => Some(TypeClass::Number),
+        "character varying" | "character" | "text" => Some(TypeClass::Text),
+        "uuid" => Some(TypeClass::Uuid),
+        "boolean" => Some(TypeClass::Boolean),
+        "bytea" => Some(TypeClass::Binary),
+        "date" | "timestamp without time zone" | "timestamp with time zone" => {
+            Some(TypeClass::Temporal)
+        }
+        "time without time zone" | "time with time zone" => Some(TypeClass::Time),
+        "USER-DEFINED" if is_enum => Some(TypeClass::Enum(format!("{udt_schema}.{udt_name}"))),
+        "USER-DEFINED" if udt_name == "citext" => Some(TypeClass::Text),
+        _ => None,
+    }
 }
 
 #[derive(Clone)]
@@ -344,6 +381,81 @@ impl PgPoolSource {
         Ok(rows)
     }
 
+    /// Joins through pg_attribute/pg_class directly: col_description is
+    /// keyed by attnum, which can diverge from ordinal_position once a
+    /// column has been dropped.
+    async fn column_comments_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        schema: &str,
+        table: &str,
+    ) -> Result<HashMap<String, String>, DbError> {
+        Ok(sqlx::query_as::<_, (String, Option<String>)>(
+            "select a.attname::text, col_description(a.attrelid, a.attnum::int) \
+             from pg_attribute a \
+             join pg_class c on c.oid = a.attrelid \
+             join pg_namespace n on n.oid = c.relnamespace \
+             where n.nspname = $1 and c.relname = $2 \
+               and a.attnum > 0 and not a.attisdropped",
+        )
+        .bind(schema)
+        .bind(table)
+        .fetch_all(&mut **tx)
+        .await?
+        .into_iter()
+        .filter_map(|(name, comment)| comment.map(|c| (name, c)))
+        .collect())
+    }
+
+    /// Column metadata of a table already cleared by `readable_table_oid_in_tx`.
+    async fn join_table_meta_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        schema: &str,
+        table: &str,
+    ) -> Result<TableMeta, DbError> {
+        let columns = sqlx::query_as::<_, (String, String, String, String, bool)>(
+            "select c.column_name, c.data_type, c.udt_schema, c.udt_name, \
+                    exists (select 1 from pg_type t \
+                            join pg_namespace n on n.oid = t.typnamespace \
+                            where n.nspname = c.udt_schema and t.typname = c.udt_name \
+                              and t.typtype = 'e') \
+             from information_schema.columns c \
+             where c.table_schema = $1 and c.table_name = $2 \
+             order by c.ordinal_position",
+        )
+        .bind(schema)
+        .bind(table)
+        .fetch_all(&mut **tx)
+        .await?;
+        let comments = self.column_comments_in_tx(tx, schema, table).await?;
+        let (pk_columns, fk_columns) = self.key_metadata_in_tx(tx, schema, table).await?;
+        Ok(TableMeta {
+            name: table.to_string(),
+            columns: columns
+                .into_iter()
+                .map(|(name, type_name, udt_schema, udt_name, is_enum)| {
+                    let (key, references) = if pk_columns.contains(&name) {
+                        (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
+                    } else if let Some(r) = fk_columns.get(&name) {
+                        (Some(KeyKind::Fk), Some(r.clone()))
+                    } else {
+                        (None, None)
+                    };
+                    ColMeta {
+                        class: type_class(&type_name, &udt_schema, &udt_name, is_enum),
+                        collation: None,
+                        comment: comments.get(&name).cloned(),
+                        key,
+                        references,
+                        type_name,
+                        name,
+                    }
+                })
+                .collect(),
+        })
+    }
+
     /// Use `ccu.constraint_schema` for cross-schema FKs; omit composites
     /// (`spec/protocol.md` §5.4.1).
     async fn key_metadata_in_tx(
@@ -475,6 +587,22 @@ fn row_to_json(row: &PgRow, columns: &[ColumnInfo]) -> serde_json::Map<String, s
     map
 }
 
+fn labelled_row_to_json(
+    row: &PgRow,
+    labels: &[String],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::with_capacity(labels.len());
+    for (i, label) in labels.iter().enumerate() {
+        let value = match row.try_get::<Option<String>, _>(i) {
+            Ok(Some(text)) => serde_json::Value::String(text),
+            Ok(None) => serde_json::Value::Null,
+            Err(_) => serde_json::Value::String("<undecodable>".to_string()),
+        };
+        map.insert(label.clone(), value);
+    }
+    map
+}
+
 impl DbSource for PgPoolSource {
     async fn list_schemas(&self) -> Result<Vec<String>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
@@ -570,25 +698,7 @@ impl DbSource for PgPoolSource {
         .bind(&table)
         .fetch_all(&mut *tx)
         .await?;
-        // Joins through pg_attribute/pg_class directly: col_description is
-        // keyed by attnum, which can diverge from ordinal_position once a
-        // column has been dropped.
-        let column_comments: HashMap<String, String> =
-            sqlx::query_as::<_, (String, Option<String>)>(
-                "select a.attname::text, col_description(a.attrelid, a.attnum::int) \
-             from pg_attribute a \
-             join pg_class c on c.oid = a.attrelid \
-             join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = $1 and c.relname = $2 \
-               and a.attnum > 0 and not a.attisdropped",
-            )
-            .bind(&schema)
-            .bind(&table)
-            .fetch_all(&mut *tx)
-            .await?
-            .into_iter()
-            .filter_map(|(name, comment)| comment.map(|c| (name, c)))
-            .collect();
+        let column_comments = self.column_comments_in_tx(&mut tx, &schema, &table).await?;
         let (pk_columns, fk_columns) = self.key_metadata_in_tx(&mut tx, &schema, &table).await?;
         let columns: Vec<ColumnInfo> = column_types
             .into_iter()
@@ -664,6 +774,55 @@ impl DbSource for PgPoolSource {
             columns,
             rows,
             total_approx,
+        })
+    }
+
+    async fn query_join(
+        &self,
+        schema: Option<&str>,
+        spec: &JoinSpec,
+        opts: JoinOpts,
+    ) -> Result<JoinData, DbError> {
+        let mut tx = self.bounded_tx(opts.timeout_secs).await?;
+        let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
+        let names = spec.table_names();
+        let mut metas: HashMap<&str, TableMeta> = HashMap::new();
+        for name in &names {
+            if !metas.contains_key(name) {
+                self.readable_table_oid_in_tx(&mut tx, &schema, name)
+                    .await?;
+                let meta = self.join_table_meta_in_tx(&mut tx, &schema, name).await?;
+                metas.insert(name, meta);
+            }
+        }
+        let tables = names.iter().map(|n| metas[n].clone()).collect();
+        let plan = join::plan(spec, tables, &opts)?;
+        let (body, values) = join::build_select(&plan, &JOIN_DIALECT, Some(&schema));
+
+        // AssertSqlSafe: the statement is built from catalog names and
+        // generated aliases only; all values are bound.
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(format!("select {body}")))
+            .bind(opts.limit as i64 + 1)
+            .bind(opts.offset as i64);
+        for value in values {
+            query = query.bind(value);
+        }
+        let mut pg_rows = query
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| map_select_denied(e, &spec.table))?;
+        tx.commit().await?;
+
+        let has_more = pg_rows.len() > opts.limit as usize;
+        pg_rows.truncate(opts.limit as usize);
+        let rows = pg_rows
+            .iter()
+            .map(|r| labelled_row_to_json(r, plan.labels()))
+            .collect();
+        Ok(JoinData {
+            columns: plan.columns(),
+            rows,
+            has_more,
         })
     }
 
