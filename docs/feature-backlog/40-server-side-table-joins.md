@@ -31,7 +31,7 @@ a definition kept by the client, not a database object.
   table. Amend it: the new route (§4) is the one exception, and combines
   rows only from tables the request names. FK navigation stays two
   queries.
-- A wholly new route is still protocol v1 (`:684`). Extensions go through
+- A wholly new route is still protocol v1 (`:684-696`). Extensions go through
   spec revisions (`:101`), so confirm this is acceptable under spec
   governance before building.
 - New section `GET {mount}/api/tables/join` in `spec/protocol.md`, and the
@@ -78,7 +78,8 @@ a definition kept by the client, not a database object.
   the server), `join`, `table`, `column`, `type`, plus the §5.4.1
   optional fields (`key`, `references`, `comment`). Clients never parse
   the label. `rows` are keyed by label. `has_more` is always present;
-  `total_approx` is omitted (a join has no cheap count; contrast `:180`).
+  `total_approx` is omitted (a join has no cheap count; contrast §5.3 `:163-188` and §5.4.4
+  `:357-365`).
 
 ## 5. Rules
 
@@ -93,11 +94,18 @@ a definition kept by the client, not a database object.
 2. **Equality only** in `on`.
 3. **Up to 3 pairs** per `on`, combined with AND.
 4. **Slow joins.** The 5 s timeout stays (`:651-654`), a 500. The body
-   must distinguish a timeout from other failures so the UI can say "join
-   took too long".
+   carries `code: "query_timeout"` (`:87`), so the UI can say "join took too
+   long". Only Postgres emits it today. All five ports map the MySQL,
+   MariaDB and SQLite timeout to it on every route, and the accepted gap in
+   `docs/adapter-decisions.md` §6 is closed.
 5. **Self-joins** allowed (positions, above).
 6. **One source and schema.** No cross-schema joins in this story.
 7. **No total count.** See `has_more` below.
+8. **Error codes.** Reuse existing codes. Unknown names keep
+   `unknown_table` and `unknown_column`, filter problems keep
+   `invalid_filter`, and join-shape and type errors use
+   `invalid_parameter`. The `title` names the part, e.g. `join 1 on:
+   users.id (uuid) cannot be joined to orders.status (enum)`.
 
 ### 5.2 Bounds
 
@@ -127,7 +135,7 @@ extra row existed.
   operator is always `=`. Values are bound parameters.
 - The whole operation stays on one connection and one transaction, with
   the schema resolved first (`docs/design.md` §5).
-- Filter conditions compare the column cast to text, as in `:318-323`.
+- Filter conditions compare the column cast to text, as in `~:320-324`.
 
 ## 6. Touchpoints
 
@@ -150,7 +158,8 @@ Conformance cases, run on all five ports and all three engines:
 - LEFT keeps unmatched base rows with nulls; INNER drops them.
 - Three-table join returns the expected labels, `join`/`table`/`column`
   fields and values.
-- Self-join returns both sides without a label clash.
+- Self-join (`orders` to `orders` on a non-FK pair) returns both sides
+  without a label clash.
 - Filter and sort on a joined table's column, in both `sort_join`
   positions.
 - `has_more` is true on a page with a following row and false on the last
@@ -160,27 +169,36 @@ Conformance cases, run on all five ports and all three engines:
   5 tables, 4 pairs, `=`-less `on`, oversize `join`.
 - No identifier injection: a table or column name containing quotes,
   semicolons or `"` is rejected as unknown, never spliced.
-- A join that exceeds the timeout returns a 500 whose body names the
-  timeout, and the connection is released.
+- A join that exceeds the timeout returns a 500 with `code:
+  "query_timeout"` on all three engines, and the connection is released.
 - The two-source and schema-isolation cases still pass for the new route.
 
 `mise run check` is green; `mise run docs` is green.
 
-## 8. Check before building
+## 8. Decided while planning
 
-- **Stable paging.** Sorting on a non-unique column can skip or repeat
-  rows between pages. See what the single-table route does for ties
-  (`DbSource` ordering) and match it; if it appends the primary key, the
-  join route appends every table's primary key. Tables without one are an
-  accepted gap to record in `docs/adapter-decisions.md`.
-- **MySQL text collations.** Comparing two text columns with different
-  collations raises "illegal mix of collations". Decide whether to map it
-  to the §5.1 point 1 rejection or add an explicit collation.
-- **SQLite typing.** Types are affinities, not strict. Define the class
-  from the declared type and note the weaker guarantee.
+- **Stable paging.** Match the single-table route: no primary-key
+  tie-break (`postgres.rs:623-629`, `sqlite.rs:397`). A sort on a
+  non-unique column can repeat or skip rows between pages. Record it as an
+  accepted gap in `docs/adapter-decisions.md`.
+- **MySQL text collations.** Compare `collation_name` of text pairs before
+  building the query and answer 400 naming the pair. Error 1267 maps to the
+  same 400 as a fallback.
+- **SQLite typing.** The class comes from the declared type by affinity
+  rules. An empty declared type is its own class and pairs only with
+  itself. Note the weaker guarantee in `docs/adapter-decisions.md`.
+- **SQLite connection.** The whole operation runs in one `bounded` closure
+  on one connection, as §5.4 requires. The existing `query_table` does not.
+- **Self-join test data.** Join `orders` to itself on a non-FK pair. No
+  seed change.
+
+## Still to check
+
 - **Long URLs.** A large `join` plus `filter` in a GET may reach proxy URL
   limits. A read-only POST would need a spec decision; not part of this
   story.
+- **Timeout test.** Whether the conformance runner can set a low
+  `query_timeout_secs`; otherwise cover the label in per-port tests.
 
 ## 9. Out of scope
 
