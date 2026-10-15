@@ -9,6 +9,29 @@ import java.sql.ResultSet
 import java.sql.SQLException
 import javax.sql.DataSource
 
+private val JOIN_DIALECT = JoinDialect(
+    quote = ::quoteIdent,
+    castText = { "$it::text" },
+    ilike = "native",
+)
+
+/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
+internal fun pgTypeClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): TypeClass? = when (dataType) {
+    "smallint", "integer", "bigint", "numeric" -> TypeClass.NUMBER
+    "character varying", "character", "text" -> TypeClass.TEXT
+    "uuid" -> TypeClass.UUID
+    "boolean" -> TypeClass.BOOLEAN
+    "bytea" -> TypeClass.BINARY
+    "date", "timestamp without time zone", "timestamp with time zone" -> TypeClass.TEMPORAL
+    "time without time zone", "time with time zone" -> TypeClass.TIME
+    "USER-DEFINED" -> when {
+        isEnum -> TypeClass.enum("$udtSchema.$udtName")
+        udtName == "citext" -> TypeClass.TEXT
+        else -> null
+    }
+    else -> null
+}
+
 /** Postgres [DbSource]; queryTimeout bounds catalog and data operations (`spec/protocol.md` §6). */
 class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val filterValidator: FilterValidator) : DbSource {
     private val jdbcTemplate = JdbcTemplate(dataSource).apply {
@@ -187,6 +210,89 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData =
         inReadOnlyTransaction { queryTableInTransaction(schema, table, opts) }
+
+    /** Column metadata of a table already cleared by [requireTable]. */
+    private fun joinTableMeta(schema: String, table: String): JoinTableMeta {
+        data class Col(val name: String, val type: String, val udtSchema: String, val udtName: String, val isEnum: Boolean)
+        val columns = jdbcTemplate.query(
+            "select c.column_name, c.data_type, c.udt_schema, c.udt_name, " +
+                "       exists (select 1 from pg_type t " +
+                "               join pg_namespace n on n.oid = t.typnamespace " +
+                "               where n.nspname = c.udt_schema and t.typname = c.udt_name " +
+                "                 and t.typtype = 'e') " +
+                "from information_schema.columns c " +
+                "where c.table_schema = ? and c.table_name = ? " +
+                "order by c.ordinal_position",
+            RowMapper { rs, _ -> Col(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getBoolean(5)) },
+            schema,
+            table,
+        )
+        val comments = jdbcTemplate.query(
+            "select a.attname::text, col_description(a.attrelid, a.attnum::int) " +
+                "from pg_attribute a " +
+                "join pg_class c on c.oid = a.attrelid " +
+                "join pg_namespace n on n.oid = c.relnamespace " +
+                "where n.nspname = ? and c.relname = ? " +
+                "  and a.attnum > 0 and not a.attisdropped",
+            RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
+            schema,
+            table,
+        ).filter { it.second != null }.associate { it.first to it.second!! }
+        val (pkColumns, fkColumns) = keyMetadata(schema, table)
+        return JoinTableMeta(
+            table,
+            columns.map { c ->
+                JoinColMeta(
+                    name = c.name,
+                    type = c.type,
+                    cls = pgTypeClass(c.type, c.udtSchema, c.udtName, c.isEnum),
+                    key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
+                    references = fkColumns[c.name],
+                    comment = comments[c.name],
+                )
+            },
+        )
+    }
+
+    override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
+        val realSchema = resolveSchema(schema)
+        val names = spec.tableNames()
+        val metas = HashMap<String, JoinTableMeta>()
+        for (name in names) {
+            if (name in metas) continue
+            requireTable(realSchema, name)
+            metas[name] = joinTableMeta(realSchema, name)
+        }
+        val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
+
+        // The statement is built from catalog names and generated aliases
+        // only; every value is a bound parameter.
+        val (body, values) = buildJoinSelect(plan, JOIN_DIALECT, realSchema)
+        val bindArgs: List<Any> = values + (opts.limit + 1) + opts.offset
+        val rows = try {
+            jdbcTemplate.query(
+                "select $body",
+                RowMapper { rs, _ -> List(plan.labels.size) { i -> readCell(rs, i + 1) } },
+                *bindArgs.toTypedArray(),
+            )
+        } catch (e: DataAccessException) {
+            val sqlState = (e.mostSpecificCause as? SQLException)?.sqlState
+            if (sqlState == "42501") {
+                throw NotAllowedException("not allowed: table ${spec.table}", NotAllowedKind.NOT_READABLE)
+            }
+            if (sqlState == "22021" || sqlState == "22P05") {
+                throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
+            }
+            throw e
+        }
+        plan.joinData(rows, opts.limit)
+    }
+
+    private fun readCell(rs: ResultSet, index: Int): String? = try {
+        rs.getString(index)
+    } catch (e: Exception) {
+        "<undecodable>"
+    }
 
     private fun queryTableInTransaction(schema: String?, table: String, opts: QueryOpts): TableData {
         val realSchema = resolveSchema(schema)

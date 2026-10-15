@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -378,10 +379,10 @@ class SqliteSourceTest {
                         ).use { it.executeQuery() }
                     }
                 } catch (e: Exception) {
-                    errored = true
+                    errored = isQueryTimeout(e)
                 }
             }
-            assertTrue(errored, "expected the slow query to be interrupted by the progress handler")
+            assertTrue(errored, "expected the interrupt to be recognised as a query timeout")
             // Generous upper bound: proves this is a real interrupt near the
             // 1s budget, not a lucky fast completion nor an unrelated hang.
             assertTrue(elapsedMs < 10_000, "expected abortion near the 1s budget, took ${elapsedMs}ms")
@@ -396,6 +397,88 @@ class SqliteSourceTest {
                 }
             }
             assertEquals(1, stillWorks)
+        } finally {
+            ds.close()
+        }
+    }
+
+    private fun usersOrders(type: String) = parseJoin(
+        """{"table":"users","joins":[{"type":"$type","table":"orders",
+            "on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}""",
+    )
+
+    private val joinOpts = JoinOpts(10, 0, null, null, false, null)
+
+    @Test
+    fun `join keeps unmatched rows on left and drops them on inner`() {
+        val ds = seededDataSource()
+        try {
+            val source = SqliteSource(ds, 5)
+            val left = source.queryJoin(null, usersOrders("left"), joinOpts)
+            assertEquals(3, left.rows.size)
+            assertFalse(left.hasMore)
+            assertEquals(2, left.rows.count { it["status"] == null })
+            assertEquals(1, source.queryJoin(null, usersOrders("inner"), joinOpts).rows.size)
+        } finally {
+            ds.close()
+        }
+    }
+
+    @Test
+    fun `self join has distinct labels and reports has_more`() {
+        val ds = seededDataSource()
+        try {
+            val self = parseJoin(
+                """{"table":"users","joins":[{"type":"inner","table":"users",
+                    "on":[{"left":{"join":0,"column":"age"},"right":"age"}]}],
+                    "columns":[{"join":0,"column":"id"},{"join":1,"column":"id"}]}""",
+            )
+            val page = SqliteSource(ds, 5).queryJoin(null, self, joinOpts.copy(limit = 2))
+            assertEquals(2, page.rows.size)
+            assertTrue(page.hasMore)
+            assertEquals(listOf("id_0", "id_1"), page.columns.map { it.name })
+        } finally {
+            ds.close()
+        }
+    }
+
+    @Test
+    fun `join filters and sorts on a joined table's column`() {
+        val ds = seededDataSource()
+        try {
+            val three = parseJoin(
+                """{"table":"orders","joins":[
+                    {"type":"left","table":"users","on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]},
+                    {"type":"left","table":"order_extra","on":[{"left":{"join":0,"column":"id"},"right":"order_id"}]}],
+                    "columns":[{"join":0,"column":"id"},{"join":1,"column":"email"},{"join":2,"column":"gift_message"}]}""",
+            )
+            val data = SqliteSource(ds, 5).queryJoin(
+                null,
+                three,
+                joinOpts.copy(sort = "email", sortJoin = 1, filter = listOf(Condition(column = "email", op = "LIKE", value = "a@%", join = 1))),
+            )
+            assertEquals(listOf(linkedMapOf<String, String?>("id" to "1", "email" to "a@x.com", "gift_message" to "enjoy!")), data.rows)
+        } finally {
+            ds.close()
+        }
+    }
+
+    @Test
+    fun `join rejects hostile names, mismatched types and other schemas`() {
+        val ds = seededDataSource()
+        try {
+            val source = SqliteSource(ds, 5)
+            val hostile = parseJoin(
+                """{"table":"users\"; drop table users; --","joins":[{"type":"left","table":"orders",
+                    "on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}""",
+            )
+            assertThrows(NotAllowedException::class.java) { source.queryJoin(null, hostile, joinOpts) }
+            val mismatch = parseJoin(
+                """{"table":"users","joins":[{"type":"left","table":"orders",
+                    "on":[{"left":{"join":0,"column":"email"},"right":"user_id"}]}]}""",
+            )
+            assertThrows(BadJoinException::class.java) { source.queryJoin(null, mismatch, joinOpts) }
+            assertThrows(NotAllowedException::class.java) { source.queryJoin("other", usersOrders("left"), joinOpts) }
         } finally {
             ds.close()
         }

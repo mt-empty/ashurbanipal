@@ -30,6 +30,8 @@ data class Condition(
     val column: String,
     val op: String,
     val value: String? = null,
+    /** Table position, accepted only by `parse(raw, allowJoin = true)` (`spec/protocol.md` §5.11.3). */
+    val join: Int? = null,
 )
 
 data class WhereClause(val sql: String, val values: List<String>)
@@ -40,7 +42,7 @@ class FilterValidator {
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .build()
 
-    fun parse(raw: String): List<Condition> {
+    fun parse(raw: String, allowJoin: Boolean = false): List<Condition> {
         val byteLength = raw.toByteArray(Charsets.UTF_8).size
         if (byteLength > MAX_FILTER_BYTES) {
             throw FilterException("filter too long: $byteLength bytes (max $MAX_FILTER_BYTES)")
@@ -56,6 +58,12 @@ class FilterValidator {
         }
         return conditions.mapIndexed { i, maybeCondition ->
             val condition = maybeCondition ?: throw FilterException("condition $i must not be null")
+            if (condition.join != null && !allowJoin) {
+                throw FilterException("join is only valid on the join route")
+            }
+            if (condition.join != null && condition.join < 0) {
+                throw FilterException("condition $i has an invalid join position")
+            }
             if (i == 0 && condition.logic != null) {
                 throw FilterException("logic must be absent on the first condition")
             }

@@ -47,6 +47,7 @@ class MultiSourceTest : AshurbanipalHttpTestBase() {
             "/api/table-counts?source=nonexistent",
             "/api/tables/data?source=nonexistent&table=users",
             "/api/tables/common-values?source=nonexistent&table=users&column=email",
+            "/api/tables/join?source=nonexistent&join=%7B%7D",
         )) {
             val ex = assertThrows(HttpClientErrorException::class.java) {
                 http.getForObject(url(path), String::class.java)

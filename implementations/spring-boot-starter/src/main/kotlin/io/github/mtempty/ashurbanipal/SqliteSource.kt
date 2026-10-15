@@ -70,6 +70,31 @@ private fun <T> query(conn: Connection, sql: String, params: List<Any?> = emptyL
     }
 }
 
+private val JOIN_DIALECT = JoinDialect(
+    quote = ::quoteIdent,
+    castText = { "CAST($it AS TEXT)" },
+    ilike = "like",
+)
+
+/** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
+internal fun sqliteTypeClass(declared: String): TypeClass? {
+    val upper = declared.trim().uppercase()
+    if (upper.isEmpty()) return TypeClass.UNTYPED
+    val base = upper.substringBefore('(').trim()
+    return when {
+        base == "UUID" -> TypeClass.UUID
+        base == "BOOLEAN" || base == "BOOL" -> TypeClass.BOOLEAN
+        base == "DATE" || base == "DATETIME" || base.startsWith("TIMESTAMP") -> TypeClass.TEMPORAL
+        base == "TIME" -> TypeClass.TIME
+        base == "JSON" || base == "JSONB" -> null
+        "INT" in upper -> TypeClass.NUMBER
+        "CHAR" in upper || "CLOB" in upper || "TEXT" in upper -> TypeClass.TEXT
+        "BLOB" in upper -> TypeClass.BINARY
+        "REAL" in upper || "FLOA" in upper || "DOUB" in upper -> null
+        else -> TypeClass.NUMBER
+    }
+}
+
 /** SQLite source uses a progress handler, not `Statement.setQueryTimeout`, to interrupt running queries. */
 class SqliteSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
 
@@ -165,6 +190,65 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         // documented "no estimate" sentinel (spec/protocol.md §5.3) rather
         // than a per-table COUNT(*) scan. See docs/adapter-decisions.md.
         return allowedTables().map { CountEntry(it, -1L) }
+    }
+
+    override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData {
+        checkSchema(schema)
+        // One connection and one deadline for the catalog lookups and the
+        // select (spec/protocol.md §5.11.5).
+        return bounded(queryTimeoutSecs) { conn ->
+            val allowed = query(
+                conn,
+                "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' order by name",
+            ) { rs -> rs.getString(1) }
+            val names = spec.tableNames()
+            val metas = HashMap<String, JoinTableMeta>()
+            for (name in names) {
+                if (name in metas) continue
+                if (name !in allowed) throw NotAllowedException("not allowed: table $name", NotAllowedKind.TABLE)
+                val quoted = quoteIdent(name)
+                val pk = query(conn, "select name, pk from pragma_table_info($quoted)") { rs ->
+                    rs.getString(1) to rs.getLong(2)
+                }.filter { it.second > 0 }.map { it.first }.toSet()
+                val fks = query(
+                    conn,
+                    "select fkl.id, fkl.seq, fkl.\"table\", fkl.\"from\", coalesce(fkl.\"to\", ppk.name, 'rowid') " +
+                        "from pragma_foreign_key_list($quoted) fkl " +
+                        "left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1",
+                ) { rs -> Triple(rs.getLong(1), rs.getString(4), ColumnRef(rs.getString(3), rs.getString(5), null)) }
+                val fkColumns = fks.groupBy { it.first }.values.filter { it.size == 1 }.associate { it[0].second to it[0].third }
+                metas[name] = JoinTableMeta(
+                    name,
+                    query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
+                        rs.getString(2) to (rs.getString(3) ?: "")
+                    }.map { (col, declared) ->
+                        JoinColMeta(
+                            name = col,
+                            type = declared.ifEmpty { "unknown" },
+                            cls = sqliteTypeClass(declared),
+                            key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
+                            references = fkColumns[col],
+                        )
+                    },
+                )
+            }
+            val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
+
+            // The statement is built from catalog names and generated aliases
+            // only; every value is a bound parameter.
+            val (body, values) = buildJoinSelect(plan, JOIN_DIALECT, null)
+            val bindArgs: List<Any?> = values + (opts.limit + 1) + opts.offset
+            val rows = query(conn, "select $body", bindArgs) { rs ->
+                List(plan.labels.size) { i ->
+                    try {
+                        rs.getString(i + 1)
+                    } catch (e: Exception) {
+                        "<undecodable>"
+                    }
+                }
+            }
+            plan.joinData(rows, opts.limit)
+        }
     }
 
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData {
