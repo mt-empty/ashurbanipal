@@ -133,6 +133,9 @@ export async function loadData({
   updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
+    // The transition may run this after a newer load took over; rendering then
+    // would record this table's column widths under the new table.
+    if (token !== loadDataToken) return;
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
     renderRows(data, newRowKeys, pkNames);

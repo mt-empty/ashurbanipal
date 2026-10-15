@@ -151,6 +151,9 @@ function closeFilterSuggest(): void {
   filterSuggestMatches = [];
   filterSuggestIndex = -1;
   filterSuggestHead = "";
+  const input = $<HTMLInputElement>("filter");
+  input.setAttribute("aria-expanded", "false");
+  input.removeAttribute("aria-activedescendant");
   $("filter-suggest").hidePopover();
 }
 
@@ -162,6 +165,9 @@ function renderFilterSuggest(): void {
       btn.textContent = suggestion.label;
       btn.title = suggestion.label; // long values are cut off with an ellipsis
       btn.className = i === filterSuggestIndex ? "active" : "";
+      btn.id = `filter-suggest-${i}`;
+      btn.setAttribute("role", "option");
+      btn.setAttribute("aria-selected", String(i === filterSuggestIndex));
       // Keeps focus (and the caret) in #filter — otherwise the button
       // would steal focus, firing #filter's blur handler and closing this
       // popup before its own click handler runs.
@@ -173,6 +179,9 @@ function renderFilterSuggest(): void {
   // Arrow-key moves change .active without mouse involvement, so the
   // list has to scroll itself.
   $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
+  const input = $<HTMLInputElement>("filter");
+  if (filterSuggestIndex >= 0) input.setAttribute("aria-activedescendant", `filter-suggest-${filterSuggestIndex}`);
+  else input.removeAttribute("aria-activedescendant");
 }
 
 // The trailing space starts the next word, so accepting a column goes straight
@@ -186,9 +195,13 @@ function acceptFilterSuggestion(i: number): void {
   updateFilterSuggestions();
 }
 
-// Per scope+table+column, kept for the page's lifetime: the planner's list
-// changes slowly, and a failure is cached too so typing never re-hits it.
+// Per scope+table+column: the planner's list changes slowly, so one request
+// serves every keystroke, a failed or empty answer included. Refresh clears it.
 const commonValueCache = new Map<string, Promise<string[]>>();
+
+export function clearCommonValueCache(): void {
+  commonValueCache.clear();
+}
 
 function commonValuesFor(column: string): Promise<string[]> {
   const params = new URLSearchParams({ table: state.table ?? "", column });
@@ -211,8 +224,7 @@ function showFilterSuggestions(ctx: Completion, all: Suggestion[], index: number
   const input = $<HTMLInputElement>("filter");
   const partial = ctx.partial.toLowerCase();
   const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
-  // Nothing left to complete: a lone row identical to what is typed. (Columns
-  // keep showing, as they always have.)
+  // Nothing left to complete: a lone row identical to what is typed, except columns.
   const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
   if (matches.length === 0 || done) {
     closeFilterSuggest();
@@ -226,6 +238,7 @@ function showFilterSuggestions(ctx: Completion, all: Suggestion[], index: number
   $("filter-caret-anchor").style.left = `${x}px`;
   $("filter-caret-anchor").style.top = `${y}px`;
   $("filter-suggest").showPopover();
+  input.setAttribute("aria-expanded", "true");
 }
 
 function updateFilterSuggestions(): void {

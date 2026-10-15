@@ -28,6 +28,9 @@ const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 const TABLE_CAP_LINES = 2;
 const tablesMore = $<HTMLButtonElement>("tables-more");
 let tablesExpanded = false;
+// The active table that last forced the list open, so "show fewer" sticks
+// until a different table becomes active.
+let forcedOpenFor: string | null = null;
 
 // Measures the uncapped layout (offsetTop per chip), so the cap is by
 // rendered lines and tracks window width without a per-chip width model.
@@ -37,16 +40,27 @@ function updateTablesCap(): void {
   const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   if (tops.length <= TABLE_CAP_LINES) {
     tablesMore.hidden = true;
+    setCappedInert([]);
     return;
   }
   const lastVisibleTop = tops[TABLE_CAP_LINES - 1];
   const hidden = tableEntries.filter((e) => e.li.offsetTop > lastVisibleTop);
-  // The active table must never sit behind the cap.
-  if (hidden.some((e) => e.btn.classList.contains("active"))) tablesExpanded = true;
+  // A newly active table must not sit behind the cap.
+  const active = hidden.find((e) => e.btn.classList.contains("active"));
+  if (active && active.name !== forcedOpenFor) {
+    tablesExpanded = true;
+    forcedOpenFor = active.name;
+  }
   tablesMore.hidden = false;
   tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
   tablesMore.textContent = tablesExpanded ? "show fewer" : `+ ${hidden.length} more`;
   ul.classList.toggle("capped", !tablesExpanded);
+  setCappedInert(tablesExpanded ? [] : hidden);
+}
+
+// Clipped chips would otherwise stay in the tab order and scroll the strip.
+function setCappedInert(hidden: TableEntry[]): void {
+  for (const e of tableEntries) e.li.inert = hidden.includes(e);
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
@@ -162,6 +176,7 @@ export async function loadTables(): Promise<void> {
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
+  forcedOpenFor = null;
   for (const t of tables) {
     const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
     const btn = qs<HTMLButtonElement>(li, "button");

@@ -283,7 +283,10 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #meta { display: flex; justify-content: space-between; align-items: center;
         flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); }
 #meta-title { color: var(--text-muted); }
-#current { font-family: var(--font-mono); color: initial; }
+/* Data and identifiers stay monospace; the chrome around them is system-ui. */
+.json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value,
+#filter-suggest button { font-family: var(--font-mono); }
+#current { font-family: var(--font-mono); color: CanvasText; }
 #actions { display: flex; gap: 2px; }
 #actions button, #pager button { background: none; border: none; font: inherit;
         font-size: .8125rem; color: var(--text-muted); padding: .25rem .5rem;
@@ -361,6 +364,7 @@ dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
    siblings here. */
 dialog dl .copy { position: static; top: auto; transform: none; opacity: 0; align-self: start; }
 dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
+dialog dl .copy:hover { opacity: 1; }
 /* Lives in the dialog header, so it stays visible regardless of hover —
    a standalone action, not a per-field affordance. */
 .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
@@ -556,7 +560,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
         <form id="filter-form">
           <div id="filter-wrap">
             <div id="filter-hl" aria-hidden="true"><span id="filter-hl-text"></span></div>
-            <input id="filter" type="search" spellcheck="false" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+            <input id="filter" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="filter-suggest-list" spellcheck="false" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
           </div>
           <button id="apply">apply</button>
         </form>
@@ -622,7 +626,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
 <span id="filter-caret-anchor"></span>
-<div id="filter-suggest" popover="manual"><div id="filter-suggest-list"></div></div>
+<div id="filter-suggest" popover="manual"><div id="filter-suggest-list" role="listbox" aria-label="filter suggestions"></div></div>
 
 <dialog id="api-help-dialog" closedby="any">
   <div class="dialog-head">
@@ -1491,11 +1495,19 @@ function completionAt(text) {
 var input = $("filter");
 var wrap = $("filter-wrap");
 var textEl = $("filter-hl-text");
+var MAX_HIGHLIGHT_CHARS = 1024;
 function render() {
   const text = input.value;
+  if (text.length > MAX_HIGHLIGHT_CHARS) {
+    textEl.replaceChildren();
+    wrap.classList.add("plain");
+    return;
+  }
   const { tokens } = tokenizeFilterDsl(text);
-  const error = filterDslErrorAt(text);
-  const at = error && error.index < text.length && !error.message.startsWith("unterminated") ? error.index : -1;
+  const lead = text.length - text.trimStart().length;
+  const trimmed = text.trim();
+  const error = filterDslErrorAt(trimmed);
+  const at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
   textEl.replaceChildren(
     ...tokens.map((t) => {
       const span = document.createElement("span");
@@ -1523,6 +1535,301 @@ if (valueProp?.get && valueProp.set) {
 input.addEventListener("input", render);
 window.addEventListener("resize", render);
 render();
+
+// src/bootstrap/reload.ts
+var impl = null;
+function registerLoadData(fn) {
+  impl = fn;
+}
+function loadData(opts) {
+  return impl ? impl(opts) : Promise.resolve();
+}
+
+// src/features/filter-ui.ts
+function submitFilter(text) {
+  let ast = [];
+  if (text) {
+    try {
+      ast = parseFilterDsl(text);
+    } catch (e) {
+      reportError(e);
+      return;
+    }
+  }
+  state.filter = text;
+  setAppliedFilterAst(ast);
+  markFilterVerified();
+  state.offset = 0;
+  loadData();
+}
+function applyFilterClause(column, op, value) {
+  const clause = value === void 0 ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
+  $("filter").value = clause;
+  submitFilter(clause);
+}
+function applyFilterClauses(pairs) {
+  const clause = pairs.map((p) => `${p.column} = ${quoteFilterValue(p.value)}`).join(" AND ");
+  $("filter").value = clause;
+  submitFilter(clause);
+}
+$("filter-form").onsubmit = (e) => {
+  e.preventDefault();
+  closeFilterSuggest();
+  submitFilter($("filter").value.trim());
+};
+$("filter").addEventListener("search", () => {
+  if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
+});
+var CARET_MIRROR_PROPS = [
+  "boxSizing",
+  "width",
+  "paddingTop",
+  "paddingRight",
+  "paddingBottom",
+  "paddingLeft",
+  "borderTopWidth",
+  "borderRightWidth",
+  "borderBottomWidth",
+  "borderLeftWidth",
+  // border-*-style matters too, not just width: a border's used width
+  // collapses to 0 when style is "none" (the mirror's default), so without
+  // these the mirror omits #filter's UA-default border and the measured
+  // caret position is off by that width.
+  "borderTopStyle",
+  "borderRightStyle",
+  "borderBottomStyle",
+  "borderLeftStyle",
+  "fontStyle",
+  "fontVariant",
+  "fontWeight",
+  "fontStretch",
+  "fontSize",
+  "fontFamily",
+  "lineHeight",
+  "letterSpacing",
+  "textTransform",
+  "wordSpacing"
+];
+function measureCaretPosition(input2) {
+  const mirror = document.createElement("div");
+  const computed = getComputedStyle(input2);
+  Object.assign(mirror.style, {
+    position: "absolute",
+    visibility: "hidden",
+    whiteSpace: "pre",
+    top: "0",
+    left: "-9999px"
+  });
+  const mirrorStyle = mirror.style;
+  const computedStyle = computed;
+  for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
+  mirror.textContent = input2.value.slice(0, input2.selectionStart ?? 0);
+  const marker = document.createElement("span");
+  marker.textContent = "\u200B";
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+  try {
+    const inputRect = input2.getBoundingClientRect();
+    const offsetX = marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left;
+    return { x: inputRect.left + offsetX - input2.scrollLeft, y: inputRect.bottom };
+  } finally {
+    mirror.remove();
+  }
+}
+var FILTER_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"];
+var filterSuggestMatches = [];
+var filterSuggestIndex = -1;
+var filterSuggestHead = "";
+var filterSuggestToken = 0;
+function closeFilterSuggest() {
+  filterSuggestToken++;
+  filterSuggestMatches = [];
+  filterSuggestIndex = -1;
+  filterSuggestHead = "";
+  const input2 = $("filter");
+  input2.setAttribute("aria-expanded", "false");
+  input2.removeAttribute("aria-activedescendant");
+  $("filter-suggest").hidePopover();
+}
+function renderFilterSuggest() {
+  $("filter-suggest-list").replaceChildren(
+    ...filterSuggestMatches.map((suggestion, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = suggestion.label;
+      btn.title = suggestion.label;
+      btn.className = i === filterSuggestIndex ? "active" : "";
+      btn.id = `filter-suggest-${i}`;
+      btn.setAttribute("role", "option");
+      btn.setAttribute("aria-selected", String(i === filterSuggestIndex));
+      btn.onmousedown = (e) => e.preventDefault();
+      btn.onclick = () => acceptFilterSuggestion(i);
+      return btn;
+    })
+  );
+  $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
+  const input2 = $("filter");
+  if (filterSuggestIndex >= 0) input2.setAttribute("aria-activedescendant", `filter-suggest-${filterSuggestIndex}`);
+  else input2.removeAttribute("aria-activedescendant");
+}
+function acceptFilterSuggestion(i) {
+  const input2 = $("filter");
+  input2.value = `${filterSuggestHead}${filterSuggestMatches[i].insert} `;
+  input2.setSelectionRange(input2.value.length, input2.value.length);
+  closeFilterSuggest();
+  input2.focus();
+  updateFilterSuggestions();
+}
+var commonValueCache = /* @__PURE__ */ new Map();
+function clearCommonValueCache() {
+  commonValueCache.clear();
+}
+function commonValuesFor(column) {
+  const params = new URLSearchParams({ table: state.table ?? "", column });
+  applyScopeParams(params);
+  const key = params.toString();
+  let values = commonValueCache.get(key);
+  if (!values) {
+    values = api(`/tables/common-values?${params}`).then((r) => r.values.map((v) => v.value)).catch((e) => {
+      console.warn("ashurbanipal: common values for suggestions failed", e);
+      return [];
+    });
+    commonValueCache.set(key, values);
+  }
+  return values;
+}
+function showFilterSuggestions(ctx, all, index) {
+  const input2 = $("filter");
+  const partial = ctx.partial.toLowerCase();
+  const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
+  const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
+  if (matches.length === 0 || done) {
+    closeFilterSuggest();
+    return;
+  }
+  filterSuggestMatches = matches;
+  filterSuggestHead = ctx.head;
+  filterSuggestIndex = index;
+  renderFilterSuggest();
+  const { x, y } = measureCaretPosition(input2);
+  $("filter-caret-anchor").style.left = `${x}px`;
+  $("filter-caret-anchor").style.top = `${y}px`;
+  $("filter-suggest").showPopover();
+  input2.setAttribute("aria-expanded", "true");
+}
+function updateFilterSuggestions() {
+  const input2 = $("filter");
+  if (input2.selectionStart !== input2.value.length) {
+    closeFilterSuggest();
+    return;
+  }
+  const ctx = completionAt(input2.value);
+  closeFilterSuggest();
+  if (ctx.partial.startsWith("'")) return;
+  const token = filterSuggestToken;
+  const plain = (labels) => labels.map((label) => ({ label, insert: label }));
+  if (ctx.expect === "column") {
+    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
+  } else if (ctx.expect === "operator") {
+    showFilterSuggestions(ctx, plain(FILTER_OPERATORS), -1);
+  } else if (ctx.expect === "joiner" && ctx.partial !== "") {
+    showFilterSuggestions(ctx, plain(["AND", "OR"]), -1);
+  } else if (ctx.expect === "value" && ctx.column && getLastPayload()?.columns.some((c) => c.name === ctx.column)) {
+    commonValuesFor(ctx.column).then((values) => {
+      if (token !== filterSuggestToken || document.activeElement !== input2) return;
+      const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
+      showFilterSuggestions(ctx, rows, -1);
+    });
+  }
+}
+$("filter").oninput = updateFilterSuggestions;
+$("filter").onfocus = updateFilterSuggestions;
+$("filter").onblur = closeFilterSuggest;
+$("filter").onkeydown = (e) => {
+  if (filterSuggestMatches.length === 0) return;
+  const count = filterSuggestMatches.length;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    filterSuggestIndex = (filterSuggestIndex + 1) % count;
+    renderFilterSuggest();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    filterSuggestIndex = filterSuggestIndex <= 0 ? count - 1 : filterSuggestIndex - 1;
+    renderFilterSuggest();
+  } else if (e.key === "Enter" && filterSuggestIndex >= 0) {
+    e.preventDefault();
+    acceptFilterSuggestion(filterSuggestIndex);
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    acceptFilterSuggestion(Math.max(filterSuggestIndex, 0));
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeFilterSuggest();
+  }
+};
+document.addEventListener("pointerdown", (e) => {
+  if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target) && !$("filter-suggest").contains(e.target)) {
+    closeFilterSuggest();
+  }
+});
+var cvAnchor = null;
+var cvRequestToken = 0;
+function renderCommonValues(values, column) {
+  const list = $("cv-pop-list");
+  if (values.length === 0) {
+    const p = document.createElement("p");
+    p.className = "cv-empty";
+    p.textContent = "no common values available";
+    list.replaceChildren(p);
+    return;
+  }
+  list.replaceChildren(
+    ...values.map((v) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cv-value";
+      const val = document.createElement("span");
+      val.textContent = v.value;
+      const freq = document.createElement("span");
+      freq.className = "cv-freq";
+      freq.textContent = `${Math.round(v.freq * 100)}%`;
+      btn.append(val, freq);
+      btn.onclick = () => {
+        $("cv-pop").hidePopover();
+        applyFilterClause(column, "=", v.value);
+      };
+      return btn;
+    })
+  );
+}
+async function showCommonValues(e, column) {
+  const btn = e.currentTarget;
+  if (cvAnchor) cvAnchor.style.anchorName = "";
+  cvAnchor = btn;
+  cvAnchor.style.anchorName = "--cv-anchor";
+  const list = $("cv-pop-list");
+  const loading = document.createElement("p");
+  loading.className = "cv-empty";
+  loading.textContent = "loading\u2026";
+  list.replaceChildren(loading);
+  $("cv-pop").showPopover();
+  const token = ++cvRequestToken;
+  const params = new URLSearchParams({ table: state.table ?? "", column });
+  applyScopeParams(params);
+  let values;
+  try {
+    ({ values } = await api(`/tables/common-values?${params}`));
+  } catch (err) {
+    if (token !== cvRequestToken) return;
+    const p = document.createElement("p");
+    p.className = "cv-empty";
+    p.textContent = err.message;
+    list.replaceChildren(p);
+    return;
+  }
+  if (token !== cvRequestToken) return;
+  renderCommonValues(values, column);
+}
 
 // src/features/siblings.ts
 var siblingsRequestToken = 0;
@@ -1566,15 +1873,6 @@ async function loadSiblings() {
       return a;
     })
   );
-}
-
-// src/bootstrap/reload.ts
-var impl = null;
-function registerLoadData(fn) {
-  impl = fn;
-}
-function loadData(opts) {
-  return impl ? impl(opts) : Promise.resolve();
 }
 
 // src/lib/format.ts
@@ -1659,21 +1957,31 @@ var tableRowTemplate = $("table-row-template");
 var TABLE_CAP_LINES = 2;
 var tablesMore = $("tables-more");
 var tablesExpanded = false;
+var forcedOpenFor = null;
 function updateTablesCap() {
   const ul = $("tables");
   ul.classList.remove("capped");
   const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   if (tops.length <= TABLE_CAP_LINES) {
     tablesMore.hidden = true;
+    setCappedInert([]);
     return;
   }
   const lastVisibleTop = tops[TABLE_CAP_LINES - 1];
   const hidden = tableEntries.filter((e) => e.li.offsetTop > lastVisibleTop);
-  if (hidden.some((e) => e.btn.classList.contains("active"))) tablesExpanded = true;
+  const active = hidden.find((e) => e.btn.classList.contains("active"));
+  if (active && active.name !== forcedOpenFor) {
+    tablesExpanded = true;
+    forcedOpenFor = active.name;
+  }
   tablesMore.hidden = false;
   tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
   tablesMore.textContent = tablesExpanded ? "show fewer" : `+ ${hidden.length} more`;
   ul.classList.toggle("capped", !tablesExpanded);
+  setCappedInert(tablesExpanded ? [] : hidden);
+}
+function setCappedInert(hidden) {
+  for (const e of tableEntries) e.li.inert = hidden.includes(e);
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
@@ -1752,6 +2060,7 @@ async function loadTables() {
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
+  forcedOpenFor = null;
   for (const t of tables) {
     const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
     const btn = qs(li, "button");
@@ -1985,279 +2294,6 @@ function scalarSpan(node) {
   span.className = SCALAR_CLASS[node.scalar];
   span.textContent = node.text;
   return span;
-}
-
-// src/features/filter-ui.ts
-function submitFilter(text) {
-  let ast = [];
-  if (text) {
-    try {
-      ast = parseFilterDsl(text);
-    } catch (e) {
-      reportError(e);
-      return;
-    }
-  }
-  state.filter = text;
-  setAppliedFilterAst(ast);
-  markFilterVerified();
-  state.offset = 0;
-  loadData();
-}
-function applyFilterClause(column, op, value) {
-  const clause = value === void 0 ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
-  $("filter").value = clause;
-  submitFilter(clause);
-}
-function applyFilterClauses(pairs) {
-  const clause = pairs.map((p) => `${p.column} = ${quoteFilterValue(p.value)}`).join(" AND ");
-  $("filter").value = clause;
-  submitFilter(clause);
-}
-$("filter-form").onsubmit = (e) => {
-  e.preventDefault();
-  closeFilterSuggest();
-  submitFilter($("filter").value.trim());
-};
-$("filter").addEventListener("search", () => {
-  if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
-});
-var CARET_MIRROR_PROPS = [
-  "boxSizing",
-  "width",
-  "paddingTop",
-  "paddingRight",
-  "paddingBottom",
-  "paddingLeft",
-  "borderTopWidth",
-  "borderRightWidth",
-  "borderBottomWidth",
-  "borderLeftWidth",
-  // border-*-style matters too, not just width: a border's used width
-  // collapses to 0 when style is "none" (the mirror's default), so without
-  // these the mirror omits #filter's UA-default border and the measured
-  // caret position is off by that width.
-  "borderTopStyle",
-  "borderRightStyle",
-  "borderBottomStyle",
-  "borderLeftStyle",
-  "fontStyle",
-  "fontVariant",
-  "fontWeight",
-  "fontStretch",
-  "fontSize",
-  "fontFamily",
-  "lineHeight",
-  "letterSpacing",
-  "textTransform",
-  "wordSpacing"
-];
-function measureCaretPosition(input2) {
-  const mirror = document.createElement("div");
-  const computed = getComputedStyle(input2);
-  Object.assign(mirror.style, {
-    position: "absolute",
-    visibility: "hidden",
-    whiteSpace: "pre",
-    top: "0",
-    left: "-9999px"
-  });
-  const mirrorStyle = mirror.style;
-  const computedStyle = computed;
-  for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
-  mirror.textContent = input2.value.slice(0, input2.selectionStart ?? 0);
-  const marker = document.createElement("span");
-  marker.textContent = "\u200B";
-  mirror.appendChild(marker);
-  document.body.appendChild(mirror);
-  try {
-    const inputRect = input2.getBoundingClientRect();
-    const offsetX = marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left;
-    return { x: inputRect.left + offsetX - input2.scrollLeft, y: inputRect.bottom };
-  } finally {
-    mirror.remove();
-  }
-}
-var FILTER_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"];
-var filterSuggestMatches = [];
-var filterSuggestIndex = -1;
-var filterSuggestHead = "";
-var filterSuggestToken = 0;
-function closeFilterSuggest() {
-  filterSuggestToken++;
-  filterSuggestMatches = [];
-  filterSuggestIndex = -1;
-  filterSuggestHead = "";
-  $("filter-suggest").hidePopover();
-}
-function renderFilterSuggest() {
-  $("filter-suggest-list").replaceChildren(
-    ...filterSuggestMatches.map((suggestion, i) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = suggestion.label;
-      btn.title = suggestion.label;
-      btn.className = i === filterSuggestIndex ? "active" : "";
-      btn.onmousedown = (e) => e.preventDefault();
-      btn.onclick = () => acceptFilterSuggestion(i);
-      return btn;
-    })
-  );
-  $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
-}
-function acceptFilterSuggestion(i) {
-  const input2 = $("filter");
-  input2.value = `${filterSuggestHead}${filterSuggestMatches[i].insert} `;
-  input2.setSelectionRange(input2.value.length, input2.value.length);
-  closeFilterSuggest();
-  input2.focus();
-  updateFilterSuggestions();
-}
-var commonValueCache = /* @__PURE__ */ new Map();
-function commonValuesFor(column) {
-  const params = new URLSearchParams({ table: state.table ?? "", column });
-  applyScopeParams(params);
-  const key = params.toString();
-  let values = commonValueCache.get(key);
-  if (!values) {
-    values = api(`/tables/common-values?${params}`).then((r) => r.values.map((v) => v.value)).catch((e) => {
-      console.warn("ashurbanipal: common values for suggestions failed", e);
-      return [];
-    });
-    commonValueCache.set(key, values);
-  }
-  return values;
-}
-function showFilterSuggestions(ctx, all, index) {
-  const input2 = $("filter");
-  const partial = ctx.partial.toLowerCase();
-  const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
-  const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
-  if (matches.length === 0 || done) {
-    closeFilterSuggest();
-    return;
-  }
-  filterSuggestMatches = matches;
-  filterSuggestHead = ctx.head;
-  filterSuggestIndex = index;
-  renderFilterSuggest();
-  const { x, y } = measureCaretPosition(input2);
-  $("filter-caret-anchor").style.left = `${x}px`;
-  $("filter-caret-anchor").style.top = `${y}px`;
-  $("filter-suggest").showPopover();
-}
-function updateFilterSuggestions() {
-  const input2 = $("filter");
-  if (input2.selectionStart !== input2.value.length) {
-    closeFilterSuggest();
-    return;
-  }
-  const ctx = completionAt(input2.value);
-  closeFilterSuggest();
-  if (ctx.partial.startsWith("'")) return;
-  const token = filterSuggestToken;
-  const plain = (labels) => labels.map((label) => ({ label, insert: label }));
-  if (ctx.expect === "column") {
-    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
-  } else if (ctx.expect === "operator") {
-    showFilterSuggestions(ctx, plain(FILTER_OPERATORS), -1);
-  } else if (ctx.expect === "joiner" && ctx.partial !== "") {
-    showFilterSuggestions(ctx, plain(["AND", "OR"]), -1);
-  } else if (ctx.expect === "value" && ctx.column && getLastPayload()?.columns.some((c) => c.name === ctx.column)) {
-    commonValuesFor(ctx.column).then((values) => {
-      if (token !== filterSuggestToken || document.activeElement !== input2) return;
-      const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
-      showFilterSuggestions(ctx, rows, -1);
-    });
-  }
-}
-$("filter").oninput = updateFilterSuggestions;
-$("filter").onfocus = updateFilterSuggestions;
-$("filter").onblur = closeFilterSuggest;
-$("filter").onkeydown = (e) => {
-  if (filterSuggestMatches.length === 0) return;
-  const count = filterSuggestMatches.length;
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    filterSuggestIndex = (filterSuggestIndex + 1) % count;
-    renderFilterSuggest();
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    filterSuggestIndex = filterSuggestIndex <= 0 ? count - 1 : filterSuggestIndex - 1;
-    renderFilterSuggest();
-  } else if (e.key === "Enter" && filterSuggestIndex >= 0) {
-    e.preventDefault();
-    acceptFilterSuggestion(filterSuggestIndex);
-  } else if (e.key === "Tab") {
-    e.preventDefault();
-    acceptFilterSuggestion(Math.max(filterSuggestIndex, 0));
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    closeFilterSuggest();
-  }
-};
-document.addEventListener("pointerdown", (e) => {
-  if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target) && !$("filter-suggest").contains(e.target)) {
-    closeFilterSuggest();
-  }
-});
-var cvAnchor = null;
-var cvRequestToken = 0;
-function renderCommonValues(values, column) {
-  const list = $("cv-pop-list");
-  if (values.length === 0) {
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = "no common values available";
-    list.replaceChildren(p);
-    return;
-  }
-  list.replaceChildren(
-    ...values.map((v) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "cv-value";
-      const val = document.createElement("span");
-      val.textContent = v.value;
-      const freq = document.createElement("span");
-      freq.className = "cv-freq";
-      freq.textContent = `${Math.round(v.freq * 100)}%`;
-      btn.append(val, freq);
-      btn.onclick = () => {
-        $("cv-pop").hidePopover();
-        applyFilterClause(column, "=", v.value);
-      };
-      return btn;
-    })
-  );
-}
-async function showCommonValues(e, column) {
-  const btn = e.currentTarget;
-  if (cvAnchor) cvAnchor.style.anchorName = "";
-  cvAnchor = btn;
-  cvAnchor.style.anchorName = "--cv-anchor";
-  const list = $("cv-pop-list");
-  const loading = document.createElement("p");
-  loading.className = "cv-empty";
-  loading.textContent = "loading\u2026";
-  list.replaceChildren(loading);
-  $("cv-pop").showPopover();
-  const token = ++cvRequestToken;
-  const params = new URLSearchParams({ table: state.table ?? "", column });
-  applyScopeParams(params);
-  let values;
-  try {
-    ({ values } = await api(`/tables/common-values?${params}`));
-  } catch (err) {
-    if (token !== cvRequestToken) return;
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = err.message;
-    list.replaceChildren(p);
-    return;
-  }
-  if (token !== cvRequestToken) return;
-  renderCommonValues(values, column);
 }
 
 // src/features/nav.ts
@@ -2798,6 +2834,7 @@ async function loadData2({
   updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
+    if (token !== loadDataToken) return;
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
     renderRows(data, newRowKeys, pkNames);
@@ -2872,6 +2909,7 @@ $("nav-forward").onclick = () => history.forward();
 $("refresh").onclick = () => {
   const btn = $("refresh");
   clearStructureCache();
+  clearCommonValueCache();
   resetColumnWidths();
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 500);
