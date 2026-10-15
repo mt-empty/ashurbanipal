@@ -372,6 +372,114 @@ paths:
         "500":
           $ref: "#/components/responses/ServerError"
 
+  /tables/join:
+    get:
+      operationId: tableJoin
+      summary: Paginated, filtered, sorted rows from joined tables.
+      description: >
+        Joins up to 4 tables of one schema with INNER or LEFT joins on
+        column equality, described as a structure (spec/protocol.md
+        §5.11). No SQL text is accepted. The response has no total.
+      parameters:
+        - $ref: "#/components/parameters/Source"
+        - $ref: "#/components/parameters/Schema"
+        - name: join
+          in: query
+          required: true
+          description: >
+            URL-encoded JSON object (spec/protocol.md §5.11.1). Tables are
+            referenced by position: 0 is the base table, 1..n the entries
+            of `joins`. At most 4 tables, 1 to 3 `on` pairs per join, and
+            the encoded size is bounded. Unknown names, an incompatible
+            column pair, or a malformed object yield 400.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinRequest"
+              examples:
+                orders_users:
+                  value:
+                    table: orders
+                    joins:
+                      - type: left
+                        table: users
+                        on:
+                          - left: {join: 0, column: user_id}
+                            right: id
+        - name: filter
+          in: query
+          required: false
+          description: >
+            As /tables/data, plus an optional `join` position per
+            condition (default 0). Out-of-range position or unknown
+            column yields 400.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 10
+                items:
+                  $ref: "#/components/schemas/JoinFilterCondition"
+        - name: sort
+          in: query
+          required: false
+          description: >
+            Column name of the table at `sort_join`; unknown column yields
+            400. Ordering uses the column's native type ordering.
+          schema:
+            type: string
+        - name: sort_join
+          in: query
+          required: false
+          description: >
+            Table position of the `sort` column, default 0. Present
+            without `sort`, or out of range, yields 400.
+          schema:
+            type: integer
+            minimum: 0
+        - name: order
+          in: query
+          required: false
+          description: Any value other than asc/desc yields 400.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+        - name: limit
+          in: query
+          required: false
+          description: >
+            Clamped to [1, max_page_size], never an error, as on
+            /tables/data. No `minimum`/`maximum` on the schema for the same
+            reason.
+          schema:
+            type: integer
+          example: 10
+        - name: offset
+          in: query
+          required: false
+          description: >
+            Clamped to a minimum of 0, never an error, as on /tables/data.
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: >
+            One page of joined rows plus column metadata. `has_more` says
+            whether a following row exists; there is no total.
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinResponse"
+        "400":
+          $ref: "#/components/responses/ClientError"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
   /siblings:
     get:
       operationId: siblings
@@ -820,6 +928,113 @@ components:
             Required for every op except IS NULL / IS NOT NULL, for which
             it must be absent. Always bound as a query parameter;
             comparison applies to the column cast to text.
+
+    JoinColumnRef:
+      type: object
+      required: [join, column]
+      additionalProperties: false
+      properties:
+        join:
+          type: integer
+          minimum: 0
+          description: Table position; 0 is the base table.
+        column:
+          type: string
+
+    JoinRequest:
+      type: object
+      required: [table, joins]
+      additionalProperties: false
+      properties:
+        table:
+          type: string
+          description: The base table (position 0).
+        joins:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            type: object
+            required: [type, table, on]
+            additionalProperties: false
+            properties:
+              type:
+                type: string
+                enum: [inner, left]
+              table:
+                type: string
+              on:
+                type: array
+                minItems: 1
+                maxItems: 3
+                description: Pairs combined with AND; equality only.
+                items:
+                  type: object
+                  required: [left, right]
+                  additionalProperties: false
+                  properties:
+                    left:
+                      $ref: "#/components/schemas/JoinColumnRef"
+                    right:
+                      type: string
+                      description: A column of this entry's own table.
+        columns:
+          type: array
+          minItems: 1
+          description: >
+            Columns to return, in order. Absent means every column of
+            every table.
+          items:
+            $ref: "#/components/schemas/JoinColumnRef"
+
+    JoinFilterCondition:
+      allOf:
+        - $ref: "#/components/schemas/FilterCondition"
+        - type: object
+          properties:
+            join:
+              type: integer
+              minimum: 0
+              default: 0
+              description: >
+                Table position the condition's column belongs to. Out of
+                range yields 400.
+
+    JoinColumnInfo:
+      allOf:
+        - $ref: "#/components/schemas/ColumnInfo"
+        - type: object
+          required: [join, table, column]
+          properties:
+            join:
+              type: integer
+            table:
+              type: string
+            column:
+              type: string
+              description: >
+                The real column name. `name` is a response label, unique
+                within the response; clients never parse it.
+
+    JoinResponse:
+      type: object
+      required: [columns, rows, has_more]
+      properties:
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/JoinColumnInfo"
+        rows:
+          type: array
+          description: >
+            One object per row, keyed by column label. Values are JSON
+            strings or null, as /tables/data.
+          items:
+            type: object
+            additionalProperties:
+              type: ["string", "null"]
+        has_more:
+          type: boolean
 
     ProblemDetails:
       type: object

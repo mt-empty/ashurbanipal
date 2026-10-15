@@ -238,6 +238,32 @@ constraints; there is no per-partition dedup to do.
 | MySQL/MariaDB | `information_schema.statistics` for indexes; `table_constraints` + `key_column_usage` + `referential_constraints` for constraints (`update_rule`/`delete_rule` give the actions); `check_constraints` where the server has it | No partial indexes (`predicate` always omitted) and no `INCLUDE`. Check constraints exist only on MySQL 8.0.16+ and MariaDB 10.2+; older servers report `check: []`. A functional key part is reported as its expression text via `statistics.expression`, which exists from MySQL 8.0.13 (the port requires it; older servers are unsupported); MariaDB has none. The primary key is the index and constraint named `PRIMARY`; `method` is lowercased (`btree`). An FK with no action clause reports `NO ACTION` on MySQL and `RESTRICT` on MariaDB. InnoDB has no foreign keys on partitioned tables. |
 | SQLite   | `pragma_index_list` / `pragma_index_info` / `pragma_index_xinfo` for indexes; `pragma_foreign_key_list` for foreign keys, with the same `pragma_table_info` / `COALESCE(..., 'rowid')` parent-column resolution as the §5.4.1 and §5.9 rows | `check` is always `[]`: named check constraints are not introspectable through a pragma. FK constraints are unnamed, so `name` is synthesized as `fk_<id>` (stable within one catalog read, not across schema changes). `predicate` is the text after the first `WHERE` outside quotes and parentheses in the index's `sqlite_master.sql` (a comment containing `where`, or `WHERE` with no whitespace before it, is not recognised). An expression key part has a NULL `pragma_index_xinfo.name` and no recoverable text, so it is reported as the placeholder `<expression>` in its position. `unique` constraints are the origin-`u` indexes (named like `sqlite_autoindex_users_1`); the primary key has no name; `INTEGER PRIMARY KEY` is the rowid alias and has no index entry. `method` is always `btree`. |
 
+## §5.11 — table join (`/api/tables/join`)
+
+Protocol property: each `on` pair joins columns of one type class
+(`spec/protocol.md` §5.11.2), checked from the catalog before the
+statement runs, with a 400 naming the pair. The classes are engine-neutral;
+how a native type reaches a class is not. A type with no class is not
+joinable.
+
+| Backend  | Mechanism | Notes |
+|----------|-----------|-------|
+| Postgres | `information_schema.columns.data_type`, plus `udt_name`/`udt_schema` for `USER-DEFINED`. `number`: `smallint`, `integer`, `bigint`, `numeric`. `text`: `character varying`, `character`, `text`, and the `citext` extension type. `uuid`, `boolean`, `bytea` map to their own classes. `temporal`: `date`, `timestamp without time zone`, `timestamp with time zone`. `time`: `time without time zone`, `time with time zone`. `enum`: a `USER-DEFINED` type whose `pg_type.typtype` is `e`; two enum columns pair only when `(udt_schema, udt_name)` match | `ARRAY`, `json`, `jsonb`, `real`, `double precision`, `money`, `interval` and every other type have no class. Tables are gated by `readable_table_oid_in_tx`, as §5.4. |
+| MySQL/MariaDB | `information_schema.columns.data_type` and `column_type`. `number`: `tinyint`, `smallint`, `mediumint`, `int`, `bigint`, `decimal`. `text`: `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`. `temporal`: `date`, `datetime`, `timestamp`. `time`: `time`. `binary`: `binary`, `varbinary`, and the `*blob` types. `uuid`: MariaDB's native `uuid` type. `enum`: `enum` columns pair only when `column_type` is identical | No `boolean` class: `boolean` is `tinyint(1)` and is a `number`. `json`, `set`, `bit`, `float`, `double`, `year`, geometry types have no class. Two `text` columns with different `collation_name` are rejected with a 400 naming the pair, before the statement runs, because the engine would raise "illegal mix of collations"; error 1267 maps to the same 400 as a fallback. |
+| SQLite   | The declared type, matched case-insensitively. Recognised names first: `uuid` → `uuid`; `boolean`, `bool` → `boolean`; `date`, `datetime`, `timestamp` → `temporal`; `time` → `time`; `json` → no class. Then SQLite's own affinity rules: contains `INT` → `number`; contains `CHAR`, `CLOB` or `TEXT` → `text`; contains `BLOB` → `binary`; contains `REAL`, `FLOA` or `DOUB` → no class; any other non-empty type (`NUMERIC`, `DECIMAL`) → `number`. An empty declared type has no affinity and pairs only with another empty declared type | Types are affinities, not enforced: a pair that passes the check can still hold mismatched values, which simply match no rows. This is a weaker guarantee than on the other engines and an accepted gap. |
+
+**Statement shape.** `ON` compares the columns' native types, not the text
+cast that filters use. Filters on joined columns keep the §5.4.2 cast.
+
+**Paging over ties (accepted gap).** The join route adds no primary-key
+tie-break, as the §5.4 route does not. A `sort` on a column with repeated
+values can repeat or skip rows between pages, and with no `sort` the
+engine's order applies.
+
+**SQLite connection.** The whole operation, catalog lookups and select,
+runs on one connection inside the timeout wrapper, as §6 requires of any
+multi-query operation.
+
 ## §5.4.2 — request size limits (Spring Boot)
 
 Tomcat rejects a request line over 8 KB (`server.max-http-request-header-size`)
@@ -273,22 +299,16 @@ a host-pool connection indefinitely.
 | SQLite (Spring Boot) | `org.sqlite.ProgressHandler` (Xerial `sqlite-jdbc`'s public binding to `sqlite3_progress_handler`), checked every 1000 VM opcodes, explicitly cleared after each query — `SqliteSource.kt::bounded` | Verified empirically (not trusted from documented intent) that plain JDBC `Statement.setQueryTimeout()` does **not** cancel a running query on this driver — decompiling `JDBC3Statement.withConnectionTimeout` shows it only calls `SQLiteConnection.setBusyTimeout()`, the *lock-wait* timeout, not a query-execution bound; a first version of the timeout test using `setQueryTimeout` ran a genuinely slow query to completion in ~11s instead of aborting near a 1s budget. The real mechanism is Xerial's own `org.sqlite.ProgressHandler.setHandler(Connection, int, ProgressHandler)`/`clearHandler(Connection)` static API, which requires the connection to be (or unwrap to) `org.sqlite.SQLiteConnection` — a pooled connection (HikariCP) hands back a proxy that fails that `instanceof` check directly, so `SqliteSource.kt::bounded` calls `Connection.unwrap(SQLiteConnection::class.java)` before registering/clearing the handler. |
 
 **`query_timeout` vs `database_error` (§2's error `code`):** a timed-out
-query is always a 500 (the invariant above), but `spec/protocol.md` §2
-doesn't require every port to *name* the cause — `query_timeout` is one of
-two available 500 codes, not a mandatory classification. Only the Rust
-Postgres backend distinguishes it today: `postgres.rs::map_select_denied`
-already extracts the driver's SQLSTATE to catch `42501`
-(SELECT-denied → `not_readable`), so matching `57014` (`query_canceled`,
-what `SET LOCAL statement_timeout` produces) there is a one-line addition
-on data already in hand. Every other backend/port — MySQL/MariaDB (both
-the Rust and every other language's adapter), every SQLite binding across
-all five languages, and Spring's JDBC layer — reports a timeout as the
-generic `database_error` instead. Each would need its own empirical
-detection path (a distinct driver exception type or error code per engine
-per language, mirroring the mechanism differences already tabulated
-above), which is deliberately out of scope for the initial problem+json
-rollout (`docs/feature-backlog/34-rfc9457-problem-details.md`) — a
-narrower, single-code gap, not a spec violation.
+query is always a 500 (the invariant above), and every backend MUST name it
+`query_timeout` on every route, so a client can tell "too slow" from other
+failures. The detection per engine:
+
+| Backend  | Timeout signal |
+|----------|----------------|
+| Postgres | SQLSTATE `57014` (`query_canceled`), what `SET LOCAL statement_timeout` produces |
+| MySQL    | error 3024 (`ER_QUERY_TIMEOUT`) from `MAX_EXECUTION_TIME` |
+| MariaDB  | error 1969 (`ER_STATEMENT_TIMEOUT`) from `max_statement_time` |
+| SQLite   | `SQLITE_INTERRUPT` (code 9) from the progress handler or `interrupt()`, or the context deadline in Go |
 
 ## Status note
 

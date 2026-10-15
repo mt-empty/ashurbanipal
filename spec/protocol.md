@@ -24,7 +24,7 @@ interpreted as described in RFC 2119.
   UI and API (see §3).
 - **Resolved source** — which registered `DbSource` one operation targets,
   for implementations that register more than one (§5.8). Every route
-  that takes a `source` parameter (§5.2–§5.5, §5.7, §5.9, §5.10) resolves it the same
+  that takes a `source` parameter (§5.2–§5.5, §5.7, §5.9–§5.11) resolves it the same
   way:
   - **Absent** — resolves to the first-registered source, the same order
     §5.8's list returns.
@@ -41,7 +41,7 @@ interpreted as described in RFC 2119.
 - **Resolved schema** — the namespace of tables one operation browses,
   within that operation's resolved source, for engines that have a
   schema concept above a single database. Every route that takes a
-  `schema` parameter (§5.2–§5.5, §5.9, §5.10) resolves it the same way:
+  `schema` parameter (§5.2–§5.5, §5.9–§5.11) resolves it the same way:
   - **Absent** — resolves to the connection's own default (on Postgres:
     `current_schema()`).
   - **Present** — MUST match an entry from §5.7's live list exactly
@@ -85,12 +85,12 @@ interpreted as described in RFC 2119.
     — a table that cleared §5.2's allow-list but the connected role cannot
     actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
   - **500** — server error: `database_error`, or `query_timeout` (§6).
-- Every API response (§5.2–§5.10), success or error, MUST carry the
+- Every API response (§5.2–§5.11), success or error, MUST carry the
   protocol version header (§7).
 
 ## 3. Mount contract
 
-- The UI is served at `{mount}`; the nine API routes live at
+- The UI is served at `{mount}`; the ten API routes live at
   `{mount}/api/...`.
 - `{mount}` is implementation-defined. `/__ashurbanipal` is the Rust
   implementation's default, not a requirement.
@@ -426,8 +426,8 @@ Response:
 
 ### 5.7 `GET {mount}/api/schemas`
 
-Lists the schema names selectable as the `schema` parameter on §5.2–§5.5,
-§5.9, and §5.10, for the resolved source (§1).
+Lists the schema names selectable as the `schema` parameter on §5.2–§5.5
+and §5.9–§5.11, for the resolved source (§1).
 
 | Param    | Required | Rules                                             |
 |----------|----------|----------------------------------------------------|
@@ -450,7 +450,7 @@ Response:
   namespace) — this route lists browsable schemas, not every namespace
   the engine happens to expose.
 - SHOULD exclude any schema the connected role cannot access, so nothing
-  offered here would be rejected by §5.2–§5.5's, §5.9's, or §5.10's schema check for
+  offered here would be rejected by §5.2–§5.5's, §5.9's, §5.10's, or §5.11's schema check for
   lack of privilege.
 - Engines with no schema concept above a single database (e.g. SQLite)
   MUST return exactly one entry — see `docs/adapter-decisions.md`.
@@ -460,7 +460,7 @@ Response:
 ### 5.8 `GET {mount}/api/sources`
 
 Lists the source names selectable as the `source` parameter on
-§5.2–§5.5, §5.7, §5.9, and §5.10. This is the live allow-list §1's "present" case
+§5.2–§5.5, §5.7, and §5.9–§5.11. This is the live allow-list §1's "present" case
 validates against.
 
 Response:
@@ -637,6 +637,148 @@ Response:
   foreign key names its target table whether or not the role can read it.
   See `docs/adapter-decisions.md`.
 
+### 5.11 `GET {mount}/api/tables/join`
+
+Paginated, filtered, sorted rows from several tables of one schema,
+combined by `INNER` or `LEFT` joins the client describes. The client sends
+a structure, never SQL: the server checks every name against the catalog
+and builds the statement itself. A join is not a database object; the
+server keeps no state about it (§6).
+
+| Param       | Required | Rules                                                      |
+|-------------|----------|------------------------------------------------------------|
+| `source`    | no       | See §1's resolution rules; unrecognized value → 400.       |
+| `schema`    | no       | See §1's resolution rules; unrecognized value → 400. Every table in the join is resolved in this one schema. |
+| `join`      | yes      | URL-encoded JSON object, see below.                        |
+| `filter`    | no       | URL-encoded JSON array, §5.4.2, plus an optional `join` position per condition.   |
+| `sort`      | no       | A column name of the table at `sort_join`; unknown column → 400. |
+| `sort_join` | no       | Table position, default `0`. Present without `sort`, or out of range → 400. |
+| `order`     | no       | `asc` \| `desc`, default `asc`; any other value → 400.     |
+| `limit`     | no       | Clamped, never an error — as §5.4.                         |
+| `offset`    | no       | Clamped, never an error — as §5.4.                         |
+
+`join`, decoded:
+
+```json
+{
+  "table": "orders",
+  "joins": [
+    { "type": "left", "table": "users",
+      "on": [{ "left": { "join": 0, "column": "user_id" }, "right": "id" }] },
+    { "type": "left", "table": "order_extra",
+      "on": [{ "left": { "join": 0, "column": "id" }, "right": "order_id" }] }
+  ],
+  "columns": [{ "join": 0, "column": "id" }, { "join": 1, "column": "full_name" }]
+}
+```
+
+Response:
+
+```json
+{
+  "columns": [
+    { "name": "id", "join": 0, "table": "orders", "column": "id", "type": "uuid", "key": "pk" },
+    { "name": "full_name", "join": 1, "table": "users", "column": "full_name", "type": "text" }
+  ],
+  "rows": [
+    { "id": "7d9…", "full_name": "Ada Lovelace" },
+    { "id": "81c…", "full_name": null }
+  ],
+  "has_more": true
+}
+```
+
+#### 5.11.1 The `join` object
+
+- Unknown keys, malformed JSON, or a wrong JSON type anywhere → 400
+  `invalid_parameter`.
+- **Positions.** The base `table` is position `0`; the entries of `joins`
+  are positions `1..n` in order. Every reference to a table in this route
+  is by position, never by name, so a table MAY appear more than once (a
+  self-join).
+- At most **4** tables in total (the base plus 3 `joins`); more → 400. At
+  least one entry in `joins`.
+- `type` is `"inner"` or `"left"`, exactly; anything else → 400. Each
+  maps through a fixed table to `INNER JOIN` / `LEFT JOIN`.
+- `on` has 1 to **3** pairs, combined with `AND`. Each pair is `left` (a
+  `{join, column}` of an earlier position) `=` `right` (a column name of
+  this entry's own table). The operator is always equality. A `left.join`
+  equal to or greater than this entry's position → 400.
+- `columns` is optional. Absent means every column of every table, in
+  position order then column order. If present it MUST be non-empty, each
+  entry MUST be a distinct `{join, column}`, and the response lists
+  exactly those columns in that order.
+- Every table MUST match a table from §5.2 and every column MUST match
+  that table's real columns, exactly (case-sensitive); otherwise 400
+  `unknown_table` / `unknown_column`. A table the role cannot `SELECT` is
+  rejected as in §6.
+- Implementations MUST bound the byte length of the URL-decoded `join`
+  text and reject oversize values with 400, never a truncated query. The
+  bound is 8192 bytes, as §5.4.2's `filter`.
+
+#### 5.11.2 Column compatibility
+
+Each `on` pair MUST join columns of the same **class**. The server checks
+this from the catalog types before running the statement; a mismatch → 400
+`invalid_parameter` whose `title` names the pair and both types.
+
+| Class      | Types                                                    |
+|------------|----------------------------------------------------------|
+| `number`   | integer and exact decimal types, mutually compatible     |
+| `text`     | character types                                          |
+| `uuid`     | `uuid`                                                   |
+| `boolean`  | `boolean`                                                |
+| `temporal` | `date` and timestamp types, with or without time zone    |
+| `time`     | time-of-day types                                        |
+| `binary`   | byte-string types                                        |
+| `enum`     | an enumerated type; joinable only to a column of the same enumerated type |
+
+Every other type is not joinable, including `json`/`jsonb`, arrays,
+floating-point types, and types with no class above. The per-engine
+mapping from native types to classes, and any engine that cannot meet this
+check exactly, is in `docs/adapter-decisions.md`. The `ON` comparison uses
+the columns' native types, not the text cast of §5.4.2.
+
+#### 5.11.3 Filter and sort
+
+- `filter` follows §5.4.2 in full (operators, `logic`, `not`, `value`, the
+  limit of 10 conditions, the byte bound, the empty-array rule), with one
+  addition: each condition MAY carry `join`, an integer position,
+  default `0`. Out of range → 400 `invalid_filter`. A condition's `column`
+  MUST match a real column of the table at that position.
+- The comparison is applied to that column cast to text, exactly as §5.4.2.
+  Conditions are combined as §5.4.2 specifies.
+- On §5.4, a condition that carries `join` → 400 `invalid_filter`.
+- `sort` orders by the native type of the column at `sort_join`, as §5.4.
+  The column need not be in `columns`. No tie-break is added beyond
+  `sort`; paging over ties is as stable as §5.4's.
+
+#### 5.11.4 Response
+
+- Each `columns` entry carries `name`, `type`, `join`, `table` and
+  `column`, plus the optional §5.4.1 fields `key`, `references`, `comment`
+  as they apply to that column in its own table. `name` is a **label**
+  unique within the response: the column's own name when that is unique
+  among the returned columns, otherwise `{column}_{join}`, with a numeric
+  suffix appended if that still collides. Clients MUST NOT parse labels.
+- `rows` are objects keyed by label. Values follow §5.4.3. A column from a
+  `LEFT`-joined table with no matching row is `null`.
+- `has_more` is always present. The server fetches one row beyond the
+  effective limit, returns at most the effective limit, and sets `has_more`
+  to whether that extra row existed.
+- `total_approx` is never present. A join has no cheap count, and §5.4.4's
+  figure does not apply.
+
+#### 5.11.5 Execution
+
+- Source and schema are resolved once, and every statement of the
+  operation runs on that one connection and transaction (§6).
+- The statement is built with generated aliases for tables and columns;
+  no request text becomes an alias or label. Values are bound parameters.
+- A timed-out join is a 500 with `code: "query_timeout"` (§2, §6).
+- See `docs/adapter-decisions.md` for per-engine type classes, text
+  collation handling, and accepted gaps.
+
 ## 6. Server invariants
 
 These hold across all routes:
@@ -654,7 +796,9 @@ These hold across all routes:
   connection indefinitely. A timed-out query is a 500.
 - **Single-table data queries.** A data response MUST retrieve rows from
   exactly one browsed table and MUST NOT combine user rows from multiple
-  tables. FK navigation in the UI is two sequential single-table queries.
+  tables. The one exception is §5.11, which combines rows only from the
+  tables its request names, by the joins it describes. FK navigation in the
+  UI is two sequential single-table queries.
   Catalog and metadata queries MAY join system catalogs when needed to
   satisfy this protocol.
 - **Source scoping.** Every catalog and data query MUST be scoped to the
@@ -678,7 +822,7 @@ These hold across all routes:
 
 ## 7. Protocol version
 
-- Every API response (§5.2–§5.10) MUST carry the header
+- Every API response (§5.2–§5.11) MUST carry the header
   `x-ashurbanipal-protocol: 1`.
 - **Versioning policy**: adding an optional response field, an optional
   request parameter, or a wholly new route is still the same version —
@@ -692,7 +836,8 @@ These hold across all routes:
   §5.2–§5.5 and §5.7 are the second instance, for the same reason. §5.9
   (`/api/tables/referenced-by`) is the third — a wholly new route that
   changes nothing an existing caller observes, so v1 stands again. §5.10
-  (`/api/tables/structure`) is the fourth, for the same reason.
+  (`/api/tables/structure`) is the fourth, for the same reason. §5.11
+  (`/api/tables/join`) is the fifth, for the same reason.
   The §2 change from plain-text error bodies to problem+json *is* a
   serialization change, and would bump the version under the rule above —
   but it landed before any external consumer existed, so this document
