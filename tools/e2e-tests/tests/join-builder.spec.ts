@@ -230,3 +230,31 @@ test("renaming and deleting a saved join from the overlay", async ({ page }) => 
   await expect(page.locator("#tables li.join-chip button", { hasText: "second" })).toHaveCount(0);
   await expect(page.locator("#tables li.join-chip.unsaved")).toBeVisible();
 });
+
+test("an empty SQL box disables Show result", async ({ page }) => {
+  await openJoinOverlay(page);
+  await writeSql(page, "");
+  await expect(page.locator("#join-run")).toBeDisabled();
+});
+
+test("switching from the form to SQL keeps a table whose columns are all selected", async ({ page }) => {
+  await openJoinOverlay(page);
+  await pick(page, "join 1 table", "users");
+  await page.getByRole("checkbox", { name: "users.email", exact: true }).uncheck();
+  await page.locator("#join-mode-sql").click();
+  await expect(page.locator("#join-sql")).toHaveValue(/^SELECT orders\.\*, users\.id, /);
+});
+
+test("a select list that alternates tables gets a band per switch", async ({ page }) => {
+  await openJoinOverlay(page);
+  await writeSql(page, "SELECT o.id, u.email, o.status FROM orders o JOIN users u ON o.user_id = u.id");
+  await showResult(page);
+  await expect(page.locator("th.band")).toHaveText(["orders o", "users u", "orders o"]);
+});
+
+test("removing the only join cannot be shown", async ({ page }) => {
+  await openJoinOverlay(page);
+  await page.getByRole("button", { name: "remove join 1", exact: true }).click();
+  await page.locator("#join-run").click();
+  await expect(page.locator("#join-error")).toHaveText("Add a table to join.");
+});

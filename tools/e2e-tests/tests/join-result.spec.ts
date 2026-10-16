@@ -129,3 +129,13 @@ test("leaving a join view for a table chip drops the join, back returns to it", 
   await waitForIdle(page);
   await expect(page.locator("th.band")).toHaveCount(2);
 });
+
+test("a filter on a column the join lacks is reported by the error line, not the join overlay", async ({ page }) => {
+  await gotoJoin(page, ORDERS_USERS);
+  const response = nextJoinResponse(page);
+  await page.locator("#filter").fill("o.no_such_column = x");
+  await page.locator("#filter").press("Enter");
+  expect((await response).status()).toBe(400);
+  await expect(page.locator("#error")).not.toBeEmpty();
+  await expect(page.locator("#join-dialog")).toBeHidden();
+});
