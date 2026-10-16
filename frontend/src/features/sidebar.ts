@@ -33,10 +33,14 @@ const tablesMore = $<HTMLButtonElement>("tables-more");
 // final chip instead of taking width from the rows above it.
 const tablesMoreItem = $("tables-more-item");
 let tablesExpanded = false;
+// The active table the last cap pass saw; a repeat load of the same table
+// skips the measuring.
+let cappedActive: string | null = null;
 
 // Measures the full layout (offsetTop per chip), so the cap is by rendered
 // lines and tracks the list's width without a per-chip width model.
 function updateTablesCap(): void {
+  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
   for (const e of tableEntries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
@@ -253,5 +257,5 @@ export function setActiveTable(name: string | null): void {
     if (isActive) e.btn.setAttribute("aria-current", "true");
     else e.btn.removeAttribute("aria-current");
   }
-  updateTablesCap();
+  if (name !== cappedActive) updateTablesCap();
 }

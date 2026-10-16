@@ -4,7 +4,7 @@ import { $, reportError } from "../core/dom.js";
 import { applyScopeParams, getLastPayload, markFilterVerified, setAppliedFilterAst, state } from "../core/state.js";
 import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
 import { parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
-import { type Completion, completionAt, FILTER_OPERATORS } from "../lib/filter-tokens.js";
+import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
@@ -200,14 +200,20 @@ export function clearCommonValueCache(): void {
   commonValueCache.clear();
 }
 
+async function fetchCommonValues(column: string): Promise<CommonValue[]> {
+  const params = new URLSearchParams({ table: state.table ?? "", column });
+  applyScopeParams(params);
+  return (await api<{ values: CommonValue[] }>(`/tables/common-values?${params}`)).values;
+}
+
 function commonValuesFor(column: string): Promise<string[]> {
   const params = new URLSearchParams({ table: state.table ?? "", column });
   applyScopeParams(params);
   const key = params.toString();
   let values = commonValueCache.get(key);
   if (!values) {
-    values = api<{ values: CommonValue[] }>(`/tables/common-values?${params}`)
-      .then((r) => r.values.map((v) => v.value))
+    values = fetchCommonValues(column)
+      .then((rows) => rows.map((v) => v.value))
       .catch((e) => {
         console.warn("ashurbanipal: common values for suggestions failed", e);
         return [];
@@ -254,13 +260,13 @@ function updateFilterSuggestions(): void {
   closeFilterSuggest();
   if (ctx.partial.startsWith("'")) return; // inside a quoted value
   const token = filterSuggestToken;
-  const plain = (labels: string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
+  const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
     showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
   } else if (ctx.expect === "operator") {
-    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(FILTER_OPERATORS), -1);
+    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")), -1);
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
-    showFilterSuggestions(ctx, plain(["AND", "OR"]), -1);
+    showFilterSuggestions(ctx, plain(optionsFor("joiner")), -1);
   } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column)) {
     commonValuesFor(ctx.column).then((values) => {
       if (token !== filterSuggestToken || document.activeElement !== input) return;
@@ -358,11 +364,9 @@ export async function showCommonValues(e: MouseEvent, column: string): Promise<v
   // the token discards a stale response instead of clobbering the column
   // actually showing.
   const token = ++cvRequestToken;
-  const params = new URLSearchParams({ table: state.table ?? "", column });
-  applyScopeParams(params);
   let values: CommonValue[];
   try {
-    ({ values } = await api<{ values: CommonValue[] }>(`/tables/common-values?${params}`));
+    values = await fetchCommonValues(column);
   } catch (err) {
     if (token !== cvRequestToken) return;
     const p = document.createElement("p");

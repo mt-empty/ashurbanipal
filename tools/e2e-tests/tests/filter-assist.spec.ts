@@ -1,7 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { applyFilter, gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
-const suggestions = (page: import("@playwright/test").Page) => page.locator("#filter-suggest-list button");
+const suggestions = (page: Page) => page.locator("#filter-suggest-list button");
 
 test("an operator list follows a column and a space", async ({ page }) => {
   await gotoApp(page);
@@ -77,7 +77,7 @@ test("nothing is suggested once the text left the grammar", async ({ page }) => 
   await expect(page.locator("#filter-suggest")).toBeHidden();
 });
 
-const parts = (page: import("@playwright/test").Page, cls: string) => page.locator(`#filter-hl-text .${cls}`);
+const parts = (page: Page, cls: string) => page.locator(`#filter-hl-text .${cls}`);
 
 test("the typed filter is coloured by part", async ({ page }) => {
   await gotoApp(page);
@@ -199,7 +199,7 @@ test("leading spaces are not underlined as an error", async ({ page }) => {
 });
 
 // What is on top at a point just inside the popup's left edge, at the given y.
-const topmostAt = (page: import("@playwright/test").Page, y: number) =>
+const topmostAt = (page: Page, y: number) =>
   page.evaluate((y) => {
     const box = document.getElementById("filter-suggest")?.getBoundingClientRect();
     const el = box && document.elementFromPoint(box.left + 4, y);

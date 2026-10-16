@@ -3,7 +3,7 @@ import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 // The highlight diffs against the *previous* /tables/data response, so
 // every test mocks that route with a mutable body: seed it, load the
-// table, swap the body, then refresh. `users` is just a table the sidebar
+// table, swap the body, then refresh. `users` is just a table the chip list
 // lists — the mock replaces its payload wholesale.
 
 type Cell = number | string;

@@ -290,7 +290,7 @@ export function switchSchema(name: string): void {
   clearFilter();
 }
 
-// Sidebar table click: the filter was written against this table's columns
+// Table chip click: the filter was written against this table's columns
 // so it clears; the sort is restored to whatever was last used on this table.
 export function switchTable(name: string): void {
   state.table = name;

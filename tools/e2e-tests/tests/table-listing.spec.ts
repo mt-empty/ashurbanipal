@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { gotoApp, selectTable } from "./support/helpers";
 
 const SEEDED_TABLES = [
@@ -67,11 +67,11 @@ test("a long table name truncates instead of pushing the row count out", async (
 
 // Narrow enough that the seeded tables wrap past three lines.
 const NARROW = { width: 360, height: 800 };
-const visibleChips = (page: import("@playwright/test").Page) =>
+const visibleChips = (page: Page) =>
   page.locator("#tables li:not([hidden]):not(#tables-more-item)");
 
 // The button must end the collapsed list: within three rows, at the list's right edge.
-async function expectButtonOnLastRowAtRight(page: import("@playwright/test").Page) {
+async function expectButtonOnLastRowAtRight(page: Page) {
   const geometry = await page.evaluate(() => {
     const ul = document.getElementById("tables") as HTMLElement;
     const item = document.getElementById("tables-more-item") as HTMLElement;

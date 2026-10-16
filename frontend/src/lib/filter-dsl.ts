@@ -17,11 +17,14 @@ const RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 // frontend/test/filter-dsl.test.ts asserts `.position` off a caught error —
 // it must stay a real own property on the thrown object, not just baked into
 // the message string.
-export class FilterDslError extends Error {
+class FilterDslError extends Error {
   position: number;
-  constructor(message: string, position: number) {
+  // `position` is a UTF-8 byte offset (the wire contract); `index` is the same spot as a string index.
+  index: number;
+  constructor(message: string, position: number, index: number) {
     super(`${message} at position ${position}`);
     this.position = position;
+    this.index = index;
   }
 }
 
@@ -30,7 +33,7 @@ type SimpleCondition = { column: string; op: FilterOp; value?: string };
 export function parseFilterDsl(input: string): FilterCondition[] {
   const err = (message: string, index: number): FilterDslError => {
     const position = new TextEncoder().encode(input.slice(0, index)).length;
-    return new FilterDslError(message, position);
+    return new FilterDslError(message, position, index);
   };
   if (new TextEncoder().encode(input).length > FILTER_MAX_DSL_BYTES)
     throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
@@ -213,22 +216,13 @@ export function quoteFilterValue(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-// Where parseFilterDsl rejects `input`, as a string index (the error's own
-// position is a UTF-8 byte offset); null when it parses.
+// Where parseFilterDsl rejects `input`, as a string index; null when it parses.
 export function filterDslErrorAt(input: string): { index: number; message: string } | null {
   try {
     parseFilterDsl(input);
     return null;
   } catch (e) {
     if (!(e instanceof FilterDslError)) return null;
-    const encoder = new TextEncoder();
-    let bytes = 0;
-    let index = 0;
-    for (const ch of input) {
-      if (bytes >= e.position) break;
-      bytes += encoder.encode(ch).length;
-      index += ch.length;
-    }
-    return { index, message: e.message };
+    return { index: e.index, message: e.message };
   }
 }
