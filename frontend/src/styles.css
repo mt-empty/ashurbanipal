@@ -101,11 +101,11 @@ ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
 ul { list-style: none; margin: 0; padding: 0; }
-#tables li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
+#tables li button, #saved-joins li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
                     cursor: pointer; font: inherit; color: inherit; border-radius: 999px;
                     display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
-#tables li button:hover { background: var(--hover); }
-#tables li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#tables li button:hover, #saved-joins li button:hover { background: var(--hover); }
+#tables li button.active, #saved-joins li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
 /* min-width:0 plus the cap lets one very long name ellipsize instead of
    widening the row; the full name is in `title` (see loadTables()). */
 .row-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
@@ -560,3 +560,13 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
   #join-sql { color: CanvasText; }
   #join-sql-hl { display: none; }
 }
+
+/* Saved joins: their own row of chips under the table chips, set off by a label. */
+#saved-joins-bar { display: flex; align-items: center; gap: var(--gap); margin-top: .25rem; }
+#saved-joins-label { flex: none; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+                     color: var(--text-muted); padding-left: .35rem; }
+#saved-joins { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; }
+#saved-joins li.unsaved button { border: 1px dashed var(--border-strong); }
+#saved-joins li.save-link button, #saved-joins li.new-join button { color: var(--text-muted); }
+#join-name-label { display: inline-flex; gap: .4rem; align-items: center; margin-right: auto; }
+#join-name { width: 14rem; max-width: 40vw; }

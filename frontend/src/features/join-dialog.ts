@@ -1,10 +1,11 @@
 import { loadData } from "../bootstrap/reload.js";
-import { $ } from "../core/dom.js";
+import { $, copyText, reportError } from "../core/dom.js";
 import { clearFilter, getAppliedJoin, persist, setAppliedJoin, state } from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
 import { defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
-import { printJoin } from "../lib/join-dsl.js";
+import { parseJoin, printJoin } from "../lib/join-dsl.js";
 import { mountJoinForm } from "./join-form.js";
+import { deleteSavedJoin, renderSavedChips, savedJoinInView, saveJoin } from "./join-saved.js";
 import { draftText, mountJoinSql } from "./join-sql.js";
 
 // The join overlay: one JoinDef edited in a form (the SQL text mode builds on
@@ -47,8 +48,17 @@ function onSqlChange(): void {
   $("join-error").textContent = "";
 }
 
-export function openJoinDialog(opts: { error?: string } = {}): void {
-  const def = getAppliedJoin();
+// The name of the saved join being edited, so a new name renames it.
+let editingSaved: string | undefined;
+
+// `fresh` starts from the table in view even inside a join view; `focusName`
+// is the `Save…` chip, which only wants the name field.
+export function openJoinDialog(opts: { error?: string; fresh?: boolean; focusName?: boolean } = {}): void {
+  const def = opts.fresh ? null : getAppliedJoin();
+  const saved = opts.fresh ? undefined : savedJoinInView();
+  editingSaved = saved?.name;
+  $<HTMLInputElement>("join-name").value = saved?.name ?? "";
+  $("join-delete").hidden = saved === undefined;
   form.setDraft(def ? defToDraft(def) : newDraft(state.table ?? ""));
   setMode("form");
   formRadio.disabled = false;
@@ -56,6 +66,22 @@ export function openJoinDialog(opts: { error?: string } = {}): void {
   updatePreview();
   $("join-error").textContent = opts.error ?? "";
   if (!dialog.open) dialog.showModal();
+  if (opts.focusName) $<HTMLInputElement>("join-name").focus();
+}
+
+// A saved join is canonical text; a name the page cannot parse again is a bug to show, not hide.
+function openSaved(text: string): void {
+  const parsed = parseJoin(text);
+  if ("error" in parsed) reportError(new Error(`saved join: ${parsed.error.message}`));
+  else applyJoin(parsed.def);
+}
+
+export function refreshSavedChips(): void {
+  renderSavedChips({
+    open: openSaved,
+    startNew: () => openJoinDialog({ fresh: true }),
+    saveCurrent: () => openJoinDialog({ focusName: true }),
+  });
 }
 
 // A new join starts from the default view: the sort and filter were written
@@ -76,9 +102,23 @@ $("join-run").onclick = () => {
     $("join-error").textContent = typeof result.error === "string" ? result.error : sqlProblem();
     return;
   }
+  const name = $<HTMLInputElement>("join-name").value.trim();
+  if (name !== "") {
+    const problem = saveJoin(name, printJoin(result.def), editingSaved);
+    if (problem) {
+      $("join-error").textContent = problem;
+      return;
+    }
+  }
   dialog.close();
   applyJoin(result.def);
 };
+$("join-delete").onclick = () => {
+  if (editingSaved !== undefined) deleteSavedJoin(editingSaved);
+  dialog.close();
+  refreshSavedChips();
+};
+$("join-link-btn").onclick = () => copyText(location.href, $("join-link-btn"));
 formRadio.onchange = () => {
   if (!formRadio.checked) return;
   const parsed = sql.text().trim() ? sql.parse() : null;

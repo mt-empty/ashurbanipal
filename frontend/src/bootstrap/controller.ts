@@ -14,7 +14,7 @@ import type { JoinDef, TableData } from "../core/types.js";
 import { currentWidthScope, rememberColumnWidths, useWidthScope } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { tableColumns } from "../features/join-catalog.js";
-import { applyJoin, openJoinDialog } from "../features/join-dialog.js";
+import { applyJoin, openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
 import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
@@ -193,6 +193,7 @@ export async function loadData({
   $<HTMLButtonElement>("refresh").disabled = false;
   updateColumnsButtonLabel();
   updateJoinChrome();
+  refreshSavedChips();
   syncUrl();
   const renderTable = () => {
     useWidthScope(widthScope);

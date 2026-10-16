@@ -58,6 +58,10 @@
       <ul id="tables"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
       <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
     </nav>
+    <nav id="saved-joins-bar" aria-label="saved joins" hidden>
+      <span id="saved-joins-label">joins</span>
+      <ul id="saved-joins"></ul>
+    </nav>
     <div id="toolbar">
       <search id="controls">
         <form id="filter-form">
@@ -78,6 +82,7 @@
           <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
           <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
           <button id="join-edit-btn" type="button" hidden title="change the tables, columns or join type of this view">edit join</button>
+          <button id="join-link-btn" type="button" hidden title="copy a link that opens this join"><span class="copy-icon" aria-hidden="true">⧉</span> copy link</button>
           <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
           <button id="structure-btn" type="button" disabled title="indexes and constraints for this table">structure</button>
           <button id="payload" disabled title="raw JSON response for the current view">payload</button>
@@ -148,6 +153,8 @@
     <p id="join-error" role="alert"></p>
   </div>
   <div class="dialog-foot">
+    <label id="join-name-label">Name <input id="join-name" maxlength="60" autocomplete="off" spellcheck="false" placeholder="save in this browser"></label>
+    <button id="join-delete" type="button" hidden>Delete</button>
     <button id="join-cancel" type="button">Cancel</button>
     <button id="join-run" type="button">Show result</button>
   </div>

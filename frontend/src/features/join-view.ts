@@ -88,4 +88,5 @@ export function updateJoinChrome(): void {
   $<HTMLButtonElement>("join-btn").hidden = join;
   $<HTMLButtonElement>("join-btn").disabled = false;
   $<HTMLButtonElement>("join-edit-btn").hidden = !join;
+  $<HTMLButtonElement>("join-link-btn").hidden = !join;
 }
