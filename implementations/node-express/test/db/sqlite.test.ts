@@ -415,7 +415,9 @@ describe("SqliteSource.queryJoin", () => {
       NotAllowedError,
     );
   });
+});
 
+describe("sqliteTypeClass", () => {
   it("classes follow declared names, then affinity", () => {
     expect(sqliteTypeClass("INTEGER")).toEqual({ kind: "number" });
     expect(sqliteTypeClass("DECIMAL(10,2)")).toEqual({ kind: "number" });
