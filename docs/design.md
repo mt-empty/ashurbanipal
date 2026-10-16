@@ -169,9 +169,12 @@ Two components, same as the original concept:
   - *Sticky table header* — the header row stays pinned while scrolling a
     long result set vertically.
   - *Table chips* — every table is a chip above the filter. A list that
-    wraps past two lines collapses behind a "+ N more" control that
-    expands it in place; the active table is never left behind the cap.
-    There is no table search box.
+    wraps past three lines collapses behind a "+ N more" control that
+    expands it in place. The control is the last item in the list, right-aligned
+    on the last row; when collapsed, chips at the end of row three make room
+    for it, so the rows above never move. The active table stays visible when
+    collapsed: it is shown right after the last visible chip, with a divider
+    when that moves it out of alphabetical order. There is no table search box.
 - **UI state persistence**: `localStorage` remembers lightweight UI state
   across visits — currently selected source, schema (remembered per
   source), table, sort column/direction (remembered per table, like

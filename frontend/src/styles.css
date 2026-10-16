@@ -90,10 +90,12 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
                       padding: 0 .35rem; border-radius: 6px; }
 #nav-history button:not(:disabled):hover { background: var(--hover); }
 #nav-history button:disabled { opacity: .3; cursor: default; }
-/* The cap is a max-height of two chip rows; sidebar.ts decides when to
-   apply it by measuring the uncapped layout. */
 ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
-ul#tables.capped { max-height: calc(var(--chip-h) * 2 + .25rem); overflow: hidden; }
+#tables-more-item { margin-left: auto; }
+/* A chip pulled up from the hidden part of a collapsed list (see sidebar.ts). */
+#tables li.pulled { position: relative; margin-left: .5rem; }
+#tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
+                            width: 1px; background: var(--border-strong); }
 ul { list-style: none; margin: 0; padding: 0; }
 #tables li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
                     cursor: pointer; font: inherit; color: inherit; border-radius: 999px;

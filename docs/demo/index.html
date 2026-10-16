@@ -677,10 +677,12 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
                       padding: 0 .35rem; border-radius: 6px; }
 #nav-history button:not(:disabled):hover { background: var(--hover); }
 #nav-history button:disabled { opacity: .3; cursor: default; }
-/* The cap is a max-height of two chip rows; sidebar.ts decides when to
-   apply it by measuring the uncapped layout. */
 ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
-ul#tables.capped { max-height: calc(var(--chip-h) * 2 + .25rem); overflow: hidden; }
+#tables-more-item { margin-left: auto; }
+/* A chip pulled up from the hidden part of a collapsed list (see sidebar.ts). */
+#tables li.pulled { position: relative; margin-left: .5rem; }
+#tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
+                            width: 1px; background: var(--border-strong); }
 ul { list-style: none; margin: 0; padding: 0; }
 #tables li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
                     cursor: pointer; font: inherit; color: inherit; border-radius: 999px;
@@ -1116,8 +1118,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
         <button id="nav-back" type="button" disabled title="back to previous table view" aria-label="back">‹</button>
         <button id="nav-forward" type="button" disabled title="forward to next table view" aria-label="forward">›</button>
       </span>
-      <ul id="tables"></ul>
-      <button id="tables-more" type="button" hidden aria-expanded="false"></button>
+      <ul id="tables"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
       <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
     </nav>
     <div id="toolbar">
@@ -2519,40 +2520,52 @@ function formatCellValue(col, raw) {
 // src/features/sidebar.ts
 var tableEntries = [];
 var tableRowTemplate = $("table-row-template");
-var TABLE_CAP_LINES = 2;
+var TABLE_CAP_LINES = 3;
 var tablesMore = $("tables-more");
+var tablesMoreItem = $("tables-more-item");
 var tablesExpanded = false;
-var forcedOpenFor = null;
 function updateTablesCap() {
-  const ul = $("tables");
-  ul.classList.remove("capped");
+  for (const e of tableEntries) {
+    e.li.hidden = false;
+    e.li.classList.remove("pulled");
+  }
   const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
-  if (tops.length <= TABLE_CAP_LINES) {
-    tablesMore.hidden = true;
-    setCappedInert([]);
+  const lastRowTop = tops[TABLE_CAP_LINES - 1];
+  const beyond = tops.length > TABLE_CAP_LINES ? tableEntries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const active = beyond.find((e) => e.btn.classList.contains("active"));
+  const hidden = new Set(beyond.filter((e) => e !== active));
+  tablesMoreItem.hidden = hidden.size === 0;
+  if (tablesMoreItem.hidden) return;
+  tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
+  if (tablesExpanded) {
+    tablesMore.textContent = "show fewer";
     return;
   }
-  const lastVisibleTop = tops[TABLE_CAP_LINES - 1];
-  const hidden = tableEntries.filter((e) => e.li.offsetTop > lastVisibleTop);
-  const active = hidden.find((e) => e.btn.classList.contains("active"));
-  if (active && active.name !== forcedOpenFor) {
-    tablesExpanded = true;
-    forcedOpenFor = active.name;
+  for (const e of hidden) e.li.hidden = true;
+  const shown = tableEntries.filter((e) => !hidden.has(e) && e !== active);
+  tablesMore.textContent = `+ ${hidden.size} more`;
+  while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
+    const last = shown.pop();
+    last.li.hidden = true;
+    hidden.add(last);
+    tablesMore.textContent = `+ ${hidden.size} more`;
   }
-  tablesMore.hidden = false;
-  tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
-  tablesMore.textContent = tablesExpanded ? "show fewer" : `+ ${hidden.length} more`;
-  ul.classList.toggle("capped", !tablesExpanded);
-  setCappedInert(tablesExpanded ? [] : hidden);
-}
-function setCappedInert(hidden) {
-  for (const e of tableEntries) e.li.inert = hidden.includes(e);
+  if (!active) return;
+  const at = tableEntries.indexOf(active);
+  const movedUp = [...hidden].some((e) => tableEntries.indexOf(e) < at);
+  const before = tableEntries.slice(0, at).filter((e) => !e.li.hidden).pop();
+  if (movedUp && before && before.li.offsetTop === active.li.offsetTop) active.li.classList.add("pulled");
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
   updateTablesCap();
 };
-window.addEventListener("resize", updateTablesCap);
+var tablesWidth = 0;
+new ResizeObserver(([entry]) => {
+  if (entry.contentRect.width === tablesWidth) return;
+  tablesWidth = entry.contentRect.width;
+  updateTablesCap();
+}).observe($("tables"));
 async function loadSources() {
   let sources;
   try {
@@ -2625,7 +2638,6 @@ async function loadTables() {
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
-  forcedOpenFor = null;
   for (const t of tables) {
     const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
     const btn = qs(li, "button");
@@ -2642,6 +2654,7 @@ async function loadTables() {
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, btn });
   }
+  ul.appendChild(tablesMoreItem);
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   if (!tableNames.includes(state.table ?? "")) {

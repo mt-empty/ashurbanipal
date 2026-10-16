@@ -24,49 +24,69 @@ interface TableEntry {
 let tableEntries: TableEntry[] = [];
 const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 
-// ---- two-line cap: a long table list collapses behind "+ N more" ----
-const TABLE_CAP_LINES = 2;
+// ---- three-line cap: a long table list collapses behind "+ N more", except
+// the active table, which stays visible (and is marked `pulled` when it was
+// moved up out of the hidden part) ----
+const TABLE_CAP_LINES = 3;
 const tablesMore = $<HTMLButtonElement>("tables-more");
+// Last item in the list, right-aligned (see styles.css), so it follows the
+// final chip instead of taking width from the rows above it.
+const tablesMoreItem = $("tables-more-item");
 let tablesExpanded = false;
-// The active table that last forced the list open, so "show fewer" sticks
-// until a different table becomes active.
-let forcedOpenFor: string | null = null;
 
-// Measures the uncapped layout (offsetTop per chip), so the cap is by
-// rendered lines and tracks window width without a per-chip width model.
+// Measures the full layout (offsetTop per chip), so the cap is by rendered
+// lines and tracks the list's width without a per-chip width model.
 function updateTablesCap(): void {
-  const ul = $("tables");
-  ul.classList.remove("capped");
+  for (const e of tableEntries) {
+    e.li.hidden = false;
+    e.li.classList.remove("pulled");
+  }
   const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
-  if (tops.length <= TABLE_CAP_LINES) {
-    tablesMore.hidden = true;
-    setCappedInert([]);
+  const lastRowTop = tops[TABLE_CAP_LINES - 1];
+  const beyond = tops.length > TABLE_CAP_LINES ? tableEntries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const active = beyond.find((e) => e.btn.classList.contains("active"));
+  const hidden = new Set(beyond.filter((e) => e !== active));
+  tablesMoreItem.hidden = hidden.size === 0;
+  if (tablesMoreItem.hidden) return;
+  tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
+  if (tablesExpanded) {
+    tablesMore.textContent = "show fewer";
     return;
   }
-  const lastVisibleTop = tops[TABLE_CAP_LINES - 1];
-  const hidden = tableEntries.filter((e) => e.li.offsetTop > lastVisibleTop);
-  // A newly active table must not sit behind the cap.
-  const active = hidden.find((e) => e.btn.classList.contains("active"));
-  if (active && active.name !== forcedOpenFor) {
-    tablesExpanded = true;
-    forcedOpenFor = active.name;
+  for (const e of hidden) e.li.hidden = true;
+  // The button has to land on the last row: give up chips from the end of the
+  // visible ones until it (and a pulled active chip) fits there.
+  const shown = tableEntries.filter((e) => !hidden.has(e) && e !== active);
+  tablesMore.textContent = `+ ${hidden.size} more`;
+  while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
+    const last = shown.pop() as TableEntry;
+    last.li.hidden = true;
+    hidden.add(last);
+    tablesMore.textContent = `+ ${hidden.size} more`;
   }
-  tablesMore.hidden = false;
-  tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
-  tablesMore.textContent = tablesExpanded ? "show fewer" : `+ ${hidden.length} more`;
-  ul.classList.toggle("capped", !tablesExpanded);
-  setCappedInert(tablesExpanded ? [] : hidden);
-}
-
-// Clipped chips would otherwise stay in the tab order and scroll the strip.
-function setCappedInert(hidden: TableEntry[]): void {
-  for (const e of tableEntries) e.li.inert = hidden.includes(e);
+  if (!active) return;
+  // Out of alphabetical order only if a hidden chip sits before it; a divider
+  // at the start of a line would just dangle.
+  const at = tableEntries.indexOf(active);
+  const movedUp = [...hidden].some((e) => tableEntries.indexOf(e) < at);
+  const before = tableEntries
+    .slice(0, at)
+    .filter((e) => !e.li.hidden)
+    .pop();
+  if (movedUp && before && before.li.offsetTop === active.li.offsetTop) active.li.classList.add("pulled");
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
   updateTablesCap();
 };
-window.addEventListener("resize", updateTablesCap);
+// A width change only: updateTablesCap itself changes the height, which must
+// not re-trigger it.
+let tablesWidth = 0;
+new ResizeObserver(([entry]) => {
+  if (entry.contentRect.width === tablesWidth) return;
+  tablesWidth = entry.contentRect.width;
+  updateTablesCap();
+}).observe($("tables"));
 
 // ==== Source selector ====
 // Same hide-when-singular shape as the schema selector below it (and drawn
@@ -176,7 +196,6 @@ export async function loadTables(): Promise<void> {
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
-  forcedOpenFor = null;
   for (const t of tables) {
     const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
     const btn = qs<HTMLButtonElement>(li, "button");
@@ -195,6 +214,7 @@ export async function loadTables(): Promise<void> {
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, btn });
   }
+  ul.appendChild(tablesMoreItem);
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
