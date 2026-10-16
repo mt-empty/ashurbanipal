@@ -96,6 +96,14 @@ describe("planJoin", () => {
     const array = parseJoin(JOIN);
     array.joins[0].on[0].left.column = "tags";
     expect(() => planJoin(array, [orders(), users()], opts())).toThrow(BadJoinError);
+
+    const float = parseJoin(JOIN);
+    float.joins[0].on[0].left.column = "score";
+    const o = orders();
+    o.columns.push({ name: "score", type: "double precision" });
+    expect(() => planJoin(float, [o, users()], opts())).toThrow(
+      /orders\.score \(double precision\).*floating-point values are not compared exactly/,
+    );
   });
 
   it("pairs enums only within one type and rejects differing collations", () => {

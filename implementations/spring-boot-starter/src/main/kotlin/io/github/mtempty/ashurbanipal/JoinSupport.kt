@@ -209,9 +209,16 @@ class JoinPlan internal constructor(
 
 private fun describe(t: JoinTableMeta, c: JoinColMeta) = "${t.name}.${c.name} (${c.type})"
 
+private val FLOAT_TYPE = Regex("real|float|double", RegexOption.IGNORE_CASE)
+
+private fun unjoinable(position: Int, t: JoinTableMeta, c: JoinColMeta): BadJoinException {
+    val why = if (FLOAT_TYPE.containsMatchIn(c.type)) ": floating-point values are not compared exactly" else ""
+    return BadJoinException("join $position on: ${describe(t, c)} cannot be used in a join$why")
+}
+
 private fun checkPair(position: Int, lt: JoinTableMeta, lc: JoinColMeta, rt: JoinTableMeta, rc: JoinColMeta) {
-    val lcls = lc.cls ?: throw BadJoinException("join $position on: ${describe(lt, lc)} cannot be used in a join")
-    val rcls = rc.cls ?: throw BadJoinException("join $position on: ${describe(rt, rc)} cannot be used in a join")
+    val lcls = lc.cls ?: throw unjoinable(position, lt, lc)
+    val rcls = rc.cls ?: throw unjoinable(position, rt, rc)
     if (lcls != rcls) {
         throw BadJoinException("join $position on: ${describe(lt, lc)} cannot be joined to ${describe(rt, rc)}")
     }

@@ -137,6 +137,14 @@ def test_plan_join_rejects_unknown_names_hostile_names_and_incompatible_pairs() 
     with pytest.raises(BadJoin):
         plan_join(array, [_orders(), _users()], _opts())
 
+    floaty = parse_join(JOIN.replace('"column": "user_id"', '"column": "score"'))
+    orders = _orders()
+    orders.columns.append(_col("score", "double precision", None))
+    with pytest.raises(
+        BadJoin, match=r"orders\.score \(double precision\).*floating-point values are not compared exactly"
+    ):
+        plan_join(floaty, [orders, _users()], _opts())
+
 
 def test_enums_pair_only_within_one_type_and_collations_must_match() -> None:
     spec = parse_join(

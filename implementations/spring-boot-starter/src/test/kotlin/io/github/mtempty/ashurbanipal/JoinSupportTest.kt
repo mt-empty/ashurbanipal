@@ -85,6 +85,15 @@ class JoinSupportTest {
 
         val array = spec.copy(joins = listOf(spec.joins[0].copy(on = listOf(OnPair(ColumnPos(0, "tags"), "id")))))
         assertThrows(BadJoinException::class.java) { planJoin(array, listOf(orders(), users()), opts()) }
+
+        val withScore = orders().let { it.copy(columns = it.columns + col("score", "double precision", null)) }
+        val float = spec.copy(joins = listOf(spec.joins[0].copy(on = listOf(OnPair(ColumnPos(0, "score"), "id")))))
+        val fex = assertThrows(BadJoinException::class.java) { planJoin(float, listOf(withScore, users()), opts()) }
+        assertTrue(
+            fex.message!!.contains("orders.score (double precision)") &&
+                fex.message!!.contains("floating-point values are not compared exactly"),
+            fex.message,
+        )
     }
 
     @Test

@@ -107,6 +107,16 @@ func TestPlanJoinRejectsUnknownNamesAndIncompatiblePairs(t *testing.T) {
 	if _, err := planJoin(array, testOrdersUsers(), JoinOpts{}); err == nil {
 		t.Error("array column must not be joinable")
 	}
+
+	metas := testOrdersUsers()
+	metas[0].columns = append(metas[0].columns, joinColMeta{name: "score", typeName: "double precision"})
+	float := spec
+	float.Joins = []JoinEntry{{Table: "users", On: []OnPair{{Left: ColumnPos{Join: 0, Column: "score"}, Right: "id"}}}}
+	_, err = planJoin(float, metas, JoinOpts{})
+	bad, ok = err.(*BadJoinError)
+	if !ok || !strings.Contains(bad.Reason, "orders.score (double precision)") || !strings.Contains(bad.Reason, "floating-point values are not compared exactly") {
+		t.Errorf("float key must say why it cannot join, got %v", err)
+	}
 }
 
 func TestPlanJoinEnumsPairOnlyWithinOneType(t *testing.T) {

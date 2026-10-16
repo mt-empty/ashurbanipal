@@ -9,6 +9,7 @@ emits SQL from catalog names and generated aliases only.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -286,11 +287,20 @@ def _describe(t: TableMeta, c: ColMeta) -> str:
     return f"{t.name}.{c.name} ({c.type_name})"
 
 
+def _unjoinable(position: int, t: TableMeta, c: ColMeta) -> BadJoin:
+    why = (
+        ": floating-point values are not compared exactly"
+        if re.search(r"real|float|double", c.type_name, re.I)
+        else ""
+    )
+    return BadJoin(f"join {position} on: {_describe(t, c)} cannot be used in a join{why}")
+
+
 def _check_pair(position: int, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta) -> None:
     if lc.cls is None:
-        raise BadJoin(f"join {position} on: {_describe(lt, lc)} cannot be used in a join")
+        raise _unjoinable(position, lt, lc)
     if rc.cls is None:
-        raise BadJoin(f"join {position} on: {_describe(rt, rc)} cannot be used in a join")
+        raise _unjoinable(position, rt, rc)
     if lc.cls != rc.cls:
         raise BadJoin(f"join {position} on: {_describe(lt, lc)} cannot be joined to {_describe(rt, rc)}")
     if lc.cls == TEXT and lc.collation and rc.collation and lc.collation != rc.collation:

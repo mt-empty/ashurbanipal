@@ -213,9 +213,14 @@ function columnIndex(table: JoinTableMeta, column: string): number {
 
 const describe = (t: JoinTableMeta, c: JoinColMeta): string => `${t.name}.${c.name} (${c.type})`;
 
+function unjoinable(position: number, t: JoinTableMeta, c: JoinColMeta): BadJoinError {
+  const why = /real|float|double/i.test(c.type) ? ": floating-point values are not compared exactly" : "";
+  return new BadJoinError(`join ${position} on: ${describe(t, c)} cannot be used in a join${why}`);
+}
+
 function checkPair(position: number, lt: JoinTableMeta, lc: JoinColMeta, rt: JoinTableMeta, rc: JoinColMeta): void {
-  if (!lc.class) throw new BadJoinError(`join ${position} on: ${describe(lt, lc)} cannot be used in a join`);
-  if (!rc.class) throw new BadJoinError(`join ${position} on: ${describe(rt, rc)} cannot be used in a join`);
+  if (!lc.class) throw unjoinable(position, lt, lc);
+  if (!rc.class) throw unjoinable(position, rt, rc);
   if (classKey(lc.class) !== classKey(rc.class)) {
     throw new BadJoinError(`join ${position} on: ${describe(lt, lc)} cannot be joined to ${describe(rt, rc)}`);
   }

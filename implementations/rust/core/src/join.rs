@@ -282,6 +282,19 @@ fn describe(table: &TableMeta, col: &ColMeta) -> String {
     format!("{}.{} ({})", table.name, col.name, col.type_name)
 }
 
+fn unjoinable(position: usize, table: &TableMeta, col: &ColMeta) -> DbError {
+    let t = col.type_name.to_lowercase();
+    let why = if ["real", "float", "double"].iter().any(|f| t.contains(f)) {
+        ": floating-point values are not compared exactly"
+    } else {
+        ""
+    };
+    DbError::BadJoin(format!(
+        "join {position} on: {} cannot be used in a join{why}",
+        describe(table, col)
+    ))
+}
+
 fn check_pair(
     position: usize,
     lt: &TableMeta,
@@ -295,10 +308,7 @@ fn check_pair(
         } else {
             (rt, rc)
         };
-        return Err(DbError::BadJoin(format!(
-            "join {position} on: {} cannot be used in a join",
-            describe(bad.0, bad.1)
-        )));
+        return Err(unjoinable(position, bad.0, bad.1));
     };
     if a != b {
         return Err(DbError::BadJoin(format!(
@@ -699,6 +709,22 @@ mod tests {
             plan(&array, vec![orders(), users()], &opts()),
             Err(DbError::BadJoin(_))
         ));
+    }
+
+    #[test]
+    fn a_float_key_says_why_it_cannot_join() {
+        let mut o = orders();
+        o.columns.push(col("score", "double precision", None));
+        let mut spec = JoinSpec::parse(JOIN).unwrap();
+        spec.joins[0].on[0].left.column = "score".into();
+        let Err(DbError::BadJoin(msg)) = plan(&spec, vec![o, users()], &opts()) else {
+            panic!("expected BadJoin");
+        };
+        assert!(
+            msg.contains("orders.score (double precision)")
+                && msg.contains("floating-point values are not compared exactly"),
+            "{msg}"
+        );
     }
 
     #[test]

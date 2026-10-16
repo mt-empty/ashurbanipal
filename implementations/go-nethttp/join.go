@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
@@ -269,12 +270,22 @@ func describeCol(t joinTableMeta, c joinColMeta) string {
 	return fmt.Sprintf("%s.%s (%s)", t.name, c.name, c.typeName)
 }
 
+var floatTypeRe = regexp.MustCompile(`(?i)real|float|double`)
+
+func unjoinable(position int, t joinTableMeta, c joinColMeta) error {
+	why := ""
+	if floatTypeRe.MatchString(c.typeName) {
+		why = ": floating-point values are not compared exactly"
+	}
+	return badJoin("join %d on: %s cannot be used in a join%s", position, describeCol(t, c), why)
+}
+
 func checkJoinPair(position int, lt joinTableMeta, lc joinColMeta, rt joinTableMeta, rc joinColMeta) error {
 	if lc.class == nil {
-		return badJoin("join %d on: %s cannot be used in a join", position, describeCol(lt, lc))
+		return unjoinable(position, lt, lc)
 	}
 	if rc.class == nil {
-		return badJoin("join %d on: %s cannot be used in a join", position, describeCol(rt, rc))
+		return unjoinable(position, rt, rc)
 	}
 	if *lc.class != *rc.class {
 		return badJoin("join %d on: %s cannot be joined to %s", position, describeCol(lt, lc), describeCol(rt, rc))
