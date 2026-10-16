@@ -118,7 +118,7 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
 #nav-history button:disabled { opacity: .3; cursor: default; }
 ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
 #tables-more-item { margin-left: auto; }
-/* A chip pulled up from the hidden part of a collapsed list (see sidebar.ts). */
+/* A chip pulled up from the hidden part of a collapsed list (see features/sidebar.ts). */
 #tables li.pulled { position: relative; margin-left: .5rem; }
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
@@ -179,13 +179,13 @@ th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
 thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+/* Capped like the table chips' names; the title carries the full name. */
+.col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
+            vertical-align: bottom; }
 /* Arrow always rendered (dim when unsorted), not just on the active
    column: keeps every th's width stable across sort changes and shows
    sortability before the first click. "↑" default previews the real
    first-click behavior (ascending — see th.onclick). */
-/* Capped like the table chips' names; the title carries the full name. */
-.col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
-            vertical-align: bottom; }
 th[aria-sort] .th-name::after { content: " ↑"; opacity: .35; }
 th[aria-sort="ascending"] .th-name::after { content: " ↑"; opacity: 1; }
 th[aria-sort="descending"] .th-name::after { content: " ↓"; opacity: 1; }
@@ -924,15 +924,18 @@ var FILTER_MAX_CONDITIONS = 10;
 var RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 var FilterDslError = class extends Error {
   position;
-  constructor(message, position) {
+  // `position` is a UTF-8 byte offset (the wire contract); `index` is the same spot as a string index.
+  index;
+  constructor(message, position, index) {
     super(`${message} at position ${position}`);
     this.position = position;
+    this.index = index;
   }
 };
 function parseFilterDsl(input2) {
   const err = (message, index) => {
     const position = new TextEncoder().encode(input2.slice(0, index)).length;
-    return new FilterDslError(message, position);
+    return new FilterDslError(message, position, index);
   };
   if (new TextEncoder().encode(input2).length > FILTER_MAX_DSL_BYTES)
     throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
@@ -1097,15 +1100,7 @@ function filterDslErrorAt(input2) {
     return null;
   } catch (e) {
     if (!(e instanceof FilterDslError)) return null;
-    const encoder = new TextEncoder();
-    let bytes = 0;
-    let index = 0;
-    for (const ch of input2) {
-      if (bytes >= e.position) break;
-      bytes += encoder.encode(ch).length;
-      index += ch.length;
-    }
-    return { index, message: e.message };
+    return { index: e.index, message: e.message };
   }
 }
 
@@ -1489,13 +1484,29 @@ function completionAt(text) {
     column: last.column
   };
 }
-var FILTER_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"];
+var FILTER_OPERATORS = [
+  "=",
+  "!=",
+  ">",
+  "<",
+  ">=",
+  "<=",
+  "LIKE",
+  "ILIKE",
+  "IS NULL",
+  "IS NOT NULL"
+];
+function optionsFor(expect) {
+  if (expect === "operator") return FILTER_OPERATORS;
+  if (expect === "joiner") return ["AND", "OR"];
+  if (expect === "isTail") return ["NULL", "NOT NULL"];
+  return [];
+}
 function endsInUnfinishedWord(text) {
   const { expect, partial } = completionAt(text);
   if (partial === "") return false;
-  const options = expect === "operator" ? FILTER_OPERATORS : expect === "joiner" ? ["AND", "OR"] : expect === "isTail" ? ["NULL", "NOT NULL"] : [];
   const word = partial.toLowerCase();
-  return options.some((o) => o.toLowerCase().startsWith(word));
+  return optionsFor(expect).some((o) => o.toLowerCase().startsWith(word));
 }
 
 // src/features/filter-highlight.ts
@@ -1690,13 +1701,18 @@ var commonValueCache = /* @__PURE__ */ new Map();
 function clearCommonValueCache() {
   commonValueCache.clear();
 }
+async function fetchCommonValues(column) {
+  const params = new URLSearchParams({ table: state.table ?? "", column });
+  applyScopeParams(params);
+  return (await api(`/tables/common-values?${params}`)).values;
+}
 function commonValuesFor(column) {
   const params = new URLSearchParams({ table: state.table ?? "", column });
   applyScopeParams(params);
   const key = params.toString();
   let values = commonValueCache.get(key);
   if (!values) {
-    values = api(`/tables/common-values?${params}`).then((r) => r.values.map((v) => v.value)).catch((e) => {
+    values = fetchCommonValues(column).then((rows) => rows.map((v) => v.value)).catch((e) => {
       console.warn("ashurbanipal: common values for suggestions failed", e);
       return [];
     });
@@ -1740,9 +1756,9 @@ function updateFilterSuggestions() {
   if (ctx.expect === "column") {
     showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
   } else if (ctx.expect === "operator") {
-    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(FILTER_OPERATORS), -1);
+    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")), -1);
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
-    showFilterSuggestions(ctx, plain(["AND", "OR"]), -1);
+    showFilterSuggestions(ctx, plain(optionsFor("joiner")), -1);
   } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column)) {
     commonValuesFor(ctx.column).then((values) => {
       if (token !== filterSuggestToken || document.activeElement !== input2) return;
@@ -1823,11 +1839,9 @@ async function showCommonValues(e, column) {
   list.replaceChildren(loading);
   $("cv-pop").showPopover();
   const token = ++cvRequestToken;
-  const params = new URLSearchParams({ table: state.table ?? "", column });
-  applyScopeParams(params);
   let values;
   try {
-    ({ values } = await api(`/tables/common-values?${params}`));
+    values = await fetchCommonValues(column);
   } catch (err) {
     if (token !== cvRequestToken) return;
     const p = document.createElement("p");
@@ -1967,7 +1981,9 @@ var TABLE_CAP_LINES = 3;
 var tablesMore = $("tables-more");
 var tablesMoreItem = $("tables-more-item");
 var tablesExpanded = false;
+var cappedActive = null;
 function updateTablesCap() {
+  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
   for (const e of tableEntries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
@@ -2118,7 +2134,7 @@ function setActiveTable(name) {
     if (isActive) e.btn.setAttribute("aria-current", "true");
     else e.btn.removeAttribute("aria-current");
   }
-  updateTablesCap();
+  if (name !== cappedActive) updateTablesCap();
 }
 
 // src/features/sticky-header.ts
