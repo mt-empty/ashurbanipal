@@ -9,6 +9,7 @@ import type {
   TableData,
   TableInfo,
 } from "../src/db/types.js";
+import type { JoinData } from "../src/join.js";
 import { createRouter, type NamedSource } from "../src/routes.js";
 import { getJson as sharedGetJson, startServer, type TestServer } from "./helpers.js";
 
@@ -48,6 +49,10 @@ class FakeDbSource implements DbSource {
   async structure(): Promise<Structure> {
     return { indexes: [], constraints: { unique: [], foreign_keys: [], check: [] } };
   }
+
+  async queryJoin(): Promise<JoinData> {
+    return { columns: [], rows: [], has_more: false };
+  }
 }
 
 const alpha: NamedSource = { name: "alpha", source: new FakeDbSource("alpha") };
@@ -79,6 +84,7 @@ describe("multi-source support", () => {
       "/__ashurbanipal/api/table-counts?source=nonexistent",
       "/__ashurbanipal/api/tables/data?source=nonexistent&table=t",
       "/__ashurbanipal/api/tables/common-values?source=nonexistent&table=t&column=c",
+      "/__ashurbanipal/api/tables/join?source=nonexistent&join=%7B%7D",
     ]) {
       const { status } = await getJson(path);
       expect(status, path).toBe(400);

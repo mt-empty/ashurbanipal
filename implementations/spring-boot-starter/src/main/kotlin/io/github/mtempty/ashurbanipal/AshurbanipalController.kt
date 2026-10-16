@@ -137,6 +137,53 @@ class AshurbanipalController(
         return apiOk(TableDataResponse(data.columns, data.rows, data.totalApprox))
     }
 
+    @GetMapping("/api/tables/join")
+    fun tableJoin(
+        @RequestParam(required = false) schema: String?,
+        @RequestParam(required = false) source: String?,
+        @RequestParam join: String,
+        @RequestParam(required = false) filter: String?,
+        @RequestParam(required = false) limit: String?,
+        @RequestParam(required = false) offset: String?,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(name = "sort_join", required = false) sortJoin: String?,
+        @RequestParam(required = false) order: String?,
+    ): ResponseEntity<JoinData> {
+        val spec = parseJoin(join)
+        val conditions = filter?.takeIf { it.isNotBlank() }
+            ?.let { filterValidator.parse(it, allowJoin = true) }
+            ?.takeIf { it.isNotEmpty() }
+
+        val limits = properties.limits
+        val effectiveLimit = (parseSaturating(limit) ?: limits.defaultPageSize.toLong())
+            .coerceIn(1L, limits.maxPageSize.toLong())
+        val effectiveOffset = parseSaturating(offset) ?: 0L
+
+        val descending = when (order) {
+            null, "asc" -> false
+            "desc" -> true
+            else -> throw FilterException("invalid order \"$order\" (expected \"asc\" or \"desc\")", code = "invalid_parameter")
+        }
+        val sortJoinPosition = sortJoin?.let {
+            it.trim().toIntOrNull()?.takeIf { n -> n >= 0 }
+                ?: throw FilterException("invalid sort_join \"$it\" (expected a table position)", code = "invalid_parameter")
+        }
+
+        val data = resolveSource(source).queryJoin(
+            schema,
+            spec,
+            JoinOpts(
+                limit = effectiveLimit,
+                offset = effectiveOffset,
+                sort = sort?.takeIf { it.isNotEmpty() },
+                sortJoin = sortJoinPosition,
+                descending = descending,
+                filter = conditions,
+            ),
+        )
+        return apiOk(data)
+    }
+
     @GetMapping("/api/tables/common-values")
     fun commonValues(
         @RequestParam(required = false) schema: String?,
@@ -213,9 +260,17 @@ class AshurbanipalController(
     fun handleTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<ProblemDetails> =
         problemResponse(HttpStatus.BAD_REQUEST, "invalid_parameter", e.message)
 
+    @ExceptionHandler(BadJoinException::class)
+    fun handleBadJoin(e: BadJoinException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.BAD_REQUEST, "invalid_parameter", e.message ?: "bad request")
+
     @ExceptionHandler(DataAccessException::class)
     fun handleDatabaseError(e: DataAccessException): ResponseEntity<ProblemDetails> =
-        problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", "database error: ${e.message}")
+        if (isQueryTimeout(e)) queryTimeoutResponse()
+        else problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", "database error: ${e.message}")
+
+    private fun queryTimeoutResponse(): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "query_timeout", "query timed out")
 
     // A query string the servlet container itself can't parse (e.g. a stray
     // `=value` with no parameter name) surfaces here as an IllegalStateException
@@ -228,7 +283,8 @@ class AshurbanipalController(
 
     @ExceptionHandler(Exception::class)
     fun handleUnexpectedError(e: Exception): ResponseEntity<ProblemDetails> =
-        problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", e.message ?: "internal error")
+        if (isQueryTimeout(e)) queryTimeoutResponse()
+        else problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", e.message ?: "internal error")
 }
 
 /** RFC 9457 Problem Details body (`spec/protocol.md` §2). */

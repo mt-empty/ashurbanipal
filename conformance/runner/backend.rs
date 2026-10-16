@@ -107,6 +107,14 @@ pub enum ExpressionIndexes {
     NotSeeded,
 }
 
+/// Whether the dialect's seed has a column of a type `/api/tables/join`
+/// (§5.11.2) never joins: `users.metadata` is `jsonb` / `json`.
+pub enum NotJoinableColumns {
+    Seeded,
+    /// SQLite declares it `TEXT`, which is joinable.
+    NotSeeded,
+}
+
 impl Backend {
     pub(crate) fn parse(raw: &str) -> Option<Backend> {
         match raw.trim().to_ascii_lowercase().as_str() {
@@ -190,6 +198,13 @@ impl Backend {
         match self {
             Backend::Postgres | Backend::Sqlite => PartialIndexes::Reported,
             Backend::Mysql => PartialIndexes::NeverEmitted,
+        }
+    }
+
+    pub fn not_joinable_columns(self) -> NotJoinableColumns {
+        match self {
+            Backend::Postgres | Backend::Mysql => NotJoinableColumns::Seeded,
+            Backend::Sqlite => NotJoinableColumns::NotSeeded,
         }
     }
 

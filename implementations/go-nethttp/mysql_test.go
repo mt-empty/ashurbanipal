@@ -384,10 +384,12 @@ func runSlowQueryTimeoutTest(t *testing.T, url string) {
 	// otherwise finish in under a millisecond, long before the 1s timeout
 	// gets a chance to fire, making this a broken test rather than a
 	// passing one. MySQL has no such cap, so this is a no-op there.
+	raiseCap := "set session cte_max_recursion_depth = 100000000" // MySQL aborts at 1000 with error 3636
 	if variant == variantMariaDB {
-		if _, err := conn.ExecContext(ctx, "set session max_recursive_iterations = 100000000"); err != nil {
-			t.Fatalf("raising max_recursive_iterations: %v", err)
-		}
+		raiseCap = "set session max_recursive_iterations = 100000000"
+	}
+	if _, err := conn.ExecContext(ctx, raiseCap); err != nil {
+		t.Fatalf("raising the recursion cap: %v", err)
 	}
 
 	// Timeout checks happen at row-iteration checkpoints on both forks —
@@ -406,6 +408,9 @@ func runSlowQueryTimeoutTest(t *testing.T, url string) {
 	if err == nil {
 		t.Fatalf("expected the slow query to be interrupted, got n=%d after %v", n, elapsed)
 	}
+	if !isQueryTimeout(err) {
+		t.Errorf("the abort must be recognised as a query timeout (3024 / 1969), got %v", err)
+	}
 	if elapsed > 5*time.Second {
 		t.Fatalf("slow query took %v to error, want close to the 1s deadline", elapsed)
 	}
@@ -419,5 +424,82 @@ func runSlowQueryTimeoutTest(t *testing.T, url string) {
 	}
 	if ok != 1 {
 		t.Fatalf("probe query = %d, want 1", ok)
+	}
+}
+
+func TestMySQLJoinLeftKeepsUnmatchedRowsAndFiltersAJoinedColumn(t *testing.T) {
+	source := NewMySQLSource(seededMySQLDB(t, testURL(t)), 5)
+	runMySQLJoinChecks(t, source)
+}
+
+func TestMariaDBJoinLeftKeepsUnmatchedRowsAndFiltersAJoinedColumn(t *testing.T) {
+	url := os.Getenv("MARIADB_TEST_URL")
+	if url == "" {
+		t.Skip("MARIADB_TEST_URL not set — needs a reachable MariaDB instance (see .devcontainer)")
+	}
+	runMySQLJoinChecks(t, NewMySQLSource(seededMySQLDB(t, url), 5))
+}
+
+func runMySQLJoinChecks(t *testing.T, source *MySQLSource) {
+	t.Helper()
+	ctx := context.Background()
+	left, err := ParseJoin(`{"table":"users","joins":[{"type":"left","table":"orders",
+		"on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := source.QueryJoin(ctx, nil, left, JoinOpts{Limit: 10})
+	if err != nil || len(all.Rows) != 3 || all.HasMore {
+		t.Fatalf("left join: %v %+v", err, all)
+	}
+	page, err := source.QueryJoin(ctx, nil, left, JoinOpts{Limit: 1})
+	if err != nil || len(page.Rows) != 1 || !page.HasMore {
+		t.Fatalf("one row page: %v %+v", err, page)
+	}
+	pattern, zero := "B@X.%", 0
+	one, err := source.QueryJoin(ctx, nil, left, JoinOpts{
+		Limit:  10,
+		Filter: []Condition{{Column: "email", Op: "ILIKE", Value: &pattern, Join: &zero}},
+	})
+	if err != nil || len(one.Rows) != 1 {
+		t.Errorf("ILIKE on a joined column: %v %+v", err, one)
+	}
+}
+
+func TestMySQLJoinDifferingTextCollationsAreABadJoin(t *testing.T) {
+	db := seededMySQLDB(t, testURL(t))
+	for _, ddl := range []string{
+		"create table ca (v varchar(20) collate utf8mb4_bin)",
+		"create table cb (v varchar(20) collate utf8mb4_general_ci)",
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec, err := ParseJoin(`{"table":"ca","joins":[{"type":"inner","table":"cb",
+		"on":[{"left":{"join":0,"column":"v"},"right":"v"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewMySQLSource(db, 5).QueryJoin(context.Background(), nil, spec, JoinOpts{Limit: 10})
+	if _, ok := err.(*BadJoinError); !ok {
+		t.Errorf("want *BadJoinError, got %v", err)
+	}
+}
+
+func TestMySQLTypeClass(t *testing.T) {
+	num, txt, temporal, uuid := classNumber, classText, classTemporal, classUUID
+	enum := classEnum("enum('a','b')")
+	for _, c := range []struct {
+		dataType, columnType string
+		want                 *typeClass
+	}{
+		{"bigint", "bigint", &num}, {"VARCHAR", "varchar(20)", &txt}, {"datetime", "datetime", &temporal},
+		{"enum", "enum('a','b')", &enum}, {"json", "json", nil}, {"double", "double", nil}, {"uuid", "uuid", &uuid},
+	} {
+		got := mysqlTypeClass(c.dataType, c.columnType)
+		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+			t.Errorf("%s: got %v want %v", c.dataType, got, c.want)
+		}
 	}
 }

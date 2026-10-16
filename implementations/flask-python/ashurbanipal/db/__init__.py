@@ -7,7 +7,10 @@ import functools
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from ..join import JoinData, JoinOpts, JoinSpec
 
 _F = TypeVar("_F", bound=Callable)
 
@@ -179,8 +182,28 @@ class FilterParseError(DbError):
     """A filter AST condition was structurally invalid at the query-building stage."""
 
 
+class BadJoin(DbError):
+    """A well-formed join request the catalog or the §5.11 rules reject:
+    an incompatible column pair, a position out of range. Maps to 400
+    invalid_parameter.
+    """
+
+
 class DatabaseError(DbError):
-    """The underlying driver raised (connection failure, timeout, syntax error, ...)."""
+    """The underlying driver raised (connection failure, syntax error, ...)."""
+
+
+class QueryTimeout(DatabaseError):
+    """The engine stopped a statement at the query timeout (spec/protocol.md §6). Maps to 500 query_timeout."""
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    """Postgres SQLSTATE 57014, MySQL 3024, MariaDB 1969, SQLite SQLITE_INTERRUPT (9)."""
+    if getattr(exc, "sqlstate", None) == "57014":
+        return True
+    if exc.args and isinstance(exc.args[0], int) and exc.args[0] in (3024, 1969):
+        return True
+    return getattr(exc, "sqlite_errorcode", None) == 9
 
 
 def wrap_driver_errors(driver_error_cls: type[BaseException]) -> Callable[[_F], _F]:
@@ -195,6 +218,8 @@ def wrap_driver_errors(driver_error_cls: type[BaseException]) -> Callable[[_F], 
             try:
                 return fn(*args, **kwargs)
             except driver_error_cls as exc:
+                if _is_timeout(exc):
+                    raise QueryTimeout(str(exc)) from exc
                 raise DatabaseError(str(exc)) from exc
 
         return wrapper  # type: ignore[return-value]
@@ -232,6 +257,11 @@ class DbSource(abc.ABC):
     @abc.abstractmethod
     def structure(self, schema: str | None, table: str) -> Structure:
         """Indexes and constraints of `table` (spec/protocol.md §5.10)."""
+        ...
+
+    @abc.abstractmethod
+    def query_join(self, schema: str | None, spec: JoinSpec, opts: JoinOpts) -> JoinData:
+        """Rows from the tables a join names (spec/protocol.md §5.11)."""
         ...
 
 

@@ -37,4 +37,5 @@ pub use ashurbanipal::{
 };
 pub use ashurbanipal::{Condition, FilterError, FilterOp, Logic};
 pub use ashurbanipal::{Config, ConfigError, Limits, Sibling};
+pub use ashurbanipal::{JoinColumnInfo, JoinData, JoinError, JoinOpts, JoinSpec};
 pub use routes::{app_state, service, AppState};

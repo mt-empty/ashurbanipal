@@ -3,6 +3,7 @@ package io.github.mtempty.ashurbanipal
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -332,10 +333,10 @@ class MySqlSourceTest {
                             st.resultSet?.use { it.next() }
                         }
                     } catch (e: Exception) {
-                        errored = true
+                        errored = isQueryTimeout(e)
                     }
                 }
-                assertTrue(errored, "[$envVar] expected the slow query to be interrupted")
+                assertTrue(errored, "[$envVar] expected the abort to be recognised as a query timeout (3024 / 1969)")
                 // Generous upper bound: proves this is a real interrupt near
                 // the 1s budget, not a lucky fast completion (e.g. the CTE
                 // cap silently biting again) nor an unrelated hang.
@@ -348,6 +349,51 @@ class MySqlSourceTest {
                 }
                 assertEquals(1, ok, "[$envVar]")
             }
+        }
+    }
+
+    private fun usersOrders() = parseJoin(
+        """{"table":"users","joins":[{"type":"left","table":"orders",
+            "on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}""",
+    )
+
+    @Test
+    fun `join keeps unmatched rows, pages with has_more and filters a joined column`() = forEachReachableInstance { envVar ->
+        SeededDb(envVar).use { db ->
+            val source = MySqlSource(db.dataSource, 5)
+            val opts = JoinOpts(10, 0, null, null, false, null)
+            val all = source.queryJoin(null, usersOrders(), opts)
+            assertEquals(3, all.rows.size, "[$envVar]")
+            assertFalse(all.hasMore, "[$envVar]")
+            val page = source.queryJoin(null, usersOrders(), opts.copy(limit = 1))
+            assertEquals(1, page.rows.size, "[$envVar]")
+            assertTrue(page.hasMore, "[$envVar]")
+            val one = source.queryJoin(
+                null,
+                usersOrders(),
+                opts.copy(filter = listOf(Condition(column = "email", op = "ILIKE", value = "B@X.%", join = 0))),
+            )
+            assertEquals(1, one.rows.size, "[$envVar]")
+        }
+    }
+
+    @Test
+    fun `join with differing text collations is a bad join, not a database error`() = forEachReachableInstance { envVar ->
+        SeededDb(envVar).use { db ->
+            db.dataSource.connection.use { conn ->
+                conn.createStatement().use { st ->
+                    st.execute("create table ca (v varchar(20) collate utf8mb4_bin)")
+                    st.execute("create table cb (v varchar(20) collate utf8mb4_general_ci)")
+                }
+            }
+            val spec = parseJoin(
+                """{"table":"ca","joins":[{"type":"inner","table":"cb",
+                    "on":[{"left":{"join":0,"column":"v"},"right":"v"}]}]}""",
+            )
+            val ex = assertThrows(BadJoinException::class.java) {
+                MySqlSource(db.dataSource, 5).queryJoin(null, spec, JoinOpts(10, 0, null, null, false, null))
+            }
+            assertTrue(ex.message!!.contains("collation"), "[$envVar] ${ex.message}")
         }
     }
 }

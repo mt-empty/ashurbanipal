@@ -1,8 +1,9 @@
 import mysql, { type Pool } from "mysql2/promise";
 import { afterAll, describe, expect, it } from "vitest";
-import { MySqlSource, timedSelect, type Variant } from "../../src/db/mysql.js";
+import { MySqlSource, mysqlTypeClass, timedSelect, type Variant } from "../../src/db/mysql.js";
 import type { QueryOpts } from "../../src/db/types.js";
-import { NotAllowedError } from "../../src/errors.js";
+import { isQueryTimeout, NotAllowedError } from "../../src/errors.js";
+import { BadJoinError, parseJoin } from "../../src/join.js";
 
 // Live-instance coverage against the devcontainer's MySQL and MariaDB services.
 
@@ -226,6 +227,54 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       expect(data.rows[0].email).toBe("a@x.com");
     });
 
+    it("joins: left keeps unmatched rows, ILIKE filters a joined column, has_more pages", async () => {
+      const db = await fresh();
+      const source = new MySqlSource(db.pool);
+      const left = parseJoin(
+        JSON.stringify({
+          table: "users",
+          joins: [{ type: "left", table: "orders", on: [{ left: { join: 0, column: "id" }, right: "user_id" }] }],
+        }),
+      );
+      const all = await source.queryJoin(undefined, left, { ...baseOpts, filter: [] }, 5000);
+      expect(all.rows).toHaveLength(3);
+      expect(all.has_more).toBe(false);
+      const page = await source.queryJoin(undefined, left, { ...baseOpts, limit: 1 }, 5000);
+      expect(page.rows).toHaveLength(1);
+      expect(page.has_more).toBe(true);
+      const one = await source.queryJoin(
+        undefined,
+        left,
+        { ...baseOpts, filter: [{ column: "email", op: "ILIKE", value: "B@X.%", join: 0 }] },
+        5000,
+      );
+      expect(one.rows).toHaveLength(1);
+    });
+
+    it("joins: differing text collations are a BadJoinError, not a database error", async () => {
+      const db = await fresh();
+      await db.pool.query("create table ca (v varchar(20) collate utf8mb4_bin)");
+      await db.pool.query("create table cb (v varchar(20) collate utf8mb4_general_ci)");
+      const source = new MySqlSource(db.pool);
+      const clash = parseJoin(
+        JSON.stringify({
+          table: "ca",
+          joins: [{ type: "inner", table: "cb", on: [{ left: { join: 0, column: "v" }, right: "v" }] }],
+        }),
+      );
+      await expect(source.queryJoin(undefined, clash, { ...baseOpts, filter: [] }, 5000)).rejects.toBeInstanceOf(
+        BadJoinError,
+      );
+    });
+
+    it("joins: type classes follow data_type", () => {
+      expect(mysqlTypeClass("bigint", "bigint")).toEqual({ kind: "number" });
+      expect(mysqlTypeClass("VARCHAR", "varchar(20)")).toEqual({ kind: "text" });
+      expect(mysqlTypeClass("enum", "enum('a','b')")).toEqual({ kind: "enum", id: "enum('a','b')" });
+      expect(mysqlTypeClass("json", "json")).toBeUndefined();
+      expect(mysqlTypeClass("double", "double")).toBeUndefined();
+    });
+
     // The load-bearing regression test PR #26 (Rust) and the Go port both
     // required: proves the two forks' distinct timeout mechanisms
     // (MAX_EXECUTION_TIME hint vs. SET STATEMENT max_statement_time) each
@@ -235,14 +284,14 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       const db = await fresh();
       const conn = await db.pool.getConnection();
       try {
-        if (expectedVariant === "mariadb") {
-          // MariaDB caps WITH RECURSIVE at max_recursive_iterations
-          // (default 1000) regardless of max_statement_time — without
-          // raising it the CTE finishes in under a millisecond, long
-          // before the timeout gets a chance to fire, making this a
-          // broken test rather than a passing one.
-          await conn.query("set session max_recursive_iterations = 100000000");
-        }
+        // Both forks cap WITH RECURSIVE far below the CTE's size (MariaDB
+        // max_recursive_iterations, MySQL cte_max_recursion_depth, default
+        // 1000), so the cap is raised or the timeout never gets to fire.
+        await conn.query(
+          expectedVariant === "mariadb"
+            ? "set session max_recursive_iterations = 100000000"
+            : "set session cte_max_recursion_depth = 100000000",
+        );
         const sql = timedSelect(
           expectedVariant,
           1000,
@@ -250,7 +299,7 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
             "select 1 union all select x + 1 from slow where x < 100000000" +
             ") select x from slow) t",
         );
-        await expect(conn.query(sql)).rejects.toThrow();
+        await expect(conn.query(sql)).rejects.toSatisfy((e: unknown) => isQueryTimeout(e));
 
         // The same connection must still be usable afterward — proves
         // the mechanism is self-resetting, no stale state left behind.

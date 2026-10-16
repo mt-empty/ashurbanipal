@@ -10,6 +10,25 @@ import sqlite3
 import time
 
 from ..filter import Condition
+from ..join import (
+    BINARY,
+    BOOLEAN,
+    NUMBER,
+    TEMPORAL,
+    TEXT,
+    TIME,
+    UNTYPED,
+    UUID,
+    ColMeta,
+    Dialect,
+    JoinData,
+    JoinOpts,
+    JoinSpec,
+    TableMeta,
+    TypeClass,
+    build_select,
+    plan_join,
+)
 from . import (
     ColumnInfo,
     ColumnPair,
@@ -117,6 +136,43 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
         clause_parts.append(wrapped)
 
     return " where " + "".join(clause_parts), values
+
+
+_JOIN_DIALECT = Dialect(
+    quote=quote_ident,
+    cast_text=lambda expr: f"CAST({expr} AS TEXT)",
+    placeholder="?",
+    ilike="like",
+)
+
+
+def type_class(declared: str) -> TypeClass | None:
+    """Recognised names first, then SQLite's own affinity rules
+    (`docs/adapter-decisions.md` §5.11).
+    """
+    upper = declared.strip().upper()
+    if not upper:
+        return UNTYPED
+    base = upper.split("(")[0].strip()
+    if base == "UUID":
+        return UUID
+    if base in ("BOOLEAN", "BOOL"):
+        return BOOLEAN
+    if base in ("DATE", "DATETIME") or base.startswith("TIMESTAMP"):
+        return TEMPORAL
+    if base == "TIME":
+        return TIME
+    if base in ("JSON", "JSONB"):
+        return None
+    if "INT" in upper:
+        return NUMBER
+    if "CHAR" in upper or "CLOB" in upper or "TEXT" in upper:
+        return TEXT
+    if "BLOB" in upper:
+        return BINARY
+    if "REAL" in upper or "FLOA" in upper or "DOUB" in upper:
+        return None
+    return NUMBER
 
 
 class SqliteSource(DbSource):
@@ -292,6 +348,58 @@ class SqliteSource(DbSource):
                 # §5.4.4), not a second COUNT(*) scan on every page load.
                 total_approx=-1,
             )
+        finally:
+            conn.close()
+
+    @wrap_driver_errors(sqlite3.Error)
+    def query_join(self, schema: str | None, spec: JoinSpec, opts: JoinOpts) -> JoinData:
+        _check_schema(schema)
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            # One connection and one deadline for the catalog lookups and the
+            # select (spec/protocol.md §5.11.5).
+            self._bounded(conn, opts.timeout_secs)
+            try:
+                allowed = self._allowed_tables(cur)
+                names = spec.table_names()
+                metas: dict[str, TableMeta] = {}
+                for name in names:
+                    if name in metas:
+                        continue
+                    if name not in allowed:
+                        raise NotAllowed(f"table {name!r}", kind=NotAllowedKind.TABLE)
+                    pk_columns, fk_columns = self._key_metadata(cur, name)
+                    cur.execute(f"select cid, name, type from pragma_table_info({quote_ident(name)}) order by cid")
+                    metas[name] = TableMeta(
+                        name=name,
+                        columns=[
+                            ColMeta(
+                                name=col,
+                                type_name=declared or "unknown",
+                                cls=type_class(declared or ""),
+                                key=(
+                                    KeyKind.PK
+                                    if col in pk_columns
+                                    else (KeyKind.FK if col in fk_columns else None)
+                                ),
+                                references=fk_columns.get(col),
+                            )
+                            for _, col, declared in cur.fetchall()
+                        ],
+                    )
+                plan = plan_join(spec, [metas[n] for n in names], opts)
+
+                # The statement is built from catalog names and generated
+                # aliases only; every value is a bound parameter.
+                body, values = build_select(plan, _JOIN_DIALECT, None)
+                cur.execute(f"select {body}", (*values, opts.limit + 1, opts.offset))
+                rows, has_more = plan.rows_from(
+                    cur.fetchall(), opts.limit, lambda v: None if v is None else str(v)
+                )
+            finally:
+                self._clear_bound(conn)
+            return JoinData(columns=plan.column_infos(), rows=rows, has_more=has_more)
         finally:
             conn.close()
 

@@ -11,7 +11,15 @@ import json
 from flask import Flask
 
 from ashurbanipal.config import Config
-from ashurbanipal.db import DatabaseError, DbSource, FilterParseError, NotAllowed, NotAllowedKind
+from ashurbanipal.db import (
+    BadJoin,
+    DatabaseError,
+    DbSource,
+    FilterParseError,
+    NotAllowed,
+    NotAllowedKind,
+    QueryTimeout,
+)
 from ashurbanipal.routes import router
 
 
@@ -38,6 +46,9 @@ class _FailingSource(DbSource):
         raise self._exc
 
     def structure(self, schema, table):
+        raise self._exc
+
+    def query_join(self, schema, spec, opts):
         raise self._exc
 
 
@@ -75,3 +86,26 @@ def test_filter_parse_error_is_a_400() -> None:
     assert resp.content_type == "application/problem+json"
     body = json.loads(resp.data)
     assert body["code"] == "invalid_filter"
+
+
+_JOIN = (
+    "/__ashurbanipal/api/tables/join?join="
+    "%7B%22table%22%3A%22o%22%2C%22joins%22%3A%5B%7B%22type%22%3A%22left%22%2C%22table%22%3A%22u%22%2C"
+    "%22on%22%3A%5B%7B%22left%22%3A%7B%22join%22%3A0%2C%22column%22%3A%22a%22%7D%2C%22right%22%3A%22b%22%7D%5D%7D%5D%7D"
+)
+
+
+def test_query_timeout_is_a_problem_json_500_named_query_timeout() -> None:
+    resp = _client(QueryTimeout("canceling statement due to statement timeout")).get(_JOIN)
+    assert resp.status_code == 500
+    assert resp.content_type == "application/problem+json"
+    assert json.loads(resp.data)["code"] == "query_timeout"
+
+
+def test_bad_join_is_a_400_invalid_parameter() -> None:
+    resp = _client(BadJoin("join 1 on: orders.status (text) cannot be joined to users.id (uuid)")).get(_JOIN)
+    assert resp.status_code == 400
+    assert resp.content_type == "application/problem+json"
+    body = json.loads(resp.data)
+    assert body["code"] == "invalid_parameter"
+    assert "orders.status (text)" in body["title"]

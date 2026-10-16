@@ -194,6 +194,30 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.10-SOURCE-PARAM` | Unrecognized `source` → 400 | `structure::unknown_source_is_rejected` |
 | `P5.10-HEADER` | Carries the protocol version header on 200 and 400 | `structure::every_response_carries_the_protocol_version_header` |
 
+## §5.11 `GET /api/tables/join`
+
+| ID | Requirement | Test |
+|---|---|---|
+| `P5.11-SHAPE` | `columns` entries carry `name`, `type`, `join`, `table`, `column`; labels unique; `rows` keyed by label; `has_more` present, `total_approx` absent | `join::response_shape_has_join_metadata_and_no_total` |
+| `P5.11-COLUMN-METADATA` | §5.4.1 `key`/`references` apply per table | `join::column_metadata_is_carried_per_table` |
+| `P5.11-LEFT-INNER` | `left` keeps unmatched base rows as nulls; `inner` drops them | `join::left_keeps_unmatched_rows_and_inner_drops_them` |
+| `P5.11-THREE-TABLES` | A three-table join returns each table's columns in position order with unique labels | `join::three_table_join_returns_every_tables_columns` |
+| `P5.11-SELF-JOIN` | The same table at two positions returns both sides with distinct labels | `join::self_join_returns_both_sides` |
+| `P5.11-COLUMNS` | `columns` selects and orders the output | `join::columns_selects_and_orders_the_output` |
+| `P5.11-FILTER-JOINED` | A condition's `join` selects the table its column belongs to | `join::filter_on_a_joined_table_column` |
+| `P5.11-SORT` | `sort` + `sort_join` order by the column at that position | `join::sort_applies_to_the_table_at_sort_join` |
+| `P5.11-HAS-MORE` | `has_more` true with a following row, false on the last page; `limit` clamped | `join::has_more_reports_a_following_row` |
+| `P5.11-SCHEMA-PARAM` | Explicit default `schema` resolves like an absent one; unrecognized `schema`/`source` → 400 | `join::source_and_schema_params_resolve_like_the_other_routes` |
+| `P5.11-SCHEMA-ISOLATION` | Every table resolves only in the requested schema (Postgres, MySQL; SQLite self-skips) | `join::tables_resolve_only_in_the_requested_schema` |
+| `P5.11-NAMES-EXACT` | Tables and columns in `join`, `columns`, `sort` and `filter` matched exactly; injection-shaped input → 400, never reaches SQL | `join::unknown_and_malicious_names_are_rejected` |
+| `P5.11-JOIN-STRUCTURE` | Forward/self `on` position, pair count, join type, operator key, empty or duplicate `columns`, more than 4 tables, malformed `join` → 400 | `join::invalid_join_structures_are_rejected` |
+| `P5.11-JOIN-BOUND` | An oversize `join` is a 400, never truncated | `join::oversize_join_is_rejected` |
+| `P5.11-COMPATIBILITY` | A pair across type classes, or a `json`/`jsonb` column, → 400 `invalid_parameter` | `join::incompatible_column_pairs_are_rejected` |
+| `P5.11-SAME-CLASS` | Exact numerics of different widths join | `join::same_class_pairs_with_different_types_join` |
+| `P5.11-SORT-PARAMS` | `sort_join` needs `sort` and a real position; unknown sort column and bad `order` → 400 | `join::sort_parameters_are_validated` |
+| `P5.11-FILTER-RULES` | §5.4.2 structural rules apply; out-of-range `join` → `invalid_filter`; §5.4 rejects a `join` key | `join::filter_rules_hold_on_the_join_route` |
+| `P5.11-HEADER` | Carries the protocol version header on 200 and 400 | `join::every_response_carries_the_protocol_version_header` |
+
 ## §6 Server invariants
 
 | ID | Requirement | Test |
@@ -201,7 +225,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P6-NO-UNVALIDATED-IDENTIFIER` | No unvalidated identifier ever reaches SQL text | `table_data::malicious_table_values_are_rejected_cleanly_and_do_no_damage`, `table_data::malicious_sort_value_against_a_valid_table_is_rejected_cleanly`, `filter_dsl::injection_value_stays_a_bind_param`, `filter_dsl::unknown_column_rejection_is_a_400` |
 | `P6-READ-ONLY` | Read-only: only `SELECT`s execute | `protocol::writes_are_not_accepted` |
 | `P6-QUERY-TIMEOUT-BOUNDED` | Every query bounded by a timeout | **gap** — see [Known gaps](#known-gaps) |
-| `P6-SINGLE-TABLE-NO-JOINS` | Single table per query, no joins | not independently observable over HTTP beyond "every route's response only ever contains one table's columns/rows" — implicit in every `table_data`/`common_values` test, none of which ever request or receive cross-table shape |
+| `P6-SINGLE-TABLE-NO-JOINS` | Single table per query; the one exception is §5.11, which combines only the tables its request names | not independently observable over HTTP beyond "every route but §5.11 only ever returns one table's columns/rows" — implicit in every `table_data`/`common_values` test; §5.11 is covered by its own rows above |
 | `P6-SCHEMA-SCOPING` | Schema scoping — resolved schema (§1), never hardcoded; unrecognized `schema` rejected before reaching SQL text | `tables::schema_scoping_excludes_other_schemas`, `schemas::unrecognized_schema_values_are_rejected_cleanly_on_every_route` |
 | `P6-SOURCE-SCOPING` | Source scoping — resolved source (§1), never hardcoded; unrecognized `source` rejected before reaching dispatch | `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |
 | `P6-STATELESS` | Statelessness — no required server-side session | `protocol::every_api_response_carries_the_protocol_version_header` (asserts no `Set-Cookie`) |
@@ -280,7 +304,9 @@ to trigger deterministically):
   `pg_sleep()` from outside. Provoking a real 5s+ query would need a
   fixture engineered to make ordinary predicates slow (e.g. a
   pathological `ILIKE` over a huge unindexed column), which isn't a
-  reliable, portable conformance fixture. Left as reviewer-checklist
+  reliable, portable conformance fixture. The `query_timeout` code a
+  timed-out join or data query MUST carry is likewise covered by each
+  port's own timeout test, not this runner. Left as reviewer-checklist
   territory (`docs/design.md` §4.2's closing paragraph already flags
   this class of property as outside all three automatable layers).
 

@@ -101,6 +101,24 @@ private data class ConstraintRow(
 
 private data class FkCandidate(val columnName: String, val refSchema: String?, val refTable: String?, val refColumn: String?)
 
+private val JOIN_DIALECT = JoinDialect(
+    quote = ::quoteIdentMysql,
+    castText = { "CAST($it AS CHAR)" },
+    ilike = "lowered-like",
+)
+
+/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
+internal fun mysqlTypeClass(dataType: String, columnType: String): TypeClass? = when (dataType.lowercase()) {
+    "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> TypeClass.NUMBER
+    "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> TypeClass.TEXT
+    "date", "datetime", "timestamp" -> TypeClass.TEMPORAL
+    "time" -> TypeClass.TIME
+    "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> TypeClass.BINARY
+    "uuid" -> TypeClass.UUID
+    "enum" -> TypeClass.enum(columnType)
+    else -> null
+}
+
 /** MySQL/MariaDB [DbSource] (`spec/protocol.md` §5). */
 class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
     private val transactionTemplate = TransactionTemplate(DataSourceTransactionManager(dataSource)).apply {
@@ -265,6 +283,66 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         }
     }
 
+    private fun joinTableMeta(variant: Variant, schema: String, table: String): JoinTableMeta {
+        data class Col(val name: String, val type: String, val comment: String?, val collation: String?, val columnType: String)
+        val columns = query(
+            dataSource,
+            timedSelect(
+                variant,
+                queryTimeoutSecs,
+                "column_name, data_type, column_comment, collation_name, column_type from information_schema.columns " +
+                    "where table_schema = ? and table_name = ? order by ordinal_position",
+            ),
+            listOf(schema, table),
+        ) { rs -> Col(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)) }
+        val (pkColumns, fkColumns) = keyMetadata(variant, schema, table)
+        return JoinTableMeta(
+            table,
+            columns.map { c ->
+                JoinColMeta(
+                    name = c.name,
+                    type = c.type,
+                    cls = mysqlTypeClass(c.type, c.columnType),
+                    collation = c.collation?.takeIf { it.isNotEmpty() },
+                    key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
+                    references = fkColumns[c.name],
+                    comment = c.comment?.takeIf { it.isNotEmpty() },
+                )
+            },
+        )
+    }
+
+    override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
+        val variant = variant()
+        val realSchema = resolveSchema(variant, schema)
+        val allowed = allowedTables(variant, realSchema)
+        val names = spec.tableNames()
+        val metas = HashMap<String, JoinTableMeta>()
+        for (name in names) {
+            if (name in metas) continue
+            if (name !in allowed) throw NotAllowedException("not allowed: table $name", NotAllowedKind.TABLE)
+            metas[name] = joinTableMeta(variant, realSchema, name)
+        }
+        val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
+
+        // The statement is built from catalog names and generated aliases
+        // only; every value is a bound parameter.
+        val (body, values) = buildJoinSelect(plan, JOIN_DIALECT, realSchema)
+        val bindArgs: List<Any?> = values + (opts.limit + 1) + opts.offset
+        val rows = try {
+            query(dataSource, timedSelect(variant, queryTimeoutSecs, body), bindArgs) { rs ->
+                List(plan.labels.size) { i -> readCell(rs, i + 1) }
+            }
+        } catch (e: SQLException) {
+            // MySQL has no SELECT privilege gate; map residual 1142 to NotAllowed.
+            if (e.errorCode == 1142) {
+                throw NotAllowedException("not allowed: table ${spec.table}", NotAllowedKind.NOT_READABLE)
+            }
+            throw e
+        }
+        plan.joinData(rows, opts.limit)
+    }
+
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData = inReadOnlyTransaction {
         val variant = variant()
         val realSchema = resolveSchema(variant, schema)
@@ -345,12 +423,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     private fun rowToJson(rs: ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
         val map = LinkedHashMap<String, String?>(columns.size)
         for ((i, col) in columns.withIndex()) {
-            val value = try {
-                rs.getString(i + 1)
-            } catch (e: Exception) {
-                "<undecodable>"
-            }
-            map[col.name] = value
+            map[col.name] = readCell(rs, i + 1)
         }
         return map
     }

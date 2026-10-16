@@ -70,6 +70,31 @@ private fun <T> query(conn: Connection, sql: String, params: List<Any?> = emptyL
     }
 }
 
+private val JOIN_DIALECT = JoinDialect(
+    quote = ::quoteIdent,
+    castText = { "CAST($it AS TEXT)" },
+    ilike = "like",
+)
+
+/** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
+internal fun sqliteTypeClass(declared: String): TypeClass? {
+    val upper = declared.trim().uppercase()
+    if (upper.isEmpty()) return TypeClass.UNTYPED
+    val base = upper.substringBefore('(').trim()
+    return when {
+        base == "UUID" -> TypeClass.UUID
+        base == "BOOLEAN" || base == "BOOL" -> TypeClass.BOOLEAN
+        base == "DATE" || base == "DATETIME" || base.startsWith("TIMESTAMP") -> TypeClass.TEMPORAL
+        base == "TIME" -> TypeClass.TIME
+        base == "JSON" || base == "JSONB" -> null
+        "INT" in upper -> TypeClass.NUMBER
+        "CHAR" in upper || "CLOB" in upper || "TEXT" in upper -> TypeClass.TEXT
+        "BLOB" in upper -> TypeClass.BINARY
+        "REAL" in upper || "FLOA" in upper || "DOUB" in upper -> null
+        else -> TypeClass.NUMBER
+    }
+}
+
 /** SQLite source uses a progress handler, not `Statement.setQueryTimeout`, to interrupt running queries. */
 class SqliteSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
 
@@ -98,12 +123,12 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         }
     }
 
-    private fun allowedTables(): List<String> = bounded(queryTimeoutSecs) { conn ->
-        query(
-            conn,
-            "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' order by name",
-        ) { rs -> rs.getString(1) }
-    }
+    private fun allowedTables(): List<String> = bounded(queryTimeoutSecs) { conn -> allowedTablesOn(conn) }
+
+    private fun allowedTablesOn(conn: Connection): List<String> = query(
+        conn,
+        "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' order by name",
+    ) { rs -> rs.getString(1) }
 
     /** `table` is validated against [allowedTables] by every caller before reaching here — PRAGMA doesn't accept bound parameters for the table name, so this is the one identifier spliced into a PRAGMA string rather than bound. */
     private fun allowedColumns(table: String): List<String> = bounded(queryTimeoutSecs) { conn ->
@@ -115,7 +140,10 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
     /** Composite FKs are dropped, mirroring [PostgresSource]/[MySqlSource]. */
-    private fun keyMetadata(table: String): Pair<List<String>, Map<String, ColumnRef>> = bounded(queryTimeoutSecs) { conn ->
+    private fun keyMetadata(table: String): Pair<List<String>, Map<String, ColumnRef>> =
+        bounded(queryTimeoutSecs) { conn -> keyMetadataOn(conn, table) }
+
+    private fun keyMetadataOn(conn: Connection, table: String): Pair<List<String>, Map<String, ColumnRef>> {
         val quoted = quoteIdent(table)
         val cols = query(conn, "select cid, name, pk from pragma_table_info($quoted) order by cid") { rs ->
             Triple(rs.getLong(1), rs.getString(2), rs.getLong(3))
@@ -148,7 +176,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
             // SQLite has no schema namespace (see ONLY_SCHEMA).
             fkColumns[m.from] = ColumnRef(m.refTable, m.to, null)
         }
-        pkColumns to fkColumns
+        return pkColumns to fkColumns
     }
 
     override fun listSchemas(): List<String> = listOf(ONLY_SCHEMA)
@@ -165,6 +193,47 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         // documented "no estimate" sentinel (spec/protocol.md §5.3) rather
         // than a per-table COUNT(*) scan. See docs/adapter-decisions.md.
         return allowedTables().map { CountEntry(it, -1L) }
+    }
+
+    override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData {
+        checkSchema(schema)
+        // One connection and one deadline for the catalog lookups and the
+        // select (spec/protocol.md §5.11.5).
+        return bounded(queryTimeoutSecs) { conn ->
+            val allowed = allowedTablesOn(conn)
+            val names = spec.tableNames()
+            val metas = HashMap<String, JoinTableMeta>()
+            for (name in names) {
+                if (name in metas) continue
+                if (name !in allowed) throw NotAllowedException("not allowed: table $name", NotAllowedKind.TABLE)
+                val quoted = quoteIdent(name)
+                val (pk, fkColumns) = keyMetadataOn(conn, name)
+                metas[name] = JoinTableMeta(
+                    name,
+                    query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
+                        rs.getString(2) to (rs.getString(3) ?: "")
+                    }.map { (col, declared) ->
+                        JoinColMeta(
+                            name = col,
+                            type = declared.ifEmpty { "unknown" },
+                            cls = sqliteTypeClass(declared),
+                            key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
+                            references = fkColumns[col],
+                        )
+                    },
+                )
+            }
+            val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
+
+            // The statement is built from catalog names and generated aliases
+            // only; every value is a bound parameter.
+            val (body, values) = buildJoinSelect(plan, JOIN_DIALECT, null)
+            val bindArgs: List<Any?> = values + (opts.limit + 1) + opts.offset
+            val rows = query(conn, "select $body", bindArgs) { rs ->
+                List(plan.labels.size) { i -> readCell(rs, i + 1) }
+            }
+            plan.joinData(rows, opts.limit)
+        }
     }
 
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData {
@@ -223,12 +292,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
     private fun rowToJson(rs: ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
         val map = LinkedHashMap<String, String?>(columns.size)
         for ((i, col) in columns.withIndex()) {
-            val value = try {
-                rs.getString(i + 1)
-            } catch (e: Exception) {
-                "<undecodable>"
-            }
-            map[col.name] = value
+            map[col.name] = readCell(rs, i + 1)
         }
         return map
     }

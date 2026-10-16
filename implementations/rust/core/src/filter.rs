@@ -67,6 +67,9 @@ pub struct Condition {
     pub column: String,
     pub op: FilterOp,
     pub value: Option<String>,
+    /// Table position, accepted only by [`parse_for_join`] (`spec/protocol.md` §5.11.3).
+    #[serde(default)]
+    pub join: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +88,15 @@ fn err(message: impl Into<String>) -> FilterError {
 }
 
 pub fn parse(raw: &str) -> Result<Vec<Condition>, FilterError> {
+    parse_inner(raw, false)
+}
+
+/// Like [`parse`], but conditions may carry a `join` table position.
+pub fn parse_for_join(raw: &str) -> Result<Vec<Condition>, FilterError> {
+    parse_inner(raw, true)
+}
+
+fn parse_inner(raw: &str, allow_join: bool) -> Result<Vec<Condition>, FilterError> {
     if raw.len() > MAX_FILTER_BYTES {
         return Err(err(format!(
             "filter too long: {} bytes (max {MAX_FILTER_BYTES})",
@@ -100,6 +112,9 @@ pub fn parse(raw: &str) -> Result<Vec<Condition>, FilterError> {
         )));
     }
     for (i, condition) in conditions.iter().enumerate() {
+        if condition.join.is_some() && !allow_join {
+            return Err(err("join is only valid on the join route"));
+        }
         match (i, condition.logic) {
             (0, Some(_)) => return Err(err("logic must be absent on the first condition")),
             (1.., None) => {

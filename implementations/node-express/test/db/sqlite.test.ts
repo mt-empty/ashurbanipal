@@ -1,8 +1,9 @@
 import { Database } from "sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { partialIndexPredicate, SqliteSource } from "../../src/db/sqlite.js";
+import { partialIndexPredicate, SqliteSource, sqliteTypeClass } from "../../src/db/sqlite.js";
 import type { QueryOpts } from "../../src/db/types.js";
-import { NotAllowedError } from "../../src/errors.js";
+import { isQueryTimeout, NotAllowedError } from "../../src/errors.js";
+import { BadJoinError, type JoinSpec, parseJoin } from "../../src/join.js";
 
 // No external infrastructure is needed (":memory:").
 
@@ -300,7 +301,7 @@ describe("SqliteSource", () => {
         );
         setTimeout(() => db.interrupt(), 200);
       }),
-    ).rejects.toThrow();
+    ).rejects.toSatisfy((e: unknown) => isQueryTimeout(e));
     // Interrupted well before the query could have finished unbounded.
     expect(Date.now() - start).toBeLessThan(5000);
 
@@ -318,5 +319,113 @@ describe("partialIndexPredicate", () => {
     expect(partialIndexPredicate("CREATE INDEX i ON t(a) WHERE note = ' where '")).toBe("note = ' where '");
     expect(partialIndexPredicate("CREATE INDEX i ON t(a || ' where ')")).toBeUndefined();
     expect(partialIndexPredicate("CREATE INDEX i ON t(lower(a) )")).toBeUndefined();
+  });
+});
+
+describe("SqliteSource.queryJoin", () => {
+  let db: Database;
+
+  afterEach(async () => {
+    if (db) await closeDb(db);
+  });
+
+  const joinOpts = { limit: 10, offset: 0, descending: false, filter: [] };
+  const usersOrders = (type: string): JoinSpec =>
+    parseJoin(
+      JSON.stringify({
+        table: "users",
+        joins: [{ type, table: "orders", on: [{ left: { join: 0, column: "id" }, right: "user_id" }] }],
+      }),
+    );
+
+  it("keeps unmatched rows on left and drops them on inner", async () => {
+    db = await seededDb();
+    const source = new SqliteSource(db);
+    const left = await source.queryJoin(undefined, usersOrders("left"), joinOpts, 5000);
+    expect(left.rows).toHaveLength(3);
+    expect(left.has_more).toBe(false);
+    expect(left.rows.filter((r) => r.status === null)).toHaveLength(2);
+    const inner = await source.queryJoin(undefined, usersOrders("inner"), joinOpts, 5000);
+    expect(inner.rows).toHaveLength(1);
+  });
+
+  it("self-joins with distinct labels and reports has_more", async () => {
+    db = await seededDb();
+    const source = new SqliteSource(db);
+    const self = parseJoin(
+      JSON.stringify({
+        table: "users",
+        joins: [{ type: "inner", table: "users", on: [{ left: { join: 0, column: "age" }, right: "age" }] }],
+        columns: [
+          { join: 0, column: "id" },
+          { join: 1, column: "id" },
+        ],
+      }),
+    );
+    const page = await source.queryJoin(undefined, self, { ...joinOpts, limit: 2 }, 5000);
+    expect(page.rows).toHaveLength(2);
+    expect(page.has_more).toBe(true);
+    expect(page.columns.map((c) => c.name)).toEqual(["id_0", "id_1"]);
+  });
+
+  it("filters and sorts on a joined table's column", async () => {
+    db = await seededDb();
+    const source = new SqliteSource(db);
+    const three = parseJoin(
+      JSON.stringify({
+        table: "orders",
+        joins: [
+          { type: "left", table: "users", on: [{ left: { join: 0, column: "user_id" }, right: "id" }] },
+          { type: "left", table: "order_extra", on: [{ left: { join: 0, column: "id" }, right: "order_id" }] },
+        ],
+        columns: [
+          { join: 0, column: "id" },
+          { join: 1, column: "email" },
+          { join: 2, column: "gift_message" },
+        ],
+      }),
+    );
+    const data = await source.queryJoin(
+      undefined,
+      three,
+      { ...joinOpts, sort: "email", sortJoin: 1, filter: [{ column: "email", op: "LIKE", value: "a@%", join: 1 }] },
+      5000,
+    );
+    expect(data.rows).toEqual([{ id: "1", email: "a@x.com", gift_message: "enjoy!" }]);
+  });
+
+  it("rejects hostile names, mismatched types and other schemas", async () => {
+    db = await seededDb();
+    const source = new SqliteSource(db);
+    const hostile = parseJoin(
+      JSON.stringify({
+        table: 'users"; drop table users; --',
+        joins: [{ type: "left", table: "orders", on: [{ left: { join: 0, column: "id" }, right: "user_id" }] }],
+      }),
+    );
+    await expect(source.queryJoin(undefined, hostile, joinOpts, 5000)).rejects.toBeInstanceOf(NotAllowedError);
+    const mismatch = parseJoin(
+      JSON.stringify({
+        table: "users",
+        joins: [{ type: "left", table: "orders", on: [{ left: { join: 0, column: "email" }, right: "user_id" }] }],
+      }),
+    );
+    await expect(source.queryJoin(undefined, mismatch, joinOpts, 5000)).rejects.toBeInstanceOf(BadJoinError);
+    await expect(source.queryJoin("other", usersOrders("left"), joinOpts, 5000)).rejects.toBeInstanceOf(
+      NotAllowedError,
+    );
+  });
+});
+
+describe("sqliteTypeClass", () => {
+  it("classes follow declared names, then affinity", () => {
+    expect(sqliteTypeClass("INTEGER")).toEqual({ kind: "number" });
+    expect(sqliteTypeClass("DECIMAL(10,2)")).toEqual({ kind: "number" });
+    expect(sqliteTypeClass("VARCHAR(20)")).toEqual({ kind: "text" });
+    expect(sqliteTypeClass("BLOB")).toEqual({ kind: "binary" });
+    expect(sqliteTypeClass("UUID")).toEqual({ kind: "uuid" });
+    expect(sqliteTypeClass("TIMESTAMP(6)")).toEqual({ kind: "temporal" });
+    expect(sqliteTypeClass("")).toEqual({ kind: "untyped" });
+    for (const t of ["REAL", "DOUBLE PRECISION", "JSON"]) expect(sqliteTypeClass(t), t).toBeUndefined();
   });
 });

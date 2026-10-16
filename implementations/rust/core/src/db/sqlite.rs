@@ -10,6 +10,9 @@ use super::{
     NotAllowedKind, QueryOpts, ReferencedBy, Structure, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
+use crate::join::{
+    self, ColMeta, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta, TypeClass,
+};
 
 /// Catalog/metadata queries need a fixed bounded timeout.
 const CATALOG_TIMEOUT_SECS: u32 = 5;
@@ -67,15 +70,7 @@ impl SqliteSource {
 
     async fn allowed_tables(&self) -> Result<Vec<String>, DbError> {
         self.bounded(CATALOG_TIMEOUT_SECS, async |conn| {
-            let rows = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(
-                "select name from sqlite_master \
-                 where type = 'table' and name not like 'sqlite\\_%' escape '\\' \
-                 order by name"
-                    .to_string(),
-            ))
-            .fetch_all(&mut *conn)
-            .await?;
-            Ok(rows)
+            allowed_tables_on(conn).await
         })
         .await
     }
@@ -104,66 +99,85 @@ impl SqliteSource {
         &self,
         table: &str,
     ) -> Result<(Vec<String>, HashMap<String, ColumnRef>), DbError> {
-        let table = quote_ident(table);
+        let table = table.to_string();
         self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-            let cols = sqlx::query_as::<_, (i64, String, i64)>(sqlx::AssertSqlSafe(format!(
-                "select cid, name, pk from pragma_table_info({table}) order by cid"
-            )))
-            .fetch_all(&mut *conn)
-            .await?;
-            let pk_columns: Vec<String> = cols
-                .into_iter()
-                .filter(|(_, _, pk)| *pk > 0)
-                .map(|(_, name, _)| name)
-                .collect();
-
-            // (id, seq, table, from, to) — `id` groups columns belonging to
-            // the same constraint (composite FKs share an id). The quoted
-            // "table"/"from"/"to" are pragma_foreign_key_list's own fixed
-            // output column names (SQL keywords needing escape), not the
-            // caller-supplied table.
-            //
-            // `REFERENCES parent` shorthand leaves `to` NULL; `ppk` resolves
-            // it by position against the parent's PK, correlated per FK row
-            // since each can reference a different parent — unlike
-            // `referenced_by`'s single bound parent (docs/adapter-decisions.md §5.4.1).
-            let fks = sqlx::query_as::<_, (i64, i64, String, String, String)>(sqlx::AssertSqlSafe(
-                format!(
-                    "select fkl.id, fkl.seq, fkl.\"table\", fkl.\"from\", \
-                            coalesce(fkl.\"to\", ppk.name, 'rowid') \
-                     from pragma_foreign_key_list({table}) fkl \
-                     left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1"
-                ),
-            ))
-            .fetch_all(&mut *conn)
-            .await?;
-            let mut by_constraint: HashMap<i64, Vec<(String, String, String)>> = HashMap::new();
-            for (id, _seq, ref_table, from, to) in fks {
-                by_constraint
-                    .entry(id)
-                    .or_default()
-                    .push((from, ref_table, to));
-            }
-            let mut fk_columns = HashMap::new();
-            for members in by_constraint.into_values() {
-                if members.len() != 1 {
-                    continue;
-                }
-                let (from, ref_table, to) = members.into_iter().next().unwrap();
-                fk_columns.insert(
-                    from,
-                    ColumnRef {
-                        table: ref_table,
-                        column: to,
-                        // SQLite has no schema namespace (see ONLY_SCHEMA).
-                        schema: None,
-                    },
-                );
-            }
-            Ok((pk_columns, fk_columns))
+            key_metadata_on(conn, &table).await
         })
         .await
     }
+}
+
+/// `table` must already be allow-listed: it is spliced into the pragma calls.
+async fn allowed_tables_on(conn: &mut sqlx::SqliteConnection) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(
+        "select name from sqlite_master \
+         where type = 'table' and name not like 'sqlite\\_%' escape '\\' \
+         order by name"
+            .to_string(),
+    ))
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
+async fn key_metadata_on(
+    conn: &mut sqlx::SqliteConnection,
+    table: &str,
+) -> Result<(Vec<String>, HashMap<String, ColumnRef>), DbError> {
+    let table = quote_ident(table);
+    let cols = sqlx::query_as::<_, (i64, String, i64)>(sqlx::AssertSqlSafe(format!(
+        "select cid, name, pk from pragma_table_info({table}) order by cid"
+    )))
+    .fetch_all(&mut *conn)
+    .await?;
+    let pk_columns: Vec<String> = cols
+        .into_iter()
+        .filter(|(_, _, pk)| *pk > 0)
+        .map(|(_, name, _)| name)
+        .collect();
+
+    // (id, seq, table, from, to) — `id` groups columns belonging to
+    // the same constraint (composite FKs share an id). The quoted
+    // "table"/"from"/"to" are pragma_foreign_key_list's own fixed
+    // output column names (SQL keywords needing escape), not the
+    // caller-supplied table.
+    //
+    // `REFERENCES parent` shorthand leaves `to` NULL; `ppk` resolves
+    // it by position against the parent's PK, correlated per FK row
+    // since each can reference a different parent — unlike
+    // `referenced_by`'s single bound parent (docs/adapter-decisions.md §5.4.1).
+    let fks =
+        sqlx::query_as::<_, (i64, i64, String, String, String)>(sqlx::AssertSqlSafe(format!(
+            "select fkl.id, fkl.seq, fkl.\"table\", fkl.\"from\", \
+                    coalesce(fkl.\"to\", ppk.name, 'rowid') \
+             from pragma_foreign_key_list({table}) fkl \
+             left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1"
+        )))
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut by_constraint: HashMap<i64, Vec<(String, String, String)>> = HashMap::new();
+    for (id, _seq, ref_table, from, to) in fks {
+        by_constraint
+            .entry(id)
+            .or_default()
+            .push((from, ref_table, to));
+    }
+    let mut fk_columns = HashMap::new();
+    for members in by_constraint.into_values() {
+        if members.len() != 1 {
+            continue;
+        }
+        let (from, ref_table, to) = members.into_iter().next().unwrap();
+        fk_columns.insert(
+            from,
+            ColumnRef {
+                table: ref_table,
+                column: to,
+                // SQLite has no schema namespace (see ONLY_SCHEMA).
+                schema: None,
+            },
+        );
+    }
+    Ok((pk_columns, fk_columns))
 }
 
 /// The text after a `CREATE INDEX` statement's top-level `WHERE`, ignoring
@@ -204,18 +218,100 @@ fn partial_index_predicate(sql: &str) -> Option<String> {
     None
 }
 
-fn row_to_json(
+/// `spec/protocol.md` §5.11.2: recognised names first, then SQLite's own
+/// affinity rules (`docs/adapter-decisions.md` §5.11).
+fn type_class(declared: &str) -> Option<TypeClass> {
+    let upper = declared.trim().to_ascii_uppercase();
+    if upper.is_empty() {
+        return Some(TypeClass::Untyped);
+    }
+    let base = upper.split('(').next().unwrap_or("").trim();
+    match base {
+        "UUID" => return Some(TypeClass::Uuid),
+        "BOOLEAN" | "BOOL" => return Some(TypeClass::Boolean),
+        "DATE" | "DATETIME" => return Some(TypeClass::Temporal),
+        "TIME" => return Some(TypeClass::Time),
+        "JSON" | "JSONB" => return None,
+        _ if base.starts_with("TIMESTAMP") => return Some(TypeClass::Temporal),
+        _ => {}
+    }
+    if upper.contains("INT") {
+        Some(TypeClass::Number)
+    } else if upper.contains("CHAR") || upper.contains("CLOB") || upper.contains("TEXT") {
+        Some(TypeClass::Text)
+    } else if upper.contains("BLOB") {
+        Some(TypeClass::Binary)
+    } else if upper.contains("REAL") || upper.contains("FLOA") || upper.contains("DOUB") {
+        None
+    } else {
+        Some(TypeClass::Number)
+    }
+}
+
+fn cast_text(column: &str) -> String {
+    format!("CAST({column} AS TEXT)")
+}
+
+const JOIN_DIALECT: Dialect = Dialect {
+    quote: quote_ident,
+    cast_text,
+    numbered: false,
+    ilike: IlikeStyle::Like,
+};
+
+async fn join_table_meta(
+    conn: &mut sqlx::SqliteConnection,
+    table: &str,
+) -> Result<TableMeta, DbError> {
+    let quoted = quote_ident(table);
+    let columns = sqlx::query_as::<_, (i64, String, String)>(sqlx::AssertSqlSafe(format!(
+        "select cid, name, type from pragma_table_info({quoted}) order by cid"
+    )))
+    .fetch_all(&mut *conn)
+    .await?;
+    let (pk_columns, fk_columns) = key_metadata_on(conn, table).await?;
+    Ok(TableMeta {
+        name: table.to_string(),
+        columns: columns
+            .into_iter()
+            .map(|(_, name, declared)| {
+                let (key, references) = if pk_columns.contains(&name) {
+                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
+                } else if let Some(r) = fk_columns.get(&name) {
+                    (Some(KeyKind::Fk), Some(r.clone()))
+                } else {
+                    (None, None)
+                };
+                ColMeta {
+                    class: type_class(&declared),
+                    collation: None,
+                    comment: None,
+                    key,
+                    references,
+                    type_name: if declared.is_empty() {
+                        "unknown".to_string()
+                    } else {
+                        declared
+                    },
+                    name,
+                }
+            })
+            .collect(),
+    })
+}
+
+fn row_to_json<'a>(
     row: &SqliteRow,
-    columns: &[ColumnInfo],
+    names: impl ExactSizeIterator<Item = &'a str>,
 ) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::with_capacity(columns.len());
-    for (i, col) in columns.iter().enumerate() {
+    let mut map = serde_json::Map::with_capacity(names.len());
+    for (i, name) in names.enumerate() {
         let value = match row.try_get::<Option<String>, _>(i) {
             Ok(Some(text)) => serde_json::Value::String(text),
             Ok(None) => serde_json::Value::Null,
             Err(_) => serde_json::Value::String("<undecodable>".to_string()),
         };
-        map.insert(col.name.clone(), value);
+        map.insert(name.to_string(), value);
     }
     map
 }
@@ -419,7 +515,7 @@ impl DbSource for SqliteSource {
 
                 let rows = sqlite_rows
                     .iter()
-                    .map(|r| row_to_json(r, &columns))
+                    .map(|r| row_to_json(r, columns.iter().map(|c| c.name.as_str())))
                     .collect();
                 Ok((rows, columns))
             })
@@ -433,6 +529,58 @@ impl DbSource for SqliteSource {
             // not a second COUNT(*) scan on every page load.
             total_approx: -1,
         })
+    }
+
+    async fn query_join(
+        &self,
+        schema: Option<&str>,
+        spec: &JoinSpec,
+        opts: JoinOpts,
+    ) -> Result<JoinData, DbError> {
+        check_schema(schema)?;
+        let names = spec.table_names();
+        // Catalog lookups and the select share one connection and one
+        // deadline (`spec/protocol.md` §5.11.5).
+        self.bounded(opts.timeout_secs, async |conn| {
+            let allowed = allowed_tables_on(conn).await?;
+            let mut metas: HashMap<&str, TableMeta> = HashMap::new();
+            for name in &names {
+                if metas.contains_key(name) {
+                    continue;
+                }
+                if !allowed.iter().any(|t| t == name) {
+                    return Err(DbError::not_allowed(
+                        NotAllowedKind::Table,
+                        format!("table {name:?}"),
+                    ));
+                }
+                metas.insert(name, join_table_meta(conn, name).await?);
+            }
+            let tables = names.iter().map(|n| metas[n].clone()).collect();
+            let plan = join::plan(spec, tables, &opts)?;
+            let (body, values) = join::build_select(&plan, &JOIN_DIALECT, None);
+
+            // AssertSqlSafe: the statement is built from catalog names and
+            // generated aliases only; all values are bound.
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(format!("select {body}")));
+            for value in &values {
+                query = query.bind(value);
+            }
+            query = query.bind(opts.limit as i64 + 1).bind(opts.offset as i64);
+            let mut sqlite_rows = query.fetch_all(&mut *conn).await?;
+
+            let has_more = sqlite_rows.len() > opts.limit as usize;
+            sqlite_rows.truncate(opts.limit as usize);
+            Ok(JoinData {
+                columns: plan.columns(),
+                rows: sqlite_rows
+                    .iter()
+                    .map(|r| row_to_json(r, plan.labels().iter().map(String::as_str)))
+                    .collect(),
+                has_more,
+            })
+        })
+        .await
     }
 
     async fn common_values(
@@ -1095,7 +1243,10 @@ mod tests {
                 .map_err(DbError::from)
             })
             .await;
-        assert!(err.is_err(), "expected the slow query to be interrupted");
+        assert!(
+            matches!(err, Err(DbError::QueryTimeout)),
+            "expected the interrupt to surface as QueryTimeout, got {err:?}"
+        );
 
         // The connection must still be usable afterward — proves the
         // handler was cleared, not left armed with a stale deadline.
@@ -1108,5 +1259,155 @@ mod tests {
             })
             .await;
         assert_eq!(ok.unwrap(), 1);
+    }
+
+    fn join_opts() -> JoinOpts {
+        JoinOpts {
+            limit: 10,
+            offset: 0,
+            sort: None,
+            sort_join: None,
+            descending: false,
+            timeout_secs: 5,
+            filter: None,
+        }
+    }
+
+    fn spec(raw: &str) -> JoinSpec {
+        JoinSpec::parse(raw).unwrap()
+    }
+
+    const USERS_ORDERS: &str = r#"{"table":"users","joins":[{"type":"TYPE","table":"orders",
+        "on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}"#;
+
+    #[tokio::test]
+    async fn left_join_keeps_unmatched_rows_and_inner_drops_them() {
+        let source = SqliteSource::new(seeded_pool().await);
+        let left = source
+            .query_join(
+                None,
+                &spec(&USERS_ORDERS.replace("TYPE", "left")),
+                join_opts(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(left.rows.len(), 3);
+        assert!(!left.has_more);
+        let status = &left
+            .columns
+            .iter()
+            .find(|c| c.column == "status")
+            .unwrap()
+            .name;
+        let unmatched = left.rows.iter().filter(|r| r[status].is_null()).count();
+        assert_eq!(unmatched, 2);
+
+        let inner = source
+            .query_join(
+                None,
+                &spec(&USERS_ORDERS.replace("TYPE", "inner")),
+                join_opts(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(inner.rows.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn self_join_has_more_and_distinct_labels() {
+        let source = SqliteSource::new(seeded_pool().await);
+        let self_join = spec(
+            r#"{"table":"users","joins":[{"type":"inner","table":"users",
+                "on":[{"left":{"join":0,"column":"age"},"right":"age"}]}],
+                "columns":[{"join":0,"column":"id"},{"join":1,"column":"id"}]}"#,
+        );
+        let mut opts = join_opts();
+        opts.limit = 2;
+        let page = source.query_join(None, &self_join, opts).await.unwrap();
+        assert_eq!(page.rows.len(), 2);
+        assert!(page.has_more, "5 pairs exist, 2 returned");
+        let labels: Vec<_> = page.columns.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(labels, ["id_0", "id_1"]);
+        assert!(page.rows[0].contains_key("id_0") && page.rows[0].contains_key("id_1"));
+    }
+
+    #[tokio::test]
+    async fn three_tables_filter_and_sort_on_joined_columns() {
+        let source = SqliteSource::new(seeded_pool().await);
+        let three = spec(
+            r#"{"table":"orders","joins":[
+                {"type":"left","table":"users","on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]},
+                {"type":"left","table":"order_extra","on":[{"left":{"join":0,"column":"id"},"right":"order_id"}]}],
+                "columns":[{"join":0,"column":"id"},{"join":1,"column":"email"},{"join":2,"column":"gift_message"}]}"#,
+        );
+        let mut opts = join_opts();
+        opts.filter = Some(vec![crate::filter::Condition {
+            logic: None,
+            not: false,
+            column: "email".into(),
+            op: crate::filter::FilterOp::Like,
+            value: Some("a@%".into()),
+            join: Some(1),
+        }]);
+        opts.sort = Some("email".into());
+        opts.sort_join = Some(1);
+        let data = source.query_join(None, &three, opts).await.unwrap();
+        assert_eq!(data.rows.len(), 1);
+        assert_eq!(data.rows[0]["gift_message"], "enjoy!");
+    }
+
+    #[tokio::test]
+    async fn rejects_hostile_names_and_incompatible_pairs() {
+        let source = SqliteSource::new(seeded_pool().await);
+        let hostile = spec(
+            r#"{"table":"users\"; drop table users; --","joins":[{"type":"left","table":"orders",
+                "on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}"#,
+        );
+        assert!(matches!(
+            source.query_join(None, &hostile, join_opts()).await,
+            Err(DbError::NotAllowed(_))
+        ));
+        let mismatch = spec(
+            r#"{"table":"users","joins":[{"type":"left","table":"orders",
+                "on":[{"left":{"join":0,"column":"email"},"right":"user_id"}]}]}"#,
+        );
+        assert!(matches!(
+            source.query_join(None, &mismatch, join_opts()).await,
+            Err(DbError::BadJoin(_))
+        ));
+        assert!(matches!(
+            source
+                .query_join(
+                    Some("other"),
+                    &spec(&USERS_ORDERS.replace("TYPE", "left")),
+                    join_opts()
+                )
+                .await,
+            Err(DbError::NotAllowed(_))
+        ));
+    }
+
+    #[test]
+    fn type_classes_follow_declared_names_then_affinity() {
+        use TypeClass::*;
+        for (declared, expected) in [
+            ("INTEGER", Some(Number)),
+            ("bigint", Some(Number)),
+            ("DECIMAL(10,2)", Some(Number)),
+            ("VARCHAR(20)", Some(Text)),
+            ("TEXT", Some(Text)),
+            ("BLOB", Some(Binary)),
+            ("REAL", None),
+            ("DOUBLE PRECISION", None),
+            ("UUID", Some(Uuid)),
+            ("BOOLEAN", Some(Boolean)),
+            ("DATETIME", Some(Temporal)),
+            ("TIMESTAMP(6)", Some(Temporal)),
+            ("TIME", Some(Time)),
+            ("JSON", None),
+            ("", Some(Untyped)),
+        ] {
+            assert_eq!(type_class(declared), expected, "{declared:?}");
+        }
     }
 }

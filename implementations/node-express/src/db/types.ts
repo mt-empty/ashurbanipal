@@ -1,4 +1,5 @@
 import type { Condition } from "../filter.js";
+import type { JoinData, JoinOpts, JoinSpec } from "../join.js";
 
 export type KeyKind = "pk" | "fk";
 
@@ -118,6 +119,8 @@ export interface DbSource {
   referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]>;
   /** Indexes and constraints of `table` (`spec/protocol.md` §5.10). */
   structure(schema: string | undefined, table: string, timeoutMs: number): Promise<Structure>;
+  /** Rows from the tables a join names (`spec/protocol.md` §5.11). */
+  queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData>;
 }
 
 export function findExact(haystack: string[], needle: string): string | undefined {

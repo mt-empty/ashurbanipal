@@ -21,6 +21,7 @@ const ALL_MOUNT_PATHS = [
   "/__ashurbanipal/api/tables/common-values",
   "/__ashurbanipal/api/tables/referenced-by",
   "/__ashurbanipal/api/tables/structure",
+  "/__ashurbanipal/api/tables/join",
   "/__ashurbanipal/api/siblings",
 ];
 

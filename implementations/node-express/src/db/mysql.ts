@@ -2,6 +2,20 @@ import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 import { assertSafeTimeoutMs, FilterError, mapSelectDeniedMysql, NotAllowedError } from "../errors.js";
 import type { Condition } from "../filter.js";
 import {
+  buildJoinSelect,
+  type JoinColMeta,
+  type JoinData,
+  type JoinDialect,
+  type JoinOpts,
+  type JoinSpec,
+  type JoinTableMeta,
+  joinColumnInfos,
+  joinRows,
+  joinTableNames,
+  planJoin,
+  type TypeClass,
+} from "../join.js";
+import {
   type ColumnInfo,
   type ColumnRef,
   type CommonValueEntry,
@@ -84,6 +98,54 @@ export function buildWhereClauseMysql(
   });
 
   return { where: ` where ${clause}`, values };
+}
+
+const JOIN_DIALECT: JoinDialect = {
+  quote: quoteIdentMysql,
+  castText: (expr) => `CAST(${expr} AS CHAR)`,
+  numbered: false,
+  ilike: "lowered-like",
+};
+
+/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
+export function mysqlTypeClass(dataType: string, columnType: string): TypeClass | undefined {
+  switch (dataType.toLowerCase()) {
+    case "tinyint":
+    case "smallint":
+    case "mediumint":
+    case "int":
+    case "integer":
+    case "bigint":
+    case "decimal":
+    case "numeric":
+      return { kind: "number" };
+    case "char":
+    case "varchar":
+    case "tinytext":
+    case "text":
+    case "mediumtext":
+    case "longtext":
+      return { kind: "text" };
+    case "date":
+    case "datetime":
+    case "timestamp":
+      return { kind: "temporal" };
+    case "time":
+      return { kind: "time" };
+    case "binary":
+    case "varbinary":
+    case "tinyblob":
+    case "blob":
+    case "mediumblob":
+    case "longblob":
+      return { kind: "binary" };
+    case "uuid":
+      return { kind: "uuid" };
+    case "enum":
+      return { kind: "enum", id: columnType };
+    default:
+      return undefined;
+  }
 }
 
 async function queryRows(
@@ -314,6 +376,79 @@ export class MySqlSource implements DbSource {
         table: r.table_name as string,
         approx_rows: r.table_rows === null ? -1 : Number(r.table_rows),
       }));
+    });
+  }
+
+  private async joinTableMeta(
+    conn: PoolConnection,
+    variant: Variant,
+    schema: string,
+    table: string,
+    timeoutMs: number,
+  ): Promise<JoinTableMeta> {
+    const rows = await queryRows(
+      conn,
+      timedSelect(
+        variant,
+        timeoutMs,
+        "column_name as column_name, data_type as data_type, column_comment as column_comment, " +
+          "collation_name as collation_name, column_type as column_type " +
+          "from information_schema.columns where table_schema = ? and table_name = ? order by ordinal_position",
+      ),
+      [schema, table],
+    );
+    const { pkColumns, fkColumns } = await this.keyMetadataInTx(conn, variant, schema, table, timeoutMs);
+    const columns = rows.map((r): JoinColMeta => {
+      const name = r.column_name as string;
+      const col: JoinColMeta = {
+        name,
+        type: r.data_type as string,
+        class: mysqlTypeClass(r.data_type as string, String(r.column_type)),
+      };
+      if (r.collation_name) col.collation = r.collation_name as string;
+      if (pkColumns.has(name)) {
+        col.key = "pk";
+        if (fkColumns.has(name)) col.references = fkColumns.get(name);
+      } else if (fkColumns.has(name)) {
+        col.key = "fk";
+        col.references = fkColumns.get(name);
+      }
+      const comment = r.column_comment as string;
+      if (comment.length > 0) col.comment = comment;
+      return col;
+    });
+    return { name: table, columns };
+  }
+
+  async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
+    return this.withTx(async (conn, variant) => {
+      const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
+      const allowed = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
+      const names = joinTableNames(spec);
+      const metas = new Map<string, JoinTableMeta>();
+      for (const name of names) {
+        if (metas.has(name)) continue;
+        if (!findExact(allowed, name)) throw new NotAllowedError(`table "${name}"`, "table");
+        metas.set(name, await this.joinTableMeta(conn, variant, realSchema, name, timeoutMs));
+      }
+      const plan = planJoin(
+        spec,
+        names.map((n) => metas.get(n) as JoinTableMeta),
+        opts,
+      );
+
+      // The statement is built from catalog names and generated aliases
+      // only; every value is a bound ? parameter.
+      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT, realSchema);
+      const rows = await queryRows(conn, timedSelect(variant, timeoutMs, body), [
+        ...values,
+        opts.limit + 1,
+        opts.offset,
+      ]).catch((err: unknown) => {
+        throw mapSelectDeniedMysql(err, spec.table);
+      });
+      const out = joinRows(plan, rows, opts.limit, cellToJson);
+      return { columns: joinColumnInfos(plan), rows: out.rows, has_more: out.hasMore };
     });
   }
 

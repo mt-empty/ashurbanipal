@@ -10,6 +10,7 @@ mod common;
 mod common_values;
 mod filter_dsl;
 mod html_and_siblings;
+mod join;
 mod protocol;
 mod referenced_by;
 mod schemas;

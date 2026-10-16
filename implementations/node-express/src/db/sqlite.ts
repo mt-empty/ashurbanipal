@@ -2,6 +2,20 @@ import type { Database } from "sqlite3";
 import { FilterError, NotAllowedError, quoteIdent } from "../errors.js";
 import type { Condition } from "../filter.js";
 import {
+  buildJoinSelect,
+  type JoinColMeta,
+  type JoinData,
+  type JoinDialect,
+  type JoinOpts,
+  type JoinSpec,
+  type JoinTableMeta,
+  joinColumnInfos,
+  joinRows,
+  joinTableNames,
+  planJoin,
+  type TypeClass,
+} from "../join.js";
+import {
   type ColumnInfo,
   type ColumnRef,
   type CommonValueEntry,
@@ -86,14 +100,17 @@ function bounded<T>(db: Database, timeoutMs: number, fn: () => Promise<T>): Prom
   });
 }
 
-async function allowedTables(db: Database, timeoutMs: number): Promise<string[]> {
-  const rows = await bounded(db, timeoutMs, () =>
-    dbAll<{ name: string }>(
-      db,
-      "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' order by name",
-    ),
+// The caller owns the deadline (queryJoin runs every lookup under one).
+async function allowedTablesUnbounded(db: Database): Promise<string[]> {
+  const rows = await dbAll<{ name: string }>(
+    db,
+    "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' order by name",
   );
   return rows.map((r) => r.name);
+}
+
+async function allowedTables(db: Database, timeoutMs: number): Promise<string[]> {
+  return bounded(db, timeoutMs, () => allowedTablesUnbounded(db));
 }
 
 // PRAGMA cannot bind table names; callers supply an allow-listed table
@@ -112,30 +129,35 @@ async function keyMetadata(
   table: string,
   timeoutMs: number,
 ): Promise<{ pkColumns: Set<string>; fkColumns: Map<string, ColumnRef> }> {
+  return bounded(db, timeoutMs, () => keyMetadataUnbounded(db, table));
+}
+
+// The caller owns the deadline (queryJoin runs every lookup under one).
+async function keyMetadataUnbounded(
+  db: Database,
+  table: string,
+): Promise<{ pkColumns: Set<string>; fkColumns: Map<string, ColumnRef> }> {
   const quoted = quoteIdent(table);
-  const { cols, fks } = await bounded(db, timeoutMs, async () => {
-    const cols = await dbAll<{ cid: number; name: string; pk: number }>(
-      db,
-      `select cid, name, pk from pragma_table_info(${quoted}) order by cid`,
-    );
-    // (id, seq, table, from, to) — `id` groups columns belonging to the
-    // same constraint (composite FKs share an id). The quoted
-    // "table"/"from"/"to" are pragma_foreign_key_list's own fixed output
-    // column names (SQL keywords needing escape), not the caller-supplied
-    // table.
-    //
-    // "REFERENCES parent" shorthand leaves "to" NULL; ppk resolves it by
-    // position against the parent's PK, correlated per FK row since each
-    // can reference a different parent — unlike referencedBy's single
-    // bound parent (docs/adapter-decisions.md §5.4.1).
-    const fks = await dbAll<{ id: number; seq: number; table: string; from: string; to: string }>(
-      db,
-      `select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid') as "to"
-       from pragma_foreign_key_list(${quoted}) fkl
-       left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1`,
-    );
-    return { cols, fks };
-  });
+  const cols = await dbAll<{ cid: number; name: string; pk: number }>(
+    db,
+    `select cid, name, pk from pragma_table_info(${quoted}) order by cid`,
+  );
+  // (id, seq, table, from, to) — `id` groups columns belonging to the
+  // same constraint (composite FKs share an id). The quoted
+  // "table"/"from"/"to" are pragma_foreign_key_list's own fixed output
+  // column names (SQL keywords needing escape), not the caller-supplied
+  // table.
+  //
+  // "REFERENCES parent" shorthand leaves "to" NULL; ppk resolves it by
+  // position against the parent's PK, correlated per FK row since each
+  // can reference a different parent — unlike referencedBy's single
+  // bound parent (docs/adapter-decisions.md §5.4.1).
+  const fks = await dbAll<{ id: number; seq: number; table: string; from: string; to: string }>(
+    db,
+    `select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid') as "to"
+     from pragma_foreign_key_list(${quoted}) fkl
+     left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1`,
+  );
 
   const pkColumns = new Set(cols.filter((c) => c.pk > 0).map((c) => c.name));
 
@@ -154,6 +176,30 @@ async function keyMetadata(
     fkColumns.set(from, { table: refTable, column: to });
   }
   return { pkColumns, fkColumns };
+}
+
+const JOIN_DIALECT: JoinDialect = {
+  quote: quoteIdent,
+  castText: (expr) => `CAST(${expr} AS TEXT)`,
+  numbered: false,
+  ilike: "like",
+};
+
+/** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
+export function sqliteTypeClass(declared: string): TypeClass | undefined {
+  const upper = declared.trim().toUpperCase();
+  if (upper === "") return { kind: "untyped" };
+  const base = (upper.split("(")[0] as string).trim();
+  if (base === "UUID") return { kind: "uuid" };
+  if (base === "BOOLEAN" || base === "BOOL") return { kind: "boolean" };
+  if (base === "DATE" || base === "DATETIME" || base.startsWith("TIMESTAMP")) return { kind: "temporal" };
+  if (base === "TIME") return { kind: "time" };
+  if (base === "JSON" || base === "JSONB") return undefined;
+  if (upper.includes("INT")) return { kind: "number" };
+  if (upper.includes("CHAR") || upper.includes("CLOB") || upper.includes("TEXT")) return { kind: "text" };
+  if (upper.includes("BLOB")) return { kind: "binary" };
+  if (upper.includes("REAL") || upper.includes("FLOA") || upper.includes("DOUB")) return undefined;
+  return { kind: "number" };
 }
 
 /** SQLite filter SQL uses `?`, `CAST(... AS TEXT)`, and `LIKE` for `ILIKE`. */
@@ -223,6 +269,58 @@ export class SqliteSource implements DbSource {
     return tables.map((table) => ({ table, approx_rows: -1 }));
   }
 
+  async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
+    checkSchema(schema);
+    // One connection, one deadline for the catalog lookups and the select
+    // (spec/protocol.md §5.11.5).
+    return bounded(this.db, timeoutMs, async () => {
+      const allowed = await allowedTablesUnbounded(this.db);
+      const names = joinTableNames(spec);
+      const metas = new Map<string, JoinTableMeta>();
+      for (const name of names) {
+        if (metas.has(name)) continue;
+        if (!findExact(allowed, name)) throw new NotAllowedError(`table "${name}"`, "table");
+        const declared = await dbAll<{ cid: number; name: string; type: string }>(
+          this.db,
+          `select cid, name, type from pragma_table_info(${quoteIdent(name)}) order by cid`,
+        );
+        const { pkColumns, fkColumns } = await keyMetadataUnbounded(this.db, name);
+        const columns = declared.map((ct): JoinColMeta => {
+          const col: JoinColMeta = {
+            name: ct.name,
+            type: ct.type || "unknown",
+            class: sqliteTypeClass(ct.type ?? ""),
+          };
+          if (pkColumns.has(ct.name)) {
+            col.key = "pk";
+            if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
+          } else if (fkColumns.has(ct.name)) {
+            col.key = "fk";
+            col.references = fkColumns.get(ct.name);
+          }
+          return col;
+        });
+        metas.set(name, { name, columns });
+      }
+      const plan = planJoin(
+        spec,
+        names.map((n) => metas.get(n) as JoinTableMeta),
+        opts,
+      );
+
+      // The statement is built from catalog names and generated aliases
+      // only; every value is a bound ? parameter.
+      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT, undefined);
+      const rows = await dbAll<Record<string, unknown>>(this.db, `select ${body}`, [
+        ...values,
+        opts.limit + 1,
+        opts.offset,
+      ]);
+      const out = joinRows(plan, rows, opts.limit, cellToJson);
+      return { columns: joinColumnInfos(plan), rows: out.rows, has_more: out.hasMore };
+    });
+  }
+
   async queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData> {
     checkSchema(schema);
     const tables = await allowedTables(this.db, timeoutMs);
@@ -256,7 +354,7 @@ export class SqliteSource implements DbSource {
         name: ct.name,
         // SQLite's declared column types can be empty (""); fall back to
         // a stable label rather than emitting "".
-        type: ct.type && ct.type.length > 0 ? ct.type : "unknown",
+        type: ct.type || "unknown",
       };
       if (pkColumns.has(ct.name)) {
         col.key = "pk";

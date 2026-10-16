@@ -1,6 +1,8 @@
 package ashurbanipal
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -15,6 +17,30 @@ import (
 // syntactically safe to splice.
 func quoteIdent(s string) string {
 	return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+}
+
+// timeoutDetectors are registered by each engine's file for the driver
+// errors that mean the engine itself stopped a slow statement (Postgres
+// 57014, MySQL 3024, MariaDB 1969, SQLite interrupt); a context deadline
+// (every engine here bounds statements by one) is recognised directly.
+var timeoutDetectors []func(error) bool
+
+func registerTimeoutDetector(f func(error) bool) {
+	timeoutDetectors = append(timeoutDetectors, f)
+}
+
+// isQueryTimeout reports whether err is a statement stopped by the query
+// timeout (spec/protocol.md §6), to be answered 500 query_timeout.
+func isQueryTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	for _, detect := range timeoutDetectors {
+		if detect(err) {
+			return true
+		}
+	}
+	return false
 }
 
 // NotAllowedKind identifies which allow-list (or privilege check) rejected

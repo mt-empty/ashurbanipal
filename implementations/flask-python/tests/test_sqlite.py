@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts
+from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts, QueryTimeout, wrap_driver_errors
 from ashurbanipal.db.sqlite import SqliteSource, partial_index_predicate
 
 
@@ -316,12 +316,17 @@ def test_slow_query_is_aborted_by_the_progress_handler_not_left_to_run(seeded_pa
     conn = source._connect()
     source._bounded(conn, timeout_secs=1)
     start = time.monotonic()
-    with pytest.raises(sqlite3.OperationalError):
-        conn.execute(
+
+    @wrap_driver_errors(sqlite3.Error)
+    def run_slow():
+        return conn.execute(
             "with recursive slow(x) as ("
             "  select 1 union all select x + 1 from slow where x < 100000000"
             ") select count(*) from slow"
         ).fetchone()
+
+    with pytest.raises(QueryTimeout):
+        run_slow()
     elapsed = time.monotonic() - start
     assert elapsed < 5, f"expected the progress handler to abort near the 1s deadline, took {elapsed}s"
     source._clear_bound(conn)

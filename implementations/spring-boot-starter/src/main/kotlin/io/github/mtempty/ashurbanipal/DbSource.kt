@@ -175,4 +175,7 @@ interface DbSource {
 
     /** Indexes and constraints of `table` (`spec/protocol.md` §5.10). */
     fun structure(schema: String?, table: String): Structure
+
+    /** Rows from the tables a join names (`spec/protocol.md` §5.11). */
+    fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData
 }
