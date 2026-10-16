@@ -14,38 +14,83 @@ import {
 import type { SourceEntry, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
 
-// ---- sidebar table search-as-you-type: transient, session-local state,
-// not part of `state`/localStorage — resets on reload ----
+// ---- table chips: transient, session-local state, not part of
+// `state`/localStorage — resets on reload ----
 interface TableEntry {
   name: string;
   li: HTMLLIElement;
   btn: HTMLButtonElement;
-  textNode: Text;
 }
 let tableEntries: TableEntry[] = [];
 const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
-const tableMatchHighlight = CSS.highlights ? new Highlight() : null;
-if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
 
-function filterTables(): void {
-  const q = $<HTMLInputElement>("table-filter").value.trim().toLowerCase();
-  tableMatchHighlight?.clear();
-  let visible = 0;
-  for (const { name, li, textNode } of tableEntries) {
-    const idx = q ? name.toLowerCase().indexOf(q) : -1;
-    const match = !q || idx !== -1;
-    li.hidden = !match;
-    if (match) visible++;
-    if (tableMatchHighlight && idx !== -1) {
-      const range = new Range();
-      range.setStart(textNode, idx);
-      range.setEnd(textNode, idx + q.length);
-      tableMatchHighlight.add(range);
-    }
+// ---- three-line cap: a long table list collapses behind "+ N more", except
+// the active table, which stays visible (and is marked `pulled` when it was
+// moved up out of the hidden part) ----
+const TABLE_CAP_LINES = 3;
+const tablesMore = $<HTMLButtonElement>("tables-more");
+// Last item in the list, right-aligned (see styles.css), so it follows the
+// final chip instead of taking width from the rows above it.
+const tablesMoreItem = $("tables-more-item");
+let tablesExpanded = false;
+// The active table the last cap pass saw; a repeat load of the same table
+// skips the measuring.
+let cappedActive: string | null = null;
+
+// Measures the full layout (offsetTop per chip), so the cap is by rendered
+// lines and tracks the list's width without a per-chip width model.
+function updateTablesCap(): void {
+  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
+  for (const e of tableEntries) {
+    e.li.hidden = false;
+    e.li.classList.remove("pulled");
   }
-  $("tables-empty").hidden = visible > 0 || tableEntries.length === 0;
+  const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
+  const lastRowTop = tops[TABLE_CAP_LINES - 1];
+  const beyond = tops.length > TABLE_CAP_LINES ? tableEntries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const active = beyond.find((e) => e.btn.classList.contains("active"));
+  const hidden = new Set(beyond.filter((e) => e !== active));
+  tablesMoreItem.hidden = hidden.size === 0;
+  if (tablesMoreItem.hidden) return;
+  tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
+  if (tablesExpanded) {
+    tablesMore.textContent = "show fewer";
+    return;
+  }
+  for (const e of hidden) e.li.hidden = true;
+  // The button has to land on the last row: give up chips from the end of the
+  // visible ones until it (and a pulled active chip) fits there.
+  const shown = tableEntries.filter((e) => !hidden.has(e) && e !== active);
+  tablesMore.textContent = `+ ${hidden.size} more`;
+  while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
+    const last = shown.pop() as TableEntry;
+    last.li.hidden = true;
+    hidden.add(last);
+    tablesMore.textContent = `+ ${hidden.size} more`;
+  }
+  if (!active) return;
+  // Out of alphabetical order only if a hidden chip sits before it; a divider
+  // at the start of a line would just dangle.
+  const at = tableEntries.indexOf(active);
+  const movedUp = [...hidden].some((e) => tableEntries.indexOf(e) < at);
+  const before = tableEntries
+    .slice(0, at)
+    .filter((e) => !e.li.hidden)
+    .pop();
+  if (movedUp && before && before.li.offsetTop === active.li.offsetTop) active.li.classList.add("pulled");
 }
-$<HTMLInputElement>("table-filter").oninput = filterTables;
+tablesMore.onclick = () => {
+  tablesExpanded = !tablesExpanded;
+  updateTablesCap();
+};
+// A width change only: updateTablesCap itself changes the height, which must
+// not re-trigger it.
+let tablesWidth = 0;
+new ResizeObserver(([entry]) => {
+  if (entry.contentRect.width === tablesWidth) return;
+  tablesWidth = entry.contentRect.width;
+  updateTablesCap();
+}).observe($("tables"));
 
 // ==== Source selector ====
 // Same hide-when-singular shape as the schema selector below it (and drawn
@@ -139,7 +184,7 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 
 // A slower earlier loadTables() (e.g. from a schema switch quickly
 // followed by another) resolving after a faster later one would otherwise
-// clobber the sidebar with the wrong schema's table list — same shape of
+// clobber the chip row with the wrong schema's table list — same shape of
 // guard as loadDataToken/cvRequestToken/siblingsRequestToken.
 let loadTablesToken = 0;
 
@@ -158,8 +203,7 @@ export async function loadTables(): Promise<void> {
   for (const t of tables) {
     const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
     const btn = qs<HTMLButtonElement>(li, "button");
-    const textNode = document.createTextNode(t.name);
-    qs<HTMLElement>(li, ".row-name").appendChild(textNode);
+    qs<HTMLElement>(li, ".row-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     countEl.title = APPROX_COUNT_TITLE;
@@ -172,9 +216,10 @@ export async function loadTables(): Promise<void> {
       loadData();
     };
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn, textNode });
+    tableEntries.push({ name: t.name, li, btn });
   }
-  filterTables();
+  ul.appendChild(tablesMoreItem);
+  updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
   if (!tableNames.includes(state.table ?? "")) {
@@ -212,4 +257,5 @@ export function setActiveTable(name: string | null): void {
     if (isActive) e.btn.setAttribute("aria-current", "true");
     else e.btn.removeAttribute("aria-current");
   }
+  if (name !== cappedActive) updateTablesCap();
 }

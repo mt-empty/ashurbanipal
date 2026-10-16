@@ -6,7 +6,7 @@ test("table/sort/order/limit round-trip through localStorage across a fresh visi
 }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  await page.locator('th[data-col="price"]').click();
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
   await expect(page.locator('th[data-col="price"]')).toHaveAttribute("aria-sort", "ascending");
 
   // Bare URL, no query params — forces restore-from-localStorage, not URL.
@@ -18,7 +18,7 @@ test("table/sort/order/limit round-trip through localStorage across a fresh visi
 test("a URL query param wins over a conflicting localStorage value", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  await page.locator('th[data-col="price"]').click(); // localStorage: products, price asc
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } }); // localStorage: products, price asc
 
   await gotoApp(page, "?table=users&sort=email&order=desc");
   await page.locator("#current").getByText("users", { exact: true }).waitFor();

@@ -136,7 +136,7 @@ should block on.
   from: visibility of system status, user control and freedom.)*
 - **R9 — Every async action reports its own status.** Loading, success, and
   error are all visible states — not just error (a `#status` live region,
-  a per-row spinner in the sidebar, and `aria-busy` on the table cover
+  a spinner on the table's chip, and `aria-busy` on the table cover
   loading; `#error` covers failure). *(Derives from: visibility of system
   status — heuristic #1, given full weight above.)*
 - **R10 — The `refresh` button and its new-row tint are the sanctioned

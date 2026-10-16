@@ -583,23 +583,11 @@
     if (ashurbanipalTheme === "light" || ashurbanipalTheme === "dark")
       document.documentElement.dataset.theme = ashurbanipalTheme;
   } catch {}
-  try {
-    // build.mjs injects the key and bounds here from sidebar-bounds.ts: this
-    // script runs standalone, before the bundled module graph, so it can't
-    // import them. Until injection the typeof guard makes it an inert no-op
-    // (raw index.html is a build input, never served).
-    var ASHURBANIPAL_SIDEBAR_W_KEY = "ashurbanipal_sidebar_w", ASHURBANIPAL_SIDEBAR_MIN = 180, ASHURBANIPAL_SIDEBAR_MAX = 500;
-    if (typeof ASHURBANIPAL_SIDEBAR_W_KEY === "string") {
-      var ashurbanipalSidebarW = parseFloat(localStorage.getItem(ASHURBANIPAL_SIDEBAR_W_KEY));
-      if (ashurbanipalSidebarW >= ASHURBANIPAL_SIDEBAR_MIN && ashurbanipalSidebarW <= ASHURBANIPAL_SIDEBAR_MAX)
-        document.documentElement.style.setProperty("--sidebar-w", ashurbanipalSidebarW + "px");
-    }
-  } catch {}
 </script>
 <style>
 :root {
   color-scheme: light dark;
-  font-family: ui-monospace, monospace;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 /* Overrides the system-default `light dark` above — light-dark() reads
    the *used* color-scheme value, so pinning it here is enough to force
@@ -617,90 +605,115 @@
   --backdrop: light-dark(#0006, #0009);
   --gap: .5rem;
   --gap-lg: .75rem;
+  --gap-xl: 1.25rem;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --surface: light-dark(#f3f3f0, #26262a);
+  --rule: light-dark(#eeeeea, #2e2e32);
+  --rule-strong: color-mix(in srgb, currentColor 55%, transparent);
+  --text-muted: light-dark(#6b6b68, #a0a09c);
+  --chip-active-bg: light-dark(#1d1d1f, #ececea);
+  --chip-active-fg: light-dark(#fff, #1a1a1c);
+  --chip-h: 1.75rem;
   /* Scrollable content budget inside a modal <dialog> (max-height 80vh
      less the header). */
   --dialog-body-max-h: calc(80vh - 3rem);
-  --sidebar-w: 220px;
-  /* min() re-clamps on window shrink alone (no resize listener needed) if
-     a wide persisted width no longer fits. */
-  --sidebar-w-clamped: min(var(--sidebar-w), 60vw);
   /* --type-* (grid/record cells) and --json-* (json tree tokens) share
      values for bool/number/uuid, so a value looks identical whether it's
      a top-level column or nested inside a jsonb blob. */
-  --json-string: light-dark(#a11, #e88);
-  --json-number: light-dark(#166, #6cc);
-  --json-bool: light-dark(#a60, #fb5);
+  --json-string: light-dark(#8f4a4a, #d4a0a0);
+  --json-number: light-dark(#2f6b6b, #86bcbc);
+  --json-bool: light-dark(#8a6a2e, #d6b980);
   --json-null: light-dark(#888, #999);
-  --type-uuid: light-dark(#639, #c9f);
+  --type-uuid: light-dark(#6e5a8a, #bba8d6);
   --type-bool: var(--json-bool);
   --type-number: var(--json-number);
-  --type-date: light-dark(#2a6, #6db);
+  --type-date: light-dark(#3f7a5c, #8cc4a8);
   /* Transient wash on rows added since the last manual refresh. */
   --row-new-bg: light-dark(#e3f6e6, #1f3a26);
 }
 
 /* ==== Layout ==== */
-body { margin: 0; display: grid; grid-template-columns: var(--sidebar-w-clamped) 1fr; height: 100vh; position: relative; }
-nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
-#sidebar-resize-handle {
-  position: absolute; top: 0; bottom: 0;
-  left: var(--sidebar-w-clamped); width: 9px; margin-left: -4px;
-  cursor: col-resize; touch-action: none; z-index: 1;
-}
-#sidebar-resize-handle:hover, #sidebar-resize-handle.active { background: var(--hover); }
-/* Always-visible grip so the handle reads as draggable before a hover. */
-#sidebar-resize-handle::after {
-  content: ""; position: absolute; top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 3px; height: 2rem; border-radius: 2px;
-  background: var(--border-strong);
-}
-#sidebar-resize-handle:hover::after, #sidebar-resize-handle.active::after { background: var(--active); }
-body.sidebar-resizing { cursor: col-resize; user-select: none; }
-body.sidebar-resizing #sidebar-resize-handle { background: var(--active); }
-/* No padding here: #toolbar is sticky and must reach main's actual
-   edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
-main { overflow: auto; }
+/* Author-level display rules below would otherwise defeat the hidden
+   attribute's UA-level display:none. */
+[hidden] { display: none !important; }
+body { margin: 0; height: 100vh; font-size: .875rem; }
+/* main is the only scroller: the chrome scrolls away with the page and only
+   the table header pins (thead th, top: 0). */
+main { height: 100%; overflow: auto; }
+/* sticky left keeps the chrome in view when a wide table scrolls sideways;
+   it works because #content below is as wide as the table (see #content). */
+#chrome { position: sticky; left: 0; z-index: 2; padding: var(--gap-lg) var(--gap-xl) 0; }
+/* Above the table header until the header is pinned (features/sticky-header.ts),
+   then level with it, and the header comes later so it wins: the filter's
+   suggestion list covers the header at rest and slides behind it on scroll. */
+#main.header-stuck #chrome { z-index: 1; }
 /* width: max-content (floored at 100%) makes #content's own box grow to
    match a wide table's overflow instead of staying clipped to main's
-   visible width. Without this, #pager/#toolbar's sticky `left` has no
-   room to travel — their containing block (#content) is only as wide as
-   the viewport, so once scrolled past that they run out of stickiness
-   and get dragged along horizontally. */
-#content { padding: 0 var(--gap-lg) var(--gap-lg); width: max-content; min-width: 100%; }
-.nav-header { display: flex; align-items: center; gap: var(--gap); margin: 0 0 var(--gap); }
-h1 { font-size: 1rem; margin: 0; flex: 1; min-width: 0; overflow: hidden; }
-h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em;
-       display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-h1 a:hover { text-decoration-thickness: 2px; }
+   visible width. Without this, #pager's sticky `left` has no room to
+   travel — its containing block (#content) is only as wide as the
+   viewport, so once scrolled past that it runs out of stickiness and gets
+   dragged along horizontally. */
+#content { box-sizing: border-box; padding: 0 var(--gap-xl) var(--gap-lg); width: max-content; min-width: 100%; }
 
-/* ==== Sidebar table list ==== */
+/* ==== Top bar ==== */
+#topbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-lg); }
+h1 { font-size: .9rem; margin: 0; font-weight: 600; }
+h1 a { color: inherit; text-decoration: none; }
+h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
+#scope { display: flex; align-items: center; gap: var(--gap); }
+#topbar-end { margin-left: auto; display: flex; align-items: center; gap: var(--gap); }
+/* Hidden by default (single-source / single-schema deployments never show
+   them — see loadSources / loadSchemas); no `source`/`schema` param is sent
+   in that case, so the wire shape matches a build without the selectors. */
+#source-select-wrap, #schema-select-wrap { display: flex; align-items: center; gap: .35rem;
+                                           background: var(--surface); border-radius: 6px;
+                                           padding: .2rem .25rem .2rem .6rem; }
+.scope-label { font-size: .75rem; color: var(--text-muted); }
+#source-select, #schema-select { border: none; background: transparent; font: inherit;
+                                 color: inherit; padding: .1rem; cursor: pointer;
+                                 max-width: 12rem; text-overflow: ellipsis; }
+
+/* ==== Table chips ==== */
+#tables-bar { display: flex; align-items: flex-start; gap: var(--gap); margin-top: var(--gap-lg); }
+#nav-history { display: flex; flex: none; }
+#nav-history button { background: none; border: none; font: inherit; font-size: 1.25rem;
+                      height: var(--chip-h); line-height: 1; color: inherit; cursor: pointer;
+                      padding: 0 .35rem; border-radius: 6px; }
+#nav-history button:not(:disabled):hover { background: var(--hover); }
+#nav-history button:disabled { opacity: .3; cursor: default; }
+ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
+#tables-more-item { margin-left: auto; }
+/* A chip pulled up from the hidden part of a collapsed list (see features/sidebar.ts). */
+#tables li.pulled { position: relative; margin-left: .5rem; }
+#tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
+                            width: 1px; background: var(--border-strong); }
 ul { list-style: none; margin: 0; padding: 0; }
-li button { width: 100%; text-align: left; background: none; border: none;
-            padding: .3rem .4rem; cursor: pointer; font: inherit; color: inherit;
-            border-radius: 4px; display: flex; justify-content: space-between; }
-li button:hover { background: var(--hover); }
-li button.active { background: var(--active); }
-/* min-width:0 overrides the flex-item default of min-width:auto, which
-   otherwise blocks shrinking below content size and prevents the
-   ellipsis truncation below from ever kicking in. Full name is in
-   `title` (see loadTables()) as the escape hatch. */
-.row-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
-            text-overflow: ellipsis; white-space: nowrap; }
-.row-right { display: flex; align-items: center; gap: .35rem; flex: none; }
-.count { opacity: .6; }
-/* Always in the DOM at a fixed size; only visibility toggles (never
-   display), so gaining/losing the spinner never reflows layout — this
-   replaced an old #status text in #controls that shoved #filter sideways
-   every time it appeared/disappeared. */
-.row-spinner { width: .7rem; height: .7rem; border-radius: 50%;
-               border: 2px solid var(--border-strong); border-top-color: transparent;
-               visibility: hidden; flex: none; }
-li button.loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
+#tables li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
+                    cursor: pointer; font: inherit; color: inherit; border-radius: 999px;
+                    display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
+#tables li button:hover { background: var(--hover); }
+#tables li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+/* min-width:0 plus the cap lets one very long name ellipsize instead of
+   widening the row; the full name is in `title` (see loadTables()). */
+.row-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; }
+.row-right { position: relative; display: flex; align-items: center; flex: none; }
+.count { font-size: .7rem; opacity: .6; }
+/* Overlays the count while loading (absolutely positioned, so it adds no
+   width and the chip row never reflows). */
+.row-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
+               border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent;
+               visibility: hidden; }
+#tables li button.loading .count { visibility: hidden; }
+#tables li button.loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
+  #tables li button.loading .row-spinner { animation: none; border-top-color: currentColor; }
 }
+#tables-more { flex: none; background: none; border: none; font: inherit; font-size: .8rem;
+               color: var(--text-muted); height: var(--chip-h); padding: 0 .5rem;
+               cursor: pointer; border-radius: 6px; }
+#tables-more:hover { background: var(--hover); color: inherit; }
 /* One rotation per click, always run to completion (JS drops .spinning on a
    timer) so a sub-100ms re-fetch still acknowledges the click, separately
    from #status/aria-busy. inline-block so the rotate applies. */
@@ -710,52 +723,46 @@ li button.loading .row-spinner { visibility: visible; animation: spin .6s linear
   #refresh.spinning #refresh-icon { animation: none; }
 }
 
-/* ==== Source selector ==== */
-/* hidden by default (single-source deployments never show this — see
-   loadSources); same margin as #schema-select-wrap below it, so hiding/
-   showing either never shifts the other's position. */
-#source-select-wrap { margin-bottom: var(--gap-lg); }
-#source-select { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
-
-/* ==== Schema selector ==== */
-/* hidden by default (single-schema deployments never show this — see
-   loadSchemas); margin matches #table-search's so hiding/showing it
-   doesn't shift the search box's position underneath. */
-#schema-select-wrap { margin-bottom: var(--gap-lg); }
-#schema-select { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
-
-/* ==== Sidebar table search ==== */
-#table-search { margin-bottom: var(--gap); }
-#table-filter { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
-#tables-empty { opacity: .6; margin: .3rem .4rem; }
-::highlight(table-match) { background: var(--active); }
-
 /* ==== Data table ==== */
 /* separate/0, not collapse: verified that collapsed borders let
    scrolled-under row content bleed through a sticky <th>'s background at
-   the collapsed border seams in Chromium. */
-table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: var(--gap); }
-th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
-th { cursor: pointer; user-select: none; white-space: nowrap; }
-/* z-index is load-bearing: td has position:relative (for the copy
-   button), and since tbody follows thead in DOM order, its positioned
-   <td>s paint over a sticky <th> with the default stacking order unless
-   the header is explicitly raised. top tracks #toolbar's live height
-   (--toolbar-h, set via ResizeObserver) since it isn't constant. */
-thead th { position: sticky; top: var(--toolbar-h, 0px); z-index: 1; background: canvas; }
+   the collapsed border seams in Chromium. Horizontal rules only. */
+/* max-content, not auto: inside #content's own max-content box, auto lets the
+   table inflate far past its natural width (a 5-column table rendered 3x wide). */
+table { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
+th, td { padding: .45rem .75rem .45rem 0; text-align: left; }
+/* Border-box so the min-width from features/column-widths.ts is the column's
+   measured width, not that plus padding (which would grow it every render). */
+th { box-sizing: border-box; }
+td { position: relative; border-bottom: 1px solid var(--rule);
+     font-family: var(--font-mono); font-size: .8125rem; }
+tbody tr:hover { background: var(--hover); }
+th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
+     font-size: .75rem; border-bottom: 1px solid var(--rule-strong); }
+/* z-index is load-bearing: td has position:relative (for the cell actions),
+   and since tbody follows thead in DOM order, its positioned <td>s paint
+   over a sticky <th> with the default stacking order unless the header is
+   explicitly raised. */
+thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+/* Capped like the table chips' names; the title carries the full name. */
+.col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
+            vertical-align: bottom; }
 /* Arrow always rendered (dim when unsorted), not just on the active
    column: keeps every th's width stable across sort changes and shows
    sortability before the first click. "↑" default previews the real
    first-click behavior (ascending — see th.onclick). */
-th[aria-sort]::after { content: " ↑"; opacity: .35; }
-th[aria-sort="ascending"]::after { content: " ↑"; opacity: 1; }
-th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
+th[aria-sort] .th-name::after { content: " ↑"; opacity: .35; }
+th[aria-sort="ascending"] .th-name::after { content: " ↑"; opacity: 1; }
+th[aria-sort="descending"] .th-name::after { content: " ↓"; opacity: 1; }
 /* Decorative (aria-hidden) — the th carries an aria-label with the text
    equivalent. */
 .key-icon { margin-right: .2rem; }
-/* The engine-native column type, rendered as inline code in the header. */
-th code.col-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em;
-            font-weight: normal; background: color-mix(in srgb, currentColor 10%, transparent);
+/* The engine-native column type, on its own line under the name so a long
+   spelling ("timestamp with time zone") doesn't set the column's width. */
+th code.col-type { display: block; width: fit-content; max-width: 10rem; overflow: hidden;
+            text-overflow: ellipsis; margin-top: .1rem; font-family: var(--font-mono);
+            font-size: .7rem; font-weight: normal; opacity: .75;
+            background: color-mix(in srgb, currentColor 10%, transparent);
             padding: 0 .25em; border-radius: 3px; }
 /* Not part of the sort click target — its onclick stops propagation so
    it doesn't also trigger th's sort handler. */
@@ -774,24 +781,29 @@ th code.col-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; 
 th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
 td.row-actions { padding-right: .25rem; }
 .record-btn { background: none; border: none; cursor: pointer; font: inherit;
-              color: inherit; padding: 0 .15rem; border-radius: 3px; }
-.record-btn:hover { background: var(--hover); }
-td { position: relative; padding-right: 2.7rem; }
+              color: var(--text-muted); padding: 0 .15rem; border-radius: 3px; }
+.record-btn:hover { background: var(--hover); color: inherit; }
 .cell-text { display: block; max-width: 24rem; overflow: hidden;
              text-overflow: ellipsis; white-space: nowrap; }
 button.cell-text { background: none; border: none; padding: 0; margin: 0;
                    font: inherit; color: inherit; text-align: left; cursor: inherit; }
 td.expandable .cell-text { cursor: zoom-in; }
-.copy, .filter-eq { position: absolute; top: 50%; transform: translateY(-50%);
-        background: none; border: none; cursor: pointer; font: inherit;
-        color: inherit; opacity: 0; padding: 0 .15rem; border-radius: 3px; }
-.copy { right: .15rem; }
-.filter-eq { right: 1.45rem; }
-/* Null cells have no copy button, so their lone filter button sits in
-   copy's slot instead of leaving that corner visibly empty. */
-.filter-eq.only-action { right: .15rem; }
-td:hover .copy, td:hover .filter-eq, .copy:focus-visible, .filter-eq:focus-visible { opacity: .7; }
-.copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+.copy, .filter-eq { background: none; border: none; cursor: pointer; font: inherit;
+        color: inherit; padding: 0 .15rem; border-radius: 3px; }
+.copy:hover, .filter-eq:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+/* Overlays the cell's right edge on hover/focus instead of reserving
+   padding in every cell. Opacity (not display) so the buttons stay
+   focusable and the reveal is keyboard-reachable. */
+.cell-actions { position: absolute; right: .25rem; top: 50%; transform: translateY(-50%);
+                display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: canvas;
+                box-shadow: 0 0 0 1px var(--border), 0 2px 6px #0002; opacity: 0; }
+.cell-actions button { padding: .1rem .45rem; border-radius: 4px; }
+td:hover .cell-actions, td:focus-within .cell-actions { opacity: 1; }
+/* No hover on touch: keep the buttons visible, in reserved space. */
+@media (hover: none) {
+  td { padding-right: 4.5rem; }
+  .cell-actions { opacity: 1; }
+}
 /* Fades out over 3s after a manual refresh; static under reduced motion,
    cleared by the next re-render (a fresh <tr> without the class). td has no
    background of its own, so the tr wash shows through. */
@@ -802,58 +814,102 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 }
 
 /* ==== Controls / status ==== */
-/* Pinned in both axes (unlike thead th, top:0 only — header cells must
-   still scroll horizontally). #error lives inside so a rejection message
-   stays paired with the filter. z-index above thead th's + opaque
-   background stop rows from showing through. */
-#toolbar { position: sticky; top: 0; left: 0; z-index: 2; background: canvas;
-           padding: var(--gap-lg) var(--gap-lg) var(--gap);
-           border-bottom: 1px solid var(--border); }
-#controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
-/* display: contents keeps #filter/#apply direct flex items of #controls,
-   so wrapping them in a <form> doesn't change layout. */
-#filter-form { display: contents; }
-#filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
+#toolbar { margin-top: var(--gap-xl); }
+#filter-form { display: flex; gap: var(--gap); }
+/* The wrap carries the field's look; the input's own text is transparent and
+   #filter-hl, behind it, draws the coloured copy (features/filter-highlight.ts).
+   The two must share font and padding exactly. */
+#filter-wrap { position: relative; flex: 1; min-width: 12rem; display: flex;
+               background: var(--surface); border-radius: 8px; }
+#filter, #filter-hl { font-family: var(--font-mono); font-size: .8125rem; padding: .6rem .85rem;
+                      box-sizing: border-box; }
+#filter { flex: 1; min-width: 0; border: none; border-radius: 8px; background: transparent;
+          color: transparent; caret-color: CanvasText; appearance: none; position: relative; }
+#filter::placeholder { color: var(--text-muted); opacity: 1; }
+#filter::selection { color: transparent; background: color-mix(in srgb, Highlight 40%, transparent); }
+#filter-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+             display: flex; align-items: center; white-space: pre; }
+#filter-wrap.plain #filter { color: inherit; }
+#filter-wrap.plain #filter::selection { color: inherit; }
+#filter-wrap.plain #filter-hl { display: none; }
+.t-op { color: var(--text-muted); }
+.t-keyword { color: var(--type-uuid); }
+.t-value { color: var(--json-number); }
+.t-err { text-decoration: underline wavy var(--danger); text-underline-offset: .2em; }
+/* Forced colors repaint the input's text anyway, so the copy would double it. */
+@media (forced-colors: active) {
+  #filter { color: CanvasText; }
+  #filter-hl { display: none; }
+}
+#apply { background: var(--chip-active-bg); color: var(--chip-active-fg); border: none;
+         border-radius: 8px; padding: 0 1.1rem; font: inherit; cursor: pointer; }
 /* Visually hidden but still in the accessibility tree — the aria-live
-   loading text never occupies space in #controls's flex row, which used
-   to shove #filter sideways on every load. */
+   loading text never occupies layout space. */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
            margin: -1px; overflow: hidden; clip-path: inset(50%);
            white-space: nowrap; border: 0; }
-#error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap; }
-#protocol-warning { display: flex; gap: var(--gap); align-items: baseline;
-                    color: var(--warning); margin-bottom: var(--gap); }
-/* display:flex above would silently defeat the hidden attribute's
-   UA-level display:none — restate it at author-level specificity. */
-#protocol-warning[hidden] { display: none; }
+#error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap;
+         font-family: var(--font-mono); font-size: .8rem; }
+#error:empty { display: none; }
+#meta { display: flex; justify-content: space-between; align-items: center;
+        flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); }
+#meta-title { color: var(--text-muted); }
+/* Data and identifiers stay monospace; the chrome around them is system-ui. */
+.json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value,
+#filter-suggest button { font-family: var(--font-mono); }
+#current { font-family: var(--font-mono); color: CanvasText; }
+#actions { display: flex; gap: 2px; }
+#actions button, #pager button { background: none; border: none; font: inherit;
+        font-size: .8125rem; color: var(--text-muted); padding: .25rem .5rem;
+        border-radius: 6px; cursor: pointer; }
+#actions button:hover:not(:disabled), #pager button:hover:not(:disabled) { background: var(--hover); color: inherit; }
+#actions button:disabled, #pager button:disabled { opacity: .4; cursor: default; }
+#protocol-warning { display: flex; justify-content: space-between; gap: var(--gap);
+                    align-items: baseline; margin-top: var(--gap-lg); padding: .5rem .75rem;
+                    border-radius: 8px;
+                    background: color-mix(in srgb, var(--warning) 16%, transparent); }
 #protocol-warning button { background: none; border: none; cursor: pointer; font: inherit;
                            color: inherit; padding: 0 .15rem; border-radius: 3px; }
 #protocol-warning button:hover { background: var(--hover); }
 .empty td { text-align: center; opacity: .6; padding: 1rem; }
 
-/* Shared by any small sidebar section heading — currently #siblings' h2
-   and the schema selector's label (see their sections below). */
+/* Small uppercase heading inside dialogs and popovers. */
 .section-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
                font-weight: 600; opacity: .6; margin: 0 0 var(--gap); display: block; }
 
-/* ==== Siblings ==== */
-#siblings { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: var(--gap); }
+/* ==== Other services (siblings) ==== */
 .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
-       margin-right: .4em; background: #999; flex: none; }
+       background: #999; flex: none; }
 .dot.up { background: var(--success); } .dot.down { background: var(--danger); }
-/* Same truncation shape as .row-name above. Full name is in `title`
-   (see loadSiblings()) as the escape hatch. */
-.sibling-row { display: flex; align-items: center; }
-.sibling-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                min-width: 0; }
+#siblings-btn { display: inline-flex; align-items: center; gap: .4rem; background: none;
+                border: none; font: inherit; font-size: .8rem; color: var(--text-muted);
+                padding: .25rem .5rem; border-radius: 6px; cursor: pointer;
+                anchor-name: --siblings-anchor; }
+#siblings-btn:hover { background: var(--hover); color: inherit; }
+/* Same anchored-popover shape as #cv-pop, aligned to the button's right edge. */
+#siblings-pop { position: fixed; position-anchor: --siblings-anchor;
+          position-try-fallbacks: flip-block, flip-inline;
+          inset: auto; top: calc(anchor(bottom) + .3rem); right: anchor(right);
+          margin: 0; border: 1px solid var(--border-strong); border-radius: 12px;
+          padding: .5rem; width: max-content; max-width: min(22rem, 90vw);
+          box-shadow: 0 4px 16px #0004; }
+#siblings-heading { margin: .1rem .6rem .5rem; font-size: .75rem; color: var(--text-muted); }
+#siblings-list { display: flex; flex-direction: column; }
+.sibling-row { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem;
+               border-radius: 6px; color: inherit; text-decoration: none; }
+.sibling-row:hover { background: var(--hover); }
+/* Full name is in `title` (see loadSiblings()) as the truncation escape hatch. */
+.sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; font-family: var(--font-mono); }
+.sibling-state { color: var(--text-muted); font-size: .75rem; }
 
 /* ==== Pager ==== */
-/* Sticky left, same reasoning as #toolbar above: #content (and #pager's
+/* Sticky left, same reasoning as #chrome above: #content (and #pager's
    own position in normal flow) is only as wide as the table, so once a
    wide table pushes main's horizontal scrollbar out, an unpinned pager
    scrolls away with it instead of staying reachable. */
-#pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center;
-         position: sticky; left: var(--gap-lg); width: fit-content; }
+#pager { margin-top: var(--gap-lg); display: flex; gap: var(--gap); align-items: center;
+         position: sticky; left: var(--gap-xl); width: fit-content; color: var(--text-muted); }
 
 /* Native <dialog>: showModal() gives backdrop, Esc-to-close, and focus
    trapping for free. */
@@ -879,6 +935,7 @@ dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
    siblings here. */
 dialog dl .copy { position: static; top: auto; transform: none; opacity: 0; align-self: start; }
 dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
+dialog dl .copy:hover { opacity: 1; }
 /* Lives in the dialog header, so it stays visible regardless of hover —
    a standalone action, not a per-field affordance. */
 .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
@@ -912,18 +969,10 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 .cell-type-number { color: var(--type-number); }
 .cell-type-date { color: var(--type-date); }
 
-/* Lives in .nav-header beside the title, not fixed to the viewport — a
-   fixed corner overlapped the sidebar once #tables/#siblings grew past
-   one screenful. */
-#api-help-btn { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
-                border: 1px solid var(--border-strong); background: canvas;
-                color: inherit; cursor: pointer; font: inherit; }
-#api-help-btn:hover { background: var(--hover); }
-
-#theme-toggle { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
-                border: 1px solid var(--border-strong); background: canvas;
-                color: inherit; cursor: pointer; font: inherit; line-height: 1; }
-#theme-toggle:hover { background: var(--hover); }
+/* Icon buttons in the top bar. */
+#api-help-btn, #theme-toggle { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 6px; padding: 0;
+                border: none; background: none; color: var(--text-muted); cursor: pointer; font: inherit; line-height: 1; }
+#api-help-btn:hover, #theme-toggle:hover { background: var(--hover); color: inherit; }
 /* Icon is pure CSS, no JS: it's driven by the same cascade the
    color-scheme rules above use (system prefers-color-scheme by default,
    overridden by an explicit :root[data-theme]), so it always reflects
@@ -995,7 +1044,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 /* Record dialog: the field list and this section scroll together as one
    region within the dialog's height budget — not two stacked scrollers —
    and the section flows in the same inset column as the fields, set off
-   only by the reused sidebar section label, no rule. */
+   only by the reused section label, no rule. */
 #record-body { overflow: auto; max-height: var(--dialog-body-max-h); }
 #record-dialog #record-dl { max-height: none; }
 #record-referenced-by-wrap { padding: 0 var(--gap-lg) var(--gap-lg); }
@@ -1022,77 +1071,83 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #columns-pop label:hover { background: var(--hover); }
 .col-hidden { display: none; }
 
-/* Anchored to the text caret inside #filter, not the input's box — a
-   zero-size tracking element whose left/top JS recomputes on every
-   keystroke via mirror-div caret measurement (no native way to anchor to
-   a point inside plain text). popover="manual" (see filter-ui.ts) so it
-   stays open while typing. */
-#filter-caret-anchor { position: fixed; width: 0; height: 0; anchor-name: --filter-caret; }
-#filter-suggest { position: fixed; position-anchor: --filter-caret;
-          position-try-fallbacks: flip-block;
-          inset: auto; top: calc(anchor(bottom) + .15rem); left: anchor(left);
-          margin: 0; border: 1px solid var(--border-strong);
+/* Absolutely positioned under the field at the caret (left set from
+   filter-ui.ts), in the page's flow so it scrolls with the field; #chrome's
+   z-index decides whether it is over or behind the sticky table header. */
+#filter-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0;
+          background: canvas; color: inherit; border: 1px solid var(--border-strong);
           border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
           overflow: auto; box-shadow: 0 4px 16px #0004; }
 #filter-suggest button { display: block; width: 100%; box-sizing: border-box;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           background: none; border: none; font: inherit; color: inherit;
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 </style>
 </head>
 <body>
-<nav>
-  <div class="nav-header">
-    <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
-    <button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
-    <button id="theme-toggle" type="button" aria-label="toggle light/dark theme" title="toggle light/dark theme"></button>
-  </div>
-  <div id="source-select-wrap" hidden>
-    <label for="source-select" class="section-label">source</label>
-    <select id="source-select"></select>
-  </div>
-  <div id="schema-select-wrap" hidden>
-    <label for="schema-select" class="section-label">schema</label>
-    <select id="schema-select"></select>
-  </div>
-  <search id="table-search">
-    <input id="table-filter" type="search" enterkeyhint="search" placeholder="filter tables…" aria-label="filter tables" autocomplete="off">
-  </search>
-  <ul id="tables"></ul>
-  <p id="tables-empty" hidden>no matching tables</p>
-  <div id="siblings" hidden>
-    <h2 id="siblings-heading" class="section-label" hidden>siblings microservices</h2>
-    <div id="siblings-list"></div>
-  </div>
-</nav>
-<div id="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="resize sidebar" tabindex="-1"></div>
 <main id="main">
-  <div id="toolbar">
+  <div id="chrome">
+    <header id="topbar">
+      <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
+      <div id="scope">
+        <div id="source-select-wrap" hidden>
+          <label for="source-select" class="scope-label">source</label>
+          <select id="source-select"></select>
+        </div>
+        <div id="schema-select-wrap" hidden>
+          <label for="schema-select" class="scope-label">schema</label>
+          <select id="schema-select"></select>
+        </div>
+      </div>
+      <div id="topbar-end">
+        <div id="siblings" hidden>
+          <button id="siblings-btn" type="button" popovertarget="siblings-pop"><span id="siblings-dot" class="dot" aria-hidden="true"></span><span id="siblings-summary"></span></button>
+        </div>
+        <button id="api-help-btn" type="button" aria-label="API reference for AI agents" title="API reference for AI agents — copy and paste to an AI agent">?</button>
+        <button id="theme-toggle" type="button" aria-label="toggle light/dark theme" title="toggle light/dark theme"></button>
+      </div>
+    </header>
     <div id="protocol-warning" role="status" hidden>
       <span id="protocol-warning-text"></span>
       <button id="protocol-warning-dismiss" type="button" aria-label="dismiss warning">✕</button>
     </div>
-    <search id="controls">
-      <button id="nav-back" type="button" disabled title="back to previous table view" aria-label="back">‹</button>
-      <button id="nav-forward" type="button" disabled title="forward to next table view" aria-label="forward">›</button>
-      <strong id="current">—</strong>
-      <output id="status" aria-live="polite" class="sr-only"></output>
-      <form id="filter-form">
-        <input id="filter" type="search" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
-        <button id="apply">apply</button>
-      </form>
-      <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
-      <button id="structure-btn" type="button" disabled title="indexes and constraints for this table">structure</button>
-      <button id="payload" disabled title="raw JSON response for the current view">payload</button>
-      <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
-    </search>
-    <div id="error" role="alert"></div>
+    <nav id="tables-bar" aria-label="tables">
+      <span id="nav-history">
+        <button id="nav-back" type="button" disabled title="back to previous table view" aria-label="back">‹</button>
+        <button id="nav-forward" type="button" disabled title="forward to next table view" aria-label="forward">›</button>
+      </span>
+      <ul id="tables"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
+      <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
+    </nav>
+    <div id="toolbar">
+      <search id="controls">
+        <form id="filter-form">
+          <div id="filter-wrap">
+            <div id="filter-hl" aria-hidden="true"><span id="filter-hl-text"></span></div>
+            <input id="filter" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="filter-suggest-list" spellcheck="false" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+            <div id="filter-suggest" hidden><div id="filter-suggest-list" role="listbox" aria-label="filter suggestions"></div></div>
+          </div>
+          <button id="apply">apply</button>
+        </form>
+      </search>
+      <div id="error" role="alert"></div>
+      <div id="meta">
+        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span></span>
+        <output id="status" aria-live="polite" class="sr-only"></output>
+        <span id="actions">
+          <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
+          <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
+          <button id="structure-btn" type="button" disabled title="indexes and constraints for this table">structure</button>
+          <button id="payload" disabled title="raw JSON response for the current view">payload</button>
+        </span>
+      </div>
+    </div>
   </div>
   <div id="content">
     <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
-    <template id="cell-template"><td><button class="cell-text"></button><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></td></template>
+    <template id="cell-template"><td><button class="cell-text"></button><span class="cell-actions"><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></span></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
-    <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
     <div id="pager">
       <button id="prev">‹ prev</button>
       <output id="page"></output>
@@ -1128,12 +1183,14 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
   <div id="structure-body"></div>
 </dialog>
 
+<div id="siblings-pop" popover>
+  <p id="siblings-heading">Other services' databases. Opens their Ashurbanipal in a new tab.</p>
+  <div id="siblings-list"></div>
+</div>
 <div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
 <div id="refby-pop" popover><div id="refby-pop-list"></div></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
-<span id="filter-caret-anchor"></span>
-<div id="filter-suggest" popover="manual"><div id="filter-suggest-list"></div></div>
 
 <dialog id="api-help-dialog" closedby="any">
   <div class="dialog-head">
@@ -1426,37 +1483,31 @@ $("api-help-btn").onclick = () => {
 };
 $("api-help-copy").onclick = () => copyText($("api-help-pre").textContent ?? "", $("api-help-copy"));
 
-// src/bootstrap/reload.ts
-var impl = null;
-function registerLoadData(fn) {
-  impl = fn;
-}
-function loadData(opts) {
-  return impl ? impl(opts) : Promise.resolve();
-}
-
 // src/lib/filter-dsl.ts
 var FILTER_MAX_DSL_BYTES = 1024;
 var FILTER_MAX_CONDITIONS = 10;
 var RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 var FilterDslError = class extends Error {
   position;
-  constructor(message, position) {
+  // `position` is a UTF-8 byte offset (the wire contract); `index` is the same spot as a string index.
+  index;
+  constructor(message, position, index) {
     super(`${message} at position ${position}`);
     this.position = position;
+    this.index = index;
   }
 };
-function parseFilterDsl(input) {
+function parseFilterDsl(input2) {
   const err = (message, index) => {
-    const position = new TextEncoder().encode(input.slice(0, index)).length;
-    return new FilterDslError(message, position);
+    const position = new TextEncoder().encode(input2.slice(0, index)).length;
+    return new FilterDslError(message, position, index);
   };
-  if (new TextEncoder().encode(input).length > FILTER_MAX_DSL_BYTES)
+  if (new TextEncoder().encode(input2).length > FILTER_MAX_DSL_BYTES)
     throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
   let pos = 0;
   const peekAt = (i) => {
-    if (i >= input.length) return null;
-    const cp = input.codePointAt(i);
+    if (i >= input2.length) return null;
+    const cp = input2.codePointAt(i);
     return cp === void 0 ? null : String.fromCodePoint(cp);
   };
   const peek = () => peekAt(pos);
@@ -1475,7 +1526,7 @@ function parseFilterDsl(input) {
   };
   const matchKeyword = (keyword) => {
     for (let i = 0; i < keyword.length; i++) {
-      const c = input[pos + i];
+      const c = input2[pos + i];
       if (c === void 0) return false;
       const folded = c >= "a" && c <= "z" ? String.fromCharCode(c.charCodeAt(0) - 32) : c;
       if (folded !== keyword[i]) return false;
@@ -1498,7 +1549,7 @@ function parseFilterDsl(input) {
       pos += 1;
       c = peek();
     }
-    return input.slice(start, pos);
+    return input2.slice(start, pos);
   };
   const parseQuotedValue = () => {
     const start = pos;
@@ -1539,7 +1590,7 @@ function parseFilterDsl(input) {
     if (consumeKeyword("ILIKE")) return "ILIKE";
     if (consumeKeyword("LIKE")) return "LIKE";
     for (const sym of [">=", "<=", "!=", ">", "<", "="]) {
-      if (input.startsWith(sym, pos)) {
+      if (input2.startsWith(sym, pos)) {
         pos += sym.length;
         return sym;
       }
@@ -1586,9 +1637,9 @@ function parseFilterDsl(input) {
     };
     conditions.push(condition);
     if (conditions.length > FILTER_MAX_CONDITIONS) throw err(`too many conditions (max ${FILTER_MAX_CONDITIONS})`, pos);
-    if (pos >= input.length) break;
+    if (pos >= input2.length) break;
     skipWsRequired();
-    if (pos >= input.length) break;
+    if (pos >= input2.length) break;
     const logicStart = pos;
     if (consumeKeyword("AND")) pendingLogic = "AND";
     else if (consumeKeyword("OR")) pendingLogic = "OR";
@@ -1597,9 +1648,9 @@ function parseFilterDsl(input) {
   }
   return conditions;
 }
-function tryParseFilterDsl(input) {
+function tryParseFilterDsl(input2) {
   try {
-    return parseFilterDsl(input);
+    return parseFilterDsl(input2);
   } catch {
     return null;
   }
@@ -1607,6 +1658,15 @@ function tryParseFilterDsl(input) {
 function quoteFilterValue(value) {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return `'${value.replace(/'/g, "''")}'`;
+}
+function filterDslErrorAt(input2) {
+  try {
+    parseFilterDsl(input2);
+    return null;
+  } catch (e) {
+    if (!(e instanceof FilterDslError)) return null;
+    return { index: e.index, message: e.message };
+  }
 }
 
 // src/lib/row-diff.ts
@@ -1860,6 +1920,549 @@ function initState() {
   applyUrlOverlay(new URLSearchParams(location.search));
 }
 
+// src/features/column-widths.ts
+var scope = "";
+var widths = /* @__PURE__ */ new Map();
+function currentWidthScope() {
+  return `${state.source}|${state.schema}|${state.table}`;
+}
+function useWidthScope(next) {
+  if (next === scope) return;
+  scope = next;
+  widths.clear();
+}
+function columnMinWidth(name) {
+  return widths.get(name);
+}
+function rememberColumnWidths() {
+  for (const th of $("thead").querySelectorAll("th[data-col]:not(.col-hidden)")) {
+    const name = th.dataset.col;
+    widths.set(name, Math.max(widths.get(name) ?? 0, th.getBoundingClientRect().width));
+  }
+}
+function resetColumnWidths() {
+  widths.clear();
+}
+
+// src/lib/filter-tokens.ts
+var SYMBOLS = [">=", "<=", "!=", ">", "<", "="];
+var IDENT = /[A-Za-z_][A-Za-z0-9_]*/y;
+var WORD_CHAR = /[\p{L}\p{N}_]/u;
+function keywordAt(text, i, keyword) {
+  if (text.slice(i, i + keyword.length).toUpperCase() !== keyword) return false;
+  const next = text[i + keyword.length];
+  return next === void 0 || !WORD_CHAR.test(next);
+}
+function tokenizeFilterDsl(text) {
+  const tokens = [];
+  let expect = "column";
+  let column = null;
+  let i = 0;
+  const push = (kind, start, end, next) => {
+    tokens.push({ kind, start, end, expect, column });
+    expect = next;
+    i = end;
+  };
+  const isSpace = (c) => /\s/.test(c);
+  while (i < text.length) {
+    const s = i;
+    if (isSpace(text[i])) {
+      let j2 = i;
+      while (j2 < text.length && isSpace(text[j2])) j2++;
+      tokens.push({ kind: "space", start: s, end: j2, expect, column });
+      i = j2;
+      continue;
+    }
+    if (expect === "column") {
+      if (keywordAt(text, i, "NOT")) {
+        push("keyword", s, i + 3, "column");
+        continue;
+      }
+      IDENT.lastIndex = i;
+      const m = IDENT.exec(text);
+      if (m) {
+        const name = m[0];
+        push("column", s, i + name.length, "operator");
+        column = name;
+        continue;
+      }
+    } else if (expect === "operator") {
+      if (keywordAt(text, i, "IS")) {
+        push("keyword", s, i + 2, "isTail");
+        continue;
+      }
+      const word = keywordAt(text, i, "ILIKE") ? "ILIKE" : keywordAt(text, i, "LIKE") ? "LIKE" : null;
+      const symbol = SYMBOLS.find((sym) => text.startsWith(sym, i));
+      const op = word ?? symbol;
+      if (op) {
+        push("op", s, i + op.length, "value");
+        continue;
+      }
+    } else if (expect === "isTail") {
+      if (keywordAt(text, i, "NOT")) {
+        push("keyword", s, i + 3, "isTail");
+        continue;
+      }
+      if (keywordAt(text, i, "NULL")) {
+        push("keyword", s, i + 4, "joiner");
+        continue;
+      }
+    } else if (expect === "value") {
+      let j2 = i;
+      if (text[i] === "'") {
+        j2 = i + 1;
+        while (j2 < text.length) {
+          if (text[j2] !== "'") j2++;
+          else if (text[j2 + 1] === "'") j2 += 2;
+          else {
+            j2++;
+            break;
+          }
+        }
+      } else {
+        while (j2 < text.length && !isSpace(text[j2]) && text[j2] !== "'") j2++;
+      }
+      push("value", s, j2, "joiner");
+      continue;
+    } else if (expect === "joiner") {
+      const word = keywordAt(text, i, "AND") ? "AND" : keywordAt(text, i, "OR") ? "OR" : null;
+      if (word) {
+        push("keyword", s, i + word.length, "column");
+        column = null;
+        continue;
+      }
+    }
+    let j = i;
+    while (j < text.length && !isSpace(text[j])) j++;
+    push("plain", s, j, "error");
+  }
+  return { tokens, expect, column };
+}
+function completionAt(text) {
+  const { tokens, expect, column } = tokenizeFilterDsl(text);
+  const last = tokens.at(-1);
+  if (!last || last.kind === "space") return { expect, partial: "", head: text, column };
+  return {
+    expect: last.expect,
+    partial: text.slice(last.start),
+    head: text.slice(0, last.start),
+    column: last.column
+  };
+}
+var FILTER_OPERATORS = [
+  "=",
+  "!=",
+  ">",
+  "<",
+  ">=",
+  "<=",
+  "LIKE",
+  "ILIKE",
+  "IS NULL",
+  "IS NOT NULL"
+];
+function optionsFor(expect) {
+  if (expect === "operator") return FILTER_OPERATORS;
+  if (expect === "joiner") return ["AND", "OR"];
+  if (expect === "isTail") return ["NULL", "NOT NULL"];
+  return [];
+}
+function endsInUnfinishedWord(text) {
+  const { expect, partial } = completionAt(text);
+  if (partial === "") return false;
+  const word = partial.toLowerCase();
+  return optionsFor(expect).some((o) => o.toLowerCase().startsWith(word));
+}
+
+// src/features/filter-highlight.ts
+var input = $("filter");
+var wrap = $("filter-wrap");
+var textEl = $("filter-hl-text");
+var MAX_HIGHLIGHT_CHARS = 1024;
+function render() {
+  const text = input.value;
+  if (text.length > MAX_HIGHLIGHT_CHARS) {
+    textEl.replaceChildren();
+    wrap.classList.add("plain");
+    return;
+  }
+  const { tokens } = tokenizeFilterDsl(text);
+  const lead = text.length - text.trimStart().length;
+  const trimmed = text.trim();
+  const error = filterDslErrorAt(trimmed);
+  let at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
+  const bad = tokens.find((t) => t.start <= at && at < t.end);
+  if (bad && bad.end >= lead + trimmed.length && endsInUnfinishedWord(text)) at = -1;
+  textEl.replaceChildren(
+    ...tokens.map((t) => {
+      const span = document.createElement("span");
+      span.className = `t-${t.kind}${t.start <= at && at < t.end ? " t-err" : ""}`;
+      span.textContent = text.slice(t.start, t.end);
+      return span;
+    })
+  );
+  wrap.classList.toggle("plain", input.scrollWidth > input.clientWidth);
+}
+var valueProp = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+if (valueProp?.get && valueProp.set) {
+  const { get, set } = valueProp;
+  Object.defineProperty(input, "value", {
+    configurable: true,
+    get() {
+      return get.call(this);
+    },
+    set(v) {
+      set.call(this, v);
+      render();
+    }
+  });
+}
+input.addEventListener("input", render);
+new ResizeObserver(render).observe(input);
+render();
+
+// src/bootstrap/reload.ts
+var impl = null;
+function registerLoadData(fn) {
+  impl = fn;
+}
+function loadData(opts) {
+  return impl ? impl(opts) : Promise.resolve();
+}
+
+// src/features/filter-ui.ts
+function submitFilter(text) {
+  let ast = [];
+  if (text) {
+    try {
+      ast = parseFilterDsl(text);
+    } catch (e) {
+      reportError(e);
+      return;
+    }
+  }
+  state.filter = text;
+  setAppliedFilterAst(ast);
+  markFilterVerified();
+  state.offset = 0;
+  loadData();
+}
+function applyFilterClause(column, op, value) {
+  const clause = value === void 0 ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
+  $("filter").value = clause;
+  submitFilter(clause);
+}
+function applyFilterClauses(pairs) {
+  const clause = pairs.map((p) => `${p.column} = ${quoteFilterValue(p.value)}`).join(" AND ");
+  $("filter").value = clause;
+  submitFilter(clause);
+}
+$("filter-form").onsubmit = (e) => {
+  e.preventDefault();
+  closeFilterSuggest();
+  submitFilter($("filter").value.trim());
+};
+$("filter").addEventListener("search", () => {
+  if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
+});
+var CARET_MIRROR_PROPS = [
+  "boxSizing",
+  "width",
+  "paddingTop",
+  "paddingRight",
+  "paddingBottom",
+  "paddingLeft",
+  "borderTopWidth",
+  "borderRightWidth",
+  "borderBottomWidth",
+  "borderLeftWidth",
+  // border-*-style matters too, not just width: a border's used width
+  // collapses to 0 when style is "none" (the mirror's default), so without
+  // these the mirror omits #filter's UA-default border and the measured
+  // caret position is off by that width.
+  "borderTopStyle",
+  "borderRightStyle",
+  "borderBottomStyle",
+  "borderLeftStyle",
+  "fontStyle",
+  "fontVariant",
+  "fontWeight",
+  "fontStretch",
+  "fontSize",
+  "fontFamily",
+  "lineHeight",
+  "letterSpacing",
+  "textTransform",
+  "wordSpacing"
+];
+function measureCaretX(input2) {
+  const mirror = document.createElement("div");
+  const computed = getComputedStyle(input2);
+  Object.assign(mirror.style, {
+    position: "absolute",
+    visibility: "hidden",
+    whiteSpace: "pre",
+    top: "0",
+    left: "-9999px"
+  });
+  const mirrorStyle = mirror.style;
+  const computedStyle = computed;
+  for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
+  mirror.textContent = input2.value.slice(0, input2.selectionStart ?? 0);
+  const marker = document.createElement("span");
+  marker.textContent = "\u200B";
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+  try {
+    return marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left - input2.scrollLeft;
+  } finally {
+    mirror.remove();
+  }
+}
+var filterSuggestMatches = [];
+var filterSuggestIndex = -1;
+var filterSuggestHead = "";
+var filterSuggestToken = 0;
+function closeFilterSuggest() {
+  filterSuggestToken++;
+  filterSuggestMatches = [];
+  filterSuggestIndex = -1;
+  filterSuggestHead = "";
+  const input2 = $("filter");
+  input2.setAttribute("aria-expanded", "false");
+  input2.removeAttribute("aria-activedescendant");
+  $("filter-suggest").hidden = true;
+}
+function renderFilterSuggest() {
+  $("filter-suggest-list").replaceChildren(
+    ...filterSuggestMatches.map((suggestion, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = suggestion.label;
+      btn.title = suggestion.label;
+      btn.className = i === filterSuggestIndex ? "active" : "";
+      btn.id = `filter-suggest-${i}`;
+      btn.setAttribute("role", "option");
+      btn.setAttribute("aria-selected", String(i === filterSuggestIndex));
+      btn.onmousedown = (e) => e.preventDefault();
+      btn.onclick = () => acceptFilterSuggestion(i);
+      return btn;
+    })
+  );
+  $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
+  const input2 = $("filter");
+  if (filterSuggestIndex >= 0) input2.setAttribute("aria-activedescendant", `filter-suggest-${filterSuggestIndex}`);
+  else input2.removeAttribute("aria-activedescendant");
+}
+function acceptFilterSuggestion(i) {
+  const input2 = $("filter");
+  input2.value = `${filterSuggestHead}${filterSuggestMatches[i].insert} `;
+  input2.setSelectionRange(input2.value.length, input2.value.length);
+  closeFilterSuggest();
+  input2.focus();
+  updateFilterSuggestions();
+}
+var commonValueCache = /* @__PURE__ */ new Map();
+function clearCommonValueCache() {
+  commonValueCache.clear();
+}
+async function fetchCommonValues(column) {
+  const params = new URLSearchParams({ table: state.table ?? "", column });
+  applyScopeParams(params);
+  return (await api(`/tables/common-values?${params}`)).values;
+}
+function commonValuesFor(column) {
+  const params = new URLSearchParams({ table: state.table ?? "", column });
+  applyScopeParams(params);
+  const key = params.toString();
+  let values = commonValueCache.get(key);
+  if (!values) {
+    values = fetchCommonValues(column).then((rows) => rows.map((v) => v.value)).catch((e) => {
+      console.warn("ashurbanipal: common values for suggestions failed", e);
+      return [];
+    });
+    commonValueCache.set(key, values);
+  }
+  return values;
+}
+function showFilterSuggestions(ctx, all, index) {
+  const input2 = $("filter");
+  const partial = ctx.partial.toLowerCase();
+  const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
+  const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
+  if (matches.length === 0 || done) {
+    closeFilterSuggest();
+    return;
+  }
+  filterSuggestMatches = matches;
+  filterSuggestHead = ctx.head;
+  filterSuggestIndex = index;
+  renderFilterSuggest();
+  const popup = $("filter-suggest");
+  popup.hidden = false;
+  const room = input2.parentElement ? input2.parentElement.clientWidth - popup.offsetWidth : 0;
+  popup.style.left = `${Math.max(0, Math.min(input2.offsetLeft + measureCaretX(input2), room))}px`;
+  input2.setAttribute("aria-expanded", "true");
+}
+function isColumn(name) {
+  return name !== null && (getLastPayload()?.columns.some((c) => c.name === name) ?? false);
+}
+function updateFilterSuggestions() {
+  const input2 = $("filter");
+  if (input2.selectionStart !== input2.value.length) {
+    closeFilterSuggest();
+    return;
+  }
+  const ctx = completionAt(input2.value);
+  closeFilterSuggest();
+  if (ctx.partial.startsWith("'")) return;
+  const token = filterSuggestToken;
+  const plain = (labels) => labels.map((label) => ({ label, insert: label }));
+  if (ctx.expect === "column") {
+    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
+  } else if (ctx.expect === "operator") {
+    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")), -1);
+  } else if (ctx.expect === "joiner" && ctx.partial !== "") {
+    showFilterSuggestions(ctx, plain(optionsFor("joiner")), -1);
+  } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column)) {
+    commonValuesFor(ctx.column).then((values) => {
+      if (token !== filterSuggestToken || document.activeElement !== input2) return;
+      const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
+      showFilterSuggestions(ctx, rows, -1);
+    });
+  }
+}
+$("filter").oninput = updateFilterSuggestions;
+$("filter").onfocus = updateFilterSuggestions;
+$("filter").onblur = closeFilterSuggest;
+$("filter").onkeydown = (e) => {
+  if (filterSuggestMatches.length === 0) return;
+  const count = filterSuggestMatches.length;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    filterSuggestIndex = (filterSuggestIndex + 1) % count;
+    renderFilterSuggest();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    filterSuggestIndex = filterSuggestIndex <= 0 ? count - 1 : filterSuggestIndex - 1;
+    renderFilterSuggest();
+  } else if (e.key === "Enter" && filterSuggestIndex >= 0) {
+    e.preventDefault();
+    acceptFilterSuggestion(filterSuggestIndex);
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    acceptFilterSuggestion(Math.max(filterSuggestIndex, 0));
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeFilterSuggest();
+  }
+};
+document.addEventListener("pointerdown", (e) => {
+  if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target) && !$("filter-suggest").contains(e.target)) {
+    closeFilterSuggest();
+  }
+});
+var cvAnchor = null;
+var cvRequestToken = 0;
+function renderCommonValues(values, column) {
+  const list = $("cv-pop-list");
+  if (values.length === 0) {
+    const p = document.createElement("p");
+    p.className = "cv-empty";
+    p.textContent = "no common values available";
+    list.replaceChildren(p);
+    return;
+  }
+  list.replaceChildren(
+    ...values.map((v) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cv-value";
+      const val = document.createElement("span");
+      val.textContent = v.value;
+      const freq = document.createElement("span");
+      freq.className = "cv-freq";
+      freq.textContent = `${Math.round(v.freq * 100)}%`;
+      btn.append(val, freq);
+      btn.onclick = () => {
+        $("cv-pop").hidePopover();
+        applyFilterClause(column, "=", v.value);
+      };
+      return btn;
+    })
+  );
+}
+async function showCommonValues(e, column) {
+  const btn = e.currentTarget;
+  if (cvAnchor) cvAnchor.style.anchorName = "";
+  cvAnchor = btn;
+  cvAnchor.style.anchorName = "--cv-anchor";
+  const list = $("cv-pop-list");
+  const loading = document.createElement("p");
+  loading.className = "cv-empty";
+  loading.textContent = "loading\u2026";
+  list.replaceChildren(loading);
+  $("cv-pop").showPopover();
+  const token = ++cvRequestToken;
+  let values;
+  try {
+    values = await fetchCommonValues(column);
+  } catch (err) {
+    if (token !== cvRequestToken) return;
+    const p = document.createElement("p");
+    p.className = "cv-empty";
+    p.textContent = err.message;
+    list.replaceChildren(p);
+    return;
+  }
+  if (token !== cvRequestToken) return;
+  renderCommonValues(values, column);
+}
+
+// src/features/siblings.ts
+var siblingsRequestToken = 0;
+var siblingsWarned = false;
+async function loadSiblings() {
+  const token = ++siblingsRequestToken;
+  let siblings = [];
+  try {
+    ({ siblings } = await api("/siblings"));
+    siblingsWarned = false;
+  } catch (e) {
+    if (!siblingsWarned) {
+      console.warn("ashurbanipal: /siblings poll failed; hiding the panel", e);
+      siblingsWarned = true;
+    }
+  }
+  if (token !== siblingsRequestToken) return;
+  $("siblings").hidden = siblings.length === 0;
+  const down = siblings.filter((s) => !s.healthy).length;
+  $("siblings-summary").textContent = down > 0 ? `Other services \xB7 ${down} down` : `Other services \xB7 ${siblings.length} up`;
+  $("siblings-dot").className = `dot ${down > 0 ? "down" : "up"}`;
+  $("siblings-list").replaceChildren(
+    ...siblings.map((s) => {
+      const a = document.createElement("a");
+      a.href = s.base_url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.className = "sibling-row";
+      const dot = document.createElement("span");
+      dot.className = `dot ${s.healthy ? "up" : "down"}`;
+      dot.setAttribute("role", "img");
+      dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
+      const name = document.createElement("span");
+      name.className = "sibling-name";
+      name.textContent = s.name;
+      name.title = s.name;
+      const state2 = document.createElement("span");
+      state2.className = "sibling-state";
+      state2.textContent = s.healthy ? "up \u2197" : "down \u2197";
+      a.append(dot, name, state2);
+      return a;
+    })
+  );
+}
+
 // src/lib/format.ts
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function formatApproxCount(n) {
@@ -1939,27 +2542,54 @@ function formatCellValue(col, raw) {
 // src/features/sidebar.ts
 var tableEntries = [];
 var tableRowTemplate = $("table-row-template");
-var tableMatchHighlight = CSS.highlights ? new Highlight() : null;
-if (tableMatchHighlight) CSS.highlights.set("table-match", tableMatchHighlight);
-function filterTables() {
-  const q = $("table-filter").value.trim().toLowerCase();
-  tableMatchHighlight?.clear();
-  let visible = 0;
-  for (const { name, li, textNode } of tableEntries) {
-    const idx = q ? name.toLowerCase().indexOf(q) : -1;
-    const match = !q || idx !== -1;
-    li.hidden = !match;
-    if (match) visible++;
-    if (tableMatchHighlight && idx !== -1) {
-      const range = new Range();
-      range.setStart(textNode, idx);
-      range.setEnd(textNode, idx + q.length);
-      tableMatchHighlight.add(range);
-    }
+var TABLE_CAP_LINES = 3;
+var tablesMore = $("tables-more");
+var tablesMoreItem = $("tables-more-item");
+var tablesExpanded = false;
+var cappedActive = null;
+function updateTablesCap() {
+  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
+  for (const e of tableEntries) {
+    e.li.hidden = false;
+    e.li.classList.remove("pulled");
   }
-  $("tables-empty").hidden = visible > 0 || tableEntries.length === 0;
+  const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
+  const lastRowTop = tops[TABLE_CAP_LINES - 1];
+  const beyond = tops.length > TABLE_CAP_LINES ? tableEntries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const active = beyond.find((e) => e.btn.classList.contains("active"));
+  const hidden = new Set(beyond.filter((e) => e !== active));
+  tablesMoreItem.hidden = hidden.size === 0;
+  if (tablesMoreItem.hidden) return;
+  tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
+  if (tablesExpanded) {
+    tablesMore.textContent = "show fewer";
+    return;
+  }
+  for (const e of hidden) e.li.hidden = true;
+  const shown = tableEntries.filter((e) => !hidden.has(e) && e !== active);
+  tablesMore.textContent = `+ ${hidden.size} more`;
+  while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
+    const last = shown.pop();
+    last.li.hidden = true;
+    hidden.add(last);
+    tablesMore.textContent = `+ ${hidden.size} more`;
+  }
+  if (!active) return;
+  const at = tableEntries.indexOf(active);
+  const movedUp = [...hidden].some((e) => tableEntries.indexOf(e) < at);
+  const before = tableEntries.slice(0, at).filter((e) => !e.li.hidden).pop();
+  if (movedUp && before && before.li.offsetTop === active.li.offsetTop) active.li.classList.add("pulled");
 }
-$("table-filter").oninput = filterTables;
+tablesMore.onclick = () => {
+  tablesExpanded = !tablesExpanded;
+  updateTablesCap();
+};
+var tablesWidth = 0;
+new ResizeObserver(([entry]) => {
+  if (entry.contentRect.width === tablesWidth) return;
+  tablesWidth = entry.contentRect.width;
+  updateTablesCap();
+}).observe($("tables"));
 async function loadSources() {
   let sources;
   try {
@@ -2035,8 +2665,7 @@ async function loadTables() {
   for (const t of tables) {
     const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
     const btn = qs(li, "button");
-    const textNode = document.createTextNode(t.name);
-    qs(li, ".row-name").appendChild(textNode);
+    qs(li, ".row-name").textContent = t.name;
     const countEl = qs(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     countEl.title = APPROX_COUNT_TITLE;
@@ -2047,9 +2676,10 @@ async function loadTables() {
       loadData();
     };
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn, textNode });
+    tableEntries.push({ name: t.name, li, btn });
   }
-  filterTables();
+  ul.appendChild(tablesMoreItem);
+  updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   if (!tableNames.includes(state.table ?? "")) {
     state.table = tableNames[0] ?? null;
@@ -2069,6 +2699,112 @@ function setActiveTable(name) {
     if (isActive) e.btn.setAttribute("aria-current", "true");
     else e.btn.removeAttribute("aria-current");
   }
+  if (name !== cappedActive) updateTablesCap();
+}
+
+// src/features/sticky-header.ts
+var main = $("main");
+var thead = $("thead");
+function update() {
+  main.classList.toggle("header-stuck", thead.getBoundingClientRect().top < main.getBoundingClientRect().top - 0.5);
+}
+main.addEventListener("scroll", update, { passive: true });
+window.addEventListener("resize", update);
+update();
+
+// src/features/structure.ts
+var cache = /* @__PURE__ */ new Map();
+var cacheKey = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
+var cacheGeneration = 0;
+function clearStructureCache() {
+  cache.clear();
+  cacheGeneration++;
+}
+var requestToken = 0;
+function msg(text) {
+  const p = document.createElement("p");
+  p.className = "refby-empty";
+  p.textContent = text;
+  return p;
+}
+function row(text, detail) {
+  const div = document.createElement("div");
+  div.className = "structure-row";
+  div.textContent = text;
+  if (detail) {
+    const d = document.createElement("div");
+    d.className = "structure-row-detail";
+    d.textContent = detail;
+    div.appendChild(d);
+  }
+  return div;
+}
+function section(label, rows, emptyText) {
+  const wrap2 = document.createElement("div");
+  wrap2.className = "structure-section";
+  const heading = document.createElement("span");
+  heading.className = "section-label";
+  heading.textContent = label;
+  const list = document.createElement("div");
+  list.replaceChildren(...rows.length ? rows : [msg(emptyText)]);
+  wrap2.append(heading, list);
+  return wrap2;
+}
+function fkRow(fk) {
+  const target = fk.schema ? `${fk.schema}.${fk.table}` : fk.table;
+  const from = fk.columns.map((c) => c.from).join(", ");
+  const to = fk.columns.map((c) => c.to).join(", ");
+  return row(`${fk.name}  ${from} \u2192 ${target}(${to})`, `ON DELETE ${fk.on_delete}  ON UPDATE ${fk.on_update}`);
+}
+function renderStructure(data) {
+  const { primary_key: pk, unique, foreign_keys, check } = data.constraints;
+  $("structure-body").replaceChildren(
+    section(
+      "indexes",
+      data.indexes.map(
+        (i) => row(
+          `${i.name}  (${i.columns.join(", ")})  \u2014 ${i.unique ? "unique, " : ""}${i.method}`,
+          i.predicate && `WHERE ${i.predicate}`
+        )
+      ),
+      "no indexes"
+    ),
+    section("primary key", pk ? [row(`${pk.name ?? "(unnamed)"}  (${pk.columns.join(", ")})`)] : [], "no primary key"),
+    section(
+      "unique",
+      unique.map((u) => row(`${u.name}  (${u.columns.join(", ")})`)),
+      "none"
+    ),
+    section("foreign keys", foreign_keys.map(fkRow), "none"),
+    section(
+      "check",
+      check.map((c) => row(c.name, c.expression)),
+      "none"
+    )
+  );
+}
+function openStructure() {
+  const table = state.table;
+  if (!table) return;
+  const token = ++requestToken;
+  $("structure-title").textContent = `structure \u2014 ${state.schema ? `${state.schema}.${table}` : table}`;
+  $("structure-dialog").showModal();
+  const key = cacheKey(table);
+  const generation = cacheGeneration;
+  const hit = cache.get(key);
+  if (hit) {
+    renderStructure(hit);
+    return;
+  }
+  $("structure-body").replaceChildren(msg("loading\u2026"));
+  const params = new URLSearchParams({ table });
+  applyScopeParams(params);
+  api(`/tables/structure?${params}`).then((data) => {
+    if (generation === cacheGeneration) cache.set(key, data);
+    if (token === requestToken) renderStructure(data);
+  }).catch((e) => {
+    if (token === requestToken) $("structure-body").replaceChildren(msg(e.message));
+  });
 }
 
 // src/lib/json-tree.ts
@@ -2172,242 +2908,6 @@ function scalarSpan(node) {
   return span;
 }
 
-// src/features/filter-ui.ts
-function submitFilter(text) {
-  let ast = [];
-  if (text) {
-    try {
-      ast = parseFilterDsl(text);
-    } catch (e) {
-      reportError(e);
-      return;
-    }
-  }
-  state.filter = text;
-  setAppliedFilterAst(ast);
-  markFilterVerified();
-  state.offset = 0;
-  loadData();
-}
-function applyFilterClause(column, op, value) {
-  const clause = value === void 0 ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
-  $("filter").value = clause;
-  submitFilter(clause);
-}
-function applyFilterClauses(pairs) {
-  const clause = pairs.map((p) => `${p.column} = ${quoteFilterValue(p.value)}`).join(" AND ");
-  $("filter").value = clause;
-  submitFilter(clause);
-}
-$("filter-form").onsubmit = (e) => {
-  e.preventDefault();
-  submitFilter($("filter").value.trim());
-};
-$("filter").addEventListener("search", () => {
-  if ($("filter").value.trim() === "") $("filter-form").requestSubmit();
-});
-var FILTER_COND_FIRST = /^\s*(?:NOT\s+)?$/i;
-var FILTER_COND_AFTER_LOGIC = /(^|\s)(?:AND|OR)\s+(?:NOT\s+)?$/i;
-var CARET_MIRROR_PROPS = [
-  "boxSizing",
-  "width",
-  "paddingTop",
-  "paddingRight",
-  "paddingBottom",
-  "paddingLeft",
-  "borderTopWidth",
-  "borderRightWidth",
-  "borderBottomWidth",
-  "borderLeftWidth",
-  // border-*-style matters too, not just width: a border's used width
-  // collapses to 0 when style is "none" (the mirror's default), so without
-  // these the mirror omits #filter's UA-default border and the measured
-  // caret position is off by that width.
-  "borderTopStyle",
-  "borderRightStyle",
-  "borderBottomStyle",
-  "borderLeftStyle",
-  "fontStyle",
-  "fontVariant",
-  "fontWeight",
-  "fontStretch",
-  "fontSize",
-  "fontFamily",
-  "lineHeight",
-  "letterSpacing",
-  "textTransform",
-  "wordSpacing"
-];
-function measureCaretPosition(input) {
-  const mirror = document.createElement("div");
-  const computed = getComputedStyle(input);
-  Object.assign(mirror.style, {
-    position: "absolute",
-    visibility: "hidden",
-    whiteSpace: "pre",
-    top: "0",
-    left: "-9999px"
-  });
-  const mirrorStyle = mirror.style;
-  const computedStyle = computed;
-  for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
-  mirror.textContent = input.value.slice(0, input.selectionStart ?? 0);
-  const marker = document.createElement("span");
-  marker.textContent = "\u200B";
-  mirror.appendChild(marker);
-  document.body.appendChild(mirror);
-  try {
-    const inputRect = input.getBoundingClientRect();
-    const offsetX = marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left;
-    return { x: inputRect.left + offsetX - input.scrollLeft, y: inputRect.bottom };
-  } finally {
-    mirror.remove();
-  }
-}
-var filterSuggestMatches = [];
-var filterSuggestIndex = -1;
-var filterSuggestHead = "";
-function closeFilterSuggest() {
-  filterSuggestMatches = [];
-  filterSuggestIndex = -1;
-  filterSuggestHead = "";
-  $("filter-suggest").hidePopover();
-}
-function renderFilterSuggest() {
-  $("filter-suggest-list").replaceChildren(
-    ...filterSuggestMatches.map((name, i) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = name;
-      btn.className = i === filterSuggestIndex ? "active" : "";
-      btn.onmousedown = (e) => e.preventDefault();
-      btn.onclick = () => acceptFilterSuggestion(i);
-      return btn;
-    })
-  );
-  $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
-}
-function acceptFilterSuggestion(i) {
-  const input = $("filter");
-  input.value = filterSuggestHead + filterSuggestMatches[i];
-  input.setSelectionRange(input.value.length, input.value.length);
-  closeFilterSuggest();
-  input.focus();
-}
-function updateFilterSuggestions() {
-  const input = $("filter");
-  const pos = input.selectionStart;
-  if (pos !== input.value.length) {
-    closeFilterSuggest();
-    return;
-  }
-  const before = input.value.slice(0, pos ?? 0);
-  const tokenStart = before.search(/\S*$/);
-  const head = before.slice(0, tokenStart);
-  const partial = before.slice(tokenStart);
-  if (!(FILTER_COND_FIRST.test(head) || FILTER_COND_AFTER_LOGIC.test(head))) {
-    closeFilterSuggest();
-    return;
-  }
-  const columns = (getLastPayload()?.columns ?? []).map((c) => c.name);
-  filterSuggestMatches = columns.filter((name) => name.toLowerCase().startsWith(partial.toLowerCase()));
-  if (filterSuggestMatches.length === 0) {
-    closeFilterSuggest();
-    return;
-  }
-  filterSuggestHead = head;
-  filterSuggestIndex = 0;
-  renderFilterSuggest();
-  const { x, y } = measureCaretPosition(input);
-  $("filter-caret-anchor").style.left = `${x}px`;
-  $("filter-caret-anchor").style.top = `${y}px`;
-  $("filter-suggest").showPopover();
-}
-$("filter").oninput = updateFilterSuggestions;
-$("filter").onfocus = updateFilterSuggestions;
-$("filter").onblur = closeFilterSuggest;
-$("filter").onkeydown = (e) => {
-  if (filterSuggestMatches.length === 0) return;
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    filterSuggestIndex = (filterSuggestIndex + 1) % filterSuggestMatches.length;
-    renderFilterSuggest();
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    filterSuggestIndex = (filterSuggestIndex - 1 + filterSuggestMatches.length) % filterSuggestMatches.length;
-    renderFilterSuggest();
-  } else if (e.key === "Enter" || e.key === "Tab") {
-    e.preventDefault();
-    acceptFilterSuggestion(filterSuggestIndex);
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    closeFilterSuggest();
-  }
-};
-document.addEventListener("pointerdown", (e) => {
-  if (filterSuggestMatches.length > 0 && !$("filter").contains(e.target) && !$("filter-suggest").contains(e.target)) {
-    closeFilterSuggest();
-  }
-});
-var cvAnchor = null;
-var cvRequestToken = 0;
-function renderCommonValues(values, column) {
-  const list = $("cv-pop-list");
-  if (values.length === 0) {
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = "no common values available";
-    list.replaceChildren(p);
-    return;
-  }
-  list.replaceChildren(
-    ...values.map((v) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "cv-value";
-      const val = document.createElement("span");
-      val.textContent = v.value;
-      const freq = document.createElement("span");
-      freq.className = "cv-freq";
-      freq.textContent = `${Math.round(v.freq * 100)}%`;
-      btn.append(val, freq);
-      btn.onclick = () => {
-        $("cv-pop").hidePopover();
-        applyFilterClause(column, "=", v.value);
-      };
-      return btn;
-    })
-  );
-}
-async function showCommonValues(e, column) {
-  const btn = e.currentTarget;
-  if (cvAnchor) cvAnchor.style.anchorName = "";
-  cvAnchor = btn;
-  cvAnchor.style.anchorName = "--cv-anchor";
-  const list = $("cv-pop-list");
-  const loading = document.createElement("p");
-  loading.className = "cv-empty";
-  loading.textContent = "loading\u2026";
-  list.replaceChildren(loading);
-  $("cv-pop").showPopover();
-  const token = ++cvRequestToken;
-  const params = new URLSearchParams({ table: state.table ?? "", column });
-  applyScopeParams(params);
-  let values;
-  try {
-    ({ values } = await api(`/tables/common-values?${params}`));
-  } catch (err) {
-    if (token !== cvRequestToken) return;
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = err.message;
-    list.replaceChildren(p);
-    return;
-  }
-  if (token !== cvRequestToken) return;
-  renderCommonValues(values, column);
-}
-
 // src/features/nav.ts
 function navigateWithSeededFilter(table, schema, applyFilter) {
   state.table = table;
@@ -2484,10 +2984,10 @@ window.addEventListener("popstate", (ev) => {
 });
 
 // src/features/referenced-by.ts
-var cache = /* @__PURE__ */ new Map();
-var cacheKey = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
+var cache2 = /* @__PURE__ */ new Map();
+var cacheKey2 = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
 var renderTokens = /* @__PURE__ */ new Map();
-function msg(text) {
+function msg2(text) {
   const p = document.createElement("p");
   p.className = "refby-empty";
   p.textContent = text;
@@ -2500,7 +3000,7 @@ function drillIn(entry, row2, dismiss) {
 }
 function renderList(container, entries, row2, dismiss) {
   if (entries.length === 0) {
-    container.replaceChildren(msg("nothing references this table"));
+    container.replaceChildren(msg2("nothing references this table"));
     return;
   }
   container.replaceChildren(
@@ -2526,22 +3026,22 @@ function renderReferencedBy(container, row2, dismiss) {
   const token = (renderTokens.get(container) ?? 0) + 1;
   renderTokens.set(container, token);
   const table = state.table ?? "";
-  const key = cacheKey(table);
-  const hit = cache.get(key);
+  const key = cacheKey2(table);
+  const hit = cache2.get(key);
   if (hit) {
     renderList(container, hit, row2, dismiss);
     return;
   }
-  container.replaceChildren(msg("loading\u2026"));
+  container.replaceChildren(msg2("loading\u2026"));
   const params = new URLSearchParams({ table });
   applyScopeParams(params);
   api(`/tables/referenced-by?${params}`).then((data) => {
-    cache.set(key, data.referenced_by);
+    cache2.set(key, data.referenced_by);
     if (renderTokens.get(container) !== token) return;
     renderList(container, data.referenced_by, row2, dismiss);
   }).catch((e) => {
     if (renderTokens.get(container) !== token) return;
-    container.replaceChildren(msg(e.message));
+    container.replaceChildren(msg2(e.message));
   });
 }
 var refbyAnchor = null;
@@ -2633,11 +3133,20 @@ function renderHeader(columns) {
   for (const col of columns) {
     const th = document.createElement("th");
     th.dataset.col = col.name;
+    const minWidth = columnMinWidth(col.name);
+    if (minWidth) th.style.minWidth = `${minWidth}px`;
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
     const typeCode = document.createElement("code");
     typeCode.className = "col-type";
     typeCode.textContent = col.type;
+    typeCode.title = col.type;
+    const head = document.createElement("span");
+    head.className = "th-name";
+    const nameEl = document.createElement("span");
+    nameEl.className = "col-name";
+    nameEl.textContent = col.name;
+    nameEl.title = col.comment ? `${col.name} \u2014 ${col.comment}` : col.name;
     if (col.key === "pk" || col.key === "fk") {
       const keyLabel = col.key === "pk" ? col.references ? `primary key, also references ${col.references.table}.${col.references.column}` : "primary key" : `foreign key, references ${col.references.table}.${col.references.column}`;
       const icon = document.createElement("span");
@@ -2645,10 +3154,10 @@ function renderHeader(columns) {
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "\u{1F511}" : "\u{1F517}";
-      th.append(icon, `${col.name} `, typeCode);
+      head.append(icon, nameEl, " ");
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
-      th.append(`${col.name} `, typeCode);
+      head.append(nameEl, " ");
     }
     if (col.comment) th.title = col.comment;
     th.setAttribute(
@@ -2671,7 +3180,8 @@ function renderHeader(columns) {
       e.stopPropagation();
       showCommonValues(e, col.name);
     };
-    th.appendChild(cvBtn);
+    head.appendChild(cvBtn);
+    th.append(head, typeCode);
     tr.appendChild(th);
   }
   $("thead").replaceChildren(tr);
@@ -2716,14 +3226,17 @@ function buildCell(col, row2, hidden) {
     span.textContent = "\u2205";
     td.appendChild(span);
     const filterBtn2 = document.createElement("button");
-    filterBtn2.className = "filter-eq only-action";
+    filterBtn2.className = "filter-eq";
     filterBtn2.setAttribute("aria-label", "filter by null");
     filterBtn2.textContent = "=";
     filterBtn2.onclick = (e) => {
       e.stopPropagation();
       applyFilterClause(col.name, "IS NULL");
     };
-    td.appendChild(filterBtn2);
+    const actions = document.createElement("span");
+    actions.className = "cell-actions";
+    actions.appendChild(filterBtn2);
+    td.appendChild(actions);
     return td;
   }
   const cellText = qs(td, ".cell-text");
@@ -2784,11 +3297,11 @@ function renderColumnMenu(columns) {
   $("columns-pop-list").replaceChildren(
     ...columns.map((col) => {
       const label = document.createElement("label");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = !hidden.includes(col.name);
-      input.onchange = () => setColumnVisibility(col.name, !input.checked);
-      label.append(input, col.name);
+      const input2 = document.createElement("input");
+      input2.type = "checkbox";
+      input2.checked = !hidden.includes(col.name);
+      input2.onchange = () => setColumnVisibility(col.name, !input2.checked);
+      label.append(input2, col.name);
       return label;
     })
   );
@@ -2825,8 +3338,9 @@ function renderRows(data, newRowKeys, pkNames = []) {
 }
 function updatePager(data) {
   const page = Math.floor(state.offset / state.limit) + 1;
-  $("page").textContent = `page ${page} \xB7 ${formatApproxCount(data.total_approx)} rows`;
-  $("page").title = APPROX_COUNT_TITLE;
+  $("page").textContent = `page ${page}`;
+  $("row-meta").textContent = ` \xB7 ${formatApproxCount(data.total_approx)} rows \xB7 ${data.columns.length} columns`;
+  $("row-meta").title = APPROX_COUNT_TITLE;
   $("prev").disabled = state.offset === 0;
   $("next").disabled = data.rows.length < state.limit;
 }
@@ -2907,6 +3421,7 @@ async function loadData2({
     return;
   }
   const token = ++loadDataToken;
+  const widthScope = currentWidthScope();
   let data;
   try {
     data = await fetchTableData();
@@ -2932,9 +3447,11 @@ async function loadData2({
   updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
+    useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
     renderRows(data, newRowKeys, pkNames);
+    rememberColumnWidths();
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
   };
@@ -2954,175 +3471,6 @@ async function loadData2({
     flashIcon($("refresh-icon"), "\u2713", 1e3);
   }
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
-}
-
-// src/features/sidebar-bounds.ts
-var SIDEBAR_W_KEY = "ashurbanipal_sidebar_w";
-var SIDEBAR_MIN_W = 180;
-var SIDEBAR_MAX_W = 500;
-
-// src/features/sidebar-resize.ts
-function clamp(w) {
-  return Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, w));
-}
-var handle = $("sidebar-resize-handle");
-var dragging = false;
-handle.addEventListener("pointerdown", (e) => {
-  dragging = true;
-  handle.setPointerCapture(e.pointerId);
-  document.body.classList.add("sidebar-resizing");
-  handle.classList.add("active");
-});
-handle.addEventListener("pointermove", (e) => {
-  if (!dragging) return;
-  document.documentElement.style.setProperty("--sidebar-w", `${clamp(e.clientX)}px`);
-});
-function endDrag() {
-  if (!dragging) return;
-  dragging = false;
-  document.body.classList.remove("sidebar-resizing");
-  handle.classList.remove("active");
-  const w = getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w").trim();
-  try {
-    localStorage.setItem(SIDEBAR_W_KEY, w);
-  } catch {
-  }
-}
-handle.addEventListener("pointerup", endDrag);
-handle.addEventListener("pointercancel", endDrag);
-
-// src/features/siblings.ts
-var siblingsRequestToken = 0;
-var siblingsWarned = false;
-async function loadSiblings() {
-  const token = ++siblingsRequestToken;
-  let siblings = [];
-  try {
-    ({ siblings } = await api("/siblings"));
-    siblingsWarned = false;
-  } catch (e) {
-    if (!siblingsWarned) {
-      console.warn("ashurbanipal: /siblings poll failed; hiding the panel", e);
-      siblingsWarned = true;
-    }
-  }
-  if (token !== siblingsRequestToken) return;
-  $("siblings").hidden = siblings.length === 0;
-  const div = $("siblings-list");
-  div.replaceChildren(
-    ...siblings.map((s) => {
-      const p = document.createElement("div");
-      const dot = document.createElement("span");
-      dot.className = `dot ${s.healthy ? "up" : "down"}`;
-      dot.setAttribute("role", "img");
-      dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
-      const a = document.createElement("a");
-      a.href = s.base_url;
-      a.textContent = s.name;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.title = s.name;
-      p.className = "sibling-row";
-      a.className = "sibling-name";
-      p.append(dot, a);
-      return p;
-    })
-  );
-}
-
-// src/features/structure.ts
-var cache2 = /* @__PURE__ */ new Map();
-var cacheKey2 = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
-var cacheGeneration = 0;
-function clearStructureCache() {
-  cache2.clear();
-  cacheGeneration++;
-}
-var requestToken = 0;
-function msg2(text) {
-  const p = document.createElement("p");
-  p.className = "refby-empty";
-  p.textContent = text;
-  return p;
-}
-function row(text, detail) {
-  const div = document.createElement("div");
-  div.className = "structure-row";
-  div.textContent = text;
-  if (detail) {
-    const d = document.createElement("div");
-    d.className = "structure-row-detail";
-    d.textContent = detail;
-    div.appendChild(d);
-  }
-  return div;
-}
-function section(label, rows, emptyText) {
-  const wrap = document.createElement("div");
-  wrap.className = "structure-section";
-  const heading = document.createElement("span");
-  heading.className = "section-label";
-  heading.textContent = label;
-  const list = document.createElement("div");
-  list.replaceChildren(...rows.length ? rows : [msg2(emptyText)]);
-  wrap.append(heading, list);
-  return wrap;
-}
-function fkRow(fk) {
-  const target = fk.schema ? `${fk.schema}.${fk.table}` : fk.table;
-  const from = fk.columns.map((c) => c.from).join(", ");
-  const to = fk.columns.map((c) => c.to).join(", ");
-  return row(`${fk.name}  ${from} \u2192 ${target}(${to})`, `ON DELETE ${fk.on_delete}  ON UPDATE ${fk.on_update}`);
-}
-function renderStructure(data) {
-  const { primary_key: pk, unique, foreign_keys, check } = data.constraints;
-  $("structure-body").replaceChildren(
-    section(
-      "indexes",
-      data.indexes.map(
-        (i) => row(
-          `${i.name}  (${i.columns.join(", ")})  \u2014 ${i.unique ? "unique, " : ""}${i.method}`,
-          i.predicate && `WHERE ${i.predicate}`
-        )
-      ),
-      "no indexes"
-    ),
-    section("primary key", pk ? [row(`${pk.name ?? "(unnamed)"}  (${pk.columns.join(", ")})`)] : [], "no primary key"),
-    section(
-      "unique",
-      unique.map((u) => row(`${u.name}  (${u.columns.join(", ")})`)),
-      "none"
-    ),
-    section("foreign keys", foreign_keys.map(fkRow), "none"),
-    section(
-      "check",
-      check.map((c) => row(c.name, c.expression)),
-      "none"
-    )
-  );
-}
-function openStructure() {
-  const table = state.table;
-  if (!table) return;
-  const token = ++requestToken;
-  $("structure-title").textContent = `structure \u2014 ${state.schema ? `${state.schema}.${table}` : table}`;
-  $("structure-dialog").showModal();
-  const key = cacheKey2(table);
-  const generation = cacheGeneration;
-  const hit = cache2.get(key);
-  if (hit) {
-    renderStructure(hit);
-    return;
-  }
-  $("structure-body").replaceChildren(msg2("loading\u2026"));
-  const params = new URLSearchParams({ table });
-  applyScopeParams(params);
-  api(`/tables/structure?${params}`).then((data) => {
-    if (generation === cacheGeneration) cache2.set(key, data);
-    if (token === requestToken) renderStructure(data);
-  }).catch((e) => {
-    if (token === requestToken) $("structure-body").replaceChildren(msg2(e.message));
-  });
 }
 
 // src/features/theme.ts
@@ -3174,13 +3522,12 @@ $("nav-forward").onclick = () => history.forward();
 $("refresh").onclick = () => {
   const btn = $("refresh");
   clearStructureCache();
+  clearCommonValueCache();
+  resetColumnWidths();
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });
 };
-new ResizeObserver(([entry]) => {
-  document.documentElement.style.setProperty("--toolbar-h", `${entry.target.offsetHeight}px`);
-}).observe($("toolbar"));
 loadSources().then(loadSchemas).then(loadTables).catch(reportError);
 loadSiblings();
 setInterval(loadSiblings, 15e3);

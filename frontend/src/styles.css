@@ -1,6 +1,6 @@
 :root {
   color-scheme: light dark;
-  font-family: ui-monospace, monospace;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 /* Overrides the system-default `light dark` above — light-dark() reads
    the *used* color-scheme value, so pinning it here is enough to force
@@ -18,90 +18,115 @@
   --backdrop: light-dark(#0006, #0009);
   --gap: .5rem;
   --gap-lg: .75rem;
+  --gap-xl: 1.25rem;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --surface: light-dark(#f3f3f0, #26262a);
+  --rule: light-dark(#eeeeea, #2e2e32);
+  --rule-strong: color-mix(in srgb, currentColor 55%, transparent);
+  --text-muted: light-dark(#6b6b68, #a0a09c);
+  --chip-active-bg: light-dark(#1d1d1f, #ececea);
+  --chip-active-fg: light-dark(#fff, #1a1a1c);
+  --chip-h: 1.75rem;
   /* Scrollable content budget inside a modal <dialog> (max-height 80vh
      less the header). */
   --dialog-body-max-h: calc(80vh - 3rem);
-  --sidebar-w: 220px;
-  /* min() re-clamps on window shrink alone (no resize listener needed) if
-     a wide persisted width no longer fits. */
-  --sidebar-w-clamped: min(var(--sidebar-w), 60vw);
   /* --type-* (grid/record cells) and --json-* (json tree tokens) share
      values for bool/number/uuid, so a value looks identical whether it's
      a top-level column or nested inside a jsonb blob. */
-  --json-string: light-dark(#a11, #e88);
-  --json-number: light-dark(#166, #6cc);
-  --json-bool: light-dark(#a60, #fb5);
+  --json-string: light-dark(#8f4a4a, #d4a0a0);
+  --json-number: light-dark(#2f6b6b, #86bcbc);
+  --json-bool: light-dark(#8a6a2e, #d6b980);
   --json-null: light-dark(#888, #999);
-  --type-uuid: light-dark(#639, #c9f);
+  --type-uuid: light-dark(#6e5a8a, #bba8d6);
   --type-bool: var(--json-bool);
   --type-number: var(--json-number);
-  --type-date: light-dark(#2a6, #6db);
+  --type-date: light-dark(#3f7a5c, #8cc4a8);
   /* Transient wash on rows added since the last manual refresh. */
   --row-new-bg: light-dark(#e3f6e6, #1f3a26);
 }
 
 /* ==== Layout ==== */
-body { margin: 0; display: grid; grid-template-columns: var(--sidebar-w-clamped) 1fr; height: 100vh; position: relative; }
-nav { border-right: 1px solid var(--border); padding: var(--gap-lg); overflow-y: auto; }
-#sidebar-resize-handle {
-  position: absolute; top: 0; bottom: 0;
-  left: var(--sidebar-w-clamped); width: 9px; margin-left: -4px;
-  cursor: col-resize; touch-action: none; z-index: 1;
-}
-#sidebar-resize-handle:hover, #sidebar-resize-handle.active { background: var(--hover); }
-/* Always-visible grip so the handle reads as draggable before a hover. */
-#sidebar-resize-handle::after {
-  content: ""; position: absolute; top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 3px; height: 2rem; border-radius: 2px;
-  background: var(--border-strong);
-}
-#sidebar-resize-handle:hover::after, #sidebar-resize-handle.active::after { background: var(--active); }
-body.sidebar-resizing { cursor: col-resize; user-select: none; }
-body.sidebar-resizing #sidebar-resize-handle { background: var(--active); }
-/* No padding here: #toolbar is sticky and must reach main's actual
-   edges to fully cover scrolled rows. Moved to #toolbar/#content instead. */
-main { overflow: auto; }
+/* Author-level display rules below would otherwise defeat the hidden
+   attribute's UA-level display:none. */
+[hidden] { display: none !important; }
+body { margin: 0; height: 100vh; font-size: .875rem; }
+/* main is the only scroller: the chrome scrolls away with the page and only
+   the table header pins (thead th, top: 0). */
+main { height: 100%; overflow: auto; }
+/* sticky left keeps the chrome in view when a wide table scrolls sideways;
+   it works because #content below is as wide as the table (see #content). */
+#chrome { position: sticky; left: 0; z-index: 2; padding: var(--gap-lg) var(--gap-xl) 0; }
+/* Above the table header until the header is pinned (features/sticky-header.ts),
+   then level with it, and the header comes later so it wins: the filter's
+   suggestion list covers the header at rest and slides behind it on scroll. */
+#main.header-stuck #chrome { z-index: 1; }
 /* width: max-content (floored at 100%) makes #content's own box grow to
    match a wide table's overflow instead of staying clipped to main's
-   visible width. Without this, #pager/#toolbar's sticky `left` has no
-   room to travel — their containing block (#content) is only as wide as
-   the viewport, so once scrolled past that they run out of stickiness
-   and get dragged along horizontally. */
-#content { padding: 0 var(--gap-lg) var(--gap-lg); width: max-content; min-width: 100%; }
-.nav-header { display: flex; align-items: center; gap: var(--gap); margin: 0 0 var(--gap); }
-h1 { font-size: 1rem; margin: 0; flex: 1; min-width: 0; overflow: hidden; }
-h1 a { color: inherit; text-decoration: underline; text-underline-offset: .15em;
-       display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-h1 a:hover { text-decoration-thickness: 2px; }
+   visible width. Without this, #pager's sticky `left` has no room to
+   travel — its containing block (#content) is only as wide as the
+   viewport, so once scrolled past that it runs out of stickiness and gets
+   dragged along horizontally. */
+#content { box-sizing: border-box; padding: 0 var(--gap-xl) var(--gap-lg); width: max-content; min-width: 100%; }
 
-/* ==== Sidebar table list ==== */
+/* ==== Top bar ==== */
+#topbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-lg); }
+h1 { font-size: .9rem; margin: 0; font-weight: 600; }
+h1 a { color: inherit; text-decoration: none; }
+h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
+#scope { display: flex; align-items: center; gap: var(--gap); }
+#topbar-end { margin-left: auto; display: flex; align-items: center; gap: var(--gap); }
+/* Hidden by default (single-source / single-schema deployments never show
+   them — see loadSources / loadSchemas); no `source`/`schema` param is sent
+   in that case, so the wire shape matches a build without the selectors. */
+#source-select-wrap, #schema-select-wrap { display: flex; align-items: center; gap: .35rem;
+                                           background: var(--surface); border-radius: 6px;
+                                           padding: .2rem .25rem .2rem .6rem; }
+.scope-label { font-size: .75rem; color: var(--text-muted); }
+#source-select, #schema-select { border: none; background: transparent; font: inherit;
+                                 color: inherit; padding: .1rem; cursor: pointer;
+                                 max-width: 12rem; text-overflow: ellipsis; }
+
+/* ==== Table chips ==== */
+#tables-bar { display: flex; align-items: flex-start; gap: var(--gap); margin-top: var(--gap-lg); }
+#nav-history { display: flex; flex: none; }
+#nav-history button { background: none; border: none; font: inherit; font-size: 1.25rem;
+                      height: var(--chip-h); line-height: 1; color: inherit; cursor: pointer;
+                      padding: 0 .35rem; border-radius: 6px; }
+#nav-history button:not(:disabled):hover { background: var(--hover); }
+#nav-history button:disabled { opacity: .3; cursor: default; }
+ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
+#tables-more-item { margin-left: auto; }
+/* A chip pulled up from the hidden part of a collapsed list (see features/sidebar.ts). */
+#tables li.pulled { position: relative; margin-left: .5rem; }
+#tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
+                            width: 1px; background: var(--border-strong); }
 ul { list-style: none; margin: 0; padding: 0; }
-li button { width: 100%; text-align: left; background: none; border: none;
-            padding: .3rem .4rem; cursor: pointer; font: inherit; color: inherit;
-            border-radius: 4px; display: flex; justify-content: space-between; }
-li button:hover { background: var(--hover); }
-li button.active { background: var(--active); }
-/* min-width:0 overrides the flex-item default of min-width:auto, which
-   otherwise blocks shrinking below content size and prevents the
-   ellipsis truncation below from ever kicking in. Full name is in
-   `title` (see loadTables()) as the escape hatch. */
-.row-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
-            text-overflow: ellipsis; white-space: nowrap; }
-.row-right { display: flex; align-items: center; gap: .35rem; flex: none; }
-.count { opacity: .6; }
-/* Always in the DOM at a fixed size; only visibility toggles (never
-   display), so gaining/losing the spinner never reflows layout — this
-   replaced an old #status text in #controls that shoved #filter sideways
-   every time it appeared/disappeared. */
-.row-spinner { width: .7rem; height: .7rem; border-radius: 50%;
-               border: 2px solid var(--border-strong); border-top-color: transparent;
-               visibility: hidden; flex: none; }
-li button.loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
+#tables li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
+                    cursor: pointer; font: inherit; color: inherit; border-radius: 999px;
+                    display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
+#tables li button:hover { background: var(--hover); }
+#tables li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+/* min-width:0 plus the cap lets one very long name ellipsize instead of
+   widening the row; the full name is in `title` (see loadTables()). */
+.row-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; }
+.row-right { position: relative; display: flex; align-items: center; flex: none; }
+.count { font-size: .7rem; opacity: .6; }
+/* Overlays the count while loading (absolutely positioned, so it adds no
+   width and the chip row never reflows). */
+.row-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
+               border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent;
+               visibility: hidden; }
+#tables li button.loading .count { visibility: hidden; }
+#tables li button.loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  li button.loading .row-spinner { animation: none; border-top-color: var(--border-strong); }
+  #tables li button.loading .row-spinner { animation: none; border-top-color: currentColor; }
 }
+#tables-more { flex: none; background: none; border: none; font: inherit; font-size: .8rem;
+               color: var(--text-muted); height: var(--chip-h); padding: 0 .5rem;
+               cursor: pointer; border-radius: 6px; }
+#tables-more:hover { background: var(--hover); color: inherit; }
 /* One rotation per click, always run to completion (JS drops .spinning on a
    timer) so a sub-100ms re-fetch still acknowledges the click, separately
    from #status/aria-busy. inline-block so the rotate applies. */
@@ -111,52 +136,46 @@ li button.loading .row-spinner { visibility: visible; animation: spin .6s linear
   #refresh.spinning #refresh-icon { animation: none; }
 }
 
-/* ==== Source selector ==== */
-/* hidden by default (single-source deployments never show this — see
-   loadSources); same margin as #schema-select-wrap below it, so hiding/
-   showing either never shifts the other's position. */
-#source-select-wrap { margin-bottom: var(--gap-lg); }
-#source-select { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
-
-/* ==== Schema selector ==== */
-/* hidden by default (single-schema deployments never show this — see
-   loadSchemas); margin matches #table-search's so hiding/showing it
-   doesn't shift the search box's position underneath. */
-#schema-select-wrap { margin-bottom: var(--gap-lg); }
-#schema-select { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
-
-/* ==== Sidebar table search ==== */
-#table-search { margin-bottom: var(--gap); }
-#table-filter { width: 100%; box-sizing: border-box; font: inherit; padding: .25rem; }
-#tables-empty { opacity: .6; margin: .3rem .4rem; }
-::highlight(table-match) { background: var(--active); }
-
 /* ==== Data table ==== */
 /* separate/0, not collapse: verified that collapsed borders let
    scrolled-under row content bleed through a sticky <th>'s background at
-   the collapsed border seams in Chromium. */
-table { border-collapse: separate; border-spacing: 0; width: 100%; margin-top: var(--gap); }
-th, td { border: 1px solid var(--border); padding: .25rem var(--gap); text-align: left; }
-th { cursor: pointer; user-select: none; white-space: nowrap; }
-/* z-index is load-bearing: td has position:relative (for the copy
-   button), and since tbody follows thead in DOM order, its positioned
-   <td>s paint over a sticky <th> with the default stacking order unless
-   the header is explicitly raised. top tracks #toolbar's live height
-   (--toolbar-h, set via ResizeObserver) since it isn't constant. */
-thead th { position: sticky; top: var(--toolbar-h, 0px); z-index: 1; background: canvas; }
+   the collapsed border seams in Chromium. Horizontal rules only. */
+/* max-content, not auto: inside #content's own max-content box, auto lets the
+   table inflate far past its natural width (a 5-column table rendered 3x wide). */
+table { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
+th, td { padding: .45rem .75rem .45rem 0; text-align: left; }
+/* Border-box so the min-width from features/column-widths.ts is the column's
+   measured width, not that plus padding (which would grow it every render). */
+th { box-sizing: border-box; }
+td { position: relative; border-bottom: 1px solid var(--rule);
+     font-family: var(--font-mono); font-size: .8125rem; }
+tbody tr:hover { background: var(--hover); }
+th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
+     font-size: .75rem; border-bottom: 1px solid var(--rule-strong); }
+/* z-index is load-bearing: td has position:relative (for the cell actions),
+   and since tbody follows thead in DOM order, its positioned <td>s paint
+   over a sticky <th> with the default stacking order unless the header is
+   explicitly raised. */
+thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+/* Capped like the table chips' names; the title carries the full name. */
+.col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
+            vertical-align: bottom; }
 /* Arrow always rendered (dim when unsorted), not just on the active
    column: keeps every th's width stable across sort changes and shows
    sortability before the first click. "↑" default previews the real
    first-click behavior (ascending — see th.onclick). */
-th[aria-sort]::after { content: " ↑"; opacity: .35; }
-th[aria-sort="ascending"]::after { content: " ↑"; opacity: 1; }
-th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
+th[aria-sort] .th-name::after { content: " ↑"; opacity: .35; }
+th[aria-sort="ascending"] .th-name::after { content: " ↑"; opacity: 1; }
+th[aria-sort="descending"] .th-name::after { content: " ↓"; opacity: 1; }
 /* Decorative (aria-hidden) — the th carries an aria-label with the text
    equivalent. */
 .key-icon { margin-right: .2rem; }
-/* The engine-native column type, rendered as inline code in the header. */
-th code.col-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em;
-            font-weight: normal; background: color-mix(in srgb, currentColor 10%, transparent);
+/* The engine-native column type, on its own line under the name so a long
+   spelling ("timestamp with time zone") doesn't set the column's width. */
+th code.col-type { display: block; width: fit-content; max-width: 10rem; overflow: hidden;
+            text-overflow: ellipsis; margin-top: .1rem; font-family: var(--font-mono);
+            font-size: .7rem; font-weight: normal; opacity: .75;
+            background: color-mix(in srgb, currentColor 10%, transparent);
             padding: 0 .25em; border-radius: 3px; }
 /* Not part of the sort click target — its onclick stops propagation so
    it doesn't also trigger th's sort handler. */
@@ -175,24 +194,29 @@ th code.col-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; 
 th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
 td.row-actions { padding-right: .25rem; }
 .record-btn { background: none; border: none; cursor: pointer; font: inherit;
-              color: inherit; padding: 0 .15rem; border-radius: 3px; }
-.record-btn:hover { background: var(--hover); }
-td { position: relative; padding-right: 2.7rem; }
+              color: var(--text-muted); padding: 0 .15rem; border-radius: 3px; }
+.record-btn:hover { background: var(--hover); color: inherit; }
 .cell-text { display: block; max-width: 24rem; overflow: hidden;
              text-overflow: ellipsis; white-space: nowrap; }
 button.cell-text { background: none; border: none; padding: 0; margin: 0;
                    font: inherit; color: inherit; text-align: left; cursor: inherit; }
 td.expandable .cell-text { cursor: zoom-in; }
-.copy, .filter-eq { position: absolute; top: 50%; transform: translateY(-50%);
-        background: none; border: none; cursor: pointer; font: inherit;
-        color: inherit; opacity: 0; padding: 0 .15rem; border-radius: 3px; }
-.copy { right: .15rem; }
-.filter-eq { right: 1.45rem; }
-/* Null cells have no copy button, so their lone filter button sits in
-   copy's slot instead of leaving that corner visibly empty. */
-.filter-eq.only-action { right: .15rem; }
-td:hover .copy, td:hover .filter-eq, .copy:focus-visible, .filter-eq:focus-visible { opacity: .7; }
-.copy:hover, .filter-eq:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+.copy, .filter-eq { background: none; border: none; cursor: pointer; font: inherit;
+        color: inherit; padding: 0 .15rem; border-radius: 3px; }
+.copy:hover, .filter-eq:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+/* Overlays the cell's right edge on hover/focus instead of reserving
+   padding in every cell. Opacity (not display) so the buttons stay
+   focusable and the reveal is keyboard-reachable. */
+.cell-actions { position: absolute; right: .25rem; top: 50%; transform: translateY(-50%);
+                display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: canvas;
+                box-shadow: 0 0 0 1px var(--border), 0 2px 6px #0002; opacity: 0; }
+.cell-actions button { padding: .1rem .45rem; border-radius: 4px; }
+td:hover .cell-actions, td:focus-within .cell-actions { opacity: 1; }
+/* No hover on touch: keep the buttons visible, in reserved space. */
+@media (hover: none) {
+  td { padding-right: 4.5rem; }
+  .cell-actions { opacity: 1; }
+}
 /* Fades out over 3s after a manual refresh; static under reduced motion,
    cleared by the next re-render (a fresh <tr> without the class). td has no
    background of its own, so the tr wash shows through. */
@@ -203,58 +227,102 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 }
 
 /* ==== Controls / status ==== */
-/* Pinned in both axes (unlike thead th, top:0 only — header cells must
-   still scroll horizontally). #error lives inside so a rejection message
-   stays paired with the filter. z-index above thead th's + opaque
-   background stop rows from showing through. */
-#toolbar { position: sticky; top: 0; left: 0; z-index: 2; background: canvas;
-           padding: var(--gap-lg) var(--gap-lg) var(--gap);
-           border-bottom: 1px solid var(--border); }
-#controls { display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
-/* display: contents keeps #filter/#apply direct flex items of #controls,
-   so wrapping them in a <form> doesn't change layout. */
-#filter-form { display: contents; }
-#filter { flex: 1; min-width: 12rem; font: inherit; padding: .25rem; }
+#toolbar { margin-top: var(--gap-xl); }
+#filter-form { display: flex; gap: var(--gap); }
+/* The wrap carries the field's look; the input's own text is transparent and
+   #filter-hl, behind it, draws the coloured copy (features/filter-highlight.ts).
+   The two must share font and padding exactly. */
+#filter-wrap { position: relative; flex: 1; min-width: 12rem; display: flex;
+               background: var(--surface); border-radius: 8px; }
+#filter, #filter-hl { font-family: var(--font-mono); font-size: .8125rem; padding: .6rem .85rem;
+                      box-sizing: border-box; }
+#filter { flex: 1; min-width: 0; border: none; border-radius: 8px; background: transparent;
+          color: transparent; caret-color: CanvasText; appearance: none; position: relative; }
+#filter::placeholder { color: var(--text-muted); opacity: 1; }
+#filter::selection { color: transparent; background: color-mix(in srgb, Highlight 40%, transparent); }
+#filter-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+             display: flex; align-items: center; white-space: pre; }
+#filter-wrap.plain #filter { color: inherit; }
+#filter-wrap.plain #filter::selection { color: inherit; }
+#filter-wrap.plain #filter-hl { display: none; }
+.t-op { color: var(--text-muted); }
+.t-keyword { color: var(--type-uuid); }
+.t-value { color: var(--json-number); }
+.t-err { text-decoration: underline wavy var(--danger); text-underline-offset: .2em; }
+/* Forced colors repaint the input's text anyway, so the copy would double it. */
+@media (forced-colors: active) {
+  #filter { color: CanvasText; }
+  #filter-hl { display: none; }
+}
+#apply { background: var(--chip-active-bg); color: var(--chip-active-fg); border: none;
+         border-radius: 8px; padding: 0 1.1rem; font: inherit; cursor: pointer; }
 /* Visually hidden but still in the accessibility tree — the aria-live
-   loading text never occupies space in #controls's flex row, which used
-   to shove #filter sideways on every load. */
+   loading text never occupies layout space. */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
            margin: -1px; overflow: hidden; clip-path: inset(50%);
            white-space: nowrap; border: 0; }
-#error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap; }
-#protocol-warning { display: flex; gap: var(--gap); align-items: baseline;
-                    color: var(--warning); margin-bottom: var(--gap); }
-/* display:flex above would silently defeat the hidden attribute's
-   UA-level display:none — restate it at author-level specificity. */
-#protocol-warning[hidden] { display: none; }
+#error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap;
+         font-family: var(--font-mono); font-size: .8rem; }
+#error:empty { display: none; }
+#meta { display: flex; justify-content: space-between; align-items: center;
+        flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); }
+#meta-title { color: var(--text-muted); }
+/* Data and identifiers stay monospace; the chrome around them is system-ui. */
+.json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value,
+#filter-suggest button { font-family: var(--font-mono); }
+#current { font-family: var(--font-mono); color: CanvasText; }
+#actions { display: flex; gap: 2px; }
+#actions button, #pager button { background: none; border: none; font: inherit;
+        font-size: .8125rem; color: var(--text-muted); padding: .25rem .5rem;
+        border-radius: 6px; cursor: pointer; }
+#actions button:hover:not(:disabled), #pager button:hover:not(:disabled) { background: var(--hover); color: inherit; }
+#actions button:disabled, #pager button:disabled { opacity: .4; cursor: default; }
+#protocol-warning { display: flex; justify-content: space-between; gap: var(--gap);
+                    align-items: baseline; margin-top: var(--gap-lg); padding: .5rem .75rem;
+                    border-radius: 8px;
+                    background: color-mix(in srgb, var(--warning) 16%, transparent); }
 #protocol-warning button { background: none; border: none; cursor: pointer; font: inherit;
                            color: inherit; padding: 0 .15rem; border-radius: 3px; }
 #protocol-warning button:hover { background: var(--hover); }
 .empty td { text-align: center; opacity: .6; padding: 1rem; }
 
-/* Shared by any small sidebar section heading — currently #siblings' h2
-   and the schema selector's label (see their sections below). */
+/* Small uppercase heading inside dialogs and popovers. */
 .section-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
                font-weight: 600; opacity: .6; margin: 0 0 var(--gap); display: block; }
 
-/* ==== Siblings ==== */
-#siblings { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: var(--gap); }
+/* ==== Other services (siblings) ==== */
 .dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%;
-       margin-right: .4em; background: #999; flex: none; }
+       background: #999; flex: none; }
 .dot.up { background: var(--success); } .dot.down { background: var(--danger); }
-/* Same truncation shape as .row-name above. Full name is in `title`
-   (see loadSiblings()) as the escape hatch. */
-.sibling-row { display: flex; align-items: center; }
-.sibling-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                min-width: 0; }
+#siblings-btn { display: inline-flex; align-items: center; gap: .4rem; background: none;
+                border: none; font: inherit; font-size: .8rem; color: var(--text-muted);
+                padding: .25rem .5rem; border-radius: 6px; cursor: pointer;
+                anchor-name: --siblings-anchor; }
+#siblings-btn:hover { background: var(--hover); color: inherit; }
+/* Same anchored-popover shape as #cv-pop, aligned to the button's right edge. */
+#siblings-pop { position: fixed; position-anchor: --siblings-anchor;
+          position-try-fallbacks: flip-block, flip-inline;
+          inset: auto; top: calc(anchor(bottom) + .3rem); right: anchor(right);
+          margin: 0; border: 1px solid var(--border-strong); border-radius: 12px;
+          padding: .5rem; width: max-content; max-width: min(22rem, 90vw);
+          box-shadow: 0 4px 16px #0004; }
+#siblings-heading { margin: .1rem .6rem .5rem; font-size: .75rem; color: var(--text-muted); }
+#siblings-list { display: flex; flex-direction: column; }
+.sibling-row { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem;
+               border-radius: 6px; color: inherit; text-decoration: none; }
+.sibling-row:hover { background: var(--hover); }
+/* Full name is in `title` (see loadSiblings()) as the truncation escape hatch. */
+.sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; font-family: var(--font-mono); }
+.sibling-state { color: var(--text-muted); font-size: .75rem; }
 
 /* ==== Pager ==== */
-/* Sticky left, same reasoning as #toolbar above: #content (and #pager's
+/* Sticky left, same reasoning as #chrome above: #content (and #pager's
    own position in normal flow) is only as wide as the table, so once a
    wide table pushes main's horizontal scrollbar out, an unpinned pager
    scrolls away with it instead of staying reachable. */
-#pager { margin-top: var(--gap); display: flex; gap: var(--gap); align-items: center;
-         position: sticky; left: var(--gap-lg); width: fit-content; }
+#pager { margin-top: var(--gap-lg); display: flex; gap: var(--gap); align-items: center;
+         position: sticky; left: var(--gap-xl); width: fit-content; color: var(--text-muted); }
 
 /* Native <dialog>: showModal() gives backdrop, Esc-to-close, and focus
    trapping for free. */
@@ -280,6 +348,7 @@ dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
    siblings here. */
 dialog dl .copy { position: static; top: auto; transform: none; opacity: 0; align-self: start; }
 dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
+dialog dl .copy:hover { opacity: 1; }
 /* Lives in the dialog header, so it stays visible regardless of hover —
    a standalone action, not a per-field affordance. */
 .dialog-head-title { display: flex; align-items: center; gap: .5rem; }
@@ -313,18 +382,10 @@ dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
 .cell-type-number { color: var(--type-number); }
 .cell-type-date { color: var(--type-date); }
 
-/* Lives in .nav-header beside the title, not fixed to the viewport — a
-   fixed corner overlapped the sidebar once #tables/#siblings grew past
-   one screenful. */
-#api-help-btn { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
-                border: 1px solid var(--border-strong); background: canvas;
-                color: inherit; cursor: pointer; font: inherit; }
-#api-help-btn:hover { background: var(--hover); }
-
-#theme-toggle { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 50%; padding: 0;
-                border: 1px solid var(--border-strong); background: canvas;
-                color: inherit; cursor: pointer; font: inherit; line-height: 1; }
-#theme-toggle:hover { background: var(--hover); }
+/* Icon buttons in the top bar. */
+#api-help-btn, #theme-toggle { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 6px; padding: 0;
+                border: none; background: none; color: var(--text-muted); cursor: pointer; font: inherit; line-height: 1; }
+#api-help-btn:hover, #theme-toggle:hover { background: var(--hover); color: inherit; }
 /* Icon is pure CSS, no JS: it's driven by the same cascade the
    color-scheme rules above use (system prefers-color-scheme by default,
    overridden by an explicit :root[data-theme]), so it always reflects
@@ -396,7 +457,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 /* Record dialog: the field list and this section scroll together as one
    region within the dialog's height budget — not two stacked scrollers —
    and the section flows in the same inset column as the fields, set off
-   only by the reused sidebar section label, no rule. */
+   only by the reused section label, no rule. */
 #record-body { overflow: auto; max-height: var(--dialog-body-max-h); }
 #record-dialog #record-dl { max-height: none; }
 #record-referenced-by-wrap { padding: 0 var(--gap-lg) var(--gap-lg); }
@@ -423,19 +484,15 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #columns-pop label:hover { background: var(--hover); }
 .col-hidden { display: none; }
 
-/* Anchored to the text caret inside #filter, not the input's box — a
-   zero-size tracking element whose left/top JS recomputes on every
-   keystroke via mirror-div caret measurement (no native way to anchor to
-   a point inside plain text). popover="manual" (see filter-ui.ts) so it
-   stays open while typing. */
-#filter-caret-anchor { position: fixed; width: 0; height: 0; anchor-name: --filter-caret; }
-#filter-suggest { position: fixed; position-anchor: --filter-caret;
-          position-try-fallbacks: flip-block;
-          inset: auto; top: calc(anchor(bottom) + .15rem); left: anchor(left);
-          margin: 0; border: 1px solid var(--border-strong);
+/* Absolutely positioned under the field at the caret (left set from
+   filter-ui.ts), in the page's flow so it scrolls with the field; #chrome's
+   z-index decides whether it is over or behind the sticky table header. */
+#filter-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0;
+          background: canvas; color: inherit; border: 1px solid var(--border-strong);
           border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
           overflow: auto; box-shadow: 0 4px 16px #0004; }
 #filter-suggest button { display: block; width: 100%; box-sizing: border-box;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           background: none; border: none; font: inherit; color: inherit;
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }

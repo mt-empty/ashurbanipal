@@ -1,13 +1,16 @@
 import { onProtocolSkew } from "../core/api.js";
 import "../features/api-reference.js";
 import { $, reportError } from "../core/dom.js";
+import { getLastPayload, initState, state } from "../core/state.js";
+import { resetColumnWidths } from "../features/column-widths.js";
+import "../features/filter-highlight.js";
+import { clearCommonValueCache } from "../features/filter-ui.js";
+import { loadSiblings } from "../features/siblings.js";
 import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
+import "../features/sticky-header.js";
+import { clearStructureCache, openStructure } from "../features/structure.js";
 import { loadData } from "./controller.js";
 import { registerLoadData } from "./reload.js";
-import "../features/sidebar-resize.js";
-import { getLastPayload, initState, state } from "../core/state.js";
-import { loadSiblings } from "../features/siblings.js";
-import { clearStructureCache, openStructure } from "../features/structure.js";
 import "../features/theme.js";
 
 // Entry point: wiring only. Restore state (storage, then URL layered over
@@ -58,18 +61,14 @@ $<HTMLButtonElement>("nav-forward").onclick = () => history.forward();
 $<HTMLButtonElement>("refresh").onclick = () => {
   const btn = $<HTMLButtonElement>("refresh");
   clearStructureCache();
+  clearCommonValueCache();
+  resetColumnWidths();
   // Guaranteed one rotation even on a few-ms fetch; the timer (not
   // animationend, which never fires under prefers-reduced-motion) clears it.
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData({ resetScroll: false, highlightNew: true });
 };
-
-// Feeds --toolbar-h (thead th's sticky `top`) — #toolbar's height isn't
-// static (flex-wrap, #error appearing/disappearing).
-new ResizeObserver(([entry]) => {
-  document.documentElement.style.setProperty("--toolbar-h", `${(entry.target as HTMLElement).offsetHeight}px`);
-}).observe($("toolbar"));
 
 // loadSources resolves state.source before loadSchemas needs it, which in
 // turn resolves state.schema before loadTables' first request needs it —

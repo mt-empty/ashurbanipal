@@ -11,6 +11,7 @@ import {
 } from "../lib/format.js";
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
+import { columnMinWidth } from "./column-widths.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { navigateWithSeededFilter } from "./nav.js";
 import { openRecordView } from "./record-view.js";
@@ -25,6 +26,8 @@ export function renderHeader(columns: Column[]): void {
   for (const col of columns) {
     const th = document.createElement("th");
     th.dataset.col = col.name;
+    const minWidth = columnMinWidth(col.name);
+    if (minWidth) th.style.minWidth = `${minWidth}px`;
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
     // The visible header renders the engine-native type spelling as inline
@@ -32,6 +35,16 @@ export function renderHeader(columns: Column[]): void {
     const typeCode = document.createElement("code");
     typeCode.className = "col-type";
     typeCode.textContent = col.type;
+    typeCode.title = col.type; // the chip ellipsizes a long spelling (R8)
+    // Name, ▾ and the sort arrow share one line; the type chip sits under it.
+    const head = document.createElement("span");
+    head.className = "th-name";
+    // Capped in CSS (a 63-char identifier would otherwise set the column's
+    // width); the title is the escape hatch (R8).
+    const nameEl = document.createElement("span");
+    nameEl.className = "col-name";
+    nameEl.textContent = col.name;
+    nameEl.title = col.comment ? `${col.name} — ${col.comment}` : col.name;
     if (col.key === "pk" || col.key === "fk") {
       // A column can be its own table's PK and an FK at once (1:1 detail
       // table shape) — key still reports "pk", but references is populated
@@ -47,12 +60,12 @@ export function renderHeader(columns: Column[]): void {
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "🔑" : "🔗";
-      th.append(icon, `${col.name} `, typeCode);
+      head.append(icon, nameEl, " ");
       // Layers onto the accessible name rather than replacing the key
       // description — the icon keeps its own `title` above.
       th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
     } else {
-      th.append(`${col.name} `, typeCode);
+      head.append(nameEl, " ");
     }
     if (col.comment) th.title = col.comment;
     th.setAttribute(
@@ -77,7 +90,8 @@ export function renderHeader(columns: Column[]): void {
       e.stopPropagation();
       showCommonValues(e, col.name);
     };
-    th.appendChild(cvBtn);
+    head.appendChild(cvBtn);
+    th.append(head, typeCode);
     tr.appendChild(th);
   }
   $("thead").replaceChildren(tr);
@@ -140,14 +154,17 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
     // Nothing to copy or expand for a null cell, but "filter by this
     // value" is still meaningful (IS NULL).
     const filterBtn = document.createElement("button");
-    filterBtn.className = "filter-eq only-action";
+    filterBtn.className = "filter-eq";
     filterBtn.setAttribute("aria-label", "filter by null");
     filterBtn.textContent = "=";
     filterBtn.onclick = (e) => {
       e.stopPropagation();
       applyFilterClause(col.name, "IS NULL");
     };
-    td.appendChild(filterBtn);
+    const actions = document.createElement("span");
+    actions.className = "cell-actions";
+    actions.appendChild(filterBtn);
+    td.appendChild(actions);
     return td;
   }
   const cellText = qs<HTMLElement>(td, ".cell-text");
@@ -275,8 +292,9 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
 
 export function updatePager(data: TableData): void {
   const page = Math.floor(state.offset / state.limit) + 1;
-  $("page").textContent = `page ${page} · ${formatApproxCount(data.total_approx)} rows`;
-  $("page").title = APPROX_COUNT_TITLE;
+  $("page").textContent = `page ${page}`;
+  $("row-meta").textContent = ` · ${formatApproxCount(data.total_approx)} rows · ${data.columns.length} columns`;
+  $("row-meta").title = APPROX_COUNT_TITLE;
   $<HTMLButtonElement>("prev").disabled = state.offset === 0;
   $<HTMLButtonElement>("next").disabled = data.rows.length < state.limit;
 }

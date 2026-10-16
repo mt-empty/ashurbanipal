@@ -171,8 +171,8 @@ export function persist(): void {
   const { source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource } = state;
   // Best-effort: a throw here (quota, private mode) must not abort the caller,
   // which almost always follows persist() with a loadData()/loadTables() the
-  // user still needs. Unlike the single-string writes in theme.ts /
-  // sidebar-resize.ts, this blob grows per table/source touched, so a quota
+  // user still needs. Unlike the single-string write in theme.ts, this
+  // blob grows per table/source touched, so a quota
   // failure is plausible on a long session — warn so it isn't wholly invisible.
   try {
     localStorage.setItem(
@@ -250,7 +250,7 @@ export function rememberSchema(): void {
 }
 
 // ---- named scope transitions ----
-// Each of the three sidebar scope switches has exactly one caller, so they take
+// Each of the three scope switches (source, schema, table) has exactly one caller, so they take
 // no options. nav.ts's navigateWithSeededFilter is the sanctioned bypass —
 // it seeds a filter rather than clearing one, drops the remembered sort (a
 // stale one would defeat loadData's drop-and-retry against the same-fetch
@@ -290,7 +290,7 @@ export function switchSchema(name: string): void {
   clearFilter();
 }
 
-// Sidebar table click: the filter was written against this table's columns
+// Table chip click: the filter was written against this table's columns
 // so it clears; the sort is restored to whatever was last used on this table.
 export function switchTable(name: string): void {
   state.table = name;

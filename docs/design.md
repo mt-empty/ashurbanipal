@@ -84,6 +84,11 @@ Two components, same as the original concept:
 - Served by the backend as its own route, gated by the same kill switch as
     the API routes.
 - Talks to the backend exclusively through the REST endpoints in §4.
+- **Stable column widths** — a column's min-width only grows while you stay
+  on a table, so a sort, filter or page change can widen it but never
+  shrinks it and shifts the columns after it. The refresh button, or
+  switching table, schema or source, starts over from the content's widths
+  (`features/column-widths.ts`).
 - **Inspection affordances** (native elements, no library):
   - *Raw payload viewer* — a "payload" button opens a native `<dialog>`
     (`showModal()`: backdrop, Esc-to-close, focus trap for free) showing the
@@ -125,23 +130,35 @@ Two components, same as the original concept:
     referenced table and filters it to the matching row. Per §2's
     non-goal carve-out, this is two sequential single-table queries, never
     a join.
-  - *Filter autocomplete* — the filter input suggests column names via a
-    hand-rolled, caret-anchored popover that stays open while typing (see
-    `frontend/src/features/filter-ui.ts`) at condition-start boundaries (empty
-    input, or right after `AND `/`OR `/`NOT `). No value- or operator-level
-    autocomplete, and no *as-you-type* parsing of the filter text — both
-    would require understanding where the cursor sits in the grammar.
-    (The submit-time DSL parser — `spec/filter-dsl.md`,
-    `frontend-style-guide.md` §7 — is a separate concern, not
-    per-keystroke.) (An earlier
-    version of this also highlighted the typed clause's tokens via a
-    transparent-input-plus-overlay; removed after three rounds of
-    increasingly subtle scroll/stacking bugs made it too bug-prone to
-    maintain — if revisited, do it as a `contenteditable`-based rewrite,
-    not a transparent-input-plus-overlay.)
+  - *Filter autocomplete* — the filter input suggests whatever the grammar
+    allows next, via a hand-rolled, caret-anchored list that stays open
+    while typing and scrolls with the page, passing behind the sticky table
+    header (`frontend/src/features/filter-ui.ts`): a column at
+    condition-start boundaries (empty, or after `AND `/`OR `/`NOT `), an
+    operator after a column, the column's common values (§4, same endpoint
+    as the header ▾) after an operator, and `AND`/`OR` once a letter is
+    typed after a finished condition. Accepting a row adds a space, so the
+    next list follows. Columns highlight their first row, so Enter accepts
+    it; the other lists highlight nothing, so Enter still submits what is
+    typed (Tab or an arrow key picks a row). What is allowed next comes from
+    a lenient tokenizer (`lib/filter-tokens.ts`) that only looks at the text
+    before the caret; `parseFilterDsl` (`spec/filter-dsl.md`) alone decides
+    what is accepted.
+  - *Filter colouring* — the typed text is coloured by part (column,
+    operator, keyword, value), and the part where `parseFilterDsl` stops
+    accepting it is underlined once the text has moved past that point
+    (`features/filter-highlight.ts`). It is a copy of the text drawn behind
+    a transparent-text input, so caret, selection, IME and copy/paste stay
+    native. An earlier overlay was removed for three bugs: a layer
+    positioned by anchor positioning that desynced on scroll, a z-index
+    clash with the then-sticky toolbar, and not following the input's own
+    horizontal scroll. This one is plainly positioned inside the field's
+    wrapper (the toolbar is no longer sticky), and when the text overflows
+    the field the copy is dropped and the input shows its own text, because
+    WebKit does not report a text field's horizontal scroll.
   - *Table/column comments* — `COMMENT ON TABLE`/`COMMENT ON COLUMN` text
-    (§4) is surfaced as native `title` tooltips on the sidebar table
-    buttons and column headers.
+    (§4) is surfaced as native `title` tooltips on the table chips
+    and column headers.
   - *PK/FK header icons* — a column's `key` role (§4) gets a small icon in
     its header, with a text alternative (not color-only).
 - **Grid customization**:
@@ -152,8 +169,13 @@ Two components, same as the original concept:
     (`docs/feature-backlog/09-column-reorder-and-resize.md`).
   - *Sticky table header* — the header row stays pinned while scrolling a
     long result set vertically.
-  - *Sidebar table search* — a search box above the table list filters it
-    live, client-side, as the user types.
+  - *Table chips* — every table is a chip above the filter. A list that
+    wraps past three lines collapses behind a "+ N more" control that
+    expands it in place. The control is the last item in the list, right-aligned
+    on the last row; when collapsed, chips at the end of row three make room
+    for it, so the rows above never move. The active table stays visible when
+    collapsed: it is shown right after the last visible chip, with a divider
+    when that moves it out of alphabetical order. There is no table search box.
 - **UI state persistence**: `localStorage` remembers lightweight UI state
   across visits — currently selected source, schema (remembered per
   source), table, sort column/direction (remembered per table, like

@@ -78,7 +78,7 @@ test("sorting within the initially-loaded table does not create a back-stop", as
   await expect(page.locator("#nav-back")).toBeDisabled();
   // Whatever table auto-loaded first — sorting it is a same-table
   // refinement, not a navigation, so it must not enable "back".
-  await page.locator("thead th[data-col]").first().click();
+  await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   await expect(page.locator("#nav-back")).toBeDisabled();
 });

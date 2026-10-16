@@ -12,7 +12,7 @@ export const APP_PATH = "/__ashurbanipal";
  * real signal, not a guessed timeout. Skipping this under heavy parallel
  * load is what caused sporadic "element is not stable"/misfired clicks.
  *
- * Deliberately excludes .row-spinner animations: a sidebar row's spinner
+ * Deliberately excludes .row-spinner animations: a table chip's spinner
  * used to be able to get stuck running forever (fetchTableData's finally
  * block cleared the wrong row's loading flag if state.table changed
  * mid-flight — fixed by capturing `table` into a local const, see
@@ -67,7 +67,7 @@ export async function gotoApp(page: Page, query = "") {
   await waitForIdle(page);
 }
 
-/** Clicks a sidebar table button and waits for it to actually become the
+/** Clicks a table chip and waits for it to actually become the
  * loaded/current table (not just clicked) — #current only updates after a
  * successful loadData() (see dbviewer.html's updateActiveTableChrome), so
  * this also doubles as "wait for the fetch to resolve." */

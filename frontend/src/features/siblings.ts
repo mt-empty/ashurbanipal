@@ -22,24 +22,31 @@ export async function loadSiblings(): Promise<void> {
   }
   if (token !== siblingsRequestToken) return; // superseded by a newer poll
   $("siblings").hidden = siblings.length === 0;
-  const div = $("siblings-list");
-  div.replaceChildren(
+  const down = siblings.filter((s) => !s.healthy).length;
+  // Text carries the status too, so the dot's color is never the only signal.
+  $("siblings-summary").textContent =
+    down > 0 ? `Other services · ${down} down` : `Other services · ${siblings.length} up`;
+  $("siblings-dot").className = `dot ${down > 0 ? "down" : "up"}`;
+  $("siblings-list").replaceChildren(
     ...siblings.map((s) => {
-      const p = document.createElement("div");
+      const a = document.createElement("a");
+      a.href = s.base_url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.className = "sibling-row";
       const dot = document.createElement("span");
       dot.className = `dot ${s.healthy ? "up" : "down"}`;
       dot.setAttribute("role", "img");
       dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
-      const a = document.createElement("a");
-      a.href = s.base_url;
-      a.textContent = s.name;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.title = s.name; // truncation escape hatch
-      p.className = "sibling-row";
-      a.className = "sibling-name";
-      p.append(dot, a);
-      return p;
+      const name = document.createElement("span");
+      name.className = "sibling-name";
+      name.textContent = s.name;
+      name.title = s.name; // truncation escape hatch
+      const state = document.createElement("span");
+      state.className = "sibling-state";
+      state.textContent = s.healthy ? "up ↗" : "down ↗";
+      a.append(dot, name, state);
+      return a;
     }),
   );
 }

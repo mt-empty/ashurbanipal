@@ -5,7 +5,7 @@ import { gotoApp, selectTable } from "./support/helpers";
 // artifact must render MySQL/SQLite catalog type spellings too. Mock
 // /tables/data with a column set using non-Postgres spellings plus two
 // opaque ("unknown") columns, then assert the type-aware affordances still
-// fire. `users` is just a table the sidebar lists; the mock replaces its
+// fire. `users` is just a table the chip list shows; the mock replaces its
 // payload wholesale.
 
 const payload = {

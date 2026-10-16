@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { gotoApp, selectTable } from "./support/helpers";
 
 const SEEDED_TABLES = [
@@ -19,9 +19,11 @@ const SEEDED_TABLES = [
   "users",
 ];
 
-test("sidebar lists all seeded tables alphabetically with approx row counts", async ({ page }) => {
+// A dev database may also hold zz_demo_* tables (many empty tables for looking
+// at the chip cap by hand); the specs below ignore them.
+test("table chips list all seeded tables alphabetically with approx row counts", async ({ page }) => {
   await gotoApp(page);
-  const buttons = page.locator("#tables button");
+  const buttons = page.locator('#tables button[data-table]:not([data-table^="zz_demo_"])');
   await expect(buttons).toHaveCount(SEEDED_TABLES.length);
   // _conformance_meta/feature_flags are deliberately never ANALYZEd, so
   // the frontend shows "?" (formatApproxCount) instead of a raw -1.
@@ -63,24 +65,124 @@ test("a long table name truncates instead of pushing the row count out", async (
   ).toBeVisible();
 });
 
-test("sidebar search filters the table list live and is case-insensitive", async ({ page }) => {
-  await gotoApp(page);
-  await page.locator("#table-filter").fill("PAY");
-  const visible = page.locator("#tables li:not([hidden])");
-  await expect(visible).toHaveCount(1);
-  await expect(visible.locator("button")).toContainText("payments");
-  await expect(page.locator("#tables-empty")).toBeHidden();
+// Narrow enough that the seeded tables wrap past three lines.
+const NARROW = { width: 360, height: 800 };
+const visibleChips = (page: Page) =>
+  page.locator("#tables li:not([hidden]):not(#tables-more-item)");
 
-  await page.locator("#table-filter").fill("");
-  await expect(page.locator("#tables li:not([hidden])")).toHaveCount(SEEDED_TABLES.length);
+// The button must end the collapsed list: within three rows, at the list's right edge.
+async function expectButtonOnLastRowAtRight(page: Page) {
+  const geometry = await page.evaluate(() => {
+    const ul = document.getElementById("tables") as HTMLElement;
+    const item = document.getElementById("tables-more-item") as HTMLElement;
+    const tops = new Set(
+      [...ul.querySelectorAll<HTMLElement>("li:not([hidden])")].map((li) => li.offsetTop),
+    );
+    return {
+      rows: tops.size,
+      buttonRow: item.offsetTop,
+      lastRow: Math.max(...tops),
+      gapToRightEdge: ul.getBoundingClientRect().right - item.getBoundingClientRect().right,
+    };
+  });
+  expect(geometry.rows).toBeLessThanOrEqual(3);
+  expect(geometry.buttonRow).toBe(geometry.lastRow);
+  expect(geometry.gapToRightEdge).toBeLessThan(2);
+}
+
+test("a long table list collapses to three lines behind '+ N more' and expands in place", async ({
+  page,
+}) => {
+  await page.setViewportSize(NARROW);
+  await gotoApp(page);
+  const more = page.locator("#tables-more");
+  await expect(more).toHaveText(/^\+ \d+ more$/);
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  const lines = await visibleChips(page).evaluateAll((els) => new Set(els.map((e) => (e as HTMLElement).offsetTop)).size);
+  expect(lines).toBeLessThanOrEqual(3);
+  await expectButtonOnLastRowAtRight(page);
+  const collapsed = await visibleChips(page).count();
+  // Keyed by table; the active chip is left out, since a collapsed list may pull it up.
+  const place = (names?: string[]) =>
+    page.evaluate((only) => {
+      const out: Record<string, number[]> = {};
+      for (const li of document.querySelectorAll<HTMLElement>("#tables li:not([hidden])")) {
+        const btn = li.querySelector<HTMLElement>("button[data-table]");
+        const name = btn?.dataset.table;
+        if (!name || btn?.classList.contains("active") || (only && !only.includes(name))) continue;
+        out[name] = [li.offsetTop, li.offsetLeft];
+      }
+      return out;
+    }, names);
+  const before = await place();
+  await more.click();
+  await expect(more).toHaveText("show fewer");
+  await expect(more).toHaveAttribute("aria-expanded", "true");
+  expect(await visibleChips(page).count()).toBeGreaterThan(collapsed);
+  // The button is the last item, so expanding never moves the chips above it.
+  expect(await place(Object.keys(before))).toEqual(before);
+  await expect(page.locator("#tables li[hidden]:not(#tables-more-item)")).toHaveCount(0);
 });
 
-test("sidebar search with no matches shows the empty-state message", async ({ page }) => {
+test("the active table stays visible in a collapsed list, and 'show fewer' keeps it collapsed", async ({
+  page,
+}) => {
+  await page.setViewportSize(NARROW);
+  // users is past line three at this width, so it starts out in the hidden part.
+  await gotoApp(page, "?table=users");
+  const users = page.locator('#tables button[data-table="users"]');
+  const more = page.locator("#tables-more");
+  await expect(users).toHaveClass(/active/);
+  await expect(users).toBeVisible();
+  await expect(more).toHaveText(/^\+ \d+ more$/);
+  await expectButtonOnLastRowAtRight(page);
+  await more.click();
+  await expect(more).toHaveText("show fewer");
+  await more.click();
+  await expect(more).toHaveText(/^\+ \d+ more$/);
+  await expect(users).toBeVisible();
+  // Hidden chips leave the tab order and the accessibility tree.
+  await expect(page.locator("#tables li[hidden]:not(#tables-more-item)").first()).toBeAttached();
+});
+
+test("a chip pulled up from the hidden part gets a divider only on a line with other chips", async ({
+  page,
+}) => {
+  await page.setViewportSize(NARROW);
+  await gotoApp(page, "?table=users");
+  await expect(page.locator('#tables button[data-table="users"]')).toBeVisible();
+  const pulled = page.locator("#tables li.pulled");
+  expect(await pulled.count()).toBeLessThanOrEqual(1);
+  if ((await pulled.count()) === 1) {
+    const sharesLine = await pulled.evaluate((el) => {
+      let prev = el.previousElementSibling as HTMLElement | null;
+      while (prev?.hidden) prev = prev.previousElementSibling as HTMLElement | null;
+      return prev?.offsetTop === (el as HTMLElement).offsetTop;
+    });
+    expect(sharesLine).toBe(true);
+  }
+  await page.locator('#tables button[data-table="audit_log"]').click();
+  await expect(page.locator("#tables li.pulled")).toHaveCount(0);
+});
+
+test("a wide window shows every seeded table without expanding the list", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 800 });
   await gotoApp(page);
-  await page.locator("#table-filter").fill("zzz-no-such-table");
-  await expect(page.locator("#tables li:not([hidden])")).toHaveCount(0);
-  await expect(page.locator("#tables-empty")).toBeVisible();
-  await expect(page.locator("#tables-empty")).toHaveText("no matching tables");
+  for (const name of SEEDED_TABLES) await expect(page.locator(`#tables button[data-table="${name}"]`)).toBeVisible();
+});
+
+test("a column name is capped with an ellipsis and keeps its full name in a title", async ({
+  page,
+}) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const name = page.locator('th[data-col="total_cents"] .col-name');
+  const style = await name.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { overflow: cs.overflow, textOverflow: cs.textOverflow, maxWidth: cs.maxWidth };
+  });
+  expect(style).toEqual({ overflow: "hidden", textOverflow: "ellipsis", maxWidth: "256px" });
+  await expect(name).toHaveAttribute("title", /^total_cents/);
 });
 
 test("selecting a table updates the current-table chrome", async ({ page }) => {

@@ -79,9 +79,9 @@ test("showcase: browse tables, filter down to one row, inspect jsonb, catch live
   psql(`DELETE FROM events WHERE event_type = '${SHOWCASE_EVENT_TYPE}'`);
   await selectTable(page, "events");
   const idHeader = page.locator('#thead th[data-col="id"]');
-  await idHeader.click(); // first click sorts ascending...
+  await idHeader.click({ position: { x: 6, y: 6 } }); // first click sorts ascending...
   await waitForIdle(page);
-  await idHeader.click(); // ...second flips it to descending — newest first
+  await idHeader.click({ position: { x: 6, y: 6 } }); // ...second flips it to descending — newest first
   await waitForIdle(page);
   try {
     psql(

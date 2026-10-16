@@ -13,13 +13,14 @@ test("shows a healthy sibling with its name, status dot, and link", async ({ pag
   const primary = await spawnDemo({ port: primaryPort, siblingPort });
   try {
     await page.goto(`${primary.baseUrl}/__ashurbanipal`);
-    await expect(page.locator("#siblings-heading")).toBeVisible();
-    const item = page.locator("#siblings-list > div");
+    await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 up");
+    await page.locator("#siblings-btn").click();
+    const item = page.locator("#siblings-list > a");
     await expect(item).toHaveCount(1);
     await expect(item.locator(".dot")).toHaveClass(/up/);
     await expect(item.locator(".dot")).toHaveAttribute("aria-label", "healthy");
-    await expect(item.locator("a")).toHaveText(`demo-${siblingPort}`);
-    await expect(item.locator("a")).toHaveAttribute(
+    await expect(item.locator(".sibling-name")).toHaveText(`demo-${siblingPort}`);
+    await expect(item).toHaveAttribute(
       "href",
       `http://localhost:${siblingPort}/__ashurbanipal`,
     );
@@ -35,8 +36,9 @@ test("shows an unhealthy sibling when it's down", async ({ page }) => {
   const primary = await spawnDemo({ port: primaryPort, siblingPort: deadPort });
   try {
     await page.goto(`${primary.baseUrl}/__ashurbanipal`);
-    await expect(page.locator("#siblings-heading")).toBeVisible();
-    const item = page.locator("#siblings-list > div");
+    await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 down");
+    await page.locator("#siblings-btn").click();
+    const item = page.locator("#siblings-list > a");
     await expect(item.locator(".dot")).toHaveClass(/down/);
     await expect(item.locator(".dot")).toHaveAttribute("aria-label", "unhealthy");
   } finally {
