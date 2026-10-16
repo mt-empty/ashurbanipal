@@ -282,17 +282,7 @@ def _column_to_dict(c) -> dict:
 
 
 def _join_column_to_dict(c) -> dict:
-    d = {"name": c.name, "type": c.type_name, "join": c.join, "table": c.table, "column": c.column}
-    if c.key is not None:
-        d["key"] = c.key.value
-    if c.references is not None:
-        ref = {"table": c.references.table, "column": c.references.column}
-        if c.references.schema is not None:
-            ref["schema"] = c.references.schema
-        d["references"] = ref
-    if c.comment is not None:
-        d["comment"] = c.comment
-    return d
+    return {**_column_to_dict(c), "join": c.join, "table": c.table, "column": c.column}
 
 
 def _referenced_by_to_dict(e) -> dict:

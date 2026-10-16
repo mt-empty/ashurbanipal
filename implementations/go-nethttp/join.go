@@ -582,12 +582,11 @@ func scanJoinRows(rows interface {
 	return out, hasMore, nil
 }
 
-// joinColumnKey merges PK/FK metadata onto a column.
+// joinKeyOf merges PK/FK metadata onto a column.
 func joinKeyOf(name string, pk map[string]bool, fk map[string]ColumnRef) (KeyKind, *ColumnRef) {
 	var ref *ColumnRef
 	if r, ok := fk[name]; ok {
-		rc := r
-		ref = &rc
+		ref = &r
 	}
 	switch {
 	case pk[name]:

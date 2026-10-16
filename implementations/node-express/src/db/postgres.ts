@@ -78,6 +78,22 @@ export function pgTypeClass(
   }
 }
 
+// attnum survives dropped columns; ordinal_position does not.
+async function columnComments(client: PoolClient, schema: string, table: string): Promise<Map<string, string>> {
+  const { rows } = await client.query<{ attname: string; comment: string | null }>(
+    `select a.attname::text, col_description(a.attrelid, a.attnum::int) as comment
+     from pg_attribute a
+     join pg_class c on c.oid = a.attrelid
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = $1 and c.relname = $2
+       and a.attnum > 0 and not a.attisdropped`,
+    [schema, table],
+  );
+  const comments = new Map<string, string>();
+  for (const row of rows) if (row.comment !== null) comments.set(row.attname, row.comment);
+  return comments;
+}
+
 /** Postgres `DbSource`; `SET LOCAL` scopes query timeouts (`spec/protocol.md` §6). */
 export class PostgresSource implements DbSource {
   constructor(private readonly pool: Pool) {}
@@ -294,17 +310,7 @@ export class PostgresSource implements DbSource {
        order by c.ordinal_position`,
       [schema, table],
     );
-    const { rows: commentRows } = await client.query<{ attname: string; comment: string | null }>(
-      `select a.attname::text, col_description(a.attrelid, a.attnum::int) as comment
-       from pg_attribute a
-       join pg_class c on c.oid = a.attrelid
-       join pg_namespace n on n.oid = c.relnamespace
-       where n.nspname = $1 and c.relname = $2
-         and a.attnum > 0 and not a.attisdropped`,
-      [schema, table],
-    );
-    const comments = new Map<string, string>();
-    for (const row of commentRows) if (row.comment !== null) comments.set(row.attname, row.comment);
+    const comments = await columnComments(client, schema, table);
     const { pkColumns, fkColumns } = await this.keyMetadata(client, schema, table);
     const columns = rows.map((r): JoinColMeta => {
       const col: JoinColMeta = {
@@ -386,20 +392,7 @@ export class PostgresSource implements DbSource {
         [realSchema, realTable],
       );
 
-      // attnum survives dropped columns; ordinal_position does not.
-      const { rows: commentRows } = await client.query<{ attname: string; comment: string | null }>(
-        `select a.attname::text, col_description(a.attrelid, a.attnum::int) as comment
-         from pg_attribute a
-         join pg_class c on c.oid = a.attrelid
-         join pg_namespace n on n.oid = c.relnamespace
-         where n.nspname = $1 and c.relname = $2
-           and a.attnum > 0 and not a.attisdropped`,
-        [realSchema, realTable],
-      );
-      const columnComments = new Map<string, string>();
-      for (const row of commentRows) {
-        if (row.comment !== null) columnComments.set(row.attname, row.comment);
-      }
+      const comments = await columnComments(client, realSchema, realTable);
 
       const { pkColumns, fkColumns } = await this.keyMetadata(client, realSchema, realTable);
 
@@ -412,7 +405,7 @@ export class PostgresSource implements DbSource {
           col.key = "fk";
           col.references = fkColumns.get(ct.column_name);
         }
-        const comment = columnComments.get(ct.column_name);
+        const comment = comments.get(ct.column_name);
         if (comment !== undefined) col.comment = comment;
         return col;
       });

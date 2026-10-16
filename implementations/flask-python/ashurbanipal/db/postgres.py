@@ -122,6 +122,20 @@ def type_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) ->
     return None
 
 
+def _column_comments(cur, schema: str, table: str) -> dict[str, str]:
+    # attnum survives dropped columns; ordinal_position does not.
+    cur.execute(
+        "select a.attname::text, col_description(a.attrelid, a.attnum::int) "
+        "from pg_attribute a "
+        "join pg_class c on c.oid = a.attrelid "
+        "join pg_namespace n on n.oid = c.relnamespace "
+        "where n.nspname = %s and c.relname = %s "
+        "  and a.attnum > 0 and not a.attisdropped",
+        (schema, table),
+    )
+    return {name: comment for name, comment in cur.fetchall() if comment is not None}
+
+
 class PgSource(DbSource):
     def __init__(self, dsn: str):
         self._dsn = dsn
@@ -299,17 +313,7 @@ class PgSource(DbSource):
                 )
                 column_types = list(cur.fetchall())
 
-                # attnum survives dropped columns; ordinal_position does not.
-                cur.execute(
-                    "select a.attname::text, col_description(a.attrelid, a.attnum::int) "
-                    "from pg_attribute a "
-                    "join pg_class c on c.oid = a.attrelid "
-                    "join pg_namespace n on n.oid = c.relnamespace "
-                    "where n.nspname = %s and c.relname = %s "
-                    "  and a.attnum > 0 and not a.attisdropped",
-                    (resolved_schema, table),
-                )
-                column_comments = {name: comment for name, comment in cur.fetchall() if comment is not None}
+                column_comments = _column_comments(cur, resolved_schema, table)
 
                 pk_columns, fk_columns = self._key_metadata(cur, resolved_schema, table)
                 columns = [
@@ -380,16 +384,7 @@ class PgSource(DbSource):
             (schema, table),
         )
         column_rows = list(cur.fetchall())
-        cur.execute(
-            "select a.attname::text, col_description(a.attrelid, a.attnum::int) "
-            "from pg_attribute a "
-            "join pg_class c on c.oid = a.attrelid "
-            "join pg_namespace n on n.oid = c.relnamespace "
-            "where n.nspname = %s and c.relname = %s "
-            "  and a.attnum > 0 and not a.attisdropped",
-            (schema, table),
-        )
-        comments = {name: comment for name, comment in cur.fetchall() if comment is not None}
+        comments = _column_comments(cur, schema, table)
         pk_columns, fk_columns = self._key_metadata(cur, schema, table)
         return TableMeta(
             name=table,

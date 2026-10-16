@@ -144,30 +144,9 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 	}
 	defer conn.Close()
 
-	tableCtx, tableCancel := c.bounded(ctx)
-	rows, err := conn.QueryContext(tableCtx,
-		`select name from sqlite_master
-		 where type = 'table' and name not like 'sqlite\_%' escape '\'
-		 order by name`)
+	allowed, err := c.allowedTablesOn(ctx, conn)
 	if err != nil {
-		tableCancel()
 		return JoinData{}, err
-	}
-	var allowed []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			tableCancel()
-			return JoinData{}, err
-		}
-		allowed = append(allowed, name)
-	}
-	rowsErr := rows.Err()
-	rows.Close()
-	tableCancel()
-	if rowsErr != nil {
-		return JoinData{}, rowsErr
 	}
 
 	names := spec.TableNames()
@@ -222,9 +201,13 @@ func (c *SQLiteSource) bounded(ctx context.Context) (context.Context, context.Ca
 }
 
 func (c *SQLiteSource) allowedTables(ctx context.Context) ([]string, error) {
+	return c.allowedTablesOn(ctx, c.db)
+}
+
+func (c *SQLiteSource) allowedTablesOn(ctx context.Context, q queryer) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	rows, err := c.db.QueryContext(ctx,
+	rows, err := q.QueryContext(ctx,
 		`select name from sqlite_master
 		 where type = 'table' and name not like 'sqlite\_%' escape '\'
 		 order by name`)

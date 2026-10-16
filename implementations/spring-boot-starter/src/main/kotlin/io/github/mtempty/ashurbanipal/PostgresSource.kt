@@ -227,17 +227,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             schema,
             table,
         )
-        val comments = jdbcTemplate.query(
-            "select a.attname::text, col_description(a.attrelid, a.attnum::int) " +
-                "from pg_attribute a " +
-                "join pg_class c on c.oid = a.attrelid " +
-                "join pg_namespace n on n.oid = c.relnamespace " +
-                "where n.nspname = ? and c.relname = ? " +
-                "  and a.attnum > 0 and not a.attisdropped",
-            RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
-            schema,
-            table,
-        ).filter { it.second != null }.associate { it.first to it.second!! }
+        val comments = columnComments(schema, table)
         val (pkColumns, fkColumns) = keyMetadata(schema, table)
         return JoinTableMeta(
             table,
@@ -288,11 +278,18 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         plan.joinData(rows, opts.limit)
     }
 
-    private fun readCell(rs: ResultSet, index: Int): String? = try {
-        rs.getString(index)
-    } catch (e: Exception) {
-        "<undecodable>"
-    }
+    /** `pg_attribute` (not `information_schema`) because attnum survives dropped columns; ordinal_position does not. */
+    private fun columnComments(schema: String, table: String): Map<String, String> = jdbcTemplate.query(
+        "select a.attname::text, col_description(a.attrelid, a.attnum::int) " +
+            "from pg_attribute a " +
+            "join pg_class c on c.oid = a.attrelid " +
+            "join pg_namespace n on n.oid = c.relnamespace " +
+            "where n.nspname = ? and c.relname = ? " +
+            "  and a.attnum > 0 and not a.attisdropped",
+        RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
+        schema,
+        table,
+    ).filter { it.second != null }.associate { it.first to it.second!! }
 
     private fun queryTableInTransaction(schema: String?, table: String, opts: QueryOpts): TableData {
         val realSchema = resolveSchema(schema)
@@ -314,18 +311,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             realSchema,
             realTable,
         )
-        // attnum survives dropped columns; ordinal_position does not.
-        val columnComments = jdbcTemplate.query(
-            "select a.attname::text, col_description(a.attrelid, a.attnum::int) " +
-                "from pg_attribute a " +
-                "join pg_class c on c.oid = a.attrelid " +
-                "join pg_namespace n on n.oid = c.relnamespace " +
-                "where n.nspname = ? and c.relname = ? " +
-                "  and a.attnum > 0 and not a.attisdropped",
-            RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
-            realSchema,
-            realTable,
-        ).filter { it.second != null }.associate { it.first to it.second!! }
+        val columnComments = columnComments(realSchema, realTable)
 
         val (pkColumns, fkColumns) = keyMetadata(realSchema, realTable)
         val columns = columnTypes.map { (name, typeName) ->
@@ -394,12 +380,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
     private fun rowToJson(rs: ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
         val map = LinkedHashMap<String, String?>(columns.size)
         for ((i, col) in columns.withIndex()) {
-            val value = try {
-                rs.getString(i + 1)
-            } catch (e: Exception) {
-                "<undecodable>"
-            }
-            map[col.name] = value
+            map[col.name] = readCell(rs, i + 1)
         }
         return map
     }

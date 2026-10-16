@@ -165,7 +165,7 @@ export interface JoinOpts {
   sortJoin?: number;
   descending: boolean;
   /** Conditions may carry a table position (spec/protocol.md §5.11.3). */
-  filter: (Condition & { join?: number })[];
+  filter: Condition[];
 }
 
 export interface JoinColumnInfo {

@@ -132,22 +132,6 @@ fn type_class(data_type: &str, column_type: &str) -> Option<TypeClass> {
     }
 }
 
-fn labelled_row_to_json(
-    row: &MySqlRow,
-    labels: &[String],
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::with_capacity(labels.len());
-    for (i, label) in labels.iter().enumerate() {
-        let value = match row.try_get::<Option<String>, _>(i) {
-            Ok(Some(text)) => serde_json::Value::String(text),
-            Ok(None) => serde_json::Value::Null,
-            Err(_) => serde_json::Value::String("<undecodable>".to_string()),
-        };
-        map.insert(label.clone(), value);
-    }
-    map
-}
-
 /// MySQL backend (`spec/protocol.md` §5).
 #[derive(Clone)]
 pub struct MySqlSource {
@@ -429,18 +413,18 @@ fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
     }
 }
 
-fn row_to_json(
+fn row_to_json<'a>(
     row: &MySqlRow,
-    columns: &[ColumnInfo],
+    names: impl ExactSizeIterator<Item = &'a str>,
 ) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::with_capacity(columns.len());
-    for (i, col) in columns.iter().enumerate() {
+    let mut map = serde_json::Map::with_capacity(names.len());
+    for (i, name) in names.enumerate() {
         let value = match row.try_get::<Option<String>, _>(i) {
             Ok(Some(text)) => serde_json::Value::String(text),
             Ok(None) => serde_json::Value::Null,
             Err(_) => serde_json::Value::String("<undecodable>".to_string()),
         };
-        map.insert(col.name.clone(), value);
+        map.insert(name.to_string(), value);
     }
     map
 }
@@ -635,7 +619,7 @@ impl DbSource for MySqlSource {
             .map_err(|e| map_select_denied(e, &table))?;
         let rows = mysql_rows
             .iter()
-            .map(|r| row_to_json(r, &columns))
+            .map(|r| row_to_json(r, columns.iter().map(|c| c.name.as_str())))
             .collect();
 
         let total_approx = sqlx::query_scalar::<_, Option<i64>>(sqlx::AssertSqlSafe(timed_select(
@@ -713,7 +697,7 @@ impl DbSource for MySqlSource {
             columns: plan.columns(),
             rows: mysql_rows
                 .iter()
-                .map(|r| labelled_row_to_json(r, plan.labels()))
+                .map(|r| row_to_json(r, plan.labels().iter().map(String::as_str)))
                 .collect(),
             has_more,
         })

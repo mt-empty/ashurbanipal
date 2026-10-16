@@ -331,13 +331,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val bindArgs: List<Any?> = values + (opts.limit + 1) + opts.offset
         val rows = try {
             query(dataSource, timedSelect(variant, queryTimeoutSecs, body), bindArgs) { rs ->
-                List(plan.labels.size) { i ->
-                    try {
-                        rs.getString(i + 1)
-                    } catch (e: Exception) {
-                        "<undecodable>"
-                    }
-                }
+                List(plan.labels.size) { i -> readCell(rs, i + 1) }
             }
         } catch (e: SQLException) {
             // MySQL has no SELECT privilege gate; map residual 1142 to NotAllowed.
@@ -429,12 +423,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     private fun rowToJson(rs: ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
         val map = LinkedHashMap<String, String?>(columns.size)
         for ((i, col) in columns.withIndex()) {
-            val value = try {
-                rs.getString(i + 1)
-            } catch (e: Exception) {
-                "<undecodable>"
-            }
-            map[col.name] = value
+            map[col.name] = readCell(rs, i + 1)
         }
         return map
     }

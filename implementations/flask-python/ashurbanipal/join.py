@@ -13,26 +13,13 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .db import BadJoin, ColumnRef, KeyKind, NotAllowed, NotAllowedKind
+from .db import OP_SQL, BadJoin, ColumnRef, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
 from .filter import Condition
 
 MAX_JOIN_BYTES = 8192
 MAX_JOIN_TABLES = 4
 MAX_JOIN_PAIRS = 3
-
-_OP_SQL = {
-    "=": "=",
-    "!=": "!=",
-    ">": ">",
-    "<": "<",
-    ">=": ">=",
-    "<=": "<=",
-    "LIKE": "LIKE",
-    "ILIKE": "ILIKE",
-    "IS NULL": "IS NULL",
-    "IS NOT NULL": "IS NOT NULL",
-}
 
 
 @dataclass(frozen=True)
@@ -433,7 +420,7 @@ def build_select(plan: JoinPlan, d: Dialect, schema: str | None) -> tuple[str, l
         cond = rc_cond.cond
         cast = d.cast_text(alias(rc_cond.pos, rc_cond.col))
         if cond.op in ("IS NULL", "IS NOT NULL"):
-            inner = f"{cast} {_OP_SQL[cond.op]}"
+            inner = f"{cast} {OP_SQL[cond.op]}"
         elif cond.op == "ILIKE":
             values.append(cond.value)
             if d.ilike == "native":
@@ -444,7 +431,7 @@ def build_select(plan: JoinPlan, d: Dialect, schema: str | None) -> tuple[str, l
                 inner = f"LOWER({cast}) LIKE LOWER({ph})"
         else:
             values.append(cond.value)
-            inner = f"{cast} {_OP_SQL[cond.op]} {ph}"
+            inner = f"{cast} {OP_SQL[cond.op]} {ph}"
         if i > 0:
             clause += " OR " if cond.logic == "OR" else " AND "
         clause += f"(NOT ({inner}))" if cond.not_ else f"({inner})"

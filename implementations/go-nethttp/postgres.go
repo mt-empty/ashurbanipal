@@ -253,6 +253,35 @@ func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, ta
 	return pkColumns, fkColumns, nil
 }
 
+// pgColumnComments joins pg_attribute/pg_class directly: col_description is
+// keyed by attnum, which can diverge from ordinal_position once a column has
+// been dropped.
+func pgColumnComments(ctx context.Context, q queryer, schema, table string) (map[string]string, error) {
+	rows, err := q.QueryContext(ctx,
+		`select a.attname::text, col_description(a.attrelid, a.attnum::int)
+		 from pg_attribute a
+		 join pg_class c on c.oid = a.attrelid
+		 join pg_namespace n on n.oid = c.relnamespace
+		 where n.nspname = $1 and c.relname = $2
+		   and a.attnum > 0 and not a.attisdropped`, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	comments := map[string]string{}
+	for rows.Next() {
+		var name string
+		var comment sql.NullString
+		if err := rows.Scan(&name, &comment); err != nil {
+			return nil, err
+		}
+		if comment.Valid {
+			comments[name] = comment.String
+		}
+	}
+	return comments, rows.Err()
+}
+
 // joinTableMeta reads a table already cleared by readableTableOID.
 func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, table string) (joinTableMeta, error) {
 	metaCtx, cancel := c.bounded(ctx)
@@ -287,33 +316,10 @@ func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, 
 	}
 	rows.Close()
 
-	commentRows, err := tx.QueryContext(metaCtx,
-		`select a.attname::text, col_description(a.attrelid, a.attnum::int)
-		 from pg_attribute a
-		 join pg_class c on c.oid = a.attrelid
-		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = $1 and c.relname = $2
-		   and a.attnum > 0 and not a.attisdropped`, schema, table)
+	comments, err := pgColumnComments(metaCtx, tx, schema, table)
 	if err != nil {
 		return joinTableMeta{}, err
 	}
-	comments := map[string]string{}
-	for commentRows.Next() {
-		var name string
-		var comment sql.NullString
-		if err := commentRows.Scan(&name, &comment); err != nil {
-			commentRows.Close()
-			return joinTableMeta{}, err
-		}
-		if comment.Valid {
-			comments[name] = comment.String
-		}
-	}
-	if err := commentRows.Err(); err != nil {
-		commentRows.Close()
-		return joinTableMeta{}, err
-	}
-	commentRows.Close()
 
 	pk, fk, err := c.keyMetadata(ctx, tx, schema, table)
 	if err != nil {
@@ -586,39 +592,11 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	}
 	columnTypeRows.Close()
 
-	// Joins through pg_attribute/pg_class directly: col_description is
-	// keyed by attnum, which can diverge from ordinal_position once a
-	// column has been dropped.
-	commentRows, err := tx.QueryContext(metaCtx,
-		`select a.attname::text, col_description(a.attrelid, a.attnum::int)
-		 from pg_attribute a
-		 join pg_class c on c.oid = a.attrelid
-		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = $1 and c.relname = $2
-		   and a.attnum > 0 and not a.attisdropped`, realSchema, realTable)
+	columnComments, err := pgColumnComments(metaCtx, tx, realSchema, realTable)
 	if err != nil {
 		metaCancel()
 		return TableData{}, err
 	}
-	columnComments := map[string]string{}
-	for commentRows.Next() {
-		var name string
-		var comment sql.NullString
-		if err := commentRows.Scan(&name, &comment); err != nil {
-			commentRows.Close()
-			metaCancel()
-			return TableData{}, err
-		}
-		if comment.Valid {
-			columnComments[name] = comment.String
-		}
-	}
-	if err := commentRows.Err(); err != nil {
-		commentRows.Close()
-		metaCancel()
-		return TableData{}, err
-	}
-	commentRows.Close()
 	metaCancel()
 
 	pkColumns, fkColumns, err := c.keyMetadata(ctx, tx, realSchema, realTable)

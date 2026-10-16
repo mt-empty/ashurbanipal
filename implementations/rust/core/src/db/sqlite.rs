@@ -70,15 +70,7 @@ impl SqliteSource {
 
     async fn allowed_tables(&self) -> Result<Vec<String>, DbError> {
         self.bounded(CATALOG_TIMEOUT_SECS, async |conn| {
-            let rows = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(
-                "select name from sqlite_master \
-                 where type = 'table' and name not like 'sqlite\\_%' escape '\\' \
-                 order by name"
-                    .to_string(),
-            ))
-            .fetch_all(&mut *conn)
-            .await?;
-            Ok(rows)
+            allowed_tables_on(conn).await
         })
         .await
     }
@@ -116,6 +108,17 @@ impl SqliteSource {
 }
 
 /// `table` must already be allow-listed: it is spliced into the pragma calls.
+async fn allowed_tables_on(conn: &mut sqlx::SqliteConnection) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(
+        "select name from sqlite_master \
+         where type = 'table' and name not like 'sqlite\\_%' escape '\\' \
+         order by name"
+            .to_string(),
+    ))
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
 async fn key_metadata_on(
     conn: &mut sqlx::SqliteConnection,
     table: &str,
@@ -297,34 +300,18 @@ async fn join_table_meta(
     })
 }
 
-fn labelled_row_to_json(
+fn row_to_json<'a>(
     row: &SqliteRow,
-    labels: &[String],
+    names: impl ExactSizeIterator<Item = &'a str>,
 ) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::with_capacity(labels.len());
-    for (i, label) in labels.iter().enumerate() {
+    let mut map = serde_json::Map::with_capacity(names.len());
+    for (i, name) in names.enumerate() {
         let value = match row.try_get::<Option<String>, _>(i) {
             Ok(Some(text)) => serde_json::Value::String(text),
             Ok(None) => serde_json::Value::Null,
             Err(_) => serde_json::Value::String("<undecodable>".to_string()),
         };
-        map.insert(label.clone(), value);
-    }
-    map
-}
-
-fn row_to_json(
-    row: &SqliteRow,
-    columns: &[ColumnInfo],
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::with_capacity(columns.len());
-    for (i, col) in columns.iter().enumerate() {
-        let value = match row.try_get::<Option<String>, _>(i) {
-            Ok(Some(text)) => serde_json::Value::String(text),
-            Ok(None) => serde_json::Value::Null,
-            Err(_) => serde_json::Value::String("<undecodable>".to_string()),
-        };
-        map.insert(col.name.clone(), value);
+        map.insert(name.to_string(), value);
     }
     map
 }
@@ -528,7 +515,7 @@ impl DbSource for SqliteSource {
 
                 let rows = sqlite_rows
                     .iter()
-                    .map(|r| row_to_json(r, &columns))
+                    .map(|r| row_to_json(r, columns.iter().map(|c| c.name.as_str())))
                     .collect();
                 Ok((rows, columns))
             })
@@ -555,14 +542,7 @@ impl DbSource for SqliteSource {
         // Catalog lookups and the select share one connection and one
         // deadline (`spec/protocol.md` §5.11.5).
         self.bounded(opts.timeout_secs, async |conn| {
-            let allowed = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(
-                "select name from sqlite_master \
-                 where type = 'table' and name not like 'sqlite\\_%' escape '\\' \
-                 order by name"
-                    .to_string(),
-            ))
-            .fetch_all(&mut *conn)
-            .await?;
+            let allowed = allowed_tables_on(conn).await?;
             let mut metas: HashMap<&str, TableMeta> = HashMap::new();
             for name in &names {
                 if metas.contains_key(name) {
@@ -595,7 +575,7 @@ impl DbSource for SqliteSource {
                 columns: plan.columns(),
                 rows: sqlite_rows
                     .iter()
-                    .map(|r| labelled_row_to_json(r, plan.labels()))
+                    .map(|r| row_to_json(r, plan.labels().iter().map(String::as_str)))
                     .collect(),
                 has_more,
             })

@@ -123,12 +123,12 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         }
     }
 
-    private fun allowedTables(): List<String> = bounded(queryTimeoutSecs) { conn ->
-        query(
-            conn,
-            "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' order by name",
-        ) { rs -> rs.getString(1) }
-    }
+    private fun allowedTables(): List<String> = bounded(queryTimeoutSecs) { conn -> allowedTablesOn(conn) }
+
+    private fun allowedTablesOn(conn: Connection): List<String> = query(
+        conn,
+        "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' order by name",
+    ) { rs -> rs.getString(1) }
 
     /** `table` is validated against [allowedTables] by every caller before reaching here — PRAGMA doesn't accept bound parameters for the table name, so this is the one identifier spliced into a PRAGMA string rather than bound. */
     private fun allowedColumns(table: String): List<String> = bounded(queryTimeoutSecs) { conn ->
@@ -140,7 +140,10 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
     /** Composite FKs are dropped, mirroring [PostgresSource]/[MySqlSource]. */
-    private fun keyMetadata(table: String): Pair<List<String>, Map<String, ColumnRef>> = bounded(queryTimeoutSecs) { conn ->
+    private fun keyMetadata(table: String): Pair<List<String>, Map<String, ColumnRef>> =
+        bounded(queryTimeoutSecs) { conn -> keyMetadataOn(conn, table) }
+
+    private fun keyMetadataOn(conn: Connection, table: String): Pair<List<String>, Map<String, ColumnRef>> {
         val quoted = quoteIdent(table)
         val cols = query(conn, "select cid, name, pk from pragma_table_info($quoted) order by cid") { rs ->
             Triple(rs.getLong(1), rs.getString(2), rs.getLong(3))
@@ -173,7 +176,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
             // SQLite has no schema namespace (see ONLY_SCHEMA).
             fkColumns[m.from] = ColumnRef(m.refTable, m.to, null)
         }
-        pkColumns to fkColumns
+        return pkColumns to fkColumns
     }
 
     override fun listSchemas(): List<String> = listOf(ONLY_SCHEMA)
@@ -197,26 +200,14 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         // One connection and one deadline for the catalog lookups and the
         // select (spec/protocol.md §5.11.5).
         return bounded(queryTimeoutSecs) { conn ->
-            val allowed = query(
-                conn,
-                "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' order by name",
-            ) { rs -> rs.getString(1) }
+            val allowed = allowedTablesOn(conn)
             val names = spec.tableNames()
             val metas = HashMap<String, JoinTableMeta>()
             for (name in names) {
                 if (name in metas) continue
                 if (name !in allowed) throw NotAllowedException("not allowed: table $name", NotAllowedKind.TABLE)
                 val quoted = quoteIdent(name)
-                val pk = query(conn, "select name, pk from pragma_table_info($quoted)") { rs ->
-                    rs.getString(1) to rs.getLong(2)
-                }.filter { it.second > 0 }.map { it.first }.toSet()
-                val fks = query(
-                    conn,
-                    "select fkl.id, fkl.seq, fkl.\"table\", fkl.\"from\", coalesce(fkl.\"to\", ppk.name, 'rowid') " +
-                        "from pragma_foreign_key_list($quoted) fkl " +
-                        "left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1",
-                ) { rs -> Triple(rs.getLong(1), rs.getString(4), ColumnRef(rs.getString(3), rs.getString(5), null)) }
-                val fkColumns = fks.groupBy { it.first }.values.filter { it.size == 1 }.associate { it[0].second to it[0].third }
+                val (pk, fkColumns) = keyMetadataOn(conn, name)
                 metas[name] = JoinTableMeta(
                     name,
                     query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
@@ -239,13 +230,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
             val (body, values) = buildJoinSelect(plan, JOIN_DIALECT, null)
             val bindArgs: List<Any?> = values + (opts.limit + 1) + opts.offset
             val rows = query(conn, "select $body", bindArgs) { rs ->
-                List(plan.labels.size) { i ->
-                    try {
-                        rs.getString(i + 1)
-                    } catch (e: Exception) {
-                        "<undecodable>"
-                    }
-                }
+                List(plan.labels.size) { i -> readCell(rs, i + 1) }
             }
             plan.joinData(rows, opts.limit)
         }
@@ -307,12 +292,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
     private fun rowToJson(rs: ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
         val map = LinkedHashMap<String, String?>(columns.size)
         for ((i, col) in columns.withIndex()) {
-            val value = try {
-                rs.getString(i + 1)
-            } catch (e: Exception) {
-                "<undecodable>"
-            }
-            map[col.name] = value
+            map[col.name] = readCell(rs, i + 1)
         }
         return map
     }
