@@ -88,6 +88,20 @@ function renderStructure(data: StructureResponse): void {
   );
 }
 
+// One table's structure through the same cache the dialog uses; errors are not cached.
+export function tableStructure(table: string): Promise<StructureResponse> {
+  const key = cacheKey(table);
+  const generation = cacheGeneration;
+  const hit = cache.get(key);
+  if (hit) return Promise.resolve(hit);
+  const params = new URLSearchParams({ table });
+  applyScopeParams(params);
+  return api<StructureResponse>(`/tables/structure?${params}`).then((data) => {
+    if (generation === cacheGeneration) cache.set(key, data);
+    return data;
+  });
+}
+
 export function openStructure(): void {
   const table = state.table;
   if (!table) return;
@@ -95,22 +109,14 @@ export function openStructure(): void {
   $("structure-title").textContent = `structure — ${state.schema ? `${state.schema}.${table}` : table}`;
   $<HTMLDialogElement>("structure-dialog").showModal();
 
-  // Key captured now, alongside applyScopeParams' read of the same scope,
-  // so a mid-flight scope switch can't file the result under the wrong key.
-  const key = cacheKey(table);
-  const generation = cacheGeneration;
-  const hit = cache.get(key);
+  const hit = cache.get(cacheKey(table));
   if (hit) {
     renderStructure(hit);
     return;
   }
   $("structure-body").replaceChildren(msg("loading…"));
-
-  const params = new URLSearchParams({ table });
-  applyScopeParams(params);
-  api<StructureResponse>(`/tables/structure?${params}`)
+  tableStructure(table)
     .then((data) => {
-      if (generation === cacheGeneration) cache.set(key, data);
       if (token === requestToken) renderStructure(data);
     })
     .catch((e) => {

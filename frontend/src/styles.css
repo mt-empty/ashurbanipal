@@ -532,3 +532,31 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #join-error { margin: 0; color: var(--danger); }
 .dialog-foot { display: flex; justify-content: flex-end; gap: .5rem; padding: var(--gap-lg);
                border-top: 1px solid var(--rule); }
+#filter-suggest button[aria-disabled="true"], #join-sql-suggest button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+#join-modes { display: flex; gap: 1rem; border: none; margin: 0; padding: 0; }
+#join-modes label { display: inline-flex; gap: .35rem; align-items: center; cursor: pointer; }
+/* Same technique as #filter: the field's own text is transparent and #join-sql-hl,
+   behind it, draws the coloured copy; font, padding and wrapping must match. */
+#join-sql-wrap { position: relative; background: var(--surface); border-radius: 8px; }
+#join-sql, #join-sql-hl { font-family: var(--font-mono); font-size: .8125rem; line-height: 1.5; padding: .6rem .85rem;
+                          box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+#join-sql { display: block; width: 100%; border: none; border-radius: 8px; background: transparent; resize: none;
+            color: transparent; caret-color: CanvasText; position: relative; overflow: hidden; }
+#join-sql::selection { color: transparent; background: color-mix(in srgb, Highlight 40%, transparent); }
+#join-sql::placeholder { color: var(--text-muted); opacity: 1; }
+#join-sql-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.t-column { color: inherit; }
+#join-sql-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0;
+          background: canvas; color: inherit; border: 1px solid var(--border-strong);
+          border-radius: 8px; padding: .2rem; max-width: min(34rem, 100%); max-height: 12rem;
+          overflow: auto; box-shadow: 0 4px 16px #0004; }
+#join-sql-suggest button { display: block; width: 100%; box-sizing: border-box;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono);
+          background: none; border: none; font-size: inherit; color: inherit;
+          text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
+#join-sql-suggest button:hover, #join-sql-suggest button.active { background: var(--hover); }
+#join-sql-error { margin: .4rem 0 0; color: var(--danger); min-height: 1.2em; }
+@media (forced-colors: active) {
+  #join-sql { color: CanvasText; }
+  #join-sql-hl { display: none; }
+}

@@ -130,7 +130,20 @@
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
   <div id="join-body">
+    <fieldset id="join-modes">
+      <legend class="sr-only">how to write the join</legend>
+      <label><input type="radio" name="join-mode" id="join-mode-form" value="form" checked> Form</label>
+      <label><input type="radio" name="join-mode" id="join-mode-sql" value="sql"> SQL</label>
+    </fieldset>
     <div id="join-form"></div>
+    <div id="join-sql-pane" hidden>
+      <div id="join-sql-wrap">
+        <div id="join-sql-hl" aria-hidden="true"><span id="join-sql-hl-text"></span></div>
+        <textarea id="join-sql" rows="4" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="join-sql-suggest-list" aria-label="join as SQL text" spellcheck="false" autocomplete="off" placeholder="FROM orders o&#10;LEFT JOIN users u ON o.user_id = u.id"></textarea>
+        <div id="join-sql-suggest" hidden><div id="join-sql-suggest-list" role="listbox" aria-label="join suggestions"></div></div>
+      </div>
+      <p id="join-sql-error" role="status"></p>
+    </div>
     <div id="join-preview-wrap"><span class="section-label">as SQL</span><pre id="join-preview"></pre></div>
     <p id="join-error" role="alert"></p>
   </div>

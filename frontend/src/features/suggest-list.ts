@@ -1,6 +1,8 @@
 export interface Suggestion {
   label: string;
   insert: string;
+  // Why this row cannot be taken; it still shows, greyed, with the reason.
+  blocked?: string;
 }
 
 interface SuggestOptions {
@@ -45,15 +47,19 @@ export function createSuggestList(opts: SuggestOptions): SuggestList {
     popup.hidden = true;
   };
 
-  const accept = (i: number): void => opts.accept(matches[i], head);
+  const accept = (i: number): void => {
+    if (matches[i] && !matches[i].blocked) opts.accept(matches[i], head);
+  };
 
   const render = (): void => {
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.textContent = suggestion.label;
-        btn.title = suggestion.label; // long values are cut off with an ellipsis
+        const text = suggestion.blocked ? `${suggestion.label} — ${suggestion.blocked}` : suggestion.label;
+        btn.textContent = text;
+        btn.title = text; // long values are cut off with an ellipsis
+        if (suggestion.blocked) btn.setAttribute("aria-disabled", "true");
         btn.className = i === index ? "active" : "";
         btn.id = `${idPrefix}-${i}`;
         btn.setAttribute("role", "option");
@@ -90,7 +96,7 @@ export function createSuggestList(opts: SuggestOptions): SuggestList {
       accept(index);
     } else if (e.key === "Tab") {
       e.preventDefault();
-      accept(Math.max(index, 0));
+      accept(index >= 0 ? index : matches.findIndex((m) => !m.blocked));
     } else if (e.key === "Escape") {
       e.preventDefault();
       close();
