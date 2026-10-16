@@ -29,9 +29,12 @@ src/
   index.html   styles.css
   bootstrap/   main, controller, reload, table-focus
   features/    grid, filter-ui, sidebar (source/schema selectors + table chips),
-               nav, record-view, siblings, api-reference, theme
+               nav, record-view, siblings, api-reference, theme,
+               join-dialog / join-form / join-sql / join-view / join-saved /
+               join-catalog (the join builder), suggest-list, overlay-highlight
   core/        api, dom, types, state (+ store, url)
-  lib/         filter-dsl, json-tree, format, row-diff
+  lib/         filter-dsl, filter-tokens, join-dsl, join-def, join-draft,
+               join-tokens, join-types, join-saved, json-tree, format, row-diff
   demo/        demo-shim, demo-fixtures — offline demo backend only
 ```
 

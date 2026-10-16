@@ -36,10 +36,11 @@ unchanged to both adapters.
 
 **Non-goals (v1)**
 
-- Cross-table joins or multi-table queries. One table at a time. (Surfacing
-  a foreign key as a clickable UI link that switches tables is not an
-  exception to this — it's two sequential single-table queries triggered by
-  a click, never a join, and no response ever mixes rows from two tables.)
+- Free-form multi-table queries. A table is browsed on its own, or through
+  one structured, server-checked join (`GET /tables/join`, up to four tables,
+  `INNER`/`LEFT` equality joins only, no total count). Surfacing a foreign key
+  as a clickable UI link that switches tables is not a join — it's two
+  sequential single-table queries triggered by a click.
 - Multi-column sort (single column only; multi-column is a future addition).
 - Writes of any kind.
 - Dynamic sibling discovery (service registry, k8s, etc.) — static config only.
@@ -129,7 +130,7 @@ Two components, same as the original concept:
     `references` column metadata, §4) is clickable: it switches to the
     referenced table and filters it to the matching row. Per §2's
     non-goal carve-out, this is two sequential single-table queries, never
-    a join.
+    a join; it leaves a join view, if one is open.
   - *Filter autocomplete* — the filter input suggests whatever the grammar
     allows next, via a hand-rolled, caret-anchored list that stays open
     while typing and scrolls with the page, passing behind the sticky table
@@ -144,6 +145,18 @@ Two components, same as the original concept:
     a lenient tokenizer (`lib/filter-tokens.ts`) that only looks at the text
     before the caret; `parseFilterDsl` (`spec/filter-dsl.md`) alone decides
     what is accepted.
+  - *Join builder* — the `⋈ join` button opens one overlay with a Form mode
+    and a SQL mode that edit the same definition
+    (`frontend/src/features/join-dialog.ts`). The Form lists each table's
+    columns with their types, greys the ones that cannot pair with the other
+    side and says why, and suggests a foreign key match. The SQL mode is a
+    restricted subset (`spec/join-dsl.md`) with the filter box's colouring and
+    suggestions; it is parsed in the browser into the structured `join` object
+    of `GET /tables/join`, so no SQL text reaches the server. The result is the
+    normal grid with a band per table, paged by `has_more` with no total; the
+    filter box takes `alias.column` and a header sort sends `sort_join`. A
+    join lives in the URL as its canonical text, and can be saved by name in
+    `localStorage` per source and schema (`features/join-saved.ts`).
   - *Filter colouring* — the typed text is coloured by part (column,
     operator, keyword, value), and the part where `parseFilterDsl` stops
     accepting it is underlined once the text has moved past that point
@@ -243,6 +256,7 @@ its full path space and the host doesn't need to pick a mount point.
 | GET    | `/__ashurbanipal/api/table-counts` | Approximate row counts via `pg_class.reltuples`.       |
 | GET    | `/__ashurbanipal/api/tables/data`  | Paginated, filtered, sorted rows for a single table.   |
 | GET    | `/__ashurbanipal/api/tables/common-values` | Most-common values for one column, from `pg_stats`. |
+| GET    | `/__ashurbanipal/api/tables/join`  | Paged rows of up to four tables joined server-side (`spec/protocol.md` §5.11). |
 | GET    | `/__ashurbanipal/api/siblings`     | Sibling services with live health status.              |
 
 ## 4. API contract
