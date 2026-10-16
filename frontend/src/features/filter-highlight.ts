@@ -57,5 +57,7 @@ if (valueProp?.get && valueProp.set) {
 }
 
 input.addEventListener("input", render);
-window.addEventListener("resize", render);
+// The field's own width, not the window's: a scrollbar appearing or a layout
+// change narrows it without a window resize. (Also renders once on observe.)
+new ResizeObserver(render).observe(input);
 render();

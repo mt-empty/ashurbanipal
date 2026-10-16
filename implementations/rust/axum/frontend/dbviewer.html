@@ -1534,7 +1534,7 @@ if (valueProp?.get && valueProp.set) {
   });
 }
 input.addEventListener("input", render);
-window.addEventListener("resize", render);
+new ResizeObserver(render).observe(input);
 render();
 
 // src/bootstrap/reload.ts

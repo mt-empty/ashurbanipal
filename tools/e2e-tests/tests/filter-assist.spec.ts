@@ -173,6 +173,24 @@ test("a huge paste neither throws nor leaves stale colours behind", async ({ pag
   expect(errors).toEqual([]);
 });
 
+test("the coloured copy follows the field's width, not just the window's", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#filter").fill("status = completed AND id > 10");
+  await expect(page.locator("#filter-wrap")).not.toHaveClass(/plain/);
+  // A width change without a window resize, as a scrollbar appearing causes.
+  await page.locator("#filter-wrap").evaluate((el) => {
+    el.style.flex = "none";
+    el.style.width = "80px";
+  });
+  await expect(page.locator("#filter-wrap")).toHaveClass(/plain/);
+  await page.locator("#filter-wrap").evaluate((el) => {
+    el.style.flex = "";
+    el.style.width = "";
+  });
+  await expect(page.locator("#filter-wrap")).not.toHaveClass(/plain/);
+});
+
 test("leading spaces are not underlined as an error", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
