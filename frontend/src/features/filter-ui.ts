@@ -13,6 +13,7 @@ import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
 import { parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
 import { columnKey } from "./join-view.js";
+import { createSuggestList, type Suggestion } from "./suggest-list.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
@@ -51,7 +52,7 @@ export function applyFilterClauses(pairs: { column: string; value: string }[]): 
 
 $<HTMLFormElement>("filter-form").onsubmit = (e) => {
   e.preventDefault();
-  closeFilterSuggest();
+  suggest.close();
   submitFilter($<HTMLInputElement>("filter").value.trim());
 };
 // The native clear button on a search input fires "search" but never
@@ -139,66 +140,30 @@ function measureCaretX(input: HTMLInputElement): number {
   }
 }
 
-interface Suggestion {
-  label: string;
-  insert: string;
-}
-
-let filterSuggestMatches: Suggestion[] = []; // rows currently shown, in display order
-let filterSuggestIndex = -1; // highlighted row, -1 = none
-let filterSuggestHead = ""; // input text up to (not including) the partial token being completed
-// Supersedes an in-flight value lookup: bumped on every update and close, so a
-// slow response never opens a list for text that has since changed.
-let filterSuggestToken = 0;
-
-function closeFilterSuggest(): void {
-  filterSuggestToken++;
-  filterSuggestMatches = [];
-  filterSuggestIndex = -1;
-  filterSuggestHead = "";
-  const input = $<HTMLInputElement>("filter");
-  input.setAttribute("aria-expanded", "false");
-  input.removeAttribute("aria-activedescendant");
-  $("filter-suggest").hidden = true;
-}
-
-function renderFilterSuggest(): void {
-  $("filter-suggest-list").replaceChildren(
-    ...filterSuggestMatches.map((suggestion, i) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = suggestion.label;
-      btn.title = suggestion.label; // long values are cut off with an ellipsis
-      btn.className = i === filterSuggestIndex ? "active" : "";
-      btn.id = `filter-suggest-${i}`;
-      btn.setAttribute("role", "option");
-      btn.setAttribute("aria-selected", String(i === filterSuggestIndex));
-      // Keeps focus (and the caret) in #filter — otherwise the button
-      // would steal focus, firing #filter's blur handler and closing this
-      // popup before its own click handler runs.
-      btn.onmousedown = (e) => e.preventDefault();
-      btn.onclick = () => acceptFilterSuggestion(i);
-      return btn;
-    }),
-  );
-  // Arrow-key moves change .active without mouse involvement, so the
-  // list has to scroll itself.
-  $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
-  const input = $<HTMLInputElement>("filter");
-  if (filterSuggestIndex >= 0) input.setAttribute("aria-activedescendant", `filter-suggest-${filterSuggestIndex}`);
-  else input.removeAttribute("aria-activedescendant");
-}
+const filterInput = $<HTMLInputElement>("filter");
 
 // The trailing space starts the next word, so accepting a column goes straight
 // on to suggesting operators, and so on.
-function acceptFilterSuggestion(i: number): void {
-  const input = $<HTMLInputElement>("filter");
-  input.value = `${filterSuggestHead}${filterSuggestMatches[i].insert} `;
-  input.setSelectionRange(input.value.length, input.value.length);
-  closeFilterSuggest();
-  input.focus();
-  updateFilterSuggestions();
-}
+const suggest = createSuggestList({
+  input: filterInput,
+  popup: $("filter-suggest"),
+  list: $("filter-suggest-list"),
+  idPrefix: "filter-suggest",
+  accept: (suggestion, head) => {
+    filterInput.value = `${head}${suggestion.insert} `;
+    filterInput.setSelectionRange(filterInput.value.length, filterInput.value.length);
+    suggest.close();
+    filterInput.focus();
+    updateFilterSuggestions();
+  },
+  // In the page's flow (not the top layer), so it scrolls with the field and
+  // passes behind the sticky table header. Kept inside the field's width.
+  place: () => {
+    const popup = $("filter-suggest");
+    const room = filterInput.parentElement ? filterInput.parentElement.clientWidth - popup.offsetWidth : 0;
+    popup.style.left = `${Math.max(0, Math.min(filterInput.offsetLeft + measureCaretX(filterInput), room))}px`;
+  },
+});
 
 // Per scope+table+column: the planner's list changes slowly, so one request
 // serves every keystroke, a failed or empty answer included. Refresh clears it.
@@ -232,26 +197,15 @@ function commonValuesFor(column: string): Promise<string[]> {
 }
 
 function showFilterSuggestions(ctx: Completion, all: Suggestion[], index: number): void {
-  const input = $<HTMLInputElement>("filter");
   const partial = ctx.partial.toLowerCase();
   const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
   // Nothing left to complete: a lone row identical to what is typed, except columns.
   const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
   if (matches.length === 0 || done) {
-    closeFilterSuggest();
+    suggest.close();
     return;
   }
-  filterSuggestMatches = matches;
-  filterSuggestHead = ctx.head;
-  filterSuggestIndex = index;
-  renderFilterSuggest();
-  const popup = $("filter-suggest");
-  popup.hidden = false;
-  // In the page's flow (not the top layer), so it scrolls with the field and
-  // passes behind the sticky table header. Kept inside the field's width.
-  const room = input.parentElement ? input.parentElement.clientWidth - popup.offsetWidth : 0;
-  popup.style.left = `${Math.max(0, Math.min(input.offsetLeft + measureCaretX(input), room))}px`;
-  input.setAttribute("aria-expanded", "true");
+  suggest.show(matches, ctx.head, index);
 }
 
 function isColumn(name: string | null): boolean {
@@ -259,15 +213,15 @@ function isColumn(name: string | null): boolean {
 }
 
 function updateFilterSuggestions(): void {
-  const input = $<HTMLInputElement>("filter");
+  const input = filterInput;
   if (input.selectionStart !== input.value.length) {
-    closeFilterSuggest();
+    suggest.close();
     return;
   }
   const ctx = completionAt(input.value);
-  closeFilterSuggest();
+  suggest.close();
   if (ctx.partial.startsWith("'")) return; // inside a quoted value
-  const token = filterSuggestToken;
+  const token = suggest.token();
   const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
     showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map(columnKey)), 0);
@@ -277,50 +231,15 @@ function updateFilterSuggestions(): void {
     showFilterSuggestions(ctx, plain(optionsFor("joiner")), -1);
   } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column) && !state.join) {
     commonValuesFor(ctx.column).then((values) => {
-      if (token !== filterSuggestToken || document.activeElement !== input) return;
+      if (token !== suggest.token() || document.activeElement !== input) return;
       const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
       showFilterSuggestions(ctx, rows, -1);
     });
   }
 }
 
-$<HTMLInputElement>("filter").oninput = updateFilterSuggestions;
-$<HTMLInputElement>("filter").onfocus = updateFilterSuggestions;
-$<HTMLInputElement>("filter").onblur = closeFilterSuggest;
-$<HTMLInputElement>("filter").onkeydown = (e) => {
-  if (filterSuggestMatches.length === 0) return;
-  const count = filterSuggestMatches.length;
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    filterSuggestIndex = (filterSuggestIndex + 1) % count;
-    renderFilterSuggest();
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    filterSuggestIndex = filterSuggestIndex <= 0 ? count - 1 : filterSuggestIndex - 1;
-    renderFilterSuggest();
-  } else if (e.key === "Enter" && filterSuggestIndex >= 0) {
-    e.preventDefault();
-    acceptFilterSuggestion(filterSuggestIndex);
-  } else if (e.key === "Tab") {
-    e.preventDefault();
-    acceptFilterSuggestion(Math.max(filterSuggestIndex, 0));
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    closeFilterSuggest();
-  }
-};
-// addEventListener, not `document.onpointerdown =`: the single IDL slot on
-// document is shared global state any other module could silently overwrite
-// (frontend-style-guide.md §3).
-document.addEventListener("pointerdown", (e) => {
-  if (
-    filterSuggestMatches.length > 0 &&
-    !$("filter").contains(e.target as Node) &&
-    !$("filter-suggest").contains(e.target as Node)
-  ) {
-    closeFilterSuggest();
-  }
-});
+filterInput.oninput = updateFilterSuggestions;
+filterInput.onfocus = updateFilterSuggestions;
 
 // ---- common-values header dropdown: a shortlist from Postgres planner
 // statistics, never a full distinct-value scan — copy says "common

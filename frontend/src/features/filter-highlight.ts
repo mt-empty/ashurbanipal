@@ -1,6 +1,7 @@
 import { $ } from "../core/dom.js";
 import { filterDslErrorAt } from "../lib/filter-dsl.js";
 import { endsInUnfinishedWord, tokenizeFilterDsl } from "../lib/filter-tokens.js";
+import { attachOverlayHighlight } from "./overlay-highlight.js";
 
 // A coloured copy of #filter's text drawn behind the transparent-text input, so
 // the native caret, selection and IME keep working. The copy is dropped (`.plain`)
@@ -41,24 +42,4 @@ function render(): void {
   wrap.classList.toggle("plain", input.scrollWidth > input.clientWidth);
 }
 
-// Programmatic writes to .value fire no input event, so they re-render here.
-const valueProp = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
-if (valueProp?.get && valueProp.set) {
-  const { get, set } = valueProp;
-  Object.defineProperty(input, "value", {
-    configurable: true,
-    get() {
-      return get.call(this);
-    },
-    set(v: string) {
-      set.call(this, v);
-      render();
-    },
-  });
-}
-
-input.addEventListener("input", render);
-// The field's own width, not the window's: a scrollbar appearing or a layout
-// change narrows it without a window resize. (Also renders once on observe.)
-new ResizeObserver(render).observe(input);
-render();
+attachOverlayHighlight(input, render);
