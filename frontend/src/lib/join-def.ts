@@ -10,11 +10,17 @@ export function joinLabel(def: JoinDef): string {
     .join(" ");
 }
 
-// Positions whose `alias.*` has to be expanded to column names for the request:
-// the wire has no "all of this table" form, only a whole-list omission.
+// The wire has no "all of this table" form, only a whole-list omission, which is
+// right only when every table's columns are selected.
+function selectsEverything(def: JoinDef): boolean {
+  if (def.columns === null) return true;
+  return def.columns.every((c) => "all" in c) && new Set(def.columns.map((c) => c.join)).size === def.tables.length;
+}
+
+// Positions whose `alias.*` has to be expanded to column names for the request.
 export function tablesToExpand(def: JoinDef): number[] {
-  if (def.columns === null || def.columns.every((c) => "all" in c)) return [];
-  return [...new Set(def.columns.filter((c) => "all" in c).map((c) => c.join))];
+  if (selectsEverything(def)) return [];
+  return [...new Set((def.columns ?? []).filter((c) => "all" in c).map((c) => c.join))];
 }
 
 // `columnsOf` must answer for every position in tablesToExpand(def).
@@ -23,7 +29,7 @@ export function toWire(def: JoinDef, columnsOf: (join: number) => readonly strin
     table: def.tables[0].table,
     joins: def.joins.map((j, i) => ({ type: j.type, table: def.tables[i + 1].table, on: j.on })),
   };
-  if (def.columns !== null && !def.columns.every((c) => "all" in c)) {
+  if (def.columns !== null && !selectsEverything(def)) {
     wire.columns = def.columns.flatMap((c) =>
       "all" in c ? columnsOf(c.join).map((column) => ({ join: c.join, column })) : [c],
     );

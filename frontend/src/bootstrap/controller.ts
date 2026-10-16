@@ -39,6 +39,8 @@ function setTableBusy(busy: boolean): void {
 // finish clear aria-busy/#status while another is still running.
 let inFlightFetches = 0;
 
+const JOIN_WIRE_LIMIT = 8192;
+
 // `alias.*` has no wire form, so those tables' column names come from the catalog.
 async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> {
   const names = new Map<number, string[]>();
@@ -50,9 +52,17 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
       );
     }),
   );
-  params.set("join", JSON.stringify(toWire(def, (position) => names.get(position) ?? [])));
+  const wire = JSON.stringify(toWire(def, (position) => names.get(position) ?? []));
+  // The server rejects a longer `join` (spec/protocol.md §5.11.1); say why before sending.
+  if (new TextEncoder().encode(wire).length > JOIN_WIRE_LIMIT)
+    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", undefined, 400);
+  params.set("join", wire);
   return `/tables/join?${params}`;
 }
+
+// The join text that last loaded: once a join has rendered, a 400 is about the
+// filter or sort on top of it, which the plain error line reports.
+let loadedJoin = "";
 
 // A timeout or a rejected join gets the join's own UI instead of the plain
 // error line. A bad filter is the filter bar's to report.
@@ -67,7 +77,7 @@ function reportJoinFailure(e: ApiError): boolean {
     );
     return true;
   }
-  if (e.status === 400 && e.code !== "invalid_filter") {
+  if (e.status === 400 && e.code !== "invalid_filter" && state.join !== loadedJoin) {
     openJoinDialog({ error: e.message });
     return true;
   }
@@ -173,6 +183,7 @@ export async function loadData({
   if (token !== loadDataToken) return; // superseded by a newer request
   markStoredSortVerified();
   markFilterVerified();
+  loadedJoin = state.join;
   updateActiveTableChrome();
 
   // Row keys come from primary keys, which a join of several tables does not have.

@@ -68,6 +68,17 @@ test("toWire expands alias.* in catalog order beside explicit columns", () => {
   assert.deepEqual(wire.columns?.at(-1), { join: 1, column: "email" });
 });
 
+test("toWire expands alias.* items that leave a table out of the select list", () => {
+  const parsed = parseJoin(
+    "SELECT o.*, u.* FROM orders o JOIN users u ON o.user_id = u.id JOIN events e ON e.user_id = u.id",
+    { catalog: fixture.catalog },
+  );
+  assert.ok("def" in parsed);
+  const wire = toWire(parsed.def, (join) => fixture.catalog[parsed.def.tables[join].table] ?? []);
+  assert.ok(wire.columns);
+  assert.ok(wire.columns.every((c) => c.join !== 2));
+});
+
 test("join type hints grey incompatible and unjoinable columns, and allow what they cannot tell", () => {
   assert.equal(joinMismatch("uuid", "uuid"), null);
   assert.equal(joinMismatch("integer", "bigint"), null);

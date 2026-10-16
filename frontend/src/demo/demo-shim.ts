@@ -310,6 +310,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       return handleReferencedBy(params);
     case "/tables/structure":
       return handleStructure(params);
+    case "/tables/join":
+      return jsonResponse({ title: "Joins are not available in this offline demo.", code: "invalid_parameter" }, 400);
     case "/siblings":
       return handleSiblings();
     default:

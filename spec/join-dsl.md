@@ -75,8 +75,9 @@ Notes:
   "all": true }` (for `alias.*`).
 - **Wire request.** The `JoinDef` maps to the `spec/protocol.md` §5.11 object
   by merging `tables[i + 1]` into `joins[i]` as its `table`. `columns` is
-  omitted when it is `null` or every item is `all`. Otherwise each `all`
-  item is expanded in catalog column order.
+  omitted when it is `null` or when every item is `all` and together they
+  name every table. Otherwise each `all` item is expanded in catalog column
+  order.
 - **Effective name** of a table is its alias, or its table name when
   unaliased. Effective names must all differ. A table that appears twice
   therefore needs an alias on the second use. Once aliased, only the alias

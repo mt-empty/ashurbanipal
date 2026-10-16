@@ -240,7 +240,7 @@ export async function loadTables(): Promise<void> {
   }
   // Restore this table's remembered sort unless one is already set — a
   // shared link's ?sort= or a history entry takes precedence.
-  if (state.table && state.sort === null) applyStoredSort(state.table);
+  if (state.table && !state.join && state.sort === null) applyStoredSort(state.table);
   // Awaited (not fire-and-forget): callers like nav.ts's popstate handler
   // reset restoringFromHistory once this promise settles, and that flag
   // must still be true when loadData()'s syncUrl() call runs, or a
