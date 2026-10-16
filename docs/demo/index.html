@@ -688,11 +688,11 @@ ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
 ul { list-style: none; margin: 0; padding: 0; }
-#tables li button, #saved-joins li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
+#tables li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
                     cursor: pointer; font: inherit; color: inherit; border-radius: 999px;
                     display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
-#tables li button:hover, #saved-joins li button:hover { background: var(--hover); }
-#tables li button.active, #saved-joins li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#tables li button:hover { background: var(--hover); }
+#tables li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
 /* min-width:0 plus the cap lets one very long name ellipsize instead of
    widening the row; the full name is in `title` (see loadTables()). */
 .row-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
@@ -744,14 +744,6 @@ th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
 thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
-/* Join view: one band per table above the headers. The headers pin below the
-   band row, so the band height is fixed. */
-thead { --band-h: 1.5rem; }
-thead tr.bands th { height: var(--band-h); box-sizing: border-box; cursor: default; font-weight: 600;
-                    color: var(--text-muted); border-bottom: 1px solid var(--rule); text-align: left;
-                    overflow: hidden; text-overflow: ellipsis; }
-thead tr.bands th.band + th.band, thead tr.bands th.row-actions + th.band { border-left: 1px solid var(--rule); }
-thead tr.bands + tr th { top: var(--band-h); }
 /* Capped like the table chips' names; the title carries the full name. */
 .col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
             vertical-align: bottom; }
@@ -1095,68 +1087,163 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 
-/* ==== Join: overlay form, notice ==== */
-#join-notice { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin: .5rem 0;
-               padding: .5rem .75rem; border: 1px solid var(--border-strong); border-radius: 8px; }
+/* ==== Join: saved chips, bands, notices ==== */
+/* Saved joins are chips at the end of the table row, after a divider. */
+#tables li.join-first { position: relative; margin-left: .5rem; }
+#tables li.join-first::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
+                                width: 1px; background: var(--border-strong); }
+#tables li.join-chip button { font-family: var(--font-mono); font-size: .8125rem; }
+#tables li.join-chip.unsaved button { border: 1px dashed var(--border-strong); }
+#tables li.join-chip.muted button { color: var(--text-muted); }
+/* One tint per table position in a join, shared by the bands over the headers. */
+:root {
+  --band-0: light-dark(#eeeeea, #2e2e32);
+  --band-0-fg: inherit;
+  --band-1: light-dark(#ece6f3, #342f45);
+  --band-1-fg: light-dark(#6e5a8a, #bba8d6);
+  --band-2: light-dark(#e1eeeb, #233633);
+  --band-2-fg: light-dark(#2f6b6b, #86bcbc);
+  --band-3: light-dark(#e6ecf5, #252d3d);
+  --band-3-fg: light-dark(#3b5a8a, #9db8e0);
+}
+thead { --band-h: 1.75rem; }
+thead tr.bands th { height: var(--band-h); box-sizing: border-box; cursor: default; padding: 0 0 .25rem 0;
+                    border-bottom: none; }
+thead tr.bands th.row-actions { padding: 0; }
+.band-pill { display: block; margin-right: .75rem; padding: .15rem .5rem; border-radius: 4px; overflow: hidden;
+             text-overflow: ellipsis; font-family: var(--font-mono); font-size: .75rem; font-weight: 400;
+             background: var(--band-0); color: var(--band-0-fg); }
+tr.bands th[data-band="1"] .band-pill { background: var(--band-1); color: var(--band-1-fg); }
+tr.bands th[data-band="2"] .band-pill { background: var(--band-2); color: var(--band-2-fg); }
+tr.bands th[data-band="3"] .band-pill { background: var(--band-3); color: var(--band-3-fg); }
+thead tr.bands + tr th { top: var(--band-h); }
+#row-meta .partial { opacity: .8; }
+#join-notice { display: flex; gap: .75rem; align-items: center; margin: .5rem 0; padding: .6rem .9rem;
+               border-radius: 8px; background: color-mix(in srgb, var(--danger) 12%, transparent); }
+#join-notice-text { flex: 1; }
 #join-notice-actions { display: flex; gap: .5rem; }
-#join-dialog { width: min(52rem, 94vw); }
-#join-body { overflow: auto; max-height: var(--dialog-body-max-h); padding: var(--gap-lg);
-             display: flex; flex-direction: column; gap: var(--gap-lg); }
-#join-form { display: flex; flex-direction: column; align-items: flex-start; gap: .6rem; }
-#join-form > * { max-width: 100%; }
-.jf-row, .jf-pair { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
-.jf-pair select { min-width: 12rem; max-width: 100%; }
-.jf-label, .jf-eq { color: var(--text-muted); }
-.jf-join { border: 1px solid var(--rule-strong); border-radius: 8px; padding: .5rem .75rem;
-           display: flex; flex-direction: column; gap: .5rem; }
-.jf-join legend { font-size: .75rem; color: var(--text-muted); padding: 0 .25rem; }
-.jf-heading { margin: .25rem 0 0; font-size: .75rem; font-weight: 600; color: var(--text-muted); }
-.jf-column-list { display: flex; flex-wrap: wrap; gap: .25rem .75rem; padding: .25rem 0 .5rem; }
-.jf-column-list label { display: inline-flex; gap: .25rem; align-items: center; font-size: .8125rem; }
-#join-preview { margin: 0; padding: .5rem .75rem; background: color-mix(in srgb, currentColor 6%, transparent);
-                border-radius: 6px; font-family: var(--font-mono); font-size: .8125rem; white-space: pre-wrap; }
+.empty-join { text-align: center; padding: 1.5rem 0 1rem; white-space: normal; font-family: inherit; }
+.empty-join p { margin: 0 0 .5rem; }
+.empty-join .muted-note { color: var(--text-muted); font-size: .75rem; }
+.btn { background: none; border: 1px solid var(--border-strong); border-radius: 8px; padding: .4rem .85rem;
+       font: inherit; font-size: .8125rem; color: inherit; cursor: pointer; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn.primary { background: var(--chip-active-bg); border-color: var(--chip-active-bg); color: var(--chip-active-fg); }
+.btn.primary:hover:not(:disabled) { background: var(--chip-active-bg); opacity: .9; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ==== Join: overlay ==== */
+#join-dialog { width: min(57.5rem, 94vw); max-width: none; max-height: 90vh; border-radius: 12px; overflow: visible;
+               box-shadow: 0 12px 40px #0004; }
+#join-dialog[open] { display: flex; flex-direction: column; }
+#join-dialog .dialog-head { padding: 1rem 1.5rem .25rem; border-bottom: none; }
+#join-dialog .dialog-head strong { font-size: 1rem; }
+#join-modes { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+#join-modes button { padding: .3rem .85rem; font-size: .75rem; }
+#join-modes button[aria-selected="true"] { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#join-modes button:disabled { color: var(--text-muted); opacity: .6; cursor: not-allowed; }
+#join-body { overflow: auto; flex: 1; min-height: 0; padding: 0 1.5rem; }
+.jlab { margin: 1rem 0 .4rem; font-size: .6875rem; letter-spacing: .04em; text-transform: uppercase;
+        color: var(--text-muted); }
+.jmono { font-family: var(--font-mono); }
+.jmuted { color: var(--text-muted); }
+.j-start { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.j-chip { display: inline-flex; gap: .4rem; align-items: baseline; padding: .25rem .65rem; border-radius: 999px;
+          font-size: .8125rem; background: var(--chip-active-bg); color: var(--chip-active-fg); }
+.j-chip i { font-style: normal; font-size: .6875rem; opacity: .7; }
+.j-row { border: 1px solid var(--rule-strong); border-radius: 8px; padding: .6rem .75rem; margin-top: .5rem;
+         border-color: var(--border); }
+.j-line { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .8125rem; }
+.j-line + .j-line { margin-top: .4rem; }
+.j-kw { font-size: .6875rem; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.j-eq { color: var(--text-muted); }
+.j-ok { font-size: .75rem; color: var(--type-date); }
+.j-hint { margin: .5rem 0 0; font-size: .75rem; color: var(--text-muted); display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.j-bad { margin: .4rem 0 0; font-size: .75rem; color: var(--danger); }
+.j-rm { margin-left: auto; background: none; border: none; color: var(--text-muted); cursor: pointer; font: inherit;
+        padding: .1rem .4rem; border-radius: 6px; }
+.j-rm:hover { background: var(--hover); color: inherit; }
+.j-link { background: none; border: none; font: inherit; font-size: .75rem; color: inherit; text-decoration: underline;
+          padding: 0; cursor: pointer; }
+.j-link:disabled { opacity: .4; cursor: not-allowed; }
+.j-add { margin: .6rem 0 0; font-size: .8125rem; }
+.j-add .j-link { font-size: .8125rem; }
+.j-alias { box-sizing: border-box; width: 4.5rem; background: var(--surface); border: none; border-radius: 6px;
+           padding: .3rem .5rem; font: inherit; font-family: var(--font-mono); font-size: .8125rem; color: inherit; }
+.dd { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .55rem; border-radius: 6px;
+      background: var(--surface); border: none; font: inherit; font-size: .8125rem; color: inherit;
+      white-space: nowrap; cursor: pointer; }
+.dd.mono { font-family: var(--font-mono); }
+.dd.empty { color: var(--text-muted); }
+.dd.bad { box-shadow: 0 0 0 2px var(--danger); }
+.dd:hover { background: var(--hover); }
+.dd:focus-visible, .j-alias:focus-visible { outline: 2px solid var(--chip-active-bg); outline-offset: 1px; }
+#dd-pop { position: fixed; position-anchor: --dd-anchor; position-try-fallbacks: flip-block;
+          inset: auto; top: calc(anchor(bottom) + .25rem); left: anchor(left); margin: 0;
+          border: 1px solid var(--border-strong); border-radius: 8px; padding: .2rem; min-width: 14rem;
+          width: max-content; max-width: min(26rem, 90vw); max-height: 16rem; overflow: auto;
+          box-shadow: 0 4px 16px #0004; font-size: .8125rem; }
+#dd-pop-list { display: flex; flex-direction: column; }
+.dd-row { display: flex; justify-content: space-between; gap: 1rem; width: 100%; box-sizing: border-box;
+          background: none; border: none; font: inherit; font-family: var(--font-mono); color: inherit;
+          text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.dd-row:hover:not(.blocked), .dd-row:focus-visible { background: var(--hover); outline: none; }
+.dd-row[aria-selected="true"] { background: var(--hover); }
+.dd-note { font-family: var(--font-sans, system-ui, sans-serif); font-size: .6875rem; color: var(--text-muted); align-self: center; }
+.dd-row.blocked { color: var(--text-muted); opacity: .75; cursor: not-allowed; }
+.j-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; }
+.j-card { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .65rem; }
+.j-card h3 { margin: 0 0 .35rem; font-size: .75rem; font-weight: 600; display: flex; justify-content: space-between;
+             gap: .5rem; font-family: var(--font-mono); }
+.j-card h3 span { font-weight: 400; color: var(--text-muted); }
+.j-card h3 span.j-card-name { font-weight: 600; color: inherit; }
+.j-card label { display: flex; align-items: center; gap: .4rem; font-size: .75rem; line-height: 1.25rem; cursor: pointer; }
+.j-card input { margin: 0; }
+.j-sql { margin: 0; padding: .6rem .85rem; background: var(--surface); border-radius: 8px; font-family: var(--font-mono);
+         font-size: .75rem; line-height: 1.25rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: none; }
+#join-preview { opacity: .85; }
+#join-error { margin: .6rem 0 0; font-size: .8125rem; color: var(--danger); }
 #join-error:empty { display: none; }
-#join-error { margin: 0; color: var(--danger); }
-.dialog-foot { display: flex; justify-content: flex-end; gap: .5rem; padding: var(--gap-lg);
+.dialog-foot { display: flex; align-items: center; gap: .6rem; padding: .85rem 1.5rem 1.1rem; margin-top: 1rem;
                border-top: 1px solid var(--rule); }
-#filter-suggest button[aria-disabled="true"], #join-sql-suggest button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
-#join-modes { display: flex; gap: 1rem; border: none; margin: 0; padding: 0; }
-#join-modes label { display: inline-flex; gap: .35rem; align-items: center; cursor: pointer; }
-/* Same technique as #filter: the field's own text is transparent and #join-sql-hl,
-   behind it, draws the coloured copy; font, padding and wrapping must match. */
+#join-name-label { font-size: .75rem; color: var(--text-muted); }
+#join-name { box-sizing: border-box; background: var(--surface); border: none; border-radius: 6px; padding: .4rem .65rem;
+             font: inherit; font-size: .8125rem; width: 14rem; max-width: 40vw; color: inherit; }
+#join-name-note { font-size: .75rem; color: var(--text-muted); margin-right: auto; }
+/* SQL pane: the field's own text is transparent and #join-sql-hl, behind it,
+   draws the coloured copy; font, padding and wrapping must match. */
 #join-sql-wrap { position: relative; background: var(--surface); border-radius: 8px; }
-#join-sql, #join-sql-hl { font-family: var(--font-mono); font-size: .8125rem; line-height: 1.5; padding: .6rem .85rem;
+#join-sql, #join-sql-hl { font-family: var(--font-mono); font-size: .8125rem; line-height: 1.375rem; padding: .6rem .85rem;
                           box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 #join-sql { display: block; width: 100%; border: none; border-radius: 8px; background: transparent; resize: none;
             color: transparent; caret-color: CanvasText; position: relative; overflow: hidden; }
 #join-sql::selection { color: transparent; background: color-mix(in srgb, Highlight 40%, transparent); }
 #join-sql::placeholder { color: var(--text-muted); opacity: 1; }
 #join-sql-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.t-column { color: inherit; }
-#join-sql-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0;
-          background: canvas; color: inherit; border: 1px solid var(--border-strong);
-          border-radius: 8px; padding: .2rem; max-width: min(34rem, 100%); max-height: 12rem;
-          overflow: auto; box-shadow: 0 4px 16px #0004; }
-#join-sql-suggest button { display: block; width: 100%; box-sizing: border-box;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono);
-          background: none; border: none; font-size: inherit; color: inherit;
-          text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
+.t-name { color: inherit; }
+.t-plain { color: inherit; }
+#join-sql-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0; width: max-content;
+                    min-width: 16rem; max-width: min(34rem, 100%); font: .8125rem var(--font-mono);
+                    background: canvas; color: inherit; border: 1px solid var(--border-strong); border-radius: 8px;
+                    padding: .2rem; max-height: 12rem; overflow: auto; box-shadow: 0 4px 16px #0004; }
+#join-sql-suggest button { display: flex; justify-content: space-between; gap: 1rem; width: 100%; box-sizing: border-box;
+                           background: none; border: none; font: inherit; font-family: var(--font-mono); font-size: .8125rem;
+                           color: inherit; text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer;
+                           white-space: nowrap; }
 #join-sql-suggest button:hover, #join-sql-suggest button.active { background: var(--hover); }
-#join-sql-error { margin: .4rem 0 0; color: var(--danger); min-height: 1.2em; }
+#join-sql-suggest button[aria-disabled="true"] { color: var(--text-muted); opacity: .75; cursor: not-allowed; }
+.sg-note { font-family: system-ui, sans-serif; font-size: .6875rem; color: var(--text-muted); align-self: center;
+           overflow: hidden; text-overflow: ellipsis; }
+.sg-tag { margin-left: .4rem; padding: 0 .3rem; border-radius: 3px; background: var(--hover); font-size: .625rem; }
+#join-sql-error { margin: .5rem 0 0; font-size: .8125rem; color: var(--danger); min-height: 1.2em; }
+#join-sql-error:empty { display: none; }
+.j-tip { margin: .5rem 0 0; font-size: .75rem; color: var(--text-muted); }
+.j-grammar { font-size: .6875rem; }
+.j-grammar .muted { color: var(--text-muted); }
 @media (forced-colors: active) {
   #join-sql { color: CanvasText; }
   #join-sql-hl { display: none; }
 }
-
-/* Saved joins: their own row of chips under the table chips, set off by a label. */
-#saved-joins-bar { display: flex; align-items: center; gap: var(--gap); margin-top: .25rem; }
-#saved-joins-label { flex: none; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
-                     color: var(--text-muted); padding-left: .35rem; }
-#saved-joins { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; }
-#saved-joins li.unsaved button { border: 1px dashed var(--border-strong); }
-#saved-joins li.save-link button, #saved-joins li.new-join button { color: var(--text-muted); }
-#join-name-label { display: inline-flex; gap: .4rem; align-items: center; margin-right: auto; }
-#join-name { width: 14rem; max-width: 40vw; }
 </style>
 </head>
 <body>
@@ -1194,10 +1281,6 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
       <ul id="tables"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
       <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
     </nav>
-    <nav id="saved-joins-bar" aria-label="saved joins" hidden>
-      <span id="saved-joins-label">joins</span>
-      <ul id="saved-joins"></ul>
-    </nav>
     <div id="toolbar">
       <search id="controls">
         <form id="filter-form">
@@ -1215,10 +1298,10 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
         <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
         <span id="actions">
-          <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
           <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
-          <button id="join-edit-btn" type="button" hidden title="change the tables, columns or join type of this view">edit join</button>
+          <button id="join-edit-btn" type="button" hidden title="change the tables, columns or join type of this view"><span aria-hidden="true">⋈</span> edit join</button>
           <button id="join-link-btn" type="button" hidden title="copy a link that opens this join"><span class="copy-icon" aria-hidden="true">⧉</span> copy link</button>
+          <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
           <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
           <button id="structure-btn" type="button" disabled title="indexes and constraints for this table">structure</button>
           <button id="payload" disabled title="raw JSON response for the current view">payload</button>
@@ -1267,33 +1350,48 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 
 <dialog id="join-dialog" closedby="any" aria-labelledby="join-title">
   <div class="dialog-head">
-    <span class="dialog-head-title"><strong id="join-title">join tables</strong></span>
+    <span class="dialog-head-title">
+      <strong id="join-title">Join tables</strong>
+      <span id="join-modes" role="tablist" aria-label="how to write the join">
+        <button id="join-mode-form" type="button" role="tab" aria-selected="true">Form</button>
+        <button id="join-mode-sql" type="button" role="tab" aria-selected="false">SQL</button>
+      </span>
+    </span>
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
   <div id="join-body">
-    <fieldset id="join-modes">
-      <legend class="sr-only">how to write the join</legend>
-      <label><input type="radio" name="join-mode" id="join-mode-form" value="form" checked> Form</label>
-      <label><input type="radio" name="join-mode" id="join-mode-sql" value="sql"> SQL</label>
-    </fieldset>
-    <div id="join-form"></div>
+    <div id="join-form-pane">
+      <div id="join-form"></div>
+      <div class="jlab">Equivalent SQL</div>
+      <pre id="join-preview" class="j-sql"></pre>
+    </div>
     <div id="join-sql-pane" hidden>
+      <div class="jlab">Join</div>
       <div id="join-sql-wrap">
         <div id="join-sql-hl" aria-hidden="true"><span id="join-sql-hl-text"></span></div>
-        <textarea id="join-sql" rows="4" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="join-sql-suggest-list" aria-label="join as SQL text" spellcheck="false" autocomplete="off" placeholder="FROM orders o&#10;LEFT JOIN users u ON o.user_id = u.id"></textarea>
+        <textarea id="join-sql" rows="5" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="join-sql-suggest-list" aria-label="join as SQL text" spellcheck="false" autocomplete="off" placeholder="FROM orders o&#10;LEFT JOIN users u ON o.user_id = u.id"></textarea>
         <div id="join-sql-suggest" hidden><div id="join-sql-suggest-list" role="listbox" aria-label="join suggestions"></div></div>
       </div>
       <p id="join-sql-error" role="status"></p>
+      <p id="join-sql-tip" class="j-tip" hidden>Form is unavailable until the text parses.</p>
+      <div class="jlab">Supported</div>
+      <pre class="j-sql j-grammar">SELECT alias.column, …                       optional
+FROM table [alias]
+{INNER | LEFT} JOIN table [alias]
+  ON a.col = b.col [AND …]    up to 3 pairs</pre>
+      <p class="j-tip">At most 4 tables. Filter and sort with the controls above the grid.</p>
     </div>
-    <div id="join-preview-wrap"><span class="section-label">as SQL</span><pre id="join-preview"></pre></div>
     <p id="join-error" role="alert"></p>
   </div>
   <div class="dialog-foot">
-    <label id="join-name-label">Name <input id="join-name" maxlength="60" autocomplete="off" spellcheck="false" placeholder="save in this browser"></label>
-    <button id="join-delete" type="button" hidden>Delete</button>
-    <button id="join-cancel" type="button">Cancel</button>
-    <button id="join-run" type="button">Show result</button>
+    <label id="join-name-label" for="join-name">Name</label>
+    <input id="join-name" maxlength="60" autocomplete="off" spellcheck="false" placeholder="name it to save it">
+    <span id="join-name-note">saved in this browser</span>
+    <button id="join-delete" class="btn" type="button" hidden>Delete</button>
+    <button id="join-cancel" class="btn" type="button">Cancel</button>
+    <button id="join-run" class="btn primary" type="button">Show result</button>
   </div>
+  <div id="dd-pop" popover><div id="dd-pop-list" role="listbox"></div></div>
 </dialog>
 
 <div id="siblings-pop" popover>
@@ -1380,8 +1478,8 @@ function reportError(e) {
 function clearError() {
   $("error").textContent = "";
 }
-function populateSelect(select2, values, selected) {
-  select2.replaceChildren(
+function populateSelect(select, values, selected) {
+  select.replaceChildren(
     ...values.map((v) => {
       const opt = document.createElement("option");
       opt.value = v;
@@ -1389,7 +1487,7 @@ function populateSelect(select2, values, selected) {
       return opt;
     })
   );
-  select2.value = selected;
+  select.value = selected;
 }
 function flashIcon(el2, glyph, ms = 800) {
   if (el2.dataset.rest === void 0) el2.dataset.rest = el2.textContent ?? "";
@@ -1899,8 +1997,8 @@ function printJoin(def) {
     const t = def.tables[i];
     return t.alias === null ? quoteJoinName(t.table) : `${quoteJoinName(t.table)} ${quoteJoinName(t.alias)}`;
   };
-  const select2 = def.columns === null ? "*" : def.columns.map((c) => `${name(c.join)}.${"all" in c ? "*" : quoteJoinName(c.column)}`).join(", ");
-  const lines = [`SELECT ${select2}`, `FROM ${ref(0)}`];
+  const select = def.columns === null ? "*" : def.columns.map((c) => `${name(c.join)}.${"all" in c ? "*" : quoteJoinName(c.column)}`).join(", ");
+  const lines = [`SELECT ${select}`, `FROM ${ref(0)}`];
   def.joins.forEach((j, i) => {
     const on = j.on.map((p) => `${name(p.left.join)}.${quoteJoinName(p.left.column)} = ${name(i + 1)}.${quoteJoinName(p.right)}`).join(" AND ");
     lines.push(`${j.type === "left" ? "LEFT" : "INNER"} JOIN ${ref(i + 1)} ON ${on}`);
@@ -1909,13 +2007,13 @@ function printJoin(def) {
 }
 var OPERATOR_WORDS = /* @__PURE__ */ new Set(["OR", "LIKE", "ILIKE", "IN", "IS", "NOT", "BETWEEN"]);
 var REJECTED_MESSAGE = {
-  RIGHT: "RIGHT JOIN is not supported; use LEFT JOIN with the tables swapped",
-  FULL: "FULL JOIN is not supported; use INNER or LEFT JOIN",
-  CROSS: "CROSS JOIN is not supported; use INNER or LEFT JOIN",
-  NATURAL: "NATURAL JOIN is not supported; write the ON pairs",
-  USING: "USING is not supported; write ON a.x = b.y",
-  WHERE: "WHERE is not supported here; use the filter bar",
-  ORDER: "ORDER BY is not supported here; click a column header to sort"
+  RIGHT: "RIGHT joins are not supported. Use LEFT or INNER.",
+  FULL: "FULL joins are not supported. Use LEFT or INNER.",
+  CROSS: "CROSS joins are not supported. Use LEFT or INNER.",
+  NATURAL: "NATURAL joins are not supported. Write the ON pairs.",
+  USING: "USING is not supported. Write ON a.x = b.y.",
+  WHERE: "WHERE is not part of the join. Filter with the bar above the grid.",
+  ORDER: "ORDER BY is not part of the join. Click a column header to sort."
 };
 var JoinFailure = class extends Error {
   error;
@@ -1946,7 +2044,8 @@ function closest(name, candidates) {
   }
   return best;
 }
-function parseJoin(text, catalog) {
+function parseJoin(text, options = {}) {
+  const catalog = options.catalog;
   let pos = 0;
   let cur = null;
   const fail = (code, message, index, suggest2) => {
@@ -2048,7 +2147,7 @@ function parseJoin(text, catalog) {
       const suggest2 = closest(t.text, Object.keys(catalog));
       fail(
         "unknown-table",
-        `unknown table "${t.text}"${suggest2 ? `; did you mean "${suggest2}"?` : ""}`,
+        `There is no table ${t.text}.${suggest2 ? ` Did you mean ${suggest2}?` : ""}`,
         t.start,
         suggest2
       );
@@ -2087,7 +2186,7 @@ function parseJoin(text, catalog) {
     const suggest2 = closest(c.column, known);
     fail(
       "unknown-column",
-      `table "${tables[position].table}" has no column "${c.column}"${suggest2 ? `; did you mean "${suggest2}"?` : ""}`,
+      `${tables[position].table} has no column ${c.column}.${suggest2 ? ` Did you mean ${suggest2}?` : ""}`,
       c.columnStart,
       suggest2
     );
@@ -2115,6 +2214,11 @@ function parseJoin(text, catalog) {
       );
     checkColumn(a, first);
     checkColumn(b, second);
+    const clash = options.pairCheck?.(
+      { table: tables[a].table, column: first.column },
+      { table: tables[b].table, column: second.column }
+    );
+    if (clash) fail("type-mismatch", clash, second.qualStart);
     return forward ? { left: { join: a, column: first.column }, right: second.column } : { left: { join: b, column: second.column }, right: first.column };
   };
   const run = () => {
@@ -2701,7 +2805,7 @@ function render() {
   const { tokens } = tokenizeFilterDsl(text);
   const lead = text.length - text.trimStart().length;
   const trimmed = text.trim();
-  const error = filterDslErrorAt(trimmed);
+  const error = filterDslErrorAt(trimmed, joinAliases());
   let at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
   const bad = tokens.find((t) => t.start <= at && at < t.end);
   if (bad && bad.end >= lead + trimmed.length && endsInUnfinishedWord(text)) at = -1;
@@ -2793,9 +2897,168 @@ function addJoin(draft) {
   draft.joins.push({ type: "inner", table: "", alias: "", on: [emptyPair()] });
   draft.columns.push(null);
 }
-function removeLastJoin(draft) {
-  draft.joins.pop();
-  draft.columns.pop();
+function removeJoin(draft, index) {
+  const gone = index + 1;
+  draft.joins.splice(index, 1);
+  draft.columns.splice(gone, 1);
+  for (const j of draft.joins.slice(index)) {
+    for (const p of j.on) {
+      if (p.leftJoin === gone) {
+        p.leftJoin = 0;
+        p.leftColumn = "";
+      } else if (p.leftJoin > gone) p.leftJoin -= 1;
+    }
+  }
+}
+
+// src/lib/join-tokens.ts
+var KEYWORDS = /* @__PURE__ */ new Set(["SELECT", "FROM", "JOIN", "INNER", "LEFT", "OUTER", "ON", "AND", "AS"]);
+var REJECTED = /* @__PURE__ */ new Set([
+  "RIGHT",
+  "FULL",
+  "CROSS",
+  "NATURAL",
+  "USING",
+  "WHERE",
+  "GROUP",
+  "HAVING",
+  "ORDER",
+  "LIMIT",
+  "OFFSET",
+  "UNION",
+  "DISTINCT",
+  "OR"
+]);
+var WORD = /[A-Za-z_][A-Za-z0-9_]*/y;
+function tokenizeJoinText(text) {
+  const tokens = [];
+  let i = 0;
+  while (i < text.length) {
+    const start = i;
+    const c = text[i];
+    if (/\s/.test(c)) {
+      while (i < text.length && /\s/.test(text[i])) i++;
+      tokens.push({ kind: "space", start, end: i });
+    } else if (c === '"') {
+      i++;
+      for (; i < text.length; i++) {
+        if (text[i] !== '"') continue;
+        if (text[i + 1] === '"') i++;
+        else {
+          i++;
+          break;
+        }
+      }
+      tokens.push({ kind: "name", start, end: i });
+    } else if (/[A-Za-z_]/.test(c)) {
+      WORD.lastIndex = i;
+      i = start + (WORD.exec(text)?.[0].length ?? 1);
+      const upper = text.slice(start, i).toUpperCase();
+      tokens.push({ kind: KEYWORDS.has(upper) ? "keyword" : REJECTED.has(upper) ? "plain" : "name", start, end: i });
+    } else {
+      i++;
+      tokens.push({ kind: ".,;*=".includes(c) ? "punct" : "plain", start, end: i });
+    }
+  }
+  return tokens;
+}
+var unquote = (s) => s.startsWith('"') ? s.slice(1, s.endsWith('"') && s.length > 1 ? -1 : void 0).replaceAll('""', '"') : s;
+function joinCompletionAt(text) {
+  const all = tokenizeJoinText(text);
+  const last = all.at(-1);
+  let cut = all.length;
+  let qualifier = null;
+  let partial = "";
+  const sig = all.filter((t) => t.kind !== "space");
+  const end = sig.at(-1);
+  if (last && last.kind !== "space" && end) {
+    const prev = sig.at(-2);
+    const prev2 = sig.at(-3);
+    if (end.kind === "punct" && text[end.start] === "." && prev && prev.kind === "name") {
+      qualifier = unquote(text.slice(prev.start, prev.end));
+      cut = all.indexOf(prev);
+    } else if (end.kind === "name" && prev && prev.kind === "punct" && text[prev.start] === "." && prev2 && prev2.kind === "name") {
+      qualifier = unquote(text.slice(prev2.start, prev2.end));
+      partial = text.slice(end.start, end.end);
+      cut = all.indexOf(prev2);
+    } else if (end.kind === "name" || end.kind === "keyword") {
+      partial = text.slice(end.start, end.end);
+      cut = all.indexOf(end);
+    }
+  }
+  const head = text.slice(0, text.length - partial.length);
+  const declared = [];
+  let state2 = "start";
+  let from = false;
+  let table = "";
+  let pending = null;
+  let afterEq = false;
+  let refs = [];
+  const flush = () => {
+    if (pending) declared.push(pending);
+    pending = null;
+  };
+  const before = all.slice(0, cut).filter((t) => t.kind !== "space");
+  for (let k = 0; k < before.length; k++) {
+    const t = before[k];
+    const w = text.slice(t.start, t.end);
+    const upper = w.toUpperCase();
+    if (t.kind === "keyword") {
+      if (upper === "FROM" || upper === "JOIN") {
+        flush();
+        state2 = "table";
+        from = upper === "FROM";
+      } else if (upper === "ON" || upper === "AND") {
+        flush();
+        state2 = "colref";
+        afterEq = false;
+        refs = [];
+      } else if (upper === "AS") state2 = "alias";
+      else if (upper === "SELECT") state2 = "select";
+      else if (state2 !== "start") flush();
+    } else if (t.kind === "name" && state2 === "table") {
+      table = unquote(w);
+      pending = { name: table, table };
+      state2 = "after-table";
+    } else if (t.kind === "name" && (state2 === "after-table" || state2 === "alias")) {
+      if (pending) pending.name = unquote(w);
+      state2 = "after-table";
+    } else if (t.kind === "name" && state2 === "colref") {
+      const dot = before[k + 1];
+      const col = before[k + 2];
+      if (dot && text[dot.start] === "." && col?.kind === "name") {
+        refs.push({ qualifier: unquote(w), column: unquote(text.slice(col.start, col.end)) });
+        k += 2;
+        state2 = "after-colref";
+      }
+    } else if (t.kind === "punct" && w === "=" && state2 === "after-colref") {
+      state2 = "colref";
+      afterEq = true;
+    }
+  }
+  flush();
+  const joinWords = ["JOIN", "INNER JOIN", "LEFT JOIN"];
+  let expect = "none";
+  let keywords = [];
+  if (qualifier !== null) expect = state2 === "colref" ? "column" : "none";
+  else if (state2 === "table") expect = "table";
+  else if (state2 === "colref") expect = "qualifier";
+  else if (state2 === "after-table" && partial !== "") {
+    expect = "keyword";
+    keywords = from ? joinWords : ["ON"];
+  } else if (state2 === "after-colref" && partial !== "") {
+    expect = "keyword";
+    keywords = ["AND", ...joinWords];
+  }
+  return {
+    expect,
+    partial,
+    head,
+    qualifier,
+    declared,
+    otherSide: afterEq && refs.length > 0 ? refs.at(-1) ?? null : null,
+    keywords
+  };
 }
 
 // src/lib/join-types.ts
@@ -2836,25 +3099,112 @@ var LABEL = {
   time: "time",
   binary: "binary",
   enum: "enum",
-  custom: "custom type"
+  // Postgres reports an enum (or citext) as USER-DEFINED, and an enum is far the likelier.
+  custom: "enum"
 };
 function classOf(type) {
   const t = type.toLowerCase();
   if (NOT_JOINABLE.has(t) || t.endsWith("[]")) return "none";
   return CLASS_OF[t] ?? null;
 }
-function joinBlocker(candidate, other) {
+var shown = (type) => type.toLowerCase() === "user-defined" ? "enum" : type;
+function joinMismatch(candidate, other) {
   const a = classOf(candidate);
   const b = classOf(other);
-  if (a === "none") return `${candidate}: not joinable`;
-  if (b === "none") return `${other}: not joinable`;
+  if (a === "none" || b === "none") {
+    const type = shown(a === "none" ? candidate : other);
+    return { note: `${type}: not joinable`, message: `${type} columns cannot be joined. Pick another column.` };
+  }
   if (a === null || b === null || a === b) return null;
   if (a === "custom" && b === "text" || a === "text" && b === "custom") return null;
-  return `${LABEL[a]} \u2260 ${LABEL[b]}`;
+  return {
+    note: `${shown(candidate)} \u2260 ${shown(other)}`,
+    message: `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`
+  };
 }
 function unjoinableReason(type) {
-  return classOf(type) === "none" ? `${type}: not joinable` : null;
+  return classOf(type) === "none" ? `${shown(type)}: not joinable` : null;
 }
+
+// src/features/dropdown.ts
+var pop = () => $("dd-pop");
+var anchor = null;
+var lastLabel = "";
+function lastDropdownLabel() {
+  return lastLabel;
+}
+function closeMenu() {
+  if (pop().matches(":popover-open")) pop().hidePopover();
+}
+function open(button, opts) {
+  if (anchor) anchor.style.anchorName = "";
+  anchor = button;
+  lastLabel = opts.ariaLabel;
+  button.style.anchorName = "--dd-anchor";
+  const list = $("dd-pop-list");
+  list.setAttribute("aria-label", opts.ariaLabel);
+  list.replaceChildren(
+    ...opts.options.map((o) => {
+      const row2 = document.createElement("button");
+      row2.type = "button";
+      row2.className = "dd-row";
+      row2.setAttribute("role", "option");
+      row2.setAttribute("aria-selected", String(o.value === opts.value));
+      row2.dataset.value = o.value;
+      const name = document.createElement("span");
+      name.textContent = o.label;
+      row2.appendChild(name);
+      if (o.note) {
+        const note = document.createElement("span");
+        note.className = "dd-note";
+        note.textContent = o.note;
+        row2.appendChild(note);
+      }
+      if (o.blocked) {
+        row2.setAttribute("aria-disabled", "true");
+        row2.classList.add("blocked");
+      }
+      row2.onclick = () => {
+        if (o.blocked) return;
+        closeMenu();
+        opts.onPick(o.value);
+      };
+      return row2;
+    })
+  );
+  pop().showPopover();
+  const start = list.querySelector('[aria-selected="true"]') ?? list.querySelector(".dd-row:not(.blocked)");
+  start?.focus();
+  start?.scrollIntoView({ block: "nearest" });
+}
+function createDropdown(opts) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `dd${opts.mono ? " mono" : ""}${opts.invalid ? " bad" : ""}`;
+  button.setAttribute("aria-label", opts.ariaLabel);
+  button.setAttribute("aria-haspopup", "listbox");
+  const picked = opts.options.find((o) => o.value === opts.value);
+  const text = opts.display ?? picked?.label ?? opts.placeholder;
+  button.textContent = `${text} \u25BE`;
+  if (!picked && opts.display === void 0) button.classList.add("empty");
+  button.onclick = () => open(button, opts);
+  return button;
+}
+pop().addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const rows = [...pop().querySelectorAll(".dd-row:not(.blocked)")];
+  if (rows.length === 0) return;
+  e.preventDefault();
+  const at = rows.indexOf(document.activeElement);
+  const next = e.key === "ArrowDown" ? (at + 1) % rows.length : (at <= 0 ? rows.length : at) - 1;
+  rows[next].focus();
+});
+pop().addEventListener("toggle", (e) => {
+  if (e.newState === "closed" && anchor) {
+    anchor.style.anchorName = "";
+    anchor.focus({ preventScroll: true });
+  }
+});
 
 // src/lib/format.ts
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2934,6 +3284,8 @@ function formatCellValue(col, raw) {
 
 // src/features/sidebar.ts
 var tableEntries = [];
+var joinEntries = [];
+var allEntries = () => [...tableEntries, ...joinEntries];
 var tableRowTemplate = $("table-row-template");
 var TABLE_CAP_LINES = 3;
 var tablesMore = $("tables-more");
@@ -2941,14 +3293,15 @@ var tablesMoreItem = $("tables-more-item");
 var tablesExpanded = false;
 var cappedActive = null;
 function updateTablesCap() {
-  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
-  for (const e of tableEntries) {
+  const entries = allEntries();
+  cappedActive = entries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
+  for (const e of entries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
   }
-  const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
+  const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastRowTop = tops[TABLE_CAP_LINES - 1];
-  const beyond = tops.length > TABLE_CAP_LINES ? tableEntries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
   const active = beyond.find((e) => e.btn.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
@@ -2959,19 +3312,20 @@ function updateTablesCap() {
     return;
   }
   for (const e of hidden) e.li.hidden = true;
-  const shown = tableEntries.filter((e) => !hidden.has(e) && e !== active);
+  const shown2 = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
-  while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
-    const last = shown.pop();
+  while (tablesMoreItem.offsetTop > lastRowTop && shown2.length) {
+    const last = shown2.pop();
     last.li.hidden = true;
     hidden.add(last);
     tablesMore.textContent = `+ ${hidden.size} more`;
   }
   if (!active) return;
-  const at = tableEntries.indexOf(active);
-  const movedUp = [...hidden].some((e) => tableEntries.indexOf(e) < at);
-  const before = tableEntries.slice(0, at).filter((e) => !e.li.hidden).pop();
-  if (movedUp && before && before.li.offsetTop === active.li.offsetTop) active.li.classList.add("pulled");
+  const at = entries.indexOf(active);
+  const movedUp = [...hidden].some((e) => entries.indexOf(e) < at);
+  const before = entries.slice(0, at).filter((e) => !e.li.hidden).pop();
+  if (movedUp && before && before.li.offsetTop === active.li.offsetTop && !active.li.classList.contains("join-first"))
+    active.li.classList.add("pulled");
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
@@ -3071,6 +3425,7 @@ async function loadTables() {
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, btn });
   }
+  for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
@@ -3085,6 +3440,28 @@ async function loadTables() {
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
+}
+function tableChipCount(name) {
+  return tableEntries.find((e) => e.name === name)?.li.querySelector(".count")?.textContent ?? "";
+}
+function setJoinChips(chips) {
+  const ul = $("tables");
+  for (const e of joinEntries) e.li.remove();
+  joinEntries = chips.map((c, i) => {
+    const li = document.createElement("li");
+    li.className = `join-chip ${c.className}${i === 0 ? " join-first" : ""}`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = c.label;
+    btn.title = c.title;
+    btn.classList.toggle("active", c.active);
+    if (c.active) btn.setAttribute("aria-current", "true");
+    btn.onclick = c.run;
+    li.appendChild(btn);
+    ul.insertBefore(li, tablesMoreItem);
+    return { name: `join:${c.label}`, li, btn };
+  });
+  updateTablesCap();
 }
 function setRowLoading(name, loading) {
   tableEntries.find((e) => e.name === name)?.btn.classList.toggle("loading", loading);
@@ -3245,21 +3622,8 @@ function el(tag, className, text) {
   if (text !== void 0) e.textContent = text;
   return e;
 }
-function select(label, options, value, onPick) {
-  const s = el("select");
-  s.setAttribute("aria-label", label);
-  for (const o of options) {
-    const opt = el("option", void 0, o.label);
-    opt.value = o.value;
-    opt.disabled = o.disabled ?? false;
-    s.appendChild(opt);
-  }
-  s.value = value;
-  s.onchange = () => onPick(s.value);
-  return s;
-}
-function button(text, label, run) {
-  const b = el("button", void 0, text);
+function textButton(text, className, label, run) {
+  const b = el("button", className, text);
   b.type = "button";
   b.setAttribute("aria-label", label);
   b.onclick = run;
@@ -3273,6 +3637,24 @@ function mountJoinForm(root, onChange) {
   const nameAt = (pos) => (pos === 0 ? draft.alias : draft.joins[pos - 1].alias).trim() || tableAt(pos);
   const columnsAt = (pos) => loaded.get(tableAt(pos)) ?? [];
   const typeOf = (pos, column) => columnsAt(pos).find((c) => c.name === column)?.type;
+  const mismatch = (pos, pair) => {
+    const left = typeOf(pair.leftJoin, pair.leftColumn);
+    const right = typeOf(pos, pair.rightColumn);
+    return left && right ? joinMismatch(left, right) : null;
+  };
+  function foreignKey(pos) {
+    for (let p = 0; p < pos; p++) {
+      for (const c of columnsAt(p)) {
+        if (c.references?.table === tableAt(pos))
+          return { leftJoin: p, leftColumn: c.name, rightColumn: c.references.column };
+      }
+      for (const c of columnsAt(pos)) {
+        if (c.references?.table === tableAt(p))
+          return { leftJoin: p, leftColumn: c.references.column, rightColumn: c.name };
+      }
+    }
+    return null;
+  }
   async function load() {
     const missing = [.../* @__PURE__ */ new Set([draft.table, ...draft.joins.map((j) => j.table)])].filter((t) => t && !loaded.has(t));
     if (missing.length === 0) return;
@@ -3287,18 +3669,23 @@ function mountJoinForm(root, onChange) {
         }
       })
     );
-    if (token === loadToken) render2();
-  }
-  const changed = () => {
+    if (token !== loadToken) return;
+    draft.joins.forEach((j, i) => {
+      const first = j.on[0];
+      const fk = first && first.leftColumn === "" && first.rightColumn === "" ? foreignKey(i + 1) : null;
+      if (fk) j.on[0] = fk;
+    });
     render2();
     onChange();
+  }
+  const changed = () => {
+    const focused = lastDropdownLabel();
+    render2();
+    if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
+    onChange();
   };
-  const tableOptions = () => [
-    { value: "", label: "choose a table" },
-    ...listedTableNames().map((t) => ({ value: t, label: t }))
-  ];
   const aliasInput = (value, label, set) => {
-    const input2 = el("input");
+    const input2 = el("input", "j-alias");
     input2.value = value;
     input2.placeholder = "alias";
     input2.spellcheck = false;
@@ -3310,121 +3697,125 @@ function mountJoinForm(root, onChange) {
     };
     return input2;
   };
-  const columnOption = (c, otherType) => {
-    const reason = otherType === void 0 ? unjoinableReason(c.type) : joinBlocker(c.type, otherType);
-    return { value: c.name, label: `${c.name} (${c.type})${reason ? ` \u2014 ${reason}` : ""}`, disabled: reason !== null };
-  };
-  function pairRow(join, pos, pair) {
-    const row2 = el("div", "jf-pair");
+  function pairLine(join, pos, pair, first) {
+    const line = el("div", "j-line");
+    const clash = mismatch(pos, pair);
+    const rightType = typeOf(pos, pair.rightColumn);
     const leftType = typeOf(pair.leftJoin, pair.leftColumn);
-    const rightType = (columnsAt(pos).find((c) => c.name === pair.rightColumn) ?? { type: void 0 }).type;
-    const left = el("select");
-    left.setAttribute("aria-label", `join ${pos}: column of an earlier table`);
-    left.appendChild(Object.assign(el("option", void 0, "choose column"), { value: "" }));
-    for (let p = 0; p < pos; p++) {
-      const group = el("optgroup");
-      group.label = nameAt(p);
-      for (const c of columnsAt(p)) {
-        const o = columnOption(c, rightType);
-        group.appendChild(
-          Object.assign(el("option", void 0, o.label), { value: `${p}|${c.name}`, disabled: o.disabled })
-        );
-      }
-      left.appendChild(group);
-    }
-    left.value = pair.leftColumn ? `${pair.leftJoin}|${pair.leftColumn}` : "";
-    left.onchange = () => {
-      const [p, ...rest] = left.value.split("|");
-      pair.leftJoin = left.value ? Number(p) : 0;
-      pair.leftColumn = rest.join("|");
-      changed();
-    };
-    const right = select(
-      `join ${pos}: column of ${nameAt(pos) || "this table"}`,
-      [{ value: "", label: "choose column" }, ...columnsAt(pos).map((c) => columnOption(c, leftType))],
-      pair.rightColumn,
-      (v) => {
-        pair.rightColumn = v;
-        changed();
-      }
+    const leftOptions = Array.from({ length: pos }, (_, p) => p).flatMap(
+      (p) => columnsAt(p).map((c) => {
+        const note = rightType === void 0 ? unjoinableReason(c.type) : joinMismatch(c.type, rightType)?.note ?? null;
+        return {
+          value: `${p}|${c.name}`,
+          label: `${nameAt(p)}.${c.name}`,
+          note: note ?? c.type,
+          blocked: note !== null
+        };
+      })
     );
-    row2.append(left, el("span", "jf-eq", "="), right);
-    if (join.on.length > 1) {
-      row2.appendChild(
-        button("\u2715", `remove column pair from join ${pos}`, () => {
+    const rightOptions = columnsAt(pos).map((c) => {
+      const note = leftType === void 0 ? unjoinableReason(c.type) : joinMismatch(c.type, leftType)?.note ?? null;
+      return { value: c.name, label: c.name, note: note ?? c.type, blocked: note !== null };
+    });
+    line.append(
+      el("span", "j-kw", first ? "on" : "and"),
+      createDropdown({
+        ariaLabel: `join ${pos}${first ? "" : ` pair ${join.on.indexOf(pair) + 1}`}: column of an earlier table`,
+        options: leftOptions,
+        value: pair.leftColumn ? `${pair.leftJoin}|${pair.leftColumn}` : "",
+        display: pair.leftColumn ? `${nameAt(pair.leftJoin)}.${pair.leftColumn}` : void 0,
+        placeholder: "choose column",
+        mono: true,
+        onPick: (v) => {
+          const [p, ...rest] = v.split("|");
+          pair.leftJoin = Number(p);
+          pair.leftColumn = rest.join("|");
+          changed();
+        }
+      }),
+      el("span", "j-eq", "="),
+      createDropdown({
+        ariaLabel: `join ${pos}${first ? "" : ` pair ${join.on.indexOf(pair) + 1}`}: column of ${nameAt(pos) || "this table"}`,
+        options: rightOptions,
+        value: pair.rightColumn,
+        display: pair.rightColumn ? `${nameAt(pos)}.${pair.rightColumn}` : void 0,
+        placeholder: "choose column",
+        mono: true,
+        invalid: clash !== null,
+        onPick: (v) => {
+          pair.rightColumn = v;
+          changed();
+        }
+      })
+    );
+    if (leftType && rightType && !clash) line.appendChild(el("span", "j-ok", `${leftType} = ${rightType} \u2713`));
+    if (!first) {
+      line.appendChild(
+        textButton("\u2715", "j-rm", `remove column pair from join ${pos}`, () => {
           join.on.splice(join.on.indexOf(pair), 1);
           changed();
         })
       );
     }
-    return row2;
+    return line;
   }
-  function foreignKeySuggestion(join, pos) {
-    for (let p = 0; p < pos; p++) {
-      for (const c of columnsAt(p)) {
-        if (c.references?.table === join.table)
-          return { leftJoin: p, leftColumn: c.name, rightColumn: c.references.column };
-      }
-      for (const c of columnsAt(pos)) {
-        if (c.references?.table === tableAt(p))
-          return { leftJoin: p, leftColumn: c.references.column, rightColumn: c.name };
-      }
-    }
-    return null;
-  }
-  function joinBlock(join, pos) {
-    const box = el("fieldset", "jf-join");
-    box.appendChild(el("legend", void 0, `join ${pos}`));
-    const head = el("div", "jf-row");
+  function joinRow(join, i) {
+    const pos = i + 1;
+    const box = el("div", "j-row");
+    const head = el("div", "j-line");
     head.append(
-      select(
-        `join ${pos} type`,
-        [
+      createDropdown({
+        ariaLabel: `join ${pos} type`,
+        options: [
           { value: "inner", label: "INNER" },
           { value: "left", label: "LEFT" }
         ],
-        join.type,
-        (v) => {
+        value: join.type,
+        placeholder: "type",
+        onPick: (v) => {
           join.type = v === "left" ? "left" : "inner";
           changed();
         }
-      ),
-      select(`join ${pos} table`, tableOptions(), join.table, (v) => {
-        join.table = v;
-        join.on = [emptyPair()];
-        draft.columns[pos] = null;
-        changed();
-        load();
       }),
+      createDropdown({
+        ariaLabel: `join ${pos} table`,
+        options: listedTableNames().map((t) => ({ value: t, label: t, note: tableChipCount(t) })),
+        value: join.table,
+        placeholder: "choose a table",
+        mono: true,
+        onPick: (v) => {
+          join.table = v;
+          join.on = [emptyPair()];
+          draft.columns[pos] = null;
+          changed();
+          load();
+        }
+      }),
+      el("span", "j-kw", "as"),
       aliasInput(join.alias, `join ${pos} alias`, (v) => {
         join.alias = v;
       })
     );
-    if (pos === draft.joins.length) {
-      head.appendChild(
-        button("\u2715", `remove join ${pos}`, () => {
-          removeLastJoin(draft);
-          changed();
-        })
-      );
-    }
     box.appendChild(head);
     if (join.table !== "") {
-      for (const pair of join.on) box.appendChild(pairRow(join, pos, pair));
-      const tools = el("div", "jf-row");
-      if (join.on.length < JOIN_MAX_PAIRS) {
-        tools.appendChild(
-          button("+ add pair", `add a column pair to join ${pos}`, () => {
-            join.on.push(emptyPair());
-            changed();
-          })
+      join.on.forEach((pair, k) => {
+        const line = pairLine(join, pos, pair, k === 0);
+        if (k === 0) head.append(...[...line.childNodes]);
+        else box.appendChild(line);
+      });
+      const first = join.on[0];
+      const fk = foreignKey(pos);
+      const suggested = fk && first && first.leftJoin === fk.leftJoin && first.leftColumn === fk.leftColumn && first.rightColumn === fk.rightColumn;
+      const hint = el("p", "j-hint");
+      if (suggested)
+        hint.append(
+          `Suggested from the foreign key ${nameAt(fk.leftJoin)}.${fk.leftColumn} \u2192 ${nameAt(pos)}.${fk.rightColumn}.`
         );
-      }
-      const fk = foreignKeySuggestion(join, pos);
-      if (fk && !join.on.some((p) => p.leftColumn === fk.leftColumn && p.rightColumn === fk.rightColumn)) {
-        tools.appendChild(
-          button(
-            `use foreign key: ${nameAt(fk.leftJoin)}.${fk.leftColumn} = ${nameAt(pos)}.${fk.rightColumn}`,
+      else if (fk) {
+        hint.appendChild(
+          textButton(
+            `use the foreign key ${nameAt(fk.leftJoin)}.${fk.leftColumn} = ${nameAt(pos)}.${fk.rightColumn}`,
+            "j-link",
             `use the foreign key between ${nameAt(fk.leftJoin)} and ${nameAt(pos)}`,
             () => {
               join.on = [fk];
@@ -3433,73 +3824,108 @@ function mountJoinForm(root, onChange) {
           )
         );
       }
-      box.appendChild(tools);
+      if (join.on.length < JOIN_MAX_PAIRS) {
+        hint.appendChild(
+          textButton("add another pair", "j-link", `add a column pair to join ${pos}`, () => {
+            join.on.push(emptyPair());
+            changed();
+          })
+        );
+        hint.append(el("span", "jmuted", `up to ${JOIN_MAX_PAIRS}`));
+      }
+      box.appendChild(hint);
+      const bad = join.on.map((p) => mismatch(pos, p)).find((m) => m !== null);
+      if (bad) box.appendChild(el("p", "j-bad", bad.message));
     }
-    return box;
-  }
-  function columnsBlock(pos) {
-    const cols = columnsAt(pos);
-    if (cols.length === 0) return null;
-    const details = el("details", "jf-columns");
-    const summary = el("summary");
-    const sync = () => {
-      const picked = draft.columns[pos];
-      summary.textContent = `${nameAt(pos)}: ${picked === null ? "all columns" : `${picked.length} of ${cols.length} columns`}`;
-    };
-    details.appendChild(summary);
-    const list = el("div", "jf-column-list");
-    for (const c of cols) {
-      const label = el("label");
-      const box = el("input");
-      box.type = "checkbox";
-      box.checked = draft.columns[pos] === null || draft.columns[pos].includes(c.name);
-      box.onchange = () => {
-        const checked = [...list.querySelectorAll("input")].filter((i) => i.checked).map((i) => i.dataset.col);
-        draft.columns[pos] = checked.length === cols.length ? null : checked;
-        sync();
-        onChange();
-      };
-      box.dataset.col = c.name;
-      label.append(box, `${c.name} `, Object.assign(el("code", "col-type"), { textContent: c.type }));
-      list.appendChild(label);
-    }
-    details.appendChild(list);
-    sync();
-    return details;
-  }
-  function render2() {
-    const start = el("div", "jf-row");
-    start.append(
-      el("span", "jf-label", "from"),
-      select("start table", tableOptions(), draft.table, (v) => {
-        draft.table = v;
-        for (const j of draft.joins) j.on = [emptyPair()];
-        draft.columns[0] = null;
+    head.appendChild(
+      textButton("\u2715", "j-rm", `remove join ${pos}`, () => {
+        removeJoin(draft, i);
         changed();
-        load();
-      }),
-      aliasInput(draft.alias, "start table alias", (v) => {
-        draft.alias = v;
       })
     );
-    const parts = [start];
-    draft.joins.forEach((j, i) => {
-      parts.push(joinBlock(j, i + 1));
-    });
-    if (draft.joins.length + 1 < JOIN_MAX_TABLES) {
-      parts.push(
-        button("+ add table", "add a table to the join", () => {
-          addJoin(draft);
-          changed();
-        })
-      );
-    }
-    const cols = el("div", "jf-columns-wrap");
+    return box;
+  }
+  function columnCards() {
+    let total = 0;
+    let picked = 0;
+    const cards = [];
     for (let pos = 0; pos <= draft.joins.length; pos++) {
-      const block = columnsBlock(pos);
-      if (block) cols.appendChild(block);
+      const cols = columnsAt(pos);
+      if (cols.length === 0) continue;
+      const chosen = draft.columns[pos];
+      const count = chosen === null ? cols.length : chosen.length;
+      total += cols.length;
+      picked += count;
+      const card = el("div", "j-card");
+      const h = el("h3");
+      const title = el("span", "j-card-name", nameAt(pos));
+      const tally = el("span", void 0, `${count} of ${cols.length}`);
+      h.append(title, tally);
+      card.appendChild(h);
+      const boxes = [];
+      for (const c of cols) {
+        const label = el("label");
+        const box = el("input");
+        box.type = "checkbox";
+        box.checked = chosen === null || chosen.includes(c.name);
+        box.dataset.col = c.name;
+        box.setAttribute("aria-label", `${nameAt(pos)}.${c.name}`);
+        box.onchange = () => {
+          const names = boxes.filter((b) => b.checked).map((b) => b.dataset.col);
+          draft.columns[pos] = names.length === cols.length ? null : names;
+          changed();
+        };
+        boxes.push(box);
+        label.append(box, c.name);
+        card.appendChild(label);
+      }
+      cards.push(card);
     }
-    if (cols.children.length) parts.push(el("h3", "jf-heading", "columns"), cols);
+    if (cards.length === 0) return null;
+    const wrap2 = el("div");
+    const grid = el("div", "j-cols");
+    grid.append(...cards);
+    wrap2.append(el("div", "jlab", `Columns \xB7 ${picked} of ${total}`), grid);
+    return wrap2;
+  }
+  function render2() {
+    const parts = [];
+    parts.push(el("div", "jlab", "Start from"));
+    const start = el("div", "j-start");
+    const chip = el("span", "j-chip jmono", draft.table);
+    const count = tableChipCount(draft.table);
+    if (count) chip.append(" ", el("i", void 0, count));
+    start.append(
+      chip,
+      aliasInput(draft.alias, "start table alias", (v) => {
+        draft.alias = v;
+      }),
+      el("span", "jmuted", "the table you are viewing")
+    );
+    parts.push(start);
+    parts.push(el("div", "jlab", `Joins \xB7 ${draft.joins.length} of ${JOIN_MAX_TABLES - 1}`));
+    draft.joins.forEach((j, i) => {
+      parts.push(joinRow(j, i));
+    });
+    const add = el("p", "j-add");
+    const full = draft.joins.length + 1 >= JOIN_MAX_TABLES;
+    const addBtn = textButton("+ add table", "j-link", "add a table to the join", () => {
+      addJoin(draft);
+      changed();
+    });
+    addBtn.disabled = full;
+    add.append(
+      addBtn,
+      " ",
+      el(
+        "span",
+        "jmuted",
+        full ? "Joins are limited to 4 tables. Remove one to add another." : "\xB7 inner and left joins only \xB7 equality only"
+      )
+    );
+    parts.push(add);
+    const cards = columnCards();
+    if (cards) parts.push(cards);
     root.replaceChildren(...parts);
     load();
   }
@@ -3508,7 +3934,16 @@ function mountJoinForm(root, onChange) {
       draft = next;
       render2();
     },
-    draft: () => draft
+    draft: () => draft,
+    problem() {
+      for (const [i, j] of draft.joins.entries()) {
+        for (const p of j.on) {
+          const m = mismatch(i + 1, p);
+          if (m) return m.message;
+        }
+      }
+      return null;
+    }
   };
 }
 
@@ -3628,205 +4063,42 @@ function saveJoin(name, text, replacing) {
 function deleteSavedJoin(name) {
   write(withoutSaved(read(), state.source, state.schema, name));
 }
-function chip(label, opts) {
-  const li = document.createElement("li");
-  if (opts.className) li.className = opts.className;
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.textContent = label;
-  btn.title = opts.title ?? label;
-  if (opts.active) {
-    btn.classList.add("active");
-    btn.setAttribute("aria-current", "true");
-  }
-  btn.onclick = opts.run;
-  li.appendChild(btn);
-  return li;
-}
 function renderSavedChips(actions) {
   const saved = savedJoins();
   const current = getAppliedJoin();
   const inSaved = saved.some((s) => s.text === state.join);
-  const items = saved.map(
-    (s) => chip(s.name, {
-      title: `${s.name} \u2014 ${s.text.replaceAll("\n", " ")}`,
-      active: s.text === state.join,
-      run: () => actions.open(s.text)
-    })
-  );
+  const chips = saved.map((s) => ({
+    label: `\u22C8 ${s.name}`,
+    title: `${s.name} \u2014 ${s.text.replaceAll("\n", " ")}`,
+    className: "saved",
+    active: s.text === state.join,
+    run: () => actions.open(s.text)
+  }));
   if (current && !inSaved) {
-    items.push(
-      chip(`\u22C8 ${joinLabel(current)}`, {
-        className: "unsaved",
-        title: "this join is not saved",
-        active: true,
-        run: () => {
-        }
-      })
-    );
-    items.push(
-      chip("Save\u2026", {
-        className: "save-link",
-        title: "name this join and keep it in this browser",
-        run: actions.saveCurrent
-      })
-    );
-  }
-  items.push(
-    chip("+ new join", { className: "new-join", title: "build a join from the table in view", run: actions.startNew })
-  );
-  $("saved-joins").replaceChildren(...items);
-  $("saved-joins-bar").hidden = state.table === null;
-}
-
-// src/lib/join-tokens.ts
-var KEYWORDS = /* @__PURE__ */ new Set(["SELECT", "FROM", "JOIN", "INNER", "LEFT", "OUTER", "ON", "AND", "AS"]);
-var REJECTED = /* @__PURE__ */ new Set([
-  "RIGHT",
-  "FULL",
-  "CROSS",
-  "NATURAL",
-  "USING",
-  "WHERE",
-  "GROUP",
-  "HAVING",
-  "ORDER",
-  "LIMIT",
-  "OFFSET",
-  "UNION",
-  "DISTINCT",
-  "OR"
-]);
-var WORD = /[A-Za-z_][A-Za-z0-9_]*/y;
-function tokenizeJoinText(text) {
-  const tokens = [];
-  let i = 0;
-  while (i < text.length) {
-    const start = i;
-    const c = text[i];
-    if (/\s/.test(c)) {
-      while (i < text.length && /\s/.test(text[i])) i++;
-      tokens.push({ kind: "space", start, end: i });
-    } else if (c === '"') {
-      i++;
-      for (; i < text.length; i++) {
-        if (text[i] !== '"') continue;
-        if (text[i + 1] === '"') i++;
-        else {
-          i++;
-          break;
-        }
+    chips.push({
+      label: `\u22C8 ${joinLabel(current)}`,
+      title: "this join is not saved",
+      className: "unsaved",
+      active: true,
+      run: () => {
       }
-      tokens.push({ kind: "name", start, end: i });
-    } else if (/[A-Za-z_]/.test(c)) {
-      WORD.lastIndex = i;
-      i = start + (WORD.exec(text)?.[0].length ?? 1);
-      const upper = text.slice(start, i).toUpperCase();
-      tokens.push({ kind: KEYWORDS.has(upper) ? "keyword" : REJECTED.has(upper) ? "plain" : "name", start, end: i });
-    } else {
-      i++;
-      tokens.push({ kind: ".,;*=".includes(c) ? "punct" : "plain", start, end: i });
-    }
+    });
+    chips.push({
+      label: "Save\u2026",
+      title: "name this join and keep it in this browser",
+      className: "save-link muted",
+      active: false,
+      run: actions.saveCurrent
+    });
   }
-  return tokens;
-}
-var unquote = (s) => s.startsWith('"') ? s.slice(1, s.endsWith('"') && s.length > 1 ? -1 : void 0).replaceAll('""', '"') : s;
-function joinCompletionAt(text) {
-  const all = tokenizeJoinText(text);
-  const last = all.at(-1);
-  let cut = all.length;
-  let qualifier = null;
-  let partial = "";
-  const sig = all.filter((t) => t.kind !== "space");
-  const end = sig.at(-1);
-  if (last && last.kind !== "space" && end) {
-    const prev = sig.at(-2);
-    const prev2 = sig.at(-3);
-    if (end.kind === "punct" && text[end.start] === "." && prev && prev.kind === "name") {
-      qualifier = unquote(text.slice(prev.start, prev.end));
-      cut = all.indexOf(prev);
-    } else if (end.kind === "name" && prev && prev.kind === "punct" && text[prev.start] === "." && prev2 && prev2.kind === "name") {
-      qualifier = unquote(text.slice(prev2.start, prev2.end));
-      partial = text.slice(end.start, end.end);
-      cut = all.indexOf(prev2);
-    } else if (end.kind === "name" || end.kind === "keyword") {
-      partial = text.slice(end.start, end.end);
-      cut = all.indexOf(end);
-    }
-  }
-  const head = text.slice(0, text.length - partial.length);
-  const declared = [];
-  let state2 = "start";
-  let from = false;
-  let table = "";
-  let pending = null;
-  let afterEq = false;
-  let refs = [];
-  const flush = () => {
-    if (pending) declared.push(pending);
-    pending = null;
-  };
-  const before = all.slice(0, cut).filter((t) => t.kind !== "space");
-  for (let k = 0; k < before.length; k++) {
-    const t = before[k];
-    const w = text.slice(t.start, t.end);
-    const upper = w.toUpperCase();
-    if (t.kind === "keyword") {
-      if (upper === "FROM" || upper === "JOIN") {
-        flush();
-        state2 = "table";
-        from = upper === "FROM";
-      } else if (upper === "ON" || upper === "AND") {
-        flush();
-        state2 = "colref";
-        afterEq = false;
-        refs = [];
-      } else if (upper === "AS") state2 = "alias";
-      else if (upper === "SELECT") state2 = "select";
-      else if (state2 !== "start") flush();
-    } else if (t.kind === "name" && state2 === "table") {
-      table = unquote(w);
-      pending = { name: table, table };
-      state2 = "after-table";
-    } else if (t.kind === "name" && (state2 === "after-table" || state2 === "alias")) {
-      if (pending) pending.name = unquote(w);
-      state2 = "after-table";
-    } else if (t.kind === "name" && state2 === "colref") {
-      const dot = before[k + 1];
-      const col = before[k + 2];
-      if (dot && text[dot.start] === "." && col?.kind === "name") {
-        refs.push({ qualifier: unquote(w), column: unquote(text.slice(col.start, col.end)) });
-        k += 2;
-        state2 = "after-colref";
-      }
-    } else if (t.kind === "punct" && w === "=" && state2 === "after-colref") {
-      state2 = "colref";
-      afterEq = true;
-    }
-  }
-  flush();
-  const joinWords = ["JOIN", "INNER JOIN", "LEFT JOIN"];
-  let expect = "none";
-  let keywords = [];
-  if (qualifier !== null) expect = state2 === "colref" ? "column" : "none";
-  else if (state2 === "table") expect = "table";
-  else if (state2 === "colref") expect = "qualifier";
-  else if (state2 === "after-table" && partial !== "") {
-    expect = "keyword";
-    keywords = from ? joinWords : ["ON"];
-  } else if (state2 === "after-colref" && partial !== "") {
-    expect = "keyword";
-    keywords = ["AND", ...joinWords];
-  }
-  return {
-    expect,
-    partial,
-    head,
-    qualifier,
-    declared,
-    otherSide: afterEq && refs.length > 0 ? refs.at(-1) ?? null : null,
-    keywords
-  };
+  chips.push({
+    label: "+ new join",
+    title: "build a join from the table in view",
+    className: "new-join muted",
+    active: false,
+    run: actions.startNew
+  });
+  setJoinChips(chips);
 }
 
 // src/features/suggest-list.ts
@@ -3853,9 +4125,23 @@ function createSuggestList(opts) {
       ...matches.map((suggestion, i) => {
         const btn = document.createElement("button");
         btn.type = "button";
-        const text = suggestion.blocked ? `${suggestion.label} \u2014 ${suggestion.blocked}` : suggestion.label;
-        btn.textContent = text;
+        const text = [suggestion.label, suggestion.note, suggestion.tag].filter(Boolean).join(" \xB7 ");
         btn.title = text;
+        const name = document.createElement("span");
+        name.textContent = suggestion.label;
+        btn.appendChild(name);
+        if (suggestion.note || suggestion.tag) {
+          const note = document.createElement("span");
+          note.className = "sg-note";
+          note.textContent = suggestion.note ?? "";
+          if (suggestion.tag) {
+            const tag = document.createElement("span");
+            tag.className = "sg-tag";
+            tag.textContent = suggestion.tag;
+            note.appendChild(tag);
+          }
+          btn.appendChild(note);
+        }
         if (suggestion.blocked) btn.setAttribute("aria-disabled", "true");
         btn.className = i === index ? "active" : "";
         btn.id = `${idPrefix}-${i}`;
@@ -3933,24 +4219,46 @@ function draftText(draft) {
   const picked = draft.columns.flatMap(
     (c, pos) => c === null ? [] : c.map((col) => `${nameAt(pos)}.${quoteJoinName(col)}`)
   );
-  const select2 = draft.columns.some((c) => c !== null) && picked.length > 0 ? `SELECT ${picked.join(", ")}` : "SELECT *";
-  return [select2, ...lines].join("\n");
+  const select = draft.columns.some((c) => c !== null) && picked.length > 0 ? `SELECT ${picked.join(", ")}` : "SELECT *";
+  return [select, ...lines].join("\n");
+}
+function errorSpan(text, index, code) {
+  const word = /^(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(index))?.[0] ?? text.slice(index, index + 1);
+  let end = index + word.length;
+  if (code === "unsupported-keyword") {
+    if (/^(RIGHT|FULL|CROSS|NATURAL)$/i.test(word)) end += /^\s+JOIN\b/i.exec(text.slice(end))?.[0].length ?? 0;
+    else end = text.indexOf("\n", end) < 0 ? text.length : text.indexOf("\n", end);
+  } else {
+    end += /^\.(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(end))?.[0].length ?? 0;
+  }
+  return [index, end];
+}
+function aliasFor(table, taken) {
+  const base = table.split("_").filter(Boolean).map((w) => w[0]).join("").toLowerCase() || "t";
+  let alias = base;
+  for (let n = 2; taken.has(alias) || alias === table; n++) alias = `${base}${n}`;
+  return alias;
 }
 function mountJoinSql(onChange) {
   const field = $("join-sql");
   const hlText = $("join-sql-hl-text");
-  const popup = $("join-sql-suggest");
-  const parse = () => parseJoin(field.value, knownCatalog());
+  const pairCheck = (a, b) => {
+    const at = cachedColumns(a.table)?.find((c) => c.name === a.column)?.type;
+    const bt = cachedColumns(b.table)?.find((c) => c.name === b.column)?.type;
+    return at && bt ? joinMismatch(at, bt)?.message ?? null : null;
+  };
+  const parse = () => parseJoin(field.value, { catalog: knownCatalog(), pairCheck });
   function render2() {
     const text = field.value;
-    field.rows = Math.max(4, text.split("\n").length + 1);
+    field.rows = Math.max(5, text.split("\n").length + 1);
     const result = text.trim() ? parse() : null;
-    const at = result && "error" in result && result.error.index < text.trimEnd().length ? result.error.index : -1;
+    const error = result && "error" in result && result.error.index < text.trimEnd().length ? result.error : null;
+    const [from, to] = error ? errorSpan(text, error.index, error.code) : [-1, -1];
     hlText.replaceChildren(
       ...tokenizeJoinText(text).map((t) => {
         const span = document.createElement("span");
-        const kind = t.kind === "name" ? "column" : t.kind === "punct" ? "op" : t.kind;
-        span.className = `t-${kind}${t.start <= at && at < t.end ? " t-err" : ""}`;
+        const kind = t.kind === "punct" ? "op" : t.kind;
+        span.className = `t-${kind}${t.kind !== "space" && t.start >= from && t.start < to ? " t-err" : ""}`;
         span.textContent = text.slice(t.start, t.end);
         return span;
       })
@@ -3958,9 +4266,18 @@ function mountJoinSql(onChange) {
     hlText.append("\n");
   }
   attachOverlayHighlight(field, render2);
+  const place = () => {
+    const before = field.value.slice(0, field.selectionStart);
+    const line = before.split("\n").length;
+    const col = before.length - before.lastIndexOf("\n") - 1;
+    const popup = $("join-sql-suggest");
+    popup.style.top = `calc(.6rem + ${line} * 1.375rem)`;
+    popup.style.left = `min(calc(.85rem + ${col}ch), calc(100% - ${popup.offsetWidth}px))`;
+  };
   const suggest2 = createSuggestList({
     input: field,
-    popup,
+    popup: $("join-sql-suggest"),
+    place,
     list: $("join-sql-suggest-list"),
     idPrefix: "join-sql-suggest",
     accept: (suggestion, head) => {
@@ -3969,7 +4286,7 @@ function mountJoinSql(onChange) {
       suggest2.close();
       field.focus();
       onChange();
-      update2();
+      void update2();
     }
   });
   const tableOf = (ctx, name) => ctx.declared.find((d) => d.name === name)?.table;
@@ -3980,39 +4297,46 @@ function mountJoinSql(onChange) {
     const otherTable = ctx.otherSide ? tableOf(ctx, ctx.otherSide.qualifier) : void 0;
     const otherType = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column)?.type;
     return columns.filter((c) => c.name.toLowerCase().startsWith(ctx.partial.toLowerCase())).map((c) => {
-      const reason = otherType === void 0 ? unjoinableReason(c.type) : joinBlocker(c.type, otherType);
-      const tag = indexed.has(c.name) ? " \xB7 indexed" : "";
+      const note = otherType === void 0 ? unjoinableReason(c.type) : joinMismatch(c.type, otherType)?.note ?? null;
       return {
-        label: `${c.name} (${c.type})${tag}`,
+        label: c.name,
         insert: `${quoteJoinName(c.name)} `,
-        ...reason ? { blocked: reason } : {}
+        note: note ?? c.type,
+        ...note === null && indexed.has(c.name) ? { tag: "indexed" } : {},
+        ...note !== null ? { blocked: true } : {}
       };
     });
   }
-  function tableRows(ctx) {
-    const taken = new Set(ctx.declared.map((d) => d.name));
-    const rows = [];
-    for (const table of listedTableNames()) {
-      if (!table.toLowerCase().startsWith(ctx.partial.toLowerCase())) continue;
-      const q = quoteJoinName(table);
-      const own = cachedColumns(table) ?? [];
-      const snippet = taken.has(table) ? void 0 : foreignKeyClause(ctx, table, q, own);
-      if (snippet) rows.push({ label: snippet, insert: `${snippet} ` });
-      rows.push({ label: table, insert: `${q} ` });
-    }
-    return rows;
-  }
-  function foreignKeyClause(ctx, table, q, own) {
+  function foreignKeyClause(ctx, table, own) {
+    const alias = aliasFor(table, new Set(ctx.declared.map((d) => d.name)));
+    const q = `${quoteJoinName(table)} ${alias}`;
     for (const d of ctx.declared) {
       const theirs = cachedColumns(d.table) ?? [];
       const out = theirs.find((c) => c.references?.table === table);
       if (out?.references)
-        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(out.name)} = ${q}.${quoteJoinName(out.references.column)}`;
+        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(out.name)} = ${alias}.${quoteJoinName(out.references.column)}`;
       const back = own.find((c) => c.references?.table === d.table);
       if (back?.references)
-        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(back.references.column)} = ${q}.${quoteJoinName(back.name)}`;
+        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(back.references.column)} = ${alias}.${quoteJoinName(back.name)}`;
     }
     return void 0;
+  }
+  function tableRows(ctx) {
+    const used = new Set(ctx.declared.map((d) => d.table));
+    const withKey = [];
+    const rest = [];
+    for (const table of listedTableNames()) {
+      if (!table.toLowerCase().startsWith(ctx.partial.toLowerCase())) continue;
+      const clause = used.has(table) ? void 0 : foreignKeyClause(ctx, table, cachedColumns(table) ?? []);
+      if (clause) withKey.push({ label: clause, insert: `${clause} `, tag: "foreign key" });
+      else
+        rest.push({
+          label: table,
+          insert: `${quoteJoinName(table)} `,
+          note: used.has(table) ? "already used \xB7 add as alias" : tableChipCount(table)
+        });
+    }
+    return [...withKey, ...rest];
   }
   async function update2() {
     suggest2.close();
@@ -4031,7 +4355,7 @@ function mountJoinSql(onChange) {
       }
       rows = tableRows(ctx);
     } else if (ctx.expect === "qualifier") {
-      rows = ctx.declared.filter((d) => d.name.toLowerCase().startsWith(ctx.partial.toLowerCase())).map((d) => ({ label: d.name, insert: `${quoteJoinName(d.name)}.` }));
+      rows = ctx.declared.filter((d) => d.name.toLowerCase().startsWith(ctx.partial.toLowerCase())).map((d) => ({ label: d.name, insert: `${quoteJoinName(d.name)}.`, note: d.name === d.table ? "" : d.table }));
     } else if (ctx.expect === "column") {
       rows = await columnRows(ctx).catch(() => []);
     } else if (ctx.expect === "keyword") {
@@ -4042,7 +4366,19 @@ function mountJoinSql(onChange) {
     if (only) return;
     suggest2.show(rows, ctx.head, -1);
   }
+  function prefetch() {
+    const listed = new Set(listedTableNames());
+    const wanted = [...new Set(joinCompletionAt(field.value).declared.map((d) => d.table))].filter(
+      (t) => listed.has(t) && !cachedColumns(t)
+    );
+    if (wanted.length === 0) return;
+    void Promise.allSettled(wanted.map(tableColumns)).then(() => {
+      render2();
+      onChange();
+    });
+  }
   field.addEventListener("input", () => {
+    prefetch();
     onChange();
     void update2();
   });
@@ -4059,32 +4395,51 @@ function mountJoinSql(onChange) {
 
 // src/features/join-dialog.ts
 var dialog = $("join-dialog");
-function updatePreview() {
-  const result = draftToDef(form.draft());
-  $("join-preview").textContent = "def" in result ? printJoin(result.def) : result.error;
-  $("join-error").textContent = "";
-}
-var form = mountJoinForm($("join-form"), updatePreview);
-var sql = mountJoinSql(onSqlChange);
-var formRadio = $("join-mode-form");
-var sqlRadio = $("join-mode-sql");
-function setMode(mode) {
-  formRadio.checked = mode === "form";
-  sqlRadio.checked = mode === "sql";
-  $("join-form").hidden = mode !== "form";
-  $("join-preview-wrap").hidden = mode !== "form";
-  $("join-sql-pane").hidden = mode !== "sql";
-  $("join-error").textContent = "";
-}
-function sqlProblem() {
+var formTab = $("join-mode-form");
+var sqlTab = $("join-mode-sql");
+var runBtn = $("join-run");
+var mode = "form";
+function problem() {
+  if (mode === "form") return form.problem() ?? "";
   const result = sql.text().trim() ? sql.parse() : null;
-  return result && "error" in result ? `line ${result.error.line}, column ${result.error.column}: ${result.error.message}` : "";
+  return result && "error" in result ? `Line ${result.error.line}: ${result.error.message}` : "";
 }
-function onSqlChange() {
-  const problem = sqlProblem();
-  $("join-sql-error").textContent = problem;
-  formRadio.disabled = problem !== "";
-  $("join-error").textContent = "";
+function refresh() {
+  const bad = problem();
+  runBtn.disabled = bad !== "";
+  if (mode === "form") {
+    const result = draftToDef(form.draft());
+    const text = "def" in result ? printJoin(result.def) : draftText(form.draft());
+    $("join-preview").replaceChildren(...coloured(text));
+    return;
+  }
+  $("join-sql-error").textContent = bad;
+  formTab.disabled = bad !== "";
+  $("join-sql-tip").hidden = bad === "";
+}
+function coloured(text) {
+  return tokenizeJoinText(text).map((t) => {
+    const span = document.createElement("span");
+    span.className = t.kind === "keyword" ? "t-keyword" : "";
+    span.textContent = text.slice(t.start, t.end);
+    return span;
+  });
+}
+var clearError2 = (e) => {
+  if (!e.target.closest("#join-run")) $("join-error").textContent = "";
+};
+dialog.addEventListener("input", clearError2);
+dialog.addEventListener("click", clearError2);
+var form = mountJoinForm($("join-form"), refresh);
+var sql = mountJoinSql(refresh);
+function setMode(next) {
+  mode = next;
+  formTab.setAttribute("aria-selected", String(next === "form"));
+  sqlTab.setAttribute("aria-selected", String(next === "sql"));
+  $("join-form-pane").hidden = next !== "form";
+  $("join-sql-pane").hidden = next !== "sql";
+  formTab.disabled = false;
+  $("join-sql-tip").hidden = true;
 }
 var editingSaved;
 function openJoinDialog(opts = {}) {
@@ -4095,9 +4450,8 @@ function openJoinDialog(opts = {}) {
   $("join-delete").hidden = saved === void 0;
   form.setDraft(def ? defToDraft(def) : newDraft(state.table ?? ""));
   setMode("form");
-  formRadio.disabled = false;
   $("join-sql-error").textContent = "";
-  updatePreview();
+  refresh();
   $("join-error").textContent = opts.error ?? "";
   if (!dialog.open) dialog.showModal();
   if (opts.focusName) $("join-name").focus();
@@ -4123,17 +4477,21 @@ function applyJoin(def) {
   persist();
   loadData();
 }
-$("join-run").onclick = () => {
-  const result = sqlRadio.checked ? sql.parse() : draftToDef(form.draft());
+function switchToLeftJoin() {
+  const def = getAppliedJoin();
+  if (def) applyJoin({ ...def, joins: def.joins.map((j) => ({ ...j, type: "left" })) });
+}
+runBtn.onclick = () => {
+  const result = mode === "sql" ? sql.parse() : draftToDef(form.draft());
   if ("error" in result) {
-    $("join-error").textContent = typeof result.error === "string" ? result.error : sqlProblem();
+    $("join-error").textContent = typeof result.error === "string" ? result.error : problem();
     return;
   }
   const name = $("join-name").value.trim();
   if (name !== "") {
-    const problem = saveJoin(name, printJoin(result.def), editingSaved);
-    if (problem) {
-      $("join-error").textContent = problem;
+    const failure = saveJoin(name, printJoin(result.def), editingSaved);
+    if (failure) {
+      $("join-error").textContent = failure;
       return;
     }
   }
@@ -4146,19 +4504,19 @@ $("join-delete").onclick = () => {
   refreshSavedChips();
 };
 $("join-link-btn").onclick = () => copyText(location.href, $("join-link-btn"));
-formRadio.onchange = () => {
-  if (!formRadio.checked) return;
+formTab.onclick = () => {
+  if (mode === "form" || formTab.disabled) return;
   const parsed = sql.text().trim() ? sql.parse() : null;
   if (parsed && "error" in parsed) return;
   form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(state.table ?? ""));
   setMode("form");
-  updatePreview();
+  refresh();
 };
-sqlRadio.onchange = () => {
-  if (!sqlRadio.checked) return;
+sqlTab.onclick = () => {
+  if (mode === "sql") return;
   sql.setText(draftText(form.draft()));
   setMode("sql");
-  onSqlChange();
+  refresh();
   $("join-sql").focus();
 };
 $("join-cancel").onclick = () => dialog.close();
@@ -4197,8 +4555,11 @@ function buildBands(columns) {
     const th = document.createElement("th");
     th.className = "band";
     th.dataset.band = String(col.join);
-    th.textContent = t.alias === null ? t.table : `${t.table} ${t.alias}`;
-    th.title = th.textContent;
+    const pill = document.createElement("span");
+    pill.className = "band-pill";
+    pill.textContent = t.alias === null ? t.table : `${t.table} ${t.alias}`;
+    pill.title = pill.textContent;
+    th.appendChild(pill);
     tr.appendChild(th);
   }
   return tr;
@@ -4216,6 +4577,7 @@ function showJoinNotice(text, actions) {
     ...actions.map((a) => {
       const b = document.createElement("button");
       b.type = "button";
+      b.className = "btn";
       b.textContent = a.label;
       b.onclick = a.run;
       return b;
@@ -4232,6 +4594,24 @@ function updateJoinChrome() {
   $("join-btn").disabled = false;
   $("join-edit-btn").hidden = !join;
   $("join-link-btn").hidden = !join;
+  $("structure-btn").hidden = join;
+  $("payload").hidden = join;
+}
+function buildEmptyJoin(onLeft) {
+  const box = document.createElement("div");
+  box.className = "empty-join";
+  const title = document.createElement("p");
+  title.textContent = "No rows match this join.";
+  const why = document.createElement("p");
+  why.className = "muted-note";
+  why.textContent = "An inner join drops rows without a match. A left join keeps them.";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn";
+  btn.textContent = "Switch to left join";
+  btn.onclick = onLeft;
+  box.append(title, why, btn);
+  return box;
 }
 
 // src/features/filter-ui.ts
@@ -4843,8 +5223,8 @@ function openRecordView(columns, row2) {
   copyRowBtn.onclick = () => copyText(recordAsJson(columns, row2), copyRowBtn);
   const copyInsertBtn = $("record-copy-insert");
   copyInsertBtn.onclick = () => copyText(recordAsInsert(columns, row2), copyInsertBtn);
-  const open = () => $("record-dialog").showModal();
-  document.startViewTransition ? document.startViewTransition(open) : open();
+  const open2 = () => $("record-dialog").showModal();
+  document.startViewTransition ? document.startViewTransition(open2) : open2();
 }
 
 // src/features/grid.ts
@@ -4919,7 +5299,10 @@ function renderEmptyState(columnCount) {
   emptyRow.className = "empty";
   const td = document.createElement("td");
   td.colSpan = columnCount;
-  td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
+  const join = getAppliedJoin();
+  if (join && state.offset === 0 && state.filter === "" && join.joins.some((j) => j.type === "inner")) {
+    td.appendChild(buildEmptyJoin(switchToLeftJoin));
+  } else td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
   emptyRow.appendChild(td);
   $("tbody").replaceChildren(emptyRow);
 }
@@ -5073,7 +5456,7 @@ function updatePager(data) {
   $("prev").disabled = state.offset === 0;
   if (inJoinView()) {
     $("page").textContent = `page ${page} \xB7 ${data.has_more ? "more rows available" : "last page"}`;
-    $("row-meta").textContent = ` \xB7 ${data.rows.length} rows \xB7 ${data.columns.length} columns`;
+    $("row-meta").textContent = ` \xB7 ${data.rows.length}${data.has_more ? "+" : ""} rows \xB7 ${data.columns.length} columns`;
     $("row-meta").removeAttribute("title");
     $("next").disabled = !data.has_more;
     return;
@@ -5130,10 +5513,13 @@ async function joinPath(def, params) {
 }
 function reportJoinFailure(e) {
   if (e.code === "query_timeout") {
-    showJoinNotice("This join took too long and was stopped.", [
-      { label: "Retry", run: () => loadData2() },
-      { label: "Edit join", run: () => openJoinDialog() }
-    ]);
+    showJoinNotice(
+      "This join took longer than the time limit and was stopped. Add a filter, remove a table, or join on key columns.",
+      [
+        { label: "Retry", run: () => loadData2() },
+        { label: "Edit join", run: () => openJoinDialog() }
+      ]
+    );
     return true;
   }
   if (e.status === 400 && e.code !== "invalid_filter") {
@@ -5141,16 +5527,6 @@ function reportJoinFailure(e) {
     return true;
   }
   return false;
-}
-function offerLeftJoin() {
-  const def = getAppliedJoin();
-  if (!def || state.offset !== 0 || state.filter !== "" || !def.joins.some((j) => j.type === "inner")) return;
-  showJoinNotice("No rows match this join.", [
-    {
-      label: "Switch to left join",
-      run: () => applyJoin({ ...def, joins: def.joins.map((j) => ({ ...j, type: "left" })) })
-    }
-  ]);
 }
 async function fetchTableData() {
   const table = state.table ?? "";
@@ -5251,7 +5627,6 @@ async function loadData2({
   }
   if (token !== loadDataToken) return;
   updatePager(data);
-  if (data.rows.length === 0) offerLeftJoin();
   if (newRowKeys?.size) {
     setStatus(`${newRowKeys.size} new`);
   } else if (highlightNew && newRowKeys) {
