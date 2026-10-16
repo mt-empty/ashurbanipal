@@ -51,7 +51,9 @@ condition   = [ "NOT" , ws ] , simple_condition ;
 simple_condition
             = column , ows , operator , ows , value
             | column , ws , "IS" , ws , [ "NOT" , ws ] , "NULL" ;
-column      = ( letter | "_" ) , { letter | digit | "_" } ;
+column      = [ qualifier , "." ] , name ;         (* qualifier only in a join view, §3 *)
+qualifier   = name | '"' , { any-char-except-quote | '""' } , '"' ;   (* quoted: at least one char *)
+name        = ( letter | "_" ) , { letter | digit | "_" } ;
 operator    = "=" | "!=" | ">=" | "<=" | ">" | "<" | "LIKE" | "ILIKE" ;
 value       = quoted | bare ;
 quoted      = "'" , { any-char-except-quote | "''" } , "'" ;
@@ -65,6 +67,10 @@ Notes:
 - **Keywords** (`AND`, `OR`, `IS`, `NOT`, `NULL`, `LIKE`, `ILIKE`) are
   case-insensitive. Column names are matched case-sensitively against the
   schema allow-list.
+- **Qualified columns** (`alias.column`) are accepted only in a join view
+  (§3). No whitespace is allowed around the `.`, and only one qualifier is
+  allowed (`a.b.c` is a parse error). Outside a join view a `.` in a column
+  is a parse error, exactly as before.
 - **Whitespace** around symbolic operators is optional (`status=completed`
   is valid); word operators (`LIKE`, `ILIKE`, `IS NULL`, `AND`, `OR`, `NOT`)
   require surrounding whitespace.
@@ -100,6 +106,14 @@ Notes:
   schema. `logic` is absent on the first condition and carries the
   joining `AND`/`OR` on every subsequent one; `not` reflects the prefix
   `NOT`; `value` is absent exactly for `IS NULL`/`IS NOT NULL`.
+- **Join view.** The join overlay (`spec/join-dsl.md`) runs the same parser
+  with the ordered list of table aliases (effective names, position 0
+  first). Every emitted condition then carries `join`, the position of its
+  table, per `spec/protocol.md` §5.11.3: a qualified column resolves its
+  qualifier against the aliases (case-sensitive), an unqualified column
+  means position 0. An unknown qualifier is a parse error. Without the
+  alias list (a single-table view) no condition carries `join` and a
+  qualified column is a parse error.
 - What the server then does with the AST — validating each `column`
   against the live schema allow-list, mapping each `op` through a
   hardcoded SQL-fragment table, binding every `value` as a parameter
@@ -172,6 +186,11 @@ fixtures, not this table.)
 | V19 | `NOT deleted_at IS NULL` | prefix negation on a valueless condition — legal, redundant alternate spelling of `IS NOT NULL` |
 | V20 | `not status = completed` | lowercase `NOT`, case-insensitive (parallels V13) |
 | V21 | `status = 'NOT'` | quoted keyword as value (parallels V12) |
+| V22 | `o.status = completed` with aliases `[o, u]` | `(join 0, status, =, "completed")` |
+| V23 | `u.email LIKE '%@x.com'` with aliases `[o, u]` | `(join 1, email, LIKE, "%@x.com")` |
+| V24 | `status = completed` with aliases `[o, u]` | unqualified means position 0: `(join 0, status, =, "completed")` |
+| V25 | `"order items".id = 1` with aliases `[order items, x]` | quoted qualifier, `(join 0, id, =, "1")` |
+| V26 | `o.a = 1 AND u.b = 2 OR NOT u.c IS NULL` with aliases `[o, u]` | `join` on each condition: 0, 1, 1 |
 
 ### Rejected (parse errors)
 
@@ -193,6 +212,12 @@ fixtures, not this table.)
 | R14 | 11+ ANDed conditions | condition-count limit |
 | R15 | `NOT NOT status = completed` | double negation — `[NOT]` is zero-or-one, not recursive |
 | R16 | `status = NOT` | bare `NOT` is always the keyword; quote it (`status = 'NOT'`, V21) to use as a literal value |
+| R17 | `o.status = x` with no aliases | qualified column outside a join view |
+| R18 | `z.status = x` with aliases `[o, u]` | unknown qualifier |
+| R19 | `o. status = x` with aliases `[o, u]` | no whitespace around the `.` |
+| R20 | `o.u.status = x` with aliases `[o, u]` | one qualifier only |
+| R21 | `.status = x` with aliases `[o, u]` | missing qualifier |
+| R22 | `"".status = x` with aliases `[o, u]` | empty quoted qualifier |
 
 ### Adversarial (must parse *or* reject safely — never reach SQL text)
 
@@ -208,6 +233,7 @@ fixtures, not this table.)
 | A8 | column named `pg_sleep` or `users; --` | parses (if lexically legal) but fails the schema allow-list check → 400 at the builder stage |
 | A9 | deeply repeated `a = 1 AND a = 1 AND …` at the count limit | parses at 10, rejects at 11 — no stack recursion (parser must be iterative) |
 | A10 | `NOT pg_sleep = 1` | parses (lexically legal) but fails the schema allow-list check on column `pg_sleep`, same as A8 — `NOT` doesn't bypass allow-listing |
+| A11 | `u.pg_sleep = 1` with aliases `[o, u]` | parses with `join 1`; the column fails the allow-list of table 1, same as A8 |
 
 Test A8 is the reminder that the grammar is only half the defense: the
 server-side column allow-list check (`spec/protocol.md` §5.4.2/§6) must
@@ -234,9 +260,13 @@ This is clause *composition*, not the parser `frontend-style-guide.md` §7
 keeps client-side: it never parses or judges arbitrary user-typed text, only
 formats a known column/value pair it already has from the server. So it's
 not the thing that rule warns against — but its quoting output still has to
-agree with this document. `tools/e2e-tests/tests/filter-parser.spec.ts`
+agree with this document. `frontend/test/filter-dsl.test.ts`
 checks that `quoteFilterValue()`'s output round-trips through the parser
 unchanged, covering in particular the shapes behind V9 (`''`-doubling),
 V12 (exact `AND`/`OR` as a value), V15 (empty string), and V21 (exact
 `NOT` as a value) — the cases most likely to silently diverge if the two
 are ever edited independently.
+
+In a join view, click-to-filter composes `alias.column = value` (alias
+quoted with `"` when it is not a bare name). The common-values dropdown does
+not run there, and FK navigation leaves the join view.

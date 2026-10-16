@@ -12,8 +12,8 @@ Be terse — no restating what was just asked, no narrating obvious next steps.
   invariant, driver/browser quirk, race, or test setup requirement. Keep them
   to one or two sentences. Do not narrate history, rejected alternatives, or
   another port's implementation; comments describe this code, not its lineage.
-- **Documentation ownership:** `spec/protocol.md`, `spec/openapi.yaml`, and
-  `spec/filter-dsl.md` are normative. `docs/adapter-decisions.md` records
+- **Documentation ownership:** `spec/protocol.md`, `spec/openapi.yaml`,
+  `spec/filter-dsl.md`, and `spec/join-dsl.md` are normative. `docs/adapter-decisions.md` records
   backend mechanisms and accepted gaps. `PORTING.md` owns porting/review
   workflow. `docs/design.md` is rationale, while frontend, browser, E2E, and
   publishing guides own their respective operational rules. Link to the owning
