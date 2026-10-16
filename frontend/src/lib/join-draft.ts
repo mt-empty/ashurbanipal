@@ -101,7 +101,18 @@ export function addJoin(draft: Draft): void {
   draft.columns.push(null);
 }
 
-export function removeLastJoin(draft: Draft): void {
-  draft.joins.pop();
-  draft.columns.pop();
+// Removes join `index` (0-based among the joins). Pairs of later joins that
+// pointed at its table lose that side, and positions after it shift down.
+export function removeJoin(draft: Draft, index: number): void {
+  const gone = index + 1;
+  draft.joins.splice(index, 1);
+  draft.columns.splice(gone, 1);
+  for (const j of draft.joins.slice(index)) {
+    for (const p of j.on) {
+      if (p.leftJoin === gone) {
+        p.leftJoin = 0;
+        p.leftColumn = "";
+      } else if (p.leftJoin > gone) p.leftJoin -= 1;
+    }
+  }
 }

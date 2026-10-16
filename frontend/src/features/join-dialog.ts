@@ -4,6 +4,7 @@ import { clearFilter, getAppliedJoin, persist, setAppliedJoin, state } from "../
 import type { JoinDef } from "../core/types.js";
 import { defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
 import { parseJoin, printJoin } from "../lib/join-dsl.js";
+import { tokenizeJoinText } from "../lib/join-tokens.js";
 import { mountJoinForm } from "./join-form.js";
 import { deleteSavedJoin, renderSavedChips, savedJoinInView, saveJoin } from "./join-saved.js";
 import { draftText, mountJoinSql } from "./join-sql.js";
@@ -12,40 +13,61 @@ import { draftText, mountJoinSql } from "./join-sql.js";
 // the same dialog). Show result applies it and closes; the server's answer to a
 // bad join comes back through openJoinDialog's `error`.
 const dialog = $<HTMLDialogElement>("join-dialog");
+const formTab = $<HTMLButtonElement>("join-mode-form");
+const sqlTab = $<HTMLButtonElement>("join-mode-sql");
+const runBtn = $<HTMLButtonElement>("join-run");
+let mode: "form" | "sql" = "form";
 
-function updatePreview(): void {
-  const result = draftToDef(form.draft());
-  $("join-preview").textContent = "def" in result ? printJoin(result.def) : result.error;
-  $("join-error").textContent = "";
-}
-
-const form = mountJoinForm($("join-form"), updatePreview);
-const sql = mountJoinSql(onSqlChange);
-const formRadio = $<HTMLInputElement>("join-mode-form");
-const sqlRadio = $<HTMLInputElement>("join-mode-sql");
-
-function setMode(mode: "form" | "sql"): void {
-  formRadio.checked = mode === "form";
-  sqlRadio.checked = mode === "sql";
-  $("join-form").hidden = mode !== "form";
-  $("join-preview-wrap").hidden = mode !== "form";
-  $("join-sql-pane").hidden = mode !== "sql";
-  $("join-error").textContent = "";
-}
-
-function sqlProblem(): string {
+// The one thing wrong with the join as it stands, or "": a pair that cannot be
+// joined (form) or text that does not parse (SQL).
+function problem(): string {
+  if (mode === "form") return form.problem() ?? "";
   const result = sql.text().trim() ? sql.parse() : null;
-  return result && "error" in result
-    ? `line ${result.error.line}, column ${result.error.column}: ${result.error.message}`
-    : "";
+  return result && "error" in result ? `Line ${result.error.line}: ${result.error.message}` : "";
 }
 
-// SQL → Form only works while the text parses; the message says where it does not.
-function onSqlChange(): void {
-  const problem = sqlProblem();
-  $("join-sql-error").textContent = problem;
-  formRadio.disabled = problem !== "";
-  $("join-error").textContent = "";
+function refresh(): void {
+  const bad = problem();
+  runBtn.disabled = bad !== "";
+  if (mode === "form") {
+    const result = draftToDef(form.draft());
+    const text = "def" in result ? printJoin(result.def) : draftText(form.draft());
+    $("join-preview").replaceChildren(...coloured(text));
+    return;
+  }
+  $("join-sql-error").textContent = bad;
+  formTab.disabled = bad !== "";
+  $("join-sql-tip").hidden = bad === "";
+}
+
+// Keywords in the keyword colour, as in the SQL field.
+function coloured(text: string): Node[] {
+  return tokenizeJoinText(text).map((t) => {
+    const span = document.createElement("span");
+    span.className = t.kind === "keyword" ? "t-keyword" : "";
+    span.textContent = text.slice(t.start, t.end);
+    return span;
+  });
+}
+
+// A message from the server or a failed save stays until the user changes something.
+const clearError = (e: Event): void => {
+  if (!(e.target as HTMLElement).closest("#join-run")) $("join-error").textContent = "";
+};
+dialog.addEventListener("input", clearError);
+dialog.addEventListener("click", clearError);
+
+const form = mountJoinForm($("join-form"), refresh);
+const sql = mountJoinSql(refresh);
+
+function setMode(next: "form" | "sql"): void {
+  mode = next;
+  formTab.setAttribute("aria-selected", String(next === "form"));
+  sqlTab.setAttribute("aria-selected", String(next === "sql"));
+  $("join-form-pane").hidden = next !== "form";
+  $("join-sql-pane").hidden = next !== "sql";
+  formTab.disabled = false;
+  $("join-sql-tip").hidden = true;
 }
 
 // The name of the saved join being edited, so a new name renames it.
@@ -61,9 +83,8 @@ export function openJoinDialog(opts: { error?: string; fresh?: boolean; focusNam
   $("join-delete").hidden = saved === undefined;
   form.setDraft(def ? defToDraft(def) : newDraft(state.table ?? ""));
   setMode("form");
-  formRadio.disabled = false;
   $("join-sql-error").textContent = "";
-  updatePreview();
+  refresh();
   $("join-error").textContent = opts.error ?? "";
   if (!dialog.open) dialog.showModal();
   if (opts.focusName) $<HTMLInputElement>("join-name").focus();
@@ -96,17 +117,23 @@ export function applyJoin(def: JoinDef): void {
   loadData();
 }
 
-$("join-run").onclick = () => {
-  const result = sqlRadio.checked ? sql.parse() : draftToDef(form.draft());
+// The empty-state button of an INNER join that matched nothing.
+export function switchToLeftJoin(): void {
+  const def = getAppliedJoin();
+  if (def) applyJoin({ ...def, joins: def.joins.map((j) => ({ ...j, type: "left" })) });
+}
+
+runBtn.onclick = () => {
+  const result = mode === "sql" ? sql.parse() : draftToDef(form.draft());
   if ("error" in result) {
-    $("join-error").textContent = typeof result.error === "string" ? result.error : sqlProblem();
+    $("join-error").textContent = typeof result.error === "string" ? result.error : problem();
     return;
   }
   const name = $<HTMLInputElement>("join-name").value.trim();
   if (name !== "") {
-    const problem = saveJoin(name, printJoin(result.def), editingSaved);
-    if (problem) {
-      $("join-error").textContent = problem;
+    const failure = saveJoin(name, printJoin(result.def), editingSaved);
+    if (failure) {
+      $("join-error").textContent = failure;
       return;
     }
   }
@@ -119,19 +146,19 @@ $("join-delete").onclick = () => {
   refreshSavedChips();
 };
 $("join-link-btn").onclick = () => copyText(location.href, $("join-link-btn"));
-formRadio.onchange = () => {
-  if (!formRadio.checked) return;
+formTab.onclick = () => {
+  if (mode === "form" || formTab.disabled) return;
   const parsed = sql.text().trim() ? sql.parse() : null;
   if (parsed && "error" in parsed) return;
   form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(state.table ?? ""));
   setMode("form");
-  updatePreview();
+  refresh();
 };
-sqlRadio.onchange = () => {
-  if (!sqlRadio.checked) return;
+sqlTab.onclick = () => {
+  if (mode === "sql") return;
   sql.setText(draftText(form.draft()));
   setMode("sql");
-  onSqlChange();
+  refresh();
   $<HTMLTextAreaElement>("join-sql").focus();
 };
 $("join-cancel").onclick = () => dialog.close();

@@ -9,9 +9,11 @@ test("a join view labels columns by table and pages without a total", async ({ p
   await expect(page.locator("th.band")).toHaveText(["orders o", "users u"]);
   await expect(page.locator("#page")).toHaveText("page 1 · more rows available");
   await expect(page.locator("#next")).toBeEnabled();
-  await expect(page.locator("#row-meta")).toContainText("5 rows");
+  await expect(page.locator("#row-meta")).toContainText("5+ rows");
   await expect(page.locator("#row-meta")).not.toContainText("~");
-  await expect(page.locator("#structure-btn")).toBeDisabled();
+  await expect(page.locator("#structure-btn")).toBeHidden();
+  await expect(page.locator("#join-edit-btn")).toBeVisible();
+  await expect(page.locator("#join-link-btn")).toBeVisible();
 
   const response = nextJoinResponse(page);
   await page.locator("#next").click();
@@ -90,7 +92,7 @@ test("a timeout offers Retry and Edit join", async ({ page }) => {
     }),
   );
   await page.goto(`/__ashurbanipal?table=orders&limit=5&join=${encodeURIComponent(ORDERS_USERS)}`);
-  await expect(page.locator("#join-notice")).toContainText("took too long");
+  await expect(page.locator("#join-notice")).toContainText("took longer than the time limit");
   await expect(page.locator("#error")).toBeEmpty();
 
   await page.unroute("**/api/tables/join*");
@@ -101,15 +103,17 @@ test("a timeout offers Retry and Edit join", async ({ page }) => {
   await expect(page.locator("#join-notice")).toBeHidden();
 });
 
-test("an inner join with no match offers a switch to left join", async ({ page }) => {
+test("an inner join with no match shows an empty state that offers a left join", async ({ page }) => {
   await gotoJoin(page, "FROM orders o JOIN users u ON o.id = u.id");
-  await expect(page.locator("#join-notice")).toContainText("No rows match this join");
+  const empty = page.locator("#tbody .empty-join");
+  await expect(empty).toContainText("No rows match this join.");
+  await expect(empty).toContainText("An inner join drops rows without a match. A left join keeps them.");
   const response = nextJoinResponse(page);
-  await page.locator("#join-notice").getByRole("button", { name: "Switch to left join" }).click();
+  await empty.getByRole("button", { name: "Switch to left join" }).click();
   const join = joinParam((await response).url()) as { joins: { type: string }[] };
   expect(join.joins.map((j) => j.type)).toEqual(["left"]);
   await waitForIdle(page);
-  await expect(page.locator("#join-notice")).toBeHidden();
+  await expect(page.locator("#tbody .empty-join")).toHaveCount(0);
   await expect(page.locator("#tbody tr").first()).toBeVisible();
 });
 

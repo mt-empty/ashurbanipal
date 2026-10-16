@@ -23,6 +23,10 @@ interface TableEntry {
   btn: HTMLButtonElement;
 }
 let tableEntries: TableEntry[] = [];
+// Saved-join chips follow the table chips (after a divider) and take part in the
+// same line cap, so they are hidden before the tables are, active one aside.
+let joinEntries: TableEntry[] = [];
+const allEntries = (): TableEntry[] => [...tableEntries, ...joinEntries];
 const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 
 // ---- three-line cap: a long table list collapses behind "+ N more", except
@@ -41,14 +45,15 @@ let cappedActive: string | null = null;
 // Measures the full layout (offsetTop per chip), so the cap is by rendered
 // lines and tracks the list's width without a per-chip width model.
 function updateTablesCap(): void {
-  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
-  for (const e of tableEntries) {
+  const entries = allEntries();
+  cappedActive = entries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
+  for (const e of entries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
   }
-  const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
+  const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastRowTop = tops[TABLE_CAP_LINES - 1];
-  const beyond = tops.length > TABLE_CAP_LINES ? tableEntries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
   const active = beyond.find((e) => e.btn.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
@@ -61,7 +66,7 @@ function updateTablesCap(): void {
   for (const e of hidden) e.li.hidden = true;
   // The button has to land on the last row: give up chips from the end of the
   // visible ones until it (and a pulled active chip) fits there.
-  const shown = tableEntries.filter((e) => !hidden.has(e) && e !== active);
+  const shown = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
   while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
     const last = shown.pop() as TableEntry;
@@ -72,13 +77,14 @@ function updateTablesCap(): void {
   if (!active) return;
   // Out of alphabetical order only if a hidden chip sits before it; a divider
   // at the start of a line would just dangle.
-  const at = tableEntries.indexOf(active);
-  const movedUp = [...hidden].some((e) => tableEntries.indexOf(e) < at);
-  const before = tableEntries
+  const at = entries.indexOf(active);
+  const movedUp = [...hidden].some((e) => entries.indexOf(e) < at);
+  const before = entries
     .slice(0, at)
     .filter((e) => !e.li.hidden)
     .pop();
-  if (movedUp && before && before.li.offsetTop === active.li.offsetTop) active.li.classList.add("pulled");
+  if (movedUp && before && before.li.offsetTop === active.li.offsetTop && !active.li.classList.contains("join-first"))
+    active.li.classList.add("pulled");
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
@@ -219,6 +225,7 @@ export async function loadTables(): Promise<void> {
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, btn });
   }
+  for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
@@ -244,6 +251,40 @@ export async function loadTables(): Promise<void> {
 
 export function listedTableNames(): string[] {
   return tableEntries.map((e) => e.name);
+}
+
+// The row count the table's chip shows (`~208`), for places that list tables.
+export function tableChipCount(name: string): string {
+  return tableEntries.find((e) => e.name === name)?.li.querySelector(".count")?.textContent ?? "";
+}
+
+export interface JoinChip {
+  label: string;
+  title: string;
+  className: string;
+  active: boolean;
+  run: () => void;
+}
+
+// Replaces the chips after the divider; called whenever the join in view or the saved list changes.
+export function setJoinChips(chips: JoinChip[]): void {
+  const ul = $("tables");
+  for (const e of joinEntries) e.li.remove();
+  joinEntries = chips.map((c, i) => {
+    const li = document.createElement("li");
+    li.className = `join-chip ${c.className}${i === 0 ? " join-first" : ""}`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = c.label;
+    btn.title = c.title;
+    btn.classList.toggle("active", c.active);
+    if (c.active) btn.setAttribute("aria-current", "true");
+    btn.onclick = c.run;
+    li.appendChild(btn);
+    ul.insertBefore(li, tablesMoreItem);
+    return { name: `join:${c.label}`, li, btn };
+  });
+  updateTablesCap();
 }
 
 // Keyed by table name rather than "whichever row is .active" so it's

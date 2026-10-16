@@ -90,7 +90,8 @@ export type JoinErrorCode =
   | "too-many-tables"
   | "too-many-pairs"
   | "bad-select"
-  | "bad-identifier";
+  | "bad-identifier"
+  | "type-mismatch";
 
 export interface JoinError {
   code: JoinErrorCode;
@@ -105,6 +106,13 @@ export interface JoinError {
 
 export type JoinParse = { def: JoinDef } | { error: JoinError };
 
+export interface JoinParseOptions {
+  catalog?: JoinCatalog;
+  // Says why two columns cannot be paired (their types), or null. Only the page
+  // knows the types, so the parser never checks them unless it is given this.
+  pairCheck?: (a: { table: string; column: string }, b: { table: string; column: string }) => string | null;
+}
+
 // Table name → its column names, or null when only the table is known. Names
 // the catalog lacks are rejected; a null column list skips the column check.
 export type JoinCatalog = Readonly<Record<string, readonly string[] | null>>;
@@ -117,13 +125,13 @@ type Tok =
 const OPERATOR_WORDS = new Set(["OR", "LIKE", "ILIKE", "IN", "IS", "NOT", "BETWEEN"]);
 
 const REJECTED_MESSAGE: Record<string, string> = {
-  RIGHT: "RIGHT JOIN is not supported; use LEFT JOIN with the tables swapped",
-  FULL: "FULL JOIN is not supported; use INNER or LEFT JOIN",
-  CROSS: "CROSS JOIN is not supported; use INNER or LEFT JOIN",
-  NATURAL: "NATURAL JOIN is not supported; write the ON pairs",
-  USING: "USING is not supported; write ON a.x = b.y",
-  WHERE: "WHERE is not supported here; use the filter bar",
-  ORDER: "ORDER BY is not supported here; click a column header to sort",
+  RIGHT: "RIGHT joins are not supported. Use LEFT or INNER.",
+  FULL: "FULL joins are not supported. Use LEFT or INNER.",
+  CROSS: "CROSS joins are not supported. Use LEFT or INNER.",
+  NATURAL: "NATURAL joins are not supported. Write the ON pairs.",
+  USING: "USING is not supported. Write ON a.x = b.y.",
+  WHERE: "WHERE is not part of the join. Filter with the bar above the grid.",
+  ORDER: "ORDER BY is not part of the join. Click a column header to sort.",
 };
 
 class JoinFailure extends Error {
@@ -158,7 +166,8 @@ function closest(name: string, candidates: readonly string[]): string | undefine
   return best;
 }
 
-export function parseJoin(text: string, catalog?: JoinCatalog): JoinParse {
+export function parseJoin(text: string, options: JoinParseOptions = {}): JoinParse {
+  const catalog = options.catalog;
   let pos = 0;
   let cur: Tok | null = null;
 
@@ -269,7 +278,7 @@ export function parseJoin(text: string, catalog?: JoinCatalog): JoinParse {
       const suggest = closest(t.text, Object.keys(catalog));
       fail(
         "unknown-table",
-        `unknown table "${t.text}"${suggest ? `; did you mean "${suggest}"?` : ""}`,
+        `There is no table ${t.text}.${suggest ? ` Did you mean ${suggest}?` : ""}`,
         t.start,
         suggest,
       );
@@ -318,7 +327,7 @@ export function parseJoin(text: string, catalog?: JoinCatalog): JoinParse {
     const suggest = closest(c.column, known);
     fail(
       "unknown-column",
-      `table "${tables[position].table}" has no column "${c.column}"${suggest ? `; did you mean "${suggest}"?` : ""}`,
+      `${tables[position].table} has no column ${c.column}.${suggest ? ` Did you mean ${suggest}?` : ""}`,
       c.columnStart,
       suggest,
     );
@@ -347,6 +356,11 @@ export function parseJoin(text: string, catalog?: JoinCatalog): JoinParse {
       );
     checkColumn(a, first);
     checkColumn(b, second);
+    const clash = options.pairCheck?.(
+      { table: tables[a].table, column: first.column },
+      { table: tables[b].table, column: second.column },
+    );
+    if (clash) fail("type-mismatch", clash, second.qualStart);
     return forward
       ? { left: { join: a, column: first.column }, right: second.column }
       : { left: { join: b, column: second.column }, right: first.column };

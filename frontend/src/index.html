@@ -58,10 +58,6 @@
       <ul id="tables"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
       <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
     </nav>
-    <nav id="saved-joins-bar" aria-label="saved joins" hidden>
-      <span id="saved-joins-label">joins</span>
-      <ul id="saved-joins"></ul>
-    </nav>
     <div id="toolbar">
       <search id="controls">
         <form id="filter-form">
@@ -79,10 +75,10 @@
         <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
         <span id="actions">
-          <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
           <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
-          <button id="join-edit-btn" type="button" hidden title="change the tables, columns or join type of this view">edit join</button>
+          <button id="join-edit-btn" type="button" hidden title="change the tables, columns or join type of this view"><span aria-hidden="true">⋈</span> edit join</button>
           <button id="join-link-btn" type="button" hidden title="copy a link that opens this join"><span class="copy-icon" aria-hidden="true">⧉</span> copy link</button>
+          <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
           <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
           <button id="structure-btn" type="button" disabled title="indexes and constraints for this table">structure</button>
           <button id="payload" disabled title="raw JSON response for the current view">payload</button>
@@ -131,33 +127,48 @@
 
 <dialog id="join-dialog" closedby="any" aria-labelledby="join-title">
   <div class="dialog-head">
-    <span class="dialog-head-title"><strong id="join-title">join tables</strong></span>
+    <span class="dialog-head-title">
+      <strong id="join-title">Join tables</strong>
+      <span id="join-modes" role="tablist" aria-label="how to write the join">
+        <button id="join-mode-form" type="button" role="tab" aria-selected="true">Form</button>
+        <button id="join-mode-sql" type="button" role="tab" aria-selected="false">SQL</button>
+      </span>
+    </span>
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
   <div id="join-body">
-    <fieldset id="join-modes">
-      <legend class="sr-only">how to write the join</legend>
-      <label><input type="radio" name="join-mode" id="join-mode-form" value="form" checked> Form</label>
-      <label><input type="radio" name="join-mode" id="join-mode-sql" value="sql"> SQL</label>
-    </fieldset>
-    <div id="join-form"></div>
+    <div id="join-form-pane">
+      <div id="join-form"></div>
+      <div class="jlab">Equivalent SQL</div>
+      <pre id="join-preview" class="j-sql"></pre>
+    </div>
     <div id="join-sql-pane" hidden>
+      <div class="jlab">Join</div>
       <div id="join-sql-wrap">
         <div id="join-sql-hl" aria-hidden="true"><span id="join-sql-hl-text"></span></div>
-        <textarea id="join-sql" rows="4" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="join-sql-suggest-list" aria-label="join as SQL text" spellcheck="false" autocomplete="off" placeholder="FROM orders o&#10;LEFT JOIN users u ON o.user_id = u.id"></textarea>
+        <textarea id="join-sql" rows="5" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="join-sql-suggest-list" aria-label="join as SQL text" spellcheck="false" autocomplete="off" placeholder="FROM orders o&#10;LEFT JOIN users u ON o.user_id = u.id"></textarea>
         <div id="join-sql-suggest" hidden><div id="join-sql-suggest-list" role="listbox" aria-label="join suggestions"></div></div>
       </div>
       <p id="join-sql-error" role="status"></p>
+      <p id="join-sql-tip" class="j-tip" hidden>Form is unavailable until the text parses.</p>
+      <div class="jlab">Supported</div>
+      <pre class="j-sql j-grammar">SELECT alias.column, …                       optional
+FROM table [alias]
+{INNER | LEFT} JOIN table [alias]
+  ON a.col = b.col [AND …]    up to 3 pairs</pre>
+      <p class="j-tip">At most 4 tables. Filter and sort with the controls above the grid.</p>
     </div>
-    <div id="join-preview-wrap"><span class="section-label">as SQL</span><pre id="join-preview"></pre></div>
     <p id="join-error" role="alert"></p>
   </div>
   <div class="dialog-foot">
-    <label id="join-name-label">Name <input id="join-name" maxlength="60" autocomplete="off" spellcheck="false" placeholder="save in this browser"></label>
-    <button id="join-delete" type="button" hidden>Delete</button>
-    <button id="join-cancel" type="button">Cancel</button>
-    <button id="join-run" type="button">Show result</button>
+    <label id="join-name-label" for="join-name">Name</label>
+    <input id="join-name" maxlength="60" autocomplete="off" spellcheck="false" placeholder="name it to save it">
+    <span id="join-name-note">saved in this browser</span>
+    <button id="join-delete" class="btn" type="button" hidden>Delete</button>
+    <button id="join-cancel" class="btn" type="button">Cancel</button>
+    <button id="join-run" class="btn primary" type="button">Show result</button>
   </div>
+  <div id="dd-pop" popover><div id="dd-pop-list" role="listbox"></div></div>
 </dialog>
 
 <div id="siblings-pop" popover>

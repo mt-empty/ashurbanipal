@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addJoin, defToDraft, draftToDef, newDraft, removeLastJoin } from "../src/lib/join-draft.ts";
+import { addJoin, defToDraft, draftToDef, newDraft, removeJoin } from "../src/lib/join-draft.ts";
 import { parseJoin, printJoin } from "../src/lib/join-dsl.ts";
 
 const parse = (text: string) => {
@@ -65,7 +65,22 @@ test("adding and removing a join keeps one column entry per table", () => {
   const draft = newDraft("orders");
   addJoin(draft);
   assert.equal(draft.columns.length, 3);
-  removeLastJoin(draft);
+  removeJoin(draft, 1);
   assert.equal(draft.columns.length, 2);
   assert.equal(draft.joins.length, 1);
+});
+
+test("removing a middle join clears pairs that pointed at it and shifts later positions", () => {
+  const def = parse(
+    "FROM orders o JOIN users u ON o.user_id = u.id JOIN order_extra x ON x.order_id = o.id JOIN events e ON e.user_id = u.id AND e.id = x.order_id",
+  );
+  const draft = defToDraft(def);
+  removeJoin(draft, 0); // drop users
+  assert.deepEqual(
+    draft.joins.map((j) => j.table),
+    ["order_extra", "events"],
+  );
+  assert.deepEqual(draft.joins[0].on[0], { leftJoin: 0, leftColumn: "id", rightColumn: "order_id" });
+  assert.deepEqual(draft.joins[1].on[0], { leftJoin: 0, leftColumn: "", rightColumn: "user_id" });
+  assert.deepEqual(draft.joins[1].on[1], { leftJoin: 1, leftColumn: "order_id", rightColumn: "id" });
 });

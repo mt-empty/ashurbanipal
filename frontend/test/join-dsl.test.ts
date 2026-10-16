@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { toWire } from "../src/lib/join-def.ts";
 import type { JoinCatalog } from "../src/lib/join-dsl.ts";
 import { parseJoin, printJoin } from "../src/lib/join-dsl.ts";
-import { joinBlocker, unjoinableReason } from "../src/lib/join-types.ts";
+import { joinMismatch, unjoinableReason } from "../src/lib/join-types.ts";
 
 // The single join-text -> JoinDef parser (spec/join-dsl.md). Cases come from
 // spec/fixtures/join-parser-tests.json, generated from the doc's §5 table.
@@ -23,13 +23,13 @@ const fixture: { catalog: JoinCatalog; cases: JoinCase[] } = JSON.parse(readFile
 
 for (const c of fixture.cases) {
   test(`${c.name}: ${JSON.stringify(c.input.slice(0, 60))}`, () => {
-    const result = parseJoin(c.input, c.no_catalog ? undefined : fixture.catalog);
+    const result = parseJoin(c.input, { catalog: c.no_catalog ? undefined : fixture.catalog });
     if (c.expect) {
       assert.ok("def" in result, "error" in result ? result.error.message : "");
       assert.deepEqual(result.def, c.expect);
       assert.equal(printJoin(result.def), c.canonical);
       // text -> definition -> text is stable
-      const again = parseJoin(c.canonical as string, c.no_catalog ? undefined : fixture.catalog);
+      const again = parseJoin(c.canonical as string, { catalog: c.no_catalog ? undefined : fixture.catalog });
       assert.ok("def" in again);
       assert.deepEqual(again.def, c.expect);
       return;
@@ -44,7 +44,7 @@ for (const c of fixture.cases) {
 }
 
 test("toWire merges tables into joins and omits columns for all columns", () => {
-  const parsed = parseJoin("FROM orders o LEFT JOIN users u ON o.user_id = u.id", fixture.catalog);
+  const parsed = parseJoin("FROM orders o LEFT JOIN users u ON o.user_id = u.id", { catalog: fixture.catalog });
   assert.ok("def" in parsed);
   assert.deepEqual(
     toWire(parsed.def, () => []),
@@ -56,7 +56,9 @@ test("toWire merges tables into joins and omits columns for all columns", () => 
 });
 
 test("toWire expands alias.* in catalog order beside explicit columns", () => {
-  const parsed = parseJoin("SELECT o.*, u.email FROM orders o JOIN users u ON o.user_id = u.id", fixture.catalog);
+  const parsed = parseJoin("SELECT o.*, u.email FROM orders o JOIN users u ON o.user_id = u.id", {
+    catalog: fixture.catalog,
+  });
   assert.ok("def" in parsed);
   const wire = toWire(parsed.def, (join) => fixture.catalog[parsed.def.tables[join].table] ?? []);
   assert.deepEqual(wire.columns?.slice(0, 2), [
@@ -67,13 +69,29 @@ test("toWire expands alias.* in catalog order beside explicit columns", () => {
 });
 
 test("join type hints grey incompatible and unjoinable columns, and allow what they cannot tell", () => {
-  assert.equal(joinBlocker("uuid", "uuid"), null);
-  assert.equal(joinBlocker("integer", "bigint"), null);
-  assert.equal(joinBlocker("USER-DEFINED", "uuid"), "custom type ≠ uuid");
-  assert.equal(joinBlocker("USER-DEFINED", "text"), null);
-  assert.equal(joinBlocker("jsonb", "text"), "jsonb: not joinable");
-  assert.equal(joinBlocker("text", "ARRAY"), "ARRAY: not joinable");
-  assert.equal(joinBlocker("geometry", "uuid"), null);
+  assert.equal(joinMismatch("uuid", "uuid"), null);
+  assert.equal(joinMismatch("integer", "bigint"), null);
+  assert.equal(joinMismatch("USER-DEFINED", "uuid")?.note, "enum ≠ uuid");
+  assert.equal(
+    joinMismatch("USER-DEFINED", "uuid")?.message,
+    "enum cannot be joined to uuid. Pick columns of the same kind.",
+  );
+  assert.equal(joinMismatch("USER-DEFINED", "text"), null);
+  assert.equal(joinMismatch("jsonb", "text")?.note, "jsonb: not joinable");
+  assert.equal(joinMismatch("text", "ARRAY")?.note, "ARRAY: not joinable");
+  assert.equal(joinMismatch("geometry", "uuid"), null);
   assert.equal(unjoinableReason("double precision"), "double precision: not joinable");
   assert.equal(unjoinableReason("uuid"), null);
+});
+
+test("a pair check supplied by the page rejects a mismatched pair at its second column", () => {
+  const text = "FROM orders o JOIN users u ON u.id = o.status";
+  const check = (a: { column: string }, b: { column: string }) =>
+    a.column === "id" && b.column === "status" ? "enum cannot be joined to uuid." : null;
+  const result = parseJoin(text, { pairCheck: check });
+  assert.ok("error" in result);
+  assert.equal(result.error.code, "type-mismatch");
+  assert.equal(result.error.message, "enum cannot be joined to uuid.");
+  assert.equal(text.slice(result.error.index), "o.status");
+  assert.ok("def" in parseJoin(text));
 });

@@ -3,20 +3,20 @@ import type { Column } from "../core/types.js";
 import type { Draft } from "../lib/join-draft.js";
 import { type JoinParse, parseJoin, quoteJoinName } from "../lib/join-dsl.js";
 import { type JoinCompletion, joinCompletionAt, tokenizeJoinText } from "../lib/join-tokens.js";
-import { joinBlocker, unjoinableReason } from "../lib/join-types.js";
+import { joinMismatch, unjoinableReason } from "../lib/join-types.js";
 import { cachedColumns, indexedColumns, knownCatalog, tableColumns } from "./join-catalog.js";
 import { attachOverlayHighlight } from "./overlay-highlight.js";
-import { listedTableNames } from "./sidebar.js";
+import { listedTableNames, tableChipCount } from "./sidebar.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
 
-// The SQL half of the join overlay: a text field coloured like the filter box,
-// with suggestions for what the grammar allows next. The text is only ever
-// parsed in the browser (spec/join-dsl.md).
+// The SQL half of the join overlay (boards U and V): a text field coloured like
+// the filter box, with suggestions for what the grammar allows next. The text is
+// only ever parsed in the browser (spec/join-dsl.md).
 
 export interface JoinSql {
   setText(text: string): void;
   text(): string;
-  // The text parsed against the catalog the page holds.
+  // The text parsed against the catalog and column types the page holds.
   parse(): JoinParse;
 }
 
@@ -49,24 +49,59 @@ export function draftText(draft: Draft): string {
   return [select, ...lines].join("\n");
 }
 
+// What the underline covers: a refused `RIGHT JOIN` through its JOIN, a `WHERE …` to the end of its
+// line, an `alias.column` through the column, otherwise the one word.
+function errorSpan(text: string, index: number, code: string): [number, number] {
+  const word =
+    /^(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(index))?.[0] ?? text.slice(index, index + 1);
+  let end = index + word.length;
+  if (code === "unsupported-keyword") {
+    if (/^(RIGHT|FULL|CROSS|NATURAL)$/i.test(word)) end += /^\s+JOIN\b/i.exec(text.slice(end))?.[0].length ?? 0;
+    else end = text.indexOf("\n", end) < 0 ? text.length : text.indexOf("\n", end);
+  } else {
+    end += /^\.(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(end))?.[0].length ?? 0;
+  }
+  return [index, end];
+}
+
+// A short alias for a table: its underscore-separated initials, made unique among the names in use.
+function aliasFor(table: string, taken: ReadonlySet<string>): string {
+  const base =
+    table
+      .split("_")
+      .filter(Boolean)
+      .map((w) => w[0])
+      .join("")
+      .toLowerCase() || "t";
+  let alias = base;
+  for (let n = 2; taken.has(alias) || alias === table; n++) alias = `${base}${n}`;
+  return alias;
+}
+
 export function mountJoinSql(onChange: () => void): JoinSql {
   const field = $<HTMLTextAreaElement>("join-sql");
   const hlText = $("join-sql-hl-text");
-  const popup = $("join-sql-suggest");
 
-  const parse = (): JoinParse => parseJoin(field.value, knownCatalog());
+  // Column types are known for the tables whose columns were read; an unknown pair is allowed.
+  const pairCheck = (a: { table: string; column: string }, b: { table: string; column: string }): string | null => {
+    const at = cachedColumns(a.table)?.find((c) => c.name === a.column)?.type;
+    const bt = cachedColumns(b.table)?.find((c) => c.name === b.column)?.type;
+    return at && bt ? (joinMismatch(at, bt)?.message ?? null) : null;
+  };
+  const parse = (): JoinParse => parseJoin(field.value, { catalog: knownCatalog(), pairCheck });
 
   function render(): void {
     const text = field.value;
-    field.rows = Math.max(4, text.split("\n").length + 1);
+    field.rows = Math.max(5, text.split("\n").length + 1);
     const result = text.trim() ? parse() : null;
     // An error at the very end is just unfinished typing.
-    const at = result && "error" in result && result.error.index < text.trimEnd().length ? result.error.index : -1;
+    const error = result && "error" in result && result.error.index < text.trimEnd().length ? result.error : null;
+    const [from, to] = error ? errorSpan(text, error.index, error.code) : [-1, -1];
     hlText.replaceChildren(
       ...tokenizeJoinText(text).map((t) => {
         const span = document.createElement("span");
-        const kind = t.kind === "name" ? "column" : t.kind === "punct" ? "op" : t.kind;
-        span.className = `t-${kind}${t.start <= at && at < t.end ? " t-err" : ""}`;
+        const kind = t.kind === "punct" ? "op" : t.kind;
+        span.className = `t-${kind}${t.kind !== "space" && t.start >= from && t.start < to ? " t-err" : ""}`;
         span.textContent = text.slice(t.start, t.end);
         return span;
       }),
@@ -76,9 +111,19 @@ export function mountJoinSql(onChange: () => void): JoinSql {
   }
   attachOverlayHighlight(field, render);
 
+  // Under the line being typed, at the caret's column (the field is monospace).
+  const place = (): void => {
+    const before = field.value.slice(0, field.selectionStart);
+    const line = before.split("\n").length;
+    const col = before.length - before.lastIndexOf("\n") - 1;
+    const popup = $("join-sql-suggest");
+    popup.style.top = `calc(.6rem + ${line} * 1.375rem)`;
+    popup.style.left = `min(calc(.85rem + ${col}ch), calc(100% - ${popup.offsetWidth}px))`;
+  };
   const suggest = createSuggestList({
     input: field,
-    popup,
+    popup: $("join-sql-suggest"),
+    place,
     list: $("join-sql-suggest-list"),
     idPrefix: "join-sql-suggest",
     accept: (suggestion, head) => {
@@ -87,11 +132,11 @@ export function mountJoinSql(onChange: () => void): JoinSql {
       suggest.close();
       field.focus();
       onChange();
-      update();
+      void update();
     },
   });
 
-  // `name` of a declared table → its columns, for `alias.` completion.
+  // `name` of a declared table → its table, for `alias.` completion.
   const tableOf = (ctx: JoinCompletion, name: string | null): string | undefined =>
     ctx.declared.find((d) => d.name === name)?.table;
 
@@ -104,42 +149,50 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     return columns
       .filter((c) => c.name.toLowerCase().startsWith(ctx.partial.toLowerCase()))
       .map((c: Column) => {
-        const reason = otherType === undefined ? unjoinableReason(c.type) : joinBlocker(c.type, otherType);
-        const tag = indexed.has(c.name) ? " · indexed" : "";
+        const note =
+          otherType === undefined ? unjoinableReason(c.type) : (joinMismatch(c.type, otherType)?.note ?? null);
         return {
-          label: `${c.name} (${c.type})${tag}`,
+          label: c.name,
           insert: `${quoteJoinName(c.name)} `,
-          ...(reason ? { blocked: reason } : {}),
+          note: note ?? c.type,
+          ...(note === null && indexed.has(c.name) ? { tag: "indexed" } : {}),
+          ...(note !== null ? { blocked: true } : {}),
         };
       });
   }
 
   // A foreign key between a declared table and the one being typed is offered as the whole clause.
-  function tableRows(ctx: JoinCompletion): Suggestion[] {
-    const taken = new Set(ctx.declared.map((d) => d.name));
-    const rows: Suggestion[] = [];
-    for (const table of listedTableNames()) {
-      if (!table.toLowerCase().startsWith(ctx.partial.toLowerCase())) continue;
-      const q = quoteJoinName(table);
-      const own = cachedColumns(table) ?? [];
-      const snippet = taken.has(table) ? undefined : foreignKeyClause(ctx, table, q, own);
-      if (snippet) rows.push({ label: snippet, insert: `${snippet} ` });
-      rows.push({ label: table, insert: `${q} ` });
-    }
-    return rows;
-  }
-
-  function foreignKeyClause(ctx: JoinCompletion, table: string, q: string, own: Column[]): string | undefined {
+  function foreignKeyClause(ctx: JoinCompletion, table: string, own: Column[]): string | undefined {
+    const alias = aliasFor(table, new Set(ctx.declared.map((d) => d.name)));
+    const q = `${quoteJoinName(table)} ${alias}`;
     for (const d of ctx.declared) {
       const theirs = cachedColumns(d.table) ?? [];
       const out = theirs.find((c) => c.references?.table === table);
       if (out?.references)
-        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(out.name)} = ${q}.${quoteJoinName(out.references.column)}`;
+        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(out.name)} = ${alias}.${quoteJoinName(out.references.column)}`;
       const back = own.find((c) => c.references?.table === d.table);
       if (back?.references)
-        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(back.references.column)} = ${q}.${quoteJoinName(back.name)}`;
+        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(back.references.column)} = ${alias}.${quoteJoinName(back.name)}`;
     }
     return undefined;
+  }
+
+  function tableRows(ctx: JoinCompletion): Suggestion[] {
+    const used = new Set(ctx.declared.map((d) => d.table));
+    const withKey: Suggestion[] = [];
+    const rest: Suggestion[] = [];
+    for (const table of listedTableNames()) {
+      if (!table.toLowerCase().startsWith(ctx.partial.toLowerCase())) continue;
+      const clause = used.has(table) ? undefined : foreignKeyClause(ctx, table, cachedColumns(table) ?? []);
+      if (clause) withKey.push({ label: clause, insert: `${clause} `, tag: "foreign key" });
+      else
+        rest.push({
+          label: table,
+          insert: `${quoteJoinName(table)} `,
+          note: used.has(table) ? "already used · add as alias" : tableChipCount(table),
+        });
+    }
+    return [...withKey, ...rest];
   }
 
   async function update(): Promise<void> {
@@ -162,7 +215,7 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     } else if (ctx.expect === "qualifier") {
       rows = ctx.declared
         .filter((d) => d.name.toLowerCase().startsWith(ctx.partial.toLowerCase()))
-        .map((d) => ({ label: d.name, insert: `${quoteJoinName(d.name)}.` }));
+        .map((d) => ({ label: d.name, insert: `${quoteJoinName(d.name)}.`, note: d.name === d.table ? "" : d.table }));
     } else if (ctx.expect === "column") {
       rows = await columnRows(ctx).catch(() => []);
     } else if (ctx.expect === "keyword") {
@@ -177,7 +230,21 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     suggest.show(rows, ctx.head, -1);
   }
 
+  // Column names and types are what catches an unknown column or a mismatched pair; read them for every table the text names.
+  function prefetch(): void {
+    const listed = new Set(listedTableNames());
+    const wanted = [...new Set(joinCompletionAt(field.value).declared.map((d) => d.table))].filter(
+      (t) => listed.has(t) && !cachedColumns(t),
+    );
+    if (wanted.length === 0) return;
+    void Promise.allSettled(wanted.map(tableColumns)).then(() => {
+      render();
+      onChange();
+    });
+  }
+
   field.addEventListener("input", () => {
+    prefetch();
     onChange();
     void update();
   });

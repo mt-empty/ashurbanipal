@@ -1,8 +1,12 @@
 export interface Suggestion {
   label: string;
   insert: string;
-  // Why this row cannot be taken; it still shows, greyed, with the reason.
-  blocked?: string;
+  // Right-aligned beside the label: a type, a row count, or the reason a row is blocked.
+  note?: string;
+  // A small badge after the note (`foreign key`, `indexed`).
+  tag?: string;
+  // The row shows greyed and cannot be taken.
+  blocked?: boolean;
 }
 
 interface SuggestOptions {
@@ -56,9 +60,23 @@ export function createSuggestList(opts: SuggestOptions): SuggestList {
       ...matches.map((suggestion, i) => {
         const btn = document.createElement("button");
         btn.type = "button";
-        const text = suggestion.blocked ? `${suggestion.label} — ${suggestion.blocked}` : suggestion.label;
-        btn.textContent = text;
+        const text = [suggestion.label, suggestion.note, suggestion.tag].filter(Boolean).join(" · ");
         btn.title = text; // long values are cut off with an ellipsis
+        const name = document.createElement("span");
+        name.textContent = suggestion.label;
+        btn.appendChild(name);
+        if (suggestion.note || suggestion.tag) {
+          const note = document.createElement("span");
+          note.className = "sg-note";
+          note.textContent = suggestion.note ?? "";
+          if (suggestion.tag) {
+            const tag = document.createElement("span");
+            tag.className = "sg-tag";
+            tag.textContent = suggestion.tag;
+            note.appendChild(tag);
+          }
+          btn.appendChild(note);
+        }
         if (suggestion.blocked) btn.setAttribute("aria-disabled", "true");
         btn.className = i === index ? "active" : "";
         btn.id = `${idPrefix}-${i}`;

@@ -1,6 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, qs } from "../core/dom.js";
-import { hiddenColumnsForTable, persist, rememberSort, state } from "../core/state.js";
+import { getAppliedJoin, hiddenColumnsForTable, persist, rememberSort, state } from "../core/state.js";
 import type { Column, Row, TableData } from "../core/types.js";
 import {
   APPROX_COUNT_TITLE,
@@ -13,7 +13,8 @@ import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { columnMinWidth } from "./column-widths.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
-import { buildBands, columnKey, inJoinView, refreshBands } from "./join-view.js";
+import { switchToLeftJoin } from "./join-dialog.js";
+import { buildBands, buildEmptyJoin, columnKey, inJoinView, refreshBands } from "./join-view.js";
 import { navigateWithSeededFilter } from "./nav.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
@@ -108,7 +109,10 @@ function renderEmptyState(columnCount: number): void {
   emptyRow.className = "empty";
   const td = document.createElement("td");
   td.colSpan = columnCount;
-  td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
+  const join = getAppliedJoin();
+  if (join && state.offset === 0 && state.filter === "" && join.joins.some((j) => j.type === "inner")) {
+    td.appendChild(buildEmptyJoin(switchToLeftJoin));
+  } else td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
   emptyRow.appendChild(td);
   $("tbody").replaceChildren(emptyRow);
 }
@@ -306,7 +310,8 @@ export function updatePager(data: TableData): void {
   if (inJoinView()) {
     // A join has no total (spec/protocol.md §5.11.4): the page says whether more follows.
     $("page").textContent = `page ${page} · ${data.has_more ? "more rows available" : "last page"}`;
-    $("row-meta").textContent = ` · ${data.rows.length} rows · ${data.columns.length} columns`;
+    $("row-meta").textContent =
+      ` · ${data.rows.length}${data.has_more ? "+" : ""} rows · ${data.columns.length} columns`;
     $("row-meta").removeAttribute("title");
     $<HTMLButtonElement>("next").disabled = !data.has_more;
     return;

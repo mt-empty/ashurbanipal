@@ -1,4 +1,3 @@
-import { $ } from "../core/dom.js";
 import { getAppliedJoin, state } from "../core/state.js";
 import { joinLabel } from "../lib/join-def.js";
 import {
@@ -9,6 +8,7 @@ import {
   withoutSaved,
   withSaved,
 } from "../lib/join-saved.js";
+import { type JoinChip, setJoinChips } from "./sidebar.js";
 
 // Saved joins live in their own localStorage key, outside the view blob: they
 // are the user's own list, grouped by source and schema, and the server never
@@ -59,58 +59,40 @@ interface ChipActions {
   saveCurrent: () => void;
 }
 
-function chip(
-  label: string,
-  opts: { className?: string; title?: string; active?: boolean; run: () => void },
-): HTMLLIElement {
-  const li = document.createElement("li");
-  if (opts.className) li.className = opts.className;
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.textContent = label;
-  btn.title = opts.title ?? label;
-  if (opts.active) {
-    btn.classList.add("active");
-    btn.setAttribute("aria-current", "true");
-  }
-  btn.onclick = opts.run;
-  li.appendChild(btn);
-  return li;
-}
-
 // The chips after the table chips: saved joins, the unsaved join in view, `+ new join`.
 export function renderSavedChips(actions: ChipActions): void {
   const saved = savedJoins();
   const current = getAppliedJoin();
   const inSaved = saved.some((s) => s.text === state.join);
-  const items = saved.map((s) =>
-    chip(s.name, {
-      title: `${s.name} — ${s.text.replaceAll("\n", " ")}`,
-      active: s.text === state.join,
-      run: () => actions.open(s.text),
-    }),
-  );
+  const chips: JoinChip[] = saved.map((s) => ({
+    label: `⋈ ${s.name}`,
+    title: `${s.name} — ${s.text.replaceAll("\n", " ")}`,
+    className: "saved",
+    active: s.text === state.join,
+    run: () => actions.open(s.text),
+  }));
   if (current && !inSaved) {
-    items.push(
-      chip(`⋈ ${joinLabel(current)}`, {
-        className: "unsaved",
-        title: "this join is not saved",
-        active: true,
-        run: () => {},
-      }),
-    );
-    items.push(
-      chip("Save…", {
-        className: "save-link",
-        title: "name this join and keep it in this browser",
-        run: actions.saveCurrent,
-      }),
-    );
+    chips.push({
+      label: `⋈ ${joinLabel(current)}`,
+      title: "this join is not saved",
+      className: "unsaved",
+      active: true,
+      run: () => {},
+    });
+    chips.push({
+      label: "Save…",
+      title: "name this join and keep it in this browser",
+      className: "save-link muted",
+      active: false,
+      run: actions.saveCurrent,
+    });
   }
-  items.push(
-    chip("+ new join", { className: "new-join", title: "build a join from the table in view", run: actions.startNew }),
-  );
-  $("saved-joins").replaceChildren(...items);
-  // Nothing to show before the first table is in view.
-  $("saved-joins-bar").hidden = state.table === null;
+  chips.push({
+    label: "+ new join",
+    title: "build a join from the table in view",
+    className: "new-join muted",
+    active: false,
+    run: actions.startNew,
+  });
+  setJoinChips(chips);
 }

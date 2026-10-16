@@ -23,8 +23,14 @@ export async function openJoinOverlay(page: Page) {
 
 /** Switches the open overlay to SQL mode and types `text` into it. */
 export async function writeSql(page: Page, text: string) {
-  await page.locator("#join-mode-sql").check();
+  await page.locator("#join-mode-sql").click();
   await page.locator("#join-sql").fill(text);
+}
+
+/** Opens the dropdown named by `label` in the form and picks the row with `value`. */
+export async function pick(page: Page, label: string, value: string) {
+  await page.getByRole("button", { name: label, exact: true }).click();
+  await page.locator(`#dd-pop .dd-row[data-value="${value}"]`).click();
 }
 
 /** Runs the join from the overlay and waits for the grid to settle. */
@@ -42,4 +48,12 @@ export async function gotoJoin(page: Page, text: string, limit = 5) {
   await page.goto(`/__ashurbanipal?table=orders&limit=${limit}&join=${encodeURIComponent(text)}`);
   await response;
   await waitForIdle(page);
+}
+
+/** A long table list collapses behind "+ N more", saved joins and `Save…` with it; open it. */
+export async function expandTableChips(page: Page) {
+  const more = page.locator("#tables-more");
+  if (await more.isVisible()) {
+    if ((await more.textContent())?.startsWith("+")) await more.click();
+  }
 }

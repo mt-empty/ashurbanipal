@@ -138,6 +138,7 @@ the `code` and position are what the fixtures pin.
 | `too-many-tables`, `too-many-pairs` | limits in §3 |
 | `bad-select` | `*` mixed with items, or the same column selected twice (including `alias.*` with `alias.col`) |
 | `bad-identifier` | an unterminated or empty quoted name, or a character that cannot start a token |
+| `type-mismatch` | only when the caller supplies a type check (the page knows the column types, the parser does not): the second column of a pair cannot be joined to the first. Never raised on the fixture cases |
 
 Messages for `WHERE` and `ORDER` say to use the filter bar and the header
 sort; `RIGHT` says to use `LEFT` with the tables swapped.

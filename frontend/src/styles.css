@@ -101,11 +101,11 @@ ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
 ul { list-style: none; margin: 0; padding: 0; }
-#tables li button, #saved-joins li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
+#tables li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
                     cursor: pointer; font: inherit; color: inherit; border-radius: 999px;
                     display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
-#tables li button:hover, #saved-joins li button:hover { background: var(--hover); }
-#tables li button.active, #saved-joins li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#tables li button:hover { background: var(--hover); }
+#tables li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
 /* min-width:0 plus the cap lets one very long name ellipsize instead of
    widening the row; the full name is in `title` (see loadTables()). */
 .row-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
@@ -157,14 +157,6 @@ th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
 thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
-/* Join view: one band per table above the headers. The headers pin below the
-   band row, so the band height is fixed. */
-thead { --band-h: 1.5rem; }
-thead tr.bands th { height: var(--band-h); box-sizing: border-box; cursor: default; font-weight: 600;
-                    color: var(--text-muted); border-bottom: 1px solid var(--rule); text-align: left;
-                    overflow: hidden; text-overflow: ellipsis; }
-thead tr.bands th.band + th.band, thead tr.bands th.row-actions + th.band { border-left: 1px solid var(--rule); }
-thead tr.bands + tr th { top: var(--band-h); }
 /* Capped like the table chips' names; the title carries the full name. */
 .col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
             vertical-align: bottom; }
@@ -508,65 +500,160 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 
-/* ==== Join: overlay form, notice ==== */
-#join-notice { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin: .5rem 0;
-               padding: .5rem .75rem; border: 1px solid var(--border-strong); border-radius: 8px; }
+/* ==== Join: saved chips, bands, notices ==== */
+/* Saved joins are chips at the end of the table row, after a divider. */
+#tables li.join-first { position: relative; margin-left: .5rem; }
+#tables li.join-first::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
+                                width: 1px; background: var(--border-strong); }
+#tables li.join-chip button { font-family: var(--font-mono); font-size: .8125rem; }
+#tables li.join-chip.unsaved button { border: 1px dashed var(--border-strong); }
+#tables li.join-chip.muted button { color: var(--text-muted); }
+/* One tint per table position in a join, shared by the bands over the headers. */
+:root {
+  --band-0: light-dark(#eeeeea, #2e2e32);
+  --band-0-fg: inherit;
+  --band-1: light-dark(#ece6f3, #342f45);
+  --band-1-fg: light-dark(#6e5a8a, #bba8d6);
+  --band-2: light-dark(#e1eeeb, #233633);
+  --band-2-fg: light-dark(#2f6b6b, #86bcbc);
+  --band-3: light-dark(#e6ecf5, #252d3d);
+  --band-3-fg: light-dark(#3b5a8a, #9db8e0);
+}
+thead { --band-h: 1.75rem; }
+thead tr.bands th { height: var(--band-h); box-sizing: border-box; cursor: default; padding: 0 0 .25rem 0;
+                    border-bottom: none; }
+thead tr.bands th.row-actions { padding: 0; }
+.band-pill { display: block; margin-right: .75rem; padding: .15rem .5rem; border-radius: 4px; overflow: hidden;
+             text-overflow: ellipsis; font-family: var(--font-mono); font-size: .75rem; font-weight: 400;
+             background: var(--band-0); color: var(--band-0-fg); }
+tr.bands th[data-band="1"] .band-pill { background: var(--band-1); color: var(--band-1-fg); }
+tr.bands th[data-band="2"] .band-pill { background: var(--band-2); color: var(--band-2-fg); }
+tr.bands th[data-band="3"] .band-pill { background: var(--band-3); color: var(--band-3-fg); }
+thead tr.bands + tr th { top: var(--band-h); }
+#row-meta .partial { opacity: .8; }
+#join-notice { display: flex; gap: .75rem; align-items: center; margin: .5rem 0; padding: .6rem .9rem;
+               border-radius: 8px; background: color-mix(in srgb, var(--danger) 12%, transparent); }
+#join-notice-text { flex: 1; }
 #join-notice-actions { display: flex; gap: .5rem; }
-#join-dialog { width: min(52rem, 94vw); }
-#join-body { overflow: auto; max-height: var(--dialog-body-max-h); padding: var(--gap-lg);
-             display: flex; flex-direction: column; gap: var(--gap-lg); }
-#join-form { display: flex; flex-direction: column; align-items: flex-start; gap: .6rem; }
-#join-form > * { max-width: 100%; }
-.jf-row, .jf-pair { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
-.jf-pair select { min-width: 12rem; max-width: 100%; }
-.jf-label, .jf-eq { color: var(--text-muted); }
-.jf-join { border: 1px solid var(--rule-strong); border-radius: 8px; padding: .5rem .75rem;
-           display: flex; flex-direction: column; gap: .5rem; }
-.jf-join legend { font-size: .75rem; color: var(--text-muted); padding: 0 .25rem; }
-.jf-heading { margin: .25rem 0 0; font-size: .75rem; font-weight: 600; color: var(--text-muted); }
-.jf-column-list { display: flex; flex-wrap: wrap; gap: .25rem .75rem; padding: .25rem 0 .5rem; }
-.jf-column-list label { display: inline-flex; gap: .25rem; align-items: center; font-size: .8125rem; }
-#join-preview { margin: 0; padding: .5rem .75rem; background: color-mix(in srgb, currentColor 6%, transparent);
-                border-radius: 6px; font-family: var(--font-mono); font-size: .8125rem; white-space: pre-wrap; }
+.empty-join { text-align: center; padding: 1.5rem 0 1rem; white-space: normal; font-family: inherit; }
+.empty-join p { margin: 0 0 .5rem; }
+.empty-join .muted-note { color: var(--text-muted); font-size: .75rem; }
+.btn { background: none; border: 1px solid var(--border-strong); border-radius: 8px; padding: .4rem .85rem;
+       font: inherit; font-size: .8125rem; color: inherit; cursor: pointer; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn.primary { background: var(--chip-active-bg); border-color: var(--chip-active-bg); color: var(--chip-active-fg); }
+.btn.primary:hover:not(:disabled) { background: var(--chip-active-bg); opacity: .9; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ==== Join: overlay ==== */
+#join-dialog { width: min(57.5rem, 94vw); max-width: none; max-height: 90vh; border-radius: 12px; overflow: visible;
+               box-shadow: 0 12px 40px #0004; }
+#join-dialog[open] { display: flex; flex-direction: column; }
+#join-dialog .dialog-head { padding: 1rem 1.5rem .25rem; border-bottom: none; }
+#join-dialog .dialog-head strong { font-size: 1rem; }
+#join-modes { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+#join-modes button { padding: .3rem .85rem; font-size: .75rem; }
+#join-modes button[aria-selected="true"] { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#join-modes button:disabled { color: var(--text-muted); opacity: .6; cursor: not-allowed; }
+#join-body { overflow: auto; flex: 1; min-height: 0; padding: 0 1.5rem; }
+.jlab { margin: 1rem 0 .4rem; font-size: .6875rem; letter-spacing: .04em; text-transform: uppercase;
+        color: var(--text-muted); }
+.jmono { font-family: var(--font-mono); }
+.jmuted { color: var(--text-muted); }
+.j-start { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.j-chip { display: inline-flex; gap: .4rem; align-items: baseline; padding: .25rem .65rem; border-radius: 999px;
+          font-size: .8125rem; background: var(--chip-active-bg); color: var(--chip-active-fg); }
+.j-chip i { font-style: normal; font-size: .6875rem; opacity: .7; }
+.j-row { border: 1px solid var(--rule-strong); border-radius: 8px; padding: .6rem .75rem; margin-top: .5rem;
+         border-color: var(--border); }
+.j-line { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .8125rem; }
+.j-line + .j-line { margin-top: .4rem; }
+.j-kw { font-size: .6875rem; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.j-eq { color: var(--text-muted); }
+.j-ok { font-size: .75rem; color: var(--type-date); }
+.j-hint { margin: .5rem 0 0; font-size: .75rem; color: var(--text-muted); display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.j-bad { margin: .4rem 0 0; font-size: .75rem; color: var(--danger); }
+.j-rm { margin-left: auto; background: none; border: none; color: var(--text-muted); cursor: pointer; font: inherit;
+        padding: .1rem .4rem; border-radius: 6px; }
+.j-rm:hover { background: var(--hover); color: inherit; }
+.j-link { background: none; border: none; font: inherit; font-size: .75rem; color: inherit; text-decoration: underline;
+          padding: 0; cursor: pointer; }
+.j-link:disabled { opacity: .4; cursor: not-allowed; }
+.j-add { margin: .6rem 0 0; font-size: .8125rem; }
+.j-add .j-link { font-size: .8125rem; }
+.j-alias { box-sizing: border-box; width: 4.5rem; background: var(--surface); border: none; border-radius: 6px;
+           padding: .3rem .5rem; font: inherit; font-family: var(--font-mono); font-size: .8125rem; color: inherit; }
+.dd { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .55rem; border-radius: 6px;
+      background: var(--surface); border: none; font: inherit; font-size: .8125rem; color: inherit;
+      white-space: nowrap; cursor: pointer; }
+.dd.mono { font-family: var(--font-mono); }
+.dd.empty { color: var(--text-muted); }
+.dd.bad { box-shadow: 0 0 0 2px var(--danger); }
+.dd:hover { background: var(--hover); }
+.dd:focus-visible, .j-alias:focus-visible { outline: 2px solid var(--chip-active-bg); outline-offset: 1px; }
+#dd-pop { position: fixed; position-anchor: --dd-anchor; position-try-fallbacks: flip-block;
+          inset: auto; top: calc(anchor(bottom) + .25rem); left: anchor(left); margin: 0;
+          border: 1px solid var(--border-strong); border-radius: 8px; padding: .2rem; min-width: 14rem;
+          width: max-content; max-width: min(26rem, 90vw); max-height: 16rem; overflow: auto;
+          box-shadow: 0 4px 16px #0004; font-size: .8125rem; }
+#dd-pop-list { display: flex; flex-direction: column; }
+.dd-row { display: flex; justify-content: space-between; gap: 1rem; width: 100%; box-sizing: border-box;
+          background: none; border: none; font: inherit; font-family: var(--font-mono); color: inherit;
+          text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.dd-row:hover:not(.blocked), .dd-row:focus-visible { background: var(--hover); outline: none; }
+.dd-row[aria-selected="true"] { background: var(--hover); }
+.dd-note { font-family: var(--font-sans, system-ui, sans-serif); font-size: .6875rem; color: var(--text-muted); align-self: center; }
+.dd-row.blocked { color: var(--text-muted); opacity: .75; cursor: not-allowed; }
+.j-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; }
+.j-card { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .65rem; }
+.j-card h3 { margin: 0 0 .35rem; font-size: .75rem; font-weight: 600; display: flex; justify-content: space-between;
+             gap: .5rem; font-family: var(--font-mono); }
+.j-card h3 span { font-weight: 400; color: var(--text-muted); }
+.j-card h3 span.j-card-name { font-weight: 600; color: inherit; }
+.j-card label { display: flex; align-items: center; gap: .4rem; font-size: .75rem; line-height: 1.25rem; cursor: pointer; }
+.j-card input { margin: 0; }
+.j-sql { margin: 0; padding: .6rem .85rem; background: var(--surface); border-radius: 8px; font-family: var(--font-mono);
+         font-size: .75rem; line-height: 1.25rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: none; }
+#join-preview { opacity: .85; }
+#join-error { margin: .6rem 0 0; font-size: .8125rem; color: var(--danger); }
 #join-error:empty { display: none; }
-#join-error { margin: 0; color: var(--danger); }
-.dialog-foot { display: flex; justify-content: flex-end; gap: .5rem; padding: var(--gap-lg);
+.dialog-foot { display: flex; align-items: center; gap: .6rem; padding: .85rem 1.5rem 1.1rem; margin-top: 1rem;
                border-top: 1px solid var(--rule); }
-#filter-suggest button[aria-disabled="true"], #join-sql-suggest button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
-#join-modes { display: flex; gap: 1rem; border: none; margin: 0; padding: 0; }
-#join-modes label { display: inline-flex; gap: .35rem; align-items: center; cursor: pointer; }
-/* Same technique as #filter: the field's own text is transparent and #join-sql-hl,
-   behind it, draws the coloured copy; font, padding and wrapping must match. */
+#join-name-label { font-size: .75rem; color: var(--text-muted); }
+#join-name { box-sizing: border-box; background: var(--surface); border: none; border-radius: 6px; padding: .4rem .65rem;
+             font: inherit; font-size: .8125rem; width: 14rem; max-width: 40vw; color: inherit; }
+#join-name-note { font-size: .75rem; color: var(--text-muted); margin-right: auto; }
+/* SQL pane: the field's own text is transparent and #join-sql-hl, behind it,
+   draws the coloured copy; font, padding and wrapping must match. */
 #join-sql-wrap { position: relative; background: var(--surface); border-radius: 8px; }
-#join-sql, #join-sql-hl { font-family: var(--font-mono); font-size: .8125rem; line-height: 1.5; padding: .6rem .85rem;
+#join-sql, #join-sql-hl { font-family: var(--font-mono); font-size: .8125rem; line-height: 1.375rem; padding: .6rem .85rem;
                           box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 #join-sql { display: block; width: 100%; border: none; border-radius: 8px; background: transparent; resize: none;
             color: transparent; caret-color: CanvasText; position: relative; overflow: hidden; }
 #join-sql::selection { color: transparent; background: color-mix(in srgb, Highlight 40%, transparent); }
 #join-sql::placeholder { color: var(--text-muted); opacity: 1; }
 #join-sql-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.t-column { color: inherit; }
-#join-sql-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0;
-          background: canvas; color: inherit; border: 1px solid var(--border-strong);
-          border-radius: 8px; padding: .2rem; max-width: min(34rem, 100%); max-height: 12rem;
-          overflow: auto; box-shadow: 0 4px 16px #0004; }
-#join-sql-suggest button { display: block; width: 100%; box-sizing: border-box;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono);
-          background: none; border: none; font-size: inherit; color: inherit;
-          text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
+.t-name { color: inherit; }
+.t-plain { color: inherit; }
+#join-sql-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0; width: max-content;
+                    min-width: 16rem; max-width: min(34rem, 100%); font: .8125rem var(--font-mono);
+                    background: canvas; color: inherit; border: 1px solid var(--border-strong); border-radius: 8px;
+                    padding: .2rem; max-height: 12rem; overflow: auto; box-shadow: 0 4px 16px #0004; }
+#join-sql-suggest button { display: flex; justify-content: space-between; gap: 1rem; width: 100%; box-sizing: border-box;
+                           background: none; border: none; font: inherit; font-family: var(--font-mono); font-size: .8125rem;
+                           color: inherit; text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer;
+                           white-space: nowrap; }
 #join-sql-suggest button:hover, #join-sql-suggest button.active { background: var(--hover); }
-#join-sql-error { margin: .4rem 0 0; color: var(--danger); min-height: 1.2em; }
+#join-sql-suggest button[aria-disabled="true"] { color: var(--text-muted); opacity: .75; cursor: not-allowed; }
+.sg-note { font-family: system-ui, sans-serif; font-size: .6875rem; color: var(--text-muted); align-self: center;
+           overflow: hidden; text-overflow: ellipsis; }
+.sg-tag { margin-left: .4rem; padding: 0 .3rem; border-radius: 3px; background: var(--hover); font-size: .625rem; }
+#join-sql-error { margin: .5rem 0 0; font-size: .8125rem; color: var(--danger); min-height: 1.2em; }
+#join-sql-error:empty { display: none; }
+.j-tip { margin: .5rem 0 0; font-size: .75rem; color: var(--text-muted); }
+.j-grammar { font-size: .6875rem; }
+.j-grammar .muted { color: var(--text-muted); }
 @media (forced-colors: active) {
   #join-sql { color: CanvasText; }
   #join-sql-hl { display: none; }
 }
-
-/* Saved joins: their own row of chips under the table chips, set off by a label. */
-#saved-joins-bar { display: flex; align-items: center; gap: var(--gap); margin-top: .25rem; }
-#saved-joins-label { flex: none; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
-                     color: var(--text-muted); padding-left: .35rem; }
-#saved-joins { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; }
-#saved-joins li.unsaved button { border: 1px dashed var(--border-strong); }
-#saved-joins li.save-link button, #saved-joins li.new-join button { color: var(--text-muted); }
-#join-name-label { display: inline-flex; gap: .4rem; align-items: center; margin-right: auto; }
-#join-name { width: 14rem; max-width: 40vw; }

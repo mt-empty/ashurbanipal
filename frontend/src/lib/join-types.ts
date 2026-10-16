@@ -46,7 +46,8 @@ const LABEL: Record<JoinClass, string> = {
   time: "time",
   binary: "binary",
   enum: "enum",
-  custom: "custom type",
+  // Postgres reports an enum (or citext) as USER-DEFINED, and an enum is far the likelier.
+  custom: "enum",
 };
 
 function classOf(type: string): JoinClass | "none" | null {
@@ -55,20 +56,34 @@ function classOf(type: string): JoinClass | "none" | null {
   return CLASS_OF[t] ?? null;
 }
 
+const shown = (type: string): string => (type.toLowerCase() === "user-defined" ? "enum" : type);
+
+export interface JoinMismatch {
+  // Short, for a menu row: `text ≠ uuid`, `jsonb: not joinable`.
+  note: string;
+  // A sentence for under the pair.
+  message: string;
+}
+
 // Why a column of type `candidate` cannot pair with one of type `other`, or null
 // when it can or the page cannot tell.
-export function joinBlocker(candidate: string, other: string): string | null {
+export function joinMismatch(candidate: string, other: string): JoinMismatch | null {
   const a = classOf(candidate);
   const b = classOf(other);
-  if (a === "none") return `${candidate}: not joinable`;
-  if (b === "none") return `${other}: not joinable`;
+  if (a === "none" || b === "none") {
+    const type = shown(a === "none" ? candidate : other);
+    return { note: `${type}: not joinable`, message: `${type} columns cannot be joined. Pick another column.` };
+  }
   if (a === null || b === null || a === b) return null;
   // A custom type may be citext, which pairs with text.
   if ((a === "custom" && b === "text") || (a === "text" && b === "custom")) return null;
-  return `${LABEL[a]} ≠ ${LABEL[b]}`;
+  return {
+    note: `${shown(candidate)} ≠ ${shown(other)}`,
+    message: `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`,
+  };
 }
 
 // A column that cannot join anything, whatever the other side is.
 export function unjoinableReason(type: string): string | null {
-  return classOf(type) === "none" ? `${type}: not joinable` : null;
+  return classOf(type) === "none" ? `${shown(type)}: not joinable` : null;
 }

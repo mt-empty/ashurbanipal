@@ -43,8 +43,11 @@ export function buildBands(columns: Column[]): HTMLTableRowElement | null {
     const th = document.createElement("th");
     th.className = "band";
     th.dataset.band = String(col.join);
-    th.textContent = t.alias === null ? t.table : `${t.table} ${t.alias}`;
-    th.title = th.textContent;
+    const pill = document.createElement("span");
+    pill.className = "band-pill";
+    pill.textContent = t.alias === null ? t.table : `${t.table} ${t.alias}`;
+    pill.title = pill.textContent;
+    th.appendChild(pill);
     tr.appendChild(th);
   }
   return tr;
@@ -69,6 +72,7 @@ export function showJoinNotice(text: string, actions: { label: string; run: () =
     ...actions.map((a) => {
       const b = document.createElement("button");
       b.type = "button";
+      b.className = "btn";
       b.textContent = a.label;
       b.onclick = a.run;
       return b;
@@ -89,4 +93,25 @@ export function updateJoinChrome(): void {
   $<HTMLButtonElement>("join-btn").disabled = false;
   $<HTMLButtonElement>("join-edit-btn").hidden = !join;
   $<HTMLButtonElement>("join-link-btn").hidden = !join;
+  // Both describe one table; the board's join view keeps edit, link, refresh and columns.
+  $("structure-btn").hidden = join;
+  $("payload").hidden = join;
+}
+
+// The grid's empty state for an INNER join that matched nothing (board T4).
+export function buildEmptyJoin(onLeft: () => void): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "empty-join";
+  const title = document.createElement("p");
+  title.textContent = "No rows match this join.";
+  const why = document.createElement("p");
+  why.className = "muted-note";
+  why.textContent = "An inner join drops rows without a match. A left join keeps them.";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn";
+  btn.textContent = "Switch to left join";
+  btn.onclick = onLeft;
+  box.append(title, why, btn);
+  return box;
 }

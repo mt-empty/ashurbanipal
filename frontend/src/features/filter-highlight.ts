@@ -1,4 +1,5 @@
 import { $ } from "../core/dom.js";
+import { joinAliases } from "../core/state.js";
 import { filterDslErrorAt } from "../lib/filter-dsl.js";
 import { endsInUnfinishedWord, tokenizeFilterDsl } from "../lib/filter-tokens.js";
 import { attachOverlayHighlight } from "./overlay-highlight.js";
@@ -25,7 +26,7 @@ function render(): void {
   // Submit trims before parsing, so the error is found in the trimmed text.
   const lead = text.length - text.trimStart().length;
   const trimmed = text.trim();
-  const error = filterDslErrorAt(trimmed);
+  const error = filterDslErrorAt(trimmed, joinAliases());
   // An error at the very end is just unfinished typing, and an open quote is
   // only unfinished until it closes.
   let at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
