@@ -2294,6 +2294,7 @@ function defToDraft(def) {
   };
 }
 function draftToDef(draft) {
+  if (draft.joins.length === 0) return { error: "Add a table to join." };
   const tables = [
     { table: draft.table, alias: draft.alias.trim() || null },
     ...draft.joins.map((j) => ({ table: j.table, alias: j.alias.trim() || null }))
@@ -2869,7 +2870,7 @@ async function loadTables() {
     clearJoin();
     clearFilter();
   }
-  if (state.table && state.sort === null) applyStoredSort(state.table);
+  if (state.table && !state.join && state.sort === null) applyStoredSort(state.table);
   if (state.table) await loadData();
   else setStatus("");
 }
@@ -3113,8 +3114,9 @@ function mountJoinForm(root, onChange) {
     render2();
     onChange();
   }
-  const changed = () => {
-    const focused = lastDropdownLabel();
+  const changed = (fromMenu = false) => {
+    const active = document.activeElement;
+    const focused = fromMenu ? lastDropdownLabel() : root.contains(active) ? active?.getAttribute("aria-label") : null;
     render2();
     if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
@@ -3165,7 +3167,7 @@ function mountJoinForm(root, onChange) {
           const [p, ...rest] = v.split("|");
           pair.leftJoin = Number(p);
           pair.leftColumn = rest.join("|");
-          changed();
+          changed(true);
         }
       }),
       el("span", "j-eq", "="),
@@ -3179,7 +3181,7 @@ function mountJoinForm(root, onChange) {
         invalid: clash !== null,
         onPick: (v) => {
           pair.rightColumn = v;
-          changed();
+          changed(true);
         }
       })
     );
@@ -3209,7 +3211,7 @@ function mountJoinForm(root, onChange) {
         placeholder: "type",
         onPick: (v) => {
           join.type = v === "left" ? "left" : "inner";
-          changed();
+          changed(true);
         }
       }),
       createDropdown({
@@ -3219,10 +3221,15 @@ function mountJoinForm(root, onChange) {
         placeholder: "choose a table",
         mono: true,
         onPick: (v) => {
+          if (v !== join.table) {
+            for (const later of draft.joins.slice(i + 1)) {
+              for (const p of later.on) if (p.leftJoin === pos) p.leftColumn = "";
+            }
+          }
           join.table = v;
           join.on = [emptyPair()];
           draft.columns[pos] = null;
-          changed();
+          changed(true);
           load();
         }
       }),
@@ -3367,6 +3374,7 @@ function mountJoinForm(root, onChange) {
   return {
     setDraft(next) {
       draft = next;
+      loaded.clear();
       render2();
     },
     draft: () => draft,
@@ -3387,16 +3395,20 @@ function joinLabel(def) {
   const ref = (t) => t.alias === null ? t.table : `${t.table} ${t.alias}`;
   return def.tables.map((t, i) => i === 0 ? ref(t) : `${def.joins[i - 1].type === "left" ? "\u27D5" : "\u22C8"} ${ref(t)}`).join(" ");
 }
+function selectsEverything(def) {
+  if (def.columns === null) return true;
+  return def.columns.every((c) => "all" in c) && new Set(def.columns.map((c) => c.join)).size === def.tables.length;
+}
 function tablesToExpand(def) {
-  if (def.columns === null || def.columns.every((c) => "all" in c)) return [];
-  return [...new Set(def.columns.filter((c) => "all" in c).map((c) => c.join))];
+  if (selectsEverything(def)) return [];
+  return [...new Set((def.columns ?? []).filter((c) => "all" in c).map((c) => c.join))];
 }
 function toWire(def, columnsOf) {
   const wire = {
     table: def.tables[0].table,
     joins: def.joins.map((j, i) => ({ type: j.type, table: def.tables[i + 1].table, on: j.on }))
   };
-  if (def.columns !== null && !def.columns.every((c) => "all" in c)) {
+  if (def.columns !== null && !selectsEverything(def)) {
     wire.columns = def.columns.flatMap(
       (c) => "all" in c ? columnsOf(c.join).map((column) => ({ join: c.join, column })) : [c]
     );
@@ -3652,7 +3664,7 @@ function draftText(draft) {
     );
   });
   const picked = draft.columns.flatMap(
-    (c, pos) => c === null ? [] : c.map((col) => `${nameAt(pos)}.${quoteJoinName(col)}`)
+    (c, pos) => c === null ? [`${nameAt(pos)}.*`] : c.map((col) => `${nameAt(pos)}.${quoteJoinName(col)}`)
   );
   const select = draft.columns.some((c) => c !== null) && picked.length > 0 ? `SELECT ${picked.join(", ")}` : "SELECT *";
   return [select, ...lines].join("\n");
@@ -3669,9 +3681,10 @@ function errorSpan(text, index, code) {
   return [index, end];
 }
 function aliasFor(table, taken) {
-  const base = table.split("_").filter(Boolean).map((w) => w[0]).join("").toLowerCase() || "t";
+  const initials = table.split("_").filter(Boolean).map((w) => w[0]).join("").toLowerCase().replace(/[^a-z0-9_]/g, "");
+  const base = /^[a-z_]/.test(initials) ? initials : `t${initials}`;
   let alias = base;
-  for (let n = 2; taken.has(alias) || alias === table; n++) alias = `${base}${n}`;
+  for (let n = 2; taken.has(alias) || alias === table || quoteJoinName(alias) !== alias; n++) alias = `${base}${n}`;
   return alias;
 }
 function mountJoinSql(onChange) {
@@ -3841,7 +3854,7 @@ function problem() {
 }
 function refresh() {
   const bad = problem();
-  runBtn.disabled = bad !== "";
+  runBtn.disabled = bad !== "" || mode === "sql" && sql.text().trim() === "";
   if (mode === "form") {
     const result = draftToDef(form.draft());
     const text = "def" in result ? printJoin(result.def) : draftText(form.draft());
@@ -3982,26 +3995,34 @@ function buildBands(columns) {
   const tr = document.createElement("tr");
   tr.className = "bands";
   tr.appendChild(document.createElement("th")).className = "row-actions";
-  const seen = /* @__PURE__ */ new Set();
-  for (const col of columns) {
-    if (col.join === void 0 || seen.has(col.join)) continue;
-    seen.add(col.join);
+  let band = null;
+  columns.forEach((col, i) => {
+    if (col.join === void 0) return;
+    if (band && band.dataset.band === String(col.join)) {
+      band.dataset.end = String(i);
+      return;
+    }
     const t = def.tables[col.join];
-    const th = document.createElement("th");
-    th.className = "band";
-    th.dataset.band = String(col.join);
+    band = document.createElement("th");
+    band.className = "band";
+    band.dataset.band = String(col.join);
+    band.dataset.start = String(i);
+    band.dataset.end = String(i);
     const pill = document.createElement("span");
     pill.className = "band-pill";
     pill.textContent = t.alias === null ? t.table : `${t.table} ${t.alias}`;
     pill.title = pill.textContent;
-    th.appendChild(pill);
-    tr.appendChild(th);
-  }
+    band.appendChild(pill);
+    tr.appendChild(band);
+  });
   return tr;
 }
 function refreshBands() {
+  const heads = [...$("thead").querySelectorAll("th[data-join]")];
   for (const band of $("thead").querySelectorAll("th.band")) {
-    const visible = $("thead").querySelectorAll(`th[data-join="${band.dataset.band}"]:not(.col-hidden)`).length;
+    const from = Number(band.dataset.start);
+    const to = Number(band.dataset.end);
+    const visible = heads.slice(from, to + 1).filter((h) => !h.classList.contains("col-hidden")).length;
     band.colSpan = Math.max(visible, 1);
     band.classList.toggle("col-hidden", visible === 0);
   }
@@ -4933,6 +4954,7 @@ function setTableBusy(busy) {
   else tableEl.removeAttribute("aria-busy");
 }
 var inFlightFetches = 0;
+var JOIN_WIRE_LIMIT = 8192;
 async function joinPath(def, params) {
   const names = /* @__PURE__ */ new Map();
   await Promise.all(
@@ -4943,9 +4965,13 @@ async function joinPath(def, params) {
       );
     })
   );
-  params.set("join", JSON.stringify(toWire(def, (position) => names.get(position) ?? [])));
+  const wire = JSON.stringify(toWire(def, (position) => names.get(position) ?? []));
+  if (new TextEncoder().encode(wire).length > JOIN_WIRE_LIMIT)
+    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", void 0, 400);
+  params.set("join", wire);
   return `/tables/join?${params}`;
 }
+var loadedJoin = "";
 function reportJoinFailure(e) {
   if (e.code === "query_timeout") {
     showJoinNotice(
@@ -4957,7 +4983,7 @@ function reportJoinFailure(e) {
     );
     return true;
   }
-  if (e.status === 400 && e.code !== "invalid_filter") {
+  if (e.status === 400 && e.code !== "invalid_filter" && state.join !== loadedJoin) {
     openJoinDialog({ error: e.message });
     return true;
   }
@@ -5034,6 +5060,7 @@ async function loadData2({
   if (token !== loadDataToken) return;
   markStoredSortVerified();
   markFilterVerified();
+  loadedJoin = state.join;
   updateActiveTableChrome();
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && !state.join);
   $("payload").disabled = false;
