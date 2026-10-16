@@ -11,6 +11,7 @@ import { parseFilterDsl, quoteFilterValue } from "../src/lib/filter-dsl.ts";
 interface ParserCase {
   name: string;
   input: string;
+  aliases?: string[];
   expect?: unknown[];
   expect_error?: { position?: number };
 }
@@ -21,11 +22,11 @@ const cases: ParserCase[] = JSON.parse(readFileSync(fixtureUrl, "utf8")).cases;
 for (const c of cases) {
   test(`${c.name}: ${JSON.stringify(c.input.slice(0, 60))}`, () => {
     if (c.expect) {
-      assert.deepEqual(parseFilterDsl(c.input), c.expect);
+      assert.deepEqual(parseFilterDsl(c.input, c.aliases), c.expect);
       return;
     }
     assert.throws(
-      () => parseFilterDsl(c.input),
+      () => parseFilterDsl(c.input, c.aliases),
       (err: unknown) => {
         assert.ok(err instanceof Error);
         // Every parse error carries a byte offset (spec/filter-dsl.md §4);

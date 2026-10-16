@@ -28,9 +28,12 @@ class FilterDslError extends Error {
   }
 }
 
-type SimpleCondition = { column: string; op: FilterOp; value?: string };
+type SimpleCondition = { column: string; join?: number; op: FilterOp; value?: string };
 
-export function parseFilterDsl(input: string): FilterCondition[] {
+// `aliases` are a join view's table aliases in position order (spec/filter-dsl.md
+// §3): qualified columns resolve against them and every condition carries its
+// `join`. Without it a qualified column is a parse error.
+export function parseFilterDsl(input: string, aliases?: readonly string[]): FilterCondition[] {
   const err = (message: string, index: number): FilterDslError => {
     const position = new TextEncoder().encode(input.slice(0, index)).length;
     return new FilterDslError(message, position, index);
@@ -77,7 +80,7 @@ export function parseFilterDsl(input: string): FilterCondition[] {
     pos += keyword.length;
     return true;
   };
-  const parseColumn = (): string => {
+  const parseName = (): string => {
     const start = pos;
     const first = peek();
     if (first === null || !/^[a-zA-Z_]$/.test(first)) throw err("expected column name", start);
@@ -88,6 +91,42 @@ export function parseFilterDsl(input: string): FilterCondition[] {
       c = peek();
     }
     return input.slice(start, pos);
+  };
+  // A doubled "" decodes to a single literal ".
+  const parseQuotedQualifier = (): string => {
+    const start = pos;
+    pos += 1; // opening quote
+    let name = "";
+    for (;;) {
+      const c = peek();
+      if (c === null) throw err("unterminated quoted table alias", start);
+      if (c === '"') {
+        pos += 1;
+        if (peek() === '"') {
+          name += '"';
+          pos += 1;
+        } else break;
+      } else {
+        name += c;
+        pos += c.length;
+      }
+    }
+    if (name === "") throw err("empty table alias", start);
+    return name;
+  };
+  const parseColumn = (): { column: string; join?: number } => {
+    const start = pos;
+    const quoted = aliases !== undefined && peek() === '"';
+    const first = quoted ? parseQuotedQualifier() : parseName();
+    if (!quoted && peek() !== ".") return { column: first, ...(aliases ? { join: 0 } : {}) };
+    if (!aliases) throw err("qualified column names are only allowed in a join view", start);
+    if (peek() !== ".") throw err("expected . after the table alias", pos);
+    pos += 1;
+    const column = parseName();
+    if (peek() === ".") throw err("a column takes one table alias only", pos);
+    const join = aliases.indexOf(first);
+    if (join < 0) throw err(`unknown table alias ${first}`, start);
+    return { column, join };
   };
   // A doubled '' decodes to a single literal '.
   const parseQuotedValue = (): string => {
@@ -143,7 +182,7 @@ export function parseFilterDsl(input: string): FilterCondition[] {
   // Speculatively tries the IS [NOT] NULL branch and rewinds to right
   // after the column if it doesn't apply.
   const parseSimpleCondition = (): SimpleCondition => {
-    const column = parseColumn();
+    const { column, join } = parseColumn();
     const afterColumn = pos;
     const wsChar = peek();
     if (wsChar !== null && isWs(wsChar)) {
@@ -153,7 +192,7 @@ export function parseFilterDsl(input: string): FilterCondition[] {
         const isNot = consumeKeyword("NOT");
         if (isNot) skipWsRequired();
         if (!consumeKeyword("NULL")) throw err("expected NULL", pos);
-        return { column, op: isNot ? "IS NOT NULL" : "IS NULL" };
+        return { column, join, op: isNot ? "IS NOT NULL" : "IS NULL" };
       }
       pos = afterColumn;
     }
@@ -161,7 +200,7 @@ export function parseFilterDsl(input: string): FilterCondition[] {
     const op = parseOperator();
     skipWsOptional();
     const value = peek() === "'" ? parseQuotedValue() : parseBareValue();
-    return { column, op, value };
+    return { column, join, op, value };
   };
 
   const conditions: FilterCondition[] = [];
@@ -179,6 +218,7 @@ export function parseFilterDsl(input: string): FilterCondition[] {
       ...(pendingLogic ? { logic: pendingLogic } : {}),
       ...(not ? { not: true } : {}),
       column: simple.column,
+      ...(simple.join !== undefined ? { join: simple.join } : {}),
       op: simple.op,
       ...(simple.value !== undefined ? { value: simple.value } : {}),
     };
@@ -199,9 +239,9 @@ export function parseFilterDsl(input: string): FilterCondition[] {
 // Non-throwing sibling for restore paths (URL-sourced filter) that must
 // discard a bad filter silently (ui-guidelines R5) rather than surface it,
 // unlike a live submission through submitFilter().
-export function tryParseFilterDsl(input: string): FilterCondition[] | null {
+export function tryParseFilterDsl(input: string, aliases?: readonly string[]): FilterCondition[] | null {
   try {
-    return parseFilterDsl(input);
+    return parseFilterDsl(input, aliases);
   } catch {
     return null;
   }
@@ -217,9 +257,12 @@ export function quoteFilterValue(value: string): string {
 }
 
 // Where parseFilterDsl rejects `input`, as a string index; null when it parses.
-export function filterDslErrorAt(input: string): { index: number; message: string } | null {
+export function filterDslErrorAt(
+  input: string,
+  aliases?: readonly string[],
+): { index: number; message: string } | null {
   try {
-    parseFilterDsl(input);
+    parseFilterDsl(input, aliases);
     return null;
   } catch (e) {
     if (!(e instanceof FilterDslError)) return null;

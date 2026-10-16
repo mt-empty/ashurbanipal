@@ -28,7 +28,9 @@ export interface Tokenized {
 }
 
 const SYMBOLS = [">=", "<=", "!=", ">", "<", "="];
-const IDENT = /[A-Za-z_][A-Za-z0-9_]*/y;
+// A column, optionally qualified by a table alias (bare or "quoted"). A trailing
+// `alias.` with no name yet is still one token, so it can be completed.
+const IDENT = /(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")+")\.[A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*/y;
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
 
 // Case-insensitive with the parser's word-boundary rule, so LIKELY is not LIKE.

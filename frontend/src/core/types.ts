@@ -64,6 +64,8 @@ export type FilterOp = "=" | "!=" | ">" | ">=" | "<" | "<=" | "LIKE" | "ILIKE" |
 export interface FilterCondition {
   logic?: "AND" | "OR";
   not?: boolean;
+  // Table position in a join view (spec/protocol.md §5.11.3); absent otherwise.
+  join?: number;
   column: string;
   op: FilterOp;
   value?: string;
@@ -103,4 +105,38 @@ export interface Sibling {
   name: string;
   base_url: string;
   healthy: boolean;
+}
+
+// ---- Join (spec/join-dsl.md §3, spec/protocol.md §5.11) ----
+
+export type JoinType = "inner" | "left";
+
+export interface JoinTable {
+  table: string;
+  alias: string | null;
+}
+
+export interface JoinPair {
+  left: { join: number; column: string };
+  right: string;
+}
+
+export interface JoinClause {
+  type: JoinType;
+  on: JoinPair[];
+}
+
+export type JoinColumn = { join: number; column: string } | { join: number; all: true };
+
+// The one object the join text, the form and the request all view.
+export interface JoinDef {
+  tables: JoinTable[];
+  joins: JoinClause[];
+  columns: JoinColumn[] | null;
+}
+
+export interface WireJoin {
+  table: string;
+  joins: { type: JoinType; table: string; on: JoinPair[] }[];
+  columns?: { join: number; column: string }[];
 }

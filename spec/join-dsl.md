@@ -47,7 +47,7 @@ ows         = { whitespace } ;
 Notes:
 
 - **Keywords** (`SELECT FROM JOIN INNER LEFT OUTER ON AND AS`) are
-  case-insensitive. A bare identifier may not be a keyword or a rejected
+  case-insensitive. A bare identifier may not be a keyword, `OR`, or a rejected
   word (§4); quote it (`"left"`) to use it as a name.
 - **Names are case-sensitive**, matched exactly against the catalog, as in
   `spec/protocol.md` §5.11.1.
