@@ -3,13 +3,23 @@ import { state } from "../core/state.js";
 import type { Column, Row } from "../core/types.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
 import { renderJsonTree } from "../lib/json-tree.js";
+import { inJoinView } from "./join-view.js";
 import { renderReferencedBy } from "./referenced-by.js";
 
 // ---- record / vertical view: one already-fetched row as a stacked
 // column:value list, for tables too wide to scan across ----
 export function buildRecordEntries(columns: Column[], row: Row): Node[] {
   const nodes: Node[] = [];
+  let group: number | undefined;
   for (const col of columns) {
+    // A join row is grouped by the table each column came from.
+    if (col.join !== undefined && col.join !== group) {
+      group = col.join;
+      const heading = document.createElement("dt");
+      heading.className = "record-group";
+      heading.textContent = col.table ?? "";
+      nodes.push(heading);
+    }
     const dt = document.createElement("dt");
     dt.textContent = col.name;
     const dd = document.createElement("dd");
@@ -82,7 +92,11 @@ function sqlLiteral(col: Column, raw: string | null): string {
 
 export function openRecordView(columns: Column[], row: Row): void {
   $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
-  renderReferencedBy($("record-referenced-by"), row, () => $<HTMLDialogElement>("record-dialog").close());
+  // Both read state.table, which is only one of a join's tables.
+  const join = inJoinView();
+  $("record-referenced-by-wrap").hidden = join;
+  $("record-copy-insert").hidden = join;
+  if (!join) renderReferencedBy($("record-referenced-by"), row, () => $<HTMLDialogElement>("record-dialog").close());
   const copyRowBtn = $("record-copy-row");
   copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
   const copyInsertBtn = $("record-copy-insert");

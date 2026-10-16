@@ -4,6 +4,7 @@ import { $, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
 import {
   applyStoredSort,
   clearFilter,
+  clearJoin,
   scopeQuery,
   sourceQuery,
   state,
@@ -227,6 +228,7 @@ export async function loadTables(): Promise<void> {
     // A ?filter= was written against the table the URL named; that table
     // isn't here, so its columns can't apply to the fallback — carrying it
     // over would 400 and dead-end the very load meant to recover (R5).
+    clearJoin();
     clearFilter();
   }
   // Restore this table's remembered sort unless one is already set — a

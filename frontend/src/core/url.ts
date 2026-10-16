@@ -1,4 +1,4 @@
-import { restoreFilterFromParams, restoreFromStorage, state } from "./store.js";
+import { restoreFilterFromParams, restoreFromStorage, restoreJoinFromParams, state } from "./store.js";
 
 // URL <-> state, read side (nav.ts owns the write side, syncUrl). There are
 // two readers and they differ on purpose:
@@ -23,6 +23,7 @@ export function applyUrlOverlay(params: URLSearchParams): void {
   if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
   if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
   if (params.has("offset")) state.offset = Number(params.get("offset")) || 0;
+  restoreJoinFromParams(params);
   restoreFilterFromParams(params);
 }
 
@@ -34,6 +35,7 @@ export function applyUrlExact(params: URLSearchParams): void {
   state.order = params.get("order") === "desc" ? "desc" : "asc";
   state.limit = Number(params.get("limit")) || state.limit;
   state.offset = Number(params.get("offset")) || 0;
+  restoreJoinFromParams(params);
   restoreFilterFromParams(params);
 }
 

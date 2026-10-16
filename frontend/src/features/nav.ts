@@ -1,5 +1,5 @@
 import { $, reportError } from "../core/dom.js";
-import { applyScopeParams, applyUrlExact, persist, setSchema, state } from "../core/state.js";
+import { applyScopeParams, applyUrlExact, clearJoin, persist, setSchema, state } from "../core/state.js";
 import { loadTables } from "./sidebar.js";
 
 // The one sanctioned bypass of the switchSource/switchSchema/switchTable
@@ -11,6 +11,7 @@ import { loadTables } from "./sidebar.js";
 // applyFilter's own. Shared by grid.ts's FK-cell nav and the
 // referenced-by drill-in.
 export function navigateWithSeededFilter(table: string, schema: string | undefined, applyFilter: () => void): void {
+  clearJoin();
   state.table = table;
   state.sort = null;
   if (schema && schema !== state.schema) {
@@ -48,7 +49,7 @@ let navIndex = -1;
 let restoringFromHistory = false; // true while a popstate-triggered reload is in flight
 
 function navViewKey(): string {
-  return `${state.source ?? ""} ${state.schema ?? ""} ${state.table ?? ""}`;
+  return `${state.source ?? ""} ${state.schema ?? ""} ${state.table ?? ""} ${state.join}`;
 }
 
 function updateNavButtons(): void {
@@ -59,6 +60,7 @@ function updateNavButtons(): void {
 // filter rides in the URL (ui-guidelines.md R6) but is deliberately excluded
 // from navViewKey() below — a filter change replaces the current history
 // entry like a sort click or a page turn, never pushing a new back-stack stop.
+// The join is part of the key: entering or leaving a join view is a new stop.
 export function syncUrl(): void {
   const params = new URLSearchParams({
     table: state.table ?? "",
@@ -70,6 +72,7 @@ export function syncUrl(): void {
     params.set("order", state.order);
   }
   applyScopeParams(params);
+  if (state.join) params.set("join", state.join);
   if (state.filter) params.set("filter", state.filter);
   const qs = `?${params}`;
   const key = navViewKey();

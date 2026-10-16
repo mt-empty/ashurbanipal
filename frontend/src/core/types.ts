@@ -8,6 +8,11 @@ interface ColumnBase {
   name: string;
   type: string;
   comment?: string;
+  // Join responses only (spec/protocol.md §5.11.4): `name` is a unique label;
+  // these locate the column. Never parse the label.
+  join?: number;
+  table?: string;
+  column?: string;
 }
 
 // spec/openapi.yaml ColumnInfo: `references` is present exactly when the
@@ -26,7 +31,9 @@ export interface Row {
 export interface TableData {
   columns: Column[];
   rows: Row[];
-  total_approx: number;
+  // /tables/data carries total_approx, /tables/join carries has_more (§5.11.4).
+  total_approx?: number;
+  has_more?: boolean;
 }
 
 // spec/openapi.yaml StructureResponse (§5.10): one table's indexes and

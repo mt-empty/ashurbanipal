@@ -13,6 +13,7 @@ import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { columnMinWidth } from "./column-widths.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
+import { buildBands, columnKey, inJoinView, refreshBands } from "./join-view.js";
 import { navigateWithSeededFilter } from "./nav.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
@@ -26,6 +27,7 @@ export function renderHeader(columns: Column[]): void {
   for (const col of columns) {
     const th = document.createElement("th");
     th.dataset.col = col.name;
+    if (col.join !== undefined) th.dataset.join = String(col.join);
     const minWidth = columnMinWidth(col.name);
     if (minWidth) th.style.minWidth = `${minWidth}px`;
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
@@ -68,13 +70,14 @@ export function renderHeader(columns: Column[]): void {
       head.append(nameEl, " ");
     }
     if (col.comment) th.title = col.comment;
+    const sortKey = columnKey(col);
     th.setAttribute(
       "aria-sort",
-      col.name === state.sort ? (state.order === "desc" ? "descending" : "ascending") : "none",
+      sortKey === state.sort ? (state.order === "desc" ? "descending" : "ascending") : "none",
     );
     th.onclick = () => {
-      state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
-      state.sort = col.name;
+      state.order = state.sort === sortKey && state.order === "asc" ? "desc" : "asc";
+      state.sort = sortKey;
       state.offset = 0;
       rememberSort();
       loadData({ resetScroll: false });
@@ -90,11 +93,14 @@ export function renderHeader(columns: Column[]): void {
       e.stopPropagation();
       showCommonValues(e, col.name);
     };
-    head.appendChild(cvBtn);
+    // Common values are a per-table query; a join column has no single table to ask.
+    if (!inJoinView()) head.appendChild(cvBtn);
     th.append(head, typeCode);
     tr.appendChild(th);
   }
-  $("thead").replaceChildren(tr);
+  const bands = buildBands(columns);
+  $("thead").replaceChildren(...(bands ? [bands, tr] : [tr]));
+  if (bands) refreshBands();
 }
 
 function renderEmptyState(columnCount: number): void {
@@ -159,7 +165,7 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
     filterBtn.textContent = "=";
     filterBtn.onclick = (e) => {
       e.stopPropagation();
-      applyFilterClause(col.name, "IS NULL");
+      applyFilterClause(columnKey(col), "IS NULL");
     };
     const actions = document.createElement("span");
     actions.className = "cell-actions";
@@ -177,7 +183,7 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
   };
   filterBtn.onclick = (e) => {
     e.stopPropagation();
-    applyFilterClause(col.name, "=", raw);
+    applyFilterClause(columnKey(col), "=", raw);
   };
   if (col.references) {
     const references = col.references;
@@ -188,7 +194,7 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
       navigateWithSeededFilter(references.table, references.schema, () =>
         applyFilterClause(references.column, "=", raw),
       );
-  } else if (col.key === "pk") {
+  } else if (col.key === "pk" && !inJoinView()) {
     // Reverse of the FK-cell click: what points *at* this row. A pk+fk
     // column took the branch above; those rows, and no-PK tables, reach the
     // same list through the record dialog instead.
@@ -218,13 +224,17 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
 function setColumnVisibility(name: string, hidden: boolean): void {
   const current = hiddenColumnsForTable();
   const next = hidden ? [...current, name] : current.filter((c) => c !== name);
-  const table = state.table ?? "";
-  if (next.length) state.hiddenColumns[table] = next;
-  else delete state.hiddenColumns[table];
-  persist();
+  if (inJoinView()) state.joinHidden = next;
+  else {
+    const table = state.table ?? "";
+    if (next.length) state.hiddenColumns[table] = next;
+    else delete state.hiddenColumns[table];
+    persist();
+  }
   for (const el of document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
     el.classList.toggle("col-hidden", hidden);
   }
+  refreshBands();
   updateColumnsButtonLabel();
 }
 
@@ -292,9 +302,17 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
 
 export function updatePager(data: TableData): void {
   const page = Math.floor(state.offset / state.limit) + 1;
-  $("page").textContent = `page ${page}`;
-  $("row-meta").textContent = ` · ${formatApproxCount(data.total_approx)} rows · ${data.columns.length} columns`;
-  $("row-meta").title = APPROX_COUNT_TITLE;
   $<HTMLButtonElement>("prev").disabled = state.offset === 0;
+  if (inJoinView()) {
+    // A join has no total (spec/protocol.md §5.11.4): the page says whether more follows.
+    $("page").textContent = `page ${page} · ${data.has_more ? "more rows available" : "last page"}`;
+    $("row-meta").textContent = ` · ${data.rows.length} rows · ${data.columns.length} columns`;
+    $("row-meta").removeAttribute("title");
+    $<HTMLButtonElement>("next").disabled = !data.has_more;
+    return;
+  }
+  $("page").textContent = `page ${page}`;
+  $("row-meta").textContent = ` · ${formatApproxCount(data.total_approx ?? -1)} rows · ${data.columns.length} columns`;
+  $("row-meta").title = APPROX_COUNT_TITLE;
   $<HTMLButtonElement>("next").disabled = data.rows.length < state.limit;
 }

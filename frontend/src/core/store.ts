@@ -1,7 +1,8 @@
 import { tryParseFilterDsl } from "../lib/filter-dsl.js";
+import { effectiveName, parseJoin, printJoin } from "../lib/join-dsl.js";
 import { collectNewRowKeys } from "../lib/row-diff.js";
 import { $ } from "./dom.js";
-import type { FilterCondition, TableData } from "./types.js";
+import type { FilterCondition, JoinDef, TableData } from "./types.js";
 
 const UI_KEY = "ashurbanipal_ui";
 
@@ -22,6 +23,12 @@ export interface State {
   // sources and back doesn't drop you into `public` again (ui-guidelines R12).
   schemaBySource: Record<string, string>;
   filter: string;
+  // The applied join in canonical text (spec/join-dsl.md §3); "" outside a join
+  // view. Like filter it rides in the URL but never in localStorage. While it is
+  // set, `table` stays the join's start table.
+  join: string;
+  // Hidden columns of the current join view only; not persisted, reset with it.
+  joinHidden: string[];
 }
 
 // Persisted to localStorage and mirrored to the URL: table/limit/offset
@@ -51,7 +58,50 @@ export const state: State = {
   sortByTable: {},
   schemaBySource: {},
   filter: "",
+  join: "",
+  joinHidden: [],
 };
+
+// Parsed from state.join at commit time, like the filter AST below.
+let appliedJoin: JoinDef | null = null;
+export function getAppliedJoin(): JoinDef | null {
+  return appliedJoin;
+}
+// Table aliases in position order, the shape parseFilterDsl takes in a join view.
+export function joinAliases(): string[] | undefined {
+  return appliedJoin?.tables.map(effectiveName);
+}
+export function setAppliedJoin(def: JoinDef): void {
+  const text = printJoin(def);
+  if (text !== state.join) state.joinHidden = [];
+  state.join = text;
+  appliedJoin = def;
+  state.table = def.tables[0].table;
+}
+// Leaves the join view (the filter and sort written against its labels go with it).
+export function clearJoin(): void {
+  if (!state.join) return;
+  state.join = "";
+  state.joinHidden = [];
+  appliedJoin = null;
+  state.sort = null;
+  state.order = "asc";
+  clearFilter();
+}
+// Shared by url.ts's two readers; runs before the filter restore, which needs
+// the aliases. Malformed text lands in no join at all (R5). Names are not
+// checked here: the page has no catalog yet, and the server answers 400.
+export function restoreJoinFromParams(params: URLSearchParams): void {
+  const text = params.get("join") ?? "";
+  const parsed = text ? parseJoin(text) : null;
+  if (!parsed || "error" in parsed) {
+    state.join = "";
+    state.joinHidden = [];
+    appliedJoin = null;
+    return;
+  }
+  setAppliedJoin(parsed.def);
+}
 
 // state.filter stays the applied *text*; the AST that actually goes on the
 // wire is derived from it once, at commit time, so unparseable box text
@@ -101,7 +151,7 @@ export function clearFilter(): void {
 // and a malformed one land in the same place: no filter at all (R5).
 export function restoreFilterFromParams(params: URLSearchParams): void {
   const text = params.get("filter") ?? "";
-  const ast = text ? tryParseFilterDsl(text) : null;
+  const ast = text ? tryParseFilterDsl(text, joinAliases()) : null;
   if (!ast) {
     clearFilter();
     return;
@@ -188,13 +238,13 @@ export function persist(): void {
 // columns simply matches nothing wherever it's consulted, so no separate
 // validation pass is needed here.
 export function hiddenColumnsForTable(): string[] {
-  return state.hiddenColumns[state.table ?? ""] ?? [];
+  return state.join ? state.joinHidden : (state.hiddenColumns[state.table ?? ""] ?? []);
 }
 
 // sort + order are remembered per table (like hiddenColumns): a column
 // name is table-specific, so this never carries a sort across tables.
 export function rememberSort(): void {
-  if (!state.table) return;
+  if (!state.table || state.join) return;
   if (state.sort) state.sortByTable[state.table] = { col: state.sort, order: state.order };
   else delete state.sortByTable[state.table];
   sortRisk.set(false); // came from a click on a live header
@@ -276,6 +326,7 @@ export function switchSource(name: string): void {
   state.table = null;
   state.sort = null;
   state.offset = 0;
+  clearJoin();
   clearFilter();
   persist();
 }
@@ -287,12 +338,14 @@ export function switchSchema(name: string): void {
   state.table = null;
   state.sort = null;
   state.offset = 0;
+  clearJoin();
   clearFilter();
 }
 
 // Table chip click: the filter was written against this table's columns
 // so it clears; the sort is restored to whatever was last used on this table.
 export function switchTable(name: string): void {
+  clearJoin();
   state.table = name;
   state.offset = 0;
   applyStoredSort(name);
@@ -316,6 +369,7 @@ export function scopeKey(): string {
     state.offset,
     state.limit,
     getAppliedFilterAst(),
+    state.join,
   ]);
 }
 

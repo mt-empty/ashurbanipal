@@ -5,15 +5,19 @@ import {
   diffNewRows,
   dropOneStaleInput,
   getAppliedFilterAst,
+  getAppliedJoin,
   markFilterVerified,
   markStoredSortVerified,
   state,
 } from "../core/state.js";
-import type { TableData } from "../core/types.js";
+import type { JoinDef, TableData } from "../core/types.js";
 import { currentWidthScope, rememberColumnWidths, useWidthScope } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
+import { tableColumns } from "../features/join-catalog.js";
+import { splitColumnKey } from "../features/join-view.js";
 import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
+import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js";
 
 // The render-orchestration hub: loadData sequences fetch -> chrome ->
@@ -34,19 +38,40 @@ function setTableBusy(busy: boolean): void {
 // finish clear aria-busy/#status while another is still running.
 let inFlightFetches = 0;
 
+// `alias.*` has no wire form, so those tables' column names come from the catalog.
+async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> {
+  const names = new Map<number, string[]>();
+  await Promise.all(
+    tablesToExpand(def).map(async (position) => {
+      names.set(
+        position,
+        (await tableColumns(def.tables[position].table)).map((c) => c.name),
+      );
+    }),
+  );
+  params.set("join", JSON.stringify(toWire(def, (position) => names.get(position) ?? [])));
+  return `/tables/join?${params}`;
+}
+
 async function fetchTableData(): Promise<TableData> {
   // Captured once, never re-read later: without this, a slow fetch for
   // table A would clear table B's row-loading flag (whatever state.table
   // had become by the time A's `finally` runs) instead of its own.
   const table = state.table ?? "";
+  const join = getAppliedJoin();
   const params = new URLSearchParams({
-    table,
     limit: String(state.limit),
     offset: String(state.offset),
   });
+  if (!join) params.set("table", table);
   if (state.sort) {
-    params.set("sort", state.sort);
-    params.set("order", state.order);
+    // In a join view the sort is `alias.column`; the wire wants the column and its table position.
+    const target = join ? splitColumnKey(state.sort) : { column: state.sort, join: undefined };
+    if (target) {
+      params.set("sort", target.column);
+      if (target.join !== undefined) params.set("sort_join", String(target.join));
+      params.set("order", state.order);
+    }
   }
   applyScopeParams(params);
   // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
@@ -58,7 +83,7 @@ async function fetchTableData(): Promise<TableData> {
   }
   setRowLoading(table, true);
   try {
-    return await api<TableData>(`/tables/data?${params}`);
+    return await api<TableData>(join ? await joinPath(join, params) : `/tables/data?${params}`);
   } finally {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
@@ -72,9 +97,11 @@ async function fetchTableData(): Promise<TableData> {
 // of it — a failed fetchTableData() (see loadData) must leave these
 // exactly as they were, matching the stale <table> body they describe.
 function updateActiveTableChrome(): void {
-  setActiveTable(state.table);
-  $("current").textContent = state.table ?? "—";
-  document.title = state.table ? `${state.table} — Ashurbanipal` : "Ashurbanipal";
+  const join = getAppliedJoin();
+  const title = join ? joinLabel(join) : state.table;
+  setActiveTable(join ? null : state.table);
+  $("current").textContent = title ?? "—";
+  document.title = title ? `${title} — Ashurbanipal` : "Ashurbanipal";
 }
 
 // loadData() has multiple entry points (table switch, sort click, filter
@@ -125,11 +152,12 @@ export async function loadData({
   markFilterVerified();
   updateActiveTableChrome();
 
-  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew);
+  // Row keys come from primary keys, which a join of several tables does not have.
+  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && !state.join);
 
   $<HTMLButtonElement>("payload").disabled = false;
   $<HTMLButtonElement>("columns-btn").disabled = false;
-  $<HTMLButtonElement>("structure-btn").disabled = false;
+  $<HTMLButtonElement>("structure-btn").disabled = state.join !== "";
   $<HTMLButtonElement>("refresh").disabled = false;
   updateColumnsButtonLabel();
   syncUrl();

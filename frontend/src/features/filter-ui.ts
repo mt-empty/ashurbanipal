@@ -1,16 +1,24 @@
 import { loadData } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
 import { $, reportError } from "../core/dom.js";
-import { applyScopeParams, getLastPayload, markFilterVerified, setAppliedFilterAst, state } from "../core/state.js";
+import {
+  applyScopeParams,
+  getLastPayload,
+  joinAliases,
+  markFilterVerified,
+  setAppliedFilterAst,
+  state,
+} from "../core/state.js";
 import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
 import { parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
+import { columnKey } from "./join-view.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
   if (text) {
     try {
-      ast = parseFilterDsl(text);
+      ast = parseFilterDsl(text, joinAliases());
     } catch (e) {
       reportError(e);
       return;
@@ -247,7 +255,7 @@ function showFilterSuggestions(ctx: Completion, all: Suggestion[], index: number
 }
 
 function isColumn(name: string | null): boolean {
-  return name !== null && (getLastPayload()?.columns.some((c) => c.name === name) ?? false);
+  return name !== null && (getLastPayload()?.columns.some((c) => columnKey(c) === name) ?? false);
 }
 
 function updateFilterSuggestions(): void {
@@ -262,12 +270,12 @@ function updateFilterSuggestions(): void {
   const token = filterSuggestToken;
   const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
-    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
+    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map(columnKey)), 0);
   } else if (ctx.expect === "operator") {
     if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")), -1);
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
     showFilterSuggestions(ctx, plain(optionsFor("joiner")), -1);
-  } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column)) {
+  } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column) && !state.join) {
     commonValuesFor(ctx.column).then((values) => {
       if (token !== filterSuggestToken || document.activeElement !== input) return;
       const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));

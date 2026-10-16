@@ -157,6 +157,14 @@ th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
 thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+/* Join view: one band per table above the headers. The headers pin below the
+   band row, so the band height is fixed. */
+thead { --band-h: 1.5rem; }
+thead tr.bands th { height: var(--band-h); box-sizing: border-box; cursor: default; font-weight: 600;
+                    color: var(--text-muted); border-bottom: 1px solid var(--rule); text-align: left;
+                    overflow: hidden; text-overflow: ellipsis; }
+thead tr.bands th.band + th.band, thead tr.bands th.row-actions + th.band { border-left: 1px solid var(--rule); }
+thead tr.bands + tr th { top: var(--band-h); }
 /* Capped like the table chips' names; the title carries the full name. */
 .col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
             vertical-align: bottom; }
@@ -342,6 +350,9 @@ dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
             gap: .3rem var(--gap-lg); }
 dialog dl dt { font-weight: 600; }
 dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A join row's fields are grouped under the table they came from. */
+dialog dl dt.record-group { grid-column: 1 / -1; color: var(--text-muted); font-size: .75rem;
+                           border-bottom: 1px solid var(--rule); padding-top: .5rem; }
 /* A grid item, not absolutely positioned over a td, so it needs
    `position: static`; hover-to-reveal otherwise matches the table's
    copy button, keyed off dd:hover since dt/dd/button are flat grid
