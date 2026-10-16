@@ -250,7 +250,7 @@ export function rememberSchema(): void {
 }
 
 // ---- named scope transitions ----
-// Each of the three sidebar scope switches has exactly one caller, so they take
+// Each of the three scope switches (source, schema, table) has exactly one caller, so they take
 // no options. nav.ts's navigateWithSeededFilter is the sanctioned bypass —
 // it seeds a filter rather than clearing one, drops the remembered sort (a
 // stale one would defeat loadData's drop-and-retry against the same-fetch

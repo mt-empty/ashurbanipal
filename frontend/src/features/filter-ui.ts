@@ -4,7 +4,7 @@ import { $, reportError } from "../core/dom.js";
 import { applyScopeParams, getLastPayload, markFilterVerified, setAppliedFilterAst, state } from "../core/state.js";
 import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
 import { parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
-import { type Completion, completionAt } from "../lib/filter-tokens.js";
+import { type Completion, completionAt, FILTER_OPERATORS } from "../lib/filter-tokens.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
@@ -64,9 +64,8 @@ $<HTMLInputElement>("filter").addEventListener("search", () => {
 // job. Scoped to the cursor sitting at the end of the text — mid-string edits
 // get no suggestions.
 //
-// popover="manual" so it stays open while typing; arrow keys/Enter/Tab/
-// Escape and light-dismiss (pointerdown listener below) are all
-// hand-rolled to match. Enter accepts only a highlighted row, so Enter still
+// Arrow keys/Enter/Tab/Escape and light-dismiss (pointerdown listener below)
+// are hand-rolled. Enter accepts only a highlighted row, so Enter still
 // submits; operator, value and joiner lists start with no row highlighted
 // (Tab or an arrow key picks one). ----
 const CARET_MIRROR_PROPS: Extract<keyof CSSStyleDeclaration, string>[] = [
@@ -102,8 +101,9 @@ const CARET_MIRROR_PROPS: Extract<keyof CSSStyleDeclaration, string>[] = [
 
 // Renders an invisible clone of the text up to the cursor with identical
 // font metrics — the standard technique for locating a caret position in a
-// plain <input>, which has no native API for this.
-function measureCaretPosition(input: HTMLInputElement): { x: number; y: number } {
+// plain <input>, which has no native API for this. Returns the caret's x
+// within the input's own box.
+function measureCaretX(input: HTMLInputElement): number {
   const mirror = document.createElement("div");
   const computed = getComputedStyle(input);
   Object.assign(mirror.style, {
@@ -125,9 +125,7 @@ function measureCaretPosition(input: HTMLInputElement): { x: number; y: number }
   mirror.appendChild(marker);
   document.body.appendChild(mirror);
   try {
-    const inputRect = input.getBoundingClientRect();
-    const offsetX = marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left;
-    return { x: inputRect.left + offsetX - input.scrollLeft, y: inputRect.bottom };
+    return marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left - input.scrollLeft;
   } finally {
     mirror.remove();
   }
@@ -137,7 +135,6 @@ interface Suggestion {
   label: string;
   insert: string;
 }
-const FILTER_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"];
 
 let filterSuggestMatches: Suggestion[] = []; // rows currently shown, in display order
 let filterSuggestIndex = -1; // highlighted row, -1 = none
@@ -154,7 +151,7 @@ function closeFilterSuggest(): void {
   const input = $<HTMLInputElement>("filter");
   input.setAttribute("aria-expanded", "false");
   input.removeAttribute("aria-activedescendant");
-  $("filter-suggest").hidePopover();
+  $("filter-suggest").hidden = true;
 }
 
 function renderFilterSuggest(): void {
@@ -234,11 +231,17 @@ function showFilterSuggestions(ctx: Completion, all: Suggestion[], index: number
   filterSuggestHead = ctx.head;
   filterSuggestIndex = index;
   renderFilterSuggest();
-  const { x, y } = measureCaretPosition(input);
-  $("filter-caret-anchor").style.left = `${x}px`;
-  $("filter-caret-anchor").style.top = `${y}px`;
-  $("filter-suggest").showPopover();
+  const popup = $("filter-suggest");
+  popup.hidden = false;
+  // In the page's flow (not the top layer), so it scrolls with the field and
+  // passes behind the sticky table header. Kept inside the field's width.
+  const room = input.parentElement ? input.parentElement.clientWidth - popup.offsetWidth : 0;
+  popup.style.left = `${Math.max(0, Math.min(input.offsetLeft + measureCaretX(input), room))}px`;
   input.setAttribute("aria-expanded", "true");
+}
+
+function isColumn(name: string | null): boolean {
+  return name !== null && (getLastPayload()?.columns.some((c) => c.name === name) ?? false);
 }
 
 function updateFilterSuggestions(): void {
@@ -255,10 +258,10 @@ function updateFilterSuggestions(): void {
   if (ctx.expect === "column") {
     showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
   } else if (ctx.expect === "operator") {
-    showFilterSuggestions(ctx, plain(FILTER_OPERATORS), -1);
+    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(FILTER_OPERATORS), -1);
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
     showFilterSuggestions(ctx, plain(["AND", "OR"]), -1);
-  } else if (ctx.expect === "value" && ctx.column && getLastPayload()?.columns.some((c) => c.name === ctx.column)) {
+  } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column)) {
     commonValuesFor(ctx.column).then((values) => {
       if (token !== filterSuggestToken || document.activeElement !== input) return;
       const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));

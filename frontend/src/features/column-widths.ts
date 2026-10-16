@@ -7,22 +7,25 @@ import { state } from "../core/state.js";
 let scope = "";
 const widths = new Map<string, number>();
 
-function syncScope(): void {
-  const current = `${state.source}|${state.schema}|${state.table}`;
-  if (current === scope) return;
-  scope = current;
+// Captured when a load starts, so a render that runs after the selection has
+// moved on still records its widths under the table it shows.
+export function currentWidthScope(): string {
+  return `${state.source}|${state.schema}|${state.table}`;
+}
+
+export function useWidthScope(next: string): void {
+  if (next === scope) return;
+  scope = next;
   widths.clear();
 }
 
 export function columnMinWidth(name: string): number | undefined {
-  syncScope();
   return widths.get(name);
 }
 
 // th is border-box (see styles.css), so the measured width is what the next
 // render's min-width must be.
 export function rememberColumnWidths(): void {
-  syncScope();
   for (const th of $("thead").querySelectorAll<HTMLElement>("th[data-col]:not(.col-hidden)")) {
     const name = th.dataset.col as string;
     widths.set(name, Math.max(widths.get(name) ?? 0, th.getBoundingClientRect().width));

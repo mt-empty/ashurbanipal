@@ -64,6 +64,7 @@
           <div id="filter-wrap">
             <div id="filter-hl" aria-hidden="true"><span id="filter-hl-text"></span></div>
             <input id="filter" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="filter-suggest-list" spellcheck="false" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+            <div id="filter-suggest" hidden><div id="filter-suggest-list" role="listbox" aria-label="filter suggestions"></div></div>
           </div>
           <button id="apply">apply</button>
         </form>
@@ -128,8 +129,6 @@
 <div id="refby-pop" popover><div id="refby-pop-list"></div></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
-<span id="filter-caret-anchor"></span>
-<div id="filter-suggest" popover="manual"><div id="filter-suggest-list" role="listbox" aria-label="filter suggestions"></div></div>
 
 <dialog id="api-help-dialog" closedby="any">
   <div class="dialog-head">

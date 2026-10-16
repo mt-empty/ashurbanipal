@@ -642,7 +642,7 @@ body { margin: 0; height: 100vh; font-size: .875rem; }
 main { height: 100%; overflow: auto; }
 /* sticky left keeps the chrome in view when a wide table scrolls sideways;
    it works because #content below is as wide as the table (see #content). */
-#chrome { position: sticky; left: 0; padding: var(--gap-lg) var(--gap-xl) 0; }
+#chrome { position: sticky; left: 0; z-index: 1; padding: var(--gap-lg) var(--gap-xl) 0; }
 /* width: max-content (floored at 100%) makes #content's own box grow to
    match a wide table's overflow instead of staying clipped to main's
    visible width. Without this, #pager's sticky `left` has no room to
@@ -1040,7 +1040,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 /* Record dialog: the field list and this section scroll together as one
    region within the dialog's height budget — not two stacked scrollers —
    and the section flows in the same inset column as the fields, set off
-   only by the reused sidebar section label, no rule. */
+   only by the reused section label, no rule. */
 #record-body { overflow: auto; max-height: var(--dialog-body-max-h); }
 #record-dialog #record-dl { max-height: none; }
 #record-referenced-by-wrap { padding: 0 var(--gap-lg) var(--gap-lg); }
@@ -1067,16 +1067,12 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #columns-pop label:hover { background: var(--hover); }
 .col-hidden { display: none; }
 
-/* Anchored to the text caret inside #filter, not the input's box — a
-   zero-size tracking element whose left/top JS recomputes on every
-   keystroke via mirror-div caret measurement (no native way to anchor to
-   a point inside plain text). popover="manual" (see filter-ui.ts) so it
-   stays open while typing. */
-#filter-caret-anchor { position: fixed; width: 0; height: 0; anchor-name: --filter-caret; }
-#filter-suggest { position: fixed; position-anchor: --filter-caret;
-          position-try-fallbacks: flip-block;
-          inset: auto; top: calc(anchor(bottom) + .15rem); left: anchor(left);
-          margin: 0; border: 1px solid var(--border-strong);
+/* Absolutely positioned under the field at the caret (left set from
+   filter-ui.ts), in the page's flow so it scrolls with the field. #chrome's
+   z-index (above the cells, tied with thead th, which comes later) puts it
+   behind the sticky table header. */
+#filter-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0;
+          background: canvas; color: inherit; border: 1px solid var(--border-strong);
           border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
           overflow: auto; box-shadow: 0 4px 16px #0004; }
 #filter-suggest button { display: block; width: 100%; box-sizing: border-box;
@@ -1127,6 +1123,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
           <div id="filter-wrap">
             <div id="filter-hl" aria-hidden="true"><span id="filter-hl-text"></span></div>
             <input id="filter" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="filter-suggest-list" spellcheck="false" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
+            <div id="filter-suggest" hidden><div id="filter-suggest-list" role="listbox" aria-label="filter suggestions"></div></div>
           </div>
           <button id="apply">apply</button>
         </form>
@@ -1191,8 +1188,6 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 <div id="refby-pop" popover><div id="refby-pop-list"></div></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
-<span id="filter-caret-anchor"></span>
-<div id="filter-suggest" popover="manual"><div id="filter-suggest-list" role="listbox" aria-label="filter suggestions"></div></div>
 
 <dialog id="api-help-dialog" closedby="any">
   <div class="dialog-head">
@@ -1930,18 +1925,18 @@ function initState() {
 // src/features/column-widths.ts
 var scope = "";
 var widths = /* @__PURE__ */ new Map();
-function syncScope() {
-  const current = `${state.source}|${state.schema}|${state.table}`;
-  if (current === scope) return;
-  scope = current;
+function currentWidthScope() {
+  return `${state.source}|${state.schema}|${state.table}`;
+}
+function useWidthScope(next) {
+  if (next === scope) return;
+  scope = next;
   widths.clear();
 }
 function columnMinWidth(name) {
-  syncScope();
   return widths.get(name);
 }
 function rememberColumnWidths() {
-  syncScope();
   for (const th of $("thead").querySelectorAll("th[data-col]:not(.col-hidden)")) {
     const name = th.dataset.col;
     widths.set(name, Math.max(widths.get(name) ?? 0, th.getBoundingClientRect().width));
@@ -2056,6 +2051,14 @@ function completionAt(text) {
     column: last.column
   };
 }
+var FILTER_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"];
+function endsInUnfinishedWord(text) {
+  const { expect, partial } = completionAt(text);
+  if (partial === "") return false;
+  const options = expect === "operator" ? FILTER_OPERATORS : expect === "joiner" ? ["AND", "OR"] : expect === "isTail" ? ["NULL", "NOT NULL"] : [];
+  const word = partial.toLowerCase();
+  return options.some((o) => o.toLowerCase().startsWith(word));
+}
 
 // src/features/filter-highlight.ts
 var input = $("filter");
@@ -2073,7 +2076,9 @@ function render() {
   const lead = text.length - text.trimStart().length;
   const trimmed = text.trim();
   const error = filterDslErrorAt(trimmed);
-  const at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
+  let at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
+  const bad = tokens.find((t) => t.start <= at && at < t.end);
+  if (bad && bad.end >= lead + trimmed.length && endsInUnfinishedWord(text)) at = -1;
   textEl.replaceChildren(
     ...tokens.map((t) => {
       const span = document.createElement("span");
@@ -2176,7 +2181,7 @@ var CARET_MIRROR_PROPS = [
   "textTransform",
   "wordSpacing"
 ];
-function measureCaretPosition(input2) {
+function measureCaretX(input2) {
   const mirror = document.createElement("div");
   const computed = getComputedStyle(input2);
   Object.assign(mirror.style, {
@@ -2195,14 +2200,11 @@ function measureCaretPosition(input2) {
   mirror.appendChild(marker);
   document.body.appendChild(mirror);
   try {
-    const inputRect = input2.getBoundingClientRect();
-    const offsetX = marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left;
-    return { x: inputRect.left + offsetX - input2.scrollLeft, y: inputRect.bottom };
+    return marker.getBoundingClientRect().left - mirror.getBoundingClientRect().left - input2.scrollLeft;
   } finally {
     mirror.remove();
   }
 }
-var FILTER_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"];
 var filterSuggestMatches = [];
 var filterSuggestIndex = -1;
 var filterSuggestHead = "";
@@ -2215,7 +2217,7 @@ function closeFilterSuggest() {
   const input2 = $("filter");
   input2.setAttribute("aria-expanded", "false");
   input2.removeAttribute("aria-activedescendant");
-  $("filter-suggest").hidePopover();
+  $("filter-suggest").hidden = true;
 }
 function renderFilterSuggest() {
   $("filter-suggest-list").replaceChildren(
@@ -2277,11 +2279,14 @@ function showFilterSuggestions(ctx, all, index) {
   filterSuggestHead = ctx.head;
   filterSuggestIndex = index;
   renderFilterSuggest();
-  const { x, y } = measureCaretPosition(input2);
-  $("filter-caret-anchor").style.left = `${x}px`;
-  $("filter-caret-anchor").style.top = `${y}px`;
-  $("filter-suggest").showPopover();
+  const popup = $("filter-suggest");
+  popup.hidden = false;
+  const room = input2.parentElement ? input2.parentElement.clientWidth - popup.offsetWidth : 0;
+  popup.style.left = `${Math.max(0, Math.min(input2.offsetLeft + measureCaretX(input2), room))}px`;
   input2.setAttribute("aria-expanded", "true");
+}
+function isColumn(name) {
+  return name !== null && (getLastPayload()?.columns.some((c) => c.name === name) ?? false);
 }
 function updateFilterSuggestions() {
   const input2 = $("filter");
@@ -2297,10 +2302,10 @@ function updateFilterSuggestions() {
   if (ctx.expect === "column") {
     showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
   } else if (ctx.expect === "operator") {
-    showFilterSuggestions(ctx, plain(FILTER_OPERATORS), -1);
+    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(FILTER_OPERATORS), -1);
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
     showFilterSuggestions(ctx, plain(["AND", "OR"]), -1);
-  } else if (ctx.expect === "value" && ctx.column && getLastPayload()?.columns.some((c) => c.name === ctx.column)) {
+  } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column)) {
     commonValuesFor(ctx.column).then((values) => {
       if (token !== filterSuggestToken || document.activeElement !== input2) return;
       const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
@@ -3387,6 +3392,7 @@ async function loadData2({
     return;
   }
   const token = ++loadDataToken;
+  const widthScope = currentWidthScope();
   let data;
   try {
     data = await fetchTableData();
@@ -3412,7 +3418,7 @@ async function loadData2({
   updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
-    if (token !== loadDataToken) return;
+    useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
     renderRows(data, newRowKeys, pkNames);

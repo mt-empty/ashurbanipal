@@ -197,3 +197,53 @@ test("leading spaces are not underlined as an error", async ({ page }) => {
   await page.locator("#filter").fill("  status = completed");
   await expect(page.locator("#filter-hl-text .t-err")).toHaveCount(0);
 });
+
+test("the suggestion popup scrolls with the field and passes behind the sticky header", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#filter").fill("status ");
+  const popup = page.locator("#filter-suggest");
+  await expect(popup).toBeVisible();
+  const before = await popup.boundingBox();
+  await page.locator("#main").evaluate((el) => el.scrollTo(0, 120));
+  await expect(popup).toBeVisible();
+  const after = await popup.boundingBox();
+  expect(Math.round((before?.y ?? 0) - (after?.y ?? 0))).toBe(120);
+  // Scroll until the popup overlaps the pinned header, then ask what is on top there.
+  const popupTop = await popup.evaluate((el) => el.getBoundingClientRect().top);
+  const headerBottom = await page.locator("#thead").evaluate((el) => el.getBoundingClientRect().bottom);
+  await page.locator("#main").evaluate((el, by) => el.scrollBy(0, by), popupTop - headerBottom + 10);
+  const topmost = await page.evaluate(() => {
+    const box = document.getElementById("filter-suggest")?.getBoundingClientRect();
+    const head = document.getElementById("thead")?.getBoundingClientRect();
+    if (!box || !head) return null;
+    const el = document.elementFromPoint(box.left + 4, head.bottom - 4);
+    return el?.closest("thead") ? "header" : el?.closest("#filter-suggest") ? "popup" : "other";
+  });
+  expect(topmost).toBe("header");
+});
+
+test("a word still being typed is not underlined as an error", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#filter").fill("status I");
+  await expect(page.locator("#filter-hl-text .t-err")).toHaveCount(0);
+});
+
+test("operators are not offered after a word that is not a column", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#filter").fill("zzz ");
+  await expect(page.locator("#filter-suggest")).toBeHidden();
+  await page.locator("#filter").fill("status ");
+  await expect(suggestions(page).first()).toHaveText("=");
+});
+
+test("only a word that cannot become valid is underlined", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#filter").fill("status = completed AN");
+  await expect(page.locator("#filter-hl-text .t-err")).toHaveCount(0);
+  await page.locator("#filter").fill("status Q");
+  await expect(page.locator("#filter-hl-text .t-err")).toHaveText("Q");
+});

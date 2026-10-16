@@ -145,3 +145,22 @@ export function completionAt(text: string): Completion {
     column: last.column,
   };
 }
+
+export const FILTER_OPERATORS = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"];
+
+// True when the text ends in a word that could still grow into one the grammar
+// accepts there (`status I`, `a = 1 AN`), so it is unfinished rather than wrong.
+export function endsInUnfinishedWord(text: string): boolean {
+  const { expect, partial } = completionAt(text);
+  if (partial === "") return false;
+  const options =
+    expect === "operator"
+      ? FILTER_OPERATORS
+      : expect === "joiner"
+        ? ["AND", "OR"]
+        : expect === "isTail"
+          ? ["NULL", "NOT NULL"]
+          : [];
+  const word = partial.toLowerCase();
+  return options.some((o) => o.toLowerCase().startsWith(word));
+}

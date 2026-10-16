@@ -1,6 +1,6 @@
 import { $ } from "../core/dom.js";
 import { filterDslErrorAt } from "../lib/filter-dsl.js";
-import { tokenizeFilterDsl } from "../lib/filter-tokens.js";
+import { endsInUnfinishedWord, tokenizeFilterDsl } from "../lib/filter-tokens.js";
 
 // A coloured copy of #filter's text drawn behind the transparent-text input, so
 // the native caret, selection and IME keep working. The copy is dropped (`.plain`)
@@ -27,8 +27,9 @@ function render(): void {
   const error = filterDslErrorAt(trimmed);
   // An error at the very end is just unfinished typing, and an open quote is
   // only unfinished until it closes.
-  const at =
-    error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
+  let at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
+  const bad = tokens.find((t) => t.start <= at && at < t.end);
+  if (bad && bad.end >= lead + trimmed.length && endsInUnfinishedWord(text)) at = -1;
   textEl.replaceChildren(
     ...tokens.map((t) => {
       const span = document.createElement("span");

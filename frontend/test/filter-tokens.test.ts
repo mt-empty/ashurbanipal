@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { filterDslErrorAt } from "../src/lib/filter-dsl.ts";
-import { completionAt, tokenizeFilterDsl } from "../src/lib/filter-tokens.ts";
+import { completionAt, endsInUnfinishedWord, tokenizeFilterDsl } from "../src/lib/filter-tokens.ts";
 
 interface ParserCase {
   name: string;
@@ -110,4 +110,11 @@ test("error index is a string index even after multi-byte characters", () => {
   assert.equal(filterDslErrorAt("a = 1"), null);
   assert.equal(filterDslErrorAt("a = é b")?.index, 6);
   assert.equal(filterDslErrorAt("a = 1 x")?.index, 6);
+});
+
+test("a last word that could still grow into a valid one is unfinished", () => {
+  for (const text of ["status I", "status !", "status LIK", "a = 1 AN", "a = 1 o", "a IS N", "a IS NOT N"])
+    assert.equal(endsInUnfinishedWord(text), true, text);
+  for (const text of ["", "status ", "status = completed oops", "a = 1 x", "status Q", "a IS x"])
+    assert.equal(endsInUnfinishedWord(text), false, text);
 });

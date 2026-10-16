@@ -55,7 +55,7 @@ body { margin: 0; height: 100vh; font-size: .875rem; }
 main { height: 100%; overflow: auto; }
 /* sticky left keeps the chrome in view when a wide table scrolls sideways;
    it works because #content below is as wide as the table (see #content). */
-#chrome { position: sticky; left: 0; padding: var(--gap-lg) var(--gap-xl) 0; }
+#chrome { position: sticky; left: 0; z-index: 1; padding: var(--gap-lg) var(--gap-xl) 0; }
 /* width: max-content (floored at 100%) makes #content's own box grow to
    match a wide table's overflow instead of staying clipped to main's
    visible width. Without this, #pager's sticky `left` has no room to
@@ -453,7 +453,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 /* Record dialog: the field list and this section scroll together as one
    region within the dialog's height budget — not two stacked scrollers —
    and the section flows in the same inset column as the fields, set off
-   only by the reused sidebar section label, no rule. */
+   only by the reused section label, no rule. */
 #record-body { overflow: auto; max-height: var(--dialog-body-max-h); }
 #record-dialog #record-dl { max-height: none; }
 #record-referenced-by-wrap { padding: 0 var(--gap-lg) var(--gap-lg); }
@@ -480,16 +480,12 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #columns-pop label:hover { background: var(--hover); }
 .col-hidden { display: none; }
 
-/* Anchored to the text caret inside #filter, not the input's box — a
-   zero-size tracking element whose left/top JS recomputes on every
-   keystroke via mirror-div caret measurement (no native way to anchor to
-   a point inside plain text). popover="manual" (see filter-ui.ts) so it
-   stays open while typing. */
-#filter-caret-anchor { position: fixed; width: 0; height: 0; anchor-name: --filter-caret; }
-#filter-suggest { position: fixed; position-anchor: --filter-caret;
-          position-try-fallbacks: flip-block;
-          inset: auto; top: calc(anchor(bottom) + .15rem); left: anchor(left);
-          margin: 0; border: 1px solid var(--border-strong);
+/* Absolutely positioned under the field at the caret (left set from
+   filter-ui.ts), in the page's flow so it scrolls with the field. #chrome's
+   z-index (above the cells, tied with thead th, which comes later) puts it
+   behind the sticky table header. */
+#filter-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0;
+          background: canvas; color: inherit; border: 1px solid var(--border-strong);
           border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
           overflow: auto; box-shadow: 0 4px 16px #0004; }
 #filter-suggest button { display: block; width: 100%; box-sizing: border-box;

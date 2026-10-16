@@ -131,8 +131,9 @@ Two components, same as the original concept:
     non-goal carve-out, this is two sequential single-table queries, never
     a join.
   - *Filter autocomplete* — the filter input suggests whatever the grammar
-    allows next, via a hand-rolled, caret-anchored popover that stays open
-    while typing (`frontend/src/features/filter-ui.ts`): a column at
+    allows next, via a hand-rolled, caret-anchored list that stays open
+    while typing and scrolls with the page, passing behind the sticky table
+    header (`frontend/src/features/filter-ui.ts`): a column at
     condition-start boundaries (empty, or after `AND `/`OR `/`NOT `), an
     operator after a column, the column's common values (§4, same endpoint
     as the header ▾) after an operator, and `AND`/`OR` once a letter is

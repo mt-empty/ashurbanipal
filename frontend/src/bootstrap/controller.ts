@@ -10,7 +10,7 @@ import {
   state,
 } from "../core/state.js";
 import type { TableData } from "../core/types.js";
-import { rememberColumnWidths } from "../features/column-widths.js";
+import { currentWidthScope, rememberColumnWidths, useWidthScope } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
@@ -98,6 +98,7 @@ export async function loadData({
     return;
   }
   const token = ++loadDataToken;
+  const widthScope = currentWidthScope();
   let data: TableData;
   try {
     data = await fetchTableData();
@@ -108,7 +109,7 @@ export async function loadData({
     // filter, ui-guidelines R11), leaving the other a chance to render.
     if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
     // The one code the frontend branches on (ui-guidelines R9): a table
-    // that cleared the sidebar's own listing but the role can't actually
+    // that cleared the table listing but the role can't actually
     // read (e.g. a stale MySQL/MariaDB listing, docs/adapter-decisions.md
     // §5.2/§5.3) gets a plain-language message instead of the server's
     // implementation-defined title text.
@@ -133,9 +134,7 @@ export async function loadData({
   updateColumnsButtonLabel();
   syncUrl();
   const renderTable = () => {
-    // The transition may run this after a newer load took over; rendering then
-    // would record this table's column widths under the new table.
-    if (token !== loadDataToken) return;
+    useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
     renderRows(data, newRowKeys, pkNames);
