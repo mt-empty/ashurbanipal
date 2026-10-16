@@ -198,29 +198,38 @@ test("leading spaces are not underlined as an error", async ({ page }) => {
   await expect(page.locator("#filter-hl-text .t-err")).toHaveCount(0);
 });
 
-test("the suggestion popup scrolls with the field and passes behind the sticky header", async ({ page }) => {
+// What is on top at a point just inside the popup's left edge, at the given y.
+const topmostAt = (page: import("@playwright/test").Page, y: number) =>
+  page.evaluate((y) => {
+    const box = document.getElementById("filter-suggest")?.getBoundingClientRect();
+    const el = box && document.elementFromPoint(box.left + 4, y);
+    return el?.closest("#filter-suggest") ? "popup" : el?.closest("thead") ? "header" : "other";
+  }, y);
+
+test("the suggestion list covers the table header at rest and slides behind it once pinned", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
   await page.locator("#filter").fill("status ");
   const popup = page.locator("#filter-suggest");
   await expect(popup).toBeVisible();
-  const before = await popup.boundingBox();
-  await page.locator("#main").evaluate((el) => el.scrollTo(0, 120));
+  const th = page.locator("#thead th").first();
+  const box = async (l: typeof popup) => l.evaluate((el) => el.getBoundingClientRect().toJSON());
+  // At rest the list overlaps the not-yet-pinned header, and is on top of it.
+  const rest = await box(popup);
+  const restHeader = await box(th);
+  expect(rest.top).toBeLessThan(restHeader.bottom);
+  expect(rest.bottom).toBeGreaterThan(restHeader.top);
+  expect(await topmostAt(page, restHeader.top + 8)).toBe("popup");
+  // Scrolling moves it with the field and never closes it.
+  await page.locator("#main").evaluate((el) => el.scrollTo(0, 60));
   await expect(popup).toBeVisible();
-  const after = await popup.boundingBox();
-  expect(Math.round((before?.y ?? 0) - (after?.y ?? 0))).toBe(120);
-  // Scroll until the popup overlaps the pinned header, then ask what is on top there.
-  const popupTop = await popup.evaluate((el) => el.getBoundingClientRect().top);
-  const headerBottom = await page.locator("#thead").evaluate((el) => el.getBoundingClientRect().bottom);
-  await page.locator("#main").evaluate((el, by) => el.scrollBy(0, by), popupTop - headerBottom + 10);
-  const topmost = await page.evaluate(() => {
-    const box = document.getElementById("filter-suggest")?.getBoundingClientRect();
-    const head = document.getElementById("thead")?.getBoundingClientRect();
-    if (!box || !head) return null;
-    const el = document.elementFromPoint(box.left + 4, head.bottom - 4);
-    return el?.closest("thead") ? "header" : el?.closest("#filter-suggest") ? "popup" : "other";
-  });
-  expect(topmost).toBe("header");
+  expect(Math.round(rest.top - (await box(popup)).top)).toBe(60);
+  // Once the header is pinned, the list passes behind it.
+  await page.locator("#main").evaluate((el, to) => el.scrollTo(0, to), restHeader.top + 40);
+  await expect(page.locator("#main")).toHaveClass(/header-stuck/);
+  const pinned = await box(th);
+  expect(await topmostAt(page, pinned.bottom - 4)).toBe("header");
+  await expect(page.locator("#filter")).toHaveAttribute("aria-expanded", "true");
 });
 
 test("a word still being typed is not underlined as an error", async ({ page }) => {

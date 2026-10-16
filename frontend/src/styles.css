@@ -55,7 +55,11 @@ body { margin: 0; height: 100vh; font-size: .875rem; }
 main { height: 100%; overflow: auto; }
 /* sticky left keeps the chrome in view when a wide table scrolls sideways;
    it works because #content below is as wide as the table (see #content). */
-#chrome { position: sticky; left: 0; z-index: 1; padding: var(--gap-lg) var(--gap-xl) 0; }
+#chrome { position: sticky; left: 0; z-index: 2; padding: var(--gap-lg) var(--gap-xl) 0; }
+/* Above the table header until the header is pinned (features/sticky-header.ts),
+   then level with it, and the header comes later so it wins: the filter's
+   suggestion list covers the header at rest and slides behind it on scroll. */
+#main.header-stuck #chrome { z-index: 1; }
 /* width: max-content (floored at 100%) makes #content's own box grow to
    match a wide table's overflow instead of staying clipped to main's
    visible width. Without this, #pager's sticky `left` has no room to
@@ -481,9 +485,8 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 .col-hidden { display: none; }
 
 /* Absolutely positioned under the field at the caret (left set from
-   filter-ui.ts), in the page's flow so it scrolls with the field. #chrome's
-   z-index (above the cells, tied with thead th, which comes later) puts it
-   behind the sticky table header. */
+   filter-ui.ts), in the page's flow so it scrolls with the field; #chrome's
+   z-index decides whether it is over or behind the sticky table header. */
 #filter-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0;
           background: canvas; color: inherit; border: 1px solid var(--border-strong);
           border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;

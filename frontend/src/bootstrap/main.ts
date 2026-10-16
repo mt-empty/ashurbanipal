@@ -7,6 +7,7 @@ import "../features/filter-highlight.js";
 import { clearCommonValueCache } from "../features/filter-ui.js";
 import { loadSiblings } from "../features/siblings.js";
 import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
+import "../features/sticky-header.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";
 import { loadData } from "./controller.js";
 import { registerLoadData } from "./reload.js";

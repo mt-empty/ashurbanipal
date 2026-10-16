@@ -19,9 +19,11 @@ const SEEDED_TABLES = [
   "users",
 ];
 
+// A dev database may also hold zz_demo_* tables (many empty tables for looking
+// at the chip cap by hand); the specs below ignore them.
 test("table chips list all seeded tables alphabetically with approx row counts", async ({ page }) => {
   await gotoApp(page);
-  const buttons = page.locator("#tables button[data-table]");
+  const buttons = page.locator('#tables button[data-table]:not([data-table^="zz_demo_"])');
   await expect(buttons).toHaveCount(SEEDED_TABLES.length);
   // _conformance_meta/feature_flags are deliberately never ANALYZEd, so
   // the frontend shows "?" (formatApproxCount) instead of a raw -1.
@@ -126,7 +128,7 @@ test("the active table stays visible in a collapsed list, and 'show fewer' keeps
   page,
 }) => {
   await page.setViewportSize(NARROW);
-  // users is the last chip, so it is past line three while collapsed.
+  // users is past line three at this width, so it starts out in the hidden part.
   await gotoApp(page, "?table=users");
   const users = page.locator('#tables button[data-table="users"]');
   const more = page.locator("#tables-more");
@@ -163,10 +165,10 @@ test("a chip pulled up from the hidden part gets a divider only on a line with o
   await expect(page.locator("#tables li.pulled")).toHaveCount(0);
 });
 
-test("a wide window shows every table with no cap control", async ({ page }) => {
+test("a wide window shows every seeded table without expanding the list", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 800 });
   await gotoApp(page);
-  await expect(page.locator("#tables-more")).toBeHidden();
+  for (const name of SEEDED_TABLES) await expect(page.locator(`#tables button[data-table="${name}"]`)).toBeVisible();
 });
 
 test("a column name is capped with an ellipsis and keeps its full name in a title", async ({
