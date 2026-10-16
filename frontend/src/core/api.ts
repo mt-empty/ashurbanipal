@@ -38,11 +38,13 @@ function checkProtocolVersion(resp: Response): void {
 // treating a thrown ApiError as a plain Error and read `.message`.
 export class ApiError extends Error {
   readonly code: string | undefined;
+  readonly status: number;
 
-  constructor(message: string, code: string | undefined) {
+  constructor(message: string, code: string | undefined, status: number) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -53,12 +55,12 @@ async function errorFromResponse(resp: Response): Promise<ApiError> {
     const body: unknown = await resp.json();
     if (body && typeof body === "object" && "title" in body && typeof body.title === "string") {
       const code = "code" in body && typeof body.code === "string" ? body.code : undefined;
-      return new ApiError(body.title, code);
+      return new ApiError(body.title, code, resp.status);
     }
   } catch {
     /* fall through to the generic message below */
   }
-  return new ApiError(`request failed with status ${resp.status}`, undefined);
+  return new ApiError(`request failed with status ${resp.status}`, undefined, resp.status);
 }
 
 export async function api<T = unknown>(path: string): Promise<T> {

@@ -70,11 +70,14 @@
         </form>
       </search>
       <div id="error" role="alert"></div>
+      <div id="join-notice" hidden><span id="join-notice-text"></span><span id="join-notice-actions"></span></div>
       <div id="meta">
         <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
         <span id="actions">
           <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
+          <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
+          <button id="join-edit-btn" type="button" hidden title="change the tables, columns or join type of this view">edit join</button>
           <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
           <button id="structure-btn" type="button" disabled title="indexes and constraints for this table">structure</button>
           <button id="payload" disabled title="raw JSON response for the current view">payload</button>
@@ -119,6 +122,22 @@
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
   <div id="structure-body"></div>
+</dialog>
+
+<dialog id="join-dialog" closedby="any" aria-labelledby="join-title">
+  <div class="dialog-head">
+    <span class="dialog-head-title"><strong id="join-title">join tables</strong></span>
+    <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
+  </div>
+  <div id="join-body">
+    <div id="join-form"></div>
+    <div id="join-preview-wrap"><span class="section-label">as SQL</span><pre id="join-preview"></pre></div>
+    <p id="join-error" role="alert"></p>
+  </div>
+  <div class="dialog-foot">
+    <button id="join-cancel" type="button">Cancel</button>
+    <button id="join-run" type="button">Show result</button>
+  </div>
 </dialog>
 
 <div id="siblings-pop" popover>

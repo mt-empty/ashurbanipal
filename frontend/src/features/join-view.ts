@@ -61,3 +61,31 @@ export function refreshBands(): void {
 export function joinHiddenCount(): number {
   return hiddenColumnsForTable().length;
 }
+
+// ---- the notice under the filter bar: a join-specific message with actions ----
+export function showJoinNotice(text: string, actions: { label: string; run: () => void }[]): void {
+  $("join-notice-text").textContent = text;
+  $("join-notice-actions").replaceChildren(
+    ...actions.map((a) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = a.label;
+      b.onclick = a.run;
+      return b;
+    }),
+  );
+  $("join-notice").hidden = false;
+}
+
+export function clearJoinNotice(): void {
+  $("join-notice").hidden = true;
+}
+
+// `⋈ join` starts a join from the table being viewed; inside a join view
+// `edit join` changes it instead.
+export function updateJoinChrome(): void {
+  const join = inJoinView();
+  $<HTMLButtonElement>("join-btn").hidden = join;
+  $<HTMLButtonElement>("join-btn").disabled = false;
+  $<HTMLButtonElement>("join-edit-btn").hidden = !join;
+}

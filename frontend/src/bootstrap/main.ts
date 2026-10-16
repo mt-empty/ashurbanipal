@@ -4,6 +4,7 @@ import { $, reportError } from "../core/dom.js";
 import { getLastPayload, initState, state } from "../core/state.js";
 import { resetColumnWidths } from "../features/column-widths.js";
 import "../features/filter-highlight.js";
+import "../features/join-dialog.js";
 import { clearCommonValueCache } from "../features/filter-ui.js";
 import { clearJoinCatalog } from "../features/join-catalog.js";
 import { loadSiblings } from "../features/siblings.js";

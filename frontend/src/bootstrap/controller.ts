@@ -14,7 +14,8 @@ import type { JoinDef, TableData } from "../core/types.js";
 import { currentWidthScope, rememberColumnWidths, useWidthScope } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { tableColumns } from "../features/join-catalog.js";
-import { splitColumnKey } from "../features/join-view.js";
+import { applyJoin, openJoinDialog } from "../features/join-dialog.js";
+import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
 import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
@@ -51,6 +52,35 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
   );
   params.set("join", JSON.stringify(toWire(def, (position) => names.get(position) ?? [])));
   return `/tables/join?${params}`;
+}
+
+// A timeout or a rejected join gets the join's own UI instead of the plain
+// error line. A bad filter is the filter bar's to report.
+function reportJoinFailure(e: ApiError): boolean {
+  if (e.code === "query_timeout") {
+    showJoinNotice("This join took too long and was stopped.", [
+      { label: "Retry", run: () => loadData() },
+      { label: "Edit join", run: () => openJoinDialog() },
+    ]);
+    return true;
+  }
+  if (e.status === 400 && e.code !== "invalid_filter") {
+    openJoinDialog({ error: e.message });
+    return true;
+  }
+  return false;
+}
+
+// An INNER join that matches nothing is often a LEFT join away from useful.
+function offerLeftJoin(): void {
+  const def = getAppliedJoin();
+  if (!def || state.offset !== 0 || state.filter !== "" || !def.joins.some((j) => j.type === "inner")) return;
+  showJoinNotice("No rows match this join.", [
+    {
+      label: "Switch to left join",
+      run: () => applyJoin({ ...def, joins: def.joins.map((j) => ({ ...j, type: "left" })) }),
+    },
+  ]);
 }
 
 async function fetchTableData(): Promise<TableData> {
@@ -119,6 +149,7 @@ export async function loadData({
   highlightNew?: boolean;
 } = {}): Promise<void> {
   clearError();
+  clearJoinNotice();
   if (!state.table) {
     updateActiveTableChrome();
     setStatus("");
@@ -140,6 +171,7 @@ export async function loadData({
     // read (e.g. a stale MySQL/MariaDB listing, docs/adapter-decisions.md
     // §5.2/§5.3) gets a plain-language message instead of the server's
     // implementation-defined title text.
+    if (state.join && e instanceof ApiError && reportJoinFailure(e)) return;
     if (e instanceof ApiError && e.code === "not_readable") {
       reportError(new Error(`you don't have access to ${state.table}`));
       return;
@@ -160,6 +192,7 @@ export async function loadData({
   $<HTMLButtonElement>("structure-btn").disabled = state.join !== "";
   $<HTMLButtonElement>("refresh").disabled = false;
   updateColumnsButtonLabel();
+  updateJoinChrome();
   syncUrl();
   const renderTable = () => {
     useWidthScope(widthScope);
@@ -188,6 +221,7 @@ export async function loadData({
   // this load, and its pager/#status must not overwrite the newer one's.
   if (token !== loadDataToken) return;
   updatePager(data);
+  if (data.rows.length === 0) offerLeftJoin();
   // Sighted users see the tint; announce the count for everyone else. The
   // next loadData clears #status the same way it clears "loading…".
   if (newRowKeys?.size) {

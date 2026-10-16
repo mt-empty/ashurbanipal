@@ -242,6 +242,10 @@ export async function loadTables(): Promise<void> {
   else setStatus("");
 }
 
+export function listedTableNames(): string[] {
+  return tableEntries.map((e) => e.name);
+}
+
 // Keyed by table name rather than "whichever row is .active" so it's
 // still correct if tableEntries is ever rebuilt mid-fetch.
 export function setRowLoading(name: string, loading: boolean): void {
