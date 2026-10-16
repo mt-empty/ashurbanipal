@@ -28,7 +28,7 @@ function problem(): string {
 
 function refresh(): void {
   const bad = problem();
-  runBtn.disabled = bad !== "";
+  runBtn.disabled = bad !== "" || (mode === "sql" && sql.text().trim() === "");
   if (mode === "form") {
     const result = draftToDef(form.draft());
     const text = "def" in result ? printJoin(result.def) : draftText(form.draft());

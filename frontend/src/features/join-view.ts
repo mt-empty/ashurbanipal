@@ -27,36 +27,45 @@ export function splitColumnKey(key: string): { join: number; column: string } | 
   return join < 0 ? null : { join, column: m[3] };
 }
 
-// One band per table, above the column headers; spans follow the visible
-// columns, so hiding every column of a table hides its band.
+// One band per run of neighbouring columns of the same table, above the column
+// headers; spans follow the visible columns, so hiding every column of a run
+// hides its band. A select list that alternates tables gets a band per switch.
 export function buildBands(columns: Column[]): HTMLTableRowElement | null {
   const def = getAppliedJoin();
   if (!def) return null;
   const tr = document.createElement("tr");
   tr.className = "bands";
   tr.appendChild(document.createElement("th")).className = "row-actions";
-  const seen = new Set<number>();
-  for (const col of columns) {
-    if (col.join === undefined || seen.has(col.join)) continue;
-    seen.add(col.join);
+  let band: HTMLTableCellElement | null = null;
+  columns.forEach((col, i) => {
+    if (col.join === undefined) return;
+    if (band && band.dataset.band === String(col.join)) {
+      band.dataset.end = String(i);
+      return;
+    }
     const t = def.tables[col.join];
-    const th = document.createElement("th");
-    th.className = "band";
-    th.dataset.band = String(col.join);
+    band = document.createElement("th");
+    band.className = "band";
+    band.dataset.band = String(col.join);
+    band.dataset.start = String(i);
+    band.dataset.end = String(i);
     const pill = document.createElement("span");
     pill.className = "band-pill";
     pill.textContent = t.alias === null ? t.table : `${t.table} ${t.alias}`;
     pill.title = pill.textContent;
-    th.appendChild(pill);
-    tr.appendChild(th);
-  }
+    band.appendChild(pill);
+    tr.appendChild(band);
+  });
   return tr;
 }
 
 export function refreshBands(): void {
-  for (const band of $("thead").querySelectorAll<HTMLElement>("th.band")) {
-    const visible = $("thead").querySelectorAll(`th[data-join="${band.dataset.band}"]:not(.col-hidden)`).length;
-    (band as HTMLTableCellElement).colSpan = Math.max(visible, 1);
+  const heads = [...$("thead").querySelectorAll<HTMLElement>("th[data-join]")];
+  for (const band of $("thead").querySelectorAll<HTMLTableCellElement>("th.band")) {
+    const from = Number(band.dataset.start);
+    const to = Number(band.dataset.end);
+    const visible = heads.slice(from, to + 1).filter((h) => !h.classList.contains("col-hidden")).length;
+    band.colSpan = Math.max(visible, 1);
     band.classList.toggle("col-hidden", visible === 0);
   }
 }

@@ -36,6 +36,12 @@ test("an incomplete draft says what is missing", () => {
   assert.ok("def" in draftToDef(draft));
 });
 
+test("a draft with every join removed is not a join", () => {
+  const draft = newDraft("orders");
+  removeJoin(draft, 0);
+  assert.deepEqual(draftToDef(draft), { error: "Add a table to join." });
+});
+
 test("the same table twice needs an alias", () => {
   const draft = newDraft("orders");
   draft.joins[0] = {

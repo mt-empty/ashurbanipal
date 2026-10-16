@@ -57,6 +57,7 @@ export function defToDraft(def: JoinDef): Draft {
 }
 
 export function draftToDef(draft: Draft): { def: JoinDef } | { error: string } {
+  if (draft.joins.length === 0) return { error: "Add a table to join." };
   const tables = [
     { table: draft.table, alias: draft.alias.trim() || null },
     ...draft.joins.map((j) => ({ table: j.table, alias: j.alias.trim() || null })),

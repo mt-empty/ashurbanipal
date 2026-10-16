@@ -42,7 +42,7 @@ export function draftText(draft: Draft): string {
     );
   });
   const picked = draft.columns.flatMap((c, pos) =>
-    c === null ? [] : c.map((col) => `${nameAt(pos)}.${quoteJoinName(col)}`),
+    c === null ? [`${nameAt(pos)}.*`] : c.map((col) => `${nameAt(pos)}.${quoteJoinName(col)}`),
   );
   const select =
     draft.columns.some((c) => c !== null) && picked.length > 0 ? `SELECT ${picked.join(", ")}` : "SELECT *";
@@ -64,17 +64,19 @@ function errorSpan(text: string, index: number, code: string): [number, number] 
   return [index, end];
 }
 
-// A short alias for a table: its underscore-separated initials, made unique among the names in use.
+// A short alias for a table: its underscore-separated initials, made a bare name the parser accepts
+// (not a keyword, ASCII, starting with a letter) and unique among the names in use.
 function aliasFor(table: string, taken: ReadonlySet<string>): string {
-  const base =
-    table
-      .split("_")
-      .filter(Boolean)
-      .map((w) => w[0])
-      .join("")
-      .toLowerCase() || "t";
+  const initials = table
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join("")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "");
+  const base = /^[a-z_]/.test(initials) ? initials : `t${initials}`;
   let alias = base;
-  for (let n = 2; taken.has(alias) || alias === table; n++) alias = `${base}${n}`;
+  for (let n = 2; taken.has(alias) || alias === table || quoteJoinName(alias) !== alias; n++) alias = `${base}${n}`;
   return alias;
 }
 

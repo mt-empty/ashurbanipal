@@ -94,8 +94,10 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     onChange();
   }
 
-  const changed = (): void => {
-    const focused = lastDropdownLabel();
+  // Focus goes back to the control that changed: a menu's button, or whichever labelled control had it.
+  const changed = (fromMenu = false): void => {
+    const active = document.activeElement;
+    const focused = fromMenu ? lastDropdownLabel() : root.contains(active) ? active?.getAttribute("aria-label") : null;
     render();
     if (focused) root.querySelector<HTMLElement>(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
@@ -149,7 +151,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
           const [p, ...rest] = v.split("|");
           pair.leftJoin = Number(p);
           pair.leftColumn = rest.join("|");
-          changed();
+          changed(true);
         },
       }),
       el("span", "j-eq", "="),
@@ -163,7 +165,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         invalid: clash !== null,
         onPick: (v) => {
           pair.rightColumn = v;
-          changed();
+          changed(true);
         },
       }),
     );
@@ -194,7 +196,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         placeholder: "type",
         onPick: (v) => {
           join.type = v === "left" ? "left" : "inner";
-          changed();
+          changed(true);
         },
       }),
       createDropdown({
@@ -204,10 +206,16 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         placeholder: "choose a table",
         mono: true,
         onPick: (v) => {
+          if (v !== join.table) {
+            // Pairs of later joins that named a column of the old table no longer point at anything.
+            for (const later of draft.joins.slice(i + 1)) {
+              for (const p of later.on) if (p.leftJoin === pos) p.leftColumn = "";
+            }
+          }
           join.table = v;
           join.on = [emptyPair()];
           draft.columns[pos] = null;
-          changed();
+          changed(true);
           load();
         },
       }),
@@ -362,6 +370,8 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   return {
     setDraft(next) {
       draft = next;
+      // Columns are read again from the scope-keyed catalog, so a schema or source switch cannot leak in.
+      loaded.clear();
       render();
     },
     draft: () => draft,
