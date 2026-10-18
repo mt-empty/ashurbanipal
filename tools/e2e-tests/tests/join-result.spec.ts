@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { waitForIdle } from "./support/helpers";
-import { gotoJoin, joinParam, nextJoinResponse, ORDERS_USERS } from "./support/join";
+import { gotoJoin, joinParam, joinUrl, nextJoinResponse, ORDERS_USERS } from "./support/join";
 
 // Story 41: the result of a join in the normal grid.
 
@@ -77,7 +77,7 @@ test("the record dialog groups a joined row by table", async ({ page }) => {
 
 test("the server's 400 for a join it refuses shows in the overlay", async ({ page }) => {
   const response = nextJoinResponse(page);
-  await page.goto(`/__ashurbanipal?table=orders&limit=5&join=${encodeURIComponent("FROM orders o JOIN users u ON o.status = u.id")}`);
+  await page.goto(joinUrl("FROM orders o JOIN users u ON o.status = u.id"));
   expect((await response).status()).toBe(400);
   await expect(page.locator("#join-dialog")).toBeVisible();
   await expect(page.locator("#join-error")).toContainText("cannot be joined");
@@ -91,7 +91,7 @@ test("a timeout offers Retry and Edit join", async ({ page }) => {
       body: JSON.stringify({ type: "about:blank", title: "query timed out", status: 500, code: "query_timeout" }),
     }),
   );
-  await page.goto(`/__ashurbanipal?table=orders&limit=5&join=${encodeURIComponent(ORDERS_USERS)}`);
+  await page.goto(joinUrl(ORDERS_USERS));
   await expect(page.locator("#join-notice")).toContainText("took longer than the time limit");
   await expect(page.locator("#error")).toBeEmpty();
 

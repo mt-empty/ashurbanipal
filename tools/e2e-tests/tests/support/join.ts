@@ -1,5 +1,5 @@
 import { expect, type Page, type Response } from "@playwright/test";
-import { gotoApp, selectTable, waitForIdle } from "./helpers";
+import { APP_PATH, gotoApp, selectTable, waitForIdle } from "./helpers";
 
 export const ORDERS_USERS = "FROM orders o LEFT JOIN users u ON o.user_id = u.id";
 
@@ -42,10 +42,15 @@ export async function showResult(page: Page): Promise<Response> {
   return r;
 }
 
+/** The app URL of a join view starting from `orders`. */
+export function joinUrl(text: string, limit = 5): string {
+  return `${APP_PATH}?table=orders&limit=${limit}&join=${encodeURIComponent(text)}`;
+}
+
 /** Loads the page straight into a join view through its URL. */
 export async function gotoJoin(page: Page, text: string, limit = 5) {
   const response = nextJoinResponse(page);
-  await page.goto(`/__ashurbanipal?table=orders&limit=${limit}&join=${encodeURIComponent(text)}`);
+  await page.goto(joinUrl(text, limit));
   await response;
   await waitForIdle(page);
 }

@@ -231,6 +231,26 @@ test("renaming and deleting a saved join from the overlay", async ({ page }) => 
   await expect(page.locator("#tables li.join-chip.unsaved")).toBeVisible();
 });
 
+test("clicking the chip of the saved join in view opens it for deleting", async ({ page }) => {
+  await openJoinOverlay(page);
+  await writeSql(page, ORDERS_USERS);
+  await page.locator("#join-name").fill("kept");
+  await showResult(page);
+  await expandTableChips(page);
+  const chip = page.locator("#tables li.join-chip.saved button", { hasText: "kept" });
+  await expect(chip).toHaveAttribute("title", "kept: click to edit, rename or delete");
+  await chip.click();
+  await expect(page.locator("#join-dialog")).toBeVisible();
+  await expect(page.locator("#join-name")).toHaveValue("kept");
+  await page.locator("#join-delete").click();
+  await expect(page.locator("#join-dialog")).toBeHidden();
+
+  await page.reload();
+  await waitForIdle(page);
+  await expandTableChips(page);
+  await expect(page.locator("#tables li.join-chip.saved")).toHaveCount(0);
+});
+
 test("an empty SQL box disables Show result", async ({ page }) => {
   await openJoinOverlay(page);
   await writeSql(page, "");
