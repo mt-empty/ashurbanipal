@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { MAX_SAVED_PER_SCOPE, sanitizeSaved, scopeEntries, withoutSaved, withSaved } from "../src/lib/join-saved.ts";
 
-const entry = (name: string) => ({ name, text: "FROM a JOIN b ON a.x = b.y" });
+const entry = (name: string, text = `FROM a JOIN b ON a.x = b.${name}`) => ({ name, text });
 
 test("anything that is not the saved shape is dropped", () => {
   assert.deepEqual(sanitizeSaved("x"), {});
@@ -57,4 +57,28 @@ test("a blank name, a long name and a full scope are refused", () => {
 test("deleting the last entry leaves no empty scope behind", () => {
   const store = (withSaved({}, "a", "p", entry("one")) as { store: Record<string, Record<string, never>> }).store;
   assert.deepEqual(withoutSaved(store, "a", "p", "one"), { a: {} });
+});
+
+test("saving a join already saved renames its entry in place", () => {
+  let store = {};
+  for (const name of ["first", "second", "third"])
+    store = (withSaved(store, null, null, entry(name)) as { store: typeof store }).store;
+  const result = withSaved(store, null, null, entry("renamed", entry("second").text));
+  assert.ok("store" in result);
+  assert.deepEqual(
+    scopeEntries(result.store, null, null).map((e) => e.name),
+    ["first", "renamed", "third"],
+  );
+});
+
+test("renaming keeps the entry's place", () => {
+  let store = {};
+  for (const name of ["first", "second"])
+    store = (withSaved(store, null, null, entry(name)) as { store: typeof store }).store;
+  const result = withSaved(store, null, null, entry("new name", "FROM a JOIN b ON a.x = b.z"), "first");
+  assert.ok("store" in result);
+  assert.deepEqual(
+    scopeEntries(result.store, null, null).map((e) => e.name),
+    ["new name", "second"],
+  );
 });

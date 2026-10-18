@@ -90,7 +90,7 @@ test("text that does not parse disables Form and Show result and says where and 
   await writeSql(page, "FROM orders o\nRIGHT JOIN users u ON o.user_id = u.id");
   await expect(page.locator("#join-mode-form")).toBeDisabled();
   await expect(page.locator("#join-run")).toBeDisabled();
-  await expect(page.locator("#join-sql-error")).toHaveText("Line 2: RIGHT joins are not supported. Use LEFT or INNER.");
+  await expect(page.locator("#join-sql-error")).toHaveText("Line 2: RIGHT joins are not supported. Swap the two tables and use LEFT.");
   await expect(page.locator("#join-sql-tip")).toBeVisible();
   await expect(page.locator("#join-sql-hl-text .t-err")).toHaveText(["RIGHT", "JOIN"]);
 
@@ -355,4 +355,26 @@ test("saving the join in view keeps its filter, sort and page", async ({ page })
   await expect(page.locator("#filter")).toHaveValue("o.id > 1");
   await expandTableChips(page);
   await expect(page.locator("#tables li.join-chip.saved")).toHaveText("⋈ kept view");
+});
+
+test("showing a join again from the form keeps its written column order and its view", async ({ page }) => {
+  const text = "SELECT u.full_name, o.id\nFROM orders o\nLEFT JOIN users u ON o.user_id = u.id";
+  await gotoJoin(page, text);
+  const response = nextJoinResponse(page);
+  await page.locator("#filter").fill("o.id > 1");
+  await page.locator("#filter").press("Enter");
+  await response;
+  await waitForIdle(page);
+
+  await page.locator("#join-edit-btn").click();
+  await expect(page.locator("#join-mode-form")).toHaveAttribute("aria-selected", "true");
+  const again = await showResult(page);
+  expect(joinParam(again.url())).toMatchObject({
+    columns: [
+      { join: 1, column: "full_name" },
+      { join: 0, column: "id" },
+    ],
+  });
+  expect(new URL(page.url()).searchParams.get("join")).toBe(text);
+  await expect(page.locator("#filter")).toHaveValue("o.id > 1");
 });

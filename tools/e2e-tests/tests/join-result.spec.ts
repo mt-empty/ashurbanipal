@@ -197,3 +197,20 @@ test("cancelling a join the server refuses goes back to the table in view", asyn
   await expect(page.locator("#join-dialog")).toBeHidden();
   expect(new URL(page.url()).searchParams.get("join")).toBeNull();
 });
+
+test("a new join that times out leaves the table in view as it was", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.route("**/api/tables/join*", (route) => route.fulfill(problem(500, "query_timeout", "query timed out")));
+  await page.locator("#join-btn").click();
+  await writeSql(page, ORDERS_USERS);
+  await page.locator("#join-run").click();
+  await expect(page.locator("#join-notice")).toBeVisible();
+  await expect(page.locator("#current")).toHaveText("orders");
+
+  const response = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  await page.locator('th[data-col="id"]').click();
+  expect((await response).status()).toBe(200);
+  await waitForIdle(page);
+  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+});

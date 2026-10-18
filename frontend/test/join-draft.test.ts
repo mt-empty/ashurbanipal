@@ -14,6 +14,9 @@ test("a parsed join survives the draft round trip", () => {
     "FROM orders JOIN users ON orders.user_id = users.id",
     "SELECT o.*, u.email FROM orders o LEFT JOIN users u ON o.user_id = u.id",
     "SELECT u.email FROM orders o LEFT JOIN users u ON o.user_id = u.id",
+    "SELECT u.full_name, o.id FROM orders o LEFT JOIN users u ON o.user_id = u.id",
+    "SELECT u.*, o.id FROM orders o LEFT JOIN users u ON o.user_id = u.id",
+    "SELECT o.*, u.* FROM orders o LEFT JOIN users u ON o.user_id = u.id",
   ]) {
     const def = parse(text);
     const back = draftToDef(defToDraft(def));
@@ -89,4 +92,23 @@ test("removing a middle join clears pairs that pointed at it and shifts later po
   assert.deepEqual(draft.joins[0].on[0], { leftJoin: 0, leftColumn: "id", rightColumn: "order_id" });
   assert.deepEqual(draft.joins[1].on[0], { leftJoin: 0, leftColumn: "", rightColumn: "user_id" });
   assert.deepEqual(draft.joins[1].on[1], { leftJoin: 1, leftColumn: "order_id", rightColumn: "id" });
+});
+
+test("ticking a column keeps the written order and adds it after", () => {
+  const draft = defToDraft(parse("SELECT u.email, o.id FROM orders o JOIN users u ON o.user_id = u.id"));
+  draft.columns[0] = ["id", "status"];
+  const back = draftToDef(draft);
+  assert.ok("def" in back);
+  assert.equal(printJoin(back.def).split("\n")[0], "SELECT u.email, o.id, o.status");
+});
+
+test("removing a join drops its written columns and renumbers the rest", () => {
+  const draft = defToDraft(
+    parse("SELECT e.id, o.id FROM orders o JOIN users u ON o.user_id = u.id JOIN events e ON e.user_id = u.id"),
+  );
+  removeJoin(draft, 0);
+  assert.deepEqual(draft.order, [
+    { join: 1, column: "id" },
+    { join: 0, column: "id" },
+  ]);
 });
