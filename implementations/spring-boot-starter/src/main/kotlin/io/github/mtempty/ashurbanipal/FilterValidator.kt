@@ -14,14 +14,11 @@ private val VALID_OPS = setOf("=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", 
 /** Operators that do not take a value (`spec/protocol.md` §5.4.2). */
 internal val OPS_WITHOUT_VALUE = setOf("IS NULL", "IS NOT NULL")
 
-/**
- * Invalid filter input (`spec/protocol.md` §2) — `code` defaults to
- * `invalid_filter` for a structural/parse/oversize AST problem, but the
- * controller overrides it to `invalid_parameter` at the two call sites
- * (`order`, non-numeric `limit`/`offset`) that reuse this exception for a
- * plain bad-request rather than a filter-AST one.
- */
-class FilterException(message: String, val code: String = "invalid_filter") : RuntimeException(message)
+/** A structural, parse or oversize problem with the filter AST → 400 `invalid_filter` (`spec/protocol.md` §2). */
+class FilterException(message: String) : RuntimeException(message)
+
+/** A bad request parameter outside the filter (`order`, `limit`/`offset`, `sort_join`) → 400 `invalid_parameter`. */
+class BadParameterException(message: String) : RuntimeException(message)
 
 /** Untrusted filter input; [DbSource] validates columns before SQL (`spec/protocol.md` §5.4.2). */
 data class Condition(

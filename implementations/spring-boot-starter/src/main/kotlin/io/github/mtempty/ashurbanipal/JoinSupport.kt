@@ -293,10 +293,10 @@ fun planJoin(spec: JoinSpec, tables: List<JoinTableMeta>, opts: JoinOpts): JoinP
         ResolvedCondition(cond, pos, tables[pos].index(cond.column))
     }
 
-    if (opts.sort == null && opts.sortJoin != null) throw FilterException("sort_join needs sort", code = "invalid_parameter")
+    if (opts.sort == null && opts.sortJoin != null) throw BadParameterException("sort_join needs sort")
     val sort = opts.sort?.let { column ->
         val pos = opts.sortJoin ?: 0
-        if (pos < 0 || pos >= tables.size) throw FilterException("sort_join: position $pos is not in the join", code = "invalid_parameter")
+        if (pos < 0 || pos >= tables.size) throw BadParameterException("sort_join: position $pos is not in the join")
         pos to tables[pos].index(column)
     }
     return JoinPlan(tables, spec.joins.map { it.left }, ons, selection, labels, filter, sort, opts.descending)

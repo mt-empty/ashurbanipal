@@ -116,8 +116,7 @@ class JoinSupportTest {
         assertThrows(FilterException::class.java) {
             planJoin(spec, listOf(orders(), users()), opts(filter = listOf(Condition(column = "id", op = "IS NULL", join = 2))))
         }
-        val sj = assertThrows(FilterException::class.java) { planJoin(spec, listOf(orders(), users()), opts(sortJoin = 1)) }
-        assertEquals("invalid_parameter", sj.code)
+        assertThrows(BadParameterException::class.java) { planJoin(spec, listOf(orders(), users()), opts(sortJoin = 1)) }
         assertThrows(NotAllowedException::class.java) { planJoin(spec, listOf(orders(), users()), opts(sort = "email")) }
     }
 

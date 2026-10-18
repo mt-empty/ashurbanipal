@@ -120,7 +120,7 @@ class AshurbanipalController(
         val descending = when (order) {
             null, "asc" -> false
             "desc" -> true
-            else -> throw FilterException("invalid order \"$order\" (expected \"asc\" or \"desc\")", code = "invalid_parameter")
+            else -> throw BadParameterException("invalid order \"$order\" (expected \"asc\" or \"desc\")")
         }
 
         val data = resolveSource(source).queryTable(
@@ -162,11 +162,11 @@ class AshurbanipalController(
         val descending = when (order) {
             null, "asc" -> false
             "desc" -> true
-            else -> throw FilterException("invalid order \"$order\" (expected \"asc\" or \"desc\")", code = "invalid_parameter")
+            else -> throw BadParameterException("invalid order \"$order\" (expected \"asc\" or \"desc\")")
         }
         val sortJoinPosition = sortJoin?.let {
             it.trim().toIntOrNull()?.takeIf { n -> n >= 0 }
-                ?: throw FilterException("invalid sort_join \"$it\" (expected a table position)", code = "invalid_parameter")
+                ?: throw BadParameterException("invalid sort_join \"$it\" (expected a table position)")
         }
 
         val data = resolveSource(source).queryJoin(
@@ -246,7 +246,11 @@ class AshurbanipalController(
 
     @ExceptionHandler(FilterException::class)
     fun handleFilterError(e: FilterException): ResponseEntity<ProblemDetails> =
-        problemResponse(HttpStatus.BAD_REQUEST, e.code, e.message ?: "bad request")
+        problemResponse(HttpStatus.BAD_REQUEST, "invalid_filter", e.message ?: "bad request")
+
+    @ExceptionHandler(BadParameterException::class)
+    fun handleBadParameter(e: BadParameterException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.BAD_REQUEST, "invalid_parameter", e.message ?: "bad request")
 
     @ExceptionHandler(NotAllowedException::class)
     fun handleNotAllowedError(e: NotAllowedException): ResponseEntity<ProblemDetails> =
@@ -302,7 +306,7 @@ private fun parseSaturating(raw: String?): Long? {
     val big = try {
         BigInteger(trimmed)
     } catch (e: NumberFormatException) {
-        throw FilterException("invalid integer parameter: \"$raw\"", code = "invalid_parameter")
+        throw BadParameterException("invalid integer parameter: \"$raw\"")
     }
     return big.coerceIn(BigInteger.ZERO, BigInteger.valueOf(Long.MAX_VALUE)).toLong()
 }
