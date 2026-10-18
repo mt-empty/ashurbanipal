@@ -4,13 +4,15 @@ import { $, el, populateSelect, qs, reportError, setStatus } from "../core/dom.j
 import {
   applyStoredSort,
   clearFilter,
-  clearJoin,
   scopeQuery,
+  showTable,
   sourceQuery,
+  startTable,
   state,
   switchSchema,
   switchSource,
   switchTable,
+  tableInView,
 } from "../core/state.js";
 import type { SourceEntry, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
@@ -233,22 +235,22 @@ export async function loadTables(): Promise<void> {
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
-  if (!tableNames.includes(state.table ?? "")) {
-    state.table = tableNames[0] ?? null;
+  if (!tableNames.includes(startTable(state.view) ?? "")) {
+    showTable(tableNames[0] ?? null);
     // A ?filter= was written against the table the URL named; that table
     // isn't here, so its columns can't apply to the fallback — carrying it
     // over would 400 and dead-end the very load meant to recover (R5).
-    clearJoin();
     clearFilter();
   }
   // Restore this table's remembered sort unless one is already set — a
   // shared link's ?sort= or a history entry takes precedence.
-  if (state.table && !state.join && state.sort === null) applyStoredSort(state.table);
+  const table = tableInView();
+  if (table && state.sort === null) applyStoredSort(table);
   // Awaited (not fire-and-forget): callers like nav.ts's popstate handler
   // reset restoringFromHistory once this promise settles, and that flag
   // must still be true when loadData()'s syncUrl() call runs, or a
   // history restoration would push a new entry instead of replacing it.
-  if (state.table) await loadData();
+  if (state.view) await loadData();
   else setStatus("");
 }
 

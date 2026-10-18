@@ -1,4 +1,4 @@
-import { restoreFilterFromParams, restoreFromStorage, restoreJoinFromParams, state } from "./store.js";
+import { restoreFilterFromParams, restoreFromStorage, restoreJoinFromParams, state, tableView } from "./store.js";
 
 // URL <-> state, read side (nav.ts owns the write side, syncUrl). There are
 // two readers and they differ on purpose:
@@ -18,7 +18,7 @@ import { restoreFilterFromParams, restoreFromStorage, restoreJoinFromParams, sta
 export function applyUrlOverlay(params: URLSearchParams): void {
   if (params.has("source")) state.source = params.get("source");
   if (params.has("schema")) state.schema = params.get("schema");
-  if (params.has("table")) state.table = params.get("table");
+  if (params.has("table")) state.view = tableView(params.get("table"));
   if (params.has("sort")) state.sort = params.get("sort");
   if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
   if (params.has("limit")) state.limit = Number(params.get("limit")) || state.limit;
@@ -30,7 +30,7 @@ export function applyUrlOverlay(params: URLSearchParams): void {
 export function applyUrlExact(params: URLSearchParams): void {
   state.source = params.get("source") || null;
   state.schema = params.get("schema") || null;
-  state.table = params.get("table") || null;
+  state.view = tableView(params.get("table"));
   state.sort = params.get("sort") || null;
   state.order = params.get("order") === "desc" ? "desc" : "asc";
   state.limit = Number(params.get("limit")) || state.limit;

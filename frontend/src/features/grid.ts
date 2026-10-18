@@ -1,6 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, el, qs } from "../core/dom.js";
-import { getAppliedJoin, hiddenColumnsForTable, persist, rememberSort, state } from "../core/state.js";
+import { hiddenColumns, joinInView, rememberSort, setHiddenColumns, state, tableInView } from "../core/state.js";
 import type { Column, Row, TableData } from "../core/types.js";
 import {
   APPROX_COUNT_TITLE,
@@ -14,13 +14,30 @@ import { rowKey } from "../lib/row-diff.js";
 import { columnMinWidth } from "./column-widths.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { switchToLeftJoin } from "./join-dialog.js";
-import { buildBands, buildEmptyJoin, columnKey, inJoinView, refreshBands } from "./join-view.js";
+import { buildBands, buildEmptyJoin, columnKey, refreshBands } from "./join-view.js";
 import { navigateWithSeededFilter } from "./nav.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
 
+// A focusable control nested in the sortable th — stopPropagation so
+// opening it doesn't also toggle sort.
+function commonValuesButton(table: string, column: string): HTMLButtonElement {
+  const btn = el("button");
+  btn.type = "button";
+  btn.className = "common-values-btn";
+  btn.setAttribute("aria-label", `common values for ${column}`);
+  btn.textContent = "▾";
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    showCommonValues(e, table, column);
+  };
+  return btn;
+}
+
 export function renderHeader(columns: Column[]): void {
-  const hidden = hiddenColumnsForTable();
+  const hidden = hiddenColumns();
+  // Common values are a per-table query; a join column has no single table to ask.
+  const table = tableInView();
   const tr = el("tr");
   const actionsTh = el("th", "row-actions");
   tr.appendChild(actionsTh);
@@ -76,19 +93,7 @@ export function renderHeader(columns: Column[]): void {
       rememberSort();
       loadData({ resetScroll: false });
     };
-    // A focusable control nested in the sortable th — stopPropagation so
-    // opening it doesn't also toggle sort.
-    const cvBtn = el("button");
-    cvBtn.type = "button";
-    cvBtn.className = "common-values-btn";
-    cvBtn.setAttribute("aria-label", `common values for ${col.name}`);
-    cvBtn.textContent = "▾";
-    cvBtn.onclick = (e) => {
-      e.stopPropagation();
-      showCommonValues(e, col.name);
-    };
-    // Common values are a per-table query; a join column has no single table to ask.
-    if (!inJoinView()) head.appendChild(cvBtn);
+    if (table !== null) head.appendChild(commonValuesButton(table, col.name));
     th.append(head, typeCode);
     tr.appendChild(th);
   }
@@ -101,8 +106,8 @@ function renderEmptyState(columnCount: number): void {
   const emptyRow = el("tr", "empty");
   const td = el("td");
   td.colSpan = columnCount;
-  const join = getAppliedJoin();
-  if (join && state.offset === 0 && state.filter === "" && join.joins.some((j) => j.type === "inner")) {
+  const join = joinInView();
+  if (join && state.offset === 0 && state.filter === "" && join.def.joins.some((j) => j.type === "inner")) {
     td.appendChild(buildEmptyJoin(switchToLeftJoin));
   } else td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
   emptyRow.appendChild(td);
@@ -186,7 +191,7 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
       navigateWithSeededFilter(references.table, references.schema, () =>
         applyFilterClause(references.column, "=", raw),
       );
-  } else if (col.key === "pk" && !inJoinView()) {
+  } else if (col.key === "pk" && tableInView() !== null) {
     // Reverse of the FK-cell click: what points *at* this row. A pk+fk
     // column took the branch above; those rows, and no-PK tables, reach the
     // same list through the record dialog instead.
@@ -214,15 +219,9 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
 // not position, so it can't fall out of sync with header/cell alignment.
 // A stale column name simply matches nothing — silent no-op. ----
 function setColumnVisibility(name: string, hidden: boolean): void {
-  const current = hiddenColumnsForTable();
+  const current = hiddenColumns();
   const next = hidden ? [...current, name] : current.filter((c) => c !== name);
-  if (inJoinView()) state.joinHidden = next;
-  else {
-    const table = state.table ?? "";
-    if (next.length) state.hiddenColumns[table] = next;
-    else delete state.hiddenColumns[table];
-    persist();
-  }
+  setHiddenColumns(next);
   for (const el of document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
     el.classList.toggle("col-hidden", hidden);
   }
@@ -231,12 +230,12 @@ function setColumnVisibility(name: string, hidden: boolean): void {
 }
 
 export function updateColumnsButtonLabel(): void {
-  const n = hiddenColumnsForTable().length;
+  const n = hiddenColumns().length;
   $("columns-btn").textContent = n > 0 ? `columns (${n} hidden)` : "columns";
 }
 
 export function renderColumnMenu(columns: Column[]): void {
-  const hidden = hiddenColumnsForTable();
+  const hidden = hiddenColumns();
   $("columns-pop-list").replaceChildren(
     ...columns.map((col) => {
       const label = el("label");
@@ -262,7 +261,7 @@ function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
 export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
   // Same for every cell in this render, so computed once rather than
   // re-derived (array rebuild + linear scan) per cell.
-  const hidden = new Set(hiddenColumnsForTable());
+  const hidden = new Set(hiddenColumns());
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
     // hidden columns (display:none) aren't counted.
@@ -295,7 +294,7 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
 export function updatePager(data: TableData): void {
   const page = Math.floor(state.offset / state.limit) + 1;
   $<HTMLButtonElement>("prev").disabled = state.offset === 0;
-  if (inJoinView()) {
+  if (joinInView()) {
     // A join has no total (spec/protocol.md §5.11.4): the page says whether more follows.
     $("page").textContent = `page ${page} · ${data.has_more ? "more rows available" : "last page"}`;
     $("row-meta").textContent =

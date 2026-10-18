@@ -1,6 +1,6 @@
 import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
-import { applyScopeParams, state } from "../core/state.js";
+import { applyScopeParams, state, tableInView } from "../core/state.js";
 import type { ConstraintFk, StructureResponse } from "../core/types.js";
 
 // ---- structure dialog: a table's indexes and constraints (spec/protocol.md
@@ -94,8 +94,8 @@ export function tableStructure(table: string): Promise<StructureResponse> {
 }
 
 export function openStructure(): void {
-  const table = state.table;
-  if (!table) return;
+  const table = tableInView();
+  if (table === null) return;
   const token = ++requestToken;
   $("structure-title").textContent = `structure — ${state.schema ? `${state.schema}.${table}` : table}`;
   $<HTMLDialogElement>("structure-dialog").showModal();

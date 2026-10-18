@@ -5,12 +5,13 @@ import {
   diffNewRows,
   dropOneStaleInput,
   getAppliedFilterAst,
-  getAppliedJoin,
   markFilterVerified,
   markStoredSortVerified,
+  startTable,
   state,
+  tableInView,
 } from "../core/state.js";
-import type { JoinDef, TableData } from "../core/types.js";
+import type { JoinDef, TableData, View } from "../core/types.js";
 import { currentWidthScope, rememberColumnWidths, useWidthScope } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
@@ -80,20 +81,32 @@ function reportJoinFailure(e: ApiError): boolean {
   return false;
 }
 
-async function fetchTableData(): Promise<TableData> {
+function dataPath(view: View, params: URLSearchParams): Promise<string> | string {
+  switch (view.kind) {
+    case "table":
+      return `/tables/data?${params}`;
+    case "join":
+      return joinPath(view.def, params);
+    default: {
+      const _exhaustive: never = view;
+      return _exhaustive;
+    }
+  }
+}
+
+async function fetchTableData(view: View): Promise<TableData> {
   // Captured once, never re-read later: without this, a slow fetch for
-  // table A would clear table B's row-loading flag (whatever state.table
+  // table A would clear table B's row-loading flag (whatever the view
   // had become by the time A's `finally` runs) instead of its own.
-  const table = state.table ?? "";
-  const join = getAppliedJoin();
+  const table = startTable(view);
   const params = new URLSearchParams({
     limit: String(state.limit),
     offset: String(state.offset),
   });
-  if (!join) params.set("table", table);
+  if (view.kind === "table") params.set("table", view.table);
   if (state.sort) {
     // In a join view the sort is `alias.column`; the wire wants the column and its table position.
-    const target = join ? splitColumnKey(state.sort) : { column: state.sort, join: undefined };
+    const target = view.kind === "join" ? splitColumnKey(state.sort) : { column: state.sort, join: undefined };
     if (target) {
       params.set("sort", target.column);
       if (target.join !== undefined) params.set("sort_join", String(target.join));
@@ -110,7 +123,7 @@ async function fetchTableData(): Promise<TableData> {
   }
   setRowLoading(table, true);
   try {
-    return await api<TableData>(join ? await joinPath(join, params) : `/tables/data?${params}`);
+    return await api<TableData>(await dataPath(view, params));
   } finally {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
@@ -123,10 +136,23 @@ async function fetchTableData(): Promise<TableData> {
 // Must only ever move in lockstep with a *successful* render, never ahead
 // of it — a failed fetchTableData() (see loadData) must leave these
 // exactly as they were, matching the stale <table> body they describe.
+function viewTitle(view: View | null): string | null {
+  if (view === null) return null;
+  switch (view.kind) {
+    case "table":
+      return view.table;
+    case "join":
+      return joinLabel(view.def);
+    default: {
+      const _exhaustive: never = view;
+      return _exhaustive;
+    }
+  }
+}
+
 function updateActiveTableChrome(): void {
-  const join = getAppliedJoin();
-  const title = join ? joinLabel(join) : state.table;
-  setActiveTable(join ? null : state.table);
+  const title = viewTitle(state.view);
+  setActiveTable(tableInView());
   $("current").textContent = title ?? "—";
   document.title = title ? `${title} — Ashurbanipal` : "Ashurbanipal";
 }
@@ -147,7 +173,8 @@ export async function loadData({
 } = {}): Promise<void> {
   clearError();
   clearJoinNotice();
-  if (!state.table) {
+  const view = state.view;
+  if (view === null) {
     updateActiveTableChrome();
     setStatus("");
     return;
@@ -156,7 +183,7 @@ export async function loadData({
   const widthScope = currentWidthScope();
   let data: TableData;
   try {
-    data = await fetchTableData();
+    data = await fetchTableData(view);
   } catch (e) {
     if (token !== loadDataToken) return; // superseded by a newer request
     // A restored sort or a URL-restored filter can each name a column that no
@@ -168,9 +195,9 @@ export async function loadData({
     // read (e.g. a stale MySQL/MariaDB listing, docs/adapter-decisions.md
     // §5.2/§5.3) gets a plain-language message instead of the server's
     // implementation-defined title text.
-    if (state.join && e instanceof ApiError && reportJoinFailure(e)) return;
+    if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e)) return;
     if (e instanceof ApiError && e.code === "not_readable") {
-      reportError(new Error(`you don't have access to ${state.table}`));
+      reportError(new Error(`you don't have access to ${startTable(view)}`));
       return;
     }
     reportError(e);
@@ -179,11 +206,11 @@ export async function loadData({
   if (token !== loadDataToken) return; // superseded by a newer request
   markStoredSortVerified();
   markFilterVerified();
-  if (!state.join) seedColumns(state.table, data.columns);
+  if (view.kind === "table") seedColumns(view.table, data.columns);
   updateActiveTableChrome();
 
   // Row keys come from primary keys, which a join of several tables does not have.
-  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && !state.join);
+  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
 
   $<HTMLButtonElement>("payload").disabled = false;
   $<HTMLButtonElement>("columns-btn").disabled = false;

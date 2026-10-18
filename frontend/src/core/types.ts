@@ -142,6 +142,22 @@ export interface JoinDef {
   columns: JoinColumn[] | null;
 }
 
+// What the page shows. A table view is the only one with a single table that
+// per-table requests (structure, common values, referenced-by) can name.
+export interface TableView {
+  readonly kind: "table";
+  readonly table: string;
+}
+export interface JoinView {
+  readonly kind: "join";
+  readonly def: JoinDef;
+  // Canonical text (spec/join-dsl.md §3); it rides in the URL, never in localStorage.
+  readonly text: string;
+  // Not persisted: kept while the same join stays in view.
+  readonly hidden: readonly string[];
+}
+export type View = TableView | JoinView;
+
 export interface WireJoin {
   table: string;
   joins: { type: JoinType; table: string; on: JoinPair[] }[];

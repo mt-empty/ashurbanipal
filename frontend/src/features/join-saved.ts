@@ -1,4 +1,4 @@
-import { getAppliedJoin, state } from "../core/state.js";
+import { joinInView, state } from "../core/state.js";
 import { joinLabel } from "../lib/join-def.js";
 import {
   type SavedJoin,
@@ -49,7 +49,8 @@ export function savedJoins(): SavedJoin[] {
 
 // The saved entry for the join in view, if it was saved.
 export function savedJoinInView(): SavedJoin | undefined {
-  return state.join === "" ? undefined : savedJoins().find((s) => s.text === state.join);
+  const text = joinInView()?.text;
+  return text === undefined ? undefined : savedJoins().find((s) => s.text === text);
 }
 
 export function saveJoin(name: string, text: string, replacing?: string): string | null {
@@ -75,14 +76,14 @@ let lastRendered = "";
 // The chips after the table chips: saved joins, the unsaved join in view, `+ new join`.
 export function renderSavedChips(actions: ChipActions): void {
   const saved = savedJoins();
-  const key = JSON.stringify([state.source, state.schema, state.join, saved]);
+  const current = joinInView();
+  const key = JSON.stringify([state.source, state.schema, current?.text, saved]);
   if (key === lastRendered) return;
   lastRendered = key;
-  const current = getAppliedJoin();
-  const inSaved = saved.some((s) => s.text === state.join);
+  const inSaved = saved.some((s) => s.text === current?.text);
   // The chip of the join in view opens it for editing, which is also where it is renamed or deleted.
   const chips: JoinChip[] = saved.map((s) => {
-    const active = s.text === state.join;
+    const active = s.text === current?.text;
     return {
       label: `⋈ ${s.name}`,
       title: active ? `${s.name}: click to edit, rename or delete` : `${s.name} — ${s.text.replaceAll("\n", " ")}`,
@@ -93,7 +94,7 @@ export function renderSavedChips(actions: ChipActions): void {
   });
   if (current && !inSaved) {
     chips.push({
-      label: `⋈ ${joinLabel(current)}`,
+      label: `⋈ ${joinLabel(current.def)}`,
       title: "this join is not saved",
       className: "unsaved",
       active: true,

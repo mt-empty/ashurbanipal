@@ -1,6 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, el, reportError } from "../core/dom.js";
-import { clearFilter, getAppliedJoin, persist, setAppliedJoin, state } from "../core/state.js";
+import { clearFilter, enterJoin, joinInView, persist, startTable, state } from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
 import { type Draft, defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
 import { parseJoin, printJoin } from "../lib/join-dsl.js";
@@ -77,12 +77,12 @@ let editingSaved: string | undefined;
 // `fresh` starts from the table in view even inside a join view; `focusName`
 // is the `Save…` chip, which only wants the name field.
 export function openJoinDialog(opts: { error?: string; fresh?: boolean; focusName?: boolean } = {}): void {
-  const def = opts.fresh ? null : getAppliedJoin();
+  const def = opts.fresh ? undefined : joinInView()?.def;
   const saved = opts.fresh ? undefined : savedJoinInView();
   editingSaved = saved?.name;
   $<HTMLInputElement>("join-name").value = saved?.name ?? "";
   $("join-delete").hidden = saved === undefined;
-  form.setDraft(def ? defToDraft(def) : newDraft(state.table ?? ""));
+  form.setDraft(def ? defToDraft(def) : newDraft(startTable(state.view) ?? ""));
   handoff = null;
   setMode("form");
   $("join-sql-error").textContent = "";
@@ -111,7 +111,7 @@ export function refreshSavedChips(): void {
 // A new join starts from the default view: the sort and filter were written
 // against other columns, and the first page is the place to look.
 export function applyJoin(def: JoinDef): void {
-  setAppliedJoin(def);
+  enterJoin(def);
   state.sort = null;
   state.order = "asc";
   state.offset = 0;
@@ -122,7 +122,7 @@ export function applyJoin(def: JoinDef): void {
 
 // The empty-state button of an INNER join that matched nothing.
 export function switchToLeftJoin(): void {
-  const def = getAppliedJoin();
+  const def = joinInView()?.def;
   if (def) applyJoin({ ...def, joins: def.joins.map((j) => ({ ...j, type: "left" })) });
 }
 
@@ -155,7 +155,7 @@ formTab.onclick = () => {
   else {
     const parsed = sql.text().trim() ? sql.parse() : null;
     if (parsed && "error" in parsed) return;
-    form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(state.table ?? ""));
+    form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(startTable(state.view) ?? ""));
   }
   setMode("form");
   refresh();

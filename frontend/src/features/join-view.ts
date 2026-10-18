@@ -1,16 +1,12 @@
 import { $, el } from "../core/dom.js";
-import { getAppliedJoin, state } from "../core/state.js";
+import { joinInView } from "../core/state.js";
 import type { Column } from "../core/types.js";
 import { effectiveName, quoteJoinName } from "../lib/join-dsl.js";
-
-export function inJoinView(): boolean {
-  return state.join !== "";
-}
 
 // How a column is named where the user types or links it (sort, filter clause):
 // `alias.column` in a join view, the plain name otherwise.
 export function columnKey(col: Column): string {
-  const def = getAppliedJoin();
+  const def = joinInView()?.def;
   if (!def || col.join === undefined || col.column === undefined) return col.name;
   return `${quoteJoinName(effectiveName(def.tables[col.join]))}.${col.column}`;
 }
@@ -19,7 +15,7 @@ const QUALIFIED = /^(?:([A-Za-z_][A-Za-z0-9_]*)|"((?:[^"]|"")+)")\.(.+)$/s;
 
 // Inverse of columnKey, resolved against the applied join's aliases.
 export function splitColumnKey(key: string): { join: number; column: string } | null {
-  const def = getAppliedJoin();
+  const def = joinInView()?.def;
   const m = QUALIFIED.exec(key);
   if (!def || !m) return null;
   const alias = m[1] ?? m[2].replaceAll('""', '"');
@@ -32,7 +28,7 @@ export function splitColumnKey(key: string): { join: number; column: string } | 
 // headers of its run and hides with the last of them. A select list that
 // alternates tables gets a band per switch.
 export function buildBands(columns: Column[], heads: readonly HTMLElement[]): HTMLTableRowElement | null {
-  const def = getAppliedJoin();
+  const def = joinInView()?.def;
   if (!def) return null;
   const tr = el("tr", "bands");
   tr.appendChild(el("th", "row-actions"));
@@ -86,7 +82,7 @@ export function clearJoinNotice(): void {
 // `⋈ join` starts a join from the table being viewed; inside a join view
 // `edit join` changes it instead.
 export function updateJoinChrome(): void {
-  const join = inJoinView();
+  const join = joinInView() !== null;
   $<HTMLButtonElement>("join-btn").hidden = join;
   $<HTMLButtonElement>("join-btn").disabled = false;
   $<HTMLButtonElement>("join-edit-btn").hidden = !join;

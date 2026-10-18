@@ -1,9 +1,8 @@
 import { $, copyText, el } from "../core/dom.js";
-import { state } from "../core/state.js";
+import { state, tableInView } from "../core/state.js";
 import type { Column, Row } from "../core/types.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
 import { renderJsonTree } from "../lib/json-tree.js";
-import { inJoinView } from "./join-view.js";
 import { renderReferencedBy } from "./referenced-by.js";
 
 // ---- record / vertical view: one already-fetched row as a stacked
@@ -71,9 +70,9 @@ function recordAsJson(columns: Column[], row: Row): string {
   return JSON.stringify(obj, null, 2);
 }
 
-function recordAsInsert(columns: Column[], row: Row): string {
+function recordAsInsert(table: string, columns: Column[], row: Row): string {
   // Identifiers left unquoted — no quote char is portable across all three engines.
-  const target = state.schema ? `${state.schema}.${state.table}` : state.table;
+  const target = state.schema ? `${state.schema}.${table}` : table;
   const cols = columns.map((c) => c.name).join(", ");
   const vals = columns.map((c) => sqlLiteral(c, row[c.name])).join(", ");
   return `INSERT INTO ${target} (${cols})\nVALUES (${vals});`;
@@ -89,15 +88,17 @@ function sqlLiteral(col: Column, raw: string | null): string {
 
 export function openRecordView(columns: Column[], row: Row): void {
   $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
-  // Both read state.table, which is only one of a join's tables.
-  const join = inJoinView();
-  $("record-referenced-by-wrap").hidden = join;
-  $("record-copy-insert").hidden = join;
-  if (!join) renderReferencedBy($("record-referenced-by"), row, () => $<HTMLDialogElement>("record-dialog").close());
+  // Both name one table; a join row has several.
+  const table = tableInView();
+  $("record-referenced-by-wrap").hidden = table === null;
+  const copyInsertBtn = $("record-copy-insert");
+  copyInsertBtn.hidden = table === null;
+  if (table !== null) {
+    renderReferencedBy($("record-referenced-by"), row, () => $<HTMLDialogElement>("record-dialog").close());
+    copyInsertBtn.onclick = () => copyText(recordAsInsert(table, columns, row), copyInsertBtn);
+  }
   const copyRowBtn = $("record-copy-row");
   copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
-  const copyInsertBtn = $("record-copy-insert");
-  copyInsertBtn.onclick = () => copyText(recordAsInsert(columns, row), copyInsertBtn);
   const open = () => $<HTMLDialogElement>("record-dialog").showModal();
   document.startViewTransition ? document.startViewTransition(open) : open();
 }

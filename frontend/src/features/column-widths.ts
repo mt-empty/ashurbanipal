@@ -1,16 +1,16 @@
 import { $ } from "../core/dom.js";
-import { state } from "../core/state.js";
+import { state, viewKey } from "../core/state.js";
 
 // Grow-only per-column min-widths for the table being viewed, so a sort,
 // filter or page change can widen a column but never shrinks it and shifts the
-// columns after it. Scoped to source/schema/table; refresh clears it.
+// columns after it. Scoped to source/schema/view; refresh clears it.
 let scope = "";
 const widths = new Map<string, number>();
 
 // Captured when a load starts, so a render that runs after the selection has
 // moved on still records its widths under the table it shows.
 export function currentWidthScope(): string {
-  return `${state.source}|${state.schema}|${state.table}`;
+  return `${state.source}|${state.schema}|${viewKey(state.view)}`;
 }
 
 export function useWidthScope(next: string): void {

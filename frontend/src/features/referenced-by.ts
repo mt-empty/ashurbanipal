@@ -1,6 +1,6 @@
 import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
-import { applyScopeParams, state } from "../core/state.js";
+import { applyScopeParams, state, tableInView } from "../core/state.js";
 import type { ReferencedByEntry, Row } from "../core/types.js";
 import { applyFilterClauses } from "./filter-ui.js";
 import { navigateWithSeededFilter } from "./nav.js";
@@ -79,7 +79,9 @@ function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: R
 export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: () => void): void {
   const token = (renderTokens.get(container) ?? 0) + 1;
   renderTokens.set(container, token);
-  const table = state.table ?? "";
+  // Only offered in a table view: a join row has several tables.
+  const table = tableInView();
+  if (table === null) return;
   // Key captured now, alongside applyScopeParams' read of the same scope,
   // so a mid-flight scope switch can't file the result under the wrong key.
   const key = cacheKey(table);
