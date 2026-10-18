@@ -19,11 +19,9 @@ const SEEDED_TABLES = [
   "users",
 ];
 
-// A dev database may also hold zz_demo_* tables (many empty tables for looking
-// at the chip cap by hand); the specs below ignore them.
 test("table chips list all seeded tables alphabetically with approx row counts", async ({ page }) => {
   await gotoApp(page);
-  const buttons = page.locator('#tables button[data-table]:not([data-table^="zz_demo_"])');
+  const buttons = page.locator("#tables button[data-table]");
   await expect(buttons).toHaveCount(SEEDED_TABLES.length);
   // _conformance_meta/feature_flags are deliberately never ANALYZEd, so
   // the frontend shows "?" (formatApproxCount) instead of a raw -1.
