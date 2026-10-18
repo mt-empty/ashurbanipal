@@ -311,7 +311,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     case "/tables/structure":
       return handleStructure(params);
     case "/tables/join":
-      return jsonResponse({ title: "Joins are not available in this offline demo.", code: "invalid_parameter" }, 400);
+      return jsonResponse({ title: "Joins are not available in this offline demo.", code: "invalid_join" }, 400);
     case "/siblings":
       return handleSiblings();
     default:

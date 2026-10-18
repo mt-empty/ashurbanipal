@@ -54,17 +54,14 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
   const wire = JSON.stringify(toWire(def, (position) => names.get(position) ?? []));
   // The server rejects a longer `join` (spec/protocol.md §5.11.1); say why before sending.
   if (new TextEncoder().encode(wire).length > JOIN_MAX_BYTES)
-    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", undefined, 400);
+    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", "invalid_join", 400);
   params.set("join", wire);
   return `/tables/join?${params}`;
 }
 
-// The join text that last loaded: once a join has rendered, a 400 is about the
-// filter or sort on top of it, which the plain error line reports.
-let loadedJoin = "";
-
 // A timeout or a rejected join gets the join's own UI instead of the plain
-// error line. A bad filter is the filter bar's to report.
+// error line; on this route `not_readable` can only name one of the join's
+// tables. Any other 400 (filter, sort) is the plain error line's.
 function reportJoinFailure(e: ApiError): boolean {
   if (e.code === "query_timeout") {
     showJoinNotice(
@@ -76,7 +73,7 @@ function reportJoinFailure(e: ApiError): boolean {
     );
     return true;
   }
-  if (e.status === 400 && e.code !== "invalid_filter" && state.join !== loadedJoin) {
+  if (e.code === "invalid_join" || e.code === "not_readable") {
     openJoinDialog({ error: e.message });
     return true;
   }
@@ -182,7 +179,6 @@ export async function loadData({
   if (token !== loadDataToken) return; // superseded by a newer request
   markStoredSortVerified();
   markFilterVerified();
-  loadedJoin = state.join;
   if (!state.join) seedColumns(state.table, data.columns);
   updateActiveTableChrome();
 
