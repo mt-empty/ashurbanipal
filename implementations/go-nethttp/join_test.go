@@ -65,6 +65,8 @@ func TestParseJoinRejectsStructuralViolations(t *testing.T) {
 		"trailing data":       testJoinJSON + ` {}`,
 		"oversize":            `{"table":"` + strings.Repeat("t", MaxJoinBytes) + `","joins":[]}`,
 		"unknown top key":     `{"table":"o","joins":[` + entry + `],"x":1}`,
+		"key in another case": fmt.Sprintf(`{"TABLE":"o","Joins":[%s]}`, entry),
+		"nested key case":     `{"table":"o","joins":[{"Type":"left","table":"u","on":[` + pair + `]}]}`,
 		"fractional position": `{"table":"o","joins":[{"type":"left","table":"u","on":[{"left":{"join":0.5,"column":"a"},"right":"b"}]}]}`,
 	}
 	for name, raw := range cases {
@@ -268,5 +270,14 @@ func TestPgTypeClass(t *testing.T) {
 	}
 	if pgTypeClass("USER-DEFINED", "public", "geometry", false) != nil {
 		t.Error("an unknown user-defined type is not joinable")
+	}
+}
+
+func TestParseFilterRejectsAKeyInAnotherCase(t *testing.T) {
+	if _, err := ParseFilter(`[{"COLUMN":"a","op":"IS NULL"}]`); err == nil {
+		t.Error("a key spelled in another case must be rejected")
+	}
+	if _, err := ParseFilter(`[{"column":"a","op":"IS NULL"}]`); err != nil {
+		t.Errorf("the documented keys must still parse: %v", err)
 	}
 }

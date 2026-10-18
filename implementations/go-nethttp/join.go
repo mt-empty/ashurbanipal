@@ -112,6 +112,16 @@ func (w *wireColumnPos) toPos(what string) (ColumnPos, error) {
 	return ColumnPos{Join: *w.Join, Column: *w.Column}, nil
 }
 
+var joinKeys = keyShape{
+	"table": nil,
+	"joins": keyShape{
+		"type":  nil,
+		"table": nil,
+		"on":    keyShape{"left": keyShape{"join": nil, "column": nil}, "right": nil},
+	},
+	"columns": keyShape{"join": nil, "column": nil},
+}
+
 // ParseJoin validates the join object's structure only; names and types are
 // checked against the catalog by planJoin.
 func ParseJoin(raw string) (JoinSpec, error) {
@@ -126,6 +136,9 @@ func ParseJoin(raw string) (JoinSpec, error) {
 	}
 	if _, err := dec.Token(); err != io.EOF {
 		return JoinSpec{}, badJoin("join must be a single JSON object")
+	}
+	if err := checkKeys(raw, joinKeys); err != nil {
+		return JoinSpec{}, badJoin("join must be a JSON object of the documented shape: %s", err)
 	}
 	if w.Table == nil {
 		return JoinSpec{}, badJoin("join needs a table")
