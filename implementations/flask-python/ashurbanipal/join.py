@@ -85,7 +85,8 @@ def parse_join(raw: str) -> JoinSpec:
         raise BadJoin(f"join too long: {size} bytes (max {MAX_JOIN_BYTES})")
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError as e:
+    # A deeply nested value that fits the byte bound overflows the decoder's recursion, not its grammar.
+    except (json.JSONDecodeError, RecursionError) as e:
         raise BadJoin(f"join must be a JSON object of the documented shape: {e}") from e
     if not isinstance(parsed, dict):
         raise BadJoin("join must be a JSON object")

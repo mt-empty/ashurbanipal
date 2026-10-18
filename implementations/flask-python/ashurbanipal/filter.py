@@ -45,7 +45,8 @@ def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
 
     try:
         raw_conditions = json.loads(raw)
-    except json.JSONDecodeError as e:
+    # A deeply nested value that fits the byte bound overflows the decoder's recursion, not its grammar.
+    except (json.JSONDecodeError, RecursionError) as e:
         raise FilterError(f"filter must be a JSON array of conditions: {e}") from e
     if not isinstance(raw_conditions, list):
         raise FilterError("filter must be a JSON array of conditions")

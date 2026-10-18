@@ -121,6 +121,18 @@ def test_parse_join_rejects_structural_violations() -> None:
     parse_join(json.dumps({"table": "o", "joins": [entry] * 3}))  # 4 tables is the limit
 
 
+def test_deeply_nested_json_under_the_byte_bound_is_a_bad_join_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Python 3.11's decoder overflows near 1000 levels, 3.12's only past the byte bound; force it.
+    def overflow(_: str) -> None:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(json, "loads", overflow)
+    with pytest.raises(BadJoin):
+        parse_join("[" * 2000 + "]" * 2000)
+
+
 def test_plan_join_rejects_unknown_names_hostile_names_and_incompatible_pairs() -> None:
     spec = parse_join(JOIN)
     plan_join(spec, [_orders(), _users()], _opts())
