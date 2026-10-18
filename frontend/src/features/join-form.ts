@@ -205,6 +205,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         value: join.table,
         placeholder: "choose a table",
         mono: true,
+        searchable: true,
         onPick: (v) => {
           if (v !== join.table) {
             // Pairs of later joins that named a column of the old table no longer point at anything.

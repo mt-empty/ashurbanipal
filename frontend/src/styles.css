@@ -597,6 +597,12 @@ thead tr.bands + tr th { top: var(--band-h); }
           width: max-content; max-width: min(26rem, 90vw); max-height: 16rem; overflow: auto;
           box-shadow: 0 4px 16px #0004; font-size: .8125rem; }
 #dd-pop-list { display: flex; flex-direction: column; }
+#dd-pop-search { position: sticky; top: 0; z-index: 1; box-sizing: border-box; width: 100%; margin-bottom: .2rem;
+                 padding: .3rem .5rem; border: 1px solid var(--border); border-radius: 6px; font: inherit;
+                 font-family: var(--font-mono); background: Canvas; color: inherit; }
+#dd-pop-search:focus-visible { outline: 2px solid var(--chip-active-bg); outline-offset: -1px; }
+#dd-pop-search[hidden] { display: none; }
+.dd-none { margin: 0; padding: .25rem .5rem; color: var(--text-muted); }
 .dd-row { display: flex; justify-content: space-between; gap: 1rem; width: 100%; box-sizing: border-box;
           background: none; border: none; font: inherit; font-family: var(--font-mono); color: inherit;
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }

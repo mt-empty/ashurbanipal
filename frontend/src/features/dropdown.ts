@@ -1,4 +1,5 @@
 import { $ } from "../core/dom.js";
+import { fuzzyFilter } from "../lib/fuzzy.js";
 
 // A button that opens a menu of rows, each a label on the left and a note on
 // the right; a row with a `blocked` note stays visible, greyed, and cannot be
@@ -22,6 +23,8 @@ export interface DropdownOptions {
   display?: string;
   mono?: boolean;
   invalid?: boolean;
+  // A search box above the rows narrows them by fuzzy match as the user types.
+  searchable?: boolean;
   onPick: (value: string) => void;
 }
 
@@ -38,15 +41,14 @@ function closeMenu(): void {
   if (pop().matches(":popover-open")) pop().hidePopover();
 }
 
-function open(button: HTMLButtonElement, opts: DropdownOptions): void {
-  if (anchor) anchor.style.anchorName = "";
-  anchor = button;
-  lastLabel = opts.ariaLabel;
-  button.style.anchorName = "--dd-anchor";
+const search = (): HTMLInputElement => $<HTMLInputElement>("dd-pop-search");
+let current: DropdownOptions | null = null;
+
+function renderRows(opts: DropdownOptions, query: string): void {
   const list = $("dd-pop-list");
-  list.setAttribute("aria-label", opts.ariaLabel);
+  const shown = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
   list.replaceChildren(
-    ...opts.options.map((o) => {
+    ...shown.map((o) => {
       const row = document.createElement("button");
       row.type = "button";
       row.className = "dd-row";
@@ -74,12 +76,34 @@ function open(button: HTMLButtonElement, opts: DropdownOptions): void {
       return row;
     }),
   );
+  if (shown.length === 0) {
+    const none = document.createElement("p");
+    none.className = "dd-none";
+    none.textContent = `Nothing matches ${query.trim()}.`;
+    list.appendChild(none);
+  }
+}
+
+const pickable = (): HTMLElement[] => [...pop().querySelectorAll<HTMLElement>(".dd-row:not(.blocked)")];
+
+function open(button: HTMLButtonElement, opts: DropdownOptions): void {
+  if (anchor) anchor.style.anchorName = "";
+  anchor = button;
+  current = opts;
+  lastLabel = opts.ariaLabel;
+  button.style.anchorName = "--dd-anchor";
+  const list = $("dd-pop-list");
+  list.setAttribute("aria-label", opts.ariaLabel);
+  const box = search();
+  box.hidden = !opts.searchable;
+  box.value = "";
+  box.setAttribute("aria-label", `search: ${opts.ariaLabel}`);
+  renderRows(opts, "");
   pop().showPopover();
-  const start =
-    list.querySelector<HTMLElement>('[aria-selected="true"]') ??
-    list.querySelector<HTMLElement>(".dd-row:not(.blocked)");
-  start?.focus();
+  const start = list.querySelector<HTMLElement>('[aria-selected="true"]') ?? pickable()[0];
   start?.scrollIntoView({ block: "nearest" });
+  if (opts.searchable) box.focus();
+  else start?.focus();
 }
 
 export function createDropdown(opts: DropdownOptions): HTMLButtonElement {
@@ -96,14 +120,33 @@ export function createDropdown(opts: DropdownOptions): HTMLButtonElement {
   return button;
 }
 
-// Arrow keys move through the rows; the popover itself handles Escape and
-// light dismiss.
+search().addEventListener("input", () => {
+  if (current) renderRows(current, search().value);
+});
+search().addEventListener("keydown", (e: KeyboardEvent) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  pickable()[0]?.click();
+});
+
+// Arrow keys move through the rows, up from the first row back to the search
+// box; typing on a row goes to the search box. The popover itself handles
+// Escape and light dismiss.
 pop().addEventListener("keydown", (e: KeyboardEvent) => {
+  const box = search();
+  if (!box.hidden && e.target !== box && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    box.focus();
+    return;
+  }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-  const rows = [...pop().querySelectorAll<HTMLElement>(".dd-row:not(.blocked)")];
+  const rows = pickable();
   if (rows.length === 0) return;
   e.preventDefault();
   const at = rows.indexOf(document.activeElement as HTMLElement);
+  if (e.key === "ArrowUp" && at === 0 && !box.hidden) {
+    box.focus();
+    return;
+  }
   const next = e.key === "ArrowDown" ? (at + 1) % rows.length : (at <= 0 ? rows.length : at) - 1;
   rows[next].focus();
 });
