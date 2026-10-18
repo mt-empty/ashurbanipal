@@ -29,6 +29,9 @@ const chipCounts = new Map<string, string>();
 // Saved-join chips follow the table chips (after a divider) and take part in the
 // same line cap, so they are hidden before the tables are, active one aside.
 let joinEntries: TableEntry[] = [];
+// The source and schema the join chips were built for; a table list for another scope drops them.
+let joinScope = "";
+const scopeOfChips = (): string => `${state.source ?? ""}|${state.schema ?? ""}`;
 const allEntries = (): TableEntry[] => [...tableEntries, ...joinEntries];
 const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 
@@ -41,15 +44,15 @@ const tablesMore = $<HTMLButtonElement>("tables-more");
 // final chip instead of taking width from the rows above it.
 const tablesMoreItem = $("tables-more-item");
 let tablesExpanded = false;
-// The active table the last cap pass saw; a repeat load of the same table
-// skips the measuring.
+// The active table chip the last cap pass saw; a repeat load of the same view
+// skips the measuring (an active join chip is setJoinChips' to measure).
 let cappedActive: string | null = null;
 
 // Measures the full layout (offsetTop per chip), so the cap is by rendered
 // lines and tracks the list's width without a per-chip width model.
 function updateTablesCap(): void {
   const entries = allEntries();
-  cappedActive = entries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
+  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
   for (const e of entries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
@@ -230,6 +233,7 @@ export async function loadTables(): Promise<void> {
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, btn });
   }
+  if (joinScope !== scopeOfChips()) joinEntries = [];
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
@@ -272,6 +276,10 @@ export interface JoinChip {
 }
 
 // Replaces the chips after the divider; called whenever the join in view or the saved list changes.
+export function hasJoinChips(): boolean {
+  return joinEntries.length > 0;
+}
+
 export function setJoinChips(chips: JoinChip[]): void {
   const ul = $("tables");
   for (const e of joinEntries) e.li.remove();
@@ -288,6 +296,7 @@ export function setJoinChips(chips: JoinChip[]): void {
     ul.insertBefore(li, tablesMoreItem);
     return { name: `join:${c.label}`, li, btn };
   });
+  joinScope = scopeOfChips();
   updateTablesCap();
 }
 

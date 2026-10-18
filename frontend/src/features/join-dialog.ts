@@ -1,6 +1,16 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, el, reportError } from "../core/dom.js";
-import { clearFilter, enterJoin, joinInView, persist, startTable, state } from "../core/state.js";
+import {
+  clearFilter,
+  clearJoin,
+  enterJoin,
+  joinInView,
+  persist,
+  restoreShownView,
+  startTable,
+  state,
+  viewIsShown,
+} from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
 import { type Draft, defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
 import { parseJoin, printJoin } from "../lib/join-dsl.js";
@@ -43,7 +53,6 @@ function refresh(): void {
   $("join-sql-tip").hidden = bad === "" || back;
 }
 
-// Keywords in the keyword colour, as in the SQL field.
 function coloured(text: string): Node[] {
   return tokenizeJoinText(text).map((t) => {
     const span = el("span", t.kind === "keyword" ? "t-keyword" : "", text.slice(t.start, t.end));
@@ -109,18 +118,20 @@ export function refreshSavedChips(): void {
 }
 
 // A new join starts from the default view: the sort and filter were written
-// against other columns, and the first page is the place to look.
+// against other columns. Saving or renaming the join in view keeps them.
 export function applyJoin(def: JoinDef): void {
+  const same = joinInView()?.text === printJoin(def);
   enterJoin(def);
-  state.sort = null;
-  state.order = "asc";
-  state.offset = 0;
-  clearFilter();
+  if (!same) {
+    state.sort = null;
+    state.order = "asc";
+    state.offset = 0;
+    clearFilter();
+  }
   persist();
   loadData();
 }
 
-// The empty-state button of an INNER join that matched nothing.
 export function switchToLeftJoin(): void {
   const def = joinInView()?.def;
   if (def) applyJoin({ ...def, joins: def.joins.map((j) => ({ ...j, type: "left" })) });
@@ -140,9 +151,24 @@ runBtn.onclick = () => {
       return;
     }
   }
+  committed = true;
   dialog.close();
   applyJoin(result.def);
 };
+// Set by Show result: its close is the only one that leaves a new join in view.
+let committed = false;
+// A join the server rejected is already the view; closing its dialog any other
+// way goes back to what the grid shows, or to the start table on a first load.
+dialog.addEventListener("close", () => {
+  if (committed) committed = false;
+  else if (joinInView() && !viewIsShown()) {
+    if (!restoreShownView()) {
+      clearJoin();
+      persist();
+      loadData();
+    }
+  }
+});
 $("join-delete").onclick = () => {
   if (editingSaved !== undefined) deleteSavedJoin(editingSaved);
   dialog.close();

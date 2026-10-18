@@ -8,7 +8,7 @@ import {
   withoutSaved,
   withSaved,
 } from "../lib/join-saved.js";
-import { type JoinChip, setJoinChips } from "./sidebar.js";
+import { hasJoinChips, type JoinChip, setJoinChips } from "./sidebar.js";
 
 // Saved joins live in their own localStorage key, outside the view blob: they
 // are the user's own list, grouped by source and schema, and the server never
@@ -78,7 +78,8 @@ export function renderSavedChips(actions: ChipActions): void {
   const saved = savedJoins();
   const current = joinInView();
   const key = JSON.stringify([state.source, state.schema, current?.text, saved]);
-  if (key === lastRendered) return;
+  // The table list drops chips built for another scope, so a match with none shown still rebuilds.
+  if (key === lastRendered && hasJoinChips()) return;
   lastRendered = key;
   const inSaved = saved.some((s) => s.text === current?.text);
   // The chip of the join in view opens it for editing, which is also where it is renamed or deleted.

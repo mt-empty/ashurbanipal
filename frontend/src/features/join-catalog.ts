@@ -12,6 +12,7 @@ import { tableStructure } from "./structure.js";
 const cache = new Map<string, Promise<Column[]>>();
 const resolved = new Map<string, Column[]>();
 const indexes = new Map<string, Promise<Set<string>>>();
+const indexesRead = new Map<string, Set<string>>();
 let generation = 0;
 let version = 0;
 const keyOf = (table: string): string => `${state.source}|${state.schema}|${table}`;
@@ -20,6 +21,7 @@ export function clearJoinCatalog(): void {
   cache.clear();
   resolved.clear();
   indexes.clear();
+  indexesRead.clear();
   generation++;
   version++;
 }
@@ -73,11 +75,22 @@ export function indexedColumns(table: string): Promise<Set<string>> {
   const key = keyOf(table);
   let found = indexes.get(key);
   if (!found) {
-    found = tableStructure(table).then(
-      (s) => new Set(s.indexes.map((i) => i.columns[0])),
-      () => new Set<string>(),
-    );
+    const asked = generation;
+    // A failed lookup counts as read too, with no tags, so callers waiting on it stop asking.
+    found = tableStructure(table)
+      .then(
+        (s) => new Set(s.indexes.map((i) => i.columns[0])),
+        () => new Set<string>(),
+      )
+      .then((set) => {
+        if (asked === generation) indexesRead.set(key, set);
+        return set;
+      });
     indexes.set(key, found);
   }
   return found;
+}
+
+export function readIndexedColumns(table: string): ReadonlySet<string> | undefined {
+  return indexesRead.get(keyOf(table));
 }

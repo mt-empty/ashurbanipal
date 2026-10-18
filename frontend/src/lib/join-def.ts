@@ -10,11 +10,11 @@ export function joinLabel(def: JoinDef): string {
     .join(" ");
 }
 
-// The wire has no "all of this table" form, only a whole-list omission, which is
-// right only when every table's columns are selected.
+// The wire has no "all of this table" form, only a whole-list omission, which
+// the server answers in table order: right only for every `alias.*` in that order.
 function selectsEverything(def: JoinDef): boolean {
   if (def.columns === null) return true;
-  return def.columns.every((c) => "all" in c) && new Set(def.columns.map((c) => c.join)).size === def.tables.length;
+  return def.columns.length === def.tables.length && def.columns.every((c, i) => "all" in c && c.join === i);
 }
 
 // Positions whose `alias.*` has to be expanded to column names for the request.

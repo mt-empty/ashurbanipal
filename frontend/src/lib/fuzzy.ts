@@ -6,12 +6,21 @@
 
 const BOUNDARY = /[_\-. ]/;
 
+function fits(rest: string, t: string, from: number): boolean {
+  for (const ch of rest) {
+    const at = t.indexOf(ch, from);
+    if (at < 0) return false;
+    from = at + 1;
+  }
+  return true;
+}
+
 // Where `ch` matches from `from` on: right here if it continues the run, else
-// the next word start, else the first occurrence.
-function place(t: string, ch: string, from: number): number {
+// the next word start that still leaves room for `rest`, else the first occurrence.
+function place(t: string, ch: string, from: number, rest: string): number {
   if (t[from] === ch) return from;
   for (let i = from; i < t.length; i++) {
-    if (t[i] === ch && (i === 0 || BOUNDARY.test(t[i - 1]))) return i;
+    if (t[i] === ch && (i === 0 || BOUNDARY.test(t[i - 1])) && fits(rest, t, i + 1)) return i;
   }
   return t.indexOf(ch, from);
 }
@@ -23,8 +32,8 @@ export function fuzzyScore(query: string, text: string): number | null {
   let score = 0;
   let from = 0;
   let prev = -2;
-  for (const ch of q) {
-    const at = place(t, ch, from);
+  for (const [k, ch] of [...q].entries()) {
+    const at = place(t, ch, from, q.slice(k + 1));
     if (at < 0) return null;
     if (at === 0) score += 8;
     else if (BOUNDARY.test(t[at - 1])) score += 6;

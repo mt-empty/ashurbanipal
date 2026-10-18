@@ -4,7 +4,14 @@ import { type Draft, draftToDef } from "../lib/join-draft.js";
 import { type JoinParse, parseJoin, printJoin, quoteJoinName } from "../lib/join-dsl.js";
 import { type JoinCompletion, type JoinToken, joinCompletionAt, tokenizeJoinText } from "../lib/join-tokens.js";
 import { findForeignKey, joinMismatch, pairNote } from "../lib/join-types.js";
-import { cachedColumns, catalogVersion, indexedColumns, knownCatalog, tableColumns } from "./join-catalog.js";
+import {
+  cachedColumns,
+  catalogVersion,
+  indexedColumns,
+  knownCatalog,
+  readIndexedColumns,
+  tableColumns,
+} from "./join-catalog.js";
 import { attachOverlayHighlight, tokenSpans } from "./overlay-highlight.js";
 import { listedTableNames, tableChipCount } from "./sidebar.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
@@ -112,7 +119,9 @@ export function mountJoinSql(onChange: () => void): JoinSql {
 
   function render(): void {
     const text = field.value;
-    field.rows = Math.max(5, text.split("\n").length + 1);
+    // Wrapped lines count too, and the field cannot scroll: grow to the content, never below its rows.
+    field.style.height = "";
+    if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
     const result = text.trim() ? parse() : null;
     // An error at the very end is just unfinished typing.
     const error = result && "error" in result && result.error.index < text.trimEnd().length ? result.error : null;
@@ -164,7 +173,13 @@ export function mountJoinSql(onChange: () => void): JoinSql {
   async function columnRows(ctx: JoinCompletion): Promise<Suggestion[]> {
     const table = tableOf(ctx, ctx.qualifier);
     if (!table) return [];
-    const [columns, indexed] = await Promise.all([tableColumns(table), indexedColumns(table)]);
+    const columns = await tableColumns(table);
+    // The index tags come from a slower structure request; columns show first and the tags join them once read.
+    const indexed = readIndexedColumns(table);
+    if (!indexed)
+      void indexedColumns(table).then(() => {
+        if (document.activeElement === field) void update();
+      });
     const otherTable = ctx.otherSide ? tableOf(ctx, ctx.otherSide.qualifier) : undefined;
     const otherType = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column)?.type;
     const starts = startsWith(ctx);
@@ -176,7 +191,7 @@ export function mountJoinSql(onChange: () => void): JoinSql {
           label: c.name,
           insert: `${quoteJoinName(c.name)} `,
           note: note ?? c.type,
-          ...(note === null && indexed.has(c.name) ? { tag: "indexed" } : {}),
+          ...(note === null && indexed?.has(c.name) ? { tag: "indexed" } : {}),
           ...(note !== null ? { blocked: true } : {}),
         };
       });

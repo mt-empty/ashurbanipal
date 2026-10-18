@@ -3,12 +3,15 @@ import { joinInView } from "../core/state.js";
 import type { Column } from "../core/types.js";
 import { effectiveName, quoteJoinName } from "../lib/join-dsl.js";
 
+// The filter DSL reads a bare AND, OR or NOT as a keyword, so a join alias spelled so is quoted there.
+const filterQualifier = (name: string): string => (/^(AND|OR|NOT)$/i.test(name) ? `"${name}"` : quoteJoinName(name));
+
 // How a column is named where the user types or links it (sort, filter clause):
 // `alias.column` in a join view, the plain name otherwise.
 export function columnKey(col: Column): string {
   const def = joinInView()?.def;
   if (!def || col.join === undefined || col.column === undefined) return col.name;
-  return `${quoteJoinName(effectiveName(def.tables[col.join]))}.${col.column}`;
+  return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
 }
 
 const QUALIFIED = /^(?:([A-Za-z_][A-Za-z0-9_]*)|"((?:[^"]|"")+)")\.(.+)$/s;

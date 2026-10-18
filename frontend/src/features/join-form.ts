@@ -196,7 +196,8 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
             }
           }
           join.table = v;
-          join.on = [emptyPair()];
+          // A table browsed earlier has its columns already; load() fills the pair for the rest.
+          join.on = [foreignKey(pos) ?? emptyPair()];
           draft.columns[pos] = null;
           changed(true);
           load();

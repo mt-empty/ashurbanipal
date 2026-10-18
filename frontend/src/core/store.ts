@@ -119,16 +119,13 @@ export function showTable(name: string | null): void {
   state.view = tableView(name);
 }
 
-// Back to the join's start table.
 export function clearJoin(): void {
   const join = joinInView();
   if (join) showTable(startTable(join));
 }
 
-// Shared by url.ts's two readers, after they set the table view and before the
-// filter restore, which needs the aliases. Malformed text leaves the table view
-// (R5). Names are not checked here: the page has no catalog yet, and the
-// server answers 400.
+// Runs after url.ts sets the table view and before the filter restore, which
+// needs the aliases; malformed text leaves the table view (R5).
 export function restoreJoinFromParams(params: URLSearchParams): void {
   const text = params.get("join") ?? "";
   const parsed = text ? parseJoin(text) : null;
@@ -161,6 +158,33 @@ function staleRiskFlag() {
 }
 const filterRisk = staleRiskFlag();
 const sortRisk = staleRiskFlag();
+
+// What the grid last rendered. A join the server rejects is already the view
+// when its dialog reopens; cancelling it goes back to this.
+let shown: {
+  view: View;
+  sort: string | null;
+  order: "asc" | "desc";
+  offset: number;
+  filter: string;
+  ast: FilterCondition[];
+} | null = null;
+export function markViewShown(): void {
+  const { view, sort, order, offset, filter } = state;
+  shown = view && { view, sort, order, offset, filter, ast: appliedFilterAst };
+}
+export function viewIsShown(): boolean {
+  return shown !== null && viewKey(shown.view) === viewKey(state.view);
+}
+export function restoreShownView(): boolean {
+  if (!shown) return false;
+  ({ view: state.view, sort: state.sort, order: state.order, offset: state.offset } = shown);
+  state.filter = shown.filter;
+  appliedFilterAst = shown.ast;
+  filterRisk.set(false);
+  $<HTMLInputElement>("filter").value = shown.filter;
+  return true;
+}
 
 export function markFilterVerified(): void {
   filterRisk.set(false);
@@ -337,7 +361,9 @@ function dropStoredSort(table: string | null): void {
 // stale-risk on a fresh load, but at most one is dropped per call, so the
 // other still gets a chance to render — sort first, since it's the visitor's
 // own incidental state while the filter is what a shared link was for.
-export function dropOneStaleInput(): boolean {
+export function dropOneStaleInput(code: string | undefined): boolean {
+  // Only what a column the server no longer has can cause; a timeout or a bad join is not the sort's or filter's.
+  if (code !== "unknown_column" && code !== "invalid_filter" && code !== "invalid_parameter") return false;
   // An applied filter that already survived a fetch was typed on this visit,
   // so the 400 is the user's to see — it suppresses the whole ladder rather
   // than being silently discarded.

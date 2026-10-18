@@ -7,6 +7,7 @@ import {
   getAppliedFilterAst,
   markFilterVerified,
   markStoredSortVerified,
+  markViewShown,
   startTable,
   state,
   tableInView,
@@ -46,16 +47,20 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
   const names = new Map<number, string[]>();
   await Promise.all(
     tablesToExpand(def).map(async (position) => {
+      // A table gone from the catalog is the join's problem, answered in its dialog like the server's invalid_join.
+      const columns = await tableColumns(def.tables[position].table).catch((e: unknown) => {
+        throw e instanceof ApiError && e.code === "unknown_table" ? new ApiError(e.message, "invalid_join") : e;
+      });
       names.set(
         position,
-        (await tableColumns(def.tables[position].table)).map((c) => c.name),
+        columns.map((c) => c.name),
       );
     }),
   );
   const wire = JSON.stringify(toWire(def, (position) => names.get(position) ?? []));
   // The server rejects a longer `join` (spec/protocol.md §5.11.1); say why before sending.
   if (new TextEncoder().encode(wire).length > JOIN_MAX_BYTES)
-    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", "invalid_join", 400);
+    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", "invalid_join");
   params.set("join", wire);
   return `/tables/join?${params}`;
 }
@@ -133,9 +138,6 @@ async function fetchTableData(view: View): Promise<TableData> {
   }
 }
 
-// Must only ever move in lockstep with a *successful* render, never ahead
-// of it — a failed fetchTableData() (see loadData) must leave these
-// exactly as they were, matching the stale <table> body they describe.
 function viewTitle(view: View | null): string | null {
   if (view === null) return null;
   switch (view.kind) {
@@ -150,6 +152,9 @@ function viewTitle(view: View | null): string | null {
   }
 }
 
+// Must only ever move in lockstep with a *successful* render, never ahead
+// of it — a failed fetchTableData() (see loadData) must leave these
+// exactly as they were, matching the stale <table> body they describe.
 function updateActiveTableChrome(): void {
   const title = viewTitle(state.view);
   setActiveTable(tableInView());
@@ -189,7 +194,7 @@ export async function loadData({
     // A restored sort or a URL-restored filter can each name a column that no
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
-    if (dropOneStaleInput()) return loadData({ resetScroll, highlightNew });
+    if (dropOneStaleInput(e instanceof ApiError ? e.code : undefined)) return loadData({ resetScroll, highlightNew });
     // The one code the frontend branches on (ui-guidelines R9): a table
     // that cleared the table listing but the role can't actually
     // read (e.g. a stale MySQL/MariaDB listing, docs/adapter-decisions.md
@@ -206,6 +211,7 @@ export async function loadData({
   if (token !== loadDataToken) return; // superseded by a newer request
   markStoredSortVerified();
   markFilterVerified();
+  markViewShown();
   if (view.kind === "table") seedColumns(view.table, data.columns);
   updateActiveTableChrome();
 
@@ -221,6 +227,8 @@ export async function loadData({
   refreshSavedChips();
   syncUrl();
   const renderTable = () => {
+    // The transition can wait for a frame; a view switch meanwhile owns the grid, and this data is not its join's.
+    if (token !== loadDataToken) return;
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
