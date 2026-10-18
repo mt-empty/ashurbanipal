@@ -545,7 +545,7 @@
       case "/tables/structure":
         return handleStructure(params);
       case "/tables/join":
-        return jsonResponse({ title: "Joins are not available in this offline demo.", code: "invalid_parameter" }, 400);
+        return jsonResponse({ title: "Joins are not available in this offline demo.", code: "invalid_join" }, 400);
       case "/siblings":
         return handleSiblings();
       default:
@@ -1676,7 +1676,7 @@ function buildApiReference() {
       {
         method: "GET",
         path: `${base}/tables/join`,
-        summary: "Rows of up to 4 tables joined server-side (INNER or LEFT, equality on 1-3 column pairs per join), read-only. Every table and column name is checked against the live catalog; each pair must join columns of one type class (number, text, uuid, boolean, temporal, time, binary, enum), so floats, json and arrays cannot be joined. Positions: the start table is 0 and `joins[]` entries are 1..n; a `left` reference may only point at an earlier position. The response has `has_more` and never a total. A column carries `join`, `table` and `column` beside a unique `name` label (never parse the label); rows are keyed by label and a LEFT-join miss is null. A join that runs over the query timeout is a 500 with `code: query_timeout`.",
+        summary: "Rows of up to 4 tables joined server-side (INNER or LEFT, equality on 1-3 column pairs per join), read-only. Every table and column name is checked against the live catalog; each pair must join columns of one type class (number, text, uuid, boolean, temporal, time, binary, enum), so floats, json and arrays cannot be joined. Positions: the start table is 0 and `joins[]` entries are 1..n; a `left` reference may only point at an earlier position. The response has `has_more` and never a total. A column carries `join`, `table` and `column` beside a unique `name` label (never parse the label); rows are keyed by label and a LEFT-join miss is null. Anything wrong with `join` itself (shape, an unknown table or column, an incompatible pair, the size limit) is a 400 with `code: invalid_join`; a bad `filter`, `sort` or `order` keeps its usual code. A join that runs over the query timeout is a 500 with `code: query_timeout`.",
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables; every table of the join is in it" },
@@ -5603,11 +5603,10 @@ async function joinPath(def, params) {
   );
   const wire = JSON.stringify(toWire(def, (position) => names.get(position) ?? []));
   if (new TextEncoder().encode(wire).length > JOIN_MAX_BYTES)
-    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", void 0, 400);
+    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", "invalid_join", 400);
   params.set("join", wire);
   return `/tables/join?${params}`;
 }
-var loadedJoin = "";
 function reportJoinFailure(e) {
   if (e.code === "query_timeout") {
     showJoinNotice(
@@ -5619,7 +5618,7 @@ function reportJoinFailure(e) {
     );
     return true;
   }
-  if (e.status === 400 && e.code !== "invalid_filter" && state.join !== loadedJoin) {
+  if (e.code === "invalid_join" || e.code === "not_readable") {
     openJoinDialog({ error: e.message });
     return true;
   }
@@ -5696,7 +5695,6 @@ async function loadData2({
   if (token !== loadDataToken) return;
   markStoredSortVerified();
   markFilterVerified();
-  loadedJoin = state.join;
   if (!state.join) seedColumns(state.table, data.columns);
   updateActiveTableChrome();
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && !state.join);

@@ -16,7 +16,7 @@ var frontendFS embed.FS
 // re-verified on every build (init, here), not just recorded once at
 // vendoring time. It pins the sha256 of this repo's canonical
 // frontend/dbviewer.html — there is no separately published frontend artifact.
-const pinnedFrontendSHA256 = "6731ef8cd7ee7aa9dc3e870754edde1064e84f2090542d944047468c7299c520"
+const pinnedFrontendSHA256 = "93c44041974f6411afcfccf7eb5437838c5affa6e1a2892c4149fe58bc53d9c7"
 
 var dbviewerHTML = mustLoadFrontend()
 
