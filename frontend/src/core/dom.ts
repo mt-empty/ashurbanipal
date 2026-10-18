@@ -7,8 +7,6 @@ export function $<T extends HTMLElement = HTMLElement>(id: string): T {
   return el as T;
 }
 
-// Same policy as $, for a selector against a freshly-cloned <template> or a
-// known-present subtree.
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className?: string,
@@ -20,6 +18,8 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   return e;
 }
 
+// Same policy as $, for a selector against a freshly-cloned <template> or a
+// known-present subtree.
 export function qs<T extends Element>(root: ParentNode, selector: string): T {
   const el = root.querySelector<T>(selector);
   if (!el) throw new Error(`no element matches ${selector}`);

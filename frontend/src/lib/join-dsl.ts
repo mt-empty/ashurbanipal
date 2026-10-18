@@ -1,10 +1,8 @@
 import type { JoinClause, JoinColumn, JoinDef, JoinPair, JoinTable } from "../core/types.js";
 
 // ==== Join DSL parser (join text → JoinDef) ====
-// The single implementation of spec/join-dsl.md. The text never reaches the
-// server: it becomes a JoinDef, and only names the server then checks against
-// its catalog cross the wire. Iterative, one flat clause loop, so input
-// cannot grow the call stack (join-dsl.md A7).
+// The text never reaches the server, only the JoinDef built from it. One flat
+// clause loop, so input cannot grow the call stack (spec/join-dsl.md A7).
 
 // spec/protocol.md §5.11.1.
 export const JOIN_MAX_TABLES = 4;

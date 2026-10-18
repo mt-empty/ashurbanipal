@@ -530,7 +530,6 @@ tr.bands th[data-band="1"] .band-pill { background: var(--band-1); color: var(--
 tr.bands th[data-band="2"] .band-pill { background: var(--band-2); color: var(--band-2-fg); }
 tr.bands th[data-band="3"] .band-pill { background: var(--band-3); color: var(--band-3-fg); }
 thead tr.bands + tr th { top: var(--band-h); }
-#row-meta .partial { opacity: .8; }
 #join-notice { display: flex; gap: .75rem; align-items: center; margin: .5rem 0; padding: .6rem .9rem;
                border-radius: 8px; background: color-mix(in srgb, var(--danger) 12%, transparent); }
 #join-notice-text { flex: 1; }

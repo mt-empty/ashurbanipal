@@ -26,7 +26,6 @@ interface SuggestOptions {
 export interface SuggestList {
   show(matches: Suggestion[], head: string, index: number): void;
   close(): void;
-  isOpen(): boolean;
   // Bumped on every show and close, so a slow lookup can tell its text has changed.
   token(): number;
 }
@@ -136,7 +135,6 @@ export function createSuggestList(opts: SuggestOptions): SuggestList {
       input.setAttribute("aria-expanded", "true");
     },
     close,
-    isOpen: () => matches.length > 0,
     token: () => token,
   };
 }
