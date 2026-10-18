@@ -1186,6 +1186,12 @@ thead tr.bands + tr th { top: var(--band-h); }
           width: max-content; max-width: min(26rem, 90vw); max-height: 16rem; overflow: auto;
           box-shadow: 0 4px 16px #0004; font-size: .8125rem; }
 #dd-pop-list { display: flex; flex-direction: column; }
+#dd-pop-search { position: sticky; top: 0; z-index: 1; box-sizing: border-box; width: 100%; margin-bottom: .2rem;
+                 padding: .3rem .5rem; border: 1px solid var(--border); border-radius: 6px; font: inherit;
+                 font-family: var(--font-mono); background: Canvas; color: inherit; }
+#dd-pop-search:focus-visible { outline: 2px solid var(--chip-active-bg); outline-offset: -1px; }
+#dd-pop-search[hidden] { display: none; }
+.dd-none { margin: 0; padding: .25rem .5rem; color: var(--text-muted); }
 .dd-row { display: flex; justify-content: space-between; gap: 1rem; width: 100%; box-sizing: border-box;
           background: none; border: none; font: inherit; font-family: var(--font-mono); color: inherit;
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
@@ -1393,7 +1399,7 @@ FROM table [alias]
     <button id="join-cancel" class="btn" type="button">Cancel</button>
     <button id="join-run" class="btn primary" type="button">Show result</button>
   </div>
-  <div id="dd-pop" popover><div id="dd-pop-list" role="listbox"></div></div>
+  <div id="dd-pop" popover><input id="dd-pop-search" type="search" placeholder="type to search" autocomplete="off" spellcheck="false" hidden><div id="dd-pop-list" role="listbox"></div></div>
 </dialog>
 
 <div id="siblings-pop" popover>
@@ -3129,6 +3135,38 @@ function unjoinableReason(type) {
   return classOf(type) === "none" ? `${shown(type)}: not joinable` : null;
 }
 
+// src/lib/fuzzy.ts
+var BOUNDARY = /[_\-. ]/;
+function place(t, ch, from) {
+  if (t[from] === ch) return from;
+  for (let i = from; i < t.length; i++) {
+    if (t[i] === ch && (i === 0 || BOUNDARY.test(t[i - 1]))) return i;
+  }
+  return t.indexOf(ch, from);
+}
+function fuzzyScore(query, text) {
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  if (q === "") return 0;
+  let score = 0;
+  let from = 0;
+  let prev = -2;
+  for (const ch of q) {
+    const at = place(t, ch, from);
+    if (at < 0) return null;
+    if (at === 0) score += 8;
+    else if (BOUNDARY.test(t[at - 1])) score += 6;
+    if (at === prev + 1) score += 4;
+    score += 1;
+    prev = at;
+    from = at + 1;
+  }
+  return score * 100 - t.length;
+}
+function fuzzyFilter(query, items, key) {
+  return items.map((item, i) => ({ item, i, score: fuzzyScore(query.trim(), key(item)) })).filter((m) => m.score !== null).sort((a, b) => b.score - a.score || a.i - b.i).map((m) => m.item);
+}
+
 // src/features/dropdown.ts
 var pop = () => $("dd-pop");
 var anchor = null;
@@ -3139,15 +3177,13 @@ function lastDropdownLabel() {
 function closeMenu() {
   if (pop().matches(":popover-open")) pop().hidePopover();
 }
-function open(button, opts) {
-  if (anchor) anchor.style.anchorName = "";
-  anchor = button;
-  lastLabel = opts.ariaLabel;
-  button.style.anchorName = "--dd-anchor";
+var search = () => $("dd-pop-search");
+var current = null;
+function renderRows(opts, query) {
   const list = $("dd-pop-list");
-  list.setAttribute("aria-label", opts.ariaLabel);
+  const shown2 = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
   list.replaceChildren(
-    ...opts.options.map((o) => {
+    ...shown2.map((o) => {
       const row2 = document.createElement("button");
       row2.type = "button";
       row2.className = "dd-row";
@@ -3175,10 +3211,32 @@ function open(button, opts) {
       return row2;
     })
   );
+  if (shown2.length === 0) {
+    const none = document.createElement("p");
+    none.className = "dd-none";
+    none.textContent = `Nothing matches ${query.trim()}.`;
+    list.appendChild(none);
+  }
+}
+var pickable = () => [...pop().querySelectorAll(".dd-row:not(.blocked)")];
+function open(button, opts) {
+  if (anchor) anchor.style.anchorName = "";
+  anchor = button;
+  current = opts;
+  lastLabel = opts.ariaLabel;
+  button.style.anchorName = "--dd-anchor";
+  const list = $("dd-pop-list");
+  list.setAttribute("aria-label", opts.ariaLabel);
+  const box = search();
+  box.hidden = !opts.searchable;
+  box.value = "";
+  box.setAttribute("aria-label", `search: ${opts.ariaLabel}`);
+  renderRows(opts, "");
   pop().showPopover();
-  const start = list.querySelector('[aria-selected="true"]') ?? list.querySelector(".dd-row:not(.blocked)");
-  start?.focus();
+  const start = list.querySelector('[aria-selected="true"]') ?? pickable()[0];
   start?.scrollIntoView({ block: "nearest" });
+  if (opts.searchable) box.focus();
+  else start?.focus();
 }
 function createDropdown(opts) {
   const button = document.createElement("button");
@@ -3193,12 +3251,29 @@ function createDropdown(opts) {
   button.onclick = () => open(button, opts);
   return button;
 }
+search().addEventListener("input", () => {
+  if (current) renderRows(current, search().value);
+});
+search().addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  pickable()[0]?.click();
+});
 pop().addEventListener("keydown", (e) => {
+  const box = search();
+  if (!box.hidden && e.target !== box && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    box.focus();
+    return;
+  }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-  const rows = [...pop().querySelectorAll(".dd-row:not(.blocked)")];
+  const rows = pickable();
   if (rows.length === 0) return;
   e.preventDefault();
   const at = rows.indexOf(document.activeElement);
+  if (e.key === "ArrowUp" && at === 0 && !box.hidden) {
+    box.focus();
+    return;
+  }
   const next = e.key === "ArrowDown" ? (at + 1) % rows.length : (at <= 0 ? rows.length : at) - 1;
   rows[next].focus();
 });
@@ -3787,6 +3862,7 @@ function mountJoinForm(root, onChange) {
         value: join.table,
         placeholder: "choose a table",
         mono: true,
+        searchable: true,
         onPick: (v) => {
           if (v !== join.table) {
             for (const later of draft.joins.slice(i + 1)) {
@@ -4079,7 +4155,7 @@ function deleteSavedJoin(name) {
 }
 function renderSavedChips(actions) {
   const saved = savedJoins();
-  const current = getAppliedJoin();
+  const current2 = getAppliedJoin();
   const inSaved = saved.some((s) => s.text === state.join);
   const chips = saved.map((s) => ({
     label: `\u22C8 ${s.name}`,
@@ -4088,9 +4164,9 @@ function renderSavedChips(actions) {
     active: s.text === state.join,
     run: () => actions.open(s.text)
   }));
-  if (current && !inSaved) {
+  if (current2 && !inSaved) {
     chips.push({
-      label: `\u22C8 ${joinLabel(current)}`,
+      label: `\u22C8 ${joinLabel(current2)}`,
       title: "this join is not saved",
       className: "unsaved",
       active: true,
@@ -4281,7 +4357,7 @@ function mountJoinSql(onChange) {
     hlText.append("\n");
   }
   attachOverlayHighlight(field, render2);
-  const place = () => {
+  const place2 = () => {
     const before = field.value.slice(0, field.selectionStart);
     const line = before.split("\n").length;
     const col = before.length - before.lastIndexOf("\n") - 1;
@@ -4292,7 +4368,7 @@ function mountJoinSql(onChange) {
   const suggest2 = createSuggestList({
     input: field,
     popup: $("join-sql-suggest"),
-    place,
+    place: place2,
     list: $("join-sql-suggest-list"),
     idPrefix: "join-sql-suggest",
     accept: (suggestion, head) => {
@@ -4414,6 +4490,8 @@ var formTab = $("join-mode-form");
 var sqlTab = $("join-mode-sql");
 var runBtn = $("join-run");
 var mode = "form";
+var handoff = null;
+var untouched = () => handoff !== null && sql.text() === handoff.text;
 function problem() {
   if (mode === "form") return form.problem() ?? "";
   const result = sql.text().trim() ? sql.parse() : null;
@@ -4428,9 +4506,10 @@ function refresh() {
     $("join-preview").replaceChildren(...coloured(text));
     return;
   }
-  $("join-sql-error").textContent = bad;
-  formTab.disabled = bad !== "";
-  $("join-sql-tip").hidden = bad === "";
+  const back = untouched();
+  $("join-sql-error").textContent = back ? "" : bad;
+  formTab.disabled = bad !== "" && !back;
+  $("join-sql-tip").hidden = bad === "" || back;
 }
 function coloured(text) {
   return tokenizeJoinText(text).map((t) => {
@@ -4464,6 +4543,7 @@ function openJoinDialog(opts = {}) {
   $("join-name").value = saved?.name ?? "";
   $("join-delete").hidden = saved === void 0;
   form.setDraft(def ? defToDraft(def) : newDraft(state.table ?? ""));
+  handoff = null;
   setMode("form");
   $("join-sql-error").textContent = "";
   refresh();
@@ -4521,15 +4601,19 @@ $("join-delete").onclick = () => {
 $("join-link-btn").onclick = () => copyText(location.href, $("join-link-btn"));
 formTab.onclick = () => {
   if (mode === "form" || formTab.disabled) return;
-  const parsed = sql.text().trim() ? sql.parse() : null;
-  if (parsed && "error" in parsed) return;
-  form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(state.table ?? ""));
+  if (handoff && untouched()) form.setDraft(handoff.draft);
+  else {
+    const parsed = sql.text().trim() ? sql.parse() : null;
+    if (parsed && "error" in parsed) return;
+    form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(state.table ?? ""));
+  }
   setMode("form");
   refresh();
 };
 sqlTab.onclick = () => {
   if (mode === "sql") return;
-  sql.setText(draftText(form.draft()));
+  handoff = { text: draftText(form.draft()), draft: form.draft() };
+  sql.setText(handoff.text);
   setMode("sql");
   refresh();
   $("join-sql").focus();
@@ -5411,8 +5495,8 @@ function buildCell(col, row2, hidden) {
   return td;
 }
 function setColumnVisibility(name, hidden) {
-  const current = hiddenColumnsForTable();
-  const next = hidden ? [...current, name] : current.filter((c) => c !== name);
+  const current2 = hiddenColumnsForTable();
+  const next = hidden ? [...current2, name] : current2.filter((c) => c !== name);
   if (inJoinView()) state.joinHidden = next;
   else {
     const table = state.table ?? "";
@@ -5449,7 +5533,7 @@ function buildRowActionCell(columns, row2) {
   qs(td, ".record-btn").onclick = () => openRecordView(columns, row2);
   return td;
 }
-function renderRows(data, newRowKeys, pkNames = []) {
+function renderRows2(data, newRowKeys, pkNames = []) {
   const hidden = new Set(hiddenColumnsForTable());
   if (data.rows.length === 0) {
     const visible = data.columns.filter((c) => !hidden.has(c.name)).length;
@@ -5642,7 +5726,7 @@ async function loadData2({
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
-    renderRows(data, newRowKeys, pkNames);
+    renderRows2(data, newRowKeys, pkNames);
     rememberColumnWidths();
     renderColumnMenu(data.columns);
     restoreTableFocus(focusCapture);
