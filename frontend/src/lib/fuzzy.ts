@@ -36,11 +36,11 @@ export function fuzzyScore(query: string, text: string): number | null {
   return score * 100 - t.length;
 }
 
-// Items whose `key` matches, best first; equal scores keep their input order.
+// Items whose `key` matches, best first; equal scores keep their input order (sort is stable).
 export function fuzzyFilter<T>(query: string, items: readonly T[], key: (item: T) => string): T[] {
   return items
-    .map((item, i) => ({ item, i, score: fuzzyScore(query.trim(), key(item)) }))
-    .filter((m): m is { item: T; i: number; score: number } => m.score !== null)
-    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((item) => ({ item, score: fuzzyScore(query.trim(), key(item)) }))
+    .filter((m): m is { item: T; score: number } => m.score !== null)
+    .sort((a, b) => b.score - a.score)
     .map((m) => m.item);
 }

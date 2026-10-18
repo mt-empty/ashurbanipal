@@ -23,6 +23,7 @@ interface TableEntry {
   btn: HTMLButtonElement;
 }
 let tableEntries: TableEntry[] = [];
+const chipCounts = new Map<string, string>();
 // Saved-join chips follow the table chips (after a divider) and take part in the
 // same line cap, so they are hidden before the tables are, active one aside.
 let joinEntries: TableEntry[] = [];
@@ -207,12 +208,14 @@ export async function loadTables(): Promise<void> {
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
+  chipCounts.clear();
   for (const t of tables) {
     const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
     const btn = qs<HTMLButtonElement>(li, "button");
     qs<HTMLElement>(li, ".row-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
+    chipCounts.set(t.name, countEl.textContent);
     countEl.title = APPROX_COUNT_TITLE;
     btn.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
@@ -255,7 +258,7 @@ export function listedTableNames(): string[] {
 
 // The row count the table's chip shows (`~208`), for places that list tables.
 export function tableChipCount(name: string): string {
-  return tableEntries.find((e) => e.name === name)?.li.querySelector(".count")?.textContent ?? "";
+  return chipCounts.get(name) ?? "";
 }
 
 export interface JoinChip {

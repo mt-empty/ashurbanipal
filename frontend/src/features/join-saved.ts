@@ -15,18 +15,27 @@ import { type JoinChip, setJoinChips } from "./sidebar.js";
 // sees them. Text is canonical, so equal joins compare equal as strings.
 const SAVED_KEY = "ashurbanipal_joins";
 
+// Read once and kept until this page writes or another tab does.
+let stored: SavedStore | null = null;
+window.addEventListener("storage", (e) => {
+  if (e.key === SAVED_KEY || e.key === null) stored = null;
+});
+
 function read(): SavedStore {
+  if (stored) return stored;
   try {
-    return sanitizeSaved(JSON.parse(localStorage.getItem(SAVED_KEY) || "{}"));
+    stored = sanitizeSaved(JSON.parse(localStorage.getItem(SAVED_KEY) || "{}"));
   } catch (e) {
     console.warn("ashurbanipal: discarding unreadable saved joins", e);
-    return {};
+    stored = {};
   }
+  return stored;
 }
 
 function write(store: SavedStore): boolean {
   try {
     localStorage.setItem(SAVED_KEY, JSON.stringify(store));
+    stored = store;
     return true;
   } catch (e) {
     console.warn("ashurbanipal: could not save joins", e);
@@ -59,9 +68,15 @@ interface ChipActions {
   saveCurrent: () => void;
 }
 
+// What the chips were last built from; every data load asks, and most change nothing.
+let lastRendered = "";
+
 // The chips after the table chips: saved joins, the unsaved join in view, `+ new join`.
 export function renderSavedChips(actions: ChipActions): void {
   const saved = savedJoins();
+  const key = JSON.stringify([state.source, state.schema, state.join, saved]);
+  if (key === lastRendered) return;
+  lastRendered = key;
   const current = getAppliedJoin();
   const inSaved = saved.some((s) => s.text === state.join);
   const chips: JoinChip[] = saved.map((s) => ({

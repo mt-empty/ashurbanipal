@@ -29,12 +29,9 @@ export interface Draft {
 export const emptyPair = (): DraftPair => ({ leftJoin: 0, leftColumn: "", rightColumn: "" });
 
 export function newDraft(table: string): Draft {
-  return {
-    table,
-    alias: "",
-    joins: [{ type: "inner", table: "", alias: "", on: [emptyPair()] }],
-    columns: [null, null],
-  };
+  const draft: Draft = { table, alias: "", joins: [], columns: [null] };
+  addJoin(draft);
+  return draft;
 }
 
 export function defToDraft(def: JoinDef): Draft {

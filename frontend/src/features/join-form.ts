@@ -1,25 +1,23 @@
+import { el } from "../core/dom.js";
 import type { Column } from "../core/types.js";
-import { addJoin, type Draft, type DraftJoin, type DraftPair, emptyPair, removeJoin } from "../lib/join-draft.js";
+import {
+  addJoin,
+  type Draft,
+  type DraftJoin,
+  type DraftPair,
+  emptyPair,
+  newDraft,
+  removeJoin,
+} from "../lib/join-draft.js";
 import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
-import { joinMismatch, unjoinableReason } from "../lib/join-types.js";
+import { findForeignKey, joinMismatch, pairNote } from "../lib/join-types.js";
 import { createDropdown, lastDropdownLabel } from "./dropdown.js";
-import { tableColumns } from "./join-catalog.js";
+import { cachedColumns, tableColumns } from "./join-catalog.js";
 import { listedTableNames, tableChipCount } from "./sidebar.js";
 
 // The Form half of the join overlay (board O): edits a Draft in place and tells
 // the dialog when it changed. Menus and buttons re-render the form; typing in an
 // alias box does not, so the caret stays put.
-
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const e = document.createElement(tag);
-  if (className) e.className = className;
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
 
 function textButton(text: string, className: string, label: string, run: () => void): HTMLButtonElement {
   const b = el("button", className, text);
@@ -37,13 +35,12 @@ export interface JoinForm {
 }
 
 export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm {
-  let draft: Draft = { table: "", alias: "", joins: [], columns: [null] };
-  const loaded = new Map<string, Column[]>();
+  let draft: Draft = newDraft("");
   let loadToken = 0;
 
   const tableAt = (pos: number): string => (pos === 0 ? draft.table : draft.joins[pos - 1].table);
   const nameAt = (pos: number): string => (pos === 0 ? draft.alias : draft.joins[pos - 1].alias).trim() || tableAt(pos);
-  const columnsAt = (pos: number): Column[] => loaded.get(tableAt(pos)) ?? [];
+  const columnsAt = (pos: number): Column[] => cachedColumns(tableAt(pos)) ?? [];
   const typeOf = (pos: number, column: string): string | undefined =>
     columnsAt(pos).find((c) => c.name === column)?.type;
 
@@ -53,37 +50,22 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     return left && right ? joinMismatch(left, right) : null;
   };
 
-  // The foreign key between this table and an earlier one, written as a pair; the first match wins.
   function foreignKey(pos: number): DraftPair | null {
-    for (let p = 0; p < pos; p++) {
-      for (const c of columnsAt(p)) {
-        if (c.references?.table === tableAt(pos))
-          return { leftJoin: p, leftColumn: c.name, rightColumn: c.references.column };
-      }
-      for (const c of columnsAt(pos)) {
-        if (c.references?.table === tableAt(p))
-          return { leftJoin: p, leftColumn: c.references.column, rightColumn: c.name };
-      }
-    }
-    return null;
+    const earlier = Array.from({ length: pos }, (_, p) => ({ table: tableAt(p), columns: columnsAt(p) }));
+    const fk = findForeignKey(earlier, tableAt(pos), columnsAt(pos));
+    return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
 
   // Columns arrive lazily; a table whose lookup fails shows no columns rather than blocking the form.
   async function load(): Promise<void> {
-    const missing = [...new Set([draft.table, ...draft.joins.map((j) => j.table)])].filter((t) => t && !loaded.has(t));
+    const missing = [...new Set([draft.table, ...draft.joins.map((j) => j.table)])].filter(
+      (t) => t && !cachedColumns(t),
+    );
     if (missing.length === 0) return;
     const token = ++loadToken;
-    await Promise.all(
-      missing.map(async (t) => {
-        try {
-          loaded.set(t, await tableColumns(t));
-        } catch (e) {
-          console.warn("ashurbanipal: could not read the columns of", t, e);
-          loaded.set(t, []);
-        }
-      }),
-    );
-    if (token !== loadToken) return;
+    const results = await Promise.allSettled(missing.map(tableColumns));
+    // Re-rendering after only failures would ask again, forever.
+    if (token !== loadToken || !results.some((r) => r.status === "fulfilled")) return;
     // A foreign key between the new table and an earlier one is suggested, not required.
     draft.joins.forEach((j, i) => {
       const first = j.on[0];
@@ -94,7 +76,6 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     onChange();
   }
 
-  // Focus goes back to the control that changed: a menu's button, or whichever labelled control had it.
   const changed = (fromMenu = false): void => {
     const active = document.activeElement;
     const focused = fromMenu ? lastDropdownLabel() : root.contains(active) ? active?.getAttribute("aria-label") : null;
@@ -117,15 +98,16 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     return input;
   };
 
-  function pairLine(join: DraftJoin, pos: number, pair: DraftPair, first: boolean): HTMLElement {
-    const line = el("div", "j-line");
+  // The controls of pair `k`; the first sits on the join's own line, later ones on a line each.
+  function pairParts(join: DraftJoin, pos: number, pair: DraftPair, k: number): Node[] {
+    const first = k === 0;
+    const which = first ? "" : ` pair ${k + 1}`;
     const clash = mismatch(pos, pair);
     const rightType = typeOf(pos, pair.rightColumn);
     const leftType = typeOf(pair.leftJoin, pair.leftColumn);
     const leftOptions = Array.from({ length: pos }, (_, p) => p).flatMap((p) =>
       columnsAt(p).map((c) => {
-        const note =
-          rightType === undefined ? unjoinableReason(c.type) : (joinMismatch(c.type, rightType)?.note ?? null);
+        const note = pairNote(c.type, rightType);
         return {
           value: `${p}|${c.name}`,
           label: `${nameAt(p)}.${c.name}`,
@@ -135,13 +117,13 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
       }),
     );
     const rightOptions = columnsAt(pos).map((c) => {
-      const note = leftType === undefined ? unjoinableReason(c.type) : (joinMismatch(c.type, leftType)?.note ?? null);
+      const note = pairNote(c.type, leftType);
       return { value: c.name, label: c.name, note: note ?? c.type, blocked: note !== null };
     });
-    line.append(
+    const parts: Node[] = [
       el("span", "j-kw", first ? "on" : "and"),
       createDropdown({
-        ariaLabel: `join ${pos}${first ? "" : ` pair ${join.on.indexOf(pair) + 1}`}: column of an earlier table`,
+        ariaLabel: `join ${pos}${which}: column of an earlier table`,
         options: leftOptions,
         value: pair.leftColumn ? `${pair.leftJoin}|${pair.leftColumn}` : "",
         display: pair.leftColumn ? `${nameAt(pair.leftJoin)}.${pair.leftColumn}` : undefined,
@@ -156,7 +138,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
       }),
       el("span", "j-eq", "="),
       createDropdown({
-        ariaLabel: `join ${pos}${first ? "" : ` pair ${join.on.indexOf(pair) + 1}`}: column of ${nameAt(pos) || "this table"}`,
+        ariaLabel: `join ${pos}${which}: column of ${nameAt(pos) || "this table"}`,
         options: rightOptions,
         value: pair.rightColumn,
         display: pair.rightColumn ? `${nameAt(pos)}.${pair.rightColumn}` : undefined,
@@ -168,17 +150,17 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
           changed(true);
         },
       }),
-    );
-    if (leftType && rightType && !clash) line.appendChild(el("span", "j-ok", `${leftType} = ${rightType} ✓`));
+    ];
+    if (leftType && rightType && !clash) parts.push(el("span", "j-ok", `${leftType} = ${rightType} ✓`));
     if (!first) {
-      line.appendChild(
+      parts.push(
         textButton("✕", "j-rm", `remove column pair from join ${pos}`, () => {
-          join.on.splice(join.on.indexOf(pair), 1);
+          join.on.splice(k, 1);
           changed();
         }),
       );
     }
-    return line;
+    return parts;
   }
 
   function joinRow(join: DraftJoin, i: number): HTMLElement {
@@ -228,9 +210,13 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     box.appendChild(head);
     if (join.table !== "") {
       join.on.forEach((pair, k) => {
-        const line = pairLine(join, pos, pair, k === 0);
-        if (k === 0) head.append(...[...line.childNodes]);
-        else box.appendChild(line);
+        const parts = pairParts(join, pos, pair, k);
+        if (k === 0) head.append(...parts);
+        else {
+          const line = el("div", "j-line");
+          line.append(...parts);
+          box.appendChild(line);
+        }
       });
       const first = join.on[0];
       const fk = foreignKey(pos);
@@ -357,7 +343,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         "span",
         "jmuted",
         full
-          ? "Joins are limited to 4 tables. Remove one to add another."
+          ? `Joins are limited to ${JOIN_MAX_TABLES} tables. Remove one to add another.`
           : "· inner and left joins only · equality only",
       ),
     );
@@ -371,8 +357,6 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   return {
     setDraft(next) {
       draft = next;
-      // Columns are read again from the scope-keyed catalog, so a schema or source switch cannot leak in.
-      loaded.clear();
       render();
     },
     draft: () => draft,

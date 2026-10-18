@@ -9,6 +9,8 @@ import type { JoinClause, JoinColumn, JoinDef, JoinPair, JoinTable } from "../co
 // spec/protocol.md §5.11.1.
 export const JOIN_MAX_TABLES = 4;
 export const JOIN_MAX_PAIRS = 3;
+// The byte bound on the wire `join` text (spec/protocol.md §5.11.1).
+export const JOIN_MAX_BYTES = 8192;
 
 // Words a bare name may not be; printJoin quotes a name spelled like one.
 export const JOIN_KEYWORDS: ReadonlySet<string> = new Set([

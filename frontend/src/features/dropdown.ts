@@ -30,11 +30,11 @@ export interface DropdownOptions {
 
 const pop = (): HTMLElement => $("dd-pop");
 let anchor: HTMLElement | null = null;
-let lastLabel = "";
+let current: DropdownOptions | null = null;
 
 // The aria-label of the dropdown last opened, so a form that re-renders can put focus back on it.
 export function lastDropdownLabel(): string {
-  return lastLabel;
+  return current?.ariaLabel ?? "";
 }
 
 function closeMenu(): void {
@@ -42,7 +42,6 @@ function closeMenu(): void {
 }
 
 const search = (): HTMLInputElement => $<HTMLInputElement>("dd-pop-search");
-let current: DropdownOptions | null = null;
 
 function renderRows(opts: DropdownOptions, query: string): void {
   const list = $("dd-pop-list");
@@ -90,7 +89,6 @@ function open(button: HTMLButtonElement, opts: DropdownOptions): void {
   if (anchor) anchor.style.anchorName = "";
   anchor = button;
   current = opts;
-  lastLabel = opts.ariaLabel;
   button.style.anchorName = "--dd-anchor";
   const list = $("dd-pop-list");
   list.setAttribute("aria-label", opts.ariaLabel);

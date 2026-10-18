@@ -12,7 +12,7 @@ export type SavedStore = Record<string, Record<string, SavedJoin[]>>;
 
 export const MAX_SAVED_PER_SCOPE = 30;
 export const MAX_SAVED_NAME = 60;
-// The request bound of spec/protocol.md §5.11.1; longer text can never run.
+// The request bound of spec/protocol.md §5.11.1 (join-dsl.ts JOIN_MAX_BYTES); longer text can never run.
 export const MAX_SAVED_TEXT = 8192;
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);

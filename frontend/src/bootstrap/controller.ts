@@ -13,12 +13,13 @@ import {
 import type { JoinDef, TableData } from "../core/types.js";
 import { currentWidthScope, rememberColumnWidths, useWidthScope } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
-import { tableColumns } from "../features/join-catalog.js";
+import { seedColumns, tableColumns } from "../features/join-catalog.js";
 import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
 import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
+import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
 import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js";
 
 // The render-orchestration hub: loadData sequences fetch -> chrome ->
@@ -39,8 +40,6 @@ function setTableBusy(busy: boolean): void {
 // finish clear aria-busy/#status while another is still running.
 let inFlightFetches = 0;
 
-const JOIN_WIRE_LIMIT = 8192;
-
 // `alias.*` has no wire form, so those tables' column names come from the catalog.
 async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> {
   const names = new Map<number, string[]>();
@@ -54,7 +53,7 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
   );
   const wire = JSON.stringify(toWire(def, (position) => names.get(position) ?? []));
   // The server rejects a longer `join` (spec/protocol.md §5.11.1); say why before sending.
-  if (new TextEncoder().encode(wire).length > JOIN_WIRE_LIMIT)
+  if (new TextEncoder().encode(wire).length > JOIN_MAX_BYTES)
     throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", undefined, 400);
   params.set("join", wire);
   return `/tables/join?${params}`;
@@ -184,6 +183,7 @@ export async function loadData({
   markStoredSortVerified();
   markFilterVerified();
   loadedJoin = state.join;
+  if (!state.join) seedColumns(state.table, data.columns);
   updateActiveTableChrome();
 
   // Row keys come from primary keys, which a join of several tables does not have.
@@ -191,7 +191,7 @@ export async function loadData({
 
   $<HTMLButtonElement>("payload").disabled = false;
   $<HTMLButtonElement>("columns-btn").disabled = false;
-  $<HTMLButtonElement>("structure-btn").disabled = state.join !== "";
+  $<HTMLButtonElement>("structure-btn").disabled = false;
   $<HTMLButtonElement>("refresh").disabled = false;
   updateColumnsButtonLabel();
   updateJoinChrome();

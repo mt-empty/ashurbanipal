@@ -34,9 +34,7 @@ function refresh(): void {
   const bad = problem();
   runBtn.disabled = bad !== "" || (mode === "sql" && sql.text().trim() === "");
   if (mode === "form") {
-    const result = draftToDef(form.draft());
-    const text = "def" in result ? printJoin(result.def) : draftText(form.draft());
-    $("join-preview").replaceChildren(...coloured(text));
+    $("join-preview").replaceChildren(...coloured(draftText(form.draft())));
     return;
   }
   const back = untouched();

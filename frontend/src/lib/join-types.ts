@@ -1,3 +1,5 @@
+import type { Column } from "../core/types.js";
+
 // ==== Join type hints (spec/protocol.md §5.11.2) ====
 // Which column types a join can pair, so the form can grey the ones that
 // cannot. Only a hint: the page does not know the engine, so native type
@@ -86,4 +88,33 @@ export function joinMismatch(candidate: string, other: string): JoinMismatch | n
 // A column that cannot join anything, whatever the other side is.
 export function unjoinableReason(type: string): string | null {
   return classOf(type) === "none" ? `${shown(type)}: not joinable` : null;
+}
+
+// The note a menu row shows for a column of `type` when the other side has
+// `otherType` (or nothing picked yet); a non-null note means the row is greyed.
+export function pairNote(type: string, otherType: string | undefined): string | null {
+  return otherType === undefined ? unjoinableReason(type) : (joinMismatch(type, otherType)?.note ?? null);
+}
+
+export interface ForeignKeyPair {
+  // Index into the `earlier` list.
+  at: number;
+  leftColumn: string;
+  rightColumn: string;
+}
+
+// A foreign key between `table` (with columns `own`) and one of the earlier
+// tables, in either direction, as an ON pair; the first match wins.
+export function findForeignKey(
+  earlier: readonly { table: string; columns: readonly Column[] }[],
+  table: string,
+  own: readonly Column[],
+): ForeignKeyPair | null {
+  for (const [at, e] of earlier.entries()) {
+    const out = e.columns.find((c) => c.references?.table === table);
+    if (out?.references) return { at, leftColumn: out.name, rightColumn: out.references.column };
+    const back = own.find((c) => c.references?.table === e.table);
+    if (back?.references) return { at, leftColumn: back.references.column, rightColumn: back.name };
+  }
+  return null;
 }

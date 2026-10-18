@@ -1,5 +1,5 @@
 import { $ } from "../core/dom.js";
-import { getAppliedJoin, hiddenColumnsForTable, state } from "../core/state.js";
+import { getAppliedJoin, state } from "../core/state.js";
 import type { Column } from "../core/types.js";
 import { effectiveName, quoteJoinName } from "../lib/join-dsl.js";
 
@@ -68,10 +68,6 @@ export function refreshBands(): void {
     band.colSpan = Math.max(visible, 1);
     band.classList.toggle("col-hidden", visible === 0);
   }
-}
-
-export function joinHiddenCount(): number {
-  return hiddenColumnsForTable().length;
 }
 
 // ---- the notice under the filter bar: a join-specific message with actions ----

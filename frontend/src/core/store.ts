@@ -79,11 +79,15 @@ export function setAppliedJoin(def: JoinDef): void {
   state.table = def.tables[0].table;
 }
 // Leaves the join view (the filter and sort written against its labels go with it).
-export function clearJoin(): void {
-  if (!state.join) return;
+function resetJoinState(): void {
   state.join = "";
   state.joinHidden = [];
   appliedJoin = null;
+}
+
+export function clearJoin(): void {
+  if (!state.join) return;
+  resetJoinState();
   state.sort = null;
   state.order = "asc";
   clearFilter();
@@ -95,9 +99,7 @@ export function restoreJoinFromParams(params: URLSearchParams): void {
   const text = params.get("join") ?? "";
   const parsed = text ? parseJoin(text) : null;
   if (!parsed || "error" in parsed) {
-    state.join = "";
-    state.joinHidden = [];
-    appliedJoin = null;
+    resetJoinState();
     return;
   }
   setAppliedJoin(parsed.def);

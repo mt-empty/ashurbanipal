@@ -24,3 +24,17 @@ export function attachOverlayHighlight(field: HTMLInputElement | HTMLTextAreaEle
   new ResizeObserver(render).observe(field);
   render();
 }
+
+// One `t-<kind>` span per token, `t-err` on those `isError` marks.
+export function tokenSpans(
+  text: string,
+  tokens: readonly { kind: string; start: number; end: number }[],
+  isError: (t: { kind: string; start: number; end: number }) => boolean,
+): HTMLSpanElement[] {
+  return tokens.map((t) => {
+    const span = document.createElement("span");
+    span.className = `t-${t.kind}${isError(t) ? " t-err" : ""}`;
+    span.textContent = text.slice(t.start, t.end);
+    return span;
+  });
+}

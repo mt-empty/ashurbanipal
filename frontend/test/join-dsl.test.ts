@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { toWire } from "../src/lib/join-def.ts";
 import type { JoinCatalog } from "../src/lib/join-dsl.ts";
 import { parseJoin, printJoin } from "../src/lib/join-dsl.ts";
-import { joinMismatch, unjoinableReason } from "../src/lib/join-types.ts";
+import { findForeignKey, joinMismatch, pairNote, unjoinableReason } from "../src/lib/join-types.ts";
 
 // The single join-text -> JoinDef parser (spec/join-dsl.md). Cases come from
 // spec/fixtures/join-parser-tests.json, generated from the doc's §5 table.
@@ -105,4 +105,22 @@ test("a pair check supplied by the page rejects a mismatched pair at its second 
   assert.equal(result.error.message, "enum cannot be joined to uuid.");
   assert.equal(text.slice(result.error.index), "o.status");
   assert.ok("def" in parseJoin(text));
+});
+
+test("a foreign key is found in either direction and greyed notes follow the other side", () => {
+  const orders = [{ name: "user_id", type: "uuid", key: "fk" as const, references: { table: "users", column: "id" } }];
+  const users = [{ name: "id", type: "uuid" }];
+  assert.deepEqual(findForeignKey([{ table: "orders", columns: orders }], "users", users), {
+    at: 0,
+    leftColumn: "user_id",
+    rightColumn: "id",
+  });
+  assert.deepEqual(findForeignKey([{ table: "users", columns: users }], "orders", orders), {
+    at: 0,
+    leftColumn: "id",
+    rightColumn: "user_id",
+  });
+  assert.equal(pairNote("jsonb", undefined), "jsonb: not joinable");
+  assert.equal(pairNote("text", "uuid"), "text ≠ uuid");
+  assert.equal(pairNote("uuid", "uuid"), null);
 });

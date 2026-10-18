@@ -6,30 +6,54 @@ import { listedTableNames } from "./sidebar.js";
 import { tableStructure } from "./structure.js";
 
 // The page learns a table's columns (names, types, keys) from the first row of
-// its data; the table listing carries only names. Cached per scope, since a
-// join view and its form both ask for the same tables repeatedly.
+// its data; the table listing carries only names. Cached per scope, failures
+// included, until Refresh: a table the role cannot read is not asked for again
+// on every keystroke.
 const cache = new Map<string, Promise<Column[]>>();
 const resolved = new Map<string, Column[]>();
+const indexes = new Map<string, Promise<Set<string>>>();
+let generation = 0;
+let version = 0;
 const keyOf = (table: string): string => `${state.source}|${state.schema}|${table}`;
 
 export function clearJoinCatalog(): void {
   cache.clear();
   resolved.clear();
+  indexes.clear();
+  generation++;
+  version++;
+}
+
+// Bumped whenever a table's columns become known, so derived results can tell they are stale.
+export function catalogVersion(): number {
+  return version;
+}
+
+// The columns of the table in view arrive with its data; no need to ask again.
+export function seedColumns(table: string, columns: Column[]): void {
+  const key = keyOf(table);
+  if (resolved.has(key)) return;
+  resolved.set(key, columns);
+  version++;
+  cache.set(key, Promise.resolve(columns));
 }
 
 export function tableColumns(table: string): Promise<Column[]> {
-  const params = new URLSearchParams({ table, limit: "1", offset: "0" });
-  applyScopeParams(params);
   const key = keyOf(table);
   let columns = cache.get(key);
   if (!columns) {
+    const params = new URLSearchParams({ table, limit: "1", offset: "0" });
+    applyScopeParams(params);
+    const started = generation;
     columns = api<TableData>(`/tables/data?${params}`).then((d) => {
-      resolved.set(key, d.columns);
+      if (started === generation) {
+        resolved.set(key, d.columns);
+        version++;
+      }
       return d.columns;
     });
     cache.set(key, columns);
-    // A failed lookup must not be remembered.
-    columns.catch(() => cache.delete(key));
+    columns.catch(() => {});
   }
   return columns;
 }
@@ -44,11 +68,16 @@ export function knownCatalog(): JoinCatalog {
   return Object.fromEntries(listedTableNames().map((t) => [t, cachedColumns(t)?.map((c) => c.name) ?? null]));
 }
 
-// Columns that lead an index, so a join on them is cheap.
-export async function indexedColumns(table: string): Promise<Set<string>> {
-  try {
-    return new Set((await tableStructure(table)).indexes.map((i) => i.columns[0]));
-  } catch {
-    return new Set();
+// Columns that lead an index, so a join on them is cheap. A table whose structure cannot be read has none.
+export function indexedColumns(table: string): Promise<Set<string>> {
+  const key = keyOf(table);
+  let found = indexes.get(key);
+  if (!found) {
+    found = tableStructure(table).then(
+      (s) => new Set(s.indexes.map((i) => i.columns[0])),
+      () => new Set<string>(),
+    );
+    indexes.set(key, found);
   }
+  return found;
 }
