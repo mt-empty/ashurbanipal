@@ -1119,7 +1119,6 @@ tr.bands th[data-band="1"] .band-pill { background: var(--band-1); color: var(--
 tr.bands th[data-band="2"] .band-pill { background: var(--band-2); color: var(--band-2-fg); }
 tr.bands th[data-band="3"] .band-pill { background: var(--band-3); color: var(--band-3-fg); }
 thead tr.bands + tr th { top: var(--band-h); }
-#row-meta .partial { opacity: .8; }
 #join-notice { display: flex; gap: .75rem; align-items: center; margin: .5rem 0; padding: .6rem .9rem;
                border-radius: 8px; background: color-mix(in srgb, var(--danger) 12%, transparent); }
 #join-notice-text { flex: 1; }
@@ -1440,12 +1439,10 @@ function checkProtocolVersion(resp) {
 }
 var ApiError = class extends Error {
   code;
-  status;
-  constructor(message, code, status) {
+  constructor(message, code) {
     super(message);
     this.name = "ApiError";
     this.code = code;
-    this.status = status;
   }
 };
 async function errorFromResponse(resp) {
@@ -1453,11 +1450,11 @@ async function errorFromResponse(resp) {
     const body = await resp.json();
     if (body && typeof body === "object" && "title" in body && typeof body.title === "string") {
       const code = "code" in body && typeof body.code === "string" ? body.code : void 0;
-      return new ApiError(body.title, code, resp.status);
+      return new ApiError(body.title, code);
     }
   } catch {
   }
-  return new ApiError(`request failed with status ${resp.status}`, void 0, resp.status);
+  return new ApiError(`request failed with status ${resp.status}`, void 0);
 }
 async function api(path) {
   const resp = await fetch(API + path);
@@ -2409,6 +2406,10 @@ function showTable(name) {
   }
   state.view = tableView(name);
 }
+function clearJoin() {
+  const join = joinInView();
+  if (join) showTable(startTable(join));
+}
 function restoreJoinFromParams(params) {
   const text = params.get("join") ?? "";
   const parsed = text ? parseJoin(text) : null;
@@ -2432,6 +2433,23 @@ function staleRiskFlag() {
 }
 var filterRisk = staleRiskFlag();
 var sortRisk = staleRiskFlag();
+var shown = null;
+function markViewShown() {
+  const { view, sort, order, offset, filter } = state;
+  shown = view && { view, sort, order, offset, filter, ast: appliedFilterAst };
+}
+function viewIsShown() {
+  return shown !== null && viewKey(shown.view) === viewKey(state.view);
+}
+function restoreShownView() {
+  if (!shown) return false;
+  ({ view: state.view, sort: state.sort, order: state.order, offset: state.offset } = shown);
+  state.filter = shown.filter;
+  appliedFilterAst = shown.ast;
+  filterRisk.set(false);
+  $("filter").value = shown.filter;
+  return true;
+}
 function markFilterVerified() {
   filterRisk.set(false);
 }
@@ -2557,7 +2575,8 @@ function dropStoredSort(table) {
   sortRisk.set(false);
   persist();
 }
-function dropOneStaleInput() {
+function dropOneStaleInput(code) {
+  if (code !== "unknown_column" && code !== "invalid_filter" && code !== "invalid_parameter") return false;
   if (state.filter !== "" && !filterRisk.isUnverified()) return false;
   if (sortRisk.isUnverified() && state.view) {
     dropStoredSort(tableInView());
@@ -3159,23 +3178,23 @@ function classOf(type) {
   if (NOT_JOINABLE.has(t) || t.endsWith("[]")) return "none";
   return CLASS_OF[t] ?? null;
 }
-var shown = (type) => type.toLowerCase() === "user-defined" ? "enum" : type;
+var shown2 = (type) => type.toLowerCase() === "user-defined" ? "enum" : type;
 function joinMismatch(candidate, other) {
   const a = classOf(candidate);
   const b = classOf(other);
   if (a === "none" || b === "none") {
-    const type = shown(a === "none" ? candidate : other);
+    const type = shown2(a === "none" ? candidate : other);
     return { note: `${type}: not joinable`, message: `${type} columns cannot be joined. Pick another column.` };
   }
   if (a === null || b === null || a === b) return null;
   if (a === "custom" && b === "text" || a === "text" && b === "custom") return null;
   return {
-    note: `${shown(candidate)} \u2260 ${shown(other)}`,
+    note: `${shown2(candidate)} \u2260 ${shown2(other)}`,
     message: `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`
   };
 }
 function unjoinableReason(type) {
-  return classOf(type) === "none" ? `${shown(type)}: not joinable` : null;
+  return classOf(type) === "none" ? `${shown2(type)}: not joinable` : null;
 }
 function pairNote(type, otherType) {
   return otherType === void 0 ? unjoinableReason(type) : joinMismatch(type, otherType)?.note ?? null;
@@ -3192,10 +3211,18 @@ function findForeignKey(earlier, table, own) {
 
 // src/lib/fuzzy.ts
 var BOUNDARY = /[_\-. ]/;
-function place(t, ch, from) {
+function fits(rest, t, from) {
+  for (const ch of rest) {
+    const at = t.indexOf(ch, from);
+    if (at < 0) return false;
+    from = at + 1;
+  }
+  return true;
+}
+function place(t, ch, from, rest) {
   if (t[from] === ch) return from;
   for (let i = from; i < t.length; i++) {
-    if (t[i] === ch && (i === 0 || BOUNDARY.test(t[i - 1]))) return i;
+    if (t[i] === ch && (i === 0 || BOUNDARY.test(t[i - 1])) && fits(rest, t, i + 1)) return i;
   }
   return t.indexOf(ch, from);
 }
@@ -3206,8 +3233,8 @@ function fuzzyScore(query, text) {
   let score = 0;
   let from = 0;
   let prev = -2;
-  for (const ch of q) {
-    const at = place(t, ch, from);
+  for (const [k, ch] of [...q].entries()) {
+    const at = place(t, ch, from, q.slice(k + 1));
     if (at < 0) return null;
     if (at === 0) score += 8;
     else if (BOUNDARY.test(t[at - 1])) score += 6;
@@ -3235,9 +3262,9 @@ function closeMenu() {
 var search = () => $("dd-pop-search");
 function renderRows(opts, query) {
   const list = $("dd-pop-list");
-  const shown2 = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
+  const shown3 = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
   list.replaceChildren(
-    ...shown2.map((o) => {
+    ...shown3.map((o) => {
       const row2 = el("button");
       row2.type = "button";
       row2.className = "dd-row";
@@ -3263,7 +3290,7 @@ function renderRows(opts, query) {
       return row2;
     })
   );
-  if (shown2.length === 0) {
+  if (shown3.length === 0) {
     const none = el("p", "dd-none", `Nothing matches ${query.trim()}.`);
     list.appendChild(none);
   }
@@ -3413,6 +3440,8 @@ function formatCellValue(col, raw) {
 var tableEntries = [];
 var chipCounts = /* @__PURE__ */ new Map();
 var joinEntries = [];
+var joinScope = "";
+var scopeOfChips = () => `${state.source ?? ""}|${state.schema ?? ""}`;
 var allEntries = () => [...tableEntries, ...joinEntries];
 var tableRowTemplate = $("table-row-template");
 var TABLE_CAP_LINES = 3;
@@ -3422,7 +3451,7 @@ var tablesExpanded = false;
 var cappedActive = null;
 function updateTablesCap() {
   const entries = allEntries();
-  cappedActive = entries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
+  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
   for (const e of entries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
@@ -3440,10 +3469,10 @@ function updateTablesCap() {
     return;
   }
   for (const e of hidden) e.li.hidden = true;
-  const shown2 = entries.filter((e) => !hidden.has(e) && e !== active);
+  const shown3 = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
-  while (tablesMoreItem.offsetTop > lastRowTop && shown2.length) {
-    const last = shown2.pop();
+  while (tablesMoreItem.offsetTop > lastRowTop && shown3.length) {
+    const last = shown3.pop();
     last.li.hidden = true;
     hidden.add(last);
     tablesMore.textContent = `+ ${hidden.size} more`;
@@ -3555,6 +3584,7 @@ async function loadTables() {
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, btn });
   }
+  if (joinScope !== scopeOfChips()) joinEntries = [];
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
@@ -3574,6 +3604,9 @@ function listedTableNames() {
 function tableChipCount(name) {
   return chipCounts.get(name) ?? "";
 }
+function hasJoinChips() {
+  return joinEntries.length > 0;
+}
 function setJoinChips(chips) {
   const ul = $("tables");
   for (const e of joinEntries) e.li.remove();
@@ -3590,6 +3623,7 @@ function setJoinChips(chips) {
     ul.insertBefore(li, tablesMoreItem);
     return { name: `join:${c.label}`, li, btn };
   });
+  joinScope = scopeOfChips();
   updateTablesCap();
 }
 function setRowLoading(name, loading) {
@@ -3702,6 +3736,7 @@ function openStructure() {
 var cache2 = /* @__PURE__ */ new Map();
 var resolved = /* @__PURE__ */ new Map();
 var indexes = /* @__PURE__ */ new Map();
+var indexesRead = /* @__PURE__ */ new Map();
 var generation = 0;
 var version = 0;
 var keyOf = (table) => `${state.source}|${state.schema}|${table}`;
@@ -3709,6 +3744,7 @@ function clearJoinCatalog() {
   cache2.clear();
   resolved.clear();
   indexes.clear();
+  indexesRead.clear();
   generation++;
   version++;
 }
@@ -3752,13 +3788,20 @@ function indexedColumns(table) {
   const key = keyOf(table);
   let found = indexes.get(key);
   if (!found) {
+    const asked = generation;
     found = tableStructure(table).then(
       (s) => new Set(s.indexes.map((i) => i.columns[0])),
       () => /* @__PURE__ */ new Set()
-    );
+    ).then((set) => {
+      if (asked === generation) indexesRead.set(key, set);
+      return set;
+    });
     indexes.set(key, found);
   }
   return found;
+}
+function readIndexedColumns(table) {
+  return indexesRead.get(keyOf(table));
 }
 
 // src/features/join-form.ts
@@ -3917,7 +3960,7 @@ function mountJoinForm(root, onChange) {
             }
           }
           join.table = v;
-          join.on = [emptyPair()];
+          join.on = [foreignKey(pos) ?? emptyPair()];
           draft.columns[pos] = null;
           changed(true);
           load();
@@ -4090,7 +4133,7 @@ function joinLabel(def) {
 }
 function selectsEverything(def) {
   if (def.columns === null) return true;
-  return def.columns.every((c) => "all" in c) && new Set(def.columns.map((c) => c.join)).size === def.tables.length;
+  return def.columns.length === def.tables.length && def.columns.every((c, i) => "all" in c && c.join === i);
 }
 function tablesToExpand(def) {
   if (selectsEverything(def)) return [];
@@ -4216,7 +4259,7 @@ function renderSavedChips(actions) {
   const saved = savedJoins();
   const current2 = joinInView();
   const key = JSON.stringify([state.source, state.schema, current2?.text, saved]);
-  if (key === lastRendered) return;
+  if (key === lastRendered && hasJoinChips()) return;
   lastRendered = key;
   const inSaved = saved.some((s) => s.text === current2?.text);
   const chips = saved.map((s) => {
@@ -4345,7 +4388,6 @@ function createSuggestList(opts) {
       input2.setAttribute("aria-expanded", "true");
     },
     close,
-    isOpen: () => matches.length > 0,
     token: () => token
   };
 }
@@ -4415,13 +4457,14 @@ function mountJoinSql(onChange) {
   };
   function render2() {
     const text = field.value;
-    field.rows = Math.max(5, text.split("\n").length + 1);
+    field.style.height = "";
+    if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
     const result = text.trim() ? parse() : null;
     const error = result && "error" in result && result.error.index < text.trimEnd().length ? result.error : null;
     const tokens = tokenizeJoinText(text);
     const [from, to] = error ? errorSpan(text, tokens, error.index, error.code) : [-1, -1];
-    const shown2 = tokens.map((t) => t.kind === "punct" ? { ...t, kind: "op" } : t);
-    hlText.replaceChildren(...tokenSpans(text, shown2, (t) => t.kind !== "space" && t.start >= from && t.start < to));
+    const shown3 = tokens.map((t) => t.kind === "punct" ? { ...t, kind: "op" } : t);
+    hlText.replaceChildren(...tokenSpans(text, shown3, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     hlText.append("\n");
   }
   attachOverlayHighlight(field, render2);
@@ -4457,7 +4500,12 @@ function mountJoinSql(onChange) {
   async function columnRows(ctx) {
     const table = tableOf(ctx, ctx.qualifier);
     if (!table) return [];
-    const [columns, indexed] = await Promise.all([tableColumns(table), indexedColumns(table)]);
+    const columns = await tableColumns(table);
+    const indexed = readIndexedColumns(table);
+    if (!indexed)
+      void indexedColumns(table).then(() => {
+        if (document.activeElement === field) void update2();
+      });
     const otherTable = ctx.otherSide ? tableOf(ctx, ctx.otherSide.qualifier) : void 0;
     const otherType = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column)?.type;
     const starts = startsWith(ctx);
@@ -4467,7 +4515,7 @@ function mountJoinSql(onChange) {
         label: c.name,
         insert: `${quoteJoinName(c.name)} `,
         note: note ?? c.type,
-        ...note === null && indexed.has(c.name) ? { tag: "indexed" } : {},
+        ...note === null && indexed?.has(c.name) ? { tag: "indexed" } : {},
         ...note !== null ? { blocked: true } : {}
       };
     });
@@ -4631,11 +4679,14 @@ function refreshSavedChips() {
   });
 }
 function applyJoin(def) {
+  const same = joinInView()?.text === printJoin(def);
   enterJoin(def);
-  state.sort = null;
-  state.order = "asc";
-  state.offset = 0;
-  clearFilter();
+  if (!same) {
+    state.sort = null;
+    state.order = "asc";
+    state.offset = 0;
+    clearFilter();
+  }
   persist();
   loadData();
 }
@@ -4657,9 +4708,21 @@ runBtn.onclick = () => {
       return;
     }
   }
+  committed = true;
   dialog.close();
   applyJoin(result.def);
 };
+var committed = false;
+dialog.addEventListener("close", () => {
+  if (committed) committed = false;
+  else if (joinInView() && !viewIsShown()) {
+    if (!restoreShownView()) {
+      clearJoin();
+      persist();
+      loadData();
+    }
+  }
+});
 $("join-delete").onclick = () => {
   if (editingSaved !== void 0) deleteSavedJoin(editingSaved);
   dialog.close();
@@ -4690,10 +4753,11 @@ $("join-btn").onclick = () => openJoinDialog();
 $("join-edit-btn").onclick = () => openJoinDialog();
 
 // src/features/join-view.ts
+var filterQualifier = (name) => /^(AND|OR|NOT)$/i.test(name) ? `"${name}"` : quoteJoinName(name);
 function columnKey(col) {
   const def = joinInView()?.def;
   if (!def || col.join === void 0 || col.column === void 0) return col.name;
-  return `${quoteJoinName(effectiveName(def.tables[col.join]))}.${col.column}`;
+  return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
 }
 var QUALIFIED = /^(?:([A-Za-z_][A-Za-z0-9_]*)|"((?:[^"]|"")+)")\.(.+)$/s;
 function splitColumnKey(key) {
@@ -5633,15 +5697,18 @@ async function joinPath(def, params) {
   const names = /* @__PURE__ */ new Map();
   await Promise.all(
     tablesToExpand(def).map(async (position) => {
+      const columns = await tableColumns(def.tables[position].table).catch((e) => {
+        throw e instanceof ApiError && e.code === "unknown_table" ? new ApiError(e.message, "invalid_join") : e;
+      });
       names.set(
         position,
-        (await tableColumns(def.tables[position].table)).map((c) => c.name)
+        columns.map((c) => c.name)
       );
     })
   );
   const wire = JSON.stringify(toWire(def, (position) => names.get(position) ?? []));
   if (new TextEncoder().encode(wire).length > JOIN_MAX_BYTES)
-    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", "invalid_join", 400);
+    throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", "invalid_join");
   params.set("join", wire);
   return `/tables/join?${params}`;
 }
@@ -5745,7 +5812,7 @@ async function loadData2({
     data = await fetchTableData(view);
   } catch (e) {
     if (token !== loadDataToken) return;
-    if (dropOneStaleInput()) return loadData2({ resetScroll, highlightNew });
+    if (dropOneStaleInput(e instanceof ApiError ? e.code : void 0)) return loadData2({ resetScroll, highlightNew });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e)) return;
     if (e instanceof ApiError && e.code === "not_readable") {
       reportError(new Error(`you don't have access to ${startTable(view)}`));
@@ -5757,6 +5824,7 @@ async function loadData2({
   if (token !== loadDataToken) return;
   markStoredSortVerified();
   markFilterVerified();
+  markViewShown();
   if (view.kind === "table") seedColumns(view.table, data.columns);
   updateActiveTableChrome();
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
@@ -5769,6 +5837,7 @@ async function loadData2({
   refreshSavedChips();
   syncUrl();
   const renderTable = () => {
+    if (token !== loadDataToken) return;
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
