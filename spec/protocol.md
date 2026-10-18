@@ -80,8 +80,9 @@ interpreted as described in RFC 2119.
   namespace — it is an embeddable library with no canonical origin);
   `detail` and `instance` MAY be present. Defined `code` values:
   - **400** — client error: `unknown_source`, `unknown_schema`,
-    `unknown_table`, `unknown_column`, `invalid_filter`,
-    `invalid_parameter` (e.g. `order` not `asc`/`desc`), or `not_readable`
+    `unknown_table`, `unknown_column`, `invalid_filter`, `invalid_join`
+    (anything wrong with §5.11's `join` value), `invalid_parameter` (e.g.
+    `order` not `asc`/`desc`), or `not_readable`
     — a table that cleared §5.2's allow-list but the connected role cannot
     actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
   - **500** — server error: `database_error`, or `query_timeout` (§6).
@@ -690,8 +691,10 @@ Response:
 
 #### 5.11.1 The `join` object
 
-- Unknown keys, malformed JSON, or a wrong JSON type anywhere → 400
-  `invalid_parameter`.
+- Every rejection of the `join` value below is 400 `invalid_join`, so a
+  client can tell a bad join from a bad `filter`, `sort` or `order`. An
+  absent `join` is `invalid_parameter`, as any missing parameter.
+- Unknown keys, malformed JSON, or a wrong JSON type anywhere → 400.
 - **Positions.** The base `table` is position `0`; the entries of `joins`
   are positions `1..n` in order. Every reference to a table in this route
   is by position, never by name, so a table MAY appear more than once (a
@@ -709,9 +712,8 @@ Response:
   entry MUST be a distinct `{join, column}`, and the response lists
   exactly those columns in that order.
 - Every table MUST match a table from §5.2 and every column MUST match
-  that table's real columns, exactly (case-sensitive); otherwise 400
-  `unknown_table` / `unknown_column`. A table the role cannot `SELECT` is
-  rejected as in §6.
+  that table's real columns, exactly (case-sensitive); otherwise 400. A
+  table the role cannot `SELECT` is rejected as in §6 (`not_readable`).
 - Implementations MUST bound the byte length of the URL-decoded `join`
   text and reject oversize values with 400, never a truncated query. The
   bound is 8192 bytes, as §5.4.2's `filter`.
@@ -720,7 +722,7 @@ Response:
 
 Each `on` pair MUST join columns of the same **class**. The server checks
 this from the catalog types before running the statement; a mismatch → 400
-`invalid_parameter` whose `title` names the pair and both types.
+`invalid_join` whose `title` names the pair and both types.
 
 | Class      | Types                                                    |
 |------------|----------------------------------------------------------|

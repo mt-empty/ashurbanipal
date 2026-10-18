@@ -391,7 +391,7 @@ paths:
             referenced by position: 0 is the base table, 1..n the entries
             of `joins`. At most 4 tables, 1 to 3 `on` pairs per join, and
             the encoded size is bounded. Unknown names, an incompatible
-            column pair, or a malformed object yield 400.
+            column pair, or a malformed object yield 400 `invalid_join`.
           content:
             application/json:
               schema:
@@ -1076,6 +1076,7 @@ components:
             - unknown_table
             - unknown_column
             - invalid_filter
+            - invalid_join
             - invalid_parameter
             - not_readable
             - database_error

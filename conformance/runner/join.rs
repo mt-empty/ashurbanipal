@@ -422,7 +422,7 @@ async fn tables_resolve_only_in_the_requested_schema() {
         &[("schema", "other_schema".into())],
     )
     .await;
-    assert_problem_code(resp, 400, "unknown_table", "orders is not in other_schema").await;
+    assert_problem_code(resp, 400, "invalid_join", "orders is not in other_schema").await;
 }
 
 /// P5.11-TABLE-COLUMN-EXACT: unknown or injection-shaped names are 400,
@@ -442,33 +442,27 @@ async fn unknown_and_malicious_names_are_rejected() {
         let mut base = orders_users("left");
         base["table"] = json!(name);
         let resp = get_join(&srv, &base, &[]).await;
-        assert_problem_code(resp, 400, "unknown_table", &format!("base table {name:?}")).await;
+        assert_problem_code(resp, 400, "invalid_join", &format!("base table {name:?}")).await;
 
         let mut joined = orders_users("left");
         joined["joins"][0]["table"] = json!(name);
         let resp = get_join(&srv, &joined, &[]).await;
-        assert_problem_code(
-            resp,
-            400,
-            "unknown_table",
-            &format!("joined table {name:?}"),
-        )
-        .await;
+        assert_problem_code(resp, 400, "invalid_join", &format!("joined table {name:?}")).await;
 
         let mut right = orders_users("left");
         right["joins"][0]["on"][0]["right"] = json!(name);
         let resp = get_join(&srv, &right, &[]).await;
-        assert_problem_code(resp, 400, "unknown_column", &format!("on.right {name:?}")).await;
+        assert_problem_code(resp, 400, "invalid_join", &format!("on.right {name:?}")).await;
 
         let mut left = orders_users("left");
         left["joins"][0]["on"][0]["left"]["column"] = json!(name);
         let resp = get_join(&srv, &left, &[]).await;
-        assert_problem_code(resp, 400, "unknown_column", &format!("on.left {name:?}")).await;
+        assert_problem_code(resp, 400, "invalid_join", &format!("on.left {name:?}")).await;
 
         let mut cols = orders_users("left");
         cols["columns"] = json!([{"join": 0, "column": name}]);
         let resp = get_join(&srv, &cols, &[]).await;
-        assert_problem_code(resp, 400, "unknown_column", &format!("columns {name:?}")).await;
+        assert_problem_code(resp, 400, "invalid_join", &format!("columns {name:?}")).await;
 
         let resp = get_join(&srv, &orders_users("left"), &[("sort", name.to_string())]).await;
         assert_problem_code(resp, 400, "unknown_column", &format!("sort {name:?}")).await;
@@ -532,7 +526,7 @@ async fn invalid_join_structures_are_rejected() {
     ];
     for (what, join) in cases {
         let resp = get_join(&srv, &join, &[]).await;
-        assert_problem_code(resp, 400, "invalid_parameter", what).await;
+        assert_problem_code(resp, 400, "invalid_join", what).await;
     }
 
     for raw in [
@@ -549,7 +543,7 @@ async fn invalid_join_structures_are_rejected() {
             .send()
             .await
             .unwrap();
-        assert_status(&resp, 400, &format!("join={raw}"));
+        assert_problem_code(resp, 400, "invalid_join", &format!("join={raw}")).await;
     }
     let resp = srv
         .client()
@@ -557,7 +551,7 @@ async fn invalid_join_structures_are_rejected() {
         .send()
         .await
         .unwrap();
-    assert_status(&resp, 400, "join is required");
+    assert_problem_code(resp, 400, "invalid_parameter", "join is required").await;
 }
 
 /// P5.11-JOIN-BOUND: an oversize `join` is a 400, never truncated.
@@ -567,10 +561,10 @@ async fn oversize_join_is_rejected() {
     let mut join = orders_users("left");
     join["table"] = json!("t".repeat(9000));
     let resp = get_join(&srv, &join, &[]).await;
-    assert_status(&resp, 400, "join over 8192 bytes");
+    assert_problem_code(resp, 400, "invalid_join", "join over 8192 bytes").await;
 }
 
-/// P5.11-COMPATIBILITY: a pair across classes is a 400 `invalid_parameter`;
+/// P5.11-COMPATIBILITY: a pair across classes is a 400 `invalid_join`;
 /// `json`/`jsonb` columns are never joinable.
 #[tokio::test]
 async fn incompatible_column_pairs_are_rejected() {
@@ -578,7 +572,7 @@ async fn incompatible_column_pairs_are_rejected() {
     let mut cross = orders_users("left");
     cross["joins"][0]["on"][0]["left"]["column"] = json!("status");
     let resp = get_join(&srv, &cross, &[]).await;
-    assert_problem_code(resp, 400, "invalid_parameter", "orders.status to users.id").await;
+    assert_problem_code(resp, 400, "invalid_join", "orders.status to users.id").await;
 
     match Backend::current().not_joinable_columns() {
         NotJoinableColumns::Seeded => {
@@ -590,7 +584,7 @@ async fn incompatible_column_pairs_are_rejected() {
                 }]
             });
             let resp = get_join(&srv, &json_pair, &[]).await;
-            assert_problem_code(resp, 400, "invalid_parameter", "json to json").await;
+            assert_problem_code(resp, 400, "invalid_join", "json to json").await;
         }
         NotJoinableColumns::NotSeeded => {}
     }
@@ -619,24 +613,31 @@ async fn same_class_pairs_with_different_types_join() {
 async fn sort_parameters_are_validated() {
     let srv = TestServer::spawn().await;
     let join = orders_users("left");
-    let cases: [(&str, Vec<(&str, String)>); 4] = [
-        ("sort_join without sort", vec![("sort_join", "1".into())]),
+    let cases: [(&str, &str, Vec<(&str, String)>); 4] = [
+        (
+            "sort_join without sort",
+            "invalid_parameter",
+            vec![("sort_join", "1".into())],
+        ),
         (
             "sort_join out of range",
+            "invalid_parameter",
             vec![("sort", "id".into()), ("sort_join", "2".into())],
         ),
         (
             "sort column not in the table at sort_join",
+            "unknown_column",
             vec![("sort", "email".into()), ("sort_join", "0".into())],
         ),
         (
             "bad order",
+            "invalid_parameter",
             vec![("sort", "id".into()), ("order", "sideways".into())],
         ),
     ];
-    for (what, args) in cases {
+    for (what, code, args) in cases {
         let resp = get_join(&srv, &join, &args).await;
-        assert_status(&resp, 400, what);
+        assert_problem_code(resp, 400, code, what).await;
     }
 }
 

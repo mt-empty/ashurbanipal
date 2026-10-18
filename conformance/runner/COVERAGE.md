@@ -208,13 +208,13 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.11-SORT` | `sort` + `sort_join` order by the column at that position | `join::sort_applies_to_the_table_at_sort_join` |
 | `P5.11-HAS-MORE` | `has_more` true with a following row, false on the last page; `limit` clamped | `join::has_more_reports_a_following_row` |
 | `P5.11-SCHEMA-PARAM` | Explicit default `schema` resolves like an absent one; unrecognized `schema`/`source` → 400 | `join::source_and_schema_params_resolve_like_the_other_routes` |
-| `P5.11-SCHEMA-ISOLATION` | Every table resolves only in the requested schema (Postgres, MySQL; SQLite self-skips) | `join::tables_resolve_only_in_the_requested_schema` |
-| `P5.11-NAMES-EXACT` | Tables and columns in `join`, `columns`, `sort` and `filter` matched exactly; injection-shaped input → 400, never reaches SQL | `join::unknown_and_malicious_names_are_rejected` |
-| `P5.11-JOIN-STRUCTURE` | Forward/self `on` position, pair count, join type, operator key, empty or duplicate `columns`, more than 4 tables, malformed `join` → 400 | `join::invalid_join_structures_are_rejected` |
-| `P5.11-JOIN-BOUND` | An oversize `join` is a 400, never truncated | `join::oversize_join_is_rejected` |
-| `P5.11-COMPATIBILITY` | A pair across type classes, or a `json`/`jsonb` column, → 400 `invalid_parameter` | `join::incompatible_column_pairs_are_rejected` |
+| `P5.11-SCHEMA-ISOLATION` | Every table resolves only in the requested schema, else `invalid_join` (Postgres, MySQL; SQLite self-skips) | `join::tables_resolve_only_in_the_requested_schema` |
+| `P5.11-NAMES-EXACT` | Tables and columns in `join`, `columns`, `sort` and `filter` matched exactly; injection-shaped input → 400, never reaches SQL; `invalid_join` for names in `join`, `unknown_column` for `sort` and `filter` | `join::unknown_and_malicious_names_are_rejected` |
+| `P5.11-JOIN-STRUCTURE` | Forward/self `on` position, pair count, join type, operator key, empty or duplicate `columns`, more than 4 tables, malformed `join` → 400 `invalid_join`; absent `join` → `invalid_parameter` | `join::invalid_join_structures_are_rejected` |
+| `P5.11-JOIN-BOUND` | An oversize `join` is a 400 `invalid_join`, never truncated | `join::oversize_join_is_rejected` |
+| `P5.11-COMPATIBILITY` | A pair across type classes, or a `json`/`jsonb` column, → 400 `invalid_join` | `join::incompatible_column_pairs_are_rejected` |
 | `P5.11-SAME-CLASS` | Exact numerics of different widths join | `join::same_class_pairs_with_different_types_join` |
-| `P5.11-SORT-PARAMS` | `sort_join` needs `sort` and a real position; unknown sort column and bad `order` → 400 | `join::sort_parameters_are_validated` |
+| `P5.11-SORT-PARAMS` | `sort_join` needs `sort` and a real position, and bad `order`, → `invalid_parameter`; unknown sort column → `unknown_column` | `join::sort_parameters_are_validated` |
 | `P5.11-FILTER-RULES` | §5.4.2 structural rules apply; out-of-range `join` → `invalid_filter`; §5.4 rejects a `join` key | `join::filter_rules_hold_on_the_join_route` |
 | `P5.11-HEADER` | Carries the protocol version header on 200 and 400 | `join::every_response_carries_the_protocol_version_header` |
 

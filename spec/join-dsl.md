@@ -231,7 +231,7 @@ Cases run against the fixture's `catalog` (`orders`, `users`, `order_extra`,
 | A1 | `FROM orders; DROP TABLE users` | `multiple-statements` |
 | A2 | `… ON a.id = b.id OR 1=1` | `unsupported-syntax` (R20) |
 | A3 | `FROM "orders"" JOIN users …` | `bad-identifier` (unterminated) |
-| A4 | `FROM "x; DROP TABLE users" a JOIN b ON a.i = b.j` *(no catalog)* | parses; the table name is `x; DROP TABLE users`, which the server then rejects as `unknown_table` |
+| A4 | `FROM "x; DROP TABLE users" a JOIN b ON a.i = b.j` *(no catalog)* | parses; the table name is `x; DROP TABLE users`, which the server then rejects as `invalid_join` |
 | A5 | `FROM ｏｒｄｅｒｓ …` (fullwidth) | `bad-identifier`, not `[A-Za-z0-9_]` |
 | A6 | a NUL byte in a bare name | `bad-identifier` |
 | A7 | `FROM a JOIN b ON a.x = b.x JOIN c … JOIN d … JOIN e …` | `too-many-tables`, no recursion (the parser is iterative) |
