@@ -64,6 +64,7 @@ export function deleteSavedJoin(name: string): void {
 
 interface ChipActions {
   open: (text: string) => void;
+  edit: () => void;
   startNew: () => void;
   saveCurrent: () => void;
 }
@@ -79,13 +80,17 @@ export function renderSavedChips(actions: ChipActions): void {
   lastRendered = key;
   const current = getAppliedJoin();
   const inSaved = saved.some((s) => s.text === state.join);
-  const chips: JoinChip[] = saved.map((s) => ({
-    label: `⋈ ${s.name}`,
-    title: `${s.name} — ${s.text.replaceAll("\n", " ")}`,
-    className: "saved",
-    active: s.text === state.join,
-    run: () => actions.open(s.text),
-  }));
+  // The chip of the join in view opens it for editing, which is also where it is renamed or deleted.
+  const chips: JoinChip[] = saved.map((s) => {
+    const active = s.text === state.join;
+    return {
+      label: `⋈ ${s.name}`,
+      title: active ? `${s.name}: click to edit, rename or delete` : `${s.name} — ${s.text.replaceAll("\n", " ")}`,
+      className: "saved",
+      active,
+      run: active ? actions.edit : () => actions.open(s.text),
+    };
+  });
   if (current && !inSaved) {
     chips.push({
       label: `⋈ ${joinLabel(current)}`,

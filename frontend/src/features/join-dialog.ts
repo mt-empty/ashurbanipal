@@ -1,5 +1,5 @@
 import { loadData } from "../bootstrap/reload.js";
-import { $, copyText, reportError } from "../core/dom.js";
+import { $, copyText, el, reportError } from "../core/dom.js";
 import { clearFilter, getAppliedJoin, persist, setAppliedJoin, state } from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
 import { type Draft, defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
@@ -46,9 +46,7 @@ function refresh(): void {
 // Keywords in the keyword colour, as in the SQL field.
 function coloured(text: string): Node[] {
   return tokenizeJoinText(text).map((t) => {
-    const span = document.createElement("span");
-    span.className = t.kind === "keyword" ? "t-keyword" : "";
-    span.textContent = text.slice(t.start, t.end);
+    const span = el("span", t.kind === "keyword" ? "t-keyword" : "", text.slice(t.start, t.end));
     return span;
   });
 }
@@ -104,6 +102,7 @@ function openSaved(text: string): void {
 export function refreshSavedChips(): void {
   renderSavedChips({
     open: openSaved,
+    edit: () => openJoinDialog(),
     startNew: () => openJoinDialog({ fresh: true }),
     saveCurrent: () => openJoinDialog({ focusName: true }),
   });
