@@ -6,6 +6,7 @@ import {
   type DraftJoin,
   type DraftPair,
   emptyPair,
+  forgetColumns,
   newDraft,
   removeJoin,
 } from "../lib/join-draft.js";
@@ -198,7 +199,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
           join.table = v;
           // A table browsed earlier has its columns already; load() fills the pair for the rest.
           join.on = [foreignKey(pos) ?? emptyPair()];
-          draft.columns[pos] = null;
+          forgetColumns(draft, pos);
           changed(true);
           load();
         },

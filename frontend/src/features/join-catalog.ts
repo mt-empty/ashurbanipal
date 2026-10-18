@@ -1,4 +1,4 @@
-import { api } from "../core/api.js";
+import { ApiError, api } from "../core/api.js";
 import { applyScopeParams, state } from "../core/state.js";
 import type { Column, TableData } from "../core/types.js";
 import type { JoinCatalog } from "../lib/join-dsl.js";
@@ -47,15 +47,20 @@ export function tableColumns(table: string): Promise<Column[]> {
     const params = new URLSearchParams({ table, limit: "1", offset: "0" });
     applyScopeParams(params);
     const started = generation;
-    columns = api<TableData>(`/tables/data?${params}`).then((d) => {
+    const asked = api<TableData>(`/tables/data?${params}`).then((d) => {
       if (started === generation) {
         resolved.set(key, d.columns);
         version++;
       }
       return d.columns;
     });
-    cache.set(key, columns);
-    columns.catch(() => {});
+    cache.set(key, asked);
+    // A missing or unreadable table stays failed; a network error or timeout may pass on the next ask.
+    asked.catch((e: unknown) => {
+      const lasting = e instanceof ApiError && (e.code === "unknown_table" || e.code === "not_readable");
+      if (!lasting && cache.get(key) === asked) cache.delete(key);
+    });
+    columns = asked;
   }
   return columns;
 }

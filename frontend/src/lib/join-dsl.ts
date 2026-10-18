@@ -125,7 +125,7 @@ type Tok =
 const OPERATOR_WORDS = new Set(["OR", "LIKE", "ILIKE", "IN", "IS", "NOT", "BETWEEN"]);
 
 const REJECTED_MESSAGE: Record<string, string> = {
-  RIGHT: "RIGHT joins are not supported. Use LEFT or INNER.",
+  RIGHT: "RIGHT joins are not supported. Swap the two tables and use LEFT.",
   FULL: "FULL joins are not supported. Use LEFT or INNER.",
   CROSS: "CROSS joins are not supported. Use LEFT or INNER.",
   NATURAL: "NATURAL joins are not supported. Write the ON pairs.",

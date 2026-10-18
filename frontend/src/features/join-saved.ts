@@ -47,10 +47,8 @@ export function savedJoins(): SavedJoin[] {
   return scopeEntries(read(), state.source, state.schema);
 }
 
-// The saved entry for the join in view, if it was saved.
-export function savedJoinInView(): SavedJoin | undefined {
-  const text = joinInView()?.text;
-  return text === undefined ? undefined : savedJoins().find((s) => s.text === text);
+export function savedJoinFor(text: string): SavedJoin | undefined {
+  return savedJoins().find((s) => s.text === text);
 }
 
 export function saveJoin(name: string, text: string, replacing?: string): string | null {

@@ -37,8 +37,8 @@ export interface State {
 // sort/page click.
 //
 // Feature modules mutate scope through the named transitions below
-// (switchSource / switchSchema / switchTable / enterJoin / clearJoin), not by
-// assigning fields ad hoc; the one sanctioned divergence is nav.ts's
+// (switchSource / switchSchema / switchTable / clearJoin, and joinRequest +
+// commitRequest for a new join), not by assigning fields ad hoc; the one sanctioned divergence is nav.ts's
 // navigateWithSeededFilter (FK-cell nav and the referenced-by drill-in),
 // which seeds a filter rather than clearing one.
 export const state: State = {
@@ -104,7 +104,7 @@ export function joinAliases(): string[] | undefined {
   return joinInView()?.def.tables.map(effectiveName);
 }
 
-export function enterJoin(def: JoinDef): void {
+function enterJoin(def: JoinDef): void {
   state.view = joinView(def, state.view);
 }
 
@@ -119,9 +119,14 @@ export function showTable(name: string | null): void {
   state.view = tableView(name);
 }
 
+// To the join's start table, as a table chip would open it.
 export function clearJoin(): void {
   const join = joinInView();
-  if (join) showTable(startTable(join));
+  if (!join) return;
+  const table = startTable(join);
+  showTable(table);
+  state.offset = 0;
+  applyStoredSort(table);
 }
 
 // Runs after url.ts sets the table view and before the filter restore, which
@@ -159,31 +164,46 @@ function staleRiskFlag() {
 const filterRisk = staleRiskFlag();
 const sortRisk = staleRiskFlag();
 
-// What the grid last rendered. A join the server rejects is already the view
-// when its dialog reopens; cancelling it goes back to this.
-let shown: {
-  view: View;
-  sort: string | null;
-  order: "asc" | "desc";
-  offset: number;
-  filter: string;
-  ast: FilterCondition[];
-} | null = null;
-export function markViewShown(): void {
+// One load's view and query. A new join travels as one of these and becomes the
+// state only once its data arrives, so a refused or failed join changes nothing.
+export interface ViewRequest {
+  readonly view: View;
+  readonly sort: string | null;
+  readonly order: "asc" | "desc";
+  readonly offset: number;
+  readonly filter: string;
+  readonly ast: readonly FilterCondition[];
+}
+
+export function currentRequest(): ViewRequest | null {
   const { view, sort, order, offset, filter } = state;
-  shown = view && { view, sort, order, offset, filter, ast: appliedFilterAst };
+  return view && { view, sort, order, offset, filter, ast: appliedFilterAst };
+}
+
+// A new join starts from the default view: the sort and filter were written
+// against other columns. The join already in view (saved or renamed) keeps them.
+export function joinRequest(def: JoinDef): ViewRequest {
+  const view = joinView(def, state.view);
+  const current = currentRequest();
+  if (current && viewKey(current.view) === viewKey(view)) return { ...current, view };
+  return { view, sort: null, order: "asc", offset: 0, filter: "", ast: [] };
+}
+
+export function commitRequest(r: ViewRequest): void {
+  ({ view: state.view, sort: state.sort, order: state.order, offset: state.offset, filter: state.filter } = r);
+  appliedFilterAst = [...r.ast];
+  $<HTMLInputElement>("filter").value = r.filter;
+  persist();
+}
+
+// The view the grid last rendered. A view set straight from a link or history
+// that the server refused has never been shown.
+let shownKey: string | null = null;
+export function markViewShown(): void {
+  shownKey = viewKey(state.view);
 }
 export function viewIsShown(): boolean {
-  return shown !== null && viewKey(shown.view) === viewKey(state.view);
-}
-export function restoreShownView(): boolean {
-  if (!shown) return false;
-  ({ view: state.view, sort: state.sort, order: state.order, offset: state.offset } = shown);
-  state.filter = shown.filter;
-  appliedFilterAst = shown.ast;
-  filterRisk.set(false);
-  $<HTMLInputElement>("filter").value = shown.filter;
-  return true;
+  return shownKey === viewKey(state.view);
 }
 
 export function markFilterVerified(): void {
@@ -362,22 +382,24 @@ function dropStoredSort(table: string | null): void {
 // other still gets a chance to render — sort first, since it's the visitor's
 // own incidental state while the filter is what a shared link was for.
 export function dropOneStaleInput(code: string | undefined): boolean {
-  // Only what a column the server no longer has can cause; a timeout or a bad join is not the sort's or filter's.
-  if (code !== "unknown_column" && code !== "invalid_filter" && code !== "invalid_parameter") return false;
   // An applied filter that already survived a fetch was typed on this visit,
   // so the 400 is the user's to see — it suppresses the whole ladder rather
   // than being silently discarded.
   if (state.filter !== "" && !filterRisk.isUnverified()) return false;
-  if (sortRisk.isUnverified() && state.view) {
+  // A sort can break the query itself (a 500 on a type the engine cannot
+  // order); a timeout or a problem with the join or table is no sign against it.
+  if (sortRisk.isUnverified() && state.view && !NOT_THE_INPUTS.has(code ?? "")) {
     dropStoredSort(tableInView());
     return true;
   }
-  if (filterRisk.isUnverified()) {
+  if (filterRisk.isUnverified() && FILTER_FAULTS.has(code ?? "")) {
     clearFilter();
     return true;
   }
   return false;
 }
+const NOT_THE_INPUTS = new Set(["query_timeout", "invalid_join", "not_readable"]);
+const FILTER_FAULTS = new Set(["unknown_column", "invalid_filter", "invalid_parameter"]);
 
 // Records the active schema against the current source (ui-guidelines R12),
 // so #source-select's onchange can restore it instead of resetting to

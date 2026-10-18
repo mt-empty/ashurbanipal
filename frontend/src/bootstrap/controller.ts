@@ -2,18 +2,20 @@ import { ApiError, api } from "../core/api.js";
 import { $, clearError, flashIcon, reportError, setStatus } from "../core/dom.js";
 import {
   applyScopeParams,
+  commitRequest,
+  currentRequest,
   diffNewRows,
   dropOneStaleInput,
-  getAppliedFilterAst,
   markFilterVerified,
   markStoredSortVerified,
   markViewShown,
   startTable,
   state,
   tableInView,
+  type ViewRequest,
 } from "../core/state.js";
 import type { JoinDef, TableData, View } from "../core/types.js";
-import { currentWidthScope, rememberColumnWidths, useWidthScope } from "../features/column-widths.js";
+import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
 import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
@@ -67,20 +69,21 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
 
 // A timeout or a rejected join gets the join's own UI instead of the plain
 // error line; on this route `not_readable` can only name one of the join's
-// tables. Any other 400 (filter, sort) is the plain error line's.
-function reportJoinFailure(e: ApiError): boolean {
+// tables. Any other 400 (filter, sort) is the plain error line's. `next` is
+// the join not yet in view, if this load was trying one.
+function reportJoinFailure(e: ApiError, def: JoinDef, next: ViewRequest | undefined): boolean {
   if (e.code === "query_timeout") {
     showJoinNotice(
       "This join took longer than the time limit and was stopped. Add a filter, remove a table, or join on key columns.",
       [
-        { label: "Retry", run: () => loadData() },
-        { label: "Edit join", run: () => openJoinDialog() },
+        { label: "Retry", run: () => loadData({ next }) },
+        { label: "Edit join", run: () => openJoinDialog({ def }) },
       ],
     );
     return true;
   }
   if (e.code === "invalid_join" || e.code === "not_readable") {
-    openJoinDialog({ error: e.message });
+    openJoinDialog({ error: e.message, def });
     return true;
   }
   return false;
@@ -99,29 +102,30 @@ function dataPath(view: View, params: URLSearchParams): Promise<string> | string
   }
 }
 
-async function fetchTableData(view: View): Promise<TableData> {
+async function fetchTableData(req: ViewRequest): Promise<TableData> {
+  const { view, sort, order } = req;
   // Captured once, never re-read later: without this, a slow fetch for
   // table A would clear table B's row-loading flag (whatever the view
   // had become by the time A's `finally` runs) instead of its own.
   const table = startTable(view);
   const params = new URLSearchParams({
     limit: String(state.limit),
-    offset: String(state.offset),
+    offset: String(req.offset),
   });
   if (view.kind === "table") params.set("table", view.table);
-  if (state.sort) {
+  if (sort) {
     // In a join view the sort is `alias.column`; the wire wants the column and its table position.
-    const target = view.kind === "join" ? splitColumnKey(state.sort) : { column: state.sort, join: undefined };
+    const target = view.kind === "join" ? splitColumnKey(sort, view.def) : { column: sort, join: undefined };
     if (target) {
       params.set("sort", target.column);
       if (target.join !== undefined) params.set("sort_join", String(target.join));
-      params.set("order", state.order);
+      params.set("order", order);
     }
   }
   applyScopeParams(params);
   // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
   // box's DSL text — URLSearchParams handles the URL-encoding.
-  if (state.filter) params.set("filter", JSON.stringify(getAppliedFilterAst()));
+  if (req.filter) params.set("filter", JSON.stringify(req.ast));
   if (inFlightFetches++ === 0) {
     setStatus("loading…");
     setTableBusy(true);
@@ -172,35 +176,41 @@ let loadDataToken = 0;
 export async function loadData({
   resetScroll = true,
   highlightNew = false,
+  next,
 }: {
   resetScroll?: boolean;
   highlightNew?: boolean;
+  // A view to try; it replaces the state only if its data arrives.
+  next?: ViewRequest;
 } = {}): Promise<void> {
   clearError();
   clearJoinNotice();
-  const view = state.view;
-  if (view === null) {
+  const req = next ?? currentRequest();
+  if (req === null) {
     updateActiveTableChrome();
     setStatus("");
     return;
   }
+  const view = req.view;
   const token = ++loadDataToken;
-  const widthScope = currentWidthScope();
+  const widthScope = widthScopeOf(view);
   let data: TableData;
   try {
-    data = await fetchTableData(view);
+    data = await fetchTableData(req);
   } catch (e) {
     if (token !== loadDataToken) return; // superseded by a newer request
     // A restored sort or a URL-restored filter can each name a column that no
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
-    if (dropOneStaleInput(e instanceof ApiError ? e.code : undefined)) return loadData({ resetScroll, highlightNew });
+    // A view not yet in view restored nothing; its failure leaves the state alone.
+    if (!next && dropOneStaleInput(e instanceof ApiError ? e.code : undefined))
+      return loadData({ resetScroll, highlightNew });
     // The one code the frontend branches on (ui-guidelines R9): a table
     // that cleared the table listing but the role can't actually
     // read (e.g. a stale MySQL/MariaDB listing, docs/adapter-decisions.md
     // §5.2/§5.3) gets a plain-language message instead of the server's
     // implementation-defined title text.
-    if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e)) return;
+    if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
     if (e instanceof ApiError && e.code === "not_readable") {
       reportError(new Error(`you don't have access to ${startTable(view)}`));
       return;
@@ -209,6 +219,7 @@ export async function loadData({
     return;
   }
   if (token !== loadDataToken) return; // superseded by a newer request
+  if (next) commitRequest(next);
   markStoredSortVerified();
   markFilterVerified();
   markViewShown();

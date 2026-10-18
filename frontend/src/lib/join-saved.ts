@@ -12,8 +12,8 @@ export type SavedStore = Record<string, Record<string, SavedJoin[]>>;
 
 export const MAX_SAVED_PER_SCOPE = 30;
 export const MAX_SAVED_NAME = 60;
-// The request bound of spec/protocol.md §5.11.1 (join-dsl.ts JOIN_MAX_BYTES); longer text can never run.
-export const MAX_SAVED_TEXT = 8192;
+// Keeps one entry from filling localStorage; whether a join fits the request is checked when it runs.
+export const MAX_SAVED_TEXT = 32768;
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -24,8 +24,10 @@ function sanitizeEntries(raw: unknown): SavedJoin[] {
   for (const e of raw) {
     if (!isPlainObject(e) || typeof e.name !== "string" || typeof e.text !== "string") continue;
     const name = e.name.trim();
-    if (name === "" || name.length > MAX_SAVED_NAME || e.text.length > MAX_SAVED_TEXT || seen.has(name)) continue;
+    if (name === "" || name.length > MAX_SAVED_NAME || e.text.length > MAX_SAVED_TEXT) continue;
+    if (seen.has(name) || seen.has(`\0${e.text}`)) continue;
     seen.add(name);
+    seen.add(`\0${e.text}`);
     out.push({ name, text: e.text });
     if (out.length === MAX_SAVED_PER_SCOPE) break;
   }
@@ -64,7 +66,8 @@ function withEntries(
   return next;
 }
 
-// Saving under a name that exists replaces it; `replacing` renames an entry.
+// One entry per name and per join: saving under a name that exists replaces it,
+// and saving a join already saved, or `replacing`, renames that entry in place.
 export function withSaved(
   store: SavedStore,
   source: string | null,
@@ -76,10 +79,15 @@ export function withSaved(
   if (name === "") return { error: "Give the join a name to save it." };
   if (name.length > MAX_SAVED_NAME) return { error: `A name can be at most ${MAX_SAVED_NAME} characters.` };
   if (entry.text.length > MAX_SAVED_TEXT) return { error: "This join is too long to save." };
-  const kept = scopeEntries(store, source, schema).filter((e) => e.name !== name && e.name !== replacing);
+  const entries = scopeEntries(store, source, schema);
+  const same = (e: SavedJoin): boolean => e.name === name || e.name === replacing || e.text === entry.text;
+  const kept = entries.filter((e) => !same(e));
   if (kept.length >= MAX_SAVED_PER_SCOPE)
     return { error: `You can save at most ${MAX_SAVED_PER_SCOPE} joins here; delete one first.` };
-  return { store: withEntries(store, source, schema, [...kept, { name, text: entry.text }]) };
+  // Every entry before the first one replaced is kept, so its index is the place in `kept` too.
+  const at = entries.findIndex(same);
+  kept.splice(at < 0 ? kept.length : at, 0, { name, text: entry.text });
+  return { store: withEntries(store, source, schema, kept) };
 }
 
 export function withoutSaved(

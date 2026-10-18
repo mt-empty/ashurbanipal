@@ -1,22 +1,12 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, el, reportError } from "../core/dom.js";
-import {
-  clearFilter,
-  clearJoin,
-  enterJoin,
-  joinInView,
-  persist,
-  restoreShownView,
-  startTable,
-  state,
-  viewIsShown,
-} from "../core/state.js";
+import { clearJoin, joinInView, joinRequest, persist, startTable, state, viewIsShown } from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
 import { type Draft, defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
 import { parseJoin, printJoin } from "../lib/join-dsl.js";
 import { tokenizeJoinText } from "../lib/join-tokens.js";
 import { mountJoinForm } from "./join-form.js";
-import { deleteSavedJoin, renderSavedChips, savedJoinInView, saveJoin } from "./join-saved.js";
+import { deleteSavedJoin, renderSavedChips, savedJoinFor, saveJoin } from "./join-saved.js";
 import { draftText, mountJoinSql } from "./join-sql.js";
 
 // The join overlay: one JoinDef edited in a form (the SQL text mode builds on
@@ -83,11 +73,19 @@ function setMode(next: "form" | "sql"): void {
 // The name of the saved join being edited, so a new name renames it.
 let editingSaved: string | undefined;
 
-// `fresh` starts from the table in view even inside a join view; `focusName`
-// is the `Save…` chip, which only wants the name field.
-export function openJoinDialog(opts: { error?: string; fresh?: boolean; focusName?: boolean } = {}): void {
-  const def = opts.fresh ? undefined : joinInView()?.def;
-  const saved = opts.fresh ? undefined : savedJoinInView();
+// `def` is the join to edit, by default the one in view; `fresh` starts from
+// the table in view instead. `focusName` is the `Save…` chip, which only wants
+// the name field.
+export function openJoinDialog(
+  opts: { error?: string; def?: JoinDef; fresh?: boolean; focusName?: boolean } = {},
+): void {
+  // Reopened while its join was loading: the server's answer must not replace what is being typed.
+  if (opts.error !== undefined && dialog.open) {
+    $("join-error").textContent = opts.error;
+    return;
+  }
+  const def = opts.fresh ? undefined : (opts.def ?? joinInView()?.def);
+  const saved = def ? savedJoinFor(printJoin(def)) : undefined;
   editingSaved = saved?.name;
   $<HTMLInputElement>("join-name").value = saved?.name ?? "";
   $("join-delete").hidden = saved === undefined;
@@ -117,19 +115,8 @@ export function refreshSavedChips(): void {
   });
 }
 
-// A new join starts from the default view: the sort and filter were written
-// against other columns. Saving or renaming the join in view keeps them.
 export function applyJoin(def: JoinDef): void {
-  const same = joinInView()?.text === printJoin(def);
-  enterJoin(def);
-  if (!same) {
-    state.sort = null;
-    state.order = "asc";
-    state.offset = 0;
-    clearFilter();
-  }
-  persist();
-  loadData();
+  loadData({ next: joinRequest(def) });
 }
 
 export function switchToLeftJoin(): void {
@@ -155,18 +142,16 @@ runBtn.onclick = () => {
   dialog.close();
   applyJoin(result.def);
 };
-// Set by Show result: its close is the only one that leaves a new join in view.
+// Set by Show result, whose join is already loading when the close event arrives.
 let committed = false;
-// A join the server rejected is already the view; closing its dialog any other
-// way goes back to what the grid shows, or to the start table on a first load.
+// A join from a link or history that the server refused has never been shown;
+// closing its dialog any other way opens its start table instead.
 dialog.addEventListener("close", () => {
   if (committed) committed = false;
   else if (joinInView() && !viewIsShown()) {
-    if (!restoreShownView()) {
-      clearJoin();
-      persist();
-      loadData();
-    }
+    clearJoin();
+    persist();
+    loadData();
   }
 });
 $("join-delete").onclick = () => {

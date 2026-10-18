@@ -1,6 +1,6 @@
 import { $, el } from "../core/dom.js";
 import { joinInView } from "../core/state.js";
-import type { Column } from "../core/types.js";
+import type { Column, JoinDef } from "../core/types.js";
 import { effectiveName, quoteJoinName } from "../lib/join-dsl.js";
 
 // The filter DSL reads a bare AND, OR or NOT as a keyword, so a join alias spelled so is quoted there.
@@ -17,8 +17,7 @@ export function columnKey(col: Column): string {
 const QUALIFIED = /^(?:([A-Za-z_][A-Za-z0-9_]*)|"((?:[^"]|"")+)")\.(.+)$/s;
 
 // Inverse of columnKey, resolved against the applied join's aliases.
-export function splitColumnKey(key: string): { join: number; column: string } | null {
-  const def = joinInView()?.def;
+export function splitColumnKey(key: string, def: JoinDef): { join: number; column: string } | null {
   const m = QUALIFIED.exec(key);
   if (!def || !m) return null;
   const alias = m[1] ?? m[2].replaceAll('""', '"');

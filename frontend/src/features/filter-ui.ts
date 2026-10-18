@@ -209,8 +209,12 @@ function showFilterSuggestions(ctx: Completion, all: Suggestion[], index: number
   suggest.show(matches, ctx.head, index);
 }
 
+// In a join view a plain name is the start table's column (spec/filter-dsl.md).
 function isColumn(name: string | null): boolean {
-  return name !== null && (getLastPayload()?.columns.some((c) => columnKey(c) === name) ?? false);
+  return (
+    name !== null &&
+    (getLastPayload()?.columns.some((c) => columnKey(c) === name || (c.join === 0 && c.column === name)) ?? false)
+  );
 }
 
 function updateFilterSuggestions(): void {

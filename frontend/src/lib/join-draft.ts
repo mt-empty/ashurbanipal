@@ -24,12 +24,14 @@ export interface Draft {
   joins: DraftJoin[];
   // Per table position: null selects every column, a list selects just those.
   columns: (string[] | null)[];
+  // The select list as written, which the per-table lists cannot order; null for `*`.
+  order: JoinColumn[] | null;
 }
 
 export const emptyPair = (): DraftPair => ({ leftJoin: 0, leftColumn: "", rightColumn: "" });
 
 export function newDraft(table: string): Draft {
-  const draft: Draft = { table, alias: "", joins: [], columns: [null] };
+  const draft: Draft = { table, alias: "", joins: [], columns: [null], order: null };
   addJoin(draft);
   return draft;
 }
@@ -50,8 +52,11 @@ export function defToDraft(def: JoinDef): Draft {
       on: j.on.map((p) => ({ leftJoin: p.left.join, leftColumn: p.left.column, rightColumn: p.right })),
     })),
     columns,
+    order: def.columns,
   };
 }
+
+const columnId = (c: JoinColumn): string => ("all" in c ? `${c.join}.*` : `${c.join}.${c.column}`);
 
 export function draftToDef(draft: Draft): { def: JoinDef } | { error: string } {
   if (draft.joins.length === 0) return { error: "Add a table to join." };
@@ -84,11 +89,16 @@ export function draftToDef(draft: Draft): { def: JoinDef } | { error: string } {
     });
   }
   let columns: JoinColumn[] | null = null;
-  if (draft.columns.some((c) => c !== null)) {
-    columns = draft.columns.flatMap((c, join): JoinColumn[] =>
+  if (draft.order !== null || draft.columns.some((c) => c !== null)) {
+    const chosen = draft.columns.flatMap((c, join): JoinColumn[] =>
       c === null ? [{ join, all: true }] : c.map((column) => ({ join, column })),
     );
-    if (columns.length === 0) return { error: "Select at least one column." };
+    if (chosen.length === 0) return { error: "Select at least one column." };
+    // Columns still selected keep their written place; newly ticked ones follow in table order.
+    const wanted = new Set(chosen.map(columnId));
+    const kept = (draft.order ?? []).filter((c) => wanted.has(columnId(c)));
+    const keptIds = new Set(kept.map(columnId));
+    columns = [...kept, ...chosen.filter((c) => !keptIds.has(columnId(c)))];
   }
   return { def: { tables, joins, columns } };
 }
@@ -105,6 +115,8 @@ export function removeJoin(draft: Draft, index: number): void {
   const gone = index + 1;
   draft.joins.splice(index, 1);
   draft.columns.splice(gone, 1);
+  draft.order =
+    draft.order?.filter((c) => c.join !== gone).map((c) => (c.join > gone ? { ...c, join: c.join - 1 } : c)) ?? null;
   for (const j of draft.joins.slice(index)) {
     for (const p of j.on) {
       if (p.leftJoin === gone) {
@@ -113,4 +125,10 @@ export function removeJoin(draft: Draft, index: number): void {
       } else if (p.leftJoin > gone) p.leftJoin -= 1;
     }
   }
+}
+
+// Table `pos` changed: its written columns named the old table's.
+export function forgetColumns(draft: Draft, pos: number): void {
+  draft.columns[pos] = null;
+  draft.order = draft.order?.filter((c) => c.join !== pos) ?? null;
 }
