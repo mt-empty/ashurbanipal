@@ -2,7 +2,7 @@ import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, reportError } from "../core/dom.js";
 import { clearFilter, getAppliedJoin, persist, setAppliedJoin, state } from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
-import { defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
+import { type Draft, defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
 import { parseJoin, printJoin } from "../lib/join-dsl.js";
 import { tokenizeJoinText } from "../lib/join-tokens.js";
 import { mountJoinForm } from "./join-form.js";
@@ -17,6 +17,10 @@ const formTab = $<HTMLButtonElement>("join-mode-form");
 const sqlTab = $<HTMLButtonElement>("join-mode-sql");
 const runBtn = $<HTMLButtonElement>("join-run");
 let mode: "form" | "sql" = "form";
+// The form as it was when SQL took over. A half-finished form prints as text
+// that does not parse; until that text is edited, Form goes back to this draft.
+let handoff: { text: string; draft: Draft } | null = null;
+const untouched = (): boolean => handoff !== null && sql.text() === handoff.text;
 
 // The one thing wrong with the join as it stands, or "": a pair that cannot be
 // joined (form) or text that does not parse (SQL).
@@ -35,9 +39,10 @@ function refresh(): void {
     $("join-preview").replaceChildren(...coloured(text));
     return;
   }
-  $("join-sql-error").textContent = bad;
-  formTab.disabled = bad !== "";
-  $("join-sql-tip").hidden = bad === "";
+  const back = untouched();
+  $("join-sql-error").textContent = back ? "" : bad;
+  formTab.disabled = bad !== "" && !back;
+  $("join-sql-tip").hidden = bad === "" || back;
 }
 
 // Keywords in the keyword colour, as in the SQL field.
@@ -82,6 +87,7 @@ export function openJoinDialog(opts: { error?: string; fresh?: boolean; focusNam
   $<HTMLInputElement>("join-name").value = saved?.name ?? "";
   $("join-delete").hidden = saved === undefined;
   form.setDraft(def ? defToDraft(def) : newDraft(state.table ?? ""));
+  handoff = null;
   setMode("form");
   $("join-sql-error").textContent = "";
   refresh();
@@ -148,15 +154,19 @@ $("join-delete").onclick = () => {
 $("join-link-btn").onclick = () => copyText(location.href, $("join-link-btn"));
 formTab.onclick = () => {
   if (mode === "form" || formTab.disabled) return;
-  const parsed = sql.text().trim() ? sql.parse() : null;
-  if (parsed && "error" in parsed) return;
-  form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(state.table ?? ""));
+  if (handoff && untouched()) form.setDraft(handoff.draft);
+  else {
+    const parsed = sql.text().trim() ? sql.parse() : null;
+    if (parsed && "error" in parsed) return;
+    form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(state.table ?? ""));
+  }
   setMode("form");
   refresh();
 };
 sqlTab.onclick = () => {
   if (mode === "sql") return;
-  sql.setText(draftText(form.draft()));
+  handoff = { text: draftText(form.draft()), draft: form.draft() };
+  sql.setText(handoff.text);
   setMode("sql");
   refresh();
   $<HTMLTextAreaElement>("join-sql").focus();
