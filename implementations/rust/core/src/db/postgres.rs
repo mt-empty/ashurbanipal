@@ -780,8 +780,12 @@ impl DbSource for PgPoolSource {
         for name in &names {
             if !metas.contains_key(name) {
                 self.readable_table_oid_in_tx(&mut tx, &schema, name)
-                    .await?;
-                let meta = self.join_table_meta_in_tx(&mut tx, &schema, name).await?;
+                    .await
+                    .map_err(join::unknown_join_table)?;
+                let meta = self
+                    .join_table_meta_in_tx(&mut tx, &schema, name)
+                    .await
+                    .map_err(join::unknown_join_table)?;
                 metas.insert(name, meta);
             }
         }

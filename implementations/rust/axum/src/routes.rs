@@ -335,7 +335,7 @@ fn join_request(
     params: &JoinParams,
     limits: &ashurbanipal::Limits,
 ) -> Result<(JoinSpec, JoinOpts), ApiError> {
-    let spec = JoinSpec::parse(&params.join).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let spec = JoinSpec::parse(&params.join).map_err(|e| ApiError::from(DbError::BadJoin(e.0)))?;
     let filter = match params.filter.as_deref() {
         Some(raw) if !raw.trim().is_empty() => match filter::parse_for_join(raw) {
             Ok(conditions) if conditions.is_empty() => None,

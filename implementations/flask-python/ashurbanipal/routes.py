@@ -15,7 +15,17 @@ from flask import Blueprint, Response, jsonify, request
 
 from . import filter as filter_module
 from .config import Config
-from .db import BadJoin, DbError, DbSource, FilterParseError, NotAllowed, NotAllowedKind, QueryOpts, QueryTimeout
+from .db import (
+    BadJoin,
+    BadParam,
+    DbError,
+    DbSource,
+    FilterParseError,
+    NotAllowed,
+    NotAllowedKind,
+    QueryOpts,
+    QueryTimeout,
+)
 from .embed import DBVIEWER_HTML
 from .join import JoinOpts, parse_join
 
@@ -70,7 +80,9 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         if isinstance(err, FilterParseError):
             return _problem_response(400, "invalid_filter", f"invalid filter: {err}")
         if isinstance(err, BadJoin):
-            return _problem_response(400, "invalid_parameter", f"invalid join: {err}")
+            return _problem_response(400, "invalid_join", f"invalid join: {err}")
+        if isinstance(err, BadParam):
+            return _problem_response(400, "invalid_parameter", f"invalid parameter: {err}")
         if isinstance(err, QueryTimeout):
             return _problem_response(500, "query_timeout", "query timed out")
         return _problem_response(500, "database_error", f"database error: {err}")

@@ -102,10 +102,10 @@ def test_query_timeout_is_a_problem_json_500_named_query_timeout() -> None:
     assert json.loads(resp.data)["code"] == "query_timeout"
 
 
-def test_bad_join_is_a_400_invalid_parameter() -> None:
+def test_bad_join_is_a_400_invalid_join() -> None:
     resp = _client(BadJoin("join 1 on: orders.status (text) cannot be joined to users.id (uuid)")).get(_JOIN)
     assert resp.status_code == 400
     assert resp.content_type == "application/problem+json"
     body = json.loads(resp.data)
-    assert body["code"] == "invalid_parameter"
+    assert body["code"] == "invalid_join"
     assert "orders.status (text)" in body["title"]

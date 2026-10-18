@@ -90,8 +90,8 @@ func TestPlanJoinRejectsUnknownNamesAndIncompatiblePairs(t *testing.T) {
 	hostile.Joins = []JoinEntry{{Left: true, Table: "users", On: []OnPair{{Left: ColumnPos{Join: 0, Column: "user_id"}, Right: `id"; drop table users; --`}}}}
 	if _, err := planJoin(hostile, testOrdersUsers(), JoinOpts{}); err == nil {
 		t.Error("unknown column must be rejected")
-	} else if na, ok := err.(*NotAllowedError); !ok || na.Kind != NotAllowedColumn {
-		t.Errorf("want NotAllowedColumn, got %v", err)
+	} else if _, ok := err.(*BadJoinError); !ok {
+		t.Errorf("want *BadJoinError, got %v", err)
 	}
 
 	cross := spec
@@ -229,7 +229,8 @@ func TestWriteErrorNamesTimeoutsAndBadJoins(t *testing.T) {
 	}{
 		{context.DeadlineExceeded, http.StatusInternalServerError, "query_timeout"},
 		{fmt.Errorf("wrapped: %w", context.DeadlineExceeded), http.StatusInternalServerError, "query_timeout"},
-		{badJoin("x"), http.StatusBadRequest, "invalid_parameter"},
+		{badJoin("x"), http.StatusBadRequest, "invalid_join"},
+		{&BadParamError{Reason: "x"}, http.StatusBadRequest, "invalid_parameter"},
 		{sql.ErrConnDone, http.StatusInternalServerError, "database_error"},
 	} {
 		rec := httptest.NewRecorder()

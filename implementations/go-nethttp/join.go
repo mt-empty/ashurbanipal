@@ -2,6 +2,7 @@ package ashurbanipal
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -15,8 +16,9 @@ const (
 	MaxJoinPairs  = 3
 )
 
-// BadJoinError is a well-formed join request the catalog or the §5.11 rules
-// reject; the handler maps it to 400 invalid_parameter.
+// BadJoinError is anything wrong with a join value (spec/protocol.md §5.11.1):
+// its shape, an unknown table or column, an incompatible pair. The handler
+// maps it to 400 invalid_join.
 type BadJoinError struct {
 	Reason string
 }
@@ -25,6 +27,23 @@ func (e *BadJoinError) Error() string { return "invalid join: " + e.Reason }
 
 func badJoin(format string, args ...interface{}) *BadJoinError {
 	return &BadJoinError{Reason: fmt.Sprintf(format, args...)}
+}
+
+// BadParamError is a request parameter outside its allowed values; 400 invalid_parameter.
+type BadParamError struct {
+	Reason string
+}
+
+func (e *BadParamError) Error() string { return "invalid parameter: " + e.Reason }
+
+// unknownJoinTable reports a table named in the join value as a bad join;
+// not_readable stays as it is.
+func unknownJoinTable(err error) error {
+	var na *NotAllowedError
+	if errors.As(err, &na) && na.Kind == NotAllowedTable {
+		return badJoin("unknown %s", na.What)
+	}
+	return err
 }
 
 // ColumnPos names a column of the table at a position (0 is the base table).
@@ -216,6 +235,15 @@ func (t joinTableMeta) index(column string) (int, error) {
 	return 0, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", column)}
 }
 
+// joinIndex is index for a name inside the join value, where a miss is a bad join.
+func (t joinTableMeta) joinIndex(column string) (int, error) {
+	i, err := t.index(column)
+	if err != nil {
+		return 0, badJoin("%s has no column %q", t.name, column)
+	}
+	return i, nil
+}
+
 // JoinColumnInfo is one response column of GET /api/tables/join.
 type JoinColumnInfo struct {
 	Name       string     `json:"name"`
@@ -338,11 +366,11 @@ func planJoin(spec JoinSpec, tables []joinTableMeta, opts JoinOpts) (*joinPlan, 
 		var ons []joinOn
 		for _, pair := range entry.On {
 			lt := tables[pair.Left.Join]
-			lc, err := lt.index(pair.Left.Column)
+			lc, err := lt.joinIndex(pair.Left.Column)
 			if err != nil {
 				return nil, err
 			}
-			rc, err := tables[position].index(pair.Right)
+			rc, err := tables[position].joinIndex(pair.Right)
 			if err != nil {
 				return nil, err
 			}
@@ -359,7 +387,7 @@ func planJoin(spec JoinSpec, tables []joinTableMeta, opts JoinOpts) (*joinPlan, 
 			if c.Join >= len(tables) {
 				return nil, badJoin("columns: position %d is not in the join", c.Join)
 			}
-			idx, err := tables[c.Join].index(c.Column)
+			idx, err := tables[c.Join].joinIndex(c.Column)
 			if err != nil {
 				return nil, err
 			}
@@ -403,14 +431,14 @@ func planJoin(spec JoinSpec, tables []joinTableMeta, opts JoinOpts) (*joinPlan, 
 
 	switch {
 	case opts.Sort == nil && opts.SortJoin != nil:
-		return nil, badJoin("sort_join needs sort")
+		return nil, &BadParamError{Reason: "sort_join needs sort"}
 	case opts.Sort != nil:
 		pos := 0
 		if opts.SortJoin != nil {
 			pos = *opts.SortJoin
 		}
 		if pos < 0 || pos >= len(tables) {
-			return nil, badJoin("sort_join: position %d is not in the join", pos)
+			return nil, &BadParamError{Reason: fmt.Sprintf("sort_join: position %d is not in the join", pos)}
 		}
 		idx, err := tables[pos].index(*opts.Sort)
 		if err != nil {

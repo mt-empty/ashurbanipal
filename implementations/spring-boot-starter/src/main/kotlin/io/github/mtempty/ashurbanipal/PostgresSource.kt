@@ -250,8 +250,10 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val metas = HashMap<String, JoinTableMeta>()
         for (name in names) {
             if (name in metas) continue
-            requireTable(realSchema, name)
-            metas[name] = joinTableMeta(realSchema, name)
+            metas[name] = joinTable(name) {
+                requireTable(realSchema, name)
+                joinTableMeta(realSchema, name)
+            }
         }
         val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
 

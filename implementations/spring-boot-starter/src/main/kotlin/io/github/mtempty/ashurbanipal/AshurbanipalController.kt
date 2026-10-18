@@ -262,7 +262,7 @@ class AshurbanipalController(
 
     @ExceptionHandler(BadJoinException::class)
     fun handleBadJoin(e: BadJoinException): ResponseEntity<ProblemDetails> =
-        problemResponse(HttpStatus.BAD_REQUEST, "invalid_parameter", e.message ?: "bad request")
+        problemResponse(HttpStatus.BAD_REQUEST, "invalid_join", e.message ?: "bad request")
 
     @ExceptionHandler(DataAccessException::class)
     fun handleDatabaseError(e: DataAccessException): ResponseEntity<ProblemDetails> =

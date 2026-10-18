@@ -2,6 +2,7 @@ import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 import { assertSafeTimeoutMs, FilterError, mapSelectDeniedMysql, NotAllowedError } from "../errors.js";
 import type { Condition } from "../filter.js";
 import {
+  BadJoinError,
   buildJoinSelect,
   type JoinColMeta,
   type JoinData,
@@ -428,7 +429,7 @@ export class MySqlSource implements DbSource {
       const metas = new Map<string, JoinTableMeta>();
       for (const name of names) {
         if (metas.has(name)) continue;
-        if (!findExact(allowed, name)) throw new NotAllowedError(`table "${name}"`, "table");
+        if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
         metas.set(name, await this.joinTableMeta(conn, variant, realSchema, name, timeoutMs));
       }
       const plan = planJoin(

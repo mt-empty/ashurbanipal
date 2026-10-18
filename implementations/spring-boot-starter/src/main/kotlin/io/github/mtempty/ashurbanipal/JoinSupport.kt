@@ -14,8 +14,19 @@ const val MAX_JOIN_BYTES = 8192
 const val MAX_JOIN_TABLES = 4
 const val MAX_JOIN_PAIRS = 3
 
-/** A well-formed join request the catalog or the §5.11 rules reject; the controller maps it to 400 `invalid_parameter`. */
+/**
+ * Anything wrong with a join value (`spec/protocol.md` §5.11.1): its shape, an unknown table or column, an
+ * incompatible pair. The controller maps it to 400 `invalid_join`.
+ */
 class BadJoinException(message: String) : RuntimeException("invalid join: $message")
+
+/** A table named in the join value is part of the join, so a miss is a bad join; `not_readable` stays as it is. */
+internal inline fun <T> joinTable(name: String, block: () -> T): T =
+    try {
+        block()
+    } catch (e: NotAllowedException) {
+        if (e.kind == NotAllowedKind.TABLE) throw BadJoinException("unknown table \"$name\"") else throw e
+    }
 
 data class ColumnPos(val join: Int, val column: String)
 data class OnPair(val left: ColumnPos, val right: String)
@@ -174,6 +185,13 @@ data class JoinTableMeta(val name: String, val columns: List<JoinColMeta>) {
         if (i < 0) throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
         return i
     }
+
+    /** [index] for a name inside the join value, where a miss is a bad join. */
+    fun joinIndex(column: String): Int {
+        val i = columns.indexOfFirst { it.name == column }
+        if (i < 0) throw BadJoinException("$name has no column \"$column\"")
+        return i
+    }
 }
 
 internal data class ResolvedCondition(val cond: Condition, val pos: Int, val col: Int)
@@ -250,8 +268,8 @@ fun planJoin(spec: JoinSpec, tables: List<JoinTableMeta>, opts: JoinOpts): JoinP
         val position = i + 1
         entry.on.map { pair ->
             val lt = tables[pair.left.join]
-            val lc = lt.index(pair.left.column)
-            val rc = tables[position].index(pair.right)
+            val lc = lt.joinIndex(pair.left.column)
+            val rc = tables[position].joinIndex(pair.right)
             checkPair(position, lt, lt.columns[lc], tables[position], tables[position].columns[rc])
             Triple(pair.left.join, lc, rc)
         }
@@ -259,7 +277,7 @@ fun planJoin(spec: JoinSpec, tables: List<JoinTableMeta>, opts: JoinOpts): JoinP
 
     val selection: List<Pair<Int, Int>> = spec.columns?.map { c ->
         if (c.join >= tables.size) throw BadJoinException("columns: position ${c.join} is not in the join")
-        c.join to tables[c.join].index(c.column)
+        c.join to tables[c.join].joinIndex(c.column)
     } ?: tables.flatMapIndexed { pos, t -> t.columns.indices.map { pos to it } }
     val labels = assignJoinLabels(
         selection.map { (p, c) -> tables[p].columns[c].name },
@@ -275,10 +293,10 @@ fun planJoin(spec: JoinSpec, tables: List<JoinTableMeta>, opts: JoinOpts): JoinP
         ResolvedCondition(cond, pos, tables[pos].index(cond.column))
     }
 
-    if (opts.sort == null && opts.sortJoin != null) throw BadJoinException("sort_join needs sort")
+    if (opts.sort == null && opts.sortJoin != null) throw FilterException("sort_join needs sort", code = "invalid_parameter")
     val sort = opts.sort?.let { column ->
         val pos = opts.sortJoin ?: 0
-        if (pos < 0 || pos >= tables.size) throw BadJoinException("sort_join: position $pos is not in the join")
+        if (pos < 0 || pos >= tables.size) throw FilterException("sort_join: position $pos is not in the join", code = "invalid_parameter")
         pos to tables[pos].index(column)
     }
     return JoinPlan(tables, spec.joins.map { it.left }, ons, selection, labels, filter, sort, opts.descending)

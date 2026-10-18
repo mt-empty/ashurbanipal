@@ -147,8 +147,8 @@ func httpProblemError(w http.ResponseWriter, status int, code, title string) {
 
 // writeError maps a DbSource error to the wire's error codes
 // (spec/protocol.md §2): a *NotAllowedError carries its own kind/code; a
-// *FilterError is always invalid_filter; a *BadJoinError is
-// invalid_parameter; a statement stopped by the query timeout is
+// *FilterError is always invalid_filter; a *BadJoinError is invalid_join; a
+// *BadParamError is invalid_parameter; a statement stopped by the query timeout is
 // query_timeout (500); anything else is a database failure (database_error,
 // 500) (docs/adapter-decisions.md §6).
 func writeError(w http.ResponseWriter, err error) {
@@ -164,6 +164,11 @@ func writeError(w http.ResponseWriter, err error) {
 	}
 	var badJoinErr *BadJoinError
 	if errors.As(err, &badJoinErr) {
+		httpProblemError(w, http.StatusBadRequest, "invalid_join", err.Error())
+		return
+	}
+	var badParam *BadParamError
+	if errors.As(err, &badParam) {
 		httpProblemError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 		return
 	}

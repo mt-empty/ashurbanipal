@@ -664,10 +664,7 @@ impl DbSource for MySqlSource {
                 continue;
             }
             if !allowed.iter().any(|t| t == name) {
-                return Err(DbError::not_allowed(
-                    NotAllowedKind::Table,
-                    format!("table {name:?}"),
-                ));
+                return Err(DbError::BadJoin(format!("unknown table {name:?}")));
             }
             let meta = self
                 .join_table_meta_in_tx(&mut tx, variant, &schema, name, timeout)

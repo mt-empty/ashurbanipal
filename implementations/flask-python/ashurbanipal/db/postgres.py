@@ -24,6 +24,7 @@ from ..join import (
     build_select,
     enum_class,
     plan_join,
+    unknown_join_table,
 )
 from . import (
     ColumnInfo,
@@ -412,8 +413,11 @@ class PgSource(DbSource):
                 metas: dict[str, TableMeta] = {}
                 for name in names:
                     if name not in metas:
-                        self._readable_table_oid(cur, resolved_schema, name)
-                        metas[name] = self._join_table_meta(cur, resolved_schema, name)
+                        try:
+                            self._readable_table_oid(cur, resolved_schema, name)
+                            metas[name] = self._join_table_meta(cur, resolved_schema, name)
+                        except NotAllowed as e:
+                            raise unknown_join_table(e, name) from None
                 plan = plan_join(spec, [metas[n] for n in names], opts)
 
                 # The statement is built from catalog names and generated

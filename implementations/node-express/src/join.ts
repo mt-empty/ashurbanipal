@@ -7,12 +7,25 @@ export const MAX_JOIN_BYTES = 8192;
 export const MAX_JOIN_TABLES = 4;
 export const MAX_JOIN_PAIRS = 3;
 
-/** A well-formed join request the catalog or the §5.11 rules reject. Maps to 400 invalid_parameter. */
+/** Anything wrong with a join value (spec/protocol.md §5.11.1): its shape, an unknown table or column, an incompatible pair. Maps to 400 invalid_join. */
 export class BadJoinError extends Error {
   constructor(reason: string) {
     super(`invalid join: ${reason}`);
     this.name = "BadJoinError";
   }
+}
+
+/** A request parameter outside its allowed values. Maps to 400 invalid_parameter. */
+export class BadParamError extends Error {
+  constructor(reason: string) {
+    super(`invalid parameter: ${reason}`);
+    this.name = "BadParamError";
+  }
+}
+
+/** A table named in the join value is part of the join, so a miss is a bad join; not_readable stays. */
+export function unknownJoinTable(err: unknown, table: string): unknown {
+  return err instanceof NotAllowedError && err.kind === "table" ? new BadJoinError(`unknown table "${table}"`) : err;
 }
 
 export interface ColumnPos {
@@ -211,6 +224,13 @@ function columnIndex(table: JoinTableMeta, column: string): number {
   return i;
 }
 
+// A name inside the join value: a miss is a bad join, not unknown_column.
+function joinColumnIndex(table: JoinTableMeta, column: string): number {
+  const i = table.columns.findIndex((c) => c.name === column);
+  if (i < 0) throw new BadJoinError(`${table.name} has no column "${column}"`);
+  return i;
+}
+
 const describe = (t: JoinTableMeta, c: JoinColMeta): string => `${t.name}.${c.name} (${c.type})`;
 
 function unjoinable(position: number, t: JoinTableMeta, c: JoinColMeta): BadJoinError {
@@ -260,8 +280,8 @@ export function planJoin(spec: JoinSpec, tables: JoinTableMeta[], opts: JoinOpts
     ons.push(
       entry.on.map((pair) => {
         const lt = tables[pair.left.join];
-        const lc = columnIndex(lt, pair.left.column);
-        const rc = columnIndex(tables[position], pair.right);
+        const lc = joinColumnIndex(lt, pair.left.column);
+        const rc = joinColumnIndex(tables[position], pair.right);
         checkPair(position, lt, lt.columns[lc], tables[position], tables[position].columns[rc]);
         return [pair.left.join, lc, rc];
       }),
@@ -272,7 +292,7 @@ export function planJoin(spec: JoinSpec, tables: JoinTableMeta[], opts: JoinOpts
   if (spec.columns) {
     selection = spec.columns.map((c) => {
       if (c.join >= tables.length) throw new BadJoinError(`columns: position ${c.join} is not in the join`);
-      return [c.join, columnIndex(tables[c.join], c.column)];
+      return [c.join, joinColumnIndex(tables[c.join], c.column)];
     });
   } else {
     selection = tables.flatMap((t, pos) => t.columns.map((_, col): [number, number] => [pos, col]));
@@ -294,10 +314,10 @@ export function planJoin(spec: JoinSpec, tables: JoinTableMeta[], opts: JoinOpts
   });
 
   let sort: [number, number] | undefined;
-  if (opts.sort === undefined && opts.sortJoin !== undefined) throw new BadJoinError("sort_join needs sort");
+  if (opts.sort === undefined && opts.sortJoin !== undefined) throw new BadParamError("sort_join needs sort");
   if (opts.sort !== undefined) {
     const pos = opts.sortJoin ?? 0;
-    if (pos < 0 || pos >= tables.length) throw new BadJoinError(`sort_join: position ${pos} is not in the join`);
+    if (pos < 0 || pos >= tables.length) throw new BadParamError(`sort_join: position ${pos} is not in the join`);
     sort = [pos, columnIndex(tables[pos], opts.sort)];
   }
   return { tables, left, ons, selection, labels, filter, sort, descending: opts.descending };

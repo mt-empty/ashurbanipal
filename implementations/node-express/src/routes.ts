@@ -4,7 +4,7 @@ import type { DbSource } from "./db/types.js";
 import { dbviewerHtml } from "./embed.js";
 import { FilterError, isQueryTimeout, NOT_ALLOWED_CODE, NotAllowedError } from "./errors.js";
 import { type Condition, parseFilter, parseFilterForJoin } from "./filter.js";
-import { BadJoinError, parseJoin } from "./join.js";
+import { BadJoinError, BadParamError, parseJoin } from "./join.js";
 import { checkSiblings } from "./siblings.js";
 
 const PROTOCOL_HEADER = "x-ashurbanipal-protocol";
@@ -122,7 +122,7 @@ function httpProblemError(res: Response, status: number, code: string, title: st
 // Maps a DbSource/filter error to the wire's error taxonomy
 // (spec/protocol.md §2): NotAllowedError's kind picks the exact
 // unknown_*/not_readable code; FilterError is always invalid_filter;
-// BadJoinError is invalid_parameter; a statement stopped by the query
+// BadJoinError is invalid_join; BadParamError is invalid_parameter; a statement stopped by the query
 // timeout is query_timeout; anything else is a database failure (500). Status code + code are the
 // contract — `title` wording is implementation-defined.
 function writeError(res: Response, err: unknown): void {
@@ -135,6 +135,10 @@ function writeError(res: Response, err: unknown): void {
     return;
   }
   if (err instanceof BadJoinError) {
+    httpProblemError(res, 400, "invalid_join", err.message);
+    return;
+  }
+  if (err instanceof BadParamError) {
     httpProblemError(res, 400, "invalid_parameter", err.message);
     return;
   }

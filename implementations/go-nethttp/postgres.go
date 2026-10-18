@@ -353,11 +353,11 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 			continue
 		}
 		if _, err := c.readableTableOID(ctx, tx, realSchema, name); err != nil {
-			return JoinData{}, err
+			return JoinData{}, unknownJoinTable(err)
 		}
 		meta, err := c.joinTableMeta(ctx, tx, realSchema, name)
 		if err != nil {
-			return JoinData{}, err
+			return JoinData{}, unknownJoinTable(err)
 		}
 		metas[name] = meta
 	}

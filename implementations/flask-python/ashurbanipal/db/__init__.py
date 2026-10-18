@@ -183,10 +183,14 @@ class FilterParseError(DbError):
 
 
 class BadJoin(DbError):
-    """A well-formed join request the catalog or the §5.11 rules reject:
-    an incompatible column pair, a position out of range. Maps to 400
-    invalid_parameter.
+    """Anything wrong with a join value (spec/protocol.md §5.11.1): its
+    shape, an unknown table or column, an incompatible pair. Maps to 400
+    invalid_join.
     """
+
+
+class BadParam(DbError):
+    """A request parameter outside its allowed values. Maps to 400 invalid_parameter."""
 
 
 class DatabaseError(DbError):

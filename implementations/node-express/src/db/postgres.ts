@@ -14,6 +14,7 @@ import {
   joinTableNames,
   planJoin,
   type TypeClass,
+  unknownJoinTable,
 } from "../join.js";
 import {
   type ColumnInfo,
@@ -339,8 +340,12 @@ export class PostgresSource implements DbSource {
       const metas = new Map<string, JoinTableMeta>();
       for (const name of names) {
         if (metas.has(name)) continue;
-        await this.readableTableOid(client, realSchema, name);
-        metas.set(name, await this.joinTableMeta(client, realSchema, name));
+        try {
+          await this.readableTableOid(client, realSchema, name);
+          metas.set(name, await this.joinTableMeta(client, realSchema, name));
+        } catch (err) {
+          throw unknownJoinTable(err, name);
+        }
       }
       const plan = planJoin(
         spec,
