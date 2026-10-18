@@ -139,3 +139,18 @@ test("a filter on a column the join lacks is reported by the error line, not the
   await expect(page.locator("#error")).not.toBeEmpty();
   await expect(page.locator("#join-dialog")).toBeHidden();
 });
+
+test("a join the server rejects after it has loaded still opens the join overlay", async ({ page }) => {
+  await gotoJoin(page, ORDERS_USERS);
+  await page.route("**/api/tables/join*", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/problem+json",
+      body: JSON.stringify({ type: "about:blank", title: "invalid join: users has no column \"id\"", status: 400, code: "invalid_join" }),
+    }),
+  );
+  await page.locator("#refresh").click();
+  await expect(page.locator("#join-dialog")).toBeVisible();
+  await expect(page.locator("#join-error")).toContainText('users has no column "id"');
+  await expect(page.locator("#error")).toBeEmpty();
+});
