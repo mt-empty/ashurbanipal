@@ -1,6 +1,16 @@
 import { expect, test } from "@playwright/test";
 import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
-import { expandTableChips, joinParam, openJoinOverlay, ORDERS_USERS, pick, showResult, writeSql } from "./support/join";
+import {
+  expandTableChips,
+  gotoJoin,
+  joinParam,
+  nextJoinResponse,
+  openJoinOverlay,
+  ORDERS_USERS,
+  pick,
+  showResult,
+  writeSql,
+} from "./support/join";
 
 // Story 41: the join overlay (boards O, U, V), in its Form and SQL modes.
 // Backend: the seed's orders -> users (FK) and order_extra -> orders (FK, 1:1).
@@ -308,4 +318,41 @@ test("SQL opened from an unfinished form can go back to Form until its text is e
   await page.locator("#join-sql").press("End");
   await page.locator("#join-sql").pressSequentially(" RIGHT");
   await expect(page.locator("#join-mode-form")).toBeDisabled();
+});
+
+test("the form suggests the foreign key pair for a table browsed earlier", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "users");
+  await selectTable(page, "orders");
+  await page.locator("#join-btn").click();
+  await pick(page, "join 1 table", "users");
+  await expect(page.locator(".j-row").first()).toContainText("Suggested from the foreign key orders.user_id → users.id.");
+});
+
+test("saving the join in view keeps its filter, sort and page", async ({ page }) => {
+  await gotoJoin(page, ORDERS_USERS);
+  let response = nextJoinResponse(page);
+  await page.locator("#filter").fill("o.id > 1");
+  await page.locator("#filter").press("Enter");
+  await response;
+  await waitForIdle(page);
+  response = nextJoinResponse(page);
+  await page.locator("thead tr:not(.bands) th[data-col]").first().click();
+  await response;
+  await waitForIdle(page);
+  response = nextJoinResponse(page);
+  await page.locator("#next").click();
+  await response;
+  await waitForIdle(page);
+
+  await expandTableChips(page);
+  await page.locator("#tables li.save-link button").click();
+  await page.locator("#join-name").fill("kept view");
+  const saved = await showResult(page);
+  const params = new URL(saved.url()).searchParams;
+  expect(params.get("offset")).toBe("5");
+  expect(params.get("sort")).toBe("id");
+  await expect(page.locator("#filter")).toHaveValue("o.id > 1");
+  await expandTableChips(page);
+  await expect(page.locator("#tables li.join-chip.saved")).toHaveText("⋈ kept view");
 });

@@ -124,3 +124,18 @@ test("a foreign key is found in either direction and greyed notes follow the oth
   assert.equal(pairNote("text", "uuid"), "text ≠ uuid");
   assert.equal(pairNote("uuid", "uuid"), null);
 });
+
+test("toWire keeps alias.* items written out of table order as an explicit column list", () => {
+  const forward = parseJoin("SELECT o.*, u.* FROM orders o JOIN users u ON o.user_id = u.id", {
+    catalog: fixture.catalog,
+  });
+  assert.ok("def" in forward);
+  assert.equal(toWire(forward.def, () => []).columns, undefined);
+  const reversed = parseJoin("SELECT u.*, o.* FROM orders o JOIN users u ON o.user_id = u.id", {
+    catalog: fixture.catalog,
+  });
+  assert.ok("def" in reversed);
+  const wire = toWire(reversed.def, (join) => fixture.catalog[reversed.def.tables[join].table] ?? []);
+  assert.equal(wire.columns?.[0].join, 1);
+  assert.equal(wire.columns?.at(-1)?.join, 0);
+});

@@ -24,3 +24,12 @@ test("an empty query keeps every item in order", () => {
     ["b", "a"],
   );
 });
+
+test("a word-start jump never skips the only place the rest of the query fits", () => {
+  assert.notEqual(fuzzyScore("ui", "build_users"), null);
+  assert.notEqual(fuzzyScore("ba", "xbay_b"), null);
+  assert.deepEqual(
+    fuzzyFilter("ui", ["build_users"], (t) => t),
+    ["build_users"],
+  );
+});

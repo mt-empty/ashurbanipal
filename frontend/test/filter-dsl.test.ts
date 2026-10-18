@@ -51,3 +51,9 @@ test("quoteFilterValue output round-trips through the parser unchanged", () => {
     assert.equal(parsed[0].value, v);
   }
 });
+
+test("a join alias spelled like a filter keyword parses once quoted", () => {
+  assert.deepEqual(parseFilterDsl(`"not".status = 'x'`, ["not", "u"]), [
+    { column: "status", join: 0, op: "=", value: "x" },
+  ]);
+});

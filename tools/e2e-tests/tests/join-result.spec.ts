@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { waitForIdle } from "./support/helpers";
-import { gotoJoin, joinParam, joinUrl, nextJoinResponse, ORDERS_USERS } from "./support/join";
+import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoJoin, joinParam, joinUrl, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
 
 // Story 41: the result of a join in the normal grid.
 
@@ -153,4 +153,47 @@ test("a join the server rejects after it has loaded still opens the join overlay
   await expect(page.locator("#join-dialog")).toBeVisible();
   await expect(page.locator("#join-error")).toContainText('users has no column "id"');
   await expect(page.locator("#error")).toBeEmpty();
+});
+
+function problem(status: number, code: string, title: string) {
+  return {
+    status,
+    contentType: "application/problem+json",
+    body: JSON.stringify({ type: "about:blank", title, status, code }),
+  };
+}
+
+test("a join that times out is asked once and keeps a shared link's filter", async ({ page }) => {
+  let requests = 0;
+  await page.route("**/api/tables/join*", (route) => {
+    requests++;
+    return route.fulfill(problem(500, "query_timeout", "query timed out"));
+  });
+  await page.goto(`${joinUrl(ORDERS_USERS)}&filter=${encodeURIComponent("o.id > 1")}`);
+  await expect(page.locator("#join-notice")).toBeVisible();
+  await waitForIdle(page);
+  expect(requests).toBe(1);
+  await expect(page.locator("#filter")).toHaveValue("o.id > 1");
+});
+
+test("cancelling a join the server refuses goes back to the table in view", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.route("**/api/tables/join*", (route) =>
+    route.fulfill(problem(400, "invalid_join", "invalid join: these columns cannot be joined")),
+  );
+  await page.locator("#join-btn").click();
+  await writeSql(page, ORDERS_USERS);
+  await page.locator("#join-run").click();
+  await expect(page.locator("#join-error")).toContainText("cannot be joined");
+  await page.locator("#join-cancel").click();
+  await expect(page.locator("#current")).toHaveText("orders");
+
+  // Later actions ask for the table again, not the refused join.
+  const response = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  await page.locator('th[data-col="id"]').click();
+  expect((await response).status()).toBe(200);
+  await waitForIdle(page);
+  await expect(page.locator("#join-dialog")).toBeHidden();
+  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
 });
