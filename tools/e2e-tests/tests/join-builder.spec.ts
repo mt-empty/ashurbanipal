@@ -258,3 +258,34 @@ test("removing the only join cannot be shown", async ({ page }) => {
   await page.locator("#join-run").click();
   await expect(page.locator("#join-error")).toHaveText("Add a table to join.");
 });
+
+test("the table menu narrows by fuzzy search as you type, and Enter picks the best match", async ({ page }) => {
+  await openJoinOverlay(page);
+  await page.getByRole("button", { name: "join 1 table", exact: true }).click();
+  const search = page.locator("#dd-pop-search");
+  await expect(search).toBeFocused();
+  await search.fill("ordx");
+  await expect(page.locator("#dd-pop .dd-row").first()).toHaveAttribute("data-value", "order_extra");
+  await search.fill("zzzzqq");
+  await expect(page.locator("#dd-pop .dd-row")).toHaveCount(0);
+  await expect(page.locator("#dd-pop .dd-none")).toHaveText("Nothing matches zzzzqq.");
+  await search.fill("users");
+  await search.press("Enter");
+  await expect(page.getByRole("button", { name: "join 1 table", exact: true })).toHaveText("users ▾");
+});
+
+test("SQL opened from an unfinished form can go back to Form until its text is edited", async ({ page }) => {
+  await openJoinOverlay(page);
+  await page.locator("#join-mode-sql").click();
+  await expect(page.locator("#join-mode-form")).toBeEnabled();
+  await expect(page.locator("#join-sql-error")).toBeEmpty();
+  await expect(page.locator("#join-run")).toBeDisabled();
+  await page.locator("#join-mode-form").click();
+  await expect(page.locator("#join-form-pane")).toBeVisible();
+  await expect(page.getByRole("button", { name: "join 1 table", exact: true })).toBeVisible();
+
+  await page.locator("#join-mode-sql").click();
+  await page.locator("#join-sql").press("End");
+  await page.locator("#join-sql").pressSequentially(" RIGHT");
+  await expect(page.locator("#join-mode-form")).toBeDisabled();
+});
