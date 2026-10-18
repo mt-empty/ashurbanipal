@@ -101,6 +101,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.4.2-OVERSIZE-BOUND` | Oversize filter (>8192 bytes decoded) → 400, never truncated | `filter_dsl::builder_fixture_cases_over_http` (`oversize`) |
 | `P5.4.2-EMPTY-ARRAY` | Empty array ≡ absent filter | `filter_dsl::empty_param_and_empty_array_mean_no_filter` |
 | `P5.4.2-DSL-TEXT-REJECTED` | DSL text in `filter` is rejected (no server-side grammar) | `filter_dsl::dsl_text_in_filter_param_is_rejected` |
+| `P5.4.2-DEEP-NESTING` | Nesting deep enough to overflow a recursive decoder, under the byte bound → 400 `invalid_filter` | `filter_dsl::deeply_nested_filter_is_rejected` |
 | `P5.4.2-COLUMN-VALIDATED` | Column validated against real columns; unknown → 400 | `filter_dsl::unknown_column_rejection_is_a_400`, `filter_dsl::builder_fixture_cases_over_http` (`unknown_column`) |
 | `P5.4.2-OP-HARDCODED-MAP` | `op` mapped through hardcoded table, never client text | `filter_dsl::equality_filter_narrows_rows` (`=` maps correctly), `filter_dsl::injection_value_stays_a_bind_param` (proxy: an operator escape attempt can only be inert if the mapping is hardcoded) |
 | `P5.4.2-VALUE-BOUND-PARAM` | `value` bound as parameter, never concatenated | `filter_dsl::injection_value_stays_a_bind_param` |
@@ -210,7 +211,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.11-SCHEMA-PARAM` | Explicit default `schema` resolves like an absent one; unrecognized `schema`/`source` → 400 | `join::source_and_schema_params_resolve_like_the_other_routes` |
 | `P5.11-SCHEMA-ISOLATION` | Every table resolves only in the requested schema, else `invalid_join` (Postgres, MySQL; SQLite self-skips) | `join::tables_resolve_only_in_the_requested_schema` |
 | `P5.11-NAMES-EXACT` | Tables and columns in `join`, `columns`, `sort` and `filter` matched exactly; injection-shaped input → 400, never reaches SQL; `invalid_join` for names in `join`, `unknown_column` for `sort` and `filter` | `join::unknown_and_malicious_names_are_rejected` |
-| `P5.11-JOIN-STRUCTURE` | Forward/self `on` position, pair count, join type, operator key, empty or duplicate `columns`, more than 4 tables, malformed `join` → 400 `invalid_join`; absent `join` → `invalid_parameter` | `join::invalid_join_structures_are_rejected` |
+| `P5.11-JOIN-STRUCTURE` | Forward/self `on` position, pair count, join type, operator key, empty or duplicate `columns`, more than 4 tables, malformed `join` (including deep nesting and keys in another case) → 400 `invalid_join`; absent `join` → `invalid_parameter` | `join::invalid_join_structures_are_rejected` |
 | `P5.11-JOIN-BOUND` | An oversize `join` is a 400 `invalid_join`, never truncated | `join::oversize_join_is_rejected` |
 | `P5.11-COMPATIBILITY` | A pair across type classes, or a `json`/`jsonb` column, → 400 `invalid_join` | `join::incompatible_column_pairs_are_rejected` |
 | `P5.11-SAME-CLASS` | Exact numerics of different widths join | `join::same_class_pairs_with_different_types_join` |

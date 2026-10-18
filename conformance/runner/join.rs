@@ -509,6 +509,17 @@ async fn invalid_join_structures_are_rejected() {
     let entry = orders_extra("left")["joins"][0].clone();
     let mut five_tables = orders_extra("left");
     five_tables["joins"] = json!([entry, entry, entry, entry]);
+    // Keys are matched exactly: a decoder that folds case would accept these.
+    let mut upper_key = orders_extra("left");
+    let table = upper_key.as_object_mut().unwrap().remove("table").unwrap();
+    upper_key["TABLE"] = table;
+    let mut nested_upper_key = orders_extra("left");
+    let kind = nested_upper_key["joins"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("type")
+        .unwrap();
+    nested_upper_key["joins"][0]["Type"] = kind;
 
     let cases = [
         ("on.left refers to its own position", forward),
@@ -523,6 +534,8 @@ async fn invalid_join_structures_are_rejected() {
         ("duplicate columns", dup_columns),
         ("columns position out of range", bad_column_join),
         ("5 tables", five_tables),
+        ("TABLE key in another case", upper_key),
+        ("Type key in another case", nested_upper_key),
     ];
     for (what, join) in cases {
         let resp = get_join(&srv, &join, &[]).await;
@@ -545,6 +558,17 @@ async fn invalid_join_structures_are_rejected() {
             .unwrap();
         assert_problem_code(resp, 400, "invalid_join", &format!("join={raw}")).await;
     }
+    // Deep enough to overflow a recursive decoder (Python 3.11's near 1000), small enough
+    // once URL-encoded for a 16 KB header limit such as Node's.
+    let deep = format!("{}{}", "[".repeat(2000), "]".repeat(2000));
+    let resp = srv
+        .client()
+        .get(srv.url("/api/tables/join"))
+        .query(&[("join", deep.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_problem_code(resp, 400, "invalid_join", "join nested 2000 deep").await;
     let resp = srv
         .client()
         .get(srv.url("/api/tables/join"))
