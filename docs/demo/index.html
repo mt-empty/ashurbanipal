@@ -1472,6 +1472,12 @@ function $(id) {
   if (!el2) throw new Error(`no element with id ${id}`);
   return el2;
 }
+function el(tag, className, text) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== void 0) e.textContent = text;
+  return e;
+}
 function qs(root, selector) {
   const el2 = root.querySelector(selector);
   if (!el2) throw new Error(`no element matches ${selector}`);
@@ -1962,6 +1968,7 @@ function filterDslErrorAt(input2, aliases) {
 // src/lib/join-dsl.ts
 var JOIN_MAX_TABLES = 4;
 var JOIN_MAX_PAIRS = 3;
+var JOIN_MAX_BYTES = 8192;
 var JOIN_KEYWORDS = /* @__PURE__ */ new Set([
   "SELECT",
   "FROM",
@@ -2373,11 +2380,14 @@ function setAppliedJoin(def) {
   appliedJoin = def;
   state.table = def.tables[0].table;
 }
-function clearJoin() {
-  if (!state.join) return;
+function resetJoinState() {
   state.join = "";
   state.joinHidden = [];
   appliedJoin = null;
+}
+function clearJoin() {
+  if (!state.join) return;
+  resetJoinState();
   state.sort = null;
   state.order = "asc";
   clearFilter();
@@ -2386,9 +2396,7 @@ function restoreJoinFromParams(params) {
   const text = params.get("join") ?? "";
   const parsed = text ? parseJoin(text) : null;
   if (!parsed || "error" in parsed) {
-    state.join = "";
-    state.joinHidden = [];
-    appliedJoin = null;
+    resetJoinState();
     return;
   }
   setAppliedJoin(parsed.def);
@@ -2494,9 +2502,9 @@ function rememberSort() {
   persist();
 }
 function applyStoredSort(table) {
-  const stored = table ? state.sortByTable[table] : void 0;
-  state.sort = stored?.col ?? null;
-  state.order = stored?.order ?? "asc";
+  const stored2 = table ? state.sortByTable[table] : void 0;
+  state.sort = stored2?.col ?? null;
+  state.order = stored2?.order ?? "asc";
   sortRisk.set(state.sort !== null);
 }
 function dropStoredSort(table) {
@@ -2797,6 +2805,14 @@ function attachOverlayHighlight(field, render2) {
   new ResizeObserver(render2).observe(field);
   render2();
 }
+function tokenSpans(text, tokens, isError) {
+  return tokens.map((t) => {
+    const span = document.createElement("span");
+    span.className = `t-${t.kind}${isError(t) ? " t-err" : ""}`;
+    span.textContent = text.slice(t.start, t.end);
+    return span;
+  });
+}
 
 // src/features/filter-highlight.ts
 var input = $("filter");
@@ -2817,14 +2833,7 @@ function render() {
   let at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
   const bad = tokens.find((t) => t.start <= at && at < t.end);
   if (bad && bad.end >= lead + trimmed.length && endsInUnfinishedWord(text)) at = -1;
-  textEl.replaceChildren(
-    ...tokens.map((t) => {
-      const span = document.createElement("span");
-      span.className = `t-${t.kind}${t.start <= at && at < t.end ? " t-err" : ""}`;
-      span.textContent = text.slice(t.start, t.end);
-      return span;
-    })
-  );
+  textEl.replaceChildren(...tokenSpans(text, tokens, (t) => t.start <= at && at < t.end));
   wrap.classList.toggle("plain", input.scrollWidth > input.clientWidth);
 }
 attachOverlayHighlight(input, render);
@@ -2841,12 +2850,9 @@ function loadData(opts) {
 // src/lib/join-draft.ts
 var emptyPair = () => ({ leftJoin: 0, leftColumn: "", rightColumn: "" });
 function newDraft(table) {
-  return {
-    table,
-    alias: "",
-    joins: [{ type: "inner", table: "", alias: "", on: [emptyPair()] }],
-    columns: [null, null]
-  };
+  const draft = { table, alias: "", joins: [], columns: [null] };
+  addJoin(draft);
+  return draft;
 }
 function defToDraft(def) {
   const columns = def.tables.map((_, join) => {
@@ -3134,6 +3140,18 @@ function joinMismatch(candidate, other) {
 function unjoinableReason(type) {
   return classOf(type) === "none" ? `${shown(type)}: not joinable` : null;
 }
+function pairNote(type, otherType) {
+  return otherType === void 0 ? unjoinableReason(type) : joinMismatch(type, otherType)?.note ?? null;
+}
+function findForeignKey(earlier, table, own) {
+  for (const [at, e] of earlier.entries()) {
+    const out = e.columns.find((c) => c.references?.table === table);
+    if (out?.references) return { at, leftColumn: out.name, rightColumn: out.references.column };
+    const back = own.find((c) => c.references?.table === e.table);
+    if (back?.references) return { at, leftColumn: back.references.column, rightColumn: back.name };
+  }
+  return null;
+}
 
 // src/lib/fuzzy.ts
 var BOUNDARY = /[_\-. ]/;
@@ -3164,21 +3182,20 @@ function fuzzyScore(query, text) {
   return score * 100 - t.length;
 }
 function fuzzyFilter(query, items, key) {
-  return items.map((item, i) => ({ item, i, score: fuzzyScore(query.trim(), key(item)) })).filter((m) => m.score !== null).sort((a, b) => b.score - a.score || a.i - b.i).map((m) => m.item);
+  return items.map((item) => ({ item, score: fuzzyScore(query.trim(), key(item)) })).filter((m) => m.score !== null).sort((a, b) => b.score - a.score).map((m) => m.item);
 }
 
 // src/features/dropdown.ts
 var pop = () => $("dd-pop");
 var anchor = null;
-var lastLabel = "";
+var current = null;
 function lastDropdownLabel() {
-  return lastLabel;
+  return current?.ariaLabel ?? "";
 }
 function closeMenu() {
   if (pop().matches(":popover-open")) pop().hidePopover();
 }
 var search = () => $("dd-pop-search");
-var current = null;
 function renderRows(opts, query) {
   const list = $("dd-pop-list");
   const shown2 = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
@@ -3223,7 +3240,6 @@ function open(button, opts) {
   if (anchor) anchor.style.anchorName = "";
   anchor = button;
   current = opts;
-  lastLabel = opts.ariaLabel;
   button.style.anchorName = "--dd-anchor";
   const list = $("dd-pop-list");
   list.setAttribute("aria-label", opts.ariaLabel);
@@ -3362,6 +3378,7 @@ function formatCellValue(col, raw) {
 
 // src/features/sidebar.ts
 var tableEntries = [];
+var chipCounts = /* @__PURE__ */ new Map();
 var joinEntries = [];
 var allEntries = () => [...tableEntries, ...joinEntries];
 var tableRowTemplate = $("table-row-template");
@@ -3487,12 +3504,14 @@ async function loadTables() {
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
+  chipCounts.clear();
   for (const t of tables) {
     const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
     const btn = qs(li, "button");
     qs(li, ".row-name").textContent = t.name;
     const countEl = qs(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
+    chipCounts.set(t.name, countEl.textContent);
     countEl.title = APPROX_COUNT_TITLE;
     btn.dataset.table = t.name;
     btn.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
@@ -3520,7 +3539,7 @@ function listedTableNames() {
   return tableEntries.map((e) => e.name);
 }
 function tableChipCount(name) {
-  return tableEntries.find((e) => e.name === name)?.li.querySelector(".count")?.textContent ?? "";
+  return chipCounts.get(name) ?? "";
 }
 function setJoinChips(chips) {
   const ul = $("tables");
@@ -3627,13 +3646,13 @@ function renderStructure(data) {
 }
 function tableStructure(table) {
   const key = cacheKey(table);
-  const generation = cacheGeneration;
+  const generation2 = cacheGeneration;
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
   const params = new URLSearchParams({ table });
   applyScopeParams(params);
   return api(`/tables/structure?${params}`).then((data) => {
-    if (generation === cacheGeneration) cache.set(key, data);
+    if (generation2 === cacheGeneration) cache.set(key, data);
     return data;
   });
 }
@@ -3659,23 +3678,44 @@ function openStructure() {
 // src/features/join-catalog.ts
 var cache2 = /* @__PURE__ */ new Map();
 var resolved = /* @__PURE__ */ new Map();
+var indexes = /* @__PURE__ */ new Map();
+var generation = 0;
+var version = 0;
 var keyOf = (table) => `${state.source}|${state.schema}|${table}`;
 function clearJoinCatalog() {
   cache2.clear();
   resolved.clear();
+  indexes.clear();
+  generation++;
+  version++;
+}
+function catalogVersion() {
+  return version;
+}
+function seedColumns(table, columns) {
+  const key = keyOf(table);
+  if (resolved.has(key)) return;
+  resolved.set(key, columns);
+  version++;
+  cache2.set(key, Promise.resolve(columns));
 }
 function tableColumns(table) {
-  const params = new URLSearchParams({ table, limit: "1", offset: "0" });
-  applyScopeParams(params);
   const key = keyOf(table);
   let columns = cache2.get(key);
   if (!columns) {
+    const params = new URLSearchParams({ table, limit: "1", offset: "0" });
+    applyScopeParams(params);
+    const started = generation;
     columns = api(`/tables/data?${params}`).then((d) => {
-      resolved.set(key, d.columns);
+      if (started === generation) {
+        resolved.set(key, d.columns);
+        version++;
+      }
       return d.columns;
     });
     cache2.set(key, columns);
-    columns.catch(() => cache2.delete(key));
+    columns.catch(() => {
+    });
   }
   return columns;
 }
@@ -3685,21 +3725,20 @@ function cachedColumns(table) {
 function knownCatalog() {
   return Object.fromEntries(listedTableNames().map((t) => [t, cachedColumns(t)?.map((c) => c.name) ?? null]));
 }
-async function indexedColumns(table) {
-  try {
-    return new Set((await tableStructure(table)).indexes.map((i) => i.columns[0]));
-  } catch {
-    return /* @__PURE__ */ new Set();
+function indexedColumns(table) {
+  const key = keyOf(table);
+  let found = indexes.get(key);
+  if (!found) {
+    found = tableStructure(table).then(
+      (s) => new Set(s.indexes.map((i) => i.columns[0])),
+      () => /* @__PURE__ */ new Set()
+    );
+    indexes.set(key, found);
   }
+  return found;
 }
 
 // src/features/join-form.ts
-function el(tag, className, text) {
-  const e = document.createElement(tag);
-  if (className) e.className = className;
-  if (text !== void 0) e.textContent = text;
-  return e;
-}
 function textButton(text, className, label, run) {
   const b = el("button", className, text);
   b.type = "button";
@@ -3708,12 +3747,11 @@ function textButton(text, className, label, run) {
   return b;
 }
 function mountJoinForm(root, onChange) {
-  let draft = { table: "", alias: "", joins: [], columns: [null] };
-  const loaded = /* @__PURE__ */ new Map();
+  let draft = newDraft("");
   let loadToken = 0;
   const tableAt = (pos) => pos === 0 ? draft.table : draft.joins[pos - 1].table;
   const nameAt = (pos) => (pos === 0 ? draft.alias : draft.joins[pos - 1].alias).trim() || tableAt(pos);
-  const columnsAt = (pos) => loaded.get(tableAt(pos)) ?? [];
+  const columnsAt = (pos) => cachedColumns(tableAt(pos)) ?? [];
   const typeOf = (pos, column) => columnsAt(pos).find((c) => c.name === column)?.type;
   const mismatch = (pos, pair) => {
     const left = typeOf(pair.leftJoin, pair.leftColumn);
@@ -3721,33 +3759,18 @@ function mountJoinForm(root, onChange) {
     return left && right ? joinMismatch(left, right) : null;
   };
   function foreignKey(pos) {
-    for (let p = 0; p < pos; p++) {
-      for (const c of columnsAt(p)) {
-        if (c.references?.table === tableAt(pos))
-          return { leftJoin: p, leftColumn: c.name, rightColumn: c.references.column };
-      }
-      for (const c of columnsAt(pos)) {
-        if (c.references?.table === tableAt(p))
-          return { leftJoin: p, leftColumn: c.references.column, rightColumn: c.name };
-      }
-    }
-    return null;
+    const earlier = Array.from({ length: pos }, (_, p) => ({ table: tableAt(p), columns: columnsAt(p) }));
+    const fk = findForeignKey(earlier, tableAt(pos), columnsAt(pos));
+    return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
   async function load() {
-    const missing = [.../* @__PURE__ */ new Set([draft.table, ...draft.joins.map((j) => j.table)])].filter((t) => t && !loaded.has(t));
+    const missing = [.../* @__PURE__ */ new Set([draft.table, ...draft.joins.map((j) => j.table)])].filter(
+      (t) => t && !cachedColumns(t)
+    );
     if (missing.length === 0) return;
     const token = ++loadToken;
-    await Promise.all(
-      missing.map(async (t) => {
-        try {
-          loaded.set(t, await tableColumns(t));
-        } catch (e) {
-          console.warn("ashurbanipal: could not read the columns of", t, e);
-          loaded.set(t, []);
-        }
-      })
-    );
-    if (token !== loadToken) return;
+    const results = await Promise.allSettled(missing.map(tableColumns));
+    if (token !== loadToken || !results.some((r) => r.status === "fulfilled")) return;
     draft.joins.forEach((j, i) => {
       const first = j.on[0];
       const fk = first && first.leftColumn === "" && first.rightColumn === "" ? foreignKey(i + 1) : null;
@@ -3776,14 +3799,15 @@ function mountJoinForm(root, onChange) {
     };
     return input2;
   };
-  function pairLine(join, pos, pair, first) {
-    const line = el("div", "j-line");
+  function pairParts(join, pos, pair, k) {
+    const first = k === 0;
+    const which = first ? "" : ` pair ${k + 1}`;
     const clash = mismatch(pos, pair);
     const rightType = typeOf(pos, pair.rightColumn);
     const leftType = typeOf(pair.leftJoin, pair.leftColumn);
     const leftOptions = Array.from({ length: pos }, (_, p) => p).flatMap(
       (p) => columnsAt(p).map((c) => {
-        const note = rightType === void 0 ? unjoinableReason(c.type) : joinMismatch(c.type, rightType)?.note ?? null;
+        const note = pairNote(c.type, rightType);
         return {
           value: `${p}|${c.name}`,
           label: `${nameAt(p)}.${c.name}`,
@@ -3793,13 +3817,13 @@ function mountJoinForm(root, onChange) {
       })
     );
     const rightOptions = columnsAt(pos).map((c) => {
-      const note = leftType === void 0 ? unjoinableReason(c.type) : joinMismatch(c.type, leftType)?.note ?? null;
+      const note = pairNote(c.type, leftType);
       return { value: c.name, label: c.name, note: note ?? c.type, blocked: note !== null };
     });
-    line.append(
+    const parts = [
       el("span", "j-kw", first ? "on" : "and"),
       createDropdown({
-        ariaLabel: `join ${pos}${first ? "" : ` pair ${join.on.indexOf(pair) + 1}`}: column of an earlier table`,
+        ariaLabel: `join ${pos}${which}: column of an earlier table`,
         options: leftOptions,
         value: pair.leftColumn ? `${pair.leftJoin}|${pair.leftColumn}` : "",
         display: pair.leftColumn ? `${nameAt(pair.leftJoin)}.${pair.leftColumn}` : void 0,
@@ -3814,7 +3838,7 @@ function mountJoinForm(root, onChange) {
       }),
       el("span", "j-eq", "="),
       createDropdown({
-        ariaLabel: `join ${pos}${first ? "" : ` pair ${join.on.indexOf(pair) + 1}`}: column of ${nameAt(pos) || "this table"}`,
+        ariaLabel: `join ${pos}${which}: column of ${nameAt(pos) || "this table"}`,
         options: rightOptions,
         value: pair.rightColumn,
         display: pair.rightColumn ? `${nameAt(pos)}.${pair.rightColumn}` : void 0,
@@ -3826,17 +3850,17 @@ function mountJoinForm(root, onChange) {
           changed(true);
         }
       })
-    );
-    if (leftType && rightType && !clash) line.appendChild(el("span", "j-ok", `${leftType} = ${rightType} \u2713`));
+    ];
+    if (leftType && rightType && !clash) parts.push(el("span", "j-ok", `${leftType} = ${rightType} \u2713`));
     if (!first) {
-      line.appendChild(
+      parts.push(
         textButton("\u2715", "j-rm", `remove column pair from join ${pos}`, () => {
-          join.on.splice(join.on.indexOf(pair), 1);
+          join.on.splice(k, 1);
           changed();
         })
       );
     }
-    return line;
+    return parts;
   }
   function joinRow(join, i) {
     const pos = i + 1;
@@ -3884,9 +3908,13 @@ function mountJoinForm(root, onChange) {
     box.appendChild(head);
     if (join.table !== "") {
       join.on.forEach((pair, k) => {
-        const line = pairLine(join, pos, pair, k === 0);
-        if (k === 0) head.append(...[...line.childNodes]);
-        else box.appendChild(line);
+        const parts = pairParts(join, pos, pair, k);
+        if (k === 0) head.append(...parts);
+        else {
+          const line = el("div", "j-line");
+          line.append(...parts);
+          box.appendChild(line);
+        }
       });
       const first = join.on[0];
       const fk = foreignKey(pos);
@@ -4005,7 +4033,7 @@ function mountJoinForm(root, onChange) {
       el(
         "span",
         "jmuted",
-        full ? "Joins are limited to 4 tables. Remove one to add another." : "\xB7 inner and left joins only \xB7 equality only"
+        full ? `Joins are limited to ${JOIN_MAX_TABLES} tables. Remove one to add another.` : "\xB7 inner and left joins only \xB7 equality only"
       )
     );
     parts.push(add);
@@ -4017,7 +4045,6 @@ function mountJoinForm(root, onChange) {
   return {
     setDraft(next) {
       draft = next;
-      loaded.clear();
       render2();
     },
     draft: () => draft,
@@ -4122,17 +4149,24 @@ function withoutSaved(store, source, schema, name) {
 
 // src/features/join-saved.ts
 var SAVED_KEY = "ashurbanipal_joins";
+var stored = null;
+window.addEventListener("storage", (e) => {
+  if (e.key === SAVED_KEY || e.key === null) stored = null;
+});
 function read() {
+  if (stored) return stored;
   try {
-    return sanitizeSaved(JSON.parse(localStorage.getItem(SAVED_KEY) || "{}"));
+    stored = sanitizeSaved(JSON.parse(localStorage.getItem(SAVED_KEY) || "{}"));
   } catch (e) {
     console.warn("ashurbanipal: discarding unreadable saved joins", e);
-    return {};
+    stored = {};
   }
+  return stored;
 }
 function write(store) {
   try {
     localStorage.setItem(SAVED_KEY, JSON.stringify(store));
+    stored = store;
     return true;
   } catch (e) {
     console.warn("ashurbanipal: could not save joins", e);
@@ -4153,8 +4187,12 @@ function saveJoin(name, text, replacing) {
 function deleteSavedJoin(name) {
   write(withoutSaved(read(), state.source, state.schema, name));
 }
+var lastRendered = "";
 function renderSavedChips(actions) {
   const saved = savedJoins();
+  const key = JSON.stringify([state.source, state.schema, state.join, saved]);
+  if (key === lastRendered) return;
+  lastRendered = key;
   const current2 = getAppliedJoin();
   const inSaved = saved.some((s) => s.text === state.join);
   const chips = saved.map((s) => ({
@@ -4291,6 +4329,8 @@ function createSuggestList(opts) {
 
 // src/features/join-sql.ts
 function draftText(draft) {
+  const done = draftToDef(draft);
+  if ("def" in done) return printJoin(done.def);
   const ref = (table, alias) => alias.trim() ? `${quoteJoinName(table)} ${quoteJoinName(alias.trim())}` : quoteJoinName(table);
   const lines = [`FROM ${draft.table ? ref(draft.table, draft.alias) : ""}`.trimEnd()];
   const nameAt = (pos) => {
@@ -4338,22 +4378,22 @@ function mountJoinSql(onChange) {
     const bt = cachedColumns(b.table)?.find((c) => c.name === b.column)?.type;
     return at && bt ? joinMismatch(at, bt)?.message ?? null : null;
   };
-  const parse = () => parseJoin(field.value, { catalog: knownCatalog(), pairCheck });
+  let memo = null;
+  const parse = () => {
+    const text = field.value;
+    const version2 = catalogVersion();
+    if (memo?.text !== text || memo.version !== version2)
+      memo = { text, version: version2, result: parseJoin(text, { catalog: knownCatalog(), pairCheck }) };
+    return memo.result;
+  };
   function render2() {
     const text = field.value;
     field.rows = Math.max(5, text.split("\n").length + 1);
     const result = text.trim() ? parse() : null;
     const error = result && "error" in result && result.error.index < text.trimEnd().length ? result.error : null;
     const [from, to] = error ? errorSpan(text, error.index, error.code) : [-1, -1];
-    hlText.replaceChildren(
-      ...tokenizeJoinText(text).map((t) => {
-        const span = document.createElement("span");
-        const kind = t.kind === "punct" ? "op" : t.kind;
-        span.className = `t-${kind}${t.kind !== "space" && t.start >= from && t.start < to ? " t-err" : ""}`;
-        span.textContent = text.slice(t.start, t.end);
-        return span;
-      })
-    );
+    const tokens = tokenizeJoinText(text).map((t) => t.kind === "punct" ? { ...t, kind: "op" } : t);
+    hlText.replaceChildren(...tokenSpans(text, tokens, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     hlText.append("\n");
   }
   attachOverlayHighlight(field, render2);
@@ -4380,6 +4420,11 @@ function mountJoinSql(onChange) {
       void update2();
     }
   });
+  const startsWith = (ctx) => {
+    const partial = ctx.partial.toLowerCase();
+    return (name) => name.toLowerCase().startsWith(partial);
+  };
+  const anyRead = (results) => results.some((r) => r.status === "fulfilled");
   const tableOf = (ctx, name) => ctx.declared.find((d) => d.name === name)?.table;
   async function columnRows(ctx) {
     const table = tableOf(ctx, ctx.qualifier);
@@ -4387,8 +4432,9 @@ function mountJoinSql(onChange) {
     const [columns, indexed] = await Promise.all([tableColumns(table), indexedColumns(table)]);
     const otherTable = ctx.otherSide ? tableOf(ctx, ctx.otherSide.qualifier) : void 0;
     const otherType = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column)?.type;
-    return columns.filter((c) => c.name.toLowerCase().startsWith(ctx.partial.toLowerCase())).map((c) => {
-      const note = otherType === void 0 ? unjoinableReason(c.type) : joinMismatch(c.type, otherType)?.note ?? null;
+    const starts = startsWith(ctx);
+    return columns.filter((c) => starts(c.name)).map((c) => {
+      const note = pairNote(c.type, otherType);
       return {
         label: c.name,
         insert: `${quoteJoinName(c.name)} `,
@@ -4398,27 +4444,21 @@ function mountJoinSql(onChange) {
       };
     });
   }
-  function foreignKeyClause(ctx, table, own) {
-    const alias = aliasFor(table, new Set(ctx.declared.map((d) => d.name)));
-    const q = `${quoteJoinName(table)} ${alias}`;
-    for (const d of ctx.declared) {
-      const theirs = cachedColumns(d.table) ?? [];
-      const out = theirs.find((c) => c.references?.table === table);
-      if (out?.references)
-        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(out.name)} = ${alias}.${quoteJoinName(out.references.column)}`;
-      const back = own.find((c) => c.references?.table === d.table);
-      if (back?.references)
-        return `${q} ON ${quoteJoinName(d.name)}.${quoteJoinName(back.references.column)} = ${alias}.${quoteJoinName(back.name)}`;
-    }
-    return void 0;
+  function foreignKeyClause(ctx, taken, table) {
+    const earlier = ctx.declared.map((d) => ({ table: d.table, columns: cachedColumns(d.table) ?? [] }));
+    const fk = findForeignKey(earlier, table, cachedColumns(table) ?? []);
+    if (!fk) return void 0;
+    const alias = aliasFor(table, taken);
+    const left = quoteJoinName(ctx.declared[fk.at].name);
+    return `${quoteJoinName(table)} ${alias} ON ${left}.${quoteJoinName(fk.leftColumn)} = ${alias}.${quoteJoinName(fk.rightColumn)}`;
   }
-  function tableRows(ctx) {
+  function tableRows(ctx, candidates) {
     const used = new Set(ctx.declared.map((d) => d.table));
+    const taken = new Set(ctx.declared.map((d) => d.name));
     const withKey = [];
     const rest = [];
-    for (const table of listedTableNames()) {
-      if (!table.toLowerCase().startsWith(ctx.partial.toLowerCase())) continue;
-      const clause = used.has(table) ? void 0 : foreignKeyClause(ctx, table, cachedColumns(table) ?? []);
+    for (const table of candidates) {
+      const clause = used.has(table) ? void 0 : foreignKeyClause(ctx, taken, table);
       if (clause) withKey.push({ label: clause, insert: `${clause} `, tag: "foreign key" });
       else
         rest.push({
@@ -4436,17 +4476,18 @@ function mountJoinSql(onChange) {
     const ctx = joinCompletionAt(field.value);
     let rows = [];
     if (ctx.expect === "table") {
-      const candidates = listedTableNames().filter((t) => t.toLowerCase().startsWith(ctx.partial.toLowerCase()));
+      const candidates = listedTableNames().filter(startsWith(ctx));
       const wanted = [...ctx.declared.map((d) => d.table), ...candidates.length <= 8 ? candidates : []];
       const missing = [...new Set(wanted)].filter((t) => !cachedColumns(t));
       if (missing.length > 0) {
-        void Promise.allSettled(missing.map(tableColumns)).then(() => {
-          if (token === suggest2.token()) void update2();
+        void Promise.allSettled(missing.map(tableColumns)).then((results) => {
+          if (anyRead(results) && token === suggest2.token()) void update2();
         });
       }
-      rows = tableRows(ctx);
+      rows = tableRows(ctx, candidates);
     } else if (ctx.expect === "qualifier") {
-      rows = ctx.declared.filter((d) => d.name.toLowerCase().startsWith(ctx.partial.toLowerCase())).map((d) => ({ label: d.name, insert: `${quoteJoinName(d.name)}.`, note: d.name === d.table ? "" : d.table }));
+      const starts = startsWith(ctx);
+      rows = ctx.declared.filter((d) => starts(d.name)).map((d) => ({ label: d.name, insert: `${quoteJoinName(d.name)}.`, note: d.name === d.table ? "" : d.table }));
     } else if (ctx.expect === "column") {
       rows = await columnRows(ctx).catch(() => []);
     } else if (ctx.expect === "keyword") {
@@ -4463,7 +4504,8 @@ function mountJoinSql(onChange) {
       (t) => listed.has(t) && !cachedColumns(t)
     );
     if (wanted.length === 0) return;
-    void Promise.allSettled(wanted.map(tableColumns)).then(() => {
+    void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
+      if (!anyRead(results)) return;
       render2();
       onChange();
     });
@@ -4501,9 +4543,7 @@ function refresh() {
   const bad = problem();
   runBtn.disabled = bad !== "" || mode === "sql" && sql.text().trim() === "";
   if (mode === "form") {
-    const result = draftToDef(form.draft());
-    const text = "def" in result ? printJoin(result.def) : draftText(form.draft());
-    $("join-preview").replaceChildren(...coloured(text));
+    $("join-preview").replaceChildren(...coloured(draftText(form.draft())));
     return;
   }
   const back = untouched();
@@ -5605,7 +5645,6 @@ function setTableBusy(busy) {
   else tableEl.removeAttribute("aria-busy");
 }
 var inFlightFetches = 0;
-var JOIN_WIRE_LIMIT = 8192;
 async function joinPath(def, params) {
   const names = /* @__PURE__ */ new Map();
   await Promise.all(
@@ -5617,7 +5656,7 @@ async function joinPath(def, params) {
     })
   );
   const wire = JSON.stringify(toWire(def, (position) => names.get(position) ?? []));
-  if (new TextEncoder().encode(wire).length > JOIN_WIRE_LIMIT)
+  if (new TextEncoder().encode(wire).length > JOIN_MAX_BYTES)
     throw new ApiError("This join lists too many columns. Untick some columns or remove a table.", void 0, 400);
   params.set("join", wire);
   return `/tables/join?${params}`;
@@ -5712,11 +5751,12 @@ async function loadData2({
   markStoredSortVerified();
   markFilterVerified();
   loadedJoin = state.join;
+  if (!state.join) seedColumns(state.table, data.columns);
   updateActiveTableChrome();
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && !state.join);
   $("payload").disabled = false;
   $("columns-btn").disabled = false;
-  $("structure-btn").disabled = state.join !== "";
+  $("structure-btn").disabled = false;
   $("refresh").disabled = false;
   updateColumnsButtonLabel();
   updateJoinChrome();
