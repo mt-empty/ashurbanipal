@@ -1,3 +1,4 @@
+import { el } from "../core/dom.js";
 export interface Suggestion {
   label: string;
   insert: string;
@@ -58,21 +59,17 @@ export function createSuggestList(opts: SuggestOptions): SuggestList {
   const render = (): void => {
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
-        const btn = document.createElement("button");
+        const btn = el("button");
         btn.type = "button";
         const text = [suggestion.label, suggestion.note, suggestion.tag].filter(Boolean).join(" · ");
         btn.title = text; // long values are cut off with an ellipsis
-        const name = document.createElement("span");
+        const name = el("span");
         name.textContent = suggestion.label;
         btn.appendChild(name);
         if (suggestion.note || suggestion.tag) {
-          const note = document.createElement("span");
-          note.className = "sg-note";
-          note.textContent = suggestion.note ?? "";
+          const note = el("span", "sg-note", suggestion.note ?? "");
           if (suggestion.tag) {
-            const tag = document.createElement("span");
-            tag.className = "sg-tag";
-            tag.textContent = suggestion.tag;
+            const tag = el("span", "sg-tag", suggestion.tag);
             note.appendChild(tag);
           }
           btn.appendChild(note);

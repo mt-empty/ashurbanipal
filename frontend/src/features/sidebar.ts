@@ -1,6 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
-import { $, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
+import { $, el, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
 import {
   applyStoredSort,
   clearFilter,
@@ -274,9 +274,8 @@ export function setJoinChips(chips: JoinChip[]): void {
   const ul = $("tables");
   for (const e of joinEntries) e.li.remove();
   joinEntries = chips.map((c, i) => {
-    const li = document.createElement("li");
-    li.className = `join-chip ${c.className}${i === 0 ? " join-first" : ""}`;
-    const btn = document.createElement("button");
+    const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
+    const btn = el("button");
     btn.type = "button";
     btn.textContent = c.label;
     btn.title = c.title;

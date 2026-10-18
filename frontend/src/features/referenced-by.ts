@@ -1,5 +1,5 @@
 import { api } from "../core/api.js";
-import { $ } from "../core/dom.js";
+import { $, el } from "../core/dom.js";
 import { applyScopeParams, state } from "../core/state.js";
 import type { ReferencedByEntry, Row } from "../core/types.js";
 import { applyFilterClauses } from "./filter-ui.js";
@@ -31,9 +31,7 @@ const cacheKey = (table: string) => `${state.source ?? ""}\x1f${state.schema ?? 
 const renderTokens = new Map<HTMLElement, number>();
 
 function msg(text: string): HTMLParagraphElement {
-  const p = document.createElement("p");
-  p.className = "refby-empty";
-  p.textContent = text;
+  const p = el("p", "refby-empty", text);
   return p;
 }
 
@@ -53,7 +51,7 @@ function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: R
   container.replaceChildren(
     ...entries.map((entry) => {
       const label = entry.schema ? `${entry.schema}.${entry.table}` : entry.table;
-      const btn = document.createElement("button");
+      const btn = el("button");
       btn.type = "button";
       btn.className = "refby-entry";
       btn.textContent = `→ ${label} (${entry.columns.map((c) => c.from).join(", ")})`;

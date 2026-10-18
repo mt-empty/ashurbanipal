@@ -1,5 +1,5 @@
 import { loadData } from "../bootstrap/reload.js";
-import { $, copyText, qs } from "../core/dom.js";
+import { $, copyText, el, qs } from "../core/dom.js";
 import { getAppliedJoin, hiddenColumnsForTable, persist, rememberSort, state } from "../core/state.js";
 import type { Column, Row, TableData } from "../core/types.js";
 import {
@@ -21,12 +21,11 @@ import { openReferencedByPopover } from "./referenced-by.js";
 
 export function renderHeader(columns: Column[]): void {
   const hidden = hiddenColumnsForTable();
-  const tr = document.createElement("tr");
-  const actionsTh = document.createElement("th");
-  actionsTh.className = "row-actions";
+  const tr = el("tr");
+  const actionsTh = el("th", "row-actions");
   tr.appendChild(actionsTh);
   for (const col of columns) {
-    const th = document.createElement("th");
+    const th = el("th");
     th.dataset.col = col.name;
     if (col.join !== undefined) th.dataset.join = String(col.join);
     const minWidth = columnMinWidth(col.name);
@@ -35,18 +34,13 @@ export function renderHeader(columns: Column[]): void {
     const label = `${col.name} (${col.type})`;
     // The visible header renders the engine-native type spelling as inline
     // code; `label` stays the plain-text form for the aria-label only.
-    const typeCode = document.createElement("code");
-    typeCode.className = "col-type";
-    typeCode.textContent = col.type;
+    const typeCode = el("code", "col-type", col.type);
     typeCode.title = col.type; // the chip ellipsizes a long spelling (R8)
     // Name, ▾ and the sort arrow share one line; the type chip sits under it.
-    const head = document.createElement("span");
-    head.className = "th-name";
+    const head = el("span", "th-name");
     // Capped in CSS (a 63-char identifier would otherwise set the column's
     // width); the title is the escape hatch (R8).
-    const nameEl = document.createElement("span");
-    nameEl.className = "col-name";
-    nameEl.textContent = col.name;
+    const nameEl = el("span", "col-name", col.name);
     nameEl.title = col.comment ? `${col.name} — ${col.comment}` : col.name;
     if (col.key === "pk" || col.key === "fk") {
       // A column can be its own table's PK and an FK at once (1:1 detail
@@ -58,8 +52,7 @@ export function renderHeader(columns: Column[]): void {
             ? `primary key, also references ${col.references.table}.${col.references.column}`
             : "primary key"
           : `foreign key, references ${col.references.table}.${col.references.column}`;
-      const icon = document.createElement("span");
-      icon.className = "key-icon";
+      const icon = el("span", "key-icon");
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "🔑" : "🔗";
@@ -85,7 +78,7 @@ export function renderHeader(columns: Column[]): void {
     };
     // A focusable control nested in the sortable th — stopPropagation so
     // opening it doesn't also toggle sort.
-    const cvBtn = document.createElement("button");
+    const cvBtn = el("button");
     cvBtn.type = "button";
     cvBtn.className = "common-values-btn";
     cvBtn.setAttribute("aria-label", `common values for ${col.name}`);
@@ -99,15 +92,14 @@ export function renderHeader(columns: Column[]): void {
     th.append(head, typeCode);
     tr.appendChild(th);
   }
-  const bands = buildBands(columns);
+  const bands = buildBands(columns, [...tr.cells].slice(1));
   $("thead").replaceChildren(...(bands ? [bands, tr] : [tr]));
   if (bands) refreshBands();
 }
 
 function renderEmptyState(columnCount: number): void {
-  const emptyRow = document.createElement("tr");
-  emptyRow.className = "empty";
-  const td = document.createElement("td");
+  const emptyRow = el("tr", "empty");
+  const td = el("td");
   td.colSpan = columnCount;
   const join = getAppliedJoin();
   if (join && state.offset === 0 && state.filter === "" && join.joins.some((j) => j.type === "inner")) {
@@ -157,22 +149,18 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
   td.dataset.col = col.name;
   if (hidden.has(col.name)) td.classList.add("col-hidden");
   if (isNull) {
-    const span = document.createElement("span");
-    span.className = "cell-text";
-    span.textContent = "∅";
+    const span = el("span", "cell-text", "∅");
     td.appendChild(span);
     // Nothing to copy or expand for a null cell, but "filter by this
     // value" is still meaningful (IS NULL).
-    const filterBtn = document.createElement("button");
-    filterBtn.className = "filter-eq";
+    const filterBtn = el("button", "filter-eq");
     filterBtn.setAttribute("aria-label", "filter by null");
     filterBtn.textContent = "=";
     filterBtn.onclick = (e) => {
       e.stopPropagation();
       applyFilterClause(columnKey(col), "IS NULL");
     };
-    const actions = document.createElement("span");
-    actions.className = "cell-actions";
+    const actions = el("span", "cell-actions");
     actions.appendChild(filterBtn);
     td.appendChild(actions);
     return td;
@@ -251,8 +239,8 @@ export function renderColumnMenu(columns: Column[]): void {
   const hidden = hiddenColumnsForTable();
   $("columns-pop-list").replaceChildren(
     ...columns.map((col) => {
-      const label = document.createElement("label");
-      const input = document.createElement("input");
+      const label = el("label");
+      const input = el("input");
       input.type = "checkbox";
       input.checked = !hidden.includes(col.name);
       input.onchange = () => setColumnVisibility(col.name, !input.checked);
@@ -285,7 +273,7 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
   const tbody = $("tbody");
   tbody.replaceChildren(
     ...data.rows.map((row) => {
-      const tr = document.createElement("tr");
+      const tr = el("tr");
       if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
       tr.appendChild(buildRowActionCell(data.columns, row));
       for (const col of data.columns) {

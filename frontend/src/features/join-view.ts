@@ -1,4 +1,4 @@
-import { $ } from "../core/dom.js";
+import { $, el } from "../core/dom.js";
 import { getAppliedJoin, state } from "../core/state.js";
 import type { Column } from "../core/types.js";
 import { effectiveName, quoteJoinName } from "../lib/join-dsl.js";
@@ -28,43 +28,36 @@ export function splitColumnKey(key: string): { join: number; column: string } | 
 }
 
 // One band per run of neighbouring columns of the same table, above the column
-// headers; spans follow the visible columns, so hiding every column of a run
-// hides its band. A select list that alternates tables gets a band per switch.
-export function buildBands(columns: Column[]): HTMLTableRowElement | null {
+// headers; each header carries its run's `data-run`, so a band spans the visible
+// headers of its run and hides with the last of them. A select list that
+// alternates tables gets a band per switch.
+export function buildBands(columns: Column[], heads: readonly HTMLElement[]): HTMLTableRowElement | null {
   const def = getAppliedJoin();
   if (!def) return null;
-  const tr = document.createElement("tr");
-  tr.className = "bands";
-  tr.appendChild(document.createElement("th")).className = "row-actions";
+  const tr = el("tr", "bands");
+  tr.appendChild(el("th", "row-actions"));
   let band: HTMLTableCellElement | null = null;
   columns.forEach((col, i) => {
     if (col.join === undefined) return;
-    if (band && band.dataset.band === String(col.join)) {
-      band.dataset.end = String(i);
-      return;
+    if (band?.dataset.band !== String(col.join)) {
+      const t = def.tables[col.join];
+      band = el("th", "band");
+      band.dataset.band = String(col.join);
+      band.dataset.run = String(tr.cells.length);
+      const pill = el("span", "band-pill", t.alias === null ? t.table : `${t.table} ${t.alias}`);
+      pill.title = pill.textContent;
+      band.appendChild(pill);
+      tr.appendChild(band);
     }
-    const t = def.tables[col.join];
-    band = document.createElement("th");
-    band.className = "band";
-    band.dataset.band = String(col.join);
-    band.dataset.start = String(i);
-    band.dataset.end = String(i);
-    const pill = document.createElement("span");
-    pill.className = "band-pill";
-    pill.textContent = t.alias === null ? t.table : `${t.table} ${t.alias}`;
-    pill.title = pill.textContent;
-    band.appendChild(pill);
-    tr.appendChild(band);
+    heads[i].dataset.run = band.dataset.run;
   });
   return tr;
 }
 
 export function refreshBands(): void {
-  const heads = [...$("thead").querySelectorAll<HTMLElement>("th[data-join]")];
-  for (const band of $("thead").querySelectorAll<HTMLTableCellElement>("th.band")) {
-    const from = Number(band.dataset.start);
-    const to = Number(band.dataset.end);
-    const visible = heads.slice(from, to + 1).filter((h) => !h.classList.contains("col-hidden")).length;
+  const thead = $("thead");
+  for (const band of thead.querySelectorAll<HTMLTableCellElement>("th.band")) {
+    const visible = thead.querySelectorAll(`th[data-join][data-run="${band.dataset.run}"]:not(.col-hidden)`).length;
     band.colSpan = Math.max(visible, 1);
     band.classList.toggle("col-hidden", visible === 0);
   }
@@ -75,7 +68,7 @@ export function showJoinNotice(text: string, actions: { label: string; run: () =
   $("join-notice-text").textContent = text;
   $("join-notice-actions").replaceChildren(
     ...actions.map((a) => {
-      const b = document.createElement("button");
+      const b = el("button");
       b.type = "button";
       b.className = "btn";
       b.textContent = a.label;
@@ -105,14 +98,11 @@ export function updateJoinChrome(): void {
 
 // The grid's empty state for an INNER join that matched nothing (board T4).
 export function buildEmptyJoin(onLeft: () => void): HTMLElement {
-  const box = document.createElement("div");
-  box.className = "empty-join";
-  const title = document.createElement("p");
+  const box = el("div", "empty-join");
+  const title = el("p");
   title.textContent = "No rows match this join.";
-  const why = document.createElement("p");
-  why.className = "muted-note";
-  why.textContent = "An inner join drops rows without a match. A left join keeps them.";
-  const btn = document.createElement("button");
+  const why = el("p", "muted-note", "An inner join drops rows without a match. A left join keeps them.");
+  const btn = el("button");
   btn.type = "button";
   btn.className = "btn";
   btn.textContent = "Switch to left join";

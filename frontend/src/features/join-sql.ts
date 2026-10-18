@@ -2,7 +2,7 @@ import { $ } from "../core/dom.js";
 import type { Column } from "../core/types.js";
 import { type Draft, draftToDef } from "../lib/join-draft.js";
 import { type JoinParse, parseJoin, printJoin, quoteJoinName } from "../lib/join-dsl.js";
-import { type JoinCompletion, joinCompletionAt, tokenizeJoinText } from "../lib/join-tokens.js";
+import { type JoinCompletion, type JoinToken, joinCompletionAt, tokenizeJoinText } from "../lib/join-tokens.js";
 import { findForeignKey, joinMismatch, pairNote } from "../lib/join-types.js";
 import { cachedColumns, catalogVersion, indexedColumns, knownCatalog, tableColumns } from "./join-catalog.js";
 import { attachOverlayHighlight, tokenSpans } from "./overlay-highlight.js";
@@ -54,17 +54,24 @@ export function draftText(draft: Draft): string {
 
 // What the underline covers: a refused `RIGHT JOIN` through its JOIN, a `WHERE …` to the end of its
 // line, an `alias.column` through the column, otherwise the one word.
-function errorSpan(text: string, index: number, code: string): [number, number] {
-  const word =
-    /^(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(index))?.[0] ?? text.slice(index, index + 1);
-  let end = index + word.length;
+function errorSpan(text: string, tokens: readonly JoinToken[], index: number, code: string): [number, number] {
+  const words = tokens.filter((t) => t.kind !== "space");
+  const at = words.findIndex((t) => t.start <= index && index < t.end);
+  if (at < 0) return [index, index + 1];
+  const [word, next, after] = [words[at], words[at + 1], words[at + 2]];
+  const textOf = (t: JoinToken | undefined): string => (t ? text.slice(t.start, t.end) : "");
   if (code === "unsupported-keyword") {
-    if (/^(RIGHT|FULL|CROSS|NATURAL)$/i.test(word)) end += /^\s+JOIN\b/i.exec(text.slice(end))?.[0].length ?? 0;
-    else end = text.indexOf("\n", end) < 0 ? text.length : text.indexOf("\n", end);
-  } else {
-    end += /^\.(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(end))?.[0].length ?? 0;
+    if (/^(RIGHT|FULL|CROSS|NATURAL)$/i.test(textOf(word)))
+      return [index, /^JOIN$/i.test(textOf(next)) ? next.end : word.end];
+    const eol = text.indexOf("\n", word.end);
+    return [index, eol < 0 ? text.length : eol];
   }
-  return [index, end];
+  const qualified =
+    textOf(next) === "." &&
+    next.start === word.end &&
+    after?.start === next.end &&
+    (after.kind === "name" || after.kind === "keyword");
+  return [index, qualified ? after.end : word.end];
 }
 
 // A short alias for a table: its underscore-separated initials, made a bare name the parser accepts
@@ -109,9 +116,10 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     const result = text.trim() ? parse() : null;
     // An error at the very end is just unfinished typing.
     const error = result && "error" in result && result.error.index < text.trimEnd().length ? result.error : null;
-    const [from, to] = error ? errorSpan(text, error.index, error.code) : [-1, -1];
-    const tokens = tokenizeJoinText(text).map((t) => (t.kind === "punct" ? { ...t, kind: "op" } : t));
-    hlText.replaceChildren(...tokenSpans(text, tokens, (t) => t.kind !== "space" && t.start >= from && t.start < to));
+    const tokens = tokenizeJoinText(text);
+    const [from, to] = error ? errorSpan(text, tokens, error.index, error.code) : [-1, -1];
+    const shown = tokens.map((t) => (t.kind === "punct" ? { ...t, kind: "op" } : t));
+    hlText.replaceChildren(...tokenSpans(text, shown, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     // The trailing newline keeps the copy as tall as the field.
     hlText.append("\n");
   }

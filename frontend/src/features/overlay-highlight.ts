@@ -1,3 +1,4 @@
+import { el } from "../core/dom.js";
 // Colouring for a text field by drawing a copy behind it (the field's own text
 // goes transparent), so the native caret, selection and IME keep working.
 // Re-renders on typing, on programmatic `.value` writes (which fire no input
@@ -32,9 +33,7 @@ export function tokenSpans(
   isError: (t: { kind: string; start: number; end: number }) => boolean,
 ): HTMLSpanElement[] {
   return tokens.map((t) => {
-    const span = document.createElement("span");
-    span.className = `t-${t.kind}${isError(t) ? " t-err" : ""}`;
-    span.textContent = text.slice(t.start, t.end);
+    const span = el("span", `t-${t.kind}${isError(t) ? " t-err" : ""}`, text.slice(t.start, t.end));
     return span;
   });
 }

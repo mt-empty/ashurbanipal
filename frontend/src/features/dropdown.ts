@@ -1,4 +1,4 @@
-import { $ } from "../core/dom.js";
+import { $, el } from "../core/dom.js";
 import { fuzzyFilter } from "../lib/fuzzy.js";
 
 // A button that opens a menu of rows, each a label on the left and a note on
@@ -48,19 +48,17 @@ function renderRows(opts: DropdownOptions, query: string): void {
   const shown = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
   list.replaceChildren(
     ...shown.map((o) => {
-      const row = document.createElement("button");
+      const row = el("button");
       row.type = "button";
       row.className = "dd-row";
       row.setAttribute("role", "option");
       row.setAttribute("aria-selected", String(o.value === opts.value));
       row.dataset.value = o.value;
-      const name = document.createElement("span");
+      const name = el("span");
       name.textContent = o.label;
       row.appendChild(name);
       if (o.note) {
-        const note = document.createElement("span");
-        note.className = "dd-note";
-        note.textContent = o.note;
+        const note = el("span", "dd-note", o.note);
         row.appendChild(note);
       }
       if (o.blocked) {
@@ -76,9 +74,7 @@ function renderRows(opts: DropdownOptions, query: string): void {
     }),
   );
   if (shown.length === 0) {
-    const none = document.createElement("p");
-    none.className = "dd-none";
-    none.textContent = `Nothing matches ${query.trim()}.`;
+    const none = el("p", "dd-none", `Nothing matches ${query.trim()}.`);
     list.appendChild(none);
   }
 }
@@ -105,7 +101,7 @@ function open(button: HTMLButtonElement, opts: DropdownOptions): void {
 }
 
 export function createDropdown(opts: DropdownOptions): HTMLButtonElement {
-  const button = document.createElement("button");
+  const button = el("button");
   button.type = "button";
   button.className = `dd${opts.mono ? " mono" : ""}${opts.invalid ? " bad" : ""}`;
   button.setAttribute("aria-label", opts.ariaLabel);

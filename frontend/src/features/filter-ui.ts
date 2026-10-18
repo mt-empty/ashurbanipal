@@ -1,6 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
-import { $, reportError } from "../core/dom.js";
+import { $, el, reportError } from "../core/dom.js";
 import {
   applyScopeParams,
   getLastPayload,
@@ -113,7 +113,7 @@ const CARET_MIRROR_PROPS: Extract<keyof CSSStyleDeclaration, string>[] = [
 // plain <input>, which has no native API for this. Returns the caret's x
 // within the input's own box.
 function measureCaretX(input: HTMLInputElement): number {
-  const mirror = document.createElement("div");
+  const mirror = el("div");
   const computed = getComputedStyle(input);
   Object.assign(mirror.style, {
     position: "absolute",
@@ -129,7 +129,7 @@ function measureCaretX(input: HTMLInputElement): number {
   const computedStyle = computed as unknown as Record<string, string>;
   for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
   mirror.textContent = input.value.slice(0, input.selectionStart ?? 0);
-  const marker = document.createElement("span");
+  const marker = el("span");
   marker.textContent = "​";
   mirror.appendChild(marker);
   document.body.appendChild(mirror);
@@ -250,22 +250,18 @@ let cvRequestToken = 0;
 function renderCommonValues(values: CommonValue[], column: string): void {
   const list = $("cv-pop-list");
   if (values.length === 0) {
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = "no common values available";
+    const p = el("p", "cv-empty", "no common values available");
     list.replaceChildren(p);
     return;
   }
   list.replaceChildren(
     ...values.map((v) => {
-      const btn = document.createElement("button");
+      const btn = el("button");
       btn.type = "button";
       btn.className = "cv-value";
-      const val = document.createElement("span");
+      const val = el("span");
       val.textContent = v.value;
-      const freq = document.createElement("span");
-      freq.className = "cv-freq";
-      freq.textContent = `${Math.round(v.freq * 100)}%`;
+      const freq = el("span", "cv-freq", `${Math.round(v.freq * 100)}%`);
       btn.append(val, freq);
       btn.onclick = () => {
         $("cv-pop").hidePopover();
@@ -282,9 +278,7 @@ export async function showCommonValues(e: MouseEvent, column: string): Promise<v
   cvAnchor = btn;
   cvAnchor.style.anchorName = "--cv-anchor";
   const list = $("cv-pop-list");
-  const loading = document.createElement("p");
-  loading.className = "cv-empty";
-  loading.textContent = "loading…";
+  const loading = el("p", "cv-empty", "loading…");
   list.replaceChildren(loading);
   $("cv-pop").showPopover();
   // A second header's ▾ can be clicked before the first request resolves;
@@ -296,9 +290,7 @@ export async function showCommonValues(e: MouseEvent, column: string): Promise<v
     values = await fetchCommonValues(column);
   } catch (err) {
     if (token !== cvRequestToken) return;
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = (err as Error).message;
+    const p = el("p", "cv-empty", (err as Error).message);
     list.replaceChildren(p);
     return;
   }

@@ -1,4 +1,4 @@
-import { $, copyText } from "../core/dom.js";
+import { $, copyText, el } from "../core/dom.js";
 import { state } from "../core/state.js";
 import type { Column, Row } from "../core/types.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
@@ -15,14 +15,12 @@ export function buildRecordEntries(columns: Column[], row: Row): Node[] {
     // A join row is grouped by the table each column came from.
     if (col.join !== undefined && col.join !== group) {
       group = col.join;
-      const heading = document.createElement("dt");
-      heading.className = "record-group";
-      heading.textContent = col.table ?? "";
+      const heading = el("dt", "record-group", col.table ?? "");
       nodes.push(heading);
     }
-    const dt = document.createElement("dt");
+    const dt = el("dt");
     dt.textContent = col.name;
-    const dd = document.createElement("dd");
+    const dd = el("dd");
     const raw = row[col.name];
     // Nothing to copy for a null field, but the grid's three-column
     // alignment still needs a cell here.
@@ -40,8 +38,7 @@ export function buildRecordEntries(columns: Column[], row: Row): Node[] {
           dd.textContent = raw;
         }
       } else dd.appendChild(formatCellValue(col, raw));
-      const btn = document.createElement("button");
-      btn.className = "copy";
+      const btn = el("button", "copy");
       btn.setAttribute("aria-label", "copy cell value");
       btn.textContent = "⧉";
       btn.onclick = () => copyText(raw, btn);
