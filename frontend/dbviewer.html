@@ -2240,9 +2240,7 @@ function attachOverlayHighlight(field, render2) {
 }
 function tokenSpans(text, tokens, isError) {
   return tokens.map((t) => {
-    const span = document.createElement("span");
-    span.className = `t-${t.kind}${isError(t) ? " t-err" : ""}`;
-    span.textContent = text.slice(t.start, t.end);
+    const span = el("span", `t-${t.kind}${isError(t) ? " t-err" : ""}`, text.slice(t.start, t.end));
     return span;
   });
 }
@@ -2634,19 +2632,17 @@ function renderRows(opts, query) {
   const shown2 = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
   list.replaceChildren(
     ...shown2.map((o) => {
-      const row2 = document.createElement("button");
+      const row2 = el("button");
       row2.type = "button";
       row2.className = "dd-row";
       row2.setAttribute("role", "option");
       row2.setAttribute("aria-selected", String(o.value === opts.value));
       row2.dataset.value = o.value;
-      const name = document.createElement("span");
+      const name = el("span");
       name.textContent = o.label;
       row2.appendChild(name);
       if (o.note) {
-        const note = document.createElement("span");
-        note.className = "dd-note";
-        note.textContent = o.note;
+        const note = el("span", "dd-note", o.note);
         row2.appendChild(note);
       }
       if (o.blocked) {
@@ -2662,9 +2658,7 @@ function renderRows(opts, query) {
     })
   );
   if (shown2.length === 0) {
-    const none = document.createElement("p");
-    none.className = "dd-none";
-    none.textContent = `Nothing matches ${query.trim()}.`;
+    const none = el("p", "dd-none", `Nothing matches ${query.trim()}.`);
     list.appendChild(none);
   }
 }
@@ -2688,7 +2682,7 @@ function open(button, opts) {
   else start?.focus();
 }
 function createDropdown(opts) {
-  const button = document.createElement("button");
+  const button = el("button");
   button.type = "button";
   button.className = `dd${opts.mono ? " mono" : ""}${opts.invalid ? " bad" : ""}`;
   button.setAttribute("aria-label", opts.ariaLabel);
@@ -2978,9 +2972,8 @@ function setJoinChips(chips) {
   const ul = $("tables");
   for (const e of joinEntries) e.li.remove();
   joinEntries = chips.map((c, i) => {
-    const li = document.createElement("li");
-    li.className = `join-chip ${c.className}${i === 0 ? " join-first" : ""}`;
-    const btn = document.createElement("button");
+    const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
+    const btn = el("button");
     btn.type = "button";
     btn.textContent = c.label;
     btn.title = c.title;
@@ -3016,30 +3009,21 @@ function clearStructureCache() {
 }
 var requestToken = 0;
 function msg(text) {
-  const p = document.createElement("p");
-  p.className = "refby-empty";
-  p.textContent = text;
+  const p = el("p", "refby-empty", text);
   return p;
 }
 function row(text, detail) {
-  const div = document.createElement("div");
-  div.className = "structure-row";
-  div.textContent = text;
+  const div = el("div", "structure-row", text);
   if (detail) {
-    const d = document.createElement("div");
-    d.className = "structure-row-detail";
-    d.textContent = detail;
+    const d = el("div", "structure-row-detail", detail);
     div.appendChild(d);
   }
   return div;
 }
 function section(label, rows, emptyText) {
-  const wrap2 = document.createElement("div");
-  wrap2.className = "structure-section";
-  const heading = document.createElement("span");
-  heading.className = "section-label";
-  heading.textContent = label;
-  const list = document.createElement("div");
+  const wrap2 = el("div", "structure-section");
+  const heading = el("span", "section-label", label);
+  const list = el("div");
   list.replaceChildren(...rows.length ? rows : [msg(emptyText)]);
   wrap2.append(heading, list);
   return wrap2;
@@ -3628,13 +3612,16 @@ function renderSavedChips(actions) {
   lastRendered = key;
   const current2 = getAppliedJoin();
   const inSaved = saved.some((s) => s.text === state.join);
-  const chips = saved.map((s) => ({
-    label: `\u22C8 ${s.name}`,
-    title: `${s.name} \u2014 ${s.text.replaceAll("\n", " ")}`,
-    className: "saved",
-    active: s.text === state.join,
-    run: () => actions.open(s.text)
-  }));
+  const chips = saved.map((s) => {
+    const active = s.text === state.join;
+    return {
+      label: `\u22C8 ${s.name}`,
+      title: active ? `${s.name}: click to edit, rename or delete` : `${s.name} \u2014 ${s.text.replaceAll("\n", " ")}`,
+      className: "saved",
+      active,
+      run: active ? actions.edit : () => actions.open(s.text)
+    };
+  });
   if (current2 && !inSaved) {
     chips.push({
       label: `\u22C8 ${joinLabel(current2)}`,
@@ -3684,21 +3671,17 @@ function createSuggestList(opts) {
   const render2 = () => {
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
-        const btn = document.createElement("button");
+        const btn = el("button");
         btn.type = "button";
         const text = [suggestion.label, suggestion.note, suggestion.tag].filter(Boolean).join(" \xB7 ");
         btn.title = text;
-        const name = document.createElement("span");
+        const name = el("span");
         name.textContent = suggestion.label;
         btn.appendChild(name);
         if (suggestion.note || suggestion.tag) {
-          const note = document.createElement("span");
-          note.className = "sg-note";
-          note.textContent = suggestion.note ?? "";
+          const note = el("span", "sg-note", suggestion.note ?? "");
           if (suggestion.tag) {
-            const tag = document.createElement("span");
-            tag.className = "sg-tag";
-            tag.textContent = suggestion.tag;
+            const tag = el("span", "sg-tag", suggestion.tag);
             note.appendChild(tag);
           }
           btn.appendChild(note);
@@ -3785,16 +3768,20 @@ function draftText(draft) {
   const select = draft.columns.some((c) => c !== null) && picked.length > 0 ? `SELECT ${picked.join(", ")}` : "SELECT *";
   return [select, ...lines].join("\n");
 }
-function errorSpan(text, index, code) {
-  const word = /^(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(index))?.[0] ?? text.slice(index, index + 1);
-  let end = index + word.length;
+function errorSpan(text, tokens, index, code) {
+  const words = tokens.filter((t) => t.kind !== "space");
+  const at = words.findIndex((t) => t.start <= index && index < t.end);
+  if (at < 0) return [index, index + 1];
+  const [word, next, after] = [words[at], words[at + 1], words[at + 2]];
+  const textOf = (t) => t ? text.slice(t.start, t.end) : "";
   if (code === "unsupported-keyword") {
-    if (/^(RIGHT|FULL|CROSS|NATURAL)$/i.test(word)) end += /^\s+JOIN\b/i.exec(text.slice(end))?.[0].length ?? 0;
-    else end = text.indexOf("\n", end) < 0 ? text.length : text.indexOf("\n", end);
-  } else {
-    end += /^\.(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)/.exec(text.slice(end))?.[0].length ?? 0;
+    if (/^(RIGHT|FULL|CROSS|NATURAL)$/i.test(textOf(word)))
+      return [index, /^JOIN$/i.test(textOf(next)) ? next.end : word.end];
+    const eol = text.indexOf("\n", word.end);
+    return [index, eol < 0 ? text.length : eol];
   }
-  return [index, end];
+  const qualified = textOf(next) === "." && next.start === word.end && after?.start === next.end && (after.kind === "name" || after.kind === "keyword");
+  return [index, qualified ? after.end : word.end];
 }
 function aliasFor(table, taken) {
   const initials = table.split("_").filter(Boolean).map((w) => w[0]).join("").toLowerCase().replace(/[^a-z0-9_]/g, "");
@@ -3824,9 +3811,10 @@ function mountJoinSql(onChange) {
     field.rows = Math.max(5, text.split("\n").length + 1);
     const result = text.trim() ? parse() : null;
     const error = result && "error" in result && result.error.index < text.trimEnd().length ? result.error : null;
-    const [from, to] = error ? errorSpan(text, error.index, error.code) : [-1, -1];
-    const tokens = tokenizeJoinText(text).map((t) => t.kind === "punct" ? { ...t, kind: "op" } : t);
-    hlText.replaceChildren(...tokenSpans(text, tokens, (t) => t.kind !== "space" && t.start >= from && t.start < to));
+    const tokens = tokenizeJoinText(text);
+    const [from, to] = error ? errorSpan(text, tokens, error.index, error.code) : [-1, -1];
+    const shown2 = tokens.map((t) => t.kind === "punct" ? { ...t, kind: "op" } : t);
+    hlText.replaceChildren(...tokenSpans(text, shown2, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     hlText.append("\n");
   }
   attachOverlayHighlight(field, render2);
@@ -3986,9 +3974,7 @@ function refresh() {
 }
 function coloured(text) {
   return tokenizeJoinText(text).map((t) => {
-    const span = document.createElement("span");
-    span.className = t.kind === "keyword" ? "t-keyword" : "";
-    span.textContent = text.slice(t.start, t.end);
+    const span = el("span", t.kind === "keyword" ? "t-keyword" : "", text.slice(t.start, t.end));
     return span;
   });
 }
@@ -4032,6 +4018,7 @@ function openSaved(text) {
 function refreshSavedChips() {
   renderSavedChips({
     open: openSaved,
+    edit: () => openJoinDialog(),
     startNew: () => openJoinDialog({ fresh: true }),
     saveCurrent: () => openJoinDialog({ focusName: true })
   });
@@ -4113,40 +4100,32 @@ function splitColumnKey(key) {
   const join = def.tables.findIndex((t) => effectiveName(t) === alias);
   return join < 0 ? null : { join, column: m[3] };
 }
-function buildBands(columns) {
+function buildBands(columns, heads) {
   const def = getAppliedJoin();
   if (!def) return null;
-  const tr = document.createElement("tr");
-  tr.className = "bands";
-  tr.appendChild(document.createElement("th")).className = "row-actions";
+  const tr = el("tr", "bands");
+  tr.appendChild(el("th", "row-actions"));
   let band = null;
   columns.forEach((col, i) => {
     if (col.join === void 0) return;
-    if (band && band.dataset.band === String(col.join)) {
-      band.dataset.end = String(i);
-      return;
+    if (band?.dataset.band !== String(col.join)) {
+      const t = def.tables[col.join];
+      band = el("th", "band");
+      band.dataset.band = String(col.join);
+      band.dataset.run = String(tr.cells.length);
+      const pill = el("span", "band-pill", t.alias === null ? t.table : `${t.table} ${t.alias}`);
+      pill.title = pill.textContent;
+      band.appendChild(pill);
+      tr.appendChild(band);
     }
-    const t = def.tables[col.join];
-    band = document.createElement("th");
-    band.className = "band";
-    band.dataset.band = String(col.join);
-    band.dataset.start = String(i);
-    band.dataset.end = String(i);
-    const pill = document.createElement("span");
-    pill.className = "band-pill";
-    pill.textContent = t.alias === null ? t.table : `${t.table} ${t.alias}`;
-    pill.title = pill.textContent;
-    band.appendChild(pill);
-    tr.appendChild(band);
+    heads[i].dataset.run = band.dataset.run;
   });
   return tr;
 }
 function refreshBands() {
-  const heads = [...$("thead").querySelectorAll("th[data-join]")];
-  for (const band of $("thead").querySelectorAll("th.band")) {
-    const from = Number(band.dataset.start);
-    const to = Number(band.dataset.end);
-    const visible = heads.slice(from, to + 1).filter((h) => !h.classList.contains("col-hidden")).length;
+  const thead2 = $("thead");
+  for (const band of thead2.querySelectorAll("th.band")) {
+    const visible = thead2.querySelectorAll(`th[data-join][data-run="${band.dataset.run}"]:not(.col-hidden)`).length;
     band.colSpan = Math.max(visible, 1);
     band.classList.toggle("col-hidden", visible === 0);
   }
@@ -4155,7 +4134,7 @@ function showJoinNotice(text, actions) {
   $("join-notice-text").textContent = text;
   $("join-notice-actions").replaceChildren(
     ...actions.map((a) => {
-      const b = document.createElement("button");
+      const b = el("button");
       b.type = "button";
       b.className = "btn";
       b.textContent = a.label;
@@ -4178,14 +4157,11 @@ function updateJoinChrome() {
   $("payload").hidden = join;
 }
 function buildEmptyJoin(onLeft) {
-  const box = document.createElement("div");
-  box.className = "empty-join";
-  const title = document.createElement("p");
+  const box = el("div", "empty-join");
+  const title = el("p");
   title.textContent = "No rows match this join.";
-  const why = document.createElement("p");
-  why.className = "muted-note";
-  why.textContent = "An inner join drops rows without a match. A left join keeps them.";
-  const btn = document.createElement("button");
+  const why = el("p", "muted-note", "An inner join drops rows without a match. A left join keeps them.");
+  const btn = el("button");
   btn.type = "button";
   btn.className = "btn";
   btn.textContent = "Switch to left join";
@@ -4260,7 +4236,7 @@ var CARET_MIRROR_PROPS = [
   "wordSpacing"
 ];
 function measureCaretX(input2) {
-  const mirror = document.createElement("div");
+  const mirror = el("div");
   const computed = getComputedStyle(input2);
   Object.assign(mirror.style, {
     position: "absolute",
@@ -4273,7 +4249,7 @@ function measureCaretX(input2) {
   const computedStyle = computed;
   for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
   mirror.textContent = input2.value.slice(0, input2.selectionStart ?? 0);
-  const marker = document.createElement("span");
+  const marker = el("span");
   marker.textContent = "\u200B";
   mirror.appendChild(marker);
   document.body.appendChild(mirror);
@@ -4372,22 +4348,18 @@ var cvRequestToken = 0;
 function renderCommonValues(values, column) {
   const list = $("cv-pop-list");
   if (values.length === 0) {
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = "no common values available";
+    const p = el("p", "cv-empty", "no common values available");
     list.replaceChildren(p);
     return;
   }
   list.replaceChildren(
     ...values.map((v) => {
-      const btn = document.createElement("button");
+      const btn = el("button");
       btn.type = "button";
       btn.className = "cv-value";
-      const val = document.createElement("span");
+      const val = el("span");
       val.textContent = v.value;
-      const freq = document.createElement("span");
-      freq.className = "cv-freq";
-      freq.textContent = `${Math.round(v.freq * 100)}%`;
+      const freq = el("span", "cv-freq", `${Math.round(v.freq * 100)}%`);
       btn.append(val, freq);
       btn.onclick = () => {
         $("cv-pop").hidePopover();
@@ -4403,9 +4375,7 @@ async function showCommonValues(e, column) {
   cvAnchor = btn;
   cvAnchor.style.anchorName = "--cv-anchor";
   const list = $("cv-pop-list");
-  const loading = document.createElement("p");
-  loading.className = "cv-empty";
-  loading.textContent = "loading\u2026";
+  const loading = el("p", "cv-empty", "loading\u2026");
   list.replaceChildren(loading);
   $("cv-pop").showPopover();
   const token = ++cvRequestToken;
@@ -4414,9 +4384,7 @@ async function showCommonValues(e, column) {
     values = await fetchCommonValues(column);
   } catch (err) {
     if (token !== cvRequestToken) return;
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = err.message;
+    const p = el("p", "cv-empty", err.message);
     list.replaceChildren(p);
     return;
   }
@@ -4446,22 +4414,17 @@ async function loadSiblings() {
   $("siblings-dot").className = `dot ${down > 0 ? "down" : "up"}`;
   $("siblings-list").replaceChildren(
     ...siblings.map((s) => {
-      const a = document.createElement("a");
+      const a = el("a");
       a.href = s.base_url;
       a.target = "_blank";
       a.rel = "noopener";
       a.className = "sibling-row";
-      const dot = document.createElement("span");
-      dot.className = `dot ${s.healthy ? "up" : "down"}`;
+      const dot = el("span", `dot ${s.healthy ? "up" : "down"}`);
       dot.setAttribute("role", "img");
       dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
-      const name = document.createElement("span");
-      name.className = "sibling-name";
-      name.textContent = s.name;
+      const name = el("span", "sibling-name", s.name);
       name.title = s.name;
-      const state2 = document.createElement("span");
-      state2.className = "sibling-state";
-      state2.textContent = s.healthy ? "up \u2197" : "down \u2197";
+      const state2 = el("span", "sibling-state", s.healthy ? "up \u2197" : "down \u2197");
       a.append(dot, name, state2);
       return a;
     })
@@ -4661,9 +4624,7 @@ var cache3 = /* @__PURE__ */ new Map();
 var cacheKey2 = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
 var renderTokens = /* @__PURE__ */ new Map();
 function msg2(text) {
-  const p = document.createElement("p");
-  p.className = "refby-empty";
-  p.textContent = text;
+  const p = el("p", "refby-empty", text);
   return p;
 }
 function drillIn(entry, row2, dismiss) {
@@ -4679,7 +4640,7 @@ function renderList(container, entries, row2, dismiss) {
   container.replaceChildren(
     ...entries.map((entry) => {
       const label = entry.schema ? `${entry.schema}.${entry.table}` : entry.table;
-      const btn = document.createElement("button");
+      const btn = el("button");
       btn.type = "button";
       btn.className = "refby-entry";
       btn.textContent = `\u2192 ${label} (${entry.columns.map((c) => c.from).join(", ")})`;
@@ -4733,14 +4694,12 @@ function buildRecordEntries(columns, row2) {
   for (const col of columns) {
     if (col.join !== void 0 && col.join !== group) {
       group = col.join;
-      const heading = document.createElement("dt");
-      heading.className = "record-group";
-      heading.textContent = col.table ?? "";
+      const heading = el("dt", "record-group", col.table ?? "");
       nodes.push(heading);
     }
-    const dt = document.createElement("dt");
+    const dt = el("dt");
     dt.textContent = col.name;
-    const dd = document.createElement("dd");
+    const dd = el("dd");
     const raw = row2[col.name];
     let action = document.createElement("span");
     if (raw == null) dd.textContent = "\u2205";
@@ -4754,8 +4713,7 @@ function buildRecordEntries(columns, row2) {
           dd.textContent = raw;
         }
       } else dd.appendChild(formatCellValue(col, raw));
-      const btn = document.createElement("button");
-      btn.className = "copy";
+      const btn = el("button", "copy");
       btn.setAttribute("aria-label", "copy cell value");
       btn.textContent = "\u29C9";
       btn.onclick = () => copyText(raw, btn);
@@ -4810,32 +4768,25 @@ function openRecordView(columns, row2) {
 // src/features/grid.ts
 function renderHeader(columns) {
   const hidden = hiddenColumnsForTable();
-  const tr = document.createElement("tr");
-  const actionsTh = document.createElement("th");
-  actionsTh.className = "row-actions";
+  const tr = el("tr");
+  const actionsTh = el("th", "row-actions");
   tr.appendChild(actionsTh);
   for (const col of columns) {
-    const th = document.createElement("th");
+    const th = el("th");
     th.dataset.col = col.name;
     if (col.join !== void 0) th.dataset.join = String(col.join);
     const minWidth = columnMinWidth(col.name);
     if (minWidth) th.style.minWidth = `${minWidth}px`;
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
-    const typeCode = document.createElement("code");
-    typeCode.className = "col-type";
-    typeCode.textContent = col.type;
+    const typeCode = el("code", "col-type", col.type);
     typeCode.title = col.type;
-    const head = document.createElement("span");
-    head.className = "th-name";
-    const nameEl = document.createElement("span");
-    nameEl.className = "col-name";
-    nameEl.textContent = col.name;
+    const head = el("span", "th-name");
+    const nameEl = el("span", "col-name", col.name);
     nameEl.title = col.comment ? `${col.name} \u2014 ${col.comment}` : col.name;
     if (col.key === "pk" || col.key === "fk") {
       const keyLabel = col.key === "pk" ? col.references ? `primary key, also references ${col.references.table}.${col.references.column}` : "primary key" : `foreign key, references ${col.references.table}.${col.references.column}`;
-      const icon = document.createElement("span");
-      icon.className = "key-icon";
+      const icon = el("span", "key-icon");
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "\u{1F511}" : "\u{1F517}";
@@ -4857,7 +4808,7 @@ function renderHeader(columns) {
       rememberSort();
       loadData({ resetScroll: false });
     };
-    const cvBtn = document.createElement("button");
+    const cvBtn = el("button");
     cvBtn.type = "button";
     cvBtn.className = "common-values-btn";
     cvBtn.setAttribute("aria-label", `common values for ${col.name}`);
@@ -4870,14 +4821,13 @@ function renderHeader(columns) {
     th.append(head, typeCode);
     tr.appendChild(th);
   }
-  const bands = buildBands(columns);
+  const bands = buildBands(columns, [...tr.cells].slice(1));
   $("thead").replaceChildren(...bands ? [bands, tr] : [tr]);
   if (bands) refreshBands();
 }
 function renderEmptyState(columnCount) {
-  const emptyRow = document.createElement("tr");
-  emptyRow.className = "empty";
-  const td = document.createElement("td");
+  const emptyRow = el("tr", "empty");
+  const td = el("td");
   td.colSpan = columnCount;
   const join = getAppliedJoin();
   if (join && state.offset === 0 && state.filter === "" && join.joins.some((j) => j.type === "inner")) {
@@ -4912,20 +4862,16 @@ function buildCell(col, row2, hidden) {
   td.dataset.col = col.name;
   if (hidden.has(col.name)) td.classList.add("col-hidden");
   if (isNull) {
-    const span = document.createElement("span");
-    span.className = "cell-text";
-    span.textContent = "\u2205";
+    const span = el("span", "cell-text", "\u2205");
     td.appendChild(span);
-    const filterBtn2 = document.createElement("button");
-    filterBtn2.className = "filter-eq";
+    const filterBtn2 = el("button", "filter-eq");
     filterBtn2.setAttribute("aria-label", "filter by null");
     filterBtn2.textContent = "=";
     filterBtn2.onclick = (e) => {
       e.stopPropagation();
       applyFilterClause(columnKey(col), "IS NULL");
     };
-    const actions = document.createElement("span");
-    actions.className = "cell-actions";
+    const actions = el("span", "cell-actions");
     actions.appendChild(filterBtn2);
     td.appendChild(actions);
     return td;
@@ -4991,8 +4937,8 @@ function renderColumnMenu(columns) {
   const hidden = hiddenColumnsForTable();
   $("columns-pop-list").replaceChildren(
     ...columns.map((col) => {
-      const label = document.createElement("label");
-      const input2 = document.createElement("input");
+      const label = el("label");
+      const input2 = el("input");
       input2.type = "checkbox";
       input2.checked = !hidden.includes(col.name);
       input2.onchange = () => setColumnVisibility(col.name, !input2.checked);
@@ -5016,7 +4962,7 @@ function renderRows2(data, newRowKeys, pkNames = []) {
   const tbody = $("tbody");
   tbody.replaceChildren(
     ...data.rows.map((row2) => {
-      const tr = document.createElement("tr");
+      const tr = el("tr");
       if (newRowKeys?.has(rowKey(pkNames, row2))) tr.classList.add("row-new");
       tr.appendChild(buildRowActionCell(data.columns, row2));
       for (const col of data.columns) {
