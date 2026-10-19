@@ -5,7 +5,7 @@ description = "Flask port of Ashurbanipal — spec/protocol.md read-only DB-brow
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "MT" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -42,7 +42,7 @@ filterwarnings = [
 
 [tool.ruff]
 line-length = 115
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "PTH"]

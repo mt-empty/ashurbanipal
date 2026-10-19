@@ -91,15 +91,3 @@ def test_filter_builder_fixture(case: dict) -> None:
     else:
         with pytest.raises(filter_module.FilterError):
             filter_module.parse(raw)
-
-
-def test_deeply_nested_json_under_the_byte_bound_is_a_filter_error_not_a_crash(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Python 3.11's decoder overflows near 1000 levels, 3.12's only past the byte bound; force it.
-    def overflow(_: str) -> None:
-        raise RecursionError("maximum recursion depth exceeded")
-
-    monkeypatch.setattr(filter_module.json, "loads", overflow)
-    with pytest.raises(filter_module.FilterError):
-        filter_module.parse("[" * 2000 + "]" * 2000)
