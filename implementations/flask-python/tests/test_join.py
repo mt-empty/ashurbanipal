@@ -15,7 +15,7 @@ import pytest
 from flask import Flask
 
 from ashurbanipal.config import Config
-from ashurbanipal.db import BadJoin, FilterParseError, NotAllowed, QueryTimeout, wrap_driver_errors
+from ashurbanipal.db import BadJoin, BadParam, FilterParseError, NotAllowed, QueryTimeout, wrap_driver_errors
 from ashurbanipal.db.postgres import type_class as pg_type_class
 from ashurbanipal.db.sqlite import SqliteSource
 from ashurbanipal.db.sqlite import type_class as sqlite_type_class
@@ -126,7 +126,7 @@ def test_plan_join_rejects_unknown_names_hostile_names_and_incompatible_pairs() 
     plan_join(spec, [_orders(), _users()], _opts())
 
     hostile = parse_join(JOIN.replace('"right": "id"', '"right": "id\\"; drop table users; --"'))
-    with pytest.raises(NotAllowed):
+    with pytest.raises(BadJoin):
         plan_join(hostile, [_orders(), _users()], _opts())
 
     cross = parse_join(JOIN.replace('"column": "user_id"', '"column": "status"'))
@@ -177,7 +177,7 @@ def test_filter_and_sort_positions_are_range_checked() -> None:
     spec = parse_join(JOIN)
     with pytest.raises(FilterParseError):
         plan_join(spec, [_orders(), _users()], _opts(filter=[Condition(column="id", op="IS NULL", join=2)]))
-    with pytest.raises(BadJoin):
+    with pytest.raises(BadParam):
         plan_join(spec, [_orders(), _users()], _opts(sort_join=1))
     with pytest.raises(NotAllowed):
         plan_join(spec, [_orders(), _users()], _opts(sort="email"))
@@ -373,13 +373,13 @@ def test_errors_use_problem_json_with_informative_titles(client) -> None:
     assert resp.status_code == 400
     assert resp.content_type == "application/problem+json"
     body = resp.get_json()
-    assert body["code"] == "invalid_parameter"
+    assert body["code"] == "invalid_join"
     title = body["title"].lower()
     assert "users.email (text)" in title and "orders.user_id (integer)" in title
 
     hostile = _get(client, _users_orders("left").replace('"users"', '"users\\"; drop table users; --"'))
-    assert hostile.get_json()["code"] == "unknown_table"
-    assert _get(client, _users_orders("left"), sort_join=1).status_code == 400
+    assert hostile.get_json()["code"] == "invalid_join"
+    assert _get(client, _users_orders("left"), sort_join=1).get_json()["code"] == "invalid_parameter"
     assert _get(client, _users_orders("left"), sort="id", sort_join="x").status_code == 400
     assert _get(client, _users_orders("left"), schema="other").get_json()["code"] == "unknown_schema"
     assert client.get("/__ashurbanipal/api/tables/join").status_code == 400

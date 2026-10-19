@@ -1,6 +1,6 @@
 # Join builder: form and SQL-like text
 
-> **Status:** OPEN · **Area:** frontend, spec, docs, e2e
+> **Status:** DONE · **Area:** frontend, spec, docs, e2e · **Ref:** implemented 2026-10-16 in `frontend/src` (`features/join-*`, `lib/join-*`), `spec/join-dsl.md` and the `join-*.spec.ts` Playwright suites
 
 Frontend for story 40's join route. Read-only. The text a user types is
 parsed in the browser into the structured `join` object; no SQL text
@@ -203,3 +203,12 @@ Playwright (assert on DOM, text and requests, not screenshots):
 
 Docs: `spec/join-dsl.md`, `spec/filter-dsl.md`, and the frontend guides
 that cover new controls.
+
+## Left open after building
+
+- **Offline demo.** `docs/demo` has no `/tables/join`; the join button there ends in an error line. Hiding it or adding a fixture is still to decide.
+- **Timeout text.** The limit is the host's `query_timeout_secs`, so the notice says "longer than the time limit", not "5 seconds" as board T does.
+- **Saved chips and the 3-line cap.** Saved-join chips share the table chips' cap, so on a database with many tables they sit behind `+ N more` (the active join chip stays visible).
+- **Enum label.** Postgres reports every enum (and citext) as `USER-DEFINED`; the hint calls it `enum`, and lets it pair with `text` in case it is citext. A column type with no known class is never greyed; the server answers 400.
+- **Columns come from one row.** The form and the SQL suggestions read a table's columns from `/tables/data?limit=1`; the table listing has names only.
+- **No SELECT-list suggestions.** The text field suggests tables, `alias.` and columns after `ON`, not in the `SELECT` list; the form's column checklist covers that.

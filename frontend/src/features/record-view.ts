@@ -1,5 +1,5 @@
-import { $, copyText } from "../core/dom.js";
-import { state } from "../core/state.js";
+import { $, copyText, el } from "../core/dom.js";
+import { state, tableInView } from "../core/state.js";
 import type { Column, Row } from "../core/types.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
 import { renderJsonTree } from "../lib/json-tree.js";
@@ -9,10 +9,17 @@ import { renderReferencedBy } from "./referenced-by.js";
 // column:value list, for tables too wide to scan across ----
 export function buildRecordEntries(columns: Column[], row: Row): Node[] {
   const nodes: Node[] = [];
+  let group: number | undefined;
   for (const col of columns) {
-    const dt = document.createElement("dt");
+    // A join row is grouped by the table each column came from.
+    if (col.join !== undefined && col.join !== group) {
+      group = col.join;
+      const heading = el("dt", "record-group", col.table ?? "");
+      nodes.push(heading);
+    }
+    const dt = el("dt");
     dt.textContent = col.name;
-    const dd = document.createElement("dd");
+    const dd = el("dd");
     const raw = row[col.name];
     // Nothing to copy for a null field, but the grid's three-column
     // alignment still needs a cell here.
@@ -30,8 +37,7 @@ export function buildRecordEntries(columns: Column[], row: Row): Node[] {
           dd.textContent = raw;
         }
       } else dd.appendChild(formatCellValue(col, raw));
-      const btn = document.createElement("button");
-      btn.className = "copy";
+      const btn = el("button", "copy");
       btn.setAttribute("aria-label", "copy cell value");
       btn.textContent = "⧉";
       btn.onclick = () => copyText(raw, btn);
@@ -64,9 +70,9 @@ function recordAsJson(columns: Column[], row: Row): string {
   return JSON.stringify(obj, null, 2);
 }
 
-function recordAsInsert(columns: Column[], row: Row): string {
+function recordAsInsert(table: string, columns: Column[], row: Row): string {
   // Identifiers left unquoted — no quote char is portable across all three engines.
-  const target = state.schema ? `${state.schema}.${state.table}` : state.table;
+  const target = state.schema ? `${state.schema}.${table}` : table;
   const cols = columns.map((c) => c.name).join(", ");
   const vals = columns.map((c) => sqlLiteral(c, row[c.name])).join(", ");
   return `INSERT INTO ${target} (${cols})\nVALUES (${vals});`;
@@ -82,11 +88,17 @@ function sqlLiteral(col: Column, raw: string | null): string {
 
 export function openRecordView(columns: Column[], row: Row): void {
   $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
-  renderReferencedBy($("record-referenced-by"), row, () => $<HTMLDialogElement>("record-dialog").close());
+  // Both name one table; a join row has several.
+  const table = tableInView();
+  $("record-referenced-by-wrap").hidden = table === null;
+  const copyInsertBtn = $("record-copy-insert");
+  copyInsertBtn.hidden = table === null;
+  if (table !== null) {
+    renderReferencedBy($("record-referenced-by"), row, () => $<HTMLDialogElement>("record-dialog").close());
+    copyInsertBtn.onclick = () => copyText(recordAsInsert(table, columns, row), copyInsertBtn);
+  }
   const copyRowBtn = $("record-copy-row");
   copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
-  const copyInsertBtn = $("record-copy-insert");
-  copyInsertBtn.onclick = () => copyText(recordAsInsert(columns, row), copyInsertBtn);
   const open = () => $<HTMLDialogElement>("record-dialog").showModal();
   document.startViewTransition ? document.startViewTransition(open) : open();
 }

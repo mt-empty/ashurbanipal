@@ -7,6 +7,7 @@ import { completionAt, endsInUnfinishedWord, tokenizeFilterDsl } from "../src/li
 interface ParserCase {
   name: string;
   input: string;
+  aliases?: string[];
   expect?: unknown[];
 }
 const fixtureUrl = new URL("../../spec/fixtures/parser-tests.json", import.meta.url);

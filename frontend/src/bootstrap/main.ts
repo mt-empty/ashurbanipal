@@ -4,7 +4,9 @@ import { $, reportError } from "../core/dom.js";
 import { getLastPayload, initState, state } from "../core/state.js";
 import { resetColumnWidths } from "../features/column-widths.js";
 import "../features/filter-highlight.js";
+import "../features/join-dialog.js";
 import { clearCommonValueCache } from "../features/filter-ui.js";
+import { clearJoinCatalog } from "../features/join-catalog.js";
 import { loadSiblings } from "../features/siblings.js";
 import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
 import "../features/sticky-header.js";
@@ -62,6 +64,7 @@ $<HTMLButtonElement>("refresh").onclick = () => {
   const btn = $<HTMLButtonElement>("refresh");
   clearStructureCache();
   clearCommonValueCache();
+  clearJoinCatalog();
   resetColumnWidths();
   // Guaranteed one rotation even on a few-ms fetch; the timer (not
   // animationend, which never fires under prefers-reduced-motion) clears it.

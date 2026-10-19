@@ -77,7 +77,7 @@ class JoinSupportTest {
         planJoin(spec, listOf(orders(), users()), opts())
 
         val hostile = spec.copy(joins = listOf(spec.joins[0].copy(on = listOf(OnPair(ColumnPos(0, "user_id"), "id\"; drop table users; --")))))
-        assertThrows(NotAllowedException::class.java) { planJoin(hostile, listOf(orders(), users()), opts()) }
+        assertThrows(BadJoinException::class.java) { planJoin(hostile, listOf(orders(), users()), opts()) }
 
         val cross = spec.copy(joins = listOf(spec.joins[0].copy(on = listOf(OnPair(ColumnPos(0, "status"), "id")))))
         val ex = assertThrows(BadJoinException::class.java) { planJoin(cross, listOf(orders(), users()), opts()) }
@@ -116,7 +116,7 @@ class JoinSupportTest {
         assertThrows(FilterException::class.java) {
             planJoin(spec, listOf(orders(), users()), opts(filter = listOf(Condition(column = "id", op = "IS NULL", join = 2))))
         }
-        assertThrows(BadJoinException::class.java) { planJoin(spec, listOf(orders(), users()), opts(sortJoin = 1)) }
+        assertThrows(BadParameterException::class.java) { planJoin(spec, listOf(orders(), users()), opts(sortJoin = 1)) }
         assertThrows(NotAllowedException::class.java) { planJoin(spec, listOf(orders(), users()), opts(sort = "email")) }
     }
 

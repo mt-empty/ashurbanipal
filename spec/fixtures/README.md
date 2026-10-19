@@ -1,14 +1,15 @@
 # Shared filter fixtures
 
-Two machine-readable fixture sets, generated from the normative docs they
-mirror (`spec/filter-dsl.md` §5 and `spec/protocol.md` §5.4.2). The docs
+Machine-readable fixture sets, generated from the normative docs they
+mirror (`spec/filter-dsl.md` §5, `spec/join-dsl.md` §5 and
+`spec/protocol.md` §5.4.2). The docs
 remain the human-readable source of truth; a change to either doc and its
 fixture file ships in the same PR.
 
 ## `parser-tests.json` — frontend DSL parser (DSL text → AST)
 
 Consumed only by the frontend parser's fixture runner
-(`tools/e2e-tests/tests/filter-parser.spec.ts`), since DSL parsing exists
+(`frontend/test/filter-dsl.test.ts`, `node --test`), since DSL parsing exists
 only in `dbviewer.html`. Not part of backend conformance.
 
 Each entry in `cases`:
@@ -17,6 +18,10 @@ Each entry in `cases`:
   split into its at-limit and over-limit halves).
 - `input` — the DSL text fed to the parser, verbatim (R13/R14/A9's
   generated long inputs are materialized here in full).
+- `aliases` — optional. A join view's table aliases in position order; the
+  parser runs in join mode (`spec/filter-dsl.md` §3), so qualified names
+  resolve and every condition in `expect` carries `join`. Absent means a
+  single-table view.
 - `expect` — the exact AST array the parser must emit
   (`spec/protocol.md` §5.4.2 conditions), compared by deep equality:
   optional fields (`logic` on the first condition, `not` when false,
@@ -26,6 +31,26 @@ Each entry in `cases`:
   `input`) must equal it; when absent, only the rejection itself is
   asserted (exact offsets for mid-string failures are parser-internal
   detail, pinned only where they're unambiguous).
+
+Exactly one of `expect`/`expect_error` is present.
+
+## `join-parser-tests.json` — frontend join parser (join text → `JoinDef`)
+
+Consumed only by `frontend/test/join-parser.test.ts`. Not part of backend
+conformance. Top-level `catalog` maps seed-schema table names to their
+column names; cases run against it unless `no_catalog` is `true`.
+
+Each entry in `cases`:
+
+- `name` — the `spec/join-dsl.md` §5 case ID.
+- `input` — the join text, verbatim.
+- `expect` — the exact `JoinDef` (`spec/join-dsl.md` §3), compared by deep
+  equality. With it, `canonical` — the text `print(def)` must write, which
+  must itself parse back to the same `JoinDef`.
+- `expect_error` — the case must be rejected. `code` is a
+  `spec/join-dsl.md` §4 code; `line` and `column` (1-based) are asserted
+  when present; `suggest` is the closest catalog name when the message
+  offers one. Message text is not pinned.
 
 Exactly one of `expect`/`expect_error` is present.
 

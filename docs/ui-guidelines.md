@@ -106,8 +106,10 @@ should block on.
   did not enter.)*
   - **R6a — What may persist.** Every persistence mechanism — `localStorage`
     and the URL (`history.replaceState()`) alike — may carry the view the
-    user built: selected table, sort, order, page size, offset, and the
-    filter the user authored. It must never carry values read back out of
+    user built: selected table, sort, order, page size, offset, the
+    filter the user authored, and the join the user built — in the URL as
+    its canonical text, and by name in its own `localStorage` key (saved
+    joins, per source and schema). It must never carry values read back out of
     result rows — cell contents, or a primary key lifted from a row to build
     a link.
   - **R6b — Authorship is the test.** A `WHERE` clause the user typed
@@ -146,11 +148,14 @@ should block on.
   it runs on a user click or on the opt-in auto-refresh interval (story 38);
   row identity is the primary key, so a PK-less table gets no tint rather
   than a guessed one; the previous row set lives in memory only and is
-  never persisted (R6); and the fetch itself reports through the normal
+  never persisted (R6); a join view has no primary key to identify a row by,
+  so it gets no tint either; and the fetch itself reports through the normal
   `fetchTableData` chrome, with the new-row count also announced via
   `#status` (R9, no carve-out). *(Derives from: recognition rather than
   recall, visibility of system status.)*
-- **R11 — Sort is remembered per table.** `sort` + `order` persist keyed by
+- **R11 — Sort is remembered per table.** (A join view keeps its sort and
+  hidden columns for the visit only; both reset with the join.) `sort` +
+  `order` persist keyed by
   table name (like hidden columns), so returning to a table restores the
   sort last chosen there — which is what lets R10's refresh surface new
   rows without re-sorting every visit. A restored sort column the backend

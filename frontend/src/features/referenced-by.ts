@@ -1,6 +1,6 @@
 import { api } from "../core/api.js";
-import { $ } from "../core/dom.js";
-import { applyScopeParams, state } from "../core/state.js";
+import { $, el } from "../core/dom.js";
+import { applyScopeParams, state, tableInView } from "../core/state.js";
 import type { ReferencedByEntry, Row } from "../core/types.js";
 import { applyFilterClauses } from "./filter-ui.js";
 import { navigateWithSeededFilter } from "./nav.js";
@@ -31,9 +31,7 @@ const cacheKey = (table: string) => `${state.source ?? ""}\x1f${state.schema ?? 
 const renderTokens = new Map<HTMLElement, number>();
 
 function msg(text: string): HTMLParagraphElement {
-  const p = document.createElement("p");
-  p.className = "refby-empty";
-  p.textContent = text;
+  const p = el("p", "refby-empty", text);
   return p;
 }
 
@@ -53,7 +51,7 @@ function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: R
   container.replaceChildren(
     ...entries.map((entry) => {
       const label = entry.schema ? `${entry.schema}.${entry.table}` : entry.table;
-      const btn = document.createElement("button");
+      const btn = el("button");
       btn.type = "button";
       btn.className = "refby-entry";
       btn.textContent = `→ ${label} (${entry.columns.map((c) => c.from).join(", ")})`;
@@ -81,7 +79,9 @@ function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: R
 export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: () => void): void {
   const token = (renderTokens.get(container) ?? 0) + 1;
   renderTokens.set(container, token);
-  const table = state.table ?? "";
+  // Only offered in a table view: a join row has several tables.
+  const table = tableInView();
+  if (table === null) return;
   // Key captured now, alongside applyScopeParams' read of the same scope,
   // so a mid-flight scope switch can't file the result under the wrong key.
   const key = cacheKey(table);

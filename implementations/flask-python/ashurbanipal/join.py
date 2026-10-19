@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .db import OP_SQL, BadJoin, ColumnRef, KeyKind, NotAllowed, NotAllowedKind
+from .db import OP_SQL, BadJoin, BadParam, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
 from .filter import Condition
 
@@ -193,6 +193,20 @@ class TableMeta:
                 return i
         raise NotAllowed(f"column {column!r}", kind=NotAllowedKind.COLUMN)
 
+    def join_index(self, column: str) -> int:
+        """`index` for a name inside the join value, where a miss is a bad join."""
+        try:
+            return self.index(column)
+        except NotAllowed:
+            raise BadJoin(f"{self.name} has no column {column!r}") from None
+
+
+def unknown_join_table(err: DbError, table: str) -> DbError:
+    """A table named in the join value is part of the join; not_readable stays as it is."""
+    if isinstance(err, NotAllowed) and err.kind == NotAllowedKind.TABLE:
+        return BadJoin(f"unknown table {table!r}")
+    return err
+
 
 @dataclass
 class JoinOpts:
@@ -332,8 +346,8 @@ def plan_join(spec: JoinSpec, tables: list[TableMeta], opts: JoinOpts) -> JoinPl
         resolved = []
         for pair in entry.on:
             lt = tables[pair.left.join]
-            lc = lt.index(pair.left.column)
-            rc = tables[position].index(pair.right)
+            lc = lt.join_index(pair.left.column)
+            rc = tables[position].join_index(pair.right)
             _check_pair(position, lt, lt.columns[lc], tables[position], tables[position].columns[rc])
             resolved.append((pair.left.join, lc, rc))
         ons.append(resolved)
@@ -343,7 +357,7 @@ def plan_join(spec: JoinSpec, tables: list[TableMeta], opts: JoinOpts) -> JoinPl
         for c in spec.columns:
             if c.join >= len(tables):
                 raise BadJoin(f"columns: position {c.join} is not in the join")
-            selection.append((c.join, tables[c.join].index(c.column)))
+            selection.append((c.join, tables[c.join].join_index(c.column)))
     else:
         selection = [(pos, col) for pos, t in enumerate(tables) for col in range(len(t.columns))]
     labels = assign_labels(
@@ -363,11 +377,11 @@ def plan_join(spec: JoinSpec, tables: list[TableMeta], opts: JoinOpts) -> JoinPl
 
     sort = None
     if opts.sort is None and opts.sort_join is not None:
-        raise BadJoin("sort_join needs sort")
+        raise BadParam("sort_join needs sort")
     if opts.sort is not None:
         pos = opts.sort_join if opts.sort_join is not None else 0
         if pos < 0 or pos >= len(tables):
-            raise BadJoin(f"sort_join: position {pos} is not in the join")
+            raise BadParam(f"sort_join: position {pos} is not in the join")
         sort = (pos, tables[pos].index(opts.sort))
 
     return JoinPlan(

@@ -29,7 +29,8 @@ Ashurbanipal skips the whole chain by not needing a new connection: it runs insi
 ## What it does
 
 - Browse tables: paginated rows, click-to-sort columns, primary/foreign-key and column-comment hints.
-- Filter rows with a subset of SQL `WHERE` syntax (no joins, no subqueries, no CTEs, no DML).
+- Filter rows with a subset of SQL `WHERE` syntax (no subqueries, no CTEs, no DML).
+- Join up to four tables with `INNER` or `LEFT` equality joins, built in a form or typed as restricted SQL text; the result is read-only and paged without a total.
 - Works with Postgres, MySQL/MariaDB, and SQLite.
 - Register more than one database and switch between them (currently only one db type at a time); browse across schemas where the engine has them.
 - Link sibling instances and see which are reachable.

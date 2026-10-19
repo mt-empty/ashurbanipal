@@ -1,5 +1,5 @@
 import { api } from "../core/api.js";
-import { $ } from "../core/dom.js";
+import { $, el } from "../core/dom.js";
 import type { Sibling } from "../core/types.js";
 
 // Same class of bug as loadDataToken: a slow health-check round that
@@ -29,22 +29,17 @@ export async function loadSiblings(): Promise<void> {
   $("siblings-dot").className = `dot ${down > 0 ? "down" : "up"}`;
   $("siblings-list").replaceChildren(
     ...siblings.map((s) => {
-      const a = document.createElement("a");
+      const a = el("a");
       a.href = s.base_url;
       a.target = "_blank";
       a.rel = "noopener";
       a.className = "sibling-row";
-      const dot = document.createElement("span");
-      dot.className = `dot ${s.healthy ? "up" : "down"}`;
+      const dot = el("span", `dot ${s.healthy ? "up" : "down"}`);
       dot.setAttribute("role", "img");
       dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
-      const name = document.createElement("span");
-      name.className = "sibling-name";
-      name.textContent = s.name;
+      const name = el("span", "sibling-name", s.name);
       name.title = s.name; // truncation escape hatch
-      const state = document.createElement("span");
-      state.className = "sibling-state";
-      state.textContent = s.healthy ? "up ↗" : "down ↗";
+      const state = el("span", "sibling-state", s.healthy ? "up ↗" : "down ↗");
       a.append(dot, name, state);
       return a;
     }),

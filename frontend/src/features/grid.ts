@@ -1,6 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
-import { $, copyText, qs } from "../core/dom.js";
-import { hiddenColumnsForTable, persist, rememberSort, state } from "../core/state.js";
+import { $, copyText, el, qs } from "../core/dom.js";
+import { hiddenColumns, joinInView, rememberSort, setHiddenColumns, state, tableInView } from "../core/state.js";
 import type { Column, Row, TableData } from "../core/types.js";
 import {
   APPROX_COUNT_TITLE,
@@ -13,37 +13,51 @@ import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { columnMinWidth } from "./column-widths.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
+import { switchToLeftJoin } from "./join-dialog.js";
+import { buildBands, buildEmptyJoin, columnKey, refreshBands } from "./join-view.js";
 import { navigateWithSeededFilter } from "./nav.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
 
+// A focusable control nested in the sortable th — stopPropagation so
+// opening it doesn't also toggle sort.
+function commonValuesButton(table: string, column: string): HTMLButtonElement {
+  const btn = el("button");
+  btn.type = "button";
+  btn.className = "common-values-btn";
+  btn.setAttribute("aria-label", `common values for ${column}`);
+  btn.textContent = "▾";
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    showCommonValues(e, table, column);
+  };
+  return btn;
+}
+
 export function renderHeader(columns: Column[]): void {
-  const hidden = hiddenColumnsForTable();
-  const tr = document.createElement("tr");
-  const actionsTh = document.createElement("th");
-  actionsTh.className = "row-actions";
+  const hidden = hiddenColumns();
+  // Common values are a per-table query; a join column has no single table to ask.
+  const table = tableInView();
+  const tr = el("tr");
+  const actionsTh = el("th", "row-actions");
   tr.appendChild(actionsTh);
   for (const col of columns) {
-    const th = document.createElement("th");
+    const th = el("th");
     th.dataset.col = col.name;
+    if (col.join !== undefined) th.dataset.join = String(col.join);
     const minWidth = columnMinWidth(col.name);
     if (minWidth) th.style.minWidth = `${minWidth}px`;
     if (hidden.includes(col.name)) th.classList.add("col-hidden");
     const label = `${col.name} (${col.type})`;
     // The visible header renders the engine-native type spelling as inline
     // code; `label` stays the plain-text form for the aria-label only.
-    const typeCode = document.createElement("code");
-    typeCode.className = "col-type";
-    typeCode.textContent = col.type;
+    const typeCode = el("code", "col-type", col.type);
     typeCode.title = col.type; // the chip ellipsizes a long spelling (R8)
     // Name, ▾ and the sort arrow share one line; the type chip sits under it.
-    const head = document.createElement("span");
-    head.className = "th-name";
+    const head = el("span", "th-name");
     // Capped in CSS (a 63-char identifier would otherwise set the column's
     // width); the title is the escape hatch (R8).
-    const nameEl = document.createElement("span");
-    nameEl.className = "col-name";
-    nameEl.textContent = col.name;
+    const nameEl = el("span", "col-name", col.name);
     nameEl.title = col.comment ? `${col.name} — ${col.comment}` : col.name;
     if (col.key === "pk" || col.key === "fk") {
       // A column can be its own table's PK and an FK at once (1:1 detail
@@ -55,8 +69,7 @@ export function renderHeader(columns: Column[]): void {
             ? `primary key, also references ${col.references.table}.${col.references.column}`
             : "primary key"
           : `foreign key, references ${col.references.table}.${col.references.column}`;
-      const icon = document.createElement("span");
-      icon.className = "key-icon";
+      const icon = el("span", "key-icon");
       icon.setAttribute("aria-hidden", "true");
       icon.title = keyLabel;
       icon.textContent = col.key === "pk" ? "🔑" : "🔗";
@@ -68,41 +81,35 @@ export function renderHeader(columns: Column[]): void {
       head.append(nameEl, " ");
     }
     if (col.comment) th.title = col.comment;
+    const sortKey = columnKey(col);
     th.setAttribute(
       "aria-sort",
-      col.name === state.sort ? (state.order === "desc" ? "descending" : "ascending") : "none",
+      sortKey === state.sort ? (state.order === "desc" ? "descending" : "ascending") : "none",
     );
     th.onclick = () => {
-      state.order = state.sort === col.name && state.order === "asc" ? "desc" : "asc";
-      state.sort = col.name;
+      state.order = state.sort === sortKey && state.order === "asc" ? "desc" : "asc";
+      state.sort = sortKey;
       state.offset = 0;
       rememberSort();
       loadData({ resetScroll: false });
     };
-    // A focusable control nested in the sortable th — stopPropagation so
-    // opening it doesn't also toggle sort.
-    const cvBtn = document.createElement("button");
-    cvBtn.type = "button";
-    cvBtn.className = "common-values-btn";
-    cvBtn.setAttribute("aria-label", `common values for ${col.name}`);
-    cvBtn.textContent = "▾";
-    cvBtn.onclick = (e) => {
-      e.stopPropagation();
-      showCommonValues(e, col.name);
-    };
-    head.appendChild(cvBtn);
+    if (table !== null) head.appendChild(commonValuesButton(table, col.name));
     th.append(head, typeCode);
     tr.appendChild(th);
   }
-  $("thead").replaceChildren(tr);
+  const bands = buildBands(columns, [...tr.cells].slice(1));
+  $("thead").replaceChildren(...(bands ? [bands, tr] : [tr]));
+  if (bands) refreshBands();
 }
 
 function renderEmptyState(columnCount: number): void {
-  const emptyRow = document.createElement("tr");
-  emptyRow.className = "empty";
-  const td = document.createElement("td");
+  const emptyRow = el("tr", "empty");
+  const td = el("td");
   td.colSpan = columnCount;
-  td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
+  const join = joinInView();
+  if (join && state.offset === 0 && state.filter === "" && join.def.joins.some((j) => j.type === "inner")) {
+    td.appendChild(buildEmptyJoin(switchToLeftJoin));
+  } else td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
   emptyRow.appendChild(td);
   $("tbody").replaceChildren(emptyRow);
 }
@@ -147,22 +154,18 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
   td.dataset.col = col.name;
   if (hidden.has(col.name)) td.classList.add("col-hidden");
   if (isNull) {
-    const span = document.createElement("span");
-    span.className = "cell-text";
-    span.textContent = "∅";
+    const span = el("span", "cell-text", "∅");
     td.appendChild(span);
     // Nothing to copy or expand for a null cell, but "filter by this
     // value" is still meaningful (IS NULL).
-    const filterBtn = document.createElement("button");
-    filterBtn.className = "filter-eq";
+    const filterBtn = el("button", "filter-eq");
     filterBtn.setAttribute("aria-label", "filter by null");
     filterBtn.textContent = "=";
     filterBtn.onclick = (e) => {
       e.stopPropagation();
-      applyFilterClause(col.name, "IS NULL");
+      applyFilterClause(columnKey(col), "IS NULL");
     };
-    const actions = document.createElement("span");
-    actions.className = "cell-actions";
+    const actions = el("span", "cell-actions");
     actions.appendChild(filterBtn);
     td.appendChild(actions);
     return td;
@@ -177,7 +180,7 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
   };
   filterBtn.onclick = (e) => {
     e.stopPropagation();
-    applyFilterClause(col.name, "=", raw);
+    applyFilterClause(columnKey(col), "=", raw);
   };
   if (col.references) {
     const references = col.references;
@@ -188,7 +191,7 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
       navigateWithSeededFilter(references.table, references.schema, () =>
         applyFilterClause(references.column, "=", raw),
       );
-  } else if (col.key === "pk") {
+  } else if (col.key === "pk" && tableInView() !== null) {
     // Reverse of the FK-cell click: what points *at* this row. A pk+fk
     // column took the branch above; those rows, and no-PK tables, reach the
     // same list through the record dialog instead.
@@ -216,29 +219,27 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
 // not position, so it can't fall out of sync with header/cell alignment.
 // A stale column name simply matches nothing — silent no-op. ----
 function setColumnVisibility(name: string, hidden: boolean): void {
-  const current = hiddenColumnsForTable();
+  const current = hiddenColumns();
   const next = hidden ? [...current, name] : current.filter((c) => c !== name);
-  const table = state.table ?? "";
-  if (next.length) state.hiddenColumns[table] = next;
-  else delete state.hiddenColumns[table];
-  persist();
+  setHiddenColumns(next);
   for (const el of document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
     el.classList.toggle("col-hidden", hidden);
   }
+  refreshBands();
   updateColumnsButtonLabel();
 }
 
 export function updateColumnsButtonLabel(): void {
-  const n = hiddenColumnsForTable().length;
+  const n = hiddenColumns().length;
   $("columns-btn").textContent = n > 0 ? `columns (${n} hidden)` : "columns";
 }
 
 export function renderColumnMenu(columns: Column[]): void {
-  const hidden = hiddenColumnsForTable();
+  const hidden = hiddenColumns();
   $("columns-pop-list").replaceChildren(
     ...columns.map((col) => {
-      const label = document.createElement("label");
-      const input = document.createElement("input");
+      const label = el("label");
+      const input = el("input");
       input.type = "checkbox";
       input.checked = !hidden.includes(col.name);
       input.onchange = () => setColumnVisibility(col.name, !input.checked);
@@ -260,7 +261,7 @@ function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
 export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
   // Same for every cell in this render, so computed once rather than
   // re-derived (array rebuild + linear scan) per cell.
-  const hidden = new Set(hiddenColumnsForTable());
+  const hidden = new Set(hiddenColumns());
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
     // hidden columns (display:none) aren't counted.
@@ -271,7 +272,7 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
   const tbody = $("tbody");
   tbody.replaceChildren(
     ...data.rows.map((row) => {
-      const tr = document.createElement("tr");
+      const tr = el("tr");
       if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
       tr.appendChild(buildRowActionCell(data.columns, row));
       for (const col of data.columns) {
@@ -292,9 +293,18 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
 
 export function updatePager(data: TableData): void {
   const page = Math.floor(state.offset / state.limit) + 1;
-  $("page").textContent = `page ${page}`;
-  $("row-meta").textContent = ` · ${formatApproxCount(data.total_approx)} rows · ${data.columns.length} columns`;
-  $("row-meta").title = APPROX_COUNT_TITLE;
   $<HTMLButtonElement>("prev").disabled = state.offset === 0;
+  if (joinInView()) {
+    // A join has no total (spec/protocol.md §5.11.4): the page says whether more follows.
+    $("page").textContent = `page ${page} · ${data.has_more ? "more rows available" : "last page"}`;
+    $("row-meta").textContent =
+      ` · ${data.rows.length}${data.has_more ? "+" : ""} rows · ${data.columns.length} columns`;
+    $("row-meta").removeAttribute("title");
+    $<HTMLButtonElement>("next").disabled = !data.has_more;
+    return;
+  }
+  $("page").textContent = `page ${page}`;
+  $("row-meta").textContent = ` · ${formatApproxCount(data.total_approx ?? -1)} rows · ${data.columns.length} columns`;
+  $("row-meta").title = APPROX_COUNT_TITLE;
   $<HTMLButtonElement>("next").disabled = data.rows.length < state.limit;
 }

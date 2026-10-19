@@ -1,16 +1,26 @@
 import { loadData } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
-import { $, reportError } from "../core/dom.js";
-import { applyScopeParams, getLastPayload, markFilterVerified, setAppliedFilterAst, state } from "../core/state.js";
+import { $, el, reportError } from "../core/dom.js";
+import {
+  applyScopeParams,
+  getLastPayload,
+  joinAliases,
+  markFilterVerified,
+  setAppliedFilterAst,
+  state,
+  tableInView,
+} from "../core/state.js";
 import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
 import { parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
+import { columnKey } from "./join-view.js";
+import { createSuggestList, type Suggestion } from "./suggest-list.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
   if (text) {
     try {
-      ast = parseFilterDsl(text);
+      ast = parseFilterDsl(text, joinAliases());
     } catch (e) {
       reportError(e);
       return;
@@ -43,7 +53,7 @@ export function applyFilterClauses(pairs: { column: string; value: string }[]): 
 
 $<HTMLFormElement>("filter-form").onsubmit = (e) => {
   e.preventDefault();
-  closeFilterSuggest();
+  suggest.close();
   submitFilter($<HTMLInputElement>("filter").value.trim());
 };
 // The native clear button on a search input fires "search" but never
@@ -104,7 +114,7 @@ const CARET_MIRROR_PROPS: Extract<keyof CSSStyleDeclaration, string>[] = [
 // plain <input>, which has no native API for this. Returns the caret's x
 // within the input's own box.
 function measureCaretX(input: HTMLInputElement): number {
-  const mirror = document.createElement("div");
+  const mirror = el("div");
   const computed = getComputedStyle(input);
   Object.assign(mirror.style, {
     position: "absolute",
@@ -120,7 +130,7 @@ function measureCaretX(input: HTMLInputElement): number {
   const computedStyle = computed as unknown as Record<string, string>;
   for (const prop of CARET_MIRROR_PROPS) mirrorStyle[prop] = computedStyle[prop];
   mirror.textContent = input.value.slice(0, input.selectionStart ?? 0);
-  const marker = document.createElement("span");
+  const marker = el("span");
   marker.textContent = "​";
   mirror.appendChild(marker);
   document.body.appendChild(mirror);
@@ -131,66 +141,30 @@ function measureCaretX(input: HTMLInputElement): number {
   }
 }
 
-interface Suggestion {
-  label: string;
-  insert: string;
-}
-
-let filterSuggestMatches: Suggestion[] = []; // rows currently shown, in display order
-let filterSuggestIndex = -1; // highlighted row, -1 = none
-let filterSuggestHead = ""; // input text up to (not including) the partial token being completed
-// Supersedes an in-flight value lookup: bumped on every update and close, so a
-// slow response never opens a list for text that has since changed.
-let filterSuggestToken = 0;
-
-function closeFilterSuggest(): void {
-  filterSuggestToken++;
-  filterSuggestMatches = [];
-  filterSuggestIndex = -1;
-  filterSuggestHead = "";
-  const input = $<HTMLInputElement>("filter");
-  input.setAttribute("aria-expanded", "false");
-  input.removeAttribute("aria-activedescendant");
-  $("filter-suggest").hidden = true;
-}
-
-function renderFilterSuggest(): void {
-  $("filter-suggest-list").replaceChildren(
-    ...filterSuggestMatches.map((suggestion, i) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = suggestion.label;
-      btn.title = suggestion.label; // long values are cut off with an ellipsis
-      btn.className = i === filterSuggestIndex ? "active" : "";
-      btn.id = `filter-suggest-${i}`;
-      btn.setAttribute("role", "option");
-      btn.setAttribute("aria-selected", String(i === filterSuggestIndex));
-      // Keeps focus (and the caret) in #filter — otherwise the button
-      // would steal focus, firing #filter's blur handler and closing this
-      // popup before its own click handler runs.
-      btn.onmousedown = (e) => e.preventDefault();
-      btn.onclick = () => acceptFilterSuggestion(i);
-      return btn;
-    }),
-  );
-  // Arrow-key moves change .active without mouse involvement, so the
-  // list has to scroll itself.
-  $("filter-suggest-list").children[filterSuggestIndex]?.scrollIntoView({ block: "nearest" });
-  const input = $<HTMLInputElement>("filter");
-  if (filterSuggestIndex >= 0) input.setAttribute("aria-activedescendant", `filter-suggest-${filterSuggestIndex}`);
-  else input.removeAttribute("aria-activedescendant");
-}
+const filterInput = $<HTMLInputElement>("filter");
 
 // The trailing space starts the next word, so accepting a column goes straight
 // on to suggesting operators, and so on.
-function acceptFilterSuggestion(i: number): void {
-  const input = $<HTMLInputElement>("filter");
-  input.value = `${filterSuggestHead}${filterSuggestMatches[i].insert} `;
-  input.setSelectionRange(input.value.length, input.value.length);
-  closeFilterSuggest();
-  input.focus();
-  updateFilterSuggestions();
-}
+const suggest = createSuggestList({
+  input: filterInput,
+  popup: $("filter-suggest"),
+  list: $("filter-suggest-list"),
+  idPrefix: "filter-suggest",
+  accept: (suggestion, head) => {
+    filterInput.value = `${head}${suggestion.insert} `;
+    filterInput.setSelectionRange(filterInput.value.length, filterInput.value.length);
+    suggest.close();
+    filterInput.focus();
+    updateFilterSuggestions();
+  },
+  // In the page's flow (not the top layer), so it scrolls with the field and
+  // passes behind the sticky table header. Kept inside the field's width.
+  place: () => {
+    const popup = $("filter-suggest");
+    const room = filterInput.parentElement ? filterInput.parentElement.clientWidth - popup.offsetWidth : 0;
+    popup.style.left = `${Math.max(0, Math.min(filterInput.offsetLeft + measureCaretX(filterInput), room))}px`;
+  },
+});
 
 // Per scope+table+column: the planner's list changes slowly, so one request
 // serves every keystroke, a failed or empty answer included. Refresh clears it.
@@ -200,19 +174,19 @@ export function clearCommonValueCache(): void {
   commonValueCache.clear();
 }
 
-async function fetchCommonValues(column: string): Promise<CommonValue[]> {
-  const params = new URLSearchParams({ table: state.table ?? "", column });
+async function fetchCommonValues(table: string, column: string): Promise<CommonValue[]> {
+  const params = new URLSearchParams({ table, column });
   applyScopeParams(params);
   return (await api<{ values: CommonValue[] }>(`/tables/common-values?${params}`)).values;
 }
 
-function commonValuesFor(column: string): Promise<string[]> {
-  const params = new URLSearchParams({ table: state.table ?? "", column });
+function commonValuesFor(table: string, column: string): Promise<string[]> {
+  const params = new URLSearchParams({ table, column });
   applyScopeParams(params);
   const key = params.toString();
   let values = commonValueCache.get(key);
   if (!values) {
-    values = fetchCommonValues(column)
+    values = fetchCommonValues(table, column)
       .then((rows) => rows.map((v) => v.value))
       .catch((e) => {
         console.warn("ashurbanipal: common values for suggestions failed", e);
@@ -224,95 +198,55 @@ function commonValuesFor(column: string): Promise<string[]> {
 }
 
 function showFilterSuggestions(ctx: Completion, all: Suggestion[], index: number): void {
-  const input = $<HTMLInputElement>("filter");
   const partial = ctx.partial.toLowerCase();
   const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
   // Nothing left to complete: a lone row identical to what is typed, except columns.
   const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
   if (matches.length === 0 || done) {
-    closeFilterSuggest();
+    suggest.close();
     return;
   }
-  filterSuggestMatches = matches;
-  filterSuggestHead = ctx.head;
-  filterSuggestIndex = index;
-  renderFilterSuggest();
-  const popup = $("filter-suggest");
-  popup.hidden = false;
-  // In the page's flow (not the top layer), so it scrolls with the field and
-  // passes behind the sticky table header. Kept inside the field's width.
-  const room = input.parentElement ? input.parentElement.clientWidth - popup.offsetWidth : 0;
-  popup.style.left = `${Math.max(0, Math.min(input.offsetLeft + measureCaretX(input), room))}px`;
-  input.setAttribute("aria-expanded", "true");
+  suggest.show(matches, ctx.head, index);
 }
 
+// In a join view a plain name is the start table's column (spec/filter-dsl.md).
 function isColumn(name: string | null): boolean {
-  return name !== null && (getLastPayload()?.columns.some((c) => c.name === name) ?? false);
+  return (
+    name !== null &&
+    (getLastPayload()?.columns.some((c) => columnKey(c) === name || (c.join === 0 && c.column === name)) ?? false)
+  );
 }
 
 function updateFilterSuggestions(): void {
-  const input = $<HTMLInputElement>("filter");
+  const input = filterInput;
   if (input.selectionStart !== input.value.length) {
-    closeFilterSuggest();
+    suggest.close();
     return;
   }
   const ctx = completionAt(input.value);
-  closeFilterSuggest();
+  suggest.close();
   if (ctx.partial.startsWith("'")) return; // inside a quoted value
-  const token = filterSuggestToken;
+  const token = suggest.token();
+  // Common values are a per-table query; a join view has no single table to ask.
+  const table = tableInView();
   const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
-    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => c.name)), 0);
+    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map(columnKey)), 0);
   } else if (ctx.expect === "operator") {
     if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")), -1);
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
     showFilterSuggestions(ctx, plain(optionsFor("joiner")), -1);
-  } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column)) {
-    commonValuesFor(ctx.column).then((values) => {
-      if (token !== filterSuggestToken || document.activeElement !== input) return;
+  } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column) && table !== null) {
+    commonValuesFor(table, ctx.column).then((values) => {
+      if (token !== suggest.token() || document.activeElement !== input) return;
       const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
       showFilterSuggestions(ctx, rows, -1);
     });
   }
 }
 
-$<HTMLInputElement>("filter").oninput = updateFilterSuggestions;
-$<HTMLInputElement>("filter").onfocus = updateFilterSuggestions;
-$<HTMLInputElement>("filter").onblur = closeFilterSuggest;
-$<HTMLInputElement>("filter").onkeydown = (e) => {
-  if (filterSuggestMatches.length === 0) return;
-  const count = filterSuggestMatches.length;
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    filterSuggestIndex = (filterSuggestIndex + 1) % count;
-    renderFilterSuggest();
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    filterSuggestIndex = filterSuggestIndex <= 0 ? count - 1 : filterSuggestIndex - 1;
-    renderFilterSuggest();
-  } else if (e.key === "Enter" && filterSuggestIndex >= 0) {
-    e.preventDefault();
-    acceptFilterSuggestion(filterSuggestIndex);
-  } else if (e.key === "Tab") {
-    e.preventDefault();
-    acceptFilterSuggestion(Math.max(filterSuggestIndex, 0));
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    closeFilterSuggest();
-  }
-};
-// addEventListener, not `document.onpointerdown =`: the single IDL slot on
-// document is shared global state any other module could silently overwrite
-// (frontend-style-guide.md §3).
-document.addEventListener("pointerdown", (e) => {
-  if (
-    filterSuggestMatches.length > 0 &&
-    !$("filter").contains(e.target as Node) &&
-    !$("filter-suggest").contains(e.target as Node)
-  ) {
-    closeFilterSuggest();
-  }
-});
+filterInput.oninput = updateFilterSuggestions;
+filterInput.onfocus = updateFilterSuggestions;
 
 // ---- common-values header dropdown: a shortlist from Postgres planner
 // statistics, never a full distinct-value scan — copy says "common
@@ -323,22 +257,18 @@ let cvRequestToken = 0;
 function renderCommonValues(values: CommonValue[], column: string): void {
   const list = $("cv-pop-list");
   if (values.length === 0) {
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = "no common values available";
+    const p = el("p", "cv-empty", "no common values available");
     list.replaceChildren(p);
     return;
   }
   list.replaceChildren(
     ...values.map((v) => {
-      const btn = document.createElement("button");
+      const btn = el("button");
       btn.type = "button";
       btn.className = "cv-value";
-      const val = document.createElement("span");
+      const val = el("span");
       val.textContent = v.value;
-      const freq = document.createElement("span");
-      freq.className = "cv-freq";
-      freq.textContent = `${Math.round(v.freq * 100)}%`;
+      const freq = el("span", "cv-freq", `${Math.round(v.freq * 100)}%`);
       btn.append(val, freq);
       btn.onclick = () => {
         $("cv-pop").hidePopover();
@@ -349,15 +279,13 @@ function renderCommonValues(values: CommonValue[], column: string): void {
   );
 }
 
-export async function showCommonValues(e: MouseEvent, column: string): Promise<void> {
+export async function showCommonValues(e: MouseEvent, table: string, column: string): Promise<void> {
   const btn = e.currentTarget as HTMLElement;
   if (cvAnchor) cvAnchor.style.anchorName = "";
   cvAnchor = btn;
   cvAnchor.style.anchorName = "--cv-anchor";
   const list = $("cv-pop-list");
-  const loading = document.createElement("p");
-  loading.className = "cv-empty";
-  loading.textContent = "loading…";
+  const loading = el("p", "cv-empty", "loading…");
   list.replaceChildren(loading);
   $("cv-pop").showPopover();
   // A second header's ▾ can be clicked before the first request resolves;
@@ -366,12 +294,10 @@ export async function showCommonValues(e: MouseEvent, column: string): Promise<v
   const token = ++cvRequestToken;
   let values: CommonValue[];
   try {
-    values = await fetchCommonValues(column);
+    values = await fetchCommonValues(table, column);
   } catch (err) {
     if (token !== cvRequestToken) return;
-    const p = document.createElement("p");
-    p.className = "cv-empty";
-    p.textContent = (err as Error).message;
+    const p = el("p", "cv-empty", (err as Error).message);
     list.replaceChildren(p);
     return;
   }

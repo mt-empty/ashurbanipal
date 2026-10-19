@@ -264,6 +264,100 @@
       ]
     },
     {
+      "name": "V22",
+      "input": "o.status = completed",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "completed",
+          "join": 0
+        }
+      ]
+    },
+    {
+      "name": "V23",
+      "input": "u.email LIKE '%@x.com'",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "email",
+          "op": "LIKE",
+          "value": "%@x.com",
+          "join": 1
+        }
+      ]
+    },
+    {
+      "name": "V24",
+      "input": "status = completed",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "status",
+          "op": "=",
+          "value": "completed",
+          "join": 0
+        }
+      ]
+    },
+    {
+      "name": "V25",
+      "input": "\"order items\".id = 1",
+      "aliases": [
+        "order items",
+        "x"
+      ],
+      "expect": [
+        {
+          "column": "id",
+          "op": "=",
+          "value": "1",
+          "join": 0
+        }
+      ]
+    },
+    {
+      "name": "V26",
+      "input": "o.a = 1 AND u.b = 2 OR NOT u.c IS NULL",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "a",
+          "op": "=",
+          "value": "1",
+          "join": 0
+        },
+        {
+          "logic": "AND",
+          "column": "b",
+          "op": "=",
+          "value": "2",
+          "join": 1
+        },
+        {
+          "logic": "OR",
+          "not": true,
+          "column": "c",
+          "op": "IS NULL",
+          "join": 1
+        }
+      ]
+    },
+    {
       "name": "R1",
       "input": "",
       "expect_error": {
@@ -356,6 +450,56 @@
       "expect_error": {
         "position": 9
       }
+    },
+    {
+      "name": "R17",
+      "input": "o.status = x",
+      "expect_error": {}
+    },
+    {
+      "name": "R18",
+      "input": "z.status = x",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect_error": {}
+    },
+    {
+      "name": "R19",
+      "input": "o. status = x",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect_error": {}
+    },
+    {
+      "name": "R20",
+      "input": "o.u.status = x",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect_error": {}
+    },
+    {
+      "name": "R21",
+      "input": ".status = x",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect_error": {}
+    },
+    {
+      "name": "R22",
+      "input": "\"\".status = x",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect_error": {}
     },
     {
       "name": "A1",
@@ -502,6 +646,22 @@
           "column": "pg_sleep",
           "op": "=",
           "value": "1"
+        }
+      ]
+    },
+    {
+      "name": "A11",
+      "input": "u.pg_sleep = 1",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "pg_sleep",
+          "op": "=",
+          "value": "1",
+          "join": 1
         }
       ]
     }

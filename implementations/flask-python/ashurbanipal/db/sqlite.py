@@ -30,6 +30,7 @@ from ..join import (
     plan_join,
 )
 from . import (
+    BadJoin,
     ColumnInfo,
     ColumnPair,
     ColumnRef,
@@ -368,7 +369,7 @@ class SqliteSource(DbSource):
                     if name in metas:
                         continue
                     if name not in allowed:
-                        raise NotAllowed(f"table {name!r}", kind=NotAllowedKind.TABLE)
+                        raise BadJoin(f"unknown table {name!r}")
                     pk_columns, fk_columns = self._key_metadata(cur, name)
                     cur.execute(f"select cid, name, type from pragma_table_info({quote_ident(name)}) order by cid")
                     metas[name] = TableMeta(

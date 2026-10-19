@@ -1,5 +1,15 @@
 import { $, reportError } from "../core/dom.js";
-import { applyScopeParams, applyUrlExact, persist, setSchema, state } from "../core/state.js";
+import {
+  applyScopeParams,
+  applyUrlExact,
+  persist,
+  setSchema,
+  showTable,
+  startTable,
+  state,
+  tableInView,
+  viewKey,
+} from "../core/state.js";
 import { loadTables } from "./sidebar.js";
 
 // The one sanctioned bypass of the switchSource/switchSchema/switchTable
@@ -11,18 +21,18 @@ import { loadTables } from "./sidebar.js";
 // applyFilter's own. Shared by grid.ts's FK-cell nav and the
 // referenced-by drill-in.
 export function navigateWithSeededFilter(table: string, schema: string | undefined, applyFilter: () => void): void {
-  state.table = table;
+  showTable(table);
   state.sort = null;
   if (schema && schema !== state.schema) {
     setSchema(schema);
     loadTables()
       .then(() => {
         // loadTables()'s stale-state fallback (sidebar.ts) silently resets
-        // state.table when `table` isn't in this schema's own /api/tables
+        // the view when `table` isn't in this schema's own /api/tables
         // listing (e.g. a partitioned referrer, which list_tables excludes)
         // — applying the filter here would seed it onto whatever table that
         // fallback landed on instead.
-        if (state.table !== table) {
+        if (tableInView() !== table) {
           reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
           return;
         }
@@ -48,7 +58,7 @@ let navIndex = -1;
 let restoringFromHistory = false; // true while a popstate-triggered reload is in flight
 
 function navViewKey(): string {
-  return `${state.source ?? ""} ${state.schema ?? ""} ${state.table ?? ""}`;
+  return `${state.source ?? ""} ${state.schema ?? ""} ${viewKey(state.view)}`;
 }
 
 function updateNavButtons(): void {
@@ -59,9 +69,10 @@ function updateNavButtons(): void {
 // filter rides in the URL (ui-guidelines.md R6) but is deliberately excluded
 // from navViewKey() below — a filter change replaces the current history
 // entry like a sort click or a page turn, never pushing a new back-stack stop.
+// The join is part of the key: entering or leaving a join view is a new stop.
 export function syncUrl(): void {
   const params = new URLSearchParams({
-    table: state.table ?? "",
+    table: startTable(state.view) ?? "",
     limit: String(state.limit),
     offset: String(state.offset),
   });
@@ -70,6 +81,7 @@ export function syncUrl(): void {
     params.set("order", state.order);
   }
   applyScopeParams(params);
+  if (state.view?.kind === "join") params.set("join", state.view.text);
   if (state.filter) params.set("filter", state.filter);
   const qs = `?${params}`;
   const key = navViewKey();

@@ -57,6 +57,8 @@ func ParseFilterForJoin(raw string) ([]Condition, error) {
 	return parseFilter(raw, true)
 }
 
+var conditionKeys = keyShape{"logic": nil, "not": nil, "column": nil, "op": nil, "value": nil, "join": nil}
+
 func parseFilter(raw string, allowJoin bool) ([]Condition, error) {
 	if len(raw) > MaxFilterBytes {
 		return nil, filterErr("filter too long: %d bytes (max %d)", len(raw), MaxFilterBytes)
@@ -70,6 +72,9 @@ func parseFilter(raw string, allowJoin bool) ([]Condition, error) {
 	}
 	if decoder.More() {
 		return nil, filterErr("filter must be a single JSON array of conditions")
+	}
+	if err := checkKeys(raw, conditionKeys); err != nil {
+		return nil, filterErr("filter must be a JSON array of conditions: %s", err)
 	}
 
 	if len(conditions) > MaxConditions {

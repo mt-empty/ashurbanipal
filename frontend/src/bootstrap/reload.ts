@@ -1,8 +1,10 @@
-// Import-free seam. Feature modules (grid, sidebar, filter-ui) need to
+// Runtime-import-free seam. Feature modules (grid, sidebar, filter-ui) need to
 // trigger a full reload but must not import controller.ts, which imports
 // them — that back-edge is what a cycle is made of. main.ts registers the
 // real implementation at bootstrap; a call before then is a no-op.
-type LoadDataOpts = { resetScroll?: boolean; highlightNew?: boolean };
+import type { ViewRequest } from "../core/store.js";
+
+type LoadDataOpts = { resetScroll?: boolean; highlightNew?: boolean; next?: ViewRequest };
 
 let impl: ((opts?: LoadDataOpts) => Promise<void>) | null = null;
 

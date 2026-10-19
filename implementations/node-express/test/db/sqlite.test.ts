@@ -403,7 +403,7 @@ describe("SqliteSource.queryJoin", () => {
         joins: [{ type: "left", table: "orders", on: [{ left: { join: 0, column: "id" }, right: "user_id" }] }],
       }),
     );
-    await expect(source.queryJoin(undefined, hostile, joinOpts, 5000)).rejects.toBeInstanceOf(NotAllowedError);
+    await expect(source.queryJoin(undefined, hostile, joinOpts, 5000)).rejects.toBeInstanceOf(BadJoinError);
     const mismatch = parseJoin(
       JSON.stringify({
         table: "users",

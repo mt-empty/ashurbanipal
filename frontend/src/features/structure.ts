@@ -1,6 +1,6 @@
 import { api } from "../core/api.js";
-import { $ } from "../core/dom.js";
-import { applyScopeParams, state } from "../core/state.js";
+import { $, el } from "../core/dom.js";
+import { applyScopeParams, state, tableInView } from "../core/state.js";
 import type { ConstraintFk, StructureResponse } from "../core/types.js";
 
 // ---- structure dialog: a table's indexes and constraints (spec/protocol.md
@@ -22,32 +22,23 @@ export function clearStructureCache(): void {
 let requestToken = 0;
 
 function msg(text: string): HTMLParagraphElement {
-  const p = document.createElement("p");
-  p.className = "refby-empty";
-  p.textContent = text;
+  const p = el("p", "refby-empty", text);
   return p;
 }
 
 function row(text: string, detail?: string): HTMLDivElement {
-  const div = document.createElement("div");
-  div.className = "structure-row";
-  div.textContent = text;
+  const div = el("div", "structure-row", text);
   if (detail) {
-    const d = document.createElement("div");
-    d.className = "structure-row-detail";
-    d.textContent = detail;
+    const d = el("div", "structure-row-detail", detail);
     div.appendChild(d);
   }
   return div;
 }
 
 function section(label: string, rows: HTMLElement[], emptyText: string): HTMLDivElement {
-  const wrap = document.createElement("div");
-  wrap.className = "structure-section";
-  const heading = document.createElement("span");
-  heading.className = "section-label";
-  heading.textContent = label;
-  const list = document.createElement("div");
+  const wrap = el("div", "structure-section");
+  const heading = el("span", "section-label", label);
+  const list = el("div");
   list.replaceChildren(...(rows.length ? rows : [msg(emptyText)]));
   wrap.append(heading, list);
   return wrap;
@@ -88,29 +79,35 @@ function renderStructure(data: StructureResponse): void {
   );
 }
 
+// One table's structure through the same cache the dialog uses; errors are not cached.
+export function tableStructure(table: string): Promise<StructureResponse> {
+  const key = cacheKey(table);
+  const generation = cacheGeneration;
+  const hit = cache.get(key);
+  if (hit) return Promise.resolve(hit);
+  const params = new URLSearchParams({ table });
+  applyScopeParams(params);
+  return api<StructureResponse>(`/tables/structure?${params}`).then((data) => {
+    if (generation === cacheGeneration) cache.set(key, data);
+    return data;
+  });
+}
+
 export function openStructure(): void {
-  const table = state.table;
-  if (!table) return;
+  const table = tableInView();
+  if (table === null) return;
   const token = ++requestToken;
   $("structure-title").textContent = `structure — ${state.schema ? `${state.schema}.${table}` : table}`;
   $<HTMLDialogElement>("structure-dialog").showModal();
 
-  // Key captured now, alongside applyScopeParams' read of the same scope,
-  // so a mid-flight scope switch can't file the result under the wrong key.
-  const key = cacheKey(table);
-  const generation = cacheGeneration;
-  const hit = cache.get(key);
+  const hit = cache.get(cacheKey(table));
   if (hit) {
     renderStructure(hit);
     return;
   }
   $("structure-body").replaceChildren(msg("loading…"));
-
-  const params = new URLSearchParams({ table });
-  applyScopeParams(params);
-  api<StructureResponse>(`/tables/structure?${params}`)
+  tableStructure(table)
     .then((data) => {
-      if (generation === cacheGeneration) cache.set(key, data);
       if (token === requestToken) renderStructure(data);
     })
     .catch((e) => {

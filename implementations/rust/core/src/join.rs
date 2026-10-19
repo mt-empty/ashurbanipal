@@ -278,6 +278,22 @@ fn column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> {
         .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Column, format!("column {column:?}")))
 }
 
+// A name inside the `join` value is part of the join, so a miss is `invalid_join`, not `unknown_column`.
+fn join_column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> {
+    column_index(table, column)
+        .map_err(|_| DbError::BadJoin(format!("{} has no column {column:?}", table.name)))
+}
+
+/// The same for a table: `not_readable` stays as it is.
+pub(crate) fn unknown_join_table(e: DbError) -> DbError {
+    match e {
+        DbError::NotAllowed(d) if d.kind == NotAllowedKind::Table => {
+            DbError::BadJoin(format!("unknown {}", d.what))
+        }
+        e => e,
+    }
+}
+
 fn describe(table: &TableMeta, col: &ColMeta) -> String {
     format!("{}.{} ({})", table.name, col.name, col.type_name)
 }
@@ -374,8 +390,8 @@ pub fn plan(spec: &JoinSpec, tables: Vec<TableMeta>, opts: &JoinOpts) -> Result<
         let mut resolved = Vec::new();
         for pair in &entry.on {
             let left_table = &tables[pair.left.join];
-            let lc = column_index(left_table, &pair.left.column)?;
-            let rc = column_index(&tables[position], &pair.right)?;
+            let lc = join_column_index(left_table, &pair.left.column)?;
+            let rc = join_column_index(&tables[position], &pair.right)?;
             check_pair(
                 position,
                 left_table,
@@ -395,7 +411,7 @@ pub fn plan(spec: &JoinSpec, tables: Vec<TableMeta>, opts: &JoinOpts) -> Result<
                 let table = tables.get(c.join).ok_or_else(|| {
                     DbError::BadJoin(format!("columns: position {} is not in the join", c.join))
                 })?;
-                Ok((c.join, column_index(table, &c.column)?))
+                Ok((c.join, join_column_index(table, &c.column)?))
             })
             .collect::<Result<Vec<_>, DbError>>()?,
         None => tables
@@ -441,11 +457,11 @@ pub fn plan(spec: &JoinSpec, tables: Vec<TableMeta>, opts: &JoinOpts) -> Result<
 
     let sort = match (&opts.sort, opts.sort_join) {
         (None, None) => None,
-        (None, Some(_)) => return Err(DbError::BadJoin("sort_join needs sort".into())),
+        (None, Some(_)) => return Err(DbError::BadParameter("sort_join needs sort".into())),
         (Some(column), join) => {
             let pos = join.unwrap_or(0);
             let table = tables.get(pos).ok_or_else(|| {
-                DbError::BadJoin(format!("sort_join: position {pos} is not in the join"))
+                DbError::BadParameter(format!("sort_join: position {pos} is not in the join"))
             })?;
             Some((pos, column_index(table, column)?))
         }
@@ -690,7 +706,7 @@ mod tests {
         bad_name.joins[0].on[0].right = "nope\"; drop".into();
         assert!(matches!(
             plan(&bad_name, vec![orders(), users()], &opts()),
-            Err(DbError::NotAllowed(_))
+            Err(DbError::BadJoin(_))
         ));
 
         let mut cross = spec.clone();
@@ -845,7 +861,7 @@ mod tests {
         o.sort_join = Some(1);
         assert!(matches!(
             plan(&spec, vec![orders(), users()], &o),
-            Err(DbError::BadJoin(_))
+            Err(DbError::BadParameter(_))
         ));
         let mut o = opts();
         o.sort = Some("email".into());

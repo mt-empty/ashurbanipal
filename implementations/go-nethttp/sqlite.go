@@ -156,7 +156,7 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 			continue
 		}
 		if _, ok := findExact(allowed, name); !ok {
-			return JoinData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", name)}
+			return JoinData{}, badJoin("unknown table %q", name)
 		}
 		meta, err := c.joinTableMeta(ctx, conn, name)
 		if err != nil {

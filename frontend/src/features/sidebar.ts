@@ -1,15 +1,18 @@
 import { loadData } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
-import { $, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
+import { $, el, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
 import {
   applyStoredSort,
   clearFilter,
   scopeQuery,
+  showTable,
   sourceQuery,
+  startTable,
   state,
   switchSchema,
   switchSource,
   switchTable,
+  tableInView,
 } from "../core/state.js";
 import type { SourceEntry, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
@@ -22,6 +25,14 @@ interface TableEntry {
   btn: HTMLButtonElement;
 }
 let tableEntries: TableEntry[] = [];
+const chipCounts = new Map<string, string>();
+// Saved-join chips follow the table chips (after a divider) and take part in the
+// same line cap, so they are hidden before the tables are, active one aside.
+let joinEntries: TableEntry[] = [];
+// The source and schema the join chips were built for; a table list for another scope drops them.
+let joinScope = "";
+const scopeOfChips = (): string => `${state.source ?? ""}|${state.schema ?? ""}`;
+const allEntries = (): TableEntry[] => [...tableEntries, ...joinEntries];
 const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 
 // ---- three-line cap: a long table list collapses behind "+ N more", except
@@ -33,21 +44,22 @@ const tablesMore = $<HTMLButtonElement>("tables-more");
 // final chip instead of taking width from the rows above it.
 const tablesMoreItem = $("tables-more-item");
 let tablesExpanded = false;
-// The active table the last cap pass saw; a repeat load of the same table
-// skips the measuring.
+// The active table chip the last cap pass saw; a repeat load of the same view
+// skips the measuring (an active join chip is setJoinChips' to measure).
 let cappedActive: string | null = null;
 
 // Measures the full layout (offsetTop per chip), so the cap is by rendered
 // lines and tracks the list's width without a per-chip width model.
 function updateTablesCap(): void {
+  const entries = allEntries();
   cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
-  for (const e of tableEntries) {
+  for (const e of entries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
   }
-  const tops = [...new Set(tableEntries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
+  const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastRowTop = tops[TABLE_CAP_LINES - 1];
-  const beyond = tops.length > TABLE_CAP_LINES ? tableEntries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
   const active = beyond.find((e) => e.btn.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
@@ -60,7 +72,7 @@ function updateTablesCap(): void {
   for (const e of hidden) e.li.hidden = true;
   // The button has to land on the last row: give up chips from the end of the
   // visible ones until it (and a pulled active chip) fits there.
-  const shown = tableEntries.filter((e) => !hidden.has(e) && e !== active);
+  const shown = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
   while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
     const last = shown.pop() as TableEntry;
@@ -71,13 +83,14 @@ function updateTablesCap(): void {
   if (!active) return;
   // Out of alphabetical order only if a hidden chip sits before it; a divider
   // at the start of a line would just dangle.
-  const at = tableEntries.indexOf(active);
-  const movedUp = [...hidden].some((e) => tableEntries.indexOf(e) < at);
-  const before = tableEntries
+  const at = entries.indexOf(active);
+  const movedUp = [...hidden].some((e) => entries.indexOf(e) < at);
+  const before = entries
     .slice(0, at)
     .filter((e) => !e.li.hidden)
     .pop();
-  if (movedUp && before && before.li.offsetTop === active.li.offsetTop) active.li.classList.add("pulled");
+  if (movedUp && before && before.li.offsetTop === active.li.offsetTop && !active.li.classList.contains("join-first"))
+    active.li.classList.add("pulled");
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
@@ -200,12 +213,14 @@ export async function loadTables(): Promise<void> {
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
+  chipCounts.clear();
   for (const t of tables) {
     const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
     const btn = qs<HTMLButtonElement>(li, "button");
     qs<HTMLElement>(li, ".row-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
+    chipCounts.set(t.name, countEl.textContent);
     countEl.title = APPROX_COUNT_TITLE;
     btn.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
@@ -218,12 +233,14 @@ export async function loadTables(): Promise<void> {
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, btn });
   }
+  if (joinScope !== scopeOfChips()) joinEntries = [];
+  for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
-  if (!tableNames.includes(state.table ?? "")) {
-    state.table = tableNames[0] ?? null;
+  if (!tableNames.includes(startTable(state.view) ?? "")) {
+    showTable(tableNames[0] ?? null);
     // A ?filter= was written against the table the URL named; that table
     // isn't here, so its columns can't apply to the fallback — carrying it
     // over would 400 and dead-end the very load meant to recover (R5).
@@ -231,13 +248,56 @@ export async function loadTables(): Promise<void> {
   }
   // Restore this table's remembered sort unless one is already set — a
   // shared link's ?sort= or a history entry takes precedence.
-  if (state.table && state.sort === null) applyStoredSort(state.table);
+  const table = tableInView();
+  if (table && state.sort === null) applyStoredSort(table);
   // Awaited (not fire-and-forget): callers like nav.ts's popstate handler
   // reset restoringFromHistory once this promise settles, and that flag
   // must still be true when loadData()'s syncUrl() call runs, or a
   // history restoration would push a new entry instead of replacing it.
-  if (state.table) await loadData();
+  if (state.view) await loadData();
   else setStatus("");
+}
+
+export function listedTableNames(): string[] {
+  return tableEntries.map((e) => e.name);
+}
+
+// The row count the table's chip shows (`~208`), for places that list tables.
+export function tableChipCount(name: string): string {
+  return chipCounts.get(name) ?? "";
+}
+
+export interface JoinChip {
+  label: string;
+  title: string;
+  className: string;
+  active: boolean;
+  run: () => void;
+}
+
+// Replaces the chips after the divider; called whenever the join in view or the saved list changes.
+export function hasJoinChips(): boolean {
+  return joinEntries.length > 0;
+}
+
+export function setJoinChips(chips: JoinChip[]): void {
+  const ul = $("tables");
+  for (const e of joinEntries) e.li.remove();
+  joinEntries = chips.map((c, i) => {
+    const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
+    const btn = el("button");
+    btn.type = "button";
+    btn.textContent = c.label;
+    btn.title = c.title;
+    btn.classList.toggle("active", c.active);
+    if (c.active) btn.setAttribute("aria-current", "true");
+    btn.onclick = c.run;
+    li.appendChild(btn);
+    ul.insertBefore(li, tablesMoreItem);
+    return { name: `join:${c.label}`, li, btn };
+  });
+  joinScope = scopeOfChips();
+  updateTablesCap();
 }
 
 // Keyed by table name rather than "whichever row is .active" so it's

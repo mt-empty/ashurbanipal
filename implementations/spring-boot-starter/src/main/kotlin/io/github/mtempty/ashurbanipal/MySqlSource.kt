@@ -320,7 +320,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val metas = HashMap<String, JoinTableMeta>()
         for (name in names) {
             if (name in metas) continue
-            if (name !in allowed) throw NotAllowedException("not allowed: table $name", NotAllowedKind.TABLE)
+            if (name !in allowed) throw BadJoinException("unknown table \"$name\"")
             metas[name] = joinTableMeta(variant, realSchema, name)
         }
         val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)

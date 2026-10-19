@@ -2,6 +2,7 @@ import type { Database } from "sqlite3";
 import { FilterError, NotAllowedError, quoteIdent } from "../errors.js";
 import type { Condition } from "../filter.js";
 import {
+  BadJoinError,
   buildJoinSelect,
   type JoinColMeta,
   type JoinData,
@@ -279,7 +280,7 @@ export class SqliteSource implements DbSource {
       const metas = new Map<string, JoinTableMeta>();
       for (const name of names) {
         if (metas.has(name)) continue;
-        if (!findExact(allowed, name)) throw new NotAllowedError(`table "${name}"`, "table");
+        if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
         const declared = await dbAll<{ cid: number; name: string; type: string }>(
           this.db,
           `select cid, name, type from pragma_table_info(${quoteIdent(name)}) order by cid`,

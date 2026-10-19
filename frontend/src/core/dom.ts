@@ -7,6 +7,17 @@ export function $<T extends HTMLElement = HTMLElement>(id: string): T {
   return el as T;
 }
 
+export function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className?: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
 // Same policy as $, for a selector against a freshly-cloned <template> or a
 // known-present subtree.
 export function qs<T extends Element>(root: ParentNode, selector: string): T {

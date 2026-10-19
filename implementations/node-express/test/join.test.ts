@@ -5,6 +5,7 @@ import { parseFilter, parseFilterForJoin } from "../src/filter.js";
 import {
   assignJoinLabels,
   BadJoinError,
+  BadParamError,
   buildJoinSelect,
   type JoinColMeta,
   type JoinDialect,
@@ -87,7 +88,7 @@ describe("planJoin", () => {
 
     const hostile = parseJoin(JOIN);
     hostile.joins[0].on[0].right = 'id"; drop table users; --';
-    expect(() => planJoin(hostile, [orders(), users()], opts())).toThrow(NotAllowedError);
+    expect(() => planJoin(hostile, [orders(), users()], opts())).toThrow(BadJoinError);
 
     const cross = parseJoin(JOIN);
     cross.joins[0].on[0].left.column = "status";
@@ -153,7 +154,7 @@ describe("planJoin", () => {
     expect(() =>
       planJoin(spec, [orders(), users()], opts({ filter: [{ column: "id", op: "IS NULL", join: 2 }] })),
     ).toThrow(FilterError);
-    expect(() => planJoin(spec, [orders(), users()], opts({ sortJoin: 1 }))).toThrow(BadJoinError);
+    expect(() => planJoin(spec, [orders(), users()], opts({ sortJoin: 1 }))).toThrow(BadParamError);
     expect(() => planJoin(spec, [orders(), users()], opts({ sort: "email" }))).toThrow(NotAllowedError);
   });
 });

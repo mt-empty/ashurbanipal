@@ -549,10 +549,7 @@ impl DbSource for SqliteSource {
                     continue;
                 }
                 if !allowed.iter().any(|t| t == name) {
-                    return Err(DbError::not_allowed(
-                        NotAllowedKind::Table,
-                        format!("table {name:?}"),
-                    ));
+                    return Err(DbError::BadJoin(format!("unknown table {name:?}")));
                 }
                 metas.insert(name, join_table_meta(conn, name).await?);
             }
@@ -1365,7 +1362,7 @@ mod tests {
         );
         assert!(matches!(
             source.query_join(None, &hostile, join_opts()).await,
-            Err(DbError::NotAllowed(_))
+            Err(DbError::BadJoin(_))
         ));
         let mismatch = spec(
             r#"{"table":"users","joins":[{"type":"left","table":"orders",

@@ -101,6 +101,16 @@ async fn dsl_text_in_filter_param_is_rejected() {
     .await;
 }
 
+/// Malformed JSON → 400, including nesting deep enough to overflow a
+/// recursive decoder while staying under the byte bound.
+#[tokio::test]
+async fn deeply_nested_filter_is_rejected() {
+    let srv = TestServer::spawn().await;
+    let deep = format!("{}{}", "[".repeat(2000), "]".repeat(2000));
+    let resp = fetch(&srv, "orders", &deep).await;
+    assert_problem_code(resp, 400, "invalid_filter", "filter nested 2000 deep").await;
+}
+
 /// Empty param and empty JSON array both mean "no filter" (§5.4.2).
 #[tokio::test]
 async fn empty_param_and_empty_array_mean_no_filter() {

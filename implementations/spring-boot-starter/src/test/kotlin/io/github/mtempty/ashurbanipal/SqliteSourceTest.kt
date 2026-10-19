@@ -472,7 +472,7 @@ class SqliteSourceTest {
                 """{"table":"users\"; drop table users; --","joins":[{"type":"left","table":"orders",
                     "on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}""",
             )
-            assertThrows(NotAllowedException::class.java) { source.queryJoin(null, hostile, joinOpts) }
+            assertThrows(BadJoinException::class.java) { source.queryJoin(null, hostile, joinOpts) }
             val mismatch = parseJoin(
                 """{"table":"users","joins":[{"type":"left","table":"orders",
                     "on":[{"left":{"join":0,"column":"email"},"right":"user_id"}]}]}""",

@@ -203,10 +203,13 @@ pub struct NotAllowedDetail {
 pub enum DbError {
     NotAllowed(NotAllowedDetail),
     FilterParse(String),
-    /// A join request that is well-formed but not allowed by the catalog
-    /// (`spec/protocol.md` §5.11): an incompatible column pair, a position
-    /// out of range. Maps to `invalid_parameter`.
+    /// Anything wrong with a `join` value (`spec/protocol.md` §5.11.1): its
+    /// shape, an unknown table or column, an incompatible column pair. Maps to
+    /// `invalid_join`.
     BadJoin(String),
+    /// A request parameter outside the allowed values. Maps to
+    /// `invalid_parameter`.
+    BadParameter(String),
     /// The engine's own timeout signal (`impl From<sqlx::Error>`).
     QueryTimeout,
     Sqlx(sqlx::Error),
@@ -230,7 +233,8 @@ impl DbError {
         let (status, code) = match self {
             Self::NotAllowed(d) => (400, d.kind.code()),
             Self::FilterParse(_) => (400, "invalid_filter"),
-            Self::BadJoin(_) => (400, "invalid_parameter"),
+            Self::BadJoin(_) => (400, "invalid_join"),
+            Self::BadParameter(_) => (400, "invalid_parameter"),
             Self::QueryTimeout => (500, "query_timeout"),
             Self::Sqlx(_) => (500, "database_error"),
         };
@@ -244,6 +248,7 @@ impl std::fmt::Display for DbError {
             Self::NotAllowed(d) => write!(f, "not allowed: {}", d.what),
             Self::FilterParse(reason) => write!(f, "invalid filter: {reason}"),
             Self::BadJoin(reason) => write!(f, "invalid join: {reason}"),
+            Self::BadParameter(reason) => write!(f, "invalid parameter: {reason}"),
             Self::QueryTimeout => write!(f, "query timed out"),
             Self::Sqlx(e) => write!(f, "database error: {e}"),
         }

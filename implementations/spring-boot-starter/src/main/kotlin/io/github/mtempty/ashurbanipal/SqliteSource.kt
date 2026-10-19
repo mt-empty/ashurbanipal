@@ -205,7 +205,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
             val metas = HashMap<String, JoinTableMeta>()
             for (name in names) {
                 if (name in metas) continue
-                if (name !in allowed) throw NotAllowedException("not allowed: table $name", NotAllowedKind.TABLE)
+                if (name !in allowed) throw BadJoinException("unknown table \"$name\"")
                 val quoted = quoteIdent(name)
                 val (pk, fkColumns) = keyMetadataOn(conn, name)
                 metas[name] = JoinTableMeta(

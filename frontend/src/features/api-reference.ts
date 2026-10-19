@@ -156,6 +156,41 @@ function buildApiReference() {
       },
       {
         method: "GET",
+        path: `${base}/tables/join`,
+        summary:
+          "Rows of up to 4 tables joined server-side (INNER or LEFT, equality on 1-3 column pairs per join), read-only. Every table and column name is checked against the live catalog; each pair must join columns of one type class (number, text, uuid, boolean, temporal, time, binary, enum), so floats, json and arrays cannot be joined. Positions: the start table is 0 and `joins[]` entries are 1..n; a `left` reference may only point at an earlier position. The response has `has_more` and never a total. A column carries `join`, `table` and `column` beside a unique `name` label (never parse the label); rows are keyed by label and a LEFT-join miss is null. Anything wrong with `join` itself (shape, an unknown table or column, an incompatible pair, the size limit) is a 400 with `code: invalid_join`; a bad `filter`, `sort` or `order` keeps its usual code. A join that runs over the query timeout is a 500 with `code: query_timeout`.",
+        params: [
+          { name: "source", required: false, notes: "same as GET /schemas" },
+          { name: "schema", required: false, notes: "same as GET /tables; every table of the join is in it" },
+          {
+            name: "join",
+            required: true,
+            notes:
+              'URL-encoded JSON object `{table, joins: [{type: "inner" | "left", table, on: [{left: {join, column}, right}]}], columns?: [{join, column}]}`, at most 8192 bytes',
+          },
+          {
+            name: "filter",
+            required: false,
+            notes:
+              "same as GET /tables/data, plus an optional integer `join` (table position, default 0) on each condition",
+          },
+          { name: "limit", required: false, notes: "default 50, max 100" },
+          { name: "offset", required: false, notes: "default 0" },
+          { name: "sort", required: false, notes: "a column name of the table at `sort_join`" },
+          { name: "sort_join", required: false, notes: "table position of `sort`, default 0; 400 without `sort`" },
+          { name: "order", required: false, notes: '"asc" | "desc", default "asc"' },
+        ],
+        example_response: {
+          columns: [
+            { name: "id", join: 0, table: "orders", column: "id", type: "uuid", key: "pk" },
+            { name: "full_name", join: 1, table: "users", column: "full_name", type: "text" },
+          ],
+          rows: [{ id: "...", full_name: "Ada Lovelace" }],
+          has_more: true,
+        },
+      },
+      {
+        method: "GET",
         path: `${base}/siblings`,
         summary: "Other related services configured for this instance, with live health status.",
         params: [],
@@ -174,6 +209,7 @@ function buildApiReference() {
         "`value` is always a JSON string, required except for IS NULL / IS NOT NULL, which take none.",
         "columns are cast to text before comparison, so the same operators work regardless of the column's real type (UUID, timestamp, JSON, etc.) — but '>'/'<'/'>='/'<=' then compare lexicographically as text, not numerically: a filter like age > 9 will incorrectly exclude age = 10.",
         "an empty condition array is treated identically to an absent `filter` param.",
+        "on GET /tables/join a condition may carry `join` (the table position, default 0); on GET /tables/data any `join` is a 400.",
         "at most 10 conditions and 8192 bytes of URL-decoded JSON — exceeding either is a 400.",
         "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text and compiles it to this AST client-side — DSL text sent as the `filter` param is a 400.",
       ],

@@ -1,0 +1,1191 @@
+{
+  "$schema_note": "See spec/fixtures/README.md. Source of truth: spec/join-dsl.md §5.",
+  "catalog": {
+    "orders": [
+      "id",
+      "user_id",
+      "status",
+      "total_cents",
+      "discount_pct",
+      "tags",
+      "line_items",
+      "created_at"
+    ],
+    "users": [
+      "id",
+      "email",
+      "full_name",
+      "age",
+      "is_active",
+      "login_count",
+      "metadata",
+      "last_login_at",
+      "created_at"
+    ],
+    "order_extra": [
+      "order_id",
+      "gift_message",
+      "is_gift",
+      "created_at"
+    ],
+    "events": [
+      "id",
+      "user_id",
+      "event_type",
+      "payload",
+      "ip_address",
+      "duration_ms",
+      "occurred_at",
+      "is_test"
+    ]
+  },
+  "cases": [
+    {
+      "name": "V1",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": null
+          },
+          {
+            "table": "users",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders\nINNER JOIN users ON orders.user_id = users.id"
+    },
+    {
+      "name": "V2",
+      "input": "select * from orders left join users on orders.user_id = users.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": null
+          },
+          {
+            "table": "users",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "left",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders\nLEFT JOIN users ON orders.user_id = users.id"
+    },
+    {
+      "name": "V3",
+      "input": "FROM orders AS o LEFT JOIN users AS u ON o.user_id = u.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": "o"
+          },
+          {
+            "table": "users",
+            "alias": "u"
+          }
+        ],
+        "joins": [
+          {
+            "type": "left",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders o\nLEFT JOIN users u ON o.user_id = u.id"
+    },
+    {
+      "name": "V4",
+      "input": "FROM orders o LEFT JOIN users u ON o.user_id = u.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": "o"
+          },
+          {
+            "table": "users",
+            "alias": "u"
+          }
+        ],
+        "joins": [
+          {
+            "type": "left",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders o\nLEFT JOIN users u ON o.user_id = u.id"
+    },
+    {
+      "name": "V5",
+      "input": "FROM orders o LEFT OUTER JOIN users u ON o.user_id = u.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": "o"
+          },
+          {
+            "table": "users",
+            "alias": "u"
+          }
+        ],
+        "joins": [
+          {
+            "type": "left",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders o\nLEFT JOIN users u ON o.user_id = u.id"
+    },
+    {
+      "name": "V6",
+      "input": "FROM orders INNER JOIN users ON orders.user_id = users.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": null
+          },
+          {
+            "table": "users",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders\nINNER JOIN users ON orders.user_id = users.id"
+    },
+    {
+      "name": "V7",
+      "input": "FROM orders JOIN users ON users.id = orders.user_id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": null
+          },
+          {
+            "table": "users",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders\nINNER JOIN users ON orders.user_id = users.id"
+    },
+    {
+      "name": "V8",
+      "input": "SELECT o.id, u.full_name FROM orders o JOIN users u ON o.user_id = u.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": "o"
+          },
+          {
+            "table": "users",
+            "alias": "u"
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": [
+          {
+            "join": 0,
+            "column": "id"
+          },
+          {
+            "join": 1,
+            "column": "full_name"
+          }
+        ]
+      },
+      "canonical": "SELECT o.id, u.full_name\nFROM orders o\nINNER JOIN users u ON o.user_id = u.id"
+    },
+    {
+      "name": "V9",
+      "input": "SELECT o.*, u.email FROM orders o JOIN users u ON o.user_id = u.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": "o"
+          },
+          {
+            "table": "users",
+            "alias": "u"
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": [
+          {
+            "join": 0,
+            "all": true
+          },
+          {
+            "join": 1,
+            "column": "email"
+          }
+        ]
+      },
+      "canonical": "SELECT o.*, u.email\nFROM orders o\nINNER JOIN users u ON o.user_id = u.id"
+    },
+    {
+      "name": "V10",
+      "input": "FROM \"orders\" JOIN \"users\" ON \"orders\".\"user_id\" = \"users\".\"id\"",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": null
+          },
+          {
+            "table": "users",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders\nINNER JOIN users ON orders.user_id = users.id"
+    },
+    {
+      "name": "V11",
+      "input": "FROM \"we\"\"ird\" w JOIN b ON w.a = b.c",
+      "no_catalog": true,
+      "expect": {
+        "tables": [
+          {
+            "table": "we\"ird",
+            "alias": "w"
+          },
+          {
+            "table": "b",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "a"
+                },
+                "right": "c"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM \"we\"\"ird\" w\nINNER JOIN b ON w.a = b.c"
+    },
+    {
+      "name": "V12",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id;",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": null
+          },
+          {
+            "table": "users",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders\nINNER JOIN users ON orders.user_id = users.id"
+    },
+    {
+      "name": "V13",
+      "input": "FROM orders a JOIN orders b ON a.user_id = b.user_id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": "a"
+          },
+          {
+            "table": "orders",
+            "alias": "b"
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "user_id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders a\nINNER JOIN orders b ON a.user_id = b.user_id"
+    },
+    {
+      "name": "V14",
+      "input": "FROM orders o\n  JOIN users u ON o.user_id = u.id\n\tLEFT JOIN order_extra x ON x.order_id = o.id\nLEFT JOIN events e ON e.user_id = u.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": "o"
+          },
+          {
+            "table": "users",
+            "alias": "u"
+          },
+          {
+            "table": "order_extra",
+            "alias": "x"
+          },
+          {
+            "table": "events",
+            "alias": "e"
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          },
+          {
+            "type": "left",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "id"
+                },
+                "right": "order_id"
+              }
+            ]
+          },
+          {
+            "type": "left",
+            "on": [
+              {
+                "left": {
+                  "join": 1,
+                  "column": "id"
+                },
+                "right": "user_id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders o\nINNER JOIN users u ON o.user_id = u.id\nLEFT JOIN order_extra x ON o.id = x.order_id\nLEFT JOIN events e ON u.id = e.user_id"
+    },
+    {
+      "name": "V15",
+      "input": "FROM orders o JOIN users u ON o.user_id = u.id AND o.created_at = u.created_at AND o.id = u.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": "o"
+          },
+          {
+            "table": "users",
+            "alias": "u"
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              },
+              {
+                "left": {
+                  "join": 0,
+                  "column": "created_at"
+                },
+                "right": "created_at"
+              },
+              {
+                "left": {
+                  "join": 0,
+                  "column": "id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders o\nINNER JOIN users u ON o.user_id = u.id AND o.created_at = u.created_at AND o.id = u.id"
+    },
+    {
+      "name": "V16",
+      "input": "From orders Left Join users On orders.user_id = users.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": null
+          },
+          {
+            "table": "users",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "left",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders\nLEFT JOIN users ON orders.user_id = users.id"
+    },
+    {
+      "name": "V17",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id JOIN events ON events.user_id = users.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "orders",
+            "alias": null
+          },
+          {
+            "table": "users",
+            "alias": null
+          },
+          {
+            "table": "events",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "user_id"
+                },
+                "right": "id"
+              }
+            ]
+          },
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 1,
+                  "column": "id"
+                },
+                "right": "user_id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM orders\nINNER JOIN users ON orders.user_id = users.id\nINNER JOIN events ON users.id = events.user_id"
+    },
+    {
+      "name": "V18",
+      "input": "FROM \"left\" JOIN b ON \"left\".x = b.y",
+      "no_catalog": true,
+      "expect": {
+        "tables": [
+          {
+            "table": "left",
+            "alias": null
+          },
+          {
+            "table": "b",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "x"
+                },
+                "right": "y"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM \"left\"\nINNER JOIN b ON \"left\".x = b.y"
+    },
+    {
+      "name": "R1",
+      "input": "  \n ",
+      "expect_error": {
+        "code": "empty",
+        "line": 1,
+        "column": 1
+      }
+    },
+    {
+      "name": "R2",
+      "input": "FROM",
+      "expect_error": {
+        "code": "expected",
+        "line": 1,
+        "column": 5
+      }
+    },
+    {
+      "name": "R3",
+      "input": "FROM orders",
+      "expect_error": {
+        "code": "no-join",
+        "line": 1,
+        "column": 12
+      }
+    },
+    {
+      "name": "R4",
+      "input": "FROM orders RIGHT JOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 13
+      }
+    },
+    {
+      "name": "R5",
+      "input": "FROM orders FULL JOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 13
+      }
+    },
+    {
+      "name": "R6",
+      "input": "FROM orders CROSS JOIN users",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 13
+      }
+    },
+    {
+      "name": "R7",
+      "input": "FROM orders NATURAL JOIN users",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 13
+      }
+    },
+    {
+      "name": "R8",
+      "input": "FROM orders JOIN users USING (id)",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 24
+      }
+    },
+    {
+      "name": "R9",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id WHERE orders.id = 1",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 53
+      }
+    },
+    {
+      "name": "R10",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id GROUP BY orders.id",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 53
+      }
+    },
+    {
+      "name": "R11",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id HAVING orders.id = 1",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 53
+      }
+    },
+    {
+      "name": "R12",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id ORDER BY orders.id",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 53
+      }
+    },
+    {
+      "name": "R13",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id LIMIT 10",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 53
+      }
+    },
+    {
+      "name": "R14",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id OFFSET 10",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 53
+      }
+    },
+    {
+      "name": "R15",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id UNION SELECT 1",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 53
+      }
+    },
+    {
+      "name": "R16",
+      "input": "SELECT DISTINCT orders.id FROM orders JOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "unsupported-keyword",
+        "line": 1,
+        "column": 8
+      }
+    },
+    {
+      "name": "R17",
+      "input": "FROM (SELECT * FROM orders) o JOIN users u ON o.user_id = u.id",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 6
+      }
+    },
+    {
+      "name": "R18",
+      "input": "FROM orders JOIN users ON (orders.user_id = users.id)",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 27
+      }
+    },
+    {
+      "name": "R19",
+      "input": "SELECT count(orders.id) FROM orders JOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 13
+      }
+    },
+    {
+      "name": "R20",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id OR orders.id = users.id",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 53
+      }
+    },
+    {
+      "name": "R21a",
+      "input": "FROM orders JOIN users ON orders.total_cents > users.age",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 46
+      }
+    },
+    {
+      "name": "R21b",
+      "input": "FROM orders JOIN users ON orders.total_cents <> users.age",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 46
+      }
+    },
+    {
+      "name": "R21c",
+      "input": "FROM orders JOIN users ON orders.total_cents != users.age",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 46
+      }
+    },
+    {
+      "name": "R21d",
+      "input": "FROM orders JOIN users ON orders.total_cents LIKE users.email",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 46
+      }
+    },
+    {
+      "name": "R22a",
+      "input": "FROM orders -- note\nJOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 13
+      }
+    },
+    {
+      "name": "R22b",
+      "input": "/* x */ FROM orders JOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 1
+      }
+    },
+    {
+      "name": "R23",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id; SELECT 1",
+      "expect_error": {
+        "code": "multiple-statements",
+        "line": 1,
+        "column": 54
+      }
+    },
+    {
+      "name": "R24",
+      "input": "FROM orders JOIN orders ON orders.id = orders.user_id",
+      "expect_error": {
+        "code": "duplicate-name",
+        "line": 1,
+        "column": 18
+      }
+    },
+    {
+      "name": "R25",
+      "input": "FROM orders o JOIN users o ON o.id = o.user_id",
+      "expect_error": {
+        "code": "duplicate-name",
+        "line": 1,
+        "column": 20
+      }
+    },
+    {
+      "name": "R26",
+      "input": "FROM orders o JOIN users u ON o.user_id = u.id JOIN order_extra x ON x.order_id = o.id JOIN events e ON e.user_id = u.id JOIN users u2 ON u2.id = e.user_id",
+      "expect_error": {
+        "code": "too-many-tables",
+        "line": 1,
+        "column": 122
+      }
+    },
+    {
+      "name": "R27",
+      "input": "FROM orders o JOIN users u ON o.id = u.id AND o.user_id = u.id AND o.created_at = u.created_at AND o.status = u.email",
+      "expect_error": {
+        "code": "too-many-pairs",
+        "line": 1,
+        "column": 96
+      }
+    },
+    {
+      "name": "R28",
+      "input": "FROM orders JOIN users ON users.id = users.email",
+      "expect_error": {
+        "code": "bad-pair",
+        "line": 1,
+        "column": 27
+      }
+    },
+    {
+      "name": "R29",
+      "input": "FROM orders JOIN users ON orders.user_id = users.id JOIN events ON orders.id = users.id",
+      "expect_error": {
+        "code": "bad-pair",
+        "line": 1,
+        "column": 68
+      }
+    },
+    {
+      "name": "R30",
+      "input": "FROM orders JOIN users ON user_id = id",
+      "expect_error": {
+        "code": "bad-pair",
+        "line": 1,
+        "column": 27
+      }
+    },
+    {
+      "name": "R31",
+      "input": "FROM orders JOIN user ON orders.user_id = user.id",
+      "expect_error": {
+        "code": "unknown-table",
+        "line": 1,
+        "column": 18,
+        "suggest": "users"
+      }
+    },
+    {
+      "name": "R32",
+      "input": "FROM orders JOIN users ON orders.user_idd = users.id",
+      "expect_error": {
+        "code": "unknown-column",
+        "line": 1,
+        "column": 34,
+        "suggest": "user_id"
+      }
+    },
+    {
+      "name": "R33",
+      "input": "FROM orders JOIN users ON x.user_id = users.id",
+      "expect_error": {
+        "code": "unknown-alias",
+        "line": 1,
+        "column": 27
+      }
+    },
+    {
+      "name": "R34",
+      "input": "FROM orders o JOIN users u ON orders.user_id = u.id",
+      "expect_error": {
+        "code": "unknown-alias",
+        "line": 1,
+        "column": 31
+      }
+    },
+    {
+      "name": "R35",
+      "input": "SELECT *, orders.id FROM orders JOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "bad-select",
+        "line": 1,
+        "column": 8
+      }
+    },
+    {
+      "name": "R36",
+      "input": "SELECT o.*, o.id FROM orders o JOIN users u ON o.user_id = u.id",
+      "expect_error": {
+        "code": "bad-select",
+        "line": 1,
+        "column": 13
+      }
+    },
+    {
+      "name": "R37",
+      "input": "FROM \"orders JOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "bad-identifier",
+        "line": 1,
+        "column": 6
+      }
+    },
+    {
+      "name": "R38",
+      "input": "FROM \"\" JOIN b ON \"\".x = b.y",
+      "no_catalog": true,
+      "expect_error": {
+        "code": "bad-identifier",
+        "line": 1,
+        "column": 6
+      }
+    },
+    {
+      "name": "R39",
+      "input": "FROM orders JOIN users",
+      "expect_error": {
+        "code": "expected",
+        "line": 1,
+        "column": 23
+      }
+    },
+    {
+      "name": "R40",
+      "input": "FROM orders JOIN users ON orders.user_id users.id",
+      "expect_error": {
+        "code": "expected",
+        "line": 1,
+        "column": 42
+      }
+    },
+    {
+      "name": "A1",
+      "input": "FROM orders; DROP TABLE users",
+      "expect_error": {
+        "code": "multiple-statements",
+        "line": 1,
+        "column": 14
+      }
+    },
+    {
+      "name": "A2",
+      "input": "FROM a JOIN b ON a.id = b.id OR 1=1",
+      "no_catalog": true,
+      "expect_error": {
+        "code": "unsupported-syntax",
+        "line": 1,
+        "column": 30
+      }
+    },
+    {
+      "name": "A3",
+      "input": "FROM \"orders\"\" JOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "bad-identifier",
+        "line": 1,
+        "column": 6
+      }
+    },
+    {
+      "name": "A4",
+      "input": "FROM \"x; DROP TABLE users\" a JOIN b ON a.i = b.j",
+      "no_catalog": true,
+      "expect": {
+        "tables": [
+          {
+            "table": "x; DROP TABLE users",
+            "alias": "a"
+          },
+          {
+            "table": "b",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "i"
+                },
+                "right": "j"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM \"x; DROP TABLE users\" a\nINNER JOIN b ON a.i = b.j"
+    },
+    {
+      "name": "A5",
+      "input": "FROM ｏｒｄｅｒｓ JOIN users ON orders.user_id = users.id",
+      "expect_error": {
+        "code": "bad-identifier",
+        "line": 1,
+        "column": 6
+      }
+    },
+    {
+      "name": "A6",
+      "input": "FROM a\u0000b JOIN c ON a.x = c.y",
+      "no_catalog": true,
+      "expect_error": {
+        "code": "bad-identifier",
+        "line": 1,
+        "column": 7
+      }
+    },
+    {
+      "name": "A7",
+      "input": "FROM a JOIN b ON a.x = b.x JOIN c ON c.x = b.x JOIN d ON d.x = c.x JOIN e ON e.x = d.x",
+      "no_catalog": true,
+      "expect_error": {
+        "code": "too-many-tables",
+        "line": 1,
+        "column": 68
+      }
+    }
+  ]
+}

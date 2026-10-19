@@ -26,6 +26,7 @@ from ..join import (
     plan_join,
 )
 from . import (
+    BadJoin,
     ColumnInfo,
     ColumnPair,
     ColumnRef,
@@ -461,7 +462,7 @@ class MySqlSource(DbSource):
                     if name in metas:
                         continue
                     if name not in allowed:
-                        raise NotAllowed(f"table {name!r}", kind=NotAllowedKind.TABLE)
+                        raise BadJoin(f"unknown table {name!r}")
                     metas[name] = self._join_table_meta(cur, variant, resolved_schema, name, timeout)
                 plan = plan_join(spec, [metas[n] for n in names], opts)
 
