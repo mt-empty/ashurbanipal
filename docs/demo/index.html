@@ -2398,7 +2398,7 @@ function joinAliases() {
 function enterJoin(def) {
   state.view = joinView(def, state.view);
 }
-function showTable(name) {
+function enterTable(name) {
   if (state.view?.kind === "join") {
     state.sort = null;
     state.order = "asc";
@@ -2410,7 +2410,7 @@ function clearJoin() {
   const join = joinInView();
   if (!join) return;
   const table = startTable(join);
-  showTable(table);
+  enterTable(table);
   state.offset = 0;
   applyStoredSort(table);
 }
@@ -2611,7 +2611,7 @@ function setSchema(name) {
 function switchSource(name) {
   state.source = name;
   state.schema = state.schemaBySource[name] ?? null;
-  showTable(null);
+  enterTable(null);
   state.sort = null;
   state.offset = 0;
   clearFilter();
@@ -2619,13 +2619,13 @@ function switchSource(name) {
 }
 function switchSchema(name) {
   setSchema(name);
-  showTable(null);
+  enterTable(null);
   state.sort = null;
   state.offset = 0;
   clearFilter();
 }
 function switchTable(name) {
-  showTable(name);
+  enterTable(name);
   state.offset = 0;
   applyStoredSort(name);
   clearFilter();
@@ -3612,7 +3612,7 @@ async function loadTables() {
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   if (!tableNames.includes(startTable(state.view) ?? "")) {
-    showTable(tableNames[0] ?? null);
+    enterTable(tableNames[0] ?? null);
     clearFilter();
   }
   const table = tableInView();
@@ -5235,7 +5235,7 @@ function scalarSpan(node) {
 
 // src/features/nav.ts
 function navigateWithSeededFilter(table, schema, applyFilter) {
-  showTable(table);
+  enterTable(table);
   state.sort = null;
   if (schema && schema !== state.schema) {
     setSchema(schema);
@@ -5763,7 +5763,7 @@ function dataPath(view, params) {
     }
   }
 }
-async function fetchTableData(req) {
+async function fetchViewData(req) {
   const { view, sort, order } = req;
   const table = startTable(view);
   const params = new URLSearchParams({
@@ -5809,7 +5809,7 @@ function viewTitle(view) {
     }
   }
 }
-function updateActiveTableChrome() {
+function updateViewChrome() {
   const title = viewTitle(state.view);
   setActiveTable(tableInView());
   $("current").textContent = title ?? "\u2014";
@@ -5825,7 +5825,7 @@ async function loadData2({
   clearJoinNotice();
   const req = next ?? currentRequest();
   if (req === null) {
-    updateActiveTableChrome();
+    updateViewChrome();
     setStatus("");
     return;
   }
@@ -5834,7 +5834,7 @@ async function loadData2({
   const widthScope = widthScopeOf(view);
   let data;
   try {
-    data = await fetchTableData(req);
+    data = await fetchViewData(req);
   } catch (e) {
     if (token !== loadDataToken) return;
     if (!next && dropOneStaleInput(e instanceof ApiError ? e.code : void 0))
@@ -5853,7 +5853,7 @@ async function loadData2({
   markFilterVerified();
   markViewShown();
   if (view.kind === "table") seedColumns(view.table, data.columns);
-  updateActiveTableChrome();
+  updateViewChrome();
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
   $("payload").disabled = false;
   $("columns-btn").disabled = false;
