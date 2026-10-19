@@ -4,8 +4,8 @@ import { $, el, populateSelect, qs, reportError, setStatus } from "../core/dom.j
 import {
   applyStoredSort,
   clearFilter,
+  enterTable,
   scopeQuery,
-  showTable,
   sourceQuery,
   startTable,
   state,
@@ -240,7 +240,7 @@ export async function loadTables(): Promise<void> {
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back silently.
   if (!tableNames.includes(startTable(state.view) ?? "")) {
-    showTable(tableNames[0] ?? null);
+    enterTable(tableNames[0] ?? null);
     // A ?filter= was written against the table the URL named; that table
     // isn't here, so its columns can't apply to the fallback — carrying it
     // over would 400 and dead-end the very load meant to recover (R5).

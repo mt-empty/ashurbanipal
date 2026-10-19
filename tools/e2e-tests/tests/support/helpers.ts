@@ -3,7 +3,7 @@ import { expect, type Page } from "@playwright/test";
 export const APP_PATH = "/__ashurbanipal";
 
 /** Waits for an in-flight loadData() fetch AND its render to fully settle.
- * aria-busy (fetchTableData's own signal) only proves the *fetch* finished
+ * aria-busy (fetchViewData's own signal) only proves the *fetch* finished
  * — dbviewer.html wraps every re-render in document.startViewTransition(),
  * which keeps animating (and can leave the clicked element's bounding box
  * "unstable," or intercept the next click via its snapshot overlay) for a
@@ -13,7 +13,7 @@ export const APP_PATH = "/__ashurbanipal";
  * load is what caused sporadic "element is not stable"/misfired clicks.
  *
  * Deliberately excludes .row-spinner animations: a table chip's spinner
- * used to be able to get stuck running forever (fetchTableData's finally
+ * used to be able to get stuck running forever (fetchViewData's finally
  * block cleared the wrong row's loading flag if state.table changed
  * mid-flight — fixed by capturing `table` into a local const, see
  * loadDataToken in dbviewer.html). Counting it here would make this
@@ -69,7 +69,7 @@ export async function gotoApp(page: Page, query = "") {
 
 /** Clicks a table chip and waits for it to actually become the
  * loaded/current table (not just clicked) — #current only updates after a
- * successful loadData() (see dbviewer.html's updateActiveTableChrome), so
+ * successful loadData() (see dbviewer.html's updateViewChrome), so
  * this also doubles as "wait for the fetch to resolve." */
 export async function selectTable(page: Page, table: string) {
   await page.locator(`#tables button[data-table="${table}"]`).click();

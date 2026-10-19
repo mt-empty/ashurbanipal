@@ -91,7 +91,7 @@ test("no protocol warning appears against a matching backend", async ({ page }) 
 
 test("errors are surfaced as a visible role=alert region, not just logged", async ({ page }) => {
   // This table never finishes loading (invalid sort column -> 400 before
-  // updateActiveTableChrome() ever runs), so wait on #error, not #current.
+  // updateViewChrome() ever runs), so wait on #error, not #current.
   await gotoApp(page, "?table=orders&sort=nonexistent_col");
   await expect(page.locator("#error")).not.toBeEmpty();
   await expect(page.locator("#error")).toHaveAttribute("role", "alert");

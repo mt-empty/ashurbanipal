@@ -2,7 +2,7 @@ import { tryParseFilterDsl } from "../lib/filter-dsl.js";
 import { effectiveName, parseJoin, printJoin } from "../lib/join-dsl.js";
 import { collectNewRowKeys } from "../lib/row-diff.js";
 import { $ } from "./dom.js";
-import type { FilterCondition, JoinDef, JoinView, TableData, TableView, View } from "./types.js";
+import type { FilterCondition, JoinDef, JoinView, TableView, View, ViewData } from "./types.js";
 
 const UI_KEY = "ashurbanipal_ui";
 
@@ -110,7 +110,7 @@ function enterJoin(def: JoinDef): void {
 
 // Every move to a table view. Leaving a join drops the sort and filter written
 // against its `alias.column` labels, which the table would reject.
-export function showTable(name: string | null): void {
+export function enterTable(name: string | null): void {
   if (state.view?.kind === "join") {
     state.sort = null;
     state.order = "asc";
@@ -124,7 +124,7 @@ export function clearJoin(): void {
   const join = joinInView();
   if (!join) return;
   const table = startTable(join);
-  showTable(table);
+  enterTable(table);
   state.offset = 0;
   applyStoredSort(table);
 }
@@ -435,7 +435,7 @@ export function setSchema(name: string): void {
 export function switchSource(name: string): void {
   state.source = name;
   state.schema = state.schemaBySource[name] ?? null;
-  showTable(null);
+  enterTable(null);
   state.sort = null;
   state.offset = 0;
   clearFilter();
@@ -446,7 +446,7 @@ export function switchSource(name: string): void {
 // implies (its table list and columns are different).
 export function switchSchema(name: string): void {
   setSchema(name);
-  showTable(null);
+  enterTable(null);
   state.sort = null;
   state.offset = 0;
   clearFilter();
@@ -455,7 +455,7 @@ export function switchSchema(name: string): void {
 // Table chip click: the filter was written against this table's columns
 // so it clears; the sort is restored to whatever was last used on this table.
 export function switchTable(name: string): void {
-  showTable(name);
+  enterTable(name);
   state.offset = 0;
   applyStoredSort(name);
   clearFilter();
@@ -481,8 +481,8 @@ export function scopeKey(): string {
   ]);
 }
 
-let lastPayload: TableData | null = null;
-export function getLastPayload(): TableData | null {
+let lastPayload: ViewData | null = null;
+export function getLastPayload(): ViewData | null {
   return lastPayload;
 }
 
@@ -490,7 +490,7 @@ let lastScopeKey: string | null = null;
 
 // Advances the lastPayload/lastScopeKey bookkeeping, since it only ever happens
 // alongside this diff.
-export function diffNewRows(data: TableData, highlightNew: boolean): { newRowKeys?: Set<string>; pkNames: string[] } {
+export function diffNewRows(data: ViewData, highlightNew: boolean): { newRowKeys?: Set<string>; pkNames: string[] } {
   const nowScope = scopeKey();
   const result = collectNewRowKeys(lastPayload, data, {
     highlightNew,

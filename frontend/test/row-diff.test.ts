@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Column, Row, TableData } from "../src/core/types.ts";
+import type { Column, Row, ViewData } from "../src/core/types.ts";
 import { collectNewRowKeys, rowKey } from "../src/lib/row-diff.ts";
 
 // The PK diff behind the new-since-refresh row highlight (ui-guidelines R10,
@@ -9,7 +9,7 @@ import { collectNewRowKeys, rowKey } from "../src/lib/row-diff.ts";
 
 const pk = (name: string): Column => ({ name, type: "int4", key: "pk" });
 const plain = (name: string): Column => ({ name, type: "text" });
-const data = (columns: Column[], rows: Row[]): TableData => ({ columns, rows, total_approx: rows.length });
+const data = (columns: Column[], rows: Row[]): ViewData => ({ columns, rows, total_approx: rows.length });
 
 test("rowKey follows pkNames order and is stable for equal values", () => {
   assert.equal(rowKey(["id"], { id: "1", x: "a" }), rowKey(["id"], { id: "1", x: "b" }));

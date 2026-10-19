@@ -2,9 +2,9 @@ import { $, reportError } from "../core/dom.js";
 import {
   applyScopeParams,
   applyUrlExact,
+  enterTable,
   persist,
   setSchema,
-  showTable,
   startTable,
   state,
   tableInView,
@@ -21,7 +21,7 @@ import { loadTables } from "./sidebar.js";
 // applyFilter's own. Shared by grid.ts's FK-cell nav and the
 // referenced-by drill-in.
 export function navigateWithSeededFilter(table: string, schema: string | undefined, applyFilter: () => void): void {
-  showTable(table);
+  enterTable(table);
   state.sort = null;
   if (schema && schema !== state.schema) {
     setSchema(schema);

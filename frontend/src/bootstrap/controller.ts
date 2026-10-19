@@ -14,7 +14,7 @@ import {
   tableInView,
   type ViewRequest,
 } from "../core/state.js";
-import type { JoinDef, TableData, View } from "../core/types.js";
+import type { JoinDef, View, ViewData } from "../core/types.js";
 import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
@@ -38,8 +38,8 @@ function setTableBusy(busy: boolean): void {
   else tableEl.removeAttribute("aria-busy");
 }
 
-// Reference-counted, not a plain boolean: fetchTableData() can be in
-// flight more than once (switching tables again before the previous fetch
+// Reference-counted, not a plain boolean: fetchViewData() can be in
+// flight more than once (switching views again before the previous fetch
 // resolves), and a plain true/false pair would let the first fetch to
 // finish clear aria-busy/#status while another is still running.
 let inFlightFetches = 0;
@@ -102,7 +102,7 @@ function dataPath(view: View, params: URLSearchParams): Promise<string> | string
   }
 }
 
-async function fetchTableData(req: ViewRequest): Promise<TableData> {
+async function fetchViewData(req: ViewRequest): Promise<ViewData> {
   const { view, sort, order } = req;
   // Captured once, never re-read later: without this, a slow fetch for
   // table A would clear table B's row-loading flag (whatever the view
@@ -132,7 +132,7 @@ async function fetchTableData(req: ViewRequest): Promise<TableData> {
   }
   setRowLoading(table, true);
   try {
-    return await api<TableData>(await dataPath(view, params));
+    return await api<ViewData>(await dataPath(view, params));
   } finally {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
@@ -157,9 +157,9 @@ function viewTitle(view: View | null): string | null {
 }
 
 // Must only ever move in lockstep with a *successful* render, never ahead
-// of it — a failed fetchTableData() (see loadData) must leave these
+// of it — a failed fetchViewData() (see loadData) must leave these
 // exactly as they were, matching the stale <table> body they describe.
-function updateActiveTableChrome(): void {
+function updateViewChrome(): void {
   const title = viewTitle(state.view);
   setActiveTable(tableInView());
   $("current").textContent = title ?? "—";
@@ -187,16 +187,16 @@ export async function loadData({
   clearJoinNotice();
   const req = next ?? currentRequest();
   if (req === null) {
-    updateActiveTableChrome();
+    updateViewChrome();
     setStatus("");
     return;
   }
   const view = req.view;
   const token = ++loadDataToken;
   const widthScope = widthScopeOf(view);
-  let data: TableData;
+  let data: ViewData;
   try {
-    data = await fetchTableData(req);
+    data = await fetchViewData(req);
   } catch (e) {
     if (token !== loadDataToken) return; // superseded by a newer request
     // A restored sort or a URL-restored filter can each name a column that no
@@ -224,7 +224,7 @@ export async function loadData({
   markFilterVerified();
   markViewShown();
   if (view.kind === "table") seedColumns(view.table, data.columns);
-  updateActiveTableChrome();
+  updateViewChrome();
 
   // Row keys come from primary keys, which a join of several tables does not have.
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");

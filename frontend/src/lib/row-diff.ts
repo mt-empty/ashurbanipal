@@ -1,4 +1,4 @@
-import type { Row, TableData } from "../core/types.js";
+import type { Row, ViewData } from "../core/types.js";
 
 // The new-since-refresh row highlight (ui-guidelines R10): rows present now
 // but absent from the previous fetch of the *same view* are tinted. Pure over
@@ -16,8 +16,8 @@ export function rowKey(pkNames: string[], row: Row): string {
 // tint them — but only when the highlight is on, the scope is unchanged, and
 // the table has a PK to identify rows by.
 export function collectNewRowKeys(
-  prev: TableData | null,
-  next: TableData,
+  prev: ViewData | null,
+  next: ViewData,
   opts: { highlightNew: boolean; sameScope: boolean },
 ): { newRowKeys?: Set<string>; pkNames: string[] } {
   if (!opts.highlightNew || !prev || !opts.sameScope) return { pkNames: [] };

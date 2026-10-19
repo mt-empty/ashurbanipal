@@ -150,7 +150,7 @@ should block on.
   than a guessed one; the previous row set lives in memory only and is
   never persisted (R6); a join view has no primary key to identify a row by,
   so it gets no tint either; and the fetch itself reports through the normal
-  `fetchTableData` chrome, with the new-row count also announced via
+  `fetchViewData` chrome, with the new-row count also announced via
   `#status` (R9, no carve-out). *(Derives from: recognition rather than
   recall, visibility of system status.)*
 - **R11 — Sort is remembered per table.** (A join view keeps its sort and

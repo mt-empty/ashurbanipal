@@ -28,7 +28,7 @@ export interface Row {
   [column: string]: string | null;
 }
 
-export interface TableData {
+export interface ViewData {
   columns: Column[];
   rows: Row[];
   // /tables/data carries total_approx, /tables/join carries has_more (§5.11.4).
