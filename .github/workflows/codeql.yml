@@ -1,0 +1,63 @@
+name: codeql
+
+# Replaces GitHub's default setup, whose Java/Kotlin autobuild only looks for
+# a build file at the repo root; the Gradle project is under
+# implementations/spring-boot-starter/. Disable default setup before merging.
+# Kotlin has no buildless mode (build-mode none skips Kotlin), so java-kotlin
+# builds manually.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { language: actions, build-mode: none }
+          - { language: go, build-mode: autobuild }
+          - { language: java-kotlin, build-mode: manual }
+          - { language: javascript-typescript, build-mode: none }
+          - { language: python, build-mode: none }
+          - { language: rust, build-mode: none }
+    steps:
+      - uses: actions/checkout@v7
+      - if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+      - if: matrix.build-mode == 'autobuild'
+        uses: github/codeql-action/autobuild@v4
+      # --no-daemon + clean so the CodeQL tracer sees every compile.
+      - if: matrix.language == 'java-kotlin'
+        working-directory: implementations/spring-boot-starter
+        run: ./gradlew clean testClasses --no-daemon
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
