@@ -25,6 +25,9 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
+permissions:
+  contents: read
+
 jobs:
   verify-version:
     name: verify tag is on main + matches build.gradle.kts version

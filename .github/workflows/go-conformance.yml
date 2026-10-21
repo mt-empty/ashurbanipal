@@ -28,6 +28,9 @@ concurrency:
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: go build/vet/fmt + fixture/kill-switch/integration tests

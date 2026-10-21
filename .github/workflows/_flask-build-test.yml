@@ -11,6 +11,9 @@ env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
   PYTHON_VERSION: "3.12"
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: ruff + fixture/kill-switch/sqlite/postgres tests

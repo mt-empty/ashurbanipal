@@ -53,6 +53,9 @@ on:
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
 
+permissions:
+  contents: read
+
 jobs:
   conformance:
     name: conformance kit (layer 3, behavior — external-URL path)

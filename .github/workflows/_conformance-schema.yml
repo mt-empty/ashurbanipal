@@ -48,6 +48,9 @@ on:
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
 
+permissions:
+  contents: read
+
 jobs:
   schema-conformance:
     name: schema conformance (schemathesis vs spec/openapi.yaml)

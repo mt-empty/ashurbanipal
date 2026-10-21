@@ -12,6 +12,9 @@ on:
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: cargo fmt/clippy/test --lib + seed sync check

@@ -24,6 +24,9 @@ concurrency:
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
 
+permissions:
+  contents: read
+
 jobs:
   test-e2e:
     name: Playwright e2e suite against dbviewer.html

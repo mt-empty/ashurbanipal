@@ -18,6 +18,9 @@ on:
       - "spring-v*"
       - "rust-v*"
 
+permissions:
+  contents: read
+
 jobs:
   reject:
     runs-on: ubuntu-latest

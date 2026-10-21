@@ -32,6 +32,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   verify-version:
     name: verify tag is on main + matches Cargo.toml version
