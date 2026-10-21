@@ -286,6 +286,17 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap;
          font-family: var(--font-mono); font-size: .8rem; }
 #error:empty { display: none; }
+/* Neutral, not --danger: the page made a safe choice, nothing failed. */
+#view-notice { display: flex; align-items: flex-start; gap: var(--gap); margin-top: var(--gap);
+               padding-left: .75rem; border: 1px solid var(--border-strong); border-radius: 8px; }
+#view-notice svg { flex: none; margin-top: .8rem; color: var(--text-muted); }
+#view-notice-text { flex: 1; min-width: 0; padding: .65rem 0; line-height: 1.4; }
+#view-notice-text code { font-family: var(--font-mono); font-size: .8125rem; }
+#view-notice-text .tag { font-family: var(--font-mono); font-size: .75rem; padding: .05rem .35rem;
+                         border-radius: 4px; background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#view-notice-close { flex: none; min-width: 44px; min-height: 44px; background: none; border: none;
+                     border-radius: 8px; font: inherit; color: var(--text-muted); cursor: pointer; }
+#view-notice-close:hover { background: var(--hover); color: inherit; }
 #meta { display: flex; justify-content: space-between; align-items: center;
         flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); }
 #meta-title { color: var(--text-muted); }
@@ -734,6 +745,11 @@ thead tr.bands + tr th { top: var(--band-h); }
       </search>
       <div id="error" role="alert"></div>
       <div id="join-notice" hidden><span id="join-notice-text"></span><span id="join-notice-actions"></span></div>
+      <div id="view-notice" role="status" hidden>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="6.3"/><path d="M8 7.2v4"/><circle cx="8" cy="4.9" r=".5" fill="currentColor"/></svg>
+        <span id="view-notice-text"></span>
+        <button id="view-notice-close" type="button" aria-label="Close this note">✕</button>
+      </div>
       <div id="meta">
         <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
@@ -1779,6 +1795,28 @@ function collectNewRowKeys(prev, next, opts) {
   return { newRowKeys, pkNames };
 }
 
+// src/core/url-intent.ts
+var KINDS = ["source", "schema", "table", "filter"];
+var asked = null;
+var swaps = [];
+function recordUrlIntent(params) {
+  asked = {};
+  for (const kind of KINDS) {
+    const value = params.get(kind);
+    if (value) asked[kind] = value;
+  }
+}
+function noteFallback(kind, from, got) {
+  if (asked === null || from === null || asked[kind] !== from) return;
+  swaps.push({ kind, asked: from, got });
+}
+function takeSwaps() {
+  const taken = swaps;
+  swaps = [];
+  asked = null;
+  return taken;
+}
+
 // src/core/store.ts
 var UI_KEY = "ashurbanipal_ui";
 var state = {
@@ -1909,6 +1947,7 @@ function restoreFilterFromParams(params) {
   const text = params.get("filter") ?? "";
   const ast = text ? tryParseFilterDsl(text, joinAliases()) : null;
   if (!ast) {
+    if (text) noteFallback("filter", text, null);
     clearFilter();
     return;
   }
@@ -2025,6 +2064,7 @@ function dropOneStaleInput(code) {
     return true;
   }
   if (filterRisk.isUnverified() && FILTER_FAULTS.has(code ?? "")) {
+    noteFallback("filter", state.filter, null);
     clearFilter();
     return true;
   }
@@ -2128,8 +2168,10 @@ function sourceQuery() {
   return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
 }
 function initState() {
+  const params = new URLSearchParams(location.search);
   restoreFromStorage();
-  applyUrlOverlay(new URLSearchParams(location.search));
+  recordUrlIntent(params);
+  applyUrlOverlay(params);
 }
 
 // src/features/column-widths.ts
@@ -2287,7 +2329,7 @@ function endsInUnfinishedWord(text) {
 }
 
 // src/features/overlay-highlight.ts
-function attachOverlayHighlight(field, render2) {
+function attachOverlayHighlight(field, render3) {
   const proto = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
   const valueProp = Object.getOwnPropertyDescriptor(proto, "value");
   if (valueProp?.get && valueProp.set) {
@@ -2299,13 +2341,13 @@ function attachOverlayHighlight(field, render2) {
       },
       set(v) {
         set.call(this, v);
-        render2();
+        render3();
       }
     });
   }
-  field.addEventListener("input", render2);
-  new ResizeObserver(render2).observe(field);
-  render2();
+  field.addEventListener("input", render3);
+  new ResizeObserver(render3).observe(field);
+  render3();
 }
 function tokenSpans(text, tokens, isError) {
   return tokens.map((t) => {
@@ -2973,6 +3015,7 @@ async function loadSources() {
   }
   let source = state.source;
   if (!source || !sources.some((s) => s.name === source)) {
+    noteFallback("source", source, sources[0].name);
     source = sources[0].name;
   }
   state.source = source;
@@ -3009,7 +3052,9 @@ async function loadSchemas() {
   }
   let schema = state.schema;
   if (!schema || !schemas.includes(schema)) {
-    schema = schemas.includes("public") ? "public" : schemas[0];
+    const fallback = schemas.includes("public") ? "public" : schemas[0];
+    noteFallback("schema", schema, fallback);
+    schema = fallback;
   }
   state.schema = schema;
   populateSelect($("schema-select"), schemas, schema);
@@ -3057,6 +3102,8 @@ async function loadTables() {
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   if (!tableNames.includes(startTable(state.view) ?? "")) {
+    noteFallback("table", startTable(state.view), tableNames[0] ?? null);
+    if (state.filter) noteFallback("filter", state.filter, null);
     enterTable(tableNames[0] ?? null);
     clearFilter();
   }
@@ -3232,19 +3279,19 @@ function tableColumns(table) {
     const params = new URLSearchParams({ table, limit: "1", offset: "0" });
     applyScopeParams(params);
     const started = generation;
-    const asked = api(`/tables/data?${params}`).then((d) => {
+    const asked2 = api(`/tables/data?${params}`).then((d) => {
       if (started === generation) {
         resolved.set(key, d.columns);
         version++;
       }
       return d.columns;
     });
-    cache2.set(key, asked);
-    asked.catch((e) => {
+    cache2.set(key, asked2);
+    asked2.catch((e) => {
       const lasting = e instanceof ApiError && (e.code === "unknown_table" || e.code === "not_readable");
-      if (!lasting && cache2.get(key) === asked) cache2.delete(key);
+      if (!lasting && cache2.get(key) === asked2) cache2.delete(key);
     });
-    columns = asked;
+    columns = asked2;
   }
   return columns;
 }
@@ -3258,12 +3305,12 @@ function indexedColumns(table) {
   const key = keyOf(table);
   let found = indexes.get(key);
   if (!found) {
-    const asked = generation;
+    const asked2 = generation;
     found = tableStructure(table).then(
       (s) => new Set(s.indexes.map((i) => i.columns[0])),
       () => /* @__PURE__ */ new Set()
     ).then((set) => {
-      if (asked === generation) indexesRead.set(key, set);
+      if (asked2 === generation) indexesRead.set(key, set);
       return set;
     });
     indexes.set(key, found);
@@ -3312,13 +3359,13 @@ function mountJoinForm(root, onChange) {
       const fk = first && first.leftColumn === "" && first.rightColumn === "" ? foreignKey(i + 1) : null;
       if (fk) j.on[0] = fk;
     });
-    render2();
+    render3();
     onChange();
   }
   const changed = (fromMenu = false) => {
     const active = document.activeElement;
     const focused = fromMenu ? lastDropdownLabel() : root.contains(active) ? active?.getAttribute("aria-label") : null;
-    render2();
+    render3();
     if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
   };
@@ -3537,7 +3584,7 @@ function mountJoinForm(root, onChange) {
     wrap2.append(el("div", "jlab", `Columns \xB7 ${picked} of ${total}`), grid);
     return wrap2;
   }
-  function render2() {
+  function render3() {
     const parts = [];
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
@@ -3581,7 +3628,7 @@ function mountJoinForm(root, onChange) {
   return {
     setDraft(next) {
       draft = next;
-      render2();
+      render3();
     },
     draft: () => draft,
     problem() {
@@ -3797,7 +3844,7 @@ function createSuggestList(opts) {
   const accept = (i) => {
     if (matches[i] && !matches[i].blocked) opts.accept(matches[i], head);
   };
-  const render2 = () => {
+  const render3 = () => {
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
         const btn = el("button");
@@ -3836,11 +3883,11 @@ function createSuggestList(opts) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       index = (index + 1) % count;
-      render2();
+      render3();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       index = index <= 0 ? count - 1 : index - 1;
-      render2();
+      render3();
     } else if (e.key === "Enter" && index >= 0) {
       e.preventDefault();
       accept(index);
@@ -3861,7 +3908,7 @@ function createSuggestList(opts) {
       matches = next;
       head = nextHead;
       index = nextIndex;
-      render2();
+      render3();
       popup.hidden = false;
       opts.place?.();
       input2.setAttribute("aria-expanded", "true");
@@ -3934,7 +3981,7 @@ function mountJoinSql(onChange) {
       memo = { text, version: version2, result: parseJoin(text, { catalog: knownCatalog(), pairCheck }) };
     return memo.result;
   };
-  function render2() {
+  function render3() {
     const text = field.value;
     field.style.height = "";
     if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
@@ -3946,7 +3993,7 @@ function mountJoinSql(onChange) {
     hlText.replaceChildren(...tokenSpans(text, shown2, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     hlText.append("\n");
   }
-  attachOverlayHighlight(field, render2);
+  attachOverlayHighlight(field, render3);
   const place2 = () => {
     const before = field.value.slice(0, field.selectionStart);
     const line = before.split("\n").length;
@@ -4061,7 +4108,7 @@ function mountJoinSql(onChange) {
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
       if (!anyRead(results)) return;
-      render2();
+      render3();
       onChange();
     });
   }
@@ -4580,6 +4627,71 @@ function update() {
 main.addEventListener("scroll", update, { passive: true });
 window.addEventListener("resize", update);
 update();
+
+// src/lib/fallback-note.ts
+var NAME_ORDER = ["source", "schema", "table"];
+function placeSegments(place2) {
+  return place2.kind === "here" ? [{ text: "here" }] : [{ text: "in " }, { label: place2.label }];
+}
+function joinOr(items) {
+  return items.flatMap((item, i) => {
+    if (i === 0) return item;
+    return [{ text: i === items.length - 1 ? " or " : ", " }, ...item];
+  });
+}
+function joinSlash(items) {
+  return items.flatMap((item, i) => i === 0 ? item : [{ text: " / " }, ...item]);
+}
+function buildFallbackNote(swaps2, table, place2) {
+  const named = NAME_ORDER.flatMap((kind) => swaps2.filter((s) => s.kind === kind));
+  const filterDropped = swaps2.some((s) => s.kind === "filter");
+  if (named.length === 0) {
+    if (!filterDropped) return [];
+    const target = table ? [{ code: table }, { text: " " }] : [];
+    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(place2), { text: ", so it was removed." }];
+  }
+  const out = [
+    { text: "There is no " },
+    ...joinOr(named.map((s) => [{ text: `${s.kind} ` }, { code: s.asked }])),
+    { text: " " },
+    ...placeSegments(place2)
+  ];
+  const got = named.filter((s) => s.got !== null);
+  if (got.length === 0) {
+    out.push({ text: filterDropped ? ". Your filter was removed." : "." });
+    return out;
+  }
+  out.push({ text: ". Showing " }, ...joinSlash(got.map((s) => [{ code: s.got }])), {
+    text: filterDropped ? " instead, without your filter." : " instead."
+  });
+  return out;
+}
+
+// src/features/view-notice.ts
+var shownFor = null;
+function scopeKey2(view, filter) {
+  return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
+}
+function render2(segment) {
+  if ("code" in segment) return el("code", void 0, segment.code);
+  if ("label" in segment) return el("span", "tag", segment.label);
+  return document.createTextNode(segment.text);
+}
+function clearViewNotice() {
+  shownFor = null;
+  $("view-notice").hidden = true;
+}
+function showBootFallbackNote() {
+  const segments = buildFallbackNote(takeSwaps(), tableInView(), { kind: "here" });
+  if (segments.length === 0) return;
+  shownFor = scopeKey2(state.view, state.filter);
+  $("view-notice").hidden = false;
+  $("view-notice-text").replaceChildren(...segments.map(render2));
+}
+function syncViewNotice(req) {
+  if (shownFor !== null && shownFor !== scopeKey2(req?.view ?? null, req?.filter ?? "")) clearViewNotice();
+}
+$("view-notice-close").onclick = clearViewNotice;
 
 // src/lib/json-tree.ts
 var SCALAR_CLASS = {
@@ -5273,6 +5385,7 @@ async function loadData2({
   clearError();
   clearJoinNotice();
   const req = next ?? currentRequest();
+  syncViewNotice(req);
   if (req === null) {
     updateViewChrome();
     setStatus("");
@@ -5397,7 +5510,7 @@ $("refresh").onclick = () => {
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });
 };
-loadSources().then(loadSchemas).then(loadTables).catch(reportError);
+loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(showBootFallbackNote);
 loadSiblings();
 setInterval(loadSiblings, 15e3);
 </script>

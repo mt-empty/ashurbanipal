@@ -11,6 +11,7 @@ import { loadSiblings } from "../features/siblings.js";
 import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
 import "../features/sticky-header.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";
+import { showBootFallbackNote } from "../features/view-notice.js";
 import { loadData } from "./controller.js";
 import { registerLoadData } from "./reload.js";
 import "../features/theme.js";
@@ -76,7 +77,9 @@ $<HTMLButtonElement>("refresh").onclick = () => {
 // loadSources resolves state.source before loadSchemas needs it, which in
 // turn resolves state.schema before loadTables' first request needs it —
 // bootstrap-only ordering; loadSchemas/loadTables are safe to call on their
-// own after this (source/schema switching does exactly that).
-loadSources().then(loadSchemas).then(loadTables).catch(reportError);
+// own after this (source/schema switching does exactly that). The fallback
+// note runs last because a URL filter can still be dropped by loadTables'
+// awaited first load.
+loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(showBootFallbackNote);
 loadSiblings();
 setInterval(loadSiblings, 15_000);

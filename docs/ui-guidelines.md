@@ -118,10 +118,15 @@ should block on.
     already the shareable-link surface a teammate might reuse, while keeping
     filter text out of `localStorage` means returning to a table later never
     silently reapplies a filter the current visit didn't type.
-  - **R6d — A restored filter the current database can't satisfy resets
-    silently.** It no longer parses, names a column the table lacks, or was
-    written against a table that isn't here — reset to no filter (R5), never
-    an error or a dead-end link.
+  - **R6d — A restored name the current database can't satisfy resets, and
+    says so only if the link asked for it.** A filter that no longer parses,
+    names a column the table lacks, or was written against a table that
+    isn't here resets to no filter; an unknown source, schema or table falls
+    back to the default (R5) — never an error or a dead-end link. When the
+    page URL named it at load, `#view-notice` says what was asked for and
+    what is shown instead, until ✕ or the next change of source, schema,
+    view or filter. A value restored from `localStorage` resets silently: it
+    is incidental state, not something the user asked to see.
   - **R6e — Host-facing exposure.** Filter text appears in URLs, so it
     reaches browser history, `Referer` headers, and any access log that
     records query strings. A host shipping those logs somewhere long-lived,

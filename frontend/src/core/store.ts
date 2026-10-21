@@ -3,6 +3,7 @@ import { effectiveName, parseJoin, printJoin } from "../lib/join-dsl.js";
 import { collectNewRowKeys } from "../lib/row-diff.js";
 import { $ } from "./dom.js";
 import type { FilterCondition, JoinDef, JoinView, TableView, View, ViewData } from "./types.js";
+import { noteFallback } from "./url-intent.js";
 
 const UI_KEY = "ashurbanipal_ui";
 
@@ -229,6 +230,7 @@ export function restoreFilterFromParams(params: URLSearchParams): void {
   const text = params.get("filter") ?? "";
   const ast = text ? tryParseFilterDsl(text, joinAliases()) : null;
   if (!ast) {
+    if (text) noteFallback("filter", text, null);
     clearFilter();
     return;
   }
@@ -393,6 +395,7 @@ export function dropOneStaleInput(code: string | undefined): boolean {
     return true;
   }
   if (filterRisk.isUnverified() && FILTER_FAULTS.has(code ?? "")) {
+    noteFallback("filter", state.filter, null);
     clearFilter();
     return true;
   }

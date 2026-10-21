@@ -54,25 +54,28 @@ test("the applied filter persists to the URL, never localStorage", async ({ page
 const statusCells = (page: import("@playwright/test").Page) =>
   page.locator('#tbody td[data-col="status"] .cell-text');
 
-test("a malformed filter URL param resets to no filter silently", async ({ page }) => {
+test("a malformed filter URL param resets to no filter with a note", async ({ page }) => {
   await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("status = 'unterminated"));
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
   await expect(page.locator("#error")).toBeEmpty();
   await expect(page.locator("#filter")).toHaveValue("");
+  await expect(page.locator("#view-notice-text")).toHaveText("Your filter doesn't fit orders here, so it was removed.");
   await expect
     .poll(async () => new Set(await statusCells(page).allTextContents()).size)
     .toBeGreaterThan(1); // unfiltered — mixed statuses still visible
 });
 
-test("a filter URL param naming a column the table lacks resets silently", async ({ page }) => {
+test("a filter URL param naming a column the table lacks resets with a note", async ({ page }) => {
   // Parses fine, so tryParseFilterDsl accepts it — the backend is what
   // rejects it (a link shared to a deployment where the column has drifted
-  // away). Must degrade like a stale sort does, not dead-end the link (R5).
+  // away). Must degrade like a stale sort does, not dead-end the link (R5),
+  // and say so, since the link asked for it (R6d).
   await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("nosuchcol = 1"));
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
   await expect(page.locator("#error")).toBeEmpty();
   await expect(page.locator("#filter")).toHaveValue("");
   await expect(page.locator("#tbody tr").first()).toBeVisible();
+  await expect(page.locator("#view-notice")).toBeVisible();
 });
 
 test("a filter survives no better than the table it was written against", async ({ page }) => {
@@ -84,6 +87,7 @@ test("a filter survives no better than the table it was written against", async 
   await expect(page.locator("#filter")).toHaveValue("");
   await expect(page.locator("#current")).not.toHaveText("—");
   await expect(page.locator("#tbody tr").first()).toBeVisible();
+  await expect(page.locator("#view-notice")).toBeVisible();
 });
 
 test("a filter URL param restores the filtered view on load", async ({ page }) => {

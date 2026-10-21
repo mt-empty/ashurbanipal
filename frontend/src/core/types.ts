@@ -114,6 +114,16 @@ export interface Sibling {
   healthy: boolean;
 }
 
+// A name the page URL asked for that this instance lacks, and what the page
+// showed instead; `got` is null when nothing replaced it (a dropped filter,
+// or a schema with no tables).
+export type SwapKind = "source" | "schema" | "table" | "filter";
+export interface Swap {
+  kind: SwapKind;
+  asked: string;
+  got: string | null;
+}
+
 // ---- Join (spec/join-dsl.md §3, spec/protocol.md §5.11) ----
 
 export type JoinType = "inner" | "left";

@@ -220,8 +220,8 @@ a broken page.
   be persisted at all: a filter the user typed persists; a value the UI
   copied from a fetched row does not (`ui-guidelines.md` R6).
 - Stale or malformed persisted state (an unknown table, unparseable JSON,
-  a filter that no longer parses) resets silently to the default view. It
-  never wedges the UI or errors.
+  a filter that no longer parses) resets to the default view. It never
+  wedges the UI or errors; whether it says so is `ui-guidelines.md` R6d.
 
 ## 7. What not to introduce
 

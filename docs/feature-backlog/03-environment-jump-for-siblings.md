@@ -207,7 +207,9 @@ look at `audit_log` and believe it is `orders`.
 ### 5.2 Behavior
 
 - **N1. Who gets a note.** Only a name the page URL asked for, at page load.
-  A name restored from `localStorage` still resets silently (R5).
+  A name restored from `localStorage` still resets silently (R5). Back and
+  Forward (popstate) do not show a note: that history entry was already
+  shown once.
 - **N2. What it says.** One sentence that names each swap in top-bar order,
   using the instance label from §4 when there is one, else "here":
   - "There is no table `orders` in int. Showing `audit_log` instead, without

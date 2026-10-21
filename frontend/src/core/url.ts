@@ -1,4 +1,5 @@
 import { restoreFilterFromParams, restoreFromStorage, restoreJoinFromParams, state, tableView } from "./store.js";
+import { recordUrlIntent } from "./url-intent.js";
 
 // URL <-> state, read side (nav.ts owns the write side, syncUrl). There are
 // two readers and they differ on purpose:
@@ -64,6 +65,8 @@ export function sourceQuery(): string {
 // Called once, first thing in main.ts's bootstrap: stored prefs, then the
 // URL layered over them.
 export function initState(): void {
+  const params = new URLSearchParams(location.search);
   restoreFromStorage();
-  applyUrlOverlay(new URLSearchParams(location.search));
+  recordUrlIntent(params);
+  applyUrlOverlay(params);
 }
