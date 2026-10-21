@@ -5,6 +5,25 @@ Notable changes to the `ashurbanipal-axum` adapter. Format follows
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.7.0] - 2026-10-21
+
+### Features
+
+- Migrate error bodies to RFC 9457 problem+json (spec/protocol.md §2) (#123)
+- Add GET /api/tables/structure (§5.10) across all ports (#148)
+- *(frontend)* Redesign layout with top table chips, quieter grid and filter assist (#147)
+- *(join)* Add the server-side table join route to all five ports (#153)
+- *(join)* [**breaking**] Build, browse and save joins in the browser; Flask requires Python 3.12 (#154)
+
+### Bug Fixes
+
+- *(join)* Review follow-ups — view renames, load race, Flask 500 on lone surrogates (#164)
+- Code scanning follow-ups (#169)
+
+### Security
+
+- Send X-Content-Type-Options: nosniff on API responses (#170)
+
 ## [0.6.0] - 2026-09-13
 
 ### Bug Fixes
