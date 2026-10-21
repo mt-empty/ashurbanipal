@@ -1,6 +1,6 @@
 import { ApiError, api } from "../core/api.js";
 import { applyScopeParams, state } from "../core/state.js";
-import type { Column, TableData } from "../core/types.js";
+import type { Column, ViewData } from "../core/types.js";
 import type { JoinCatalog } from "../lib/join-dsl.js";
 import { listedTableNames } from "./sidebar.js";
 import { tableStructure } from "./structure.js";
@@ -47,7 +47,7 @@ export function tableColumns(table: string): Promise<Column[]> {
     const params = new URLSearchParams({ table, limit: "1", offset: "0" });
     applyScopeParams(params);
     const started = generation;
-    const asked = api<TableData>(`/tables/data?${params}`).then((d) => {
+    const asked = api<ViewData>(`/tables/data?${params}`).then((d) => {
       if (started === generation) {
         resolved.set(key, d.columns);
         version++;

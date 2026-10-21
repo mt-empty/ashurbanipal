@@ -22,7 +22,7 @@ an element attribute changing, `aria-busy` clearing.
 
 ## 2. A finished fetch is not a finished render
 
-`aria-busy` clearing only proves `fetchTableData()`'s network call
+`aria-busy` clearing only proves `fetchViewData()`'s network call
 resolved — `dbviewer.html` wraps every re-render in
 `document.startViewTransition()`, which keeps animating for a short window
 after that, and an action fired mid-animation can hit an unstable bounding

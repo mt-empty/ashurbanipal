@@ -43,7 +43,7 @@ src/
   toolbar/dialog event wiring, and the bootstrap calls at the bottom
   (`loadSources().then(loadSchemas).then(loadTables)`, `loadSiblings()`,
   the polling `setInterval`). `controller.ts` owns `loadData` /
-  `fetchTableData`; it imports feature modules *downward* and they never
+  `fetchViewData`; it imports feature modules *downward* and they never
   import it (that would re-form a cycle) — they call `loadData` through
   `reload.ts`, an import-free seam `main.ts` wires at bootstrap.
 - `features/` — one module per feature or chrome unit, each holding that
@@ -147,7 +147,7 @@ misplaced import shows up as a wrong-looking path.
 - **Size discipline.** If a module crosses roughly 300 lines, that's the
   signal to question its scope and look for a real seam to split along
   (see §1's coupling notes), not to add more structure within it.
-- **Types**: shared wire/domain shapes (`Column`, `TableData`,
+- **Types**: shared wire/domain shapes (`Column`, `ViewData`,
   `FilterCondition`, etc.) live in `types.ts`; a type used by only one
   module stays local to it. Prefer a generic cast at the call site
   (`$<HTMLInputElement>("filter")`) over introducing a new exported type

@@ -83,6 +83,28 @@ extra config. If a reverse proxy strips the prefix before the request
 reaches your process, register `service(state.clone())` directly and it
 just works.
 
+## Behind your own auth
+
+Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.
+
+`service(state)` returns a `Scope`, so wrap it directly:
+
+```rust
+use actix_web::{body::MessageBody, dev::{ServiceRequest, ServiceResponse}, error::ErrorUnauthorized, middleware::{from_fn, Next}, Error};
+
+async fn require_admin(
+    req: ServiceRequest,
+    next: Next<impl MessageBody>,
+) -> Result<ServiceResponse<impl MessageBody>, Error> {
+    if !is_admin(&req) {
+        return Err(ErrorUnauthorized("unauthorized"));
+    }
+    next.call(req).await
+}
+
+App::new().service(service(state.clone()).wrap(from_fn(require_admin)))
+```
+
 ## Database support
 
 Same `DbSource` backends as `ashurbanipal-axum`, unchanged — see

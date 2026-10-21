@@ -66,6 +66,25 @@ check instead, returning 405 + `Allow: GET, HEAD` for any
 other verb — same behavior the other ports' underlying routers give for
 free by matching path before method.
 
+## Behind your own auth
+
+Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.
+
+Register the guard on the mount prefix (or your `basePath`) before the viewer. This example uses [Better Auth](https://www.better-auth.com) with its `admin` plugin; any session check works the same way:
+
+```ts
+import { fromNodeHeaders } from "better-auth/node";
+
+app.use("/__ashurbanipal", async (req, res, next) => {
+  const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+  if (!session) return res.status(401).end();
+  if (session.user.role !== "admin") return res.status(403).end();
+  next();
+});
+
+app.use(viewer);
+```
+
 ## Database support
 
 Postgres by default (`PostgresSource`, the package's main barrel export).

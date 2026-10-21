@@ -29,7 +29,7 @@ async fn ok_body(srv: &TestServer, join: &Value, extra: &[(&str, String)]) -> Va
     resp.json().await.unwrap()
 }
 
-async fn data(srv: &TestServer, table: &str, extra: &[(&str, String)]) -> Value {
+async fn table_data(srv: &TestServer, table: &str, extra: &[(&str, String)]) -> Value {
     let mut query: Vec<(&str, String)> = vec![("table", table.to_string())];
     query.extend(extra.iter().map(|(k, v)| (*k, v.clone())));
     srv.client()
@@ -259,9 +259,9 @@ async fn columns_selects_and_orders_the_output() {
 #[tokio::test]
 async fn filter_on_a_joined_table_column() {
     let srv = TestServer::spawn().await;
-    let order = data(&srv, "orders", &[("limit", "1".into())]).await;
+    let order = table_data(&srv, "orders", &[("limit", "1".into())]).await;
     let user_id = order["rows"][0]["user_id"].as_str().unwrap().to_string();
-    let user = data(
+    let user = table_data(
         &srv,
         "users",
         &[(
@@ -348,7 +348,7 @@ async fn has_more_reports_a_following_row() {
     // A filtered set small enough for one page: has_more flips exactly at its size.
     let mut one = orders_users("inner");
     one["columns"] = json!([{"join": 0, "column": "id"}]);
-    let order = data(&srv, "orders", &[("limit", "1".into())]).await;
+    let order = table_data(&srv, "orders", &[("limit", "1".into())]).await;
     let user_id = order["rows"][0]["user_id"].as_str().unwrap().to_string();
     let filter = json!([{"join": 0, "column": "user_id", "op": "=", "value": user_id}]);
     let page = ok_body(
@@ -425,7 +425,7 @@ async fn tables_resolve_only_in_the_requested_schema() {
     assert_problem_code(resp, 400, "invalid_join", "orders is not in other_schema").await;
 }
 
-/// P5.11-TABLE-COLUMN-EXACT: unknown or injection-shaped names are 400,
+/// P5.11-NAMES-EXACT: unknown or injection-shaped names are 400,
 /// never spliced.
 #[tokio::test]
 async fn unknown_and_malicious_names_are_rejected() {
@@ -478,7 +478,7 @@ async fn unknown_and_malicious_names_are_rejected() {
     }
 }
 
-/// P5.11-ON-RULES: positions, pair count, equality-only shape, join type.
+/// P5.11-JOIN-STRUCTURE: positions, pair count, equality-only shape, join type.
 #[tokio::test]
 async fn invalid_join_structures_are_rejected() {
     let srv = TestServer::spawn().await;
@@ -509,17 +509,6 @@ async fn invalid_join_structures_are_rejected() {
     let entry = orders_extra("left")["joins"][0].clone();
     let mut five_tables = orders_extra("left");
     five_tables["joins"] = json!([entry, entry, entry, entry]);
-    // Keys are matched exactly: a decoder that folds case would accept these.
-    let mut upper_key = orders_extra("left");
-    let table = upper_key.as_object_mut().unwrap().remove("table").unwrap();
-    upper_key["TABLE"] = table;
-    let mut nested_upper_key = orders_extra("left");
-    let kind = nested_upper_key["joins"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("type")
-        .unwrap();
-    nested_upper_key["joins"][0]["Type"] = kind;
 
     let cases = [
         ("on.left refers to its own position", forward),
@@ -534,14 +523,18 @@ async fn invalid_join_structures_are_rejected() {
         ("duplicate columns", dup_columns),
         ("columns position out of range", bad_column_join),
         ("5 tables", five_tables),
-        ("TABLE key in another case", upper_key),
-        ("Type key in another case", nested_upper_key),
     ];
     for (what, join) in cases {
         let resp = get_join(&srv, &join, &[]).await;
         assert_problem_code(resp, 400, "invalid_join", what).await;
     }
+}
 
+/// P5.11-JOIN-STRUCTURE: a `join` that is not a JSON object, or is nested past any
+/// sane depth, is a 400 `invalid_join`, never a 500.
+#[tokio::test]
+async fn malformed_join_values_are_rejected() {
+    let srv = TestServer::spawn().await;
     for raw in [
         "not json",
         "[]",
@@ -569,6 +562,68 @@ async fn invalid_join_structures_are_rejected() {
         .await
         .unwrap();
     assert_problem_code(resp, 400, "invalid_join", "join nested 2000 deep").await;
+}
+
+/// P5.11-JOIN-STRUCTURE: keys are matched exactly; a decoder that folds case would
+/// accept these.
+#[tokio::test]
+async fn join_keys_are_matched_exactly() {
+    let srv = TestServer::spawn().await;
+    let mut upper_key = orders_extra("left");
+    let table = upper_key.as_object_mut().unwrap().remove("table").unwrap();
+    upper_key["TABLE"] = table;
+    let mut nested_upper_key = orders_extra("left");
+    let kind = nested_upper_key["joins"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("type")
+        .unwrap();
+    nested_upper_key["joins"][0]["Type"] = kind;
+    for (what, join) in [
+        ("TABLE key in another case", upper_key),
+        ("Type key in another case", nested_upper_key),
+    ] {
+        let resp = get_join(&srv, &join, &[]).await;
+        assert_problem_code(resp, 400, "invalid_join", what).await;
+    }
+}
+
+/// P5.4.2-NO-5XX, for `join`: malformed input the rules don't name may be
+/// accepted or rejected, but never a 5xx.
+#[tokio::test]
+async fn unnamed_malformed_join_is_not_a_server_error() {
+    let srv = TestServer::spawn().await;
+    let entry = orders_users("left")["joins"][0].to_string();
+    for (what, raw) in [
+        (
+            "lone surrogate in a table name",
+            format!(r#"{{"table":"orders\ud800","joins":[{entry}]}}"#),
+        ),
+        (
+            "repeated key",
+            format!(r#"{{"table":"no_such_table","table":"orders","joins":[{entry}]}}"#),
+        ),
+    ] {
+        let resp = srv
+            .client()
+            .get(srv.url("/api/tables/join"))
+            .query(&[("join", raw.as_str())])
+            .send()
+            .await
+            .unwrap();
+        let status = resp.status();
+        assert!(
+            status == 200 || status == 400,
+            "{what}: expected 200 or 400, got {status}: {}",
+            resp.text().await.unwrap()
+        );
+    }
+}
+
+/// P5.11-JOIN-STRUCTURE: a missing `join` is a missing parameter, not a bad join.
+#[tokio::test]
+async fn missing_join_is_an_invalid_parameter() {
+    let srv = TestServer::spawn().await;
     let resp = srv
         .client()
         .get(srv.url("/api/tables/join"))
@@ -614,7 +669,7 @@ async fn incompatible_column_pairs_are_rejected() {
     }
 }
 
-/// P5.11-COMPATIBLE-NUMBERS: an exact numeric pair joins even when the
+/// P5.11-SAME-CLASS: an exact numeric pair joins even when the
 /// native types differ in width.
 #[tokio::test]
 async fn same_class_pairs_with_different_types_join() {

@@ -14,7 +14,7 @@ import {
   tableInView,
   type ViewRequest,
 } from "../core/state.js";
-import type { JoinDef, TableData, View } from "../core/types.js";
+import type { JoinDef, View, ViewData } from "../core/types.js";
 import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
@@ -24,6 +24,7 @@ import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
+import { isCurrentLoad, nextLoadToken } from "./reload.js";
 import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js";
 
 // The render-orchestration hub: loadData sequences fetch -> chrome ->
@@ -38,8 +39,8 @@ function setTableBusy(busy: boolean): void {
   else tableEl.removeAttribute("aria-busy");
 }
 
-// Reference-counted, not a plain boolean: fetchTableData() can be in
-// flight more than once (switching tables again before the previous fetch
+// Reference-counted, not a plain boolean: fetchViewData() can be in
+// flight more than once (switching views again before the previous fetch
 // resolves), and a plain true/false pair would let the first fetch to
 // finish clear aria-busy/#status while another is still running.
 let inFlightFetches = 0;
@@ -102,7 +103,7 @@ function dataPath(view: View, params: URLSearchParams): Promise<string> | string
   }
 }
 
-async function fetchTableData(req: ViewRequest): Promise<TableData> {
+async function fetchViewData(req: ViewRequest): Promise<ViewData> {
   const { view, sort, order } = req;
   // Captured once, never re-read later: without this, a slow fetch for
   // table A would clear table B's row-loading flag (whatever the view
@@ -132,7 +133,7 @@ async function fetchTableData(req: ViewRequest): Promise<TableData> {
   }
   setRowLoading(table, true);
   try {
-    return await api<TableData>(await dataPath(view, params));
+    return await api<ViewData>(await dataPath(view, params));
   } finally {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
@@ -157,21 +158,14 @@ function viewTitle(view: View | null): string | null {
 }
 
 // Must only ever move in lockstep with a *successful* render, never ahead
-// of it — a failed fetchTableData() (see loadData) must leave these
+// of it — a failed fetchViewData() (see loadData) must leave these
 // exactly as they were, matching the stale <table> body they describe.
-function updateActiveTableChrome(): void {
+function updateViewChrome(): void {
   const title = viewTitle(state.view);
   setActiveTable(tableInView());
   $("current").textContent = title ?? "—";
   document.title = title ? `${title} — Ashurbanipal` : "Ashurbanipal";
 }
-
-// loadData() has multiple entry points (table switch, sort click, filter
-// submit, pager); without this, an older slower request's response could
-// land after a newer one and overwrite its already-rendered result — the
-// grid would show a different table's columns/rows than #current claims.
-// Same shape of fix as showCommonValues's cvRequestToken.
-let loadDataToken = 0;
 
 export async function loadData({
   resetScroll = true,
@@ -187,18 +181,20 @@ export async function loadData({
   clearJoinNotice();
   const req = next ?? currentRequest();
   if (req === null) {
-    updateActiveTableChrome();
+    updateViewChrome();
     setStatus("");
     return;
   }
   const view = req.view;
-  const token = ++loadDataToken;
+  // An older, slower response must not overwrite a newer view (reload.ts).
+  const token = nextLoadToken();
+  const superseded = () => !isCurrentLoad(token);
   const widthScope = widthScopeOf(view);
-  let data: TableData;
+  let data: ViewData;
   try {
-    data = await fetchTableData(req);
+    data = await fetchViewData(req);
   } catch (e) {
-    if (token !== loadDataToken) return; // superseded by a newer request
+    if (superseded()) return;
     // A restored sort or a URL-restored filter can each name a column that no
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
@@ -218,13 +214,13 @@ export async function loadData({
     reportError(e);
     return;
   }
-  if (token !== loadDataToken) return; // superseded by a newer request
+  if (superseded()) return;
   if (next) commitRequest(next);
   markStoredSortVerified();
   markFilterVerified();
   markViewShown();
   if (view.kind === "table") seedColumns(view.table, data.columns);
-  updateActiveTableChrome();
+  updateViewChrome();
 
   // Row keys come from primary keys, which a join of several tables does not have.
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
@@ -239,7 +235,7 @@ export async function loadData({
   syncUrl();
   const renderTable = () => {
     // The transition can wait for a frame; a view switch meanwhile owns the grid, and this data is not its join's.
-    if (token !== loadDataToken) return;
+    if (superseded()) return;
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
@@ -264,7 +260,7 @@ export async function loadData({
   }
   // The await above yields; a table switch during the transition supersedes
   // this load, and its pager/#status must not overwrite the newer one's.
-  if (token !== loadDataToken) return;
+  if (superseded()) return;
   updatePager(data);
   // Sighted users see the tint; announce the count for everyone else. The
   // next loadData clears #status the same way it clears "loading…".

@@ -1,10 +1,11 @@
+import { supersedeLoads } from "../bootstrap/reload.js";
 import { $, reportError } from "../core/dom.js";
 import {
   applyScopeParams,
   applyUrlExact,
+  enterTable,
   persist,
   setSchema,
-  showTable,
   startTable,
   state,
   tableInView,
@@ -21,7 +22,7 @@ import { loadTables } from "./sidebar.js";
 // applyFilter's own. Shared by grid.ts's FK-cell nav and the
 // referenced-by drill-in.
 export function navigateWithSeededFilter(table: string, schema: string | undefined, applyFilter: () => void): void {
-  showTable(table);
+  enterTable(table);
   state.sort = null;
   if (schema && schema !== state.schema) {
     setSchema(schema);
@@ -106,6 +107,7 @@ window.addEventListener("popstate", (ev) => {
   if (!navState || typeof navState.navIndex !== "number") return;
   if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
   navIndex = navState.navIndex;
+  supersedeLoads();
   const params = new URLSearchParams(location.search);
   // Exact reader: reproduce this history entry verbatim, absences included
   // (contrast url.ts's load-time overlay). Keep it separate from that overlay

@@ -53,6 +53,28 @@ cfg := ashurbanipal.Config{
 never one silently enabled with defaults. Ashurbanipal has no opinion on
 which environment it's running in — that's entirely the host's call.
 
+## Behind your own auth
+
+Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.
+
+Register the wrapped handler at the mount prefix (or `cfg.BasePath`) instead of `/`, so the guard doesn't cover the rest of your mux. The UI is served at the bare prefix, so register both the exact path and the subtree:
+
+```go
+func requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isAdmin(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+guarded := requireAdmin(viewer)
+mux.Handle("/__ashurbanipal", guarded)
+mux.Handle("/__ashurbanipal/", guarded)
+```
+
 ## Database support
 
 Postgres by default. MySQL/MariaDB and SQLite are supported behind the

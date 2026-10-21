@@ -61,6 +61,25 @@ once per operation" invariant without the explicit transaction-pinning a
 pooled driver (Rust's `sqlx::Pool`) needs. A host wanting connection
 pooling wraps the driver call inside its own `DbSource` implementation.
 
+## Behind your own auth
+
+Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.
+
+`router(...)` returns a blueprint, so a blueprint-scoped hook covers only the viewer. Set it before registering:
+
+```python
+bp = router(config, [("primary", source)])
+
+
+@bp.before_request
+def require_admin():
+    if not is_admin():
+        abort(401)
+
+
+app.register_blueprint(bp)
+```
+
 ## Database support
 
 Same per-backend degraded features and mechanisms as the Rust reference

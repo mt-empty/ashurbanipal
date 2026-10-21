@@ -1,7 +1,7 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, el, qs } from "../core/dom.js";
 import { hiddenColumns, joinInView, rememberSort, setHiddenColumns, state, tableInView } from "../core/state.js";
-import type { Column, Row, TableData } from "../core/types.js";
+import type { Column, Row, ViewData } from "../core/types.js";
 import {
   APPROX_COUNT_TITLE,
   formatApproxCount,
@@ -258,7 +258,7 @@ function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
 // newRowKeys (rowKey values absent from the previous same-scope fetch,
 // passed only on an explicit refresh) tint those rows via .row-new;
 // pkNames is the matching PK column list, computed once by the caller.
-export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
+export function renderRows(data: ViewData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
   // Same for every cell in this render, so computed once rather than
   // re-derived (array rebuild + linear scan) per cell.
   const hidden = new Set(hiddenColumns());
@@ -291,7 +291,7 @@ export function renderRows(data: TableData, newRowKeys?: Set<string>, pkNames: s
   });
 }
 
-export function updatePager(data: TableData): void {
+export function updatePager(data: ViewData): void {
   const page = Math.floor(state.offset / state.limit) + 1;
   $<HTMLButtonElement>("prev").disabled = state.offset === 0;
   if (joinInView()) {

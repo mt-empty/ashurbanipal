@@ -75,6 +75,27 @@ extra config. If a reverse proxy strips the prefix before the request
 reaches your process, keep `.merge(...)` as-is: the app sees plain
 `/__ashurbanipal` and it just works.
 
+## Behind your own auth
+
+Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.
+
+Layer the viewer router before merging, so the guard covers only its routes:
+
+```rust
+use axum::{extract::Request, http::StatusCode, middleware::{self, Next}, response::{IntoResponse, Response}};
+
+async fn require_admin(req: Request, next: Next) -> Response {
+    if !is_admin(&req) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    next.run(req).await
+}
+
+let viewer = ashurbanipal_axum::router(config, sources)
+    .layer(middleware::from_fn(require_admin));
+let app = Router::new().merge(viewer);
+```
+
 ## Database support
 
 Postgres by default. MySQL/MariaDB and SQLite are supported behind the

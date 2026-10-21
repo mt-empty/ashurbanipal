@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 import { gotoJoin, joinParam, joinUrl, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
 
@@ -213,4 +213,104 @@ test("a new join that times out leaves the table in view as it was", async ({ pa
   expect((await response).status()).toBe(200);
   await waitForIdle(page);
   expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+});
+
+// Holds matching requests until the returned function is called.
+async function hold(page: Page, match: (url: URL) => boolean): Promise<() => void> {
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(match, async (route) => {
+    await held;
+    await route.continue();
+  });
+  return release;
+}
+
+const isJoin = (url: URL) => url.pathname.endsWith("/api/tables/join");
+const isTableList = (schema: string) => (url: URL) =>
+  url.pathname.endsWith("/api/tables") && url.searchParams.get("schema") === schema;
+
+// Runs ORDERS_USERS from the join dialog and returns once its request is held in flight.
+async function startHeldJoin(page: Page): Promise<() => void> {
+  const releaseJoin = await hold(page, isJoin);
+  await page.locator("#join-btn").click();
+  await writeSql(page, ORDERS_USERS);
+  const joinSent = page.waitForRequest((r) => isJoin(new URL(r.url())));
+  await page.locator("#join-run").click();
+  await joinSent;
+  return releaseJoin;
+}
+
+// Lets the held join answer; the checks after it wait on a later response, so they run after the page handled it.
+async function answerJoin(page: Page, releaseJoin: () => void): Promise<void> {
+  const answered = nextJoinResponse(page);
+  releaseJoin();
+  await (await answered).finished();
+}
+
+test("a join still loading when the schema changes is dropped, not shown under the new schema", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const releaseJoin = await startHeldJoin(page);
+  const releaseTables = await hold(page, isTableList("warehouse"));
+  const tablesSent = page.waitForRequest((r) => isTableList("warehouse")(new URL(r.url())));
+  await page.locator("#schema-select").selectOption("warehouse");
+  await tablesSent;
+
+  await answerJoin(page, releaseJoin);
+  const loaded = page.waitForResponse((r) => r.url().includes("/api/tables/data") && r.url().includes("warehouse"));
+  releaseTables();
+  await loaded;
+  await waitForIdle(page);
+  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+  // One step back is the table before the switch, with no join under the new schema in between.
+  await page.locator("#nav-back").click();
+  await expect(page.locator("#current")).toHaveText("orders");
+  expect(new URL(page.url()).searchParams.get("schema")).toBe("public");
+});
+
+test("a join still loading is dropped after switching schema away and back", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const releaseJoin = await startHeldJoin(page);
+  const releaseWarehouse = await hold(page, isTableList("warehouse"));
+  const releasePublic = await hold(page, isTableList("public"));
+  await page.locator("#schema-select").selectOption("warehouse");
+  const backSent = page.waitForRequest((r) => isTableList("public")(new URL(r.url())));
+  await page.locator("#schema-select").selectOption("public");
+  await backSent;
+
+  await answerJoin(page, releaseJoin);
+  const loaded = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  releaseWarehouse();
+  releasePublic();
+  await loaded;
+  await waitForIdle(page);
+  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+  await expect(page.locator("th.band")).toHaveCount(0);
+});
+
+test("a join still loading is dropped when Back restores the previous table", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "users");
+  await selectTable(page, "orders");
+  const releaseJoin = await startHeldJoin(page);
+  const releaseTables = await hold(page, isTableList("public"));
+  const tablesSent = page.waitForRequest((r) => isTableList("public")(new URL(r.url())));
+  await page.locator("#nav-back").click();
+  await tablesSent;
+
+  await answerJoin(page, releaseJoin);
+  const loaded = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  releaseTables();
+  await loaded;
+  await waitForIdle(page);
+  await expect(page.locator("#current")).toHaveText("users");
+  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+  expect(new URL(page.url()).searchParams.get("table")).toBe("users");
+  // The entry ahead is still the table the join started from, not the join.
+  await page.locator("#nav-forward").click();
+  await expect(page.locator("#current")).toHaveText("orders");
 });

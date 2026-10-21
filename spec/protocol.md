@@ -290,6 +290,9 @@ Structural rules (violations → 400):
 - `value` MUST be present (a JSON string) for every op except
   `IS NULL`/`IS NOT NULL`, for which it MUST be absent.
 - At most **10** conditions; more → 400.
+- Input these rules do not name, such as a key repeated within one object or
+  a lone UTF-16 surrogate escape, MAY be accepted or rejected with 400, but
+  MUST NOT produce a 5xx. The same holds for `join` (§5.11.1).
 - Implementations MUST bound the byte length of the JSON-encoded filter
   parameter and reject oversize filters with 400, never a truncated
   query. The Rust implementation's bound is 8192 bytes on the URL-decoded JSON text —

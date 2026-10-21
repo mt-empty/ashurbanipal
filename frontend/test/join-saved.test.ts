@@ -3,17 +3,39 @@ import { test } from "node:test";
 import { MAX_SAVED_PER_SCOPE, sanitizeSaved, scopeEntries, withoutSaved, withSaved } from "../src/lib/join-saved.ts";
 
 const entry = (name: string, text = `FROM a JOIN b ON a.x = b.${name}`) => ({ name, text });
+// The store uses null-prototype objects, which deepStrictEqual tells apart from literals.
+const plain = (v: unknown): unknown => JSON.parse(JSON.stringify(v));
 
 test("anything that is not the saved shape is dropped", () => {
-  assert.deepEqual(sanitizeSaved("x"), {});
-  assert.deepEqual(sanitizeSaved([]), {});
+  assert.deepEqual(plain(sanitizeSaved("x")), {});
+  assert.deepEqual(plain(sanitizeSaved([])), {});
   assert.deepEqual(
-    sanitizeSaved({ s: { public: [entry("ok"), { name: 1, text: "x" }, "y", { name: " ", text: "x" }, entry("ok")] } }),
+    plain(
+      sanitizeSaved({
+        s: { public: [entry("ok"), { name: 1, text: "x" }, "y", { name: " ", text: "x" }, entry("ok")] },
+      }),
+    ),
     {
       s: { public: [entry("ok")] },
     },
   );
-  assert.deepEqual(sanitizeSaved({ s: { public: "no" }, t: 3 }), {});
+  assert.deepEqual(plain(sanitizeSaved({ s: { public: "no" }, t: 3 })), {});
+});
+
+test("a source or schema named like an Object.prototype key stays an ordinary name", () => {
+  const raw = JSON.parse(
+    `{"__proto__":{"p":[${JSON.stringify(entry("a"))}]},"constructor":{"keys":[${JSON.stringify(entry("b"))}]}}`,
+  );
+  const store = sanitizeSaved(raw);
+  assert.deepEqual(scopeEntries(store, "__proto__", "p"), [entry("a")]);
+  assert.deepEqual(scopeEntries(store, "constructor", "keys"), [entry("b")]);
+  assert.deepEqual(scopeEntries(store, "constructor", "length"), []);
+  assert.deepEqual(scopeEntries({}, "constructor", "name"), []);
+  const saved = withSaved({}, "toString", "__proto__", entry("c"));
+  assert.ok("store" in saved);
+  assert.deepEqual(scopeEntries(saved.store, "toString", "__proto__"), [entry("c")]);
+  assert.equal(({} as Record<string, unknown>).p, undefined);
+  assert.equal(typeof Object.keys, "function");
 });
 
 test("saved joins are kept per source and schema", () => {
@@ -56,7 +78,7 @@ test("a blank name, a long name and a full scope are refused", () => {
 
 test("deleting the last entry leaves no empty scope behind", () => {
   const store = (withSaved({}, "a", "p", entry("one")) as { store: Record<string, Record<string, never>> }).store;
-  assert.deepEqual(withoutSaved(store, "a", "p", "one"), { a: {} });
+  assert.deepEqual(plain(withoutSaved(store, "a", "p", "one")), { a: {} });
 });
 
 test("saving a join already saved renames its entry in place", () => {
