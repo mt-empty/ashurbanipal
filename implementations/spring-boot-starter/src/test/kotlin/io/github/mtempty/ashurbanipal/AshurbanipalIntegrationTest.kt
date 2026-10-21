@@ -186,6 +186,7 @@ class AshurbanipalIntegrationTest : AshurbanipalHttpTestBase() {
     fun `every api response carries the protocol version header`() {
         val response = http.getForEntity(url("/api/tables"), String::class.java)
         assertEquals("1", response.headers.getFirst("x-ashurbanipal-protocol"))
+        assertEquals("nosniff", response.headers.getFirst("x-content-type-options"))
     }
 
     @Test

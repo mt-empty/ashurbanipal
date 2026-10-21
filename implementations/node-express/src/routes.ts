@@ -53,16 +53,16 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   const mount = basePath(config);
 
   registerGet(router, mount, serveHtml);
-  registerGet(router, `${mount}/api/sources`, withProtocolHeader(listSourcesHandler(sources)));
-  registerGet(router, `${mount}/api/schemas`, withProtocolHeader(listSchemasHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables`, withProtocolHeader(listTablesHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/table-counts`, withProtocolHeader(tableCountsHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/data`, withProtocolHeader(tableDataHandler(sources, limits, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/common-values`, withProtocolHeader(commonValuesHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/referenced-by`, withProtocolHeader(referencedByHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/structure`, withProtocolHeader(structureHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/join`, withProtocolHeader(tableJoinHandler(sources, limits, timeoutMs)));
-  registerGet(router, `${mount}/api/siblings`, withProtocolHeader(siblingsHandler(config.siblings ?? [])));
+  registerGet(router, `${mount}/api/sources`, withApiHeaders(listSourcesHandler(sources)));
+  registerGet(router, `${mount}/api/schemas`, withApiHeaders(listSchemasHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/tables`, withApiHeaders(listTablesHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/table-counts`, withApiHeaders(tableCountsHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/data`, withApiHeaders(tableDataHandler(sources, limits, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/common-values`, withApiHeaders(commonValuesHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/referenced-by`, withApiHeaders(referencedByHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/structure`, withApiHeaders(structureHandler(sources, timeoutMs)));
+  registerGet(router, `${mount}/api/tables/join`, withApiHeaders(tableJoinHandler(sources, limits, timeoutMs)));
+  registerGet(router, `${mount}/api/siblings`, withApiHeaders(siblingsHandler(config.siblings ?? [])));
 
   return router;
 }
@@ -94,13 +94,15 @@ function registerGet(router: ExpressRouter, path: string, handler: (req: Request
 }
 
 // Stamps every API response, success or error (spec/protocol.md §2/§7),
-// with the protocol version header. The HTML route (serveHtml) is wired
-// directly, without this wrapper, since §5.1 carries no protocol header.
-function withProtocolHeader(
+// with the protocol version header and nosniff, which stops a browser from
+// rendering echoed request text as HTML. The HTML route (serveHtml) is wired
+// directly, without this wrapper, since §5.1 carries neither.
+function withApiHeaders(
   handler: (req: Request, res: Response) => void | Promise<void>,
 ): (req: Request, res: Response) => void {
   return (req, res) => {
     res.setHeader(PROTOCOL_HEADER, PROTOCOL_VERSION);
+    res.setHeader("X-Content-Type-Options", "nosniff");
     Promise.resolve(handler(req, res)).catch((err: unknown) => writeError(res, err));
   };
 }

@@ -37,6 +37,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -60,6 +62,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -82,6 +86,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -110,6 +116,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -227,6 +235,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -275,6 +285,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -320,6 +332,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -363,6 +377,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -471,6 +487,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -492,6 +510,8 @@ paths:
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
           content:
             application/json:
               schema:
@@ -530,6 +550,14 @@ components:
       schema:
         type: string
         const: "1"
+    NoSniff:
+      description: >
+        Always "nosniff", so a browser never renders request text echoed in
+        a body as HTML (spec/protocol.md §2).
+      required: true
+      schema:
+        type: string
+        const: nosniff
 
   responses:
     ClientError:
@@ -539,6 +567,8 @@ components:
       headers:
         x-ashurbanipal-protocol:
           $ref: "#/components/headers/ProtocolVersion"
+        X-Content-Type-Options:
+          $ref: "#/components/headers/NoSniff"
       content:
         application/problem+json:
           schema:
@@ -548,6 +578,8 @@ components:
       headers:
         x-ashurbanipal-protocol:
           $ref: "#/components/headers/ProtocolVersion"
+        X-Content-Type-Options:
+          $ref: "#/components/headers/NoSniff"
       content:
         application/problem+json:
           schema:

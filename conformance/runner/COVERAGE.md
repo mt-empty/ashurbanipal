@@ -30,6 +30,7 @@ output exactly.
 | `P2-CONTENT-TYPE` | Success = `application/json` (HTML route excepted) | implicit in every `.json()` call across the suite; explicit content-type check on the UI route: `html_and_siblings::root_serves_the_embedded_dbviewer_html` |
 | `P2-ERROR-BODY-UNSPECIFIED` | Error bodies are `text/plain`, wording implementation-defined, MUST NOT be parsed | enforced by convention, not a single test: every error assertion in this suite goes through `assert_status()` (the status-only tier, see `assert.rs`), never a body-text match |
 | `P2-HEADER-EVERY-RESPONSE` | Every API response, success or error, carries the protocol header | `protocol::every_api_response_carries_the_protocol_version_header`, `protocol::protocol_header_is_present_even_on_api_error_responses` |
+| `P2-NOSNIFF` | Every API response, success or error, carries `X-Content-Type-Options: nosniff` | `protocol::every_api_response_carries_the_protocol_version_header`, `protocol::protocol_header_is_present_even_on_api_error_responses` |
 
 ## §3 Mount contract
 

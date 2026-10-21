@@ -1,6 +1,6 @@
 use actix_web::body::MessageBody;
 use actix_web::dev::{ServiceRequest, ServiceResponse};
-use actix_web::http::header::{HeaderName, HeaderValue};
+use actix_web::http::header::{HeaderName, HeaderValue, X_CONTENT_TYPE_OPTIONS};
 use actix_web::middleware::{from_fn, Next};
 use actix_web::web::{self, Data};
 use actix_web::{Error, HttpResponse, Scope};
@@ -62,7 +62,7 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
         .service(web::resource("").route(web::get().to(serve_html)))
         .service(
             web::scope("/api")
-                .wrap(from_fn(stamp_protocol_version))
+                .wrap(from_fn(stamp_api_headers))
                 // Actix's default `Query<T>` rejection is its own plain-text
                 // body; this routes it through `ApiError` instead so a
                 // missing/duplicate/malformed query param still comes back
@@ -86,15 +86,18 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
         )
 }
 
-async fn stamp_protocol_version(
+// nosniff stops a browser from rendering echoed request text in a JSON error as HTML.
+async fn stamp_api_headers(
     req: ServiceRequest,
     next: Next<impl MessageBody>,
 ) -> Result<ServiceResponse<impl MessageBody>, Error> {
     let mut res = next.call(req).await?;
-    res.headers_mut().insert(
+    let headers = res.headers_mut();
+    headers.insert(
         HeaderName::from_static(PROTOCOL_HEADER),
         HeaderValue::from_static(PROTOCOL_VERSION),
     );
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     Ok(res)
 }
 

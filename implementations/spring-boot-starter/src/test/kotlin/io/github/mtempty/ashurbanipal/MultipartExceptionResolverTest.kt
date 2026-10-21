@@ -26,6 +26,7 @@ class MultipartExceptionResolverTest {
         assertNotNull(result)
         assertEquals(400, response.status)
         assertEquals("1", response.getHeader("x-ashurbanipal-protocol"))
+        assertEquals("nosniff", response.getHeader("X-Content-Type-Options"))
         assertEquals("invalid_parameter", """"code":"([^"]+)"""".toRegex().find(response.contentAsString)?.groupValues?.get(1))
     }
 

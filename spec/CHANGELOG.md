@@ -20,6 +20,9 @@ all keeping v1 (they change nothing an existing caller observes — see
 `spec/protocol.md` §7): §5.7 `/api/schemas`, §5.8 `/api/sources`, §5.9
 `/api/tables/referenced-by`, §5.10 `/api/tables/structure`, §5.11 `/api/tables/join`.
 
+Every API response also carries `X-Content-Type-Options: nosniff` (§2).
+Additive — a response header an existing caller can ignore — so v1 stands.
+
 Error bodies (§2) changed from plain text (`text/plain`) to RFC 9457
 Problem Details (`application/problem+json`), adding a stable
 machine-readable `code`. This is a serialization change that would

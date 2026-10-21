@@ -134,8 +134,8 @@ by reusing the frontend and fixtures above:
    `spec/fixtures/filter-builder-tests.json` first — it's the spec.
 5. **A timeout on every query** (§6) — catalog queries included, not just
    `tables/data`.
-6. **The protocol version header** (§7) — `x-ashurbanipal-protocol` on
-   every API response.
+6. **The API response headers** (§2) — `x-ashurbanipal-protocol` (§7)
+   and `X-Content-Type-Options: nosniff` on every API response.
 
 ## What you MUST NOT do
 

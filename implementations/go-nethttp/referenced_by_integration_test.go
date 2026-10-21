@@ -170,6 +170,9 @@ func TestReferencedByRejectsUnknownOrMaliciousInputCleanly(t *testing.T) {
 		if got := resp.Header.Get("x-ashurbanipal-protocol"); got != "1" {
 			t.Errorf("GET %s: protocol header = %q, want \"1\"", path, got)
 		}
+		if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("GET %s: X-Content-Type-Options = %q, want \"nosniff\"", path, got)
+		}
 	}
 }
 
@@ -185,5 +188,8 @@ func TestReferencedByCarriesProtocolHeaderOn200(t *testing.T) {
 	}
 	if got := resp.Header.Get("x-ashurbanipal-protocol"); got != "1" {
 		t.Errorf("protocol header = %q, want \"1\"", got)
+	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want \"nosniff\"", got)
 	}
 }

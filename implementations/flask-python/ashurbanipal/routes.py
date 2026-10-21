@@ -48,10 +48,12 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     api_prefix = f"{mount}/api/"
 
     @bp.after_request
-    def _stamp_protocol_version(response: Response) -> Response:
-        # HTML has no protocol header; API responses do (spec/protocol.md §7).
+    def _stamp_api_headers(response: Response) -> Response:
+        # HTML has neither header; API responses carry both (spec/protocol.md §2).
+        # nosniff stops a browser from rendering echoed request text as HTML.
         if request.path.startswith(api_prefix):
             response.headers[PROTOCOL_HEADER] = PROTOCOL_VERSION
+            response.headers["X-Content-Type-Options"] = "nosniff"
         return response
 
     def resolve_source(name: str | None) -> DbSource:
