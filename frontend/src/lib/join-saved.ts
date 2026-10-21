@@ -39,8 +39,10 @@ export function sanitizeSaved(raw: unknown): SavedStore {
   const store: SavedStore = {};
   if (!isPlainObject(raw)) return store;
   for (const [source, schemas] of Object.entries(raw)) {
-    if (!isPlainObject(schemas)) continue;
+    // JSON.parse makes `__proto__` an own key; assigning it would write to Object.prototype.
+    if (source === "__proto__" || !isPlainObject(schemas)) continue;
     for (const [schema, entries] of Object.entries(schemas)) {
+      if (schema === "__proto__") continue;
       const clean = sanitizeEntries(entries);
       if (clean.length === 0) continue;
       store[source] ??= {};

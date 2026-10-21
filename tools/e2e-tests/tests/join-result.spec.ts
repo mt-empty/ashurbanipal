@@ -214,3 +214,53 @@ test("a new join that times out leaves the table in view as it was", async ({ pa
   await waitForIdle(page);
   expect(new URL(page.url()).searchParams.get("join")).toBeNull();
 });
+
+test("a join still loading when the schema changes is dropped, not shown under the new schema", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  let releaseJoin = () => {};
+  const joinHeld = new Promise<void>((resolve) => {
+    releaseJoin = resolve;
+  });
+  await page.route("**/api/tables/join*", async (route) => {
+    await joinHeld;
+    await route.continue();
+  });
+  // Hold the new schema's table list, so the old join answers before the new schema loads anything.
+  let releaseTables = () => {};
+  const tablesHeld = new Promise<void>((resolve) => {
+    releaseTables = resolve;
+  });
+  await page.route(
+    (url) => url.pathname.endsWith("/api/tables") && url.searchParams.get("schema") === "warehouse",
+    async (route) => {
+      await tablesHeld;
+      await route.continue();
+    },
+  );
+
+  await page.locator("#join-btn").click();
+  await writeSql(page, ORDERS_USERS);
+  const joinSent = page.waitForRequest((r) => r.url().includes("/api/tables/join"));
+  await page.locator("#join-run").click();
+  await joinSent;
+  const tablesSent = page.waitForRequest((r) => r.url().includes("/api/tables?") && r.url().includes("warehouse"));
+  await page.locator("#schema-select").selectOption("warehouse");
+  await tablesSent;
+
+  const joinAnswered = nextJoinResponse(page);
+  releaseJoin();
+  await (await joinAnswered).finished();
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+
+  const loaded = page.waitForResponse((r) => r.url().includes("/api/tables/data") && r.url().includes("warehouse"));
+  releaseTables();
+  await loaded;
+  await waitForIdle(page);
+  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+  // One step back is the table before the switch, with no join under the new schema in between.
+  await page.locator("#nav-back").click();
+  await expect(page.locator("#current")).toHaveText("orders");
+  expect(new URL(page.url()).searchParams.get("schema")).toBe("public");
+});

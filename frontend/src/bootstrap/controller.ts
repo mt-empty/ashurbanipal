@@ -9,6 +9,7 @@ import {
   markFilterVerified,
   markStoredSortVerified,
   markViewShown,
+  scopeQuery,
   startTable,
   state,
   tableInView,
@@ -170,7 +171,8 @@ function updateViewChrome(): void {
 // submit, pager); without this, an older slower request's response could
 // land after a newer one and overwrite its already-rendered result — the
 // grid would show a different table's columns/rows than #current claims.
-// Same shape of fix as showCommonValues's cvRequestToken.
+// Same shape of fix as showCommonValues's cvRequestToken. A source or schema
+// switch supersedes a load too, though its own loadData waits for the table list.
 let loadDataToken = 0;
 
 export async function loadData({
@@ -193,12 +195,14 @@ export async function loadData({
   }
   const view = req.view;
   const token = ++loadDataToken;
+  const scope = scopeQuery();
+  const superseded = () => token !== loadDataToken || scopeQuery() !== scope;
   const widthScope = widthScopeOf(view);
   let data: ViewData;
   try {
     data = await fetchViewData(req);
   } catch (e) {
-    if (token !== loadDataToken) return; // superseded by a newer request
+    if (superseded()) return;
     // A restored sort or a URL-restored filter can each name a column that no
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
@@ -218,7 +222,7 @@ export async function loadData({
     reportError(e);
     return;
   }
-  if (token !== loadDataToken) return; // superseded by a newer request
+  if (superseded()) return;
   if (next) commitRequest(next);
   markStoredSortVerified();
   markFilterVerified();
@@ -239,7 +243,7 @@ export async function loadData({
   syncUrl();
   const renderTable = () => {
     // The transition can wait for a frame; a view switch meanwhile owns the grid, and this data is not its join's.
-    if (token !== loadDataToken) return;
+    if (superseded()) return;
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
@@ -264,7 +268,7 @@ export async function loadData({
   }
   // The await above yields; a table switch during the transition supersedes
   // this load, and its pager/#status must not overwrite the newer one's.
-  if (token !== loadDataToken) return;
+  if (superseded()) return;
   updatePager(data);
   // Sighted users see the tint; announce the count for everyone else. The
   // next loadData clears #status the same way it clears "loading…".

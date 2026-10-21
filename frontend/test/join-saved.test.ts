@@ -16,6 +16,14 @@ test("anything that is not the saved shape is dropped", () => {
   assert.deepEqual(sanitizeSaved({ s: { public: "no" }, t: 3 }), {});
 });
 
+test("a __proto__ source or schema is dropped, not written to Object.prototype", () => {
+  const raw = JSON.parse(
+    `{"__proto__":{"p":[${JSON.stringify(entry("a"))}]},"s":{"__proto__":[${JSON.stringify(entry("b"))}]}}`,
+  );
+  assert.deepEqual(sanitizeSaved(raw), {});
+  assert.equal(({} as Record<string, unknown>).p, undefined);
+});
+
 test("saved joins are kept per source and schema", () => {
   let store = {};
   store = (withSaved(store, "a", "public", entry("one")) as { store: typeof store }).store;
