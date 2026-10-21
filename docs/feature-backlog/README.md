@@ -12,7 +12,7 @@ Each row links its rationale doc. Status lives in that doc's
 |---|---|---|
 | [01](01-click-to-filter-compose-vs-replace.md) | Click-to-filter: compose into existing filter vs. replace it | frontend |
 | [02](02-per-table-query-filter-history.md) | Per-table query/filter history | frontend |
-| [03](03-environment-jump-for-siblings.md) | Jump between dev / int / staging environments of the same app | frontend, spec |
+| [03](03-environment-jump-for-siblings.md) | Jump between dev / int / staging environments of the same app | spec, ports, conformance, frontend, docs, e2e |
 | [04](04-diff-viewer-for-rows.md) | Diff viewer for comparing two rows | frontend |
 | [05](05-multi-column-sort.md) | Multi-column sort | frontend, spec |
 | [06](06-dynamic-sibling-discovery.md) | Dynamic sibling discovery | ports, spec |
