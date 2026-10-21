@@ -2,11 +2,10 @@ use crate::assert::{assert_exact, assert_status};
 use crate::common::TestServer;
 
 const PROTOCOL_HEADER: &str = "x-ashurbanipal-protocol";
+const NOSNIFF_HEADER: &str = "x-content-type-options";
 
-fn header_value(resp: &reqwest::Response) -> Option<&str> {
-    resp.headers()
-        .get(PROTOCOL_HEADER)
-        .and_then(|v| v.to_str().ok())
+fn header_value<'a>(resp: &'a reqwest::Response, name: &str) -> Option<&'a str> {
+    resp.headers().get(name).and_then(|v| v.to_str().ok())
 }
 
 #[tokio::test]
@@ -23,9 +22,14 @@ async fn every_api_response_carries_the_protocol_version_header() {
         let resp = srv.client().get(srv.url(path)).send().await.unwrap();
         assert!(resp.status().is_success(), "{path}: {}", resp.status());
         assert_exact(
-            header_value(&resp),
+            header_value(&resp, PROTOCOL_HEADER),
             Some("1"),
             &format!("{PROTOCOL_HEADER} on {path}"),
+        );
+        assert_exact(
+            header_value(&resp, NOSNIFF_HEADER),
+            Some("nosniff"),
+            &format!("{NOSNIFF_HEADER} on {path}"),
         );
         // spec/protocol.md §6: statelessness — no server-side session is
         // required, and the Rust implementation never sets one; a
@@ -48,7 +52,16 @@ async fn protocol_header_is_present_even_on_api_error_responses() {
         .await
         .unwrap();
     assert_status(&resp, 400, "table=no_such_table");
-    assert_exact(header_value(&resp), Some("1"), PROTOCOL_HEADER);
+    assert_exact(
+        header_value(&resp, PROTOCOL_HEADER),
+        Some("1"),
+        PROTOCOL_HEADER,
+    );
+    assert_exact(
+        header_value(&resp, NOSNIFF_HEADER),
+        Some("nosniff"),
+        NOSNIFF_HEADER,
+    );
 }
 
 /// spec/protocol.md §2/§6: the protocol is read-only — every route is

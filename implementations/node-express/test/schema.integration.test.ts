@@ -168,6 +168,7 @@ maybeDescribe("multi-schema support (live db)", () => {
         const res = await fetch(`${testServer.baseUrl}${path}`);
         expect(res.status, path).toBe(400);
         expect(res.headers.get("x-ashurbanipal-protocol"), path).toBe("1");
+        expect(res.headers.get("x-content-type-options"), path).toBe("nosniff");
       }
     });
 
@@ -175,6 +176,7 @@ maybeDescribe("multi-schema support (live db)", () => {
       const res = await fetch(`${testServer.baseUrl}/__ashurbanipal/api/tables/referenced-by?table=users`);
       expect(res.status).toBe(200);
       expect(res.headers.get("x-ashurbanipal-protocol")).toBe("1");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     });
 
     // Regression tests: Postgres copies an inherited FK constraint onto

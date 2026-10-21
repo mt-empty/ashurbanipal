@@ -38,6 +38,7 @@ class MultipartExceptionResolver(basePath: String) : HandlerExceptionResolver, O
         )
         response.status = problem.status
         response.setHeader(PROTOCOL_HEADER, PROTOCOL_VERSION)
+        response.setHeader(NOSNIFF_HEADER, "nosniff")
         response.characterEncoding = "UTF-8"
         response.contentType = "application/problem+json"
         response.writer.write(mapper.writeValueAsString(problem))

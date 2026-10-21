@@ -55,16 +55,16 @@ func Router(cfg Config, sources []NamedSource) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+base, serveHTML)
-	mux.Handle("GET "+base+"/api/sources", withProtocolHeader(listSourcesHandler(sources)))
-	mux.Handle("GET "+base+"/api/schemas", withProtocolHeader(listSchemasHandler(sources)))
-	mux.Handle("GET "+base+"/api/tables", withProtocolHeader(listTablesHandler(sources)))
-	mux.Handle("GET "+base+"/api/table-counts", withProtocolHeader(tableCountsHandler(sources)))
-	mux.Handle("GET "+base+"/api/tables/data", withProtocolHeader(tableDataHandler(sources, limits)))
-	mux.Handle("GET "+base+"/api/tables/common-values", withProtocolHeader(commonValuesHandler(sources)))
-	mux.Handle("GET "+base+"/api/tables/referenced-by", withProtocolHeader(referencedByHandler(sources)))
-	mux.Handle("GET "+base+"/api/tables/structure", withProtocolHeader(structureHandler(sources)))
-	mux.Handle("GET "+base+"/api/tables/join", withProtocolHeader(tableJoinHandler(sources, limits)))
-	mux.Handle("GET "+base+"/api/siblings", withProtocolHeader(siblingsHandler(client, cfg.Siblings)))
+	mux.Handle("GET "+base+"/api/sources", withAPIHeaders(listSourcesHandler(sources)))
+	mux.Handle("GET "+base+"/api/schemas", withAPIHeaders(listSchemasHandler(sources)))
+	mux.Handle("GET "+base+"/api/tables", withAPIHeaders(listTablesHandler(sources)))
+	mux.Handle("GET "+base+"/api/table-counts", withAPIHeaders(tableCountsHandler(sources)))
+	mux.Handle("GET "+base+"/api/tables/data", withAPIHeaders(tableDataHandler(sources, limits)))
+	mux.Handle("GET "+base+"/api/tables/common-values", withAPIHeaders(commonValuesHandler(sources)))
+	mux.Handle("GET "+base+"/api/tables/referenced-by", withAPIHeaders(referencedByHandler(sources)))
+	mux.Handle("GET "+base+"/api/tables/structure", withAPIHeaders(structureHandler(sources)))
+	mux.Handle("GET "+base+"/api/tables/join", withAPIHeaders(tableJoinHandler(sources, limits)))
+	mux.Handle("GET "+base+"/api/siblings", withAPIHeaders(siblingsHandler(client, cfg.Siblings)))
 	return mux
 }
 
@@ -110,13 +110,15 @@ func listSourcesHandler(sources []NamedSource) http.HandlerFunc {
 	}
 }
 
-// withProtocolHeader stamps every API response, success or error
-// (spec/protocol.md §2/§7), with the protocol version header. The HTML
-// route (serveHTML) is wired directly, without this wrapper, since §5.1
-// carries no protocol header.
-func withProtocolHeader(h http.HandlerFunc) http.HandlerFunc {
+// withAPIHeaders stamps every API response, success or error
+// (spec/protocol.md §2/§7), with the protocol version header and nosniff,
+// which stops a browser from rendering echoed request text as HTML. The
+// HTML route (serveHTML) is wired directly, without this wrapper, since
+// §5.1 carries neither.
+func withAPIHeaders(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(protocolHeader, protocolVersion)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		h(w, r)
 	}
 }

@@ -88,6 +88,9 @@ interpreted as described in RFC 2119.
   - **500** — server error: `database_error`, or `query_timeout` (§6).
 - Every API response (§5.2–§5.11), success or error, MUST carry the
   protocol version header (§7).
+- Every API response (§5.2–§5.11), success or error, MUST carry
+  `X-Content-Type-Options: nosniff`, so a browser never renders request
+  text echoed in a body (a rejected table name in `title`, say) as HTML.
 
 ## 3. Mount contract
 

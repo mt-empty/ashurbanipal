@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{FromRequestParts, State};
+use axum::http::header::X_CONTENT_TYPE_OPTIONS;
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::map_response;
@@ -72,17 +73,18 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
         .route("/__ashurbanipal/api/tables/structure", get(structure::<S>))
         .route("/__ashurbanipal/api/tables/join", get(table_join::<S>))
         .route("/__ashurbanipal/api/siblings", get(siblings::<S>))
-        .layer(map_response(stamp_protocol_version));
+        .layer(map_response(stamp_api_headers));
     Router::new()
         .route("/__ashurbanipal", get(serve_html::<S>))
         .merge(api)
         .with_state(state)
 }
 
-async fn stamp_protocol_version(mut response: Response) -> Response {
-    response
-        .headers_mut()
-        .insert(PROTOCOL_HEADER, HeaderValue::from_static(PROTOCOL_VERSION));
+// nosniff stops a browser from rendering echoed request text in a JSON error as HTML.
+async fn stamp_api_headers(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(PROTOCOL_HEADER, HeaderValue::from_static(PROTOCOL_VERSION));
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     response
 }
 

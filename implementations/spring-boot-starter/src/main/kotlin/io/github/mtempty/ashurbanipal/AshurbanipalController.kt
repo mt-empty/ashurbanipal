@@ -26,6 +26,9 @@ internal const val PROTOCOL_HEADER = "x-ashurbanipal-protocol"
 /** Bumped only for non-additive wire changes (spec/protocol.md §7). */
 internal const val PROTOCOL_VERSION = "1"
 
+/** Stops a browser from rendering echoed request text in a JSON error as HTML. */
+internal const val NOSNIFF_HEADER = "X-Content-Type-Options"
+
 data class SourceEntry(val name: String)
 data class SourcesResponse(val sources: List<SourceEntry>)
 data class SchemasResponse(val schemas: List<String>)
@@ -235,12 +238,16 @@ class AshurbanipalController(
     // ==================== plumbing ====================
 
     private fun <T : Any> apiOk(body: T): ResponseEntity<T> =
-        ResponseEntity.ok().header(PROTOCOL_HEADER, PROTOCOL_VERSION).body(body)
+        ResponseEntity.ok()
+            .header(PROTOCOL_HEADER, PROTOCOL_VERSION)
+            .header(NOSNIFF_HEADER, "nosniff")
+            .body(body)
 
     /** RFC 9457 Problem Details (`spec/protocol.md` §2). */
     private fun problemResponse(status: HttpStatus, code: String, title: String): ResponseEntity<ProblemDetails> =
         ResponseEntity.status(status)
             .header(PROTOCOL_HEADER, PROTOCOL_VERSION)
+            .header(NOSNIFF_HEADER, "nosniff")
             .contentType(MediaType.valueOf("application/problem+json"))
             .body(ProblemDetails(title = title, status = status.value(), code = code))
 
