@@ -52,6 +52,7 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
       - if: matrix.build-mode == 'autobuild'
         uses: github/codeql-action/autobuild@v4
       # --no-daemon + clean so the CodeQL tracer sees every compile.
