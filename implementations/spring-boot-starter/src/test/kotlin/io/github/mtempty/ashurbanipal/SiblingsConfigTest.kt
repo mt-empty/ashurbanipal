@@ -31,7 +31,7 @@ class SiblingsConfigTest {
             )
 
     @Test
-    fun `echoes instance and labels and leaves out this instance`() {
+    fun `reports this instance in place without a check`() {
         runner().run { context ->
             assertThat(context).hasNotFailed()
             val body = context.getBean(AshurbanipalController::class.java).siblings().body
@@ -42,6 +42,7 @@ class SiblingsConfigTest {
                     {
                       "instance": { "name": "orders", "label": "dev" },
                       "siblings": [
+                        { "name": "orders", "label": "dev", "base_url": "$unreachable", "healthy": true },
                         { "name": "orders", "label": "int", "base_url": "$unreachable", "healthy": false },
                         { "name": "billing", "base_url": "$unreachable", "healthy": false }
                       ]

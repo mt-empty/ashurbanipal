@@ -100,12 +100,10 @@ impl Config {
         Ok(())
     }
 
-    /// The siblings to health-check and report: configuration order, minus
-    /// the one that is this instance, which never probes itself.
-    pub fn reported_siblings(&self) -> impl Iterator<Item = &Sibling> {
-        self.siblings
-            .iter()
-            .filter(|s| !self.instance.as_ref().is_some_and(|i| s.is(i)))
+    /// Whether `sibling` is this instance's own entry, which is reported
+    /// healthy without a health check: it is serving the response.
+    pub fn is_instance(&self, sibling: &Sibling) -> bool {
+        self.instance.as_ref().is_some_and(|i| sibling.is(i))
     }
 }
 
@@ -203,19 +201,20 @@ mod tests {
     }
 
     #[test]
-    fn reported_siblings_drop_this_instance_and_keep_order() {
+    fn only_the_matching_name_and_label_is_this_instance() {
         let config = Config::from_toml(LABELLED).unwrap();
-        let names: Vec<_> = config
-            .reported_siblings()
-            .map(|s| (s.name.as_str(), s.label.as_deref()))
+        let mine: Vec<_> = config
+            .siblings
+            .iter()
+            .map(|s| config.is_instance(s))
             .collect();
-        assert_eq!(names, [("orders", Some("int")), ("billing", None)]);
+        assert_eq!(mine, [true, false, false]);
     }
 
     #[test]
-    fn reported_siblings_keep_everything_without_an_instance() {
+    fn nothing_is_this_instance_without_an_instance() {
         let config = Config::from_toml(&LABELLED.replace("[instance]", "[unused]")).unwrap();
-        assert_eq!(config.reported_siblings().count(), 3);
+        assert!(!config.siblings.iter().any(|s| config.is_instance(s)));
     }
 
     #[test]

@@ -5,7 +5,6 @@ import {
   type Instance,
   isEnabled,
   type ResolvedLimits,
-  reportedSiblings,
   type Sibling,
   validateSiblings,
   withDefaults,
@@ -73,11 +72,7 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   registerGet(router, `${mount}/api/tables/referenced-by`, withApiHeaders(referencedByHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/structure`, withApiHeaders(structureHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/join`, withApiHeaders(tableJoinHandler(sources, limits, timeoutMs)));
-  registerGet(
-    router,
-    `${mount}/api/siblings`,
-    withApiHeaders(siblingsHandler(config.instance, reportedSiblings(config))),
-  );
+  registerGet(router, `${mount}/api/siblings`, withApiHeaders(siblingsHandler(config.instance, config.siblings ?? [])));
 
   return router;
 }
@@ -381,7 +376,7 @@ function structureHandler(sources: NamedSource[], timeoutMs: number) {
 
 function siblingsHandler(instance: Instance | undefined, siblings: Sibling[]) {
   return async (_req: Request, res: Response): Promise<void> => {
-    const statuses = await checkSiblings(siblings);
+    const statuses = await checkSiblings(siblings, instance);
     res.json(
       instance
         ? { instance: { name: instance.name, label: instance.label }, siblings: statuses }

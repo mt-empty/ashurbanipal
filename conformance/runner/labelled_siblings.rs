@@ -1,14 +1,14 @@
-//! `spec/protocol.md` §5.6 — `instance`, sibling `label`, and leaving out the
-//! sibling that is this instance. Every test self-skips unless the target
-//! reports an `instance`, so this file runs safely alongside
-//! `html_and_siblings.rs`. CI starts each port's demo with
+//! `spec/protocol.md` §5.6 — `instance`, sibling `label`, and the sibling that
+//! is this instance reported in place without a health check. Every test
+//! self-skips unless the target reports an `instance`, so this file runs
+//! safely alongside `html_and_siblings.rs`. CI starts each port's demo with
 //! `CONFORMANCE_LABELLED_SIBLINGS=1`, which every port maps to the same fixed
 //! configuration:
 //!
 //! - instance `conformance` / `a`
 //! - siblings, in order: `conformance`/`a` (this instance), `conformance`/`b`,
 //!   `other`/`a`, all at `http://127.0.0.1:9/__ashurbanipal` (port 9
-//!   refuses at once, so every check is a fast `healthy: false`)
+//!   refuses at once, so every check made is a fast `healthy: false`)
 
 use crate::assert::assert_exact;
 use crate::common::TestServer;
@@ -50,16 +50,18 @@ async fn instance_is_echoed_as_configured() {
     );
 }
 
+/// Its base_url refuses connections, so `healthy: true` can only mean the
+/// target never health-checked it.
 #[tokio::test]
-async fn the_sibling_that_is_this_instance_is_left_out() {
+async fn this_instance_is_listed_healthy_without_a_check() {
     let srv = TestServer::spawn().await;
     let Some(body) = labelled_siblings(&srv).await else {
         return;
     };
-    let is_self = |s: &serde_json::Value| s["name"] == "conformance" && s["label"] == "a";
-    assert!(
-        !body["siblings"].as_array().unwrap().iter().any(is_self),
-        "GET /api/siblings must leave out the sibling equal to instance: {body}"
+    assert_exact(
+        body["siblings"][0].clone(),
+        serde_json::json!({ "name": "conformance", "label": "a", "base_url": UNREACHABLE, "healthy": true }),
+        "GET /api/siblings own entry",
     );
 }
 
@@ -72,6 +74,7 @@ async fn labels_are_echoed_in_configuration_order() {
     assert_exact(
         body["siblings"].clone(),
         serde_json::json!([
+            { "name": "conformance", "label": "a", "base_url": UNREACHABLE, "healthy": true },
             { "name": "conformance", "label": "b", "base_url": UNREACHABLE, "healthy": false },
             { "name": "other", "label": "a", "base_url": UNREACHABLE, "healthy": false },
         ]),

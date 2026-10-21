@@ -28,11 +28,12 @@ def _labelled() -> Config:
     )
 
 
-def test_echoes_instance_and_labels_and_leaves_out_this_instance() -> None:
+def test_reports_this_instance_in_place_without_a_check() -> None:
     body = _client(_labelled()).get("/__ashurbanipal/api/siblings").get_json()
     assert body == {
         "instance": {"name": "orders", "label": "dev"},
         "siblings": [
+            {"name": "orders", "label": "dev", "base_url": UNREACHABLE, "healthy": True},
             {"name": "orders", "label": "int", "base_url": UNREACHABLE, "healthy": False},
             {"name": "billing", "base_url": UNREACHABLE, "healthy": False},
         ],

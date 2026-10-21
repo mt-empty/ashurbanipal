@@ -46,6 +46,8 @@ config = Config(
     enabled=True,
     limits=Limits(default_page_size=50, max_page_size=100, query_timeout_secs=5),
     instance=Instance(name="orders", label="dev"),  # spec/protocol.md §5.6
+    # One shared list, in the same order, on every instance keeps the grid the same
+    # everywhere. label is optional; typically an environment (dev, int) or a region (eu, us).
     siblings=[
         Sibling(
             name="orders",

@@ -76,8 +76,7 @@ export function validateSiblings(config: Config): void {
   }
 }
 
-/** Configuration order, minus the sibling that is this instance, which never probes itself. */
-export function reportedSiblings(config: Config): Sibling[] {
-  const { instance, siblings = [] } = config;
-  return siblings.filter((s) => !(instance && s.name === instance.name && s.label === instance.label));
+/** Whether `s` is this instance's own entry, which is reported healthy without a health check: it is serving the response. */
+export function isInstance(instance: Instance | undefined, s: Sibling): boolean {
+  return instance !== undefined && s.name === instance.name && s.label === instance.label;
 }

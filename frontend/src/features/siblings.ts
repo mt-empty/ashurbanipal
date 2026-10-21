@@ -1,7 +1,13 @@
 import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
 import type { Sibling, SiblingsResponse } from "../core/types.js";
-import { buildSiblingMatrix, type MatrixCell, type SiblingMatrix, sameViewHref } from "../lib/sibling-matrix.js";
+import {
+  buildSiblingMatrix,
+  isOwnEntry,
+  type MatrixCell,
+  type SiblingMatrix,
+  sameViewHref,
+} from "../lib/sibling-matrix.js";
 import { setNoticePlace } from "./view-notice.js";
 
 // Each fetch makes the server health-check every sibling, so the list is
@@ -85,10 +91,12 @@ async function loadSiblings(): Promise<void> {
 function render(body: SiblingsResponse): void {
   const { siblings } = body;
   setNoticePlace(body.instance?.label ?? null);
-  $("siblings").hidden = siblings.length === 0;
-  const down = siblings.filter((s) => !s.healthy).length;
+  // The instance's own entry is in the list for its position, not its health.
+  const others = siblings.filter((s) => !isOwnEntry(body.instance, s));
+  $("siblings").hidden = others.length === 0;
+  const down = others.filter((s) => !s.healthy).length;
   $("siblings-summary").textContent =
-    down > 0 ? `Other services · ${down} down` : `Other services · ${siblings.length} up`;
+    down > 0 ? `Other services · ${down} down` : `Other services · ${others.length} up`;
   $("siblings-dot").className = dotClass(down === 0);
 
   const matrix = buildSiblingMatrix(body);
@@ -144,7 +152,7 @@ function listRow(s: Sibling, newTab: boolean): HTMLAnchorElement {
 }
 
 function shapeOf(m: SiblingMatrix): string {
-  return JSON.stringify([m.labels, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
+  return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
 }
 
 function paintLink(ref: LinkRef, name: string, label: string, { sibling, sameView }: LinkCell): void {
@@ -187,7 +195,7 @@ function renderMatrix(m: SiblingMatrix): void {
     $("siblings-matrix-head").replaceChildren(
       corner,
       ...m.labels.map((label) => {
-        const th = el("th", undefined, label);
+        const th = el("th", label === m.ownLabel ? "mine" : undefined, label);
         th.scope = "col";
         return th;
       }),
@@ -195,7 +203,7 @@ function renderMatrix(m: SiblingMatrix): void {
     $("siblings-matrix-body").replaceChildren(
       ...m.rows.map((row) => {
         const tr = el("tr", row.isInstance ? "instance" : undefined);
-        const th = el("th");
+        const th = el("th", row.isInstance ? "mine" : undefined);
         th.scope = "row";
         const name = el("span", "sibling-name", row.name);
         name.title = row.name; // truncation escape hatch

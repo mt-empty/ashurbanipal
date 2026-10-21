@@ -55,9 +55,11 @@ query_timeout_secs = 5
 name = "orders"
 label = "dev"
 
+# One shared list, in the same order, on every instance (own entry included)
+# keeps the grid's rows and columns the same everywhere.
 [[siblings]]
 name = "orders"
-label = "int"   # optional
+label = "int"   # optional; typically an environment (dev, int) or a region (eu, us)
 base_url = "https://orders-int.internal.vpn/__ashurbanipal"
 health_path = "/health"
 

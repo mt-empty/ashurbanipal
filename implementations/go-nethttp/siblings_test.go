@@ -36,11 +36,12 @@ func getSiblings(t *testing.T, cfg Config) map[string]any {
 	return body
 }
 
-func TestSiblingsEchoInstanceAndLabelsAndDropThisInstance(t *testing.T) {
+func TestSiblingsReportThisInstanceInPlaceWithoutACheck(t *testing.T) {
 	got := getSiblings(t, labelledConfig())
 	want := map[string]any{
 		"instance": map[string]any{"name": "orders", "label": "dev"},
 		"siblings": []any{
+			map[string]any{"name": "orders", "label": "dev", "base_url": unreachable, "healthy": true},
 			map[string]any{"name": "orders", "label": "int", "base_url": unreachable, "healthy": false},
 			map[string]any{"name": "billing", "base_url": unreachable, "healthy": false},
 		},

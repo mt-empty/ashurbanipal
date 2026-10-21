@@ -645,7 +645,9 @@ health_path = "/health"
   service-registry integration).
 - `instance` and `label` are opaque strings the host writes, so one shared
   sibling list can describe every service in every environment; the rules
-  (validation, leaving out this instance) are `spec/protocol.md` §5.6.
+  (validation, the self entry reported without a probe) are
+  `spec/protocol.md` §5.6. Use one shared list, in the same order, on every
+  instance, so every instance shows the same grid.
 
 ## 8. Safety properties (carried over from the original concept)
 

@@ -77,17 +77,10 @@ func (c Config) validateSiblings() error {
 	return nil
 }
 
-// reportedSiblings keeps configuration order, minus the sibling that is
-// this instance, which never probes itself.
-func (c Config) reportedSiblings() []Sibling {
-	out := make([]Sibling, 0, len(c.Siblings))
-	for _, s := range c.Siblings {
-		if c.Instance != nil && s.Name == c.Instance.Name && s.Label == c.Instance.Label {
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
+// isInstance reports whether s is this instance's own entry, which is
+// reported healthy without a health check: it is serving the response.
+func (i *Instance) isInstance(s Sibling) bool {
+	return i != nil && s.Name == i.Name && s.Label == i.Label
 }
 
 func (c Config) basePath() string {

@@ -1,4 +1,4 @@
-import type { Sibling, SiblingsResponse } from "../core/types.js";
+import type { Sibling, SiblingInstance, SiblingsResponse } from "../core/types.js";
 
 // One cell of the service × label grid.
 export type MatrixCell =
@@ -9,22 +9,30 @@ export type MatrixCell =
 
 export interface SiblingMatrix {
   labels: string[];
+  // The instance's own label, so its column can be marked; null without one.
+  ownLabel: string | null;
   rows: { name: string; isInstance: boolean; cells: MatrixCell[] }[];
   // Siblings without a label, listed under the grid.
   unlabelled: Sibling[];
 }
 
-// null when nothing is labelled: the caller keeps the flat list.
+type Labelled = Sibling & { label: string };
+
+export function isOwnEntry(instance: SiblingInstance | undefined, s: Sibling): boolean {
+  return instance !== undefined && s.name === instance.name && s.label === instance.label;
+}
+
+// Rows and columns follow first appearance in `siblings`, so every instance
+// sharing one list shows the same grid; an instance its own list leaves out
+// goes first. null when nothing is labelled: the caller keeps the flat list.
 export function buildSiblingMatrix({ instance, siblings }: SiblingsResponse): SiblingMatrix | null {
-  const labelled = siblings.filter((s) => s.label !== undefined);
+  const labelled = siblings.filter((s): s is Labelled => s.label !== undefined);
   if (!instance && labelled.length === 0) return null;
 
-  const labels: string[] = instance ? [instance.label] : [];
-  const names: string[] = instance ? [instance.name] : [];
-  for (const s of labelled) {
-    if (!labels.includes(s.label as string)) labels.push(s.label as string);
-    if (!names.includes(s.name)) names.push(s.name);
-  }
+  const labels = [...new Set(labelled.map((s) => s.label))];
+  const names = [...new Set(labelled.map((s) => s.name))];
+  if (instance && !labels.includes(instance.label)) labels.unshift(instance.label);
+  if (instance && !names.includes(instance.name)) names.unshift(instance.name);
 
   const rows = names.map((name) => {
     const isInstance = instance?.name === name;
@@ -35,7 +43,12 @@ export function buildSiblingMatrix({ instance, siblings }: SiblingsResponse): Si
     });
     return { name, isInstance, cells };
   });
-  return { labels, rows, unlabelled: siblings.filter((s) => s.label === undefined) };
+  return {
+    labels,
+    ownLabel: instance?.label ?? null,
+    rows,
+    unlabelled: siblings.filter((s) => s.label === undefined),
+  };
 }
 
 // A link to the same view elsewhere: the target's base plus this page's query

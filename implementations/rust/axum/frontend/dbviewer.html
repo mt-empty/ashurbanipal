@@ -365,6 +365,7 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
   border-bottom: 1px solid var(--rule); padding-bottom: .15rem; }
 #siblings-matrix .sibling-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
 .sibling-me { display: block; font-size: .7rem; color: var(--text-muted); }
+#siblings-matrix th.mine { font-weight: 600; color: inherit; }
 .sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
   min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
   white-space: nowrap; }
@@ -4695,15 +4696,16 @@ async function showCommonValues(e, table, column) {
 }
 
 // src/lib/sibling-matrix.ts
+function isOwnEntry(instance, s) {
+  return instance !== void 0 && s.name === instance.name && s.label === instance.label;
+}
 function buildSiblingMatrix({ instance, siblings }) {
   const labelled = siblings.filter((s) => s.label !== void 0);
   if (!instance && labelled.length === 0) return null;
-  const labels = instance ? [instance.label] : [];
-  const names = instance ? [instance.name] : [];
-  for (const s of labelled) {
-    if (!labels.includes(s.label)) labels.push(s.label);
-    if (!names.includes(s.name)) names.push(s.name);
-  }
+  const labels = [...new Set(labelled.map((s) => s.label))];
+  const names = [...new Set(labelled.map((s) => s.name))];
+  if (instance && !labels.includes(instance.label)) labels.unshift(instance.label);
+  if (instance && !names.includes(instance.name)) names.unshift(instance.name);
   const rows = names.map((name) => {
     const isInstance = instance?.name === name;
     const cells = labels.map((label) => {
@@ -4713,7 +4715,12 @@ function buildSiblingMatrix({ instance, siblings }) {
     });
     return { name, isInstance, cells };
   });
-  return { labels, rows, unlabelled: siblings.filter((s) => s.label === void 0) };
+  return {
+    labels,
+    ownLabel: instance?.label ?? null,
+    rows,
+    unlabelled: siblings.filter((s) => s.label === void 0)
+  };
 }
 function sameViewHref(baseUrl, search2) {
   let url;
@@ -4785,9 +4792,10 @@ async function loadSiblings() {
 function render3(body) {
   const { siblings } = body;
   setNoticePlace(body.instance?.label ?? null);
-  $("siblings").hidden = siblings.length === 0;
-  const down = siblings.filter((s) => !s.healthy).length;
-  $("siblings-summary").textContent = down > 0 ? `Other services \xB7 ${down} down` : `Other services \xB7 ${siblings.length} up`;
+  const others = siblings.filter((s) => !isOwnEntry(body.instance, s));
+  $("siblings").hidden = others.length === 0;
+  const down = others.filter((s) => !s.healthy).length;
+  $("siblings-summary").textContent = down > 0 ? `Other services \xB7 ${down} down` : `Other services \xB7 ${others.length} up`;
   $("siblings-dot").className = dotClass(down === 0);
   const matrix = buildSiblingMatrix(body);
   $("siblings-matrix").hidden = matrix === null;
@@ -4834,7 +4842,7 @@ function listRow(s, newTab) {
   return a;
 }
 function shapeOf(m) {
-  return JSON.stringify([m.labels, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
+  return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
 }
 function paintLink(ref, name, label, { sibling, sameView }) {
   const state2 = sameView ? `same view \xB7 ${health(sibling.healthy)}` : health(sibling.healthy);
@@ -4874,7 +4882,7 @@ function renderMatrix(m) {
     $("siblings-matrix-head").replaceChildren(
       corner,
       ...m.labels.map((label) => {
-        const th = el("th", void 0, label);
+        const th = el("th", label === m.ownLabel ? "mine" : void 0, label);
         th.scope = "col";
         return th;
       })
@@ -4882,7 +4890,7 @@ function renderMatrix(m) {
     $("siblings-matrix-body").replaceChildren(
       ...m.rows.map((row2) => {
         const tr = el("tr", row2.isInstance ? "instance" : void 0);
-        const th = el("th");
+        const th = el("th", row2.isInstance ? "mine" : void 0);
         th.scope = "row";
         const name = el("span", "sibling-name", row2.name);
         name.title = row2.name;

@@ -62,9 +62,9 @@ class AshurbanipalProperties(
         }
     }
 
-    /** Configuration order, minus the sibling that is this instance, which never probes itself. */
-    val reportedSiblings: List<Sibling> =
-        siblings.filterNot { instance != null && it.name == instance.name && it.label == instance.label }
+    /** Whether [sibling] is this instance's own entry, reported healthy without a health check: it is serving the response. */
+    fun isInstance(sibling: Sibling): Boolean =
+        instance != null && sibling.name == instance.name && sibling.label == instance.label
 
     val isEnabled: Boolean get() = enabled
 

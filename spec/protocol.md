@@ -414,6 +414,7 @@ Response:
 {
   "instance": { "name": "orders", "label": "dev" },
   "siblings": [
+    { "name": "orders", "label": "dev", "base_url": "https://orders-dev.internal.vpn/__ashurbanipal", "healthy": true },
     { "name": "orders", "label": "int", "base_url": "https://orders-int.internal.vpn/__ashurbanipal", "healthy": true },
     { "name": "billing", "label": "dev", "base_url": "https://billing-dev.internal.vpn/__ashurbanipal", "healthy": false }
   ]
@@ -435,10 +436,14 @@ Response:
 - `instance` is present iff configured; a sibling's `label` is present iff
   configured. With neither configured the response is exactly the
   unlabelled shape above.
-- A sibling whose `name` and `label` both equal `instance`'s MUST be left
-  out of `siblings` and MUST NOT be health-checked, so a host can share one
-  sibling list across all its instances.
-- `siblings` keeps configuration order.
+- A sibling whose `name` and `label` both equal `instance`'s MUST NOT be
+  health-checked; it stays in `siblings` at its configuration position with
+  `healthy: true` (this instance is serving the response). A host can then
+  share one sibling list across all its instances, and every instance
+  reports the same order.
+- `siblings` keeps configuration order. A client that lays siblings out in
+  a grid SHOULD take rows and columns from it, so the layout is the same on
+  every instance that shares the list.
 - Health checks are performed synchronously per request: an HTTP GET to
   each sibling's configured health path, resolved against the sibling's
   **origin** (scheme + host + port of `base_url`), not against the

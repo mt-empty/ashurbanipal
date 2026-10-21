@@ -511,11 +511,13 @@ struct SiblingsResponse {
 }
 
 async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
-    let checks = state.config.reported_siblings().cloned().map(|sibling| {
+    let checks = state.config.siblings.iter().cloned().map(|sibling| {
         let http = state.http.clone();
+        let is_instance = state.config.is_instance(&sibling);
         async move {
             let health_url = health_url(&sibling.base_url, &sibling.health_path);
             let healthy = match health_url {
+                _ if is_instance => true,
                 Some(url) => matches!(
                     http.get(url).send().await,
                     Ok(resp) if resp.status().is_success()
@@ -697,7 +699,7 @@ mod kill_switch_tests {
     "#;
 
     #[actix_web::test]
-    async fn siblings_echo_instance_and_labels_and_drop_this_instance() {
+    async fn siblings_report_this_instance_in_place_without_a_check() {
         let config = Config::from_toml(LABELLED).unwrap();
         let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
         let app = test::init_service(App::new().service(service(state))).await;
@@ -713,6 +715,7 @@ mod kill_switch_tests {
             serde_json::json!({
                 "instance": { "name": "orders", "label": "dev" },
                 "siblings": [
+                    { "name": "orders", "label": "dev", "base_url": "http://127.0.0.1:9/__ashurbanipal", "healthy": true },
                     { "name": "orders", "label": "int", "base_url": "http://127.0.0.1:9/__ashurbanipal", "healthy": false },
                     { "name": "billing", "base_url": "http://127.0.0.1:9/__ashurbanipal", "healthy": false },
                 ],

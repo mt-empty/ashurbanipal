@@ -37,10 +37,11 @@ async function getSiblings(config: Config): Promise<unknown> {
   }
 }
 
-it("echoes instance and labels and leaves out this instance", async () => {
+it("reports this instance in place, healthy, without a check", async () => {
   expect(await getSiblings(labelledConfig())).toStrictEqual({
     instance: { name: "orders", label: "dev" },
     siblings: [
+      { name: "orders", label: "dev", base_url: baseUrl, healthy: true },
       { name: "orders", label: "int", base_url: baseUrl, healthy: false },
       { name: "billing", base_url: baseUrl, healthy: false },
     ],

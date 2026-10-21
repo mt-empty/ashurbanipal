@@ -27,9 +27,10 @@ ashurbanipal:
   instance: # this instance's own name and label (spec/protocol.md §5.6)
     name: orders
     label: dev
+  # One shared list, in the same order, on every instance keeps the grid the same everywhere.
   siblings:
     - name: orders
-      label: int # optional
+      label: int # optional; typically an environment (dev, int) or a region (eu, us)
       base-url: https://orders-int.internal.vpn/__ashurbanipal
       health-path: /health
     - name: billing

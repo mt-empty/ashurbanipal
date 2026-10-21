@@ -52,6 +52,8 @@ const viewer = createRouter(
     basePath: "/__ashurbanipal", // undefined also means this
     limits: { defaultPageSize: 50, maxPageSize: 100, queryTimeoutSecs: 5 },
     instance: { name: "orders", label: "dev" }, // spec/protocol.md §5.6
+    // One shared list, in the same order, on every instance keeps the grid the same everywhere.
+    // label is optional; typically an environment (dev, int) or a region (eu, us).
     siblings: [
       { name: "orders", label: "int", baseUrl: "https://orders-int.internal.vpn/__ashurbanipal", healthPath: "/health" },
       { name: "billing", baseUrl: "https://billing.internal.vpn/__ashurbanipal", healthPath: "/health" },

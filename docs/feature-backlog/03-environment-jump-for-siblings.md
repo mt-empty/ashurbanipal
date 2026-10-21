@@ -99,8 +99,8 @@ Configuration rules:
 - **C3.** Two siblings with the same `name` and the same `label` (both
   unset counts as the same) are malformed configuration.
 - **C4.** A sibling whose `name` and `label` equal the `instance`'s is
-  allowed. This lets a host share one sibling list across all its
-  instances. See W2.
+  allowed, and recommended: one shared sibling list, in the same order, on
+  every instance gives every instance the same grid. See W2.
 
 ### 4.2 Wire: `GET {mount}/api/siblings` (§5.6)
 
@@ -108,6 +108,7 @@ Configuration rules:
 {
   "instance": { "name": "orders", "label": "dev" },
   "siblings": [
+    { "name": "orders",  "label": "dev", "base_url": "https://orders-dev.internal.vpn/__ashurbanipal",  "healthy": true },
     { "name": "orders",  "label": "int", "base_url": "https://orders-int.internal.vpn/__ashurbanipal",  "healthy": true },
     { "name": "billing", "label": "dev", "base_url": "https://billing-dev.internal.vpn/__ashurbanipal", "healthy": true },
     { "name": "billing", "label": "int", "base_url": "https://billing-int.internal.vpn/__ashurbanipal", "healthy": false }
@@ -117,9 +118,9 @@ Configuration rules:
 
 - **W1.** `instance` is present iff configured. `label` on a sibling is
   present iff configured. Both values are echoed byte-for-byte.
-- **W2.** A sibling matching `instance` (C4) MUST be left out of
-  `siblings` and MUST NOT be health-checked. The instance does not probe
-  itself.
+- **W2.** A sibling matching `instance` (C4) MUST NOT be health-checked.
+  It stays in `siblings` at its configuration position with
+  `healthy: true`, since this instance is serving the response.
 - **W3.** `siblings` MUST keep configuration order. The frontend builds rows
   and columns from it.
 - **W4.** Every existing §5.6 rule (origin-relative health path, 2xx means
@@ -162,10 +163,13 @@ The frontend reads only the wire shape above.
 
 - **F1. Mode.** If `instance` is present or any sibling has a `label`, show
   the matrix. Otherwise keep today's flat list unchanged.
-- **F2. Columns.** `instance.label` first, then every other label in order
-  of first appearance.
-- **F3. Rows.** `instance.name` first, then every other name in order of
-  first appearance among labelled siblings.
+- **F2. Columns.** Labels in order of first appearance in `siblings`, so
+  every instance sharing one list shows the same columns. An
+  `instance.label` that no sibling carries goes first. The instance's own
+  column header is bold.
+- **F3. Rows.** Names in order of first appearance among labelled
+  siblings, the same way; an `instance.name` no sibling carries goes first.
+  The instance's own row name is bold.
 - **F4. Cells.**
   - The instance's own cell: "you are here", not a link, `aria-current="page"`.
   - A configured sibling: a link with a health dot and the word "up" or
@@ -286,8 +290,8 @@ Spec and docs:
 Backend, every port:
 
 - Config type: `instance`, sibling `label`, rules C1–C4.
-- Siblings handler: echo `instance` and `label`; drop the self entry
-  before health checks (W2). Rust: `core/src/config.rs`,
+- Siblings handler: echo `instance` and `label`; report the self entry
+  healthy without a health check (W2). Rust: `core/src/config.rs`,
   `axum/src/routes.rs:471-500`, and the actix-web equivalent.
 - Unit tests for C1–C4 and W2 in each port's config tests.
 - Demo configs: give `rust:demo` / `rust:demo-sibling` (and each port's
@@ -296,8 +300,8 @@ Backend, every port:
 Conformance:
 
 - `conformance/runner/html_and_siblings.rs:51` checks only the empty list.
-  Add cases for `instance` echo, `label` echo, self-entry omission and
-  order. Each port's conformance target needs a way to start with a
+  Add cases for `instance` echo, `label` echo, the self entry reported
+  healthy without a probe, and order. Each port's conformance target needs a way to start with a
   labelled sibling config.
 
 Frontend:

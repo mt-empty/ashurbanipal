@@ -52,11 +52,11 @@ class Config:
                 raise ValueError(f"two siblings share the name {s.name!r} and the same label")
             seen.add((s.name, s.label))
 
-    def reported_siblings(self) -> list[Sibling]:
-        """Configuration order, minus the sibling that is this instance, which
-        never probes itself."""
+    def is_instance(self, s: Sibling) -> bool:
+        """Whether `s` is this instance's own entry, which is reported healthy
+        without a health check: it is serving the response."""
         i = self.instance
-        return [s for s in self.siblings if i is None or (s.name, s.label) != (i.name, i.label)]
+        return i is not None and (s.name, s.label) == (i.name, i.label)
 
     @classmethod
     def from_toml(cls, text: str) -> Config:

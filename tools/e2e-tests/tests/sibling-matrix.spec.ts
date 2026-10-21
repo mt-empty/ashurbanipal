@@ -10,6 +10,7 @@ const base = (name: string, label: string) => `https://${name}-${label}.example/
 const LABELLED = {
   instance: { name: "orders", label: "dev" },
   siblings: [
+    { name: "orders", label: "dev", base_url: base("orders", "dev"), healthy: true },
     { name: "orders", label: "int", base_url: base("orders", "int"), healthy: true },
     { name: "billing", label: "dev", base_url: base("billing", "dev"), healthy: true },
     { name: "billing", label: "int", base_url: base("billing", "int"), healthy: false },
@@ -31,7 +32,7 @@ async function openMatrix(page: Page) {
 const cell = (page: Page, row: string, col: number) =>
   page.locator("#siblings-matrix-body tr").filter({ has: page.locator(`th:has-text("${row}")`) }).locator("td").nth(col);
 
-test("rows and columns put this instance first", async ({ page }) => {
+test("rows and columns follow the list, and this instance is marked", async ({ page }) => {
   await mockSiblings(page, LABELLED);
   await gotoApp(page);
   await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 down");
@@ -49,6 +50,22 @@ test("rows and columns put this instance first", async ({ page }) => {
   await expect(cell(page, "billing", 1)).toHaveText("down");
   await expect(cell(page, "users", 1)).toHaveText("not set up");
   await expect(cell(page, "users", 1).locator("a")).toHaveCount(0);
+  await expect(page.locator("#siblings-matrix th.mine")).toHaveText(["dev", "ordersthis service"]);
+});
+
+test("another instance sharing the list sees the same columns and rows", async ({ page }) => {
+  await mockSiblings(page, { ...LABELLED, instance: { name: "orders", label: "int" } });
+  await gotoApp(page);
+  await openMatrix(page);
+  await expect(page.locator("#siblings-matrix-head th[scope=col]")).toHaveText(["dev", "int"]);
+  await expect(page.locator("#siblings-matrix-body th[scope=row] .sibling-name")).toHaveText([
+    "orders",
+    "billing",
+    "users",
+  ]);
+  await expect(cell(page, "orders", 1)).toHaveText("you are here");
+  await expect(cell(page, "orders", 0)).toHaveText("same view · up");
+  await expect(page.locator("#siblings-matrix-head th.mine")).toHaveText("int");
 });
 
 test("every cell is a plain link that switches this tab", async ({ page }) => {
@@ -85,7 +102,8 @@ test("a poll that changes only health keeps focus on the link", async ({ page })
   let healthy = true;
   await page.route("**/api/siblings", (r) => {
     const body = structuredClone(LABELLED);
-    body.siblings[1].healthy = healthy;
+    const billingDev = body.siblings.find((s) => s.name === "billing" && s.label === "dev");
+    if (billingDev) billingDev.healthy = healthy;
     return r.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
   });
   await page.goto(APP_PATH);

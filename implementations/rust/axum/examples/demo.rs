@@ -52,7 +52,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|p| p.parse().ok());
     let mount_prefix: Option<String> = std::env::var("MOUNT_PREFIX").ok().filter(|p| !p.is_empty());
 
-    let config = Config::from_toml(&format!("enabled = true\n{}", siblings_toml(sibling_port)))?;
+    let config = Config::from_toml(&format!(
+        "enabled = true\n{}",
+        siblings_toml(port, sibling_port)
+    ))?;
 
     let db_backend = std::env::var("DB_BACKEND").unwrap_or_else(|_| "postgres".to_string());
     let ashurbanipal = match db_backend.as_str() {
@@ -166,35 +169,57 @@ async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::er
 /// labels, to fill the grid. `CONFORMANCE_LABELLED_SIBLINGS=1` replaces all
 /// of it with the fixed config `conformance/runner/labelled_siblings.rs`
 /// expects.
-fn siblings_toml(sibling_port: Option<u16>) -> String {
+fn siblings_toml(port: u16, sibling_port: Option<u16>) -> String {
     if std::env::var("CONFORMANCE_LABELLED_SIBLINGS").is_ok() {
         return CONFORMANCE_LABELLED_SIBLINGS.to_string();
     }
     let label = |var: &str| std::env::var(var).ok().filter(|v| !v.is_empty());
+    let entry = |name: &str, label: Option<&str>, base: &str| {
+        let label = label
+            .map(|l| {
+                format!(
+                    "label = {l:?}
+"
+                )
+            })
+            .unwrap_or_default();
+        format!(
+            "[[siblings]]
+name = {name:?}
+{label}base_url = \"{base}/__ashurbanipal\"
+health_path = \"/health\"
+"
+        )
+    };
     let mut toml = String::new();
-    if let Some(label) = label("INSTANCE_LABEL") {
-        toml += &format!("[instance]\nname = \"demo\"\nlabel = {label:?}\n");
-    }
-    if let Some(p) = sibling_port {
-        let (name, label) = match label("SIBLING_LABEL") {
-            Some(l) => ("demo".to_string(), format!("label = {l:?}\n")),
-            None => (format!("demo-{p}"), String::new()),
-        };
+    let own = label("INSTANCE_LABEL");
+    if let Some(l) = &own {
         toml += &format!(
-            "[[siblings]]\nname = {name:?}\n{label}base_url = \"http://localhost:{p}/__ashurbanipal\"\nhealth_path = \"/health\"\n"
+            "[instance]
+name = \"demo\"
+label = {l:?}
+"
         );
     }
-    let mut labels: Vec<String> = ["INSTANCE_LABEL", "SIBLING_LABEL"]
-        .iter()
-        .filter_map(|v| label(v))
-        .collect();
-    labels.dedup();
+    // Both demos of a labelled pair build the same list, sorted by label and
+    // including their own entry, so both show the same grid.
+    let mut demos: Vec<(String, u16)> = own.iter().map(|l| (l.clone(), port)).collect();
+    match (sibling_port, label("SIBLING_LABEL")) {
+        (Some(p), Some(l)) => demos.push((l, p)),
+        (Some(p), None) => {
+            toml += &entry(&format!("demo-{p}"), None, &format!("http://localhost:{p}"))
+        }
+        _ => {}
+    }
+    demos.sort();
+    demos.dedup_by(|a, b| a.0 == b.0);
+    for (l, p) in &demos {
+        toml += &entry("demo", Some(l), &format!("http://localhost:{p}"));
+    }
     // Port 9 refuses at once, so these are a fast `healthy: false`.
     for name in ["search", "analytics", "inventory"] {
-        for l in &labels {
-            toml += &format!(
-                "[[siblings]]\nname = {name:?}\nlabel = {l:?}\nbase_url = \"http://127.0.0.1:9/__ashurbanipal\"\nhealth_path = \"/health\"\n"
-            );
+        for (l, _) in &demos {
+            toml += &entry(name, Some(l), "http://127.0.0.1:9");
         }
     }
     toml

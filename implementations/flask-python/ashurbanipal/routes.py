@@ -45,7 +45,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     if not config.is_enabled():
         return bp  # zero routes registered — 404 on every path under `mount`
     config.validate_siblings()
-    reported_siblings = config.reported_siblings()
+    own_entry = [config.is_instance(s) for s in config.siblings]
     instance = None if config.instance is None else {"name": config.instance.name, "label": config.instance.label}
 
     api_prefix = f"{mount}/api/"
@@ -271,7 +271,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("/api/siblings")
     def siblings() -> Response:
-        results = _check_siblings(reported_siblings)
+        results = _check_siblings(config.siblings, own_entry)
         if instance is None:
             return jsonify({"siblings": results})
         return jsonify({"instance": instance, "siblings": results})
@@ -374,10 +374,10 @@ def _health_url(base_url: str, health_path: str):
     return urlunsplit((parts.scheme, parts.netloc, health_path, "", ""))
 
 
-def _check_one_sibling(sibling) -> dict:
+def _check_one_sibling(sibling, is_instance: bool) -> dict:
     url = _health_url(sibling.base_url, sibling.health_path)
-    healthy = False
-    if url is not None:
+    healthy = is_instance
+    if url is not None and not is_instance:
         try:
             with urllib.request.urlopen(url, timeout=_SIBLING_HEALTH_TIMEOUT_SECS) as resp:
                 healthy = 200 <= resp.status < 300
@@ -390,11 +390,11 @@ def _check_one_sibling(sibling) -> dict:
     return status
 
 
-def _check_siblings(siblings: list) -> list[dict]:
+def _check_siblings(siblings: list, own_entry: list[bool]) -> list[dict]:
     """Checks SHOULD run in parallel and MUST be individually bounded by a
     timeout, so one dead sibling can't stall the response (§5.6).
     """
     if not siblings:
         return []
     with ThreadPoolExecutor(max_workers=len(siblings)) as pool:
-        return list(pool.map(_check_one_sibling, siblings))
+        return list(pool.map(_check_one_sibling, siblings, own_entry))

@@ -24,9 +24,9 @@ Every API response also carries `X-Content-Type-Options: nosniff` (§2).
 Additive — a response header an existing caller can ignore — so v1 stands.
 
 `/api/siblings` (§5.6) gains an optional `instance` object and an optional
-`label` on each sibling, both host-configured opaque strings, and drops the
-sibling matching `instance`. Additive — both fields are absent unless
-configured — so v1 stands.
+`label` on each sibling, both host-configured opaque strings. The sibling
+matching `instance` is reported healthy without a health check. Additive —
+both fields are absent unless configured — so v1 stands.
 
 Error bodies (§2) changed from plain text (`text/plain`) to RFC 9457
 Problem Details (`application/problem+json`), adding a stable

@@ -343,6 +343,7 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
   border-bottom: 1px solid var(--rule); padding-bottom: .15rem; }
 #siblings-matrix .sibling-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
 .sibling-me { display: block; font-size: .7rem; color: var(--text-muted); }
+#siblings-matrix th.mine { font-weight: 600; color: inherit; }
 .sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
   min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
   white-space: nowrap; }

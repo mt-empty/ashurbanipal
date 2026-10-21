@@ -930,8 +930,9 @@ components:
         siblings:
           type: array
           description: >
-            Configuration order, minus the sibling whose name and label
-            equal `instance`'s.
+            Configuration order. The sibling whose name and label equal
+            `instance`'s is listed in place with healthy true and is never
+            health-checked.
           items:
             type: object
             required: [name, base_url, healthy]

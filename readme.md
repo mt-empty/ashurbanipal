@@ -237,7 +237,7 @@ Once mounted, the viewer is served under `/__ashurbanipal` (the default mount pa
 | `limits.default_page_size` | `50` | Rows per page when the request doesn't specify. |
 | `limits.max_page_size` | `100` | Hard, server-enforced page-size cap. |
 | `limits.query_timeout_secs` | `5` | Per-query timeout. |
-| `siblings` | none | Other instances to show reachability for; each has `name`, `base_url`, `health_path`, and an optional `label`. |
+| `siblings` | none | Other instances to show reachability for; each has `name`, `base_url`, `health_path`, and an optional `label`, typically an environment (dev, int) or a region (eu, us). Use one shared list, in the same order, on every instance, so the grid looks the same everywhere. |
 | `instance` | none | This instance's own `name` and `label`, so the UI can mark it and link the same view elsewhere ([`spec/protocol.md`](spec/protocol.md) §5.6). |
 
 ## Implementations

@@ -223,7 +223,7 @@ class AshurbanipalController(
 
     @GetMapping("/api/siblings")
     fun siblings(): ResponseEntity<SiblingsResponse> {
-        val checks: List<CompletableFuture<SiblingStatus>> = properties.reportedSiblings.map { sibling ->
+        val checks: List<CompletableFuture<SiblingStatus>> = properties.siblings.map { sibling ->
             checkHealth(sibling)
         }
         val statuses = CompletableFuture.allOf(*checks.toTypedArray())
@@ -233,6 +233,9 @@ class AshurbanipalController(
     }
 
     private fun checkHealth(sibling: Sibling): CompletableFuture<SiblingStatus> {
+        if (properties.isInstance(sibling)) {
+            return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.label, sibling.baseUrl, true))
+        }
         val healthUrl = healthUrl(sibling.baseUrl, sibling.healthPath)
             ?: return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.label, sibling.baseUrl, false))
         val request = try {

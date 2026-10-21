@@ -67,7 +67,7 @@ func Router(cfg Config, sources []NamedSource) http.Handler {
 	mux.Handle("GET "+base+"/api/tables/referenced-by", withAPIHeaders(referencedByHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/structure", withAPIHeaders(structureHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/join", withAPIHeaders(tableJoinHandler(sources, limits)))
-	mux.Handle("GET "+base+"/api/siblings", withAPIHeaders(siblingsHandler(client, cfg.Instance, cfg.reportedSiblings())))
+	mux.Handle("GET "+base+"/api/siblings", withAPIHeaders(siblingsHandler(client, cfg.Instance, cfg.Siblings)))
 	return mux
 }
 
@@ -493,7 +493,7 @@ func structureHandler(sources []NamedSource) http.HandlerFunc {
 
 func siblingsHandler(client *http.Client, instance *Instance, siblings []Sibling) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		statuses := checkSiblings(r.Context(), client, siblings)
+		statuses := checkSiblings(r.Context(), client, instance, siblings)
 		writeJSON(w, struct {
 			Instance *Instance       `json:"instance,omitempty"`
 			Siblings []SiblingStatus `json:"siblings"`

@@ -19,24 +19,48 @@ test("nothing labelled keeps the flat list", () => {
   assert.equal(buildSiblingMatrix({ siblings: [] }), null);
 });
 
-test("the instance's row and column come first, the rest in first-appearance order", () => {
-  const m = buildSiblingMatrix({
-    instance: { name: "orders", label: "dev" },
-    siblings: [sib("billing", "int"), sib("billing", "dev"), sib("orders", "int"), sib("users", "staging")],
-  });
-  assert.ok(m);
-  assert.deepEqual(m.labels, ["dev", "int", "staging"]);
+test("rows and columns follow the list, the same on every instance sharing it", () => {
+  const list = [
+    sib("orders", "dev"),
+    sib("orders", "int"),
+    sib("billing", "dev"),
+    sib("billing", "int"),
+    sib("users", "prod"),
+  ];
+  const dev = buildSiblingMatrix({ instance: { name: "orders", label: "dev" }, siblings: list });
+  const int = buildSiblingMatrix({ instance: { name: "orders", label: "int" }, siblings: list });
+  assert.ok(dev && int);
+  assert.deepEqual(dev.labels, ["dev", "int", "prod"]);
+  assert.deepEqual(int.labels, dev.labels);
   assert.deepEqual(
-    m.rows.map((r) => [r.name, ...r.cells.map(show)]),
+    dev.rows.map((r) => [r.name, ...r.cells.map(show)]),
     [
       ["orders", "here", "=int", "-"],
       ["billing", "dev", "int", "-"],
-      ["users", "-", "-", "staging"],
+      ["users", "-", "-", "prod"],
     ],
   );
   assert.deepEqual(
-    m.rows.map((r) => r.isInstance),
-    [true, false, false],
+    int.rows.map((r) => [r.name, ...r.cells.map(show)]),
+    [
+      ["orders", "=dev", "here", "-"],
+      ["billing", "dev", "int", "-"],
+      ["users", "-", "-", "prod"],
+    ],
+  );
+  assert.equal(int.ownLabel, "int");
+});
+
+test("an instance its own list leaves out goes first", () => {
+  const m = buildSiblingMatrix({
+    instance: { name: "orders", label: "dev" },
+    siblings: [sib("billing", "int"), sib("billing", "prod")],
+  });
+  assert.ok(m);
+  assert.deepEqual(m.labels, ["dev", "int", "prod"]);
+  assert.deepEqual(
+    m.rows.map((r) => r.name),
+    ["orders", "billing"],
   );
 });
 
