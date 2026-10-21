@@ -102,6 +102,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.4.2-EMPTY-ARRAY` | Empty array ≡ absent filter | `filter_dsl::empty_param_and_empty_array_mean_no_filter` |
 | `P5.4.2-DSL-TEXT-REJECTED` | DSL text in `filter` is rejected (no server-side grammar) | `filter_dsl::dsl_text_in_filter_param_is_rejected` |
 | `P5.4.2-DEEP-NESTING` | Nesting deep enough to overflow a recursive decoder, under the byte bound → 400 `invalid_filter` | `filter_dsl::deeply_nested_filter_is_rejected` |
+| `P5.4.2-NO-5XX` | Malformed input the rules don't name (a lone UTF-16 surrogate) → 200 or 400, never 5xx | `filter_dsl::lone_surrogate_is_not_a_server_error` |
 | `P5.4.2-COLUMN-VALIDATED` | Column validated against real columns; unknown → 400 | `filter_dsl::unknown_column_rejection_is_a_400`, `filter_dsl::builder_fixture_cases_over_http` (`unknown_column`) |
 | `P5.4.2-OP-HARDCODED-MAP` | `op` mapped through hardcoded table, never client text | `filter_dsl::equality_filter_narrows_rows` (`=` maps correctly), `filter_dsl::injection_value_stays_a_bind_param` (proxy: an operator escape attempt can only be inert if the mapping is hardcoded) |
 | `P5.4.2-VALUE-BOUND-PARAM` | `value` bound as parameter, never concatenated | `filter_dsl::injection_value_stays_a_bind_param` |
@@ -208,7 +209,8 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.11-FILTER-JOINED` | A condition's `join` selects the table its column belongs to | `join::filter_on_a_joined_table_column` |
 | `P5.11-SORT` | `sort` + `sort_join` order by the column at that position | `join::sort_applies_to_the_table_at_sort_join` |
 | `P5.11-HAS-MORE` | `has_more` true with a following row, false on the last page; `limit` clamped | `join::has_more_reports_a_following_row` |
-| `P5.11-SCHEMA-PARAM` | Explicit default `schema` resolves like an absent one; unrecognized `schema`/`source` → 400 | `join::source_and_schema_params_resolve_like_the_other_routes` |
+| `P5.11-SCHEMA-PARAM` | Explicit default `schema` resolves like an absent one; unrecognized `schema` → 400 | `join::source_and_schema_params_resolve_like_the_other_routes` |
+| `P5.11-SOURCE-PARAM` | Unrecognized `source` → 400 | `join::source_and_schema_params_resolve_like_the_other_routes` |
 | `P5.11-SCHEMA-ISOLATION` | Every table resolves only in the requested schema, else `invalid_join` (Postgres, MySQL; SQLite self-skips) | `join::tables_resolve_only_in_the_requested_schema` |
 | `P5.11-NAMES-EXACT` | Tables and columns in `join`, `columns`, `sort` and `filter` matched exactly; injection-shaped input → 400, never reaches SQL; `invalid_join` for names in `join`, `unknown_column` for `sort` and `filter` | `join::unknown_and_malicious_names_are_rejected` |
 | `P5.11-JOIN-STRUCTURE` | Forward/self `on` position, pair count, join type, operator key, empty or duplicate `columns`, more than 4 tables, malformed `join` (including deep nesting and keys in another case) → 400 `invalid_join`; absent `join` → `invalid_parameter` | `join::invalid_join_structures_are_rejected`, `join::malformed_join_values_are_rejected`, `join::join_keys_are_matched_exactly`, `join::missing_join_is_an_invalid_parameter` |
