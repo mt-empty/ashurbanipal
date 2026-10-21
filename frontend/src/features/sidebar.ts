@@ -1,4 +1,4 @@
-import { loadData } from "../bootstrap/reload.js";
+import { loadData, supersedeLoads } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
 import { $, el, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
 import {
@@ -140,6 +140,7 @@ export async function loadSources(): Promise<void> {
 $<HTMLSelectElement>("source-select").onchange = () => {
   // switchSource restores the schema last used on this source rather than
   // resetting; loadSchemas() still validates it and falls back (R5/R12).
+  supersedeLoads();
   switchSource($<HTMLSelectElement>("source-select").value);
   loadSchemas().then(loadTables).catch(reportError);
 };
@@ -191,6 +192,7 @@ export async function loadSchemas(): Promise<void> {
   $("schema-select-wrap").hidden = false;
 }
 $<HTMLSelectElement>("schema-select").onchange = () => {
+  supersedeLoads();
   switchSchema($<HTMLSelectElement>("schema-select").value);
   loadTables().catch(reportError);
 };

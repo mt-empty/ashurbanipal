@@ -1,3 +1,4 @@
+import { supersedeLoads } from "../bootstrap/reload.js";
 import { $, reportError } from "../core/dom.js";
 import {
   applyScopeParams,
@@ -106,6 +107,7 @@ window.addEventListener("popstate", (ev) => {
   if (!navState || typeof navState.navIndex !== "number") return;
   if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
   navIndex = navState.navIndex;
+  supersedeLoads();
   const params = new URLSearchParams(location.search);
   // Exact reader: reproduce this history entry verbatim, absences included
   // (contrast url.ts's load-time overlay). Keep it separate from that overlay

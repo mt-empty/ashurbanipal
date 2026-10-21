@@ -17,6 +17,12 @@ export const MAX_SAVED_TEXT = 32768;
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
+// Source and schema names are host data. A null prototype and own-key reads keep
+// one named `__proto__` or `constructor` from reaching Object.prototype.
+const dict = <T>(from?: Record<string, T>): Record<string, T> => Object.assign(Object.create(null), from);
+const own = <T>(o: Record<string, T> | undefined, key: string): T | undefined =>
+  o && Object.hasOwn(o, key) ? o[key] : undefined;
+
 function sanitizeEntries(raw: unknown): SavedJoin[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
@@ -36,16 +42,14 @@ function sanitizeEntries(raw: unknown): SavedJoin[] {
 
 // Anything that is not the expected shape is dropped, never repaired (ui-guidelines R5).
 export function sanitizeSaved(raw: unknown): SavedStore {
-  const store: SavedStore = {};
+  const store: SavedStore = dict();
   if (!isPlainObject(raw)) return store;
   for (const [source, schemas] of Object.entries(raw)) {
-    // JSON.parse makes `__proto__` an own key; assigning it would write to Object.prototype.
-    if (source === "__proto__" || !isPlainObject(schemas)) continue;
+    if (!isPlainObject(schemas)) continue;
     for (const [schema, entries] of Object.entries(schemas)) {
-      if (schema === "__proto__") continue;
       const clean = sanitizeEntries(entries);
       if (clean.length === 0) continue;
-      store[source] ??= {};
+      store[source] ??= dict();
       store[source][schema] = clean;
     }
   }
@@ -53,7 +57,7 @@ export function sanitizeSaved(raw: unknown): SavedStore {
 }
 
 export function scopeEntries(store: SavedStore, source: string | null, schema: string | null): SavedJoin[] {
-  return store[source ?? ""]?.[schema ?? ""] ?? [];
+  return own(own(store, source ?? ""), schema ?? "") ?? [];
 }
 
 function withEntries(
@@ -62,9 +66,11 @@ function withEntries(
   schema: string | null,
   entries: SavedJoin[],
 ): SavedStore {
-  const next: SavedStore = { ...store, [source ?? ""]: { ...store[source ?? ""] } };
-  if (entries.length) next[source ?? ""][schema ?? ""] = entries;
-  else delete next[source ?? ""][schema ?? ""];
+  const next = dict(store);
+  const schemas = dict(own(store, source ?? ""));
+  next[source ?? ""] = schemas;
+  if (entries.length) schemas[schema ?? ""] = entries;
+  else delete schemas[schema ?? ""];
   return next;
 }
 

@@ -15,3 +15,20 @@ export function registerLoadData(fn: (opts?: LoadDataOpts) => Promise<void>): vo
 export function loadData(opts?: LoadDataOpts): Promise<void> {
   return impl ? impl(opts) : Promise.resolve();
 }
+
+// Every loadData takes a new token, and a pending one commits only while its
+// token is current. A view change whose own loadData waits on a table list
+// (source or schema switch, Back/Forward) calls supersedeLoads() first.
+let loadToken = 0;
+
+export function nextLoadToken(): number {
+  return ++loadToken;
+}
+
+export function isCurrentLoad(token: number): boolean {
+  return token === loadToken;
+}
+
+export function supersedeLoads(): void {
+  loadToken++;
+}

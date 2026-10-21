@@ -9,7 +9,6 @@ import {
   markFilterVerified,
   markStoredSortVerified,
   markViewShown,
-  scopeQuery,
   startTable,
   state,
   tableInView,
@@ -25,6 +24,7 @@ import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
+import { isCurrentLoad, nextLoadToken } from "./reload.js";
 import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js";
 
 // The render-orchestration hub: loadData sequences fetch -> chrome ->
@@ -167,14 +167,6 @@ function updateViewChrome(): void {
   document.title = title ? `${title} — Ashurbanipal` : "Ashurbanipal";
 }
 
-// loadData() has multiple entry points (table switch, sort click, filter
-// submit, pager); without this, an older slower request's response could
-// land after a newer one and overwrite its already-rendered result — the
-// grid would show a different table's columns/rows than #current claims.
-// Same shape of fix as showCommonValues's cvRequestToken. A source or schema
-// switch supersedes a load too, though its own loadData waits for the table list.
-let loadDataToken = 0;
-
 export async function loadData({
   resetScroll = true,
   highlightNew = false,
@@ -194,9 +186,9 @@ export async function loadData({
     return;
   }
   const view = req.view;
-  const token = ++loadDataToken;
-  const scope = scopeQuery();
-  const superseded = () => token !== loadDataToken || scopeQuery() !== scope;
+  // An older, slower response must not overwrite a newer view (reload.ts).
+  const token = nextLoadToken();
+  const superseded = () => !isCurrentLoad(token);
   const widthScope = widthScopeOf(view);
   let data: ViewData;
   try {
