@@ -45,6 +45,8 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     if not config.is_enabled():
         return bp  # zero routes registered — 404 on every path under `mount`
     config.validate_siblings()
+    reported_siblings = config.reported_siblings()
+    instance = None if config.instance is None else {"name": config.instance.name, "label": config.instance.label}
 
     api_prefix = f"{mount}/api/"
 
@@ -269,10 +271,9 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("/api/siblings")
     def siblings() -> Response:
-        results = _check_siblings(config.reported_siblings())
-        if config.instance is None:
+        results = _check_siblings(reported_siblings)
+        if instance is None:
             return jsonify({"siblings": results})
-        instance = {"name": config.instance.name, "label": config.instance.label}
         return jsonify({"instance": instance, "siblings": results})
 
     return bp

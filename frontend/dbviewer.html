@@ -355,7 +355,7 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #siblings-matrix td { width: 7.5rem; }
 #siblings-matrix th, #siblings-matrix td { padding: 0 .15rem; border: none; cursor: auto;
                                            font-family: inherit; position: static; }
-#siblings-matrix thead th { position: static; background: none; font-size: .7rem; font-weight: 400;
+#siblings-matrix thead th { background: none; font-size: .7rem; font-weight: 400;
                             text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted);
                             padding: 0 .6rem .3rem; }
 #siblings-matrix tbody tr:hover { background: none; }
@@ -367,7 +367,8 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 .sibling-me { display: block; font-size: .7rem; color: var(--text-muted); }
 .sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
   min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
-  white-space: nowrap; font-size: .8125rem; }
+  white-space: nowrap; }
+.sibling-cell, .sibling-here { font-size: .8125rem; }
 .sibling-cell { color: inherit; text-decoration: none; }
 .sibling-cell:hover { background: var(--hover); }
 .sibling-cell.same { box-shadow: inset 0 0 0 1px var(--border-strong); }
@@ -1832,28 +1833,6 @@ function collectNewRowKeys(prev, next, opts) {
   return { newRowKeys, pkNames };
 }
 
-// src/core/url-intent.ts
-var KINDS = ["source", "schema", "table", "filter"];
-var asked = null;
-var swaps = [];
-function recordUrlIntent(params) {
-  asked = {};
-  for (const kind of KINDS) {
-    const value = params.get(kind);
-    if (value) asked[kind] = value;
-  }
-}
-function noteFallback(kind, from, got) {
-  if (asked === null || from === null || asked[kind] !== from) return;
-  swaps.push({ kind, asked: from, got });
-}
-function takeSwaps() {
-  const taken = swaps;
-  swaps = [];
-  asked = null;
-  return taken;
-}
-
 // src/core/store.ts
 var UI_KEY = "ashurbanipal_ui";
 var state = {
@@ -1984,7 +1963,6 @@ function restoreFilterFromParams(params) {
   const text = params.get("filter") ?? "";
   const ast = text ? tryParseFilterDsl(text, joinAliases()) : null;
   if (!ast) {
-    if (text) noteFallback("filter", text, null);
     clearFilter();
     return;
   }
@@ -2101,7 +2079,6 @@ function dropOneStaleInput(code) {
     return true;
   }
   if (filterRisk.isUnverified() && FILTER_FAULTS.has(code ?? "")) {
-    noteFallback("filter", state.filter, null);
     clearFilter();
     return true;
   }
@@ -2167,6 +2144,22 @@ function diffNewRows(data, highlightNew) {
   lastPayload = data;
   lastScopeKey = nowScope;
   return result;
+}
+
+// src/core/url-intent.ts
+var KINDS = ["source", "schema", "table", "filter"];
+var asked = null;
+function recordUrlIntent(params) {
+  asked = {};
+  for (const kind of KINDS) {
+    const value = params.get(kind);
+    if (value) asked[kind] = value;
+  }
+}
+function takeUrlIntent() {
+  const taken = asked ?? {};
+  asked = null;
+  return taken;
 }
 
 // src/core/url.ts
@@ -2366,7 +2359,7 @@ function endsInUnfinishedWord(text) {
 }
 
 // src/features/overlay-highlight.ts
-function attachOverlayHighlight(field, render3) {
+function attachOverlayHighlight(field, render4) {
   const proto = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
   const valueProp = Object.getOwnPropertyDescriptor(proto, "value");
   if (valueProp?.get && valueProp.set) {
@@ -2378,13 +2371,13 @@ function attachOverlayHighlight(field, render3) {
       },
       set(v) {
         set.call(this, v);
-        render3();
+        render4();
       }
     });
   }
-  field.addEventListener("input", render3);
-  new ResizeObserver(render3).observe(field);
-  render3();
+  field.addEventListener("input", render4);
+  new ResizeObserver(render4).observe(field);
+  render4();
 }
 function tokenSpans(text, tokens, isError) {
   return tokens.map((t) => {
@@ -2980,6 +2973,93 @@ function formatCellValue(col, raw) {
   return document.createTextNode(raw);
 }
 
+// src/lib/fallback-note.ts
+var ORDER = ["source", "schema", "table", "filter"];
+function swapsFrom(asked2, settled) {
+  return ORDER.flatMap((kind) => {
+    const want = asked2[kind];
+    const got = settled[kind];
+    if (want === void 0 || want === got) return [];
+    if ((kind === "source" || kind === "schema") && got === null) return [];
+    return [{ kind, asked: want, got }];
+  });
+}
+function placeSegments(label) {
+  return label === null ? [{ text: "here" }] : [{ text: "in " }, { label }];
+}
+function joinWith(items, sep, lastSep = sep) {
+  return items.flatMap((item, i) => i === 0 ? item : [{ text: i === items.length - 1 ? lastSep : sep }, ...item]);
+}
+function buildFallbackNote(swaps, table, label) {
+  const named = ORDER.flatMap((kind) => kind === "filter" ? [] : swaps.filter((s) => s.kind === kind));
+  const filterDropped = named.length < swaps.length;
+  if (named.length === 0) {
+    if (!filterDropped) return [];
+    const target = table ? [{ code: table }, { text: " " }] : [];
+    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(label), { text: ", so it was removed." }];
+  }
+  const out = [
+    { text: "There is no " },
+    ...joinWith(
+      named.map((s) => [{ text: `${s.kind} ` }, { code: s.asked }]),
+      ", ",
+      " or "
+    ),
+    { text: " " },
+    ...placeSegments(label)
+  ];
+  const shown2 = named.flatMap((s) => s.got === null ? [] : [[{ code: s.got }]]);
+  if (shown2.length === 0) {
+    out.push({ text: filterDropped ? ". Your filter was removed." : "." });
+    return out;
+  }
+  out.push({ text: ". Showing " }, ...joinWith(shown2, " / "), {
+    text: filterDropped ? " instead, without your filter." : " instead."
+  });
+  return out;
+}
+
+// src/features/view-notice.ts
+var shownFor = null;
+var shownSwaps = [];
+var placeLabel = null;
+function noticeKey(view, filter) {
+  return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
+}
+function render2(segment) {
+  if ("code" in segment) return el("code", void 0, segment.code);
+  if ("label" in segment) return el("span", "tag", segment.label);
+  return document.createTextNode(segment.text);
+}
+function clearViewNotice() {
+  shownFor = null;
+  $("view-notice").hidden = true;
+}
+function renderNote() {
+  $("view-notice-text").replaceChildren(...buildFallbackNote(shownSwaps, tableInView(), placeLabel).map(render2));
+}
+function showBootFallbackNote() {
+  shownSwaps = swapsFrom(takeUrlIntent(), {
+    source: state.source,
+    schema: state.schema,
+    table: startTable(state.view),
+    filter: state.filter || null
+  });
+  if (shownSwaps.length === 0) return;
+  shownFor = noticeKey(state.view, state.filter);
+  $("view-notice").hidden = false;
+  renderNote();
+}
+function setNoticePlace(label) {
+  if (label === placeLabel) return;
+  placeLabel = label;
+  if (shownFor !== null) renderNote();
+}
+function syncViewNotice(req) {
+  if (shownFor !== null && shownFor !== noticeKey(req?.view ?? null, req?.filter ?? "")) clearViewNotice();
+}
+$("view-notice-close").onclick = clearViewNotice;
+
 // src/features/sidebar.ts
 var tableEntries = [];
 var chipCounts = /* @__PURE__ */ new Map();
@@ -3052,7 +3132,6 @@ async function loadSources() {
   }
   let source = state.source;
   if (!source || !sources.some((s) => s.name === source)) {
-    noteFallback("source", source, sources[0].name);
     source = sources[0].name;
   }
   state.source = source;
@@ -3089,9 +3168,7 @@ async function loadSchemas() {
   }
   let schema = state.schema;
   if (!schema || !schemas.includes(schema)) {
-    const fallback = schemas.includes("public") ? "public" : schemas[0];
-    noteFallback("schema", schema, fallback);
-    schema = fallback;
+    schema = schemas.includes("public") ? "public" : schemas[0];
   }
   state.schema = schema;
   populateSelect($("schema-select"), schemas, schema);
@@ -3139,15 +3216,16 @@ async function loadTables() {
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   if (!tableNames.includes(startTable(state.view) ?? "")) {
-    noteFallback("table", startTable(state.view), tableNames[0] ?? null);
-    if (state.filter) noteFallback("filter", state.filter, null);
     enterTable(tableNames[0] ?? null);
     clearFilter();
   }
   const table = tableInView();
   if (table && state.sort === null) applyStoredSort(table);
   if (state.view) await loadData();
-  else setStatus("");
+  else {
+    syncViewNotice(null);
+    setStatus("");
+  }
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
@@ -3396,13 +3474,13 @@ function mountJoinForm(root, onChange) {
       const fk = first && first.leftColumn === "" && first.rightColumn === "" ? foreignKey(i + 1) : null;
       if (fk) j.on[0] = fk;
     });
-    render3();
+    render4();
     onChange();
   }
   const changed = (fromMenu = false) => {
     const active = document.activeElement;
     const focused = fromMenu ? lastDropdownLabel() : root.contains(active) ? active?.getAttribute("aria-label") : null;
-    render3();
+    render4();
     if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
   };
@@ -3621,7 +3699,7 @@ function mountJoinForm(root, onChange) {
     wrap2.append(el("div", "jlab", `Columns \xB7 ${picked} of ${total}`), grid);
     return wrap2;
   }
-  function render3() {
+  function render4() {
     const parts = [];
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
@@ -3665,7 +3743,7 @@ function mountJoinForm(root, onChange) {
   return {
     setDraft(next) {
       draft = next;
-      render3();
+      render4();
     },
     draft: () => draft,
     problem() {
@@ -3881,7 +3959,7 @@ function createSuggestList(opts) {
   const accept = (i) => {
     if (matches[i] && !matches[i].blocked) opts.accept(matches[i], head);
   };
-  const render3 = () => {
+  const render4 = () => {
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
         const btn = el("button");
@@ -3920,11 +3998,11 @@ function createSuggestList(opts) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       index = (index + 1) % count;
-      render3();
+      render4();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       index = index <= 0 ? count - 1 : index - 1;
-      render3();
+      render4();
     } else if (e.key === "Enter" && index >= 0) {
       e.preventDefault();
       accept(index);
@@ -3945,7 +4023,7 @@ function createSuggestList(opts) {
       matches = next;
       head = nextHead;
       index = nextIndex;
-      render3();
+      render4();
       popup.hidden = false;
       opts.place?.();
       input2.setAttribute("aria-expanded", "true");
@@ -4018,7 +4096,7 @@ function mountJoinSql(onChange) {
       memo = { text, version: version2, result: parseJoin(text, { catalog: knownCatalog(), pairCheck }) };
     return memo.result;
   };
-  function render3() {
+  function render4() {
     const text = field.value;
     field.style.height = "";
     if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
@@ -4030,8 +4108,8 @@ function mountJoinSql(onChange) {
     hlText.replaceChildren(...tokenSpans(text, shown2, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     hlText.append("\n");
   }
-  attachOverlayHighlight(field, render3);
-  const place3 = () => {
+  attachOverlayHighlight(field, render4);
+  const place2 = () => {
     const before = field.value.slice(0, field.selectionStart);
     const line = before.split("\n").length;
     const col = before.length - before.lastIndexOf("\n") - 1;
@@ -4042,7 +4120,7 @@ function mountJoinSql(onChange) {
   const suggest2 = createSuggestList({
     input: field,
     popup: $("join-sql-suggest"),
-    place: place3,
+    place: place2,
     list: $("join-sql-suggest-list"),
     idPrefix: "join-sql-suggest",
     accept: (suggestion, head) => {
@@ -4145,7 +4223,7 @@ function mountJoinSql(onChange) {
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
       if (!anyRead(results)) return;
-      render3();
+      render4();
       onChange();
     });
   }
@@ -4638,101 +4716,40 @@ function buildSiblingMatrix({ instance, siblings }) {
   return { labels, rows, unlabelled: siblings.filter((s) => s.label === void 0) };
 }
 function sameViewHref(baseUrl, search2) {
-  return baseUrl.replace(/\/+$/, "") + search2;
-}
-
-// src/lib/fallback-note.ts
-var NAME_ORDER = ["source", "schema", "table"];
-function placeSegments(place3) {
-  return place3.kind === "here" ? [{ text: "here" }] : [{ text: "in " }, { label: place3.label }];
-}
-function joinOr(items) {
-  return items.flatMap((item, i) => {
-    if (i === 0) return item;
-    return [{ text: i === items.length - 1 ? " or " : ", " }, ...item];
-  });
-}
-function joinSlash(items) {
-  return items.flatMap((item, i) => i === 0 ? item : [{ text: " / " }, ...item]);
-}
-function buildFallbackNote(swaps2, table, place3) {
-  const named = NAME_ORDER.flatMap((kind) => swaps2.filter((s) => s.kind === kind));
-  const filterDropped = swaps2.some((s) => s.kind === "filter");
-  if (named.length === 0) {
-    if (!filterDropped) return [];
-    const target = table ? [{ code: table }, { text: " " }] : [];
-    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(place3), { text: ", so it was removed." }];
+  let url;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return baseUrl;
   }
-  const out = [
-    { text: "There is no " },
-    ...joinOr(named.map((s) => [{ text: `${s.kind} ` }, { code: s.asked }])),
-    { text: " " },
-    ...placeSegments(place3)
-  ];
-  const got = named.filter((s) => s.got !== null);
-  if (got.length === 0) {
-    out.push({ text: filterDropped ? ". Your filter was removed." : "." });
-    return out;
-  }
-  out.push({ text: ". Showing " }, ...joinSlash(got.map((s) => [{ code: s.got }])), {
-    text: filterDropped ? " instead, without your filter." : " instead."
-  });
-  return out;
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  for (const [key, value] of new URLSearchParams(search2)) url.searchParams.set(key, value);
+  return url.toString();
 }
-
-// src/features/view-notice.ts
-var shownFor = null;
-var shownSwaps = [];
-var place2 = { kind: "here" };
-function scopeKey2(view, filter) {
-  return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
-}
-function render2(segment) {
-  if ("code" in segment) return el("code", void 0, segment.code);
-  if ("label" in segment) return el("span", "tag", segment.label);
-  return document.createTextNode(segment.text);
-}
-function clearViewNotice() {
-  shownFor = null;
-  $("view-notice").hidden = true;
-}
-function renderNote() {
-  $("view-notice-text").replaceChildren(...buildFallbackNote(shownSwaps, tableInView(), place2).map(render2));
-}
-function showBootFallbackNote() {
-  shownSwaps = takeSwaps();
-  if (shownSwaps.length === 0) return;
-  shownFor = scopeKey2(state.view, state.filter);
-  $("view-notice").hidden = false;
-  renderNote();
-}
-function setNoticePlace(label) {
-  const next = label === null ? { kind: "here" } : { kind: "label", label };
-  if (JSON.stringify(next) === JSON.stringify(place2)) return;
-  place2 = next;
-  if (shownFor !== null) renderNote();
-}
-function syncViewNotice(req) {
-  if (shownFor !== null && shownFor !== scopeKey2(req?.view ?? null, req?.filter ?? "")) clearViewNotice();
-}
-$("view-notice-close").onclick = clearViewNotice;
 
 // src/features/siblings.ts
 var FRESH_MS = 15e3;
 var FETCH_TIMEOUT_MS = 1e4;
+var MAX_RETRY_MS = 6e4;
 var lastFetchStarted = Number.NEGATIVE_INFINITY;
 var inFlight = false;
 var openTimer;
+var retryTimer;
+var retryDelay = FRESH_MS;
 var siblingsWarned = false;
 var matrixShape = "";
-var linkCells = /* @__PURE__ */ new Map();
-var sameViewLinks = [];
-var lastUpdated = null;
+var linkRefs = [];
+var linkCells = [];
 function startSiblings() {
   void loadSiblings();
   document.addEventListener("visibilitychange", () => {
-    if ($("siblings-pop").matches(":popover-open")) refreshIfStale();
+    if (retryTimer !== void 0 || $("siblings-pop").matches(":popover-open")) refreshIfStale();
   });
+}
+function scheduleRetry() {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(refreshIfStale, retryDelay);
+  retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
 }
 function refreshIfStale() {
   if (document.hidden || inFlight || performance.now() - lastFetchStarted < FRESH_MS) return;
@@ -4741,49 +4758,67 @@ function refreshIfStale() {
 async function loadSiblings() {
   inFlight = true;
   lastFetchStarted = performance.now();
-  let body = { siblings: [] };
-  let fetched = false;
+  let body;
   try {
     body = await api("/siblings", {
       cache: "no-store",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
     });
-    fetched = true;
     siblingsWarned = false;
   } catch (e) {
     if (!siblingsWarned) {
-      console.warn("ashurbanipal: /siblings fetch failed; hiding the panel", e);
+      console.warn("ashurbanipal: /siblings fetch failed; retrying", e);
       siblingsWarned = true;
     }
   } finally {
     inFlight = false;
   }
-  if (fetched) {
-    const at = /* @__PURE__ */ new Date();
-    lastUpdated = el("time", void 0, at.toLocaleTimeString());
-    lastUpdated.dateTime = at.toISOString();
-    lastUpdated.title = at.toLocaleString();
+  if (!body) {
+    scheduleRetry();
+    return;
   }
+  clearTimeout(retryTimer);
+  retryTimer = void 0;
+  retryDelay = FRESH_MS;
+  render3(body);
+}
+function render3(body) {
   const { siblings } = body;
   setNoticePlace(body.instance?.label ?? null);
   $("siblings").hidden = siblings.length === 0;
   const down = siblings.filter((s) => !s.healthy).length;
   $("siblings-summary").textContent = down > 0 ? `Other services \xB7 ${down} down` : `Other services \xB7 ${siblings.length} up`;
-  $("siblings-dot").className = `dot ${down > 0 ? "down" : "up"}`;
+  $("siblings-dot").className = dotClass(down === 0);
   const matrix = buildSiblingMatrix(body);
   $("siblings-matrix").hidden = matrix === null;
   $("siblings-foot").hidden = matrix === null;
+  const at = /* @__PURE__ */ new Date();
+  const updated = el("time", void 0, at.toLocaleTimeString());
+  updated.dateTime = at.toISOString();
+  updated.title = at.toLocaleString();
   $("siblings-heading").replaceChildren(
     matrix ? "Other services' databases. " : "Other services' databases. Opens their Ashurbanipal in a new tab. ",
-    ...lastUpdated ? ["Updated ", lastUpdated.cloneNode(true), "."] : []
+    "Updated ",
+    updated,
+    "."
   );
   if (matrix) renderMatrix(matrix);
   else matrixShape = "";
   $("siblings-list").replaceChildren(...(matrix ? matrix.unlabelled : siblings).map((s) => listRow(s, !matrix)));
 }
-function healthDot(healthy) {
-  const dot = el("span", `dot ${healthy ? "up" : "down"}`);
-  dot.setAttribute("aria-hidden", "true");
+function health(healthy) {
+  return healthy ? "up" : "down";
+}
+function dotClass(healthy) {
+  return `dot ${health(healthy)}`;
+}
+function healthDot(healthy, ariaLabel) {
+  const dot = el("span", dotClass(healthy));
+  if (ariaLabel === void 0) dot.setAttribute("aria-hidden", "true");
+  else {
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", ariaLabel);
+  }
   return dot;
 }
 function listRow(s, newTab) {
@@ -4792,28 +4827,23 @@ function listRow(s, newTab) {
   if (newTab) a.target = "_blank";
   a.rel = "noopener";
   a.className = "sibling-row";
-  const dot = el("span", `dot ${s.healthy ? "up" : "down"}`);
-  dot.setAttribute("role", "img");
-  dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
   const name = el("span", "sibling-name", s.name);
   name.title = s.name;
-  const state2 = el("span", "sibling-state", `${s.healthy ? "up" : "down"}${newTab ? " \u2197" : ""}`);
-  a.append(dot, name, state2);
+  const state2 = el("span", "sibling-state", `${health(s.healthy)}${newTab ? " \u2197" : ""}`);
+  a.append(healthDot(s.healthy, s.healthy ? "healthy" : "unhealthy"), name, state2);
   return a;
-}
-function cellKey(name, label) {
-  return JSON.stringify([name, label]);
 }
 function shapeOf(m) {
   return JSON.stringify([m.labels, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
 }
-function stateText(healthy, sameView) {
-  return sameView ? "same view" : healthy ? "up" : "down";
+function paintLink(ref, name, label, { sibling, sameView }) {
+  const state2 = sameView ? `same view \xB7 ${health(sibling.healthy)}` : health(sibling.healthy);
+  ref.dot.className = dotClass(sibling.healthy);
+  ref.state.textContent = state2;
+  ref.a.setAttribute("aria-label", `${name} in ${label}: ${state2}`);
+  ref.a.href = sameView ? sameViewHref(sibling.base_url, location.search) : sibling.base_url;
 }
-function linkLabel(name, label, healthy, sameView) {
-  return `${name} in ${label}: ${sameView ? "same view, " : ""}${healthy ? "up" : "down"}`;
-}
-function renderCell(name, label, cell) {
+function renderCell(cell) {
   const td = el("td");
   if (cell.kind === "here") {
     const here = el("span", "sibling-here", "you are here");
@@ -4822,71 +4852,58 @@ function renderCell(name, label, cell) {
   } else if (cell.kind === "missing") {
     td.append(el("span", "sibling-missing", "not set up"));
   } else {
-    const { sibling, sameView } = cell;
-    const a = el("a", sameView ? "sibling-cell same" : "sibling-cell");
-    a.href = sibling.base_url;
+    const a = el("a", cell.sameView ? "sibling-cell same" : "sibling-cell");
     a.rel = "noopener";
-    a.setAttribute("aria-label", linkLabel(name, label, sibling.healthy, sameView));
-    const dot = healthDot(sibling.healthy);
-    const state2 = el("span", "sibling-state", stateText(sibling.healthy, sameView));
-    a.append(dot, state2);
+    const ref = { a, dot: healthDot(cell.sibling.healthy), state: el("span", "sibling-state") };
+    a.append(ref.dot, ref.state);
     td.append(a);
-    linkCells.set(cellKey(name, label), { a, dot, state: state2 });
-    if (sameView) sameViewLinks.push({ a, base: sibling.base_url });
+    linkRefs.push(ref);
   }
   return td;
 }
 function renderMatrix(m) {
+  linkCells = m.rows.flatMap(
+    (row2) => row2.cells.flatMap((cell, i) => cell.kind === "link" ? [{ name: row2.name, label: m.labels[i], cell }] : [])
+  );
   const shape = shapeOf(m);
-  if (shape === matrixShape) {
-    for (const row2 of m.rows)
-      row2.cells.forEach((cell, i) => {
-        if (cell.kind !== "link") return;
-        const refs = linkCells.get(cellKey(row2.name, m.labels[i]));
-        if (!refs) return;
-        refs.dot.className = `dot ${cell.sibling.healthy ? "up" : "down"}`;
-        refs.state.textContent = stateText(cell.sibling.healthy, cell.sameView);
-        refs.a.setAttribute("aria-label", linkLabel(row2.name, m.labels[i], cell.sibling.healthy, cell.sameView));
-        if (!cell.sameView) refs.a.href = cell.sibling.base_url;
-      });
-    refreshSameViewHrefs();
-    return;
+  if (shape !== matrixShape) {
+    matrixShape = shape;
+    linkRefs = [];
+    const corner = el("th");
+    corner.append(el("span", "sr-only", "service"));
+    $("siblings-matrix-head").replaceChildren(
+      corner,
+      ...m.labels.map((label) => {
+        const th = el("th", void 0, label);
+        th.scope = "col";
+        return th;
+      })
+    );
+    $("siblings-matrix-body").replaceChildren(
+      ...m.rows.map((row2) => {
+        const tr = el("tr", row2.isInstance ? "instance" : void 0);
+        const th = el("th");
+        th.scope = "row";
+        const name = el("span", "sibling-name", row2.name);
+        name.title = row2.name;
+        th.append(name);
+        if (row2.isInstance) th.append(el("span", "sibling-me", "this service"));
+        tr.append(th, ...row2.cells.map(renderCell));
+        return tr;
+      })
+    );
   }
-  matrixShape = shape;
-  linkCells.clear();
-  sameViewLinks.length = 0;
-  const corner = el("th");
-  corner.append(el("span", "sr-only", "service"));
-  $("siblings-matrix-head").replaceChildren(
-    corner,
-    ...m.labels.map((label) => {
-      const th = el("th", void 0, label);
-      th.scope = "col";
-      return th;
-    })
-  );
-  $("siblings-matrix-body").replaceChildren(
-    ...m.rows.map((row2) => {
-      const tr = el("tr", row2.isInstance ? "instance" : void 0);
-      const th = el("th");
-      th.scope = "row";
-      const name = el("span", "sibling-name", row2.name);
-      name.title = row2.name;
-      th.append(name);
-      if (row2.isInstance) th.append(el("span", "sibling-me", "this service"));
-      tr.append(th, ...row2.cells.map((cell, i) => renderCell(row2.name, m.labels[i], cell)));
-      return tr;
-    })
-  );
-  refreshSameViewHrefs();
+  repaintLinks();
 }
-function refreshSameViewHrefs() {
-  for (const { a, base } of sameViewLinks) a.href = sameViewHref(base, location.search);
+function repaintLinks() {
+  linkCells.forEach(({ name, label, cell }, i) => {
+    paintLink(linkRefs[i], name, label, cell);
+  });
 }
 $("siblings-pop").addEventListener("beforetoggle", (e) => {
   clearInterval(openTimer);
   if (e.newState !== "open") return;
-  refreshSameViewHrefs();
+  repaintLinks();
   refreshIfStale();
   openTimer = setInterval(refreshIfStale, FRESH_MS);
 });

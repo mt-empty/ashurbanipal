@@ -15,8 +15,8 @@ import {
   tableInView,
 } from "../core/state.js";
 import type { SourceEntry, TableListEntry } from "../core/types.js";
-import { noteFallback } from "../core/url-intent.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
+import { syncViewNotice } from "./view-notice.js";
 
 // ---- table chips: transient, session-local state, not part of
 // `state`/localStorage — resets on reload ----
@@ -128,7 +128,6 @@ export async function loadSources(): Promise<void> {
   }
   let source = state.source;
   if (!source || !sources.some((s) => s.name === source)) {
-    noteFallback("source", source, sources[0].name);
     source = sources[0].name;
   }
   state.source = source;
@@ -187,9 +186,7 @@ export async function loadSchemas(): Promise<void> {
   }
   let schema = state.schema;
   if (!schema || !schemas.includes(schema)) {
-    const fallback = schemas.includes("public") ? "public" : schemas[0];
-    noteFallback("schema", schema, fallback);
-    schema = fallback;
+    schema = schemas.includes("public") ? "public" : schemas[0];
   }
   state.schema = schema;
   populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
@@ -244,10 +241,8 @@ export async function loadTables(): Promise<void> {
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
-  // Stale persisted state must never wedge the UI: fall back silently.
+  // Stale persisted state must never wedge the UI: fall back (R5).
   if (!tableNames.includes(startTable(state.view) ?? "")) {
-    noteFallback("table", startTable(state.view), tableNames[0] ?? null);
-    if (state.filter) noteFallback("filter", state.filter, null);
     enterTable(tableNames[0] ?? null);
     // A ?filter= was written against the table the URL named; that table
     // isn't here, so its columns can't apply to the fallback — carrying it
@@ -263,7 +258,11 @@ export async function loadTables(): Promise<void> {
   // must still be true when loadData()'s syncUrl() call runs, or a
   // history restoration would push a new entry instead of replacing it.
   if (state.view) await loadData();
-  else setStatus("");
+  else {
+    // loadData() is what normally drops a stale note; an empty scope never reaches it.
+    syncViewNotice(null);
+    setStatus("");
+  }
 }
 
 export function listedTableNames(): string[] {

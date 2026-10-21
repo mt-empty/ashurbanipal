@@ -60,12 +60,16 @@ export function basePath(config: Config): string {
 /** The instance/label rules of spec/protocol.md §5.6; throws on a violation. */
 export function validateSiblings(config: Config): void {
   const { instance, siblings = [] } = config;
-  if (instance && (!instance.name || !instance.label)) {
+  // Config may come from parsed JSON, so the types are checked, not assumed.
+  const nonEmpty = (v: unknown) => typeof v === "string" && v !== "";
+  if (instance && (!nonEmpty(instance.name) || !nonEmpty(instance.label))) {
     throw new Error("instance needs a non-empty name and label");
   }
   const seen = new Set<string>();
   for (const s of siblings) {
-    if (s.label === "") throw new Error(`sibling ${JSON.stringify(s.name)} has an empty label; omit it instead`);
+    if (s.label !== undefined && !nonEmpty(s.label)) {
+      throw new Error(`sibling ${JSON.stringify(s.name)} needs a non-empty string label, or none`);
+    }
     const key = JSON.stringify([s.name, s.label ?? null]);
     if (seen.has(key)) throw new Error(`two siblings share the name ${JSON.stringify(s.name)} and the same label`);
     seen.add(key);

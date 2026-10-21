@@ -131,6 +131,7 @@ export interface SiblingsResponse {
 // showed instead; `got` is null when nothing replaced it (a dropped filter,
 // or a schema with no tables).
 export type SwapKind = "source" | "schema" | "table" | "filter";
+export type UrlIntent = Partial<Record<SwapKind, string>>;
 export interface Swap {
   kind: SwapKind;
   asked: string;

@@ -79,3 +79,17 @@ test("a missing source falls back to the first source and says so", async ({ pag
     await demo.stop();
   }
 });
+
+test("switching to a schema with no tables hides the note", async ({ page }) => {
+  await page.route("**/api/tables*", (route) => {
+    const schema = new URL(route.request().url()).searchParams.get("schema");
+    if (schema === "warehouse") return route.fulfill({ json: { tables: [] } });
+    return route.continue();
+  });
+  await gotoApp(page, "?table=nosuchtable");
+  await expect(note(page)).toBeVisible();
+  const listed = page.waitForResponse((r) => r.url().includes("/api/tables?") && r.url().includes("schema=warehouse"));
+  await page.locator("#schema-select").selectOption("warehouse");
+  await listed;
+  await expect(note(page)).toBeHidden();
+});

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Swap } from "../src/core/types.ts";
-import { buildFallbackNote, type NoteSegment } from "../src/lib/fallback-note.ts";
+import { buildFallbackNote, type NoteSegment, swapsFrom } from "../src/lib/fallback-note.ts";
 
 // Flattens segments so a case reads as the sentence the user sees, with
 // `code` and [label] marked.
 const plain = (segments: NoteSegment[]) =>
   segments.map((s) => ("code" in s ? `\`${s.code}\`` : "label" in s ? `[${s.label}]` : s.text)).join("");
 
-const here = { kind: "here" } as const;
+const here = null;
 const swap = (kind: Swap["kind"], asked: string, got: string | null): Swap => ({ kind, asked, got });
 
 test("no swaps, no note", () => {
@@ -66,7 +66,39 @@ test("a table with nothing to show instead", () => {
 
 test("an instance label replaces here", () => {
   assert.equal(
-    plain(buildFallbackNote([swap("table", "orders", "audit_log")], "audit_log", { kind: "label", label: "int" })),
+    plain(buildFallbackNote([swap("table", "orders", "audit_log")], "audit_log", "int")),
     "There is no table `orders` in [int]. Showing `audit_log` instead.",
   );
+});
+
+const settled = (over: Partial<Record<Swap["kind"], string | null>>) => ({
+  source: "primary",
+  schema: "public",
+  table: "orders",
+  filter: null,
+  ...over,
+});
+
+test("nothing asked, or everything granted, gives no swaps", () => {
+  assert.deepEqual(swapsFrom({}, settled({ table: "audit_log" })), []);
+  assert.deepEqual(swapsFrom({ table: "orders", filter: "x = 1" }, settled({ filter: "x = 1" })), []);
+});
+
+test("a missing table and its dropped filter are both swaps, in top-bar order", () => {
+  assert.deepEqual(swapsFrom({ filter: "x = 1", table: "nosuch" }, settled({ table: "audit_log" })), [
+    swap("table", "nosuch", "audit_log"),
+    swap("filter", "x = 1", null),
+  ]);
+});
+
+test("a hidden source or schema selector is not a swap", () => {
+  assert.deepEqual(swapsFrom({ source: "replica", schema: "sales" }, settled({ source: null, schema: null })), []);
+});
+
+test("a missing source or schema is a swap; a scope with no tables keeps a null table", () => {
+  assert.deepEqual(swapsFrom({ source: "replica", schema: "sales", table: "orders" }, settled({ table: null })), [
+    swap("source", "replica", "primary"),
+    swap("schema", "sales", "public"),
+    swap("table", "orders", null),
+  ]);
 });

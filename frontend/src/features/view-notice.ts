@@ -1,17 +1,17 @@
 import { $, el } from "../core/dom.js";
-import { state, tableInView, type ViewRequest, viewKey } from "../core/state.js";
+import { startTable, state, tableInView, type ViewRequest, viewKey } from "../core/state.js";
 import type { Swap } from "../core/types.js";
-import { takeSwaps } from "../core/url-intent.js";
-import { buildFallbackNote, type NotePlace, type NoteSegment } from "../lib/fallback-note.js";
+import { takeUrlIntent } from "../core/url-intent.js";
+import { buildFallbackNote, type NoteSegment, swapsFrom } from "../lib/fallback-note.js";
 
 // Unlike #join-notice this survives a reload of the same view, so a refresh
 // keeps it; any change of source, schema, view or filter drops it.
 
 let shownFor: string | null = null;
 let shownSwaps: Swap[] = [];
-let place: NotePlace = { kind: "here" };
+let placeLabel: string | null = null;
 
-function scopeKey(view: ViewRequest["view"] | null, filter: string): string {
+function noticeKey(view: ViewRequest["view"] | null, filter: string): string {
   return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
 }
 
@@ -27,28 +27,33 @@ function clearViewNotice(): void {
 }
 
 function renderNote(): void {
-  $("view-notice-text").replaceChildren(...buildFallbackNote(shownSwaps, tableInView(), place).map(render));
+  $("view-notice-text").replaceChildren(...buildFallbackNote(shownSwaps, tableInView(), placeLabel).map(render));
 }
 
-// Called once the boot load settles; ends the URL-intent window either way.
+// Called once the boot load settles: whatever the URL asked for that the page
+// did not end up on gets the note. Ends the URL-intent window either way.
 export function showBootFallbackNote(): void {
-  shownSwaps = takeSwaps();
+  shownSwaps = swapsFrom(takeUrlIntent(), {
+    source: state.source,
+    schema: state.schema,
+    table: startTable(state.view),
+    filter: state.filter || null,
+  });
   if (shownSwaps.length === 0) return;
-  shownFor = scopeKey(state.view, state.filter);
+  shownFor = noticeKey(state.view, state.filter);
   $("view-notice").hidden = false;
   renderNote();
 }
 
 // The instance's own label, once /api/siblings reports one, replaces "here".
 export function setNoticePlace(label: string | null): void {
-  const next: NotePlace = label === null ? { kind: "here" } : { kind: "label", label };
-  if (JSON.stringify(next) === JSON.stringify(place)) return;
-  place = next;
+  if (label === placeLabel) return;
+  placeLabel = label;
   if (shownFor !== null) renderNote();
 }
 
 export function syncViewNotice(req: ViewRequest | null): void {
-  if (shownFor !== null && shownFor !== scopeKey(req?.view ?? null, req?.filter ?? "")) clearViewNotice();
+  if (shownFor !== null && shownFor !== noticeKey(req?.view ?? null, req?.filter ?? "")) clearViewNotice();
 }
 
 $("view-notice-close").onclick = clearViewNotice;

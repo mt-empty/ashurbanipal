@@ -71,3 +71,18 @@ test("same-view hrefs append the query string to the mount", () => {
   );
   assert.equal(sameViewHref("https://o.example/__ashurbanipal", ""), "https://o.example/__ashurbanipal");
 });
+
+test("a base_url with its own query or fragment keeps both", () => {
+  assert.equal(
+    sameViewHref("https://o.example/__ashurbanipal?tenant=a", "?table=orders"),
+    "https://o.example/__ashurbanipal?tenant=a&table=orders",
+  );
+  assert.equal(
+    sameViewHref("https://o.example/__ashurbanipal#top", "?table=orders"),
+    "https://o.example/__ashurbanipal?table=orders#top",
+  );
+});
+
+test("an unparseable base_url is returned unchanged", () => {
+  assert.equal(sameViewHref("not a url", "?table=orders"), "not a url");
+});

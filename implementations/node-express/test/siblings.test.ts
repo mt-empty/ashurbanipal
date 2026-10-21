@@ -58,6 +58,7 @@ it.each([
   ["an instance without a label", (c: Config) => (c.instance = { name: "orders", label: "" })],
   ["an empty sibling label", (c: Config) => ((c.siblings ?? [])[1].label = "")],
   ["a duplicate name and label", (c: Config) => ((c.siblings ?? [])[1].label = "dev")],
+  ["a null sibling label", (c: Config) => ((c.siblings ?? [])[1].label = null as unknown as string)],
 ])("rejects %s when enabled", (_name, mutate) => {
   const config = labelledConfig();
   mutate(config);

@@ -70,7 +70,7 @@ test("the same-view link carries the current view and follows it", async ({ page
   await gotoApp(page, "?table=orders");
   await openMatrix(page);
   const sameView = cell(page, "orders", 1).locator("a");
-  await expect(sameView).toHaveText("same view");
+  await expect(sameView).toHaveText("same view · up");
   await expect(sameView).toHaveAttribute("href", base("orders", "int") + new URL(page.url()).search);
 
   await page.keyboard.press("Escape");
@@ -153,4 +153,45 @@ test("the heading says when the list was last updated", async ({ page }) => {
   const updated = page.locator("#siblings-heading time");
   await expect(updated).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T/);
   await expect(page.locator("#siblings-heading")).toContainText("Updated ");
+});
+
+test("a failed first fetch retries on its own", async ({ page }) => {
+  await page.clock.install();
+  let fail = true;
+  await page.route("**/api/siblings", (r) =>
+    fail
+      ? r.fulfill({ status: 500, contentType: "application/problem+json", body: '{"title":"boom","status":500}' })
+      : r.fulfill({ contentType: "application/json", body: JSON.stringify(LABELLED) }),
+  );
+  const failed = page.waitForResponse((r) => r.url().includes("/api/siblings"));
+  await page.goto(APP_PATH);
+  await failed;
+  await expect(page.locator("#siblings")).toBeHidden();
+
+  fail = false;
+  const retried = page.waitForResponse((r) => r.url().includes("/api/siblings") && r.ok());
+  await page.clock.runFor(15_000);
+  await retried;
+  await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 down");
+});
+
+test("a failed refresh keeps the last good list and label", async ({ page }) => {
+  await page.clock.install();
+  let fail = false;
+  await page.route("**/api/siblings", (r) =>
+    fail
+      ? r.fulfill({ status: 500, contentType: "application/problem+json", body: '{"title":"boom","status":500}' })
+      : r.fulfill({ contentType: "application/json", body: JSON.stringify(LABELLED) }),
+  );
+  await page.goto(`${APP_PATH}?table=nosuchtable`);
+  await expect(page.locator("#view-notice-text")).toContainText("in dev");
+  await openMatrix(page);
+
+  fail = true;
+  const failed = page.waitForResponse((r) => r.url().includes("/api/siblings") && !r.ok());
+  await page.clock.runFor(15_000);
+  await failed;
+  await expect(page.locator("#siblings-matrix-body th[scope=row]")).toHaveCount(3);
+  await expect(page.locator("#siblings")).toBeVisible();
+  await expect(page.locator("#view-notice-text")).toContainText("in dev");
 });

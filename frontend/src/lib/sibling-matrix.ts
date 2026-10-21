@@ -10,7 +10,7 @@ export type MatrixCell =
 export interface SiblingMatrix {
   labels: string[];
   rows: { name: string; isInstance: boolean; cells: MatrixCell[] }[];
-  // Siblings without a label, listed under the grid as before.
+  // Siblings without a label, listed under the grid.
   unlabelled: Sibling[];
 }
 
@@ -39,8 +39,17 @@ export function buildSiblingMatrix({ instance, siblings }: SiblingsResponse): Si
 }
 
 // A link to the same view elsewhere: the target's base plus this page's query
-// string, which already holds source, schema, table, filter and sort. The page
-// is served at exactly the mount, so a trailing slash on base_url is dropped.
+// parameters, which already hold source, schema, table, filter and sort. The
+// page is served at exactly the mount, so a trailing slash on base_url is
+// dropped; any query or fragment base_url already has is kept.
 export function sameViewHref(baseUrl: string, search: string): string {
-  return baseUrl.replace(/\/+$/, "") + search;
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return baseUrl;
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  for (const [key, value] of new URLSearchParams(search)) url.searchParams.set(key, value);
+  return url.toString();
 }

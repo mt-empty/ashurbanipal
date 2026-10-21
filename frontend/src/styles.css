@@ -333,7 +333,7 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #siblings-matrix td { width: 7.5rem; }
 #siblings-matrix th, #siblings-matrix td { padding: 0 .15rem; border: none; cursor: auto;
                                            font-family: inherit; position: static; }
-#siblings-matrix thead th { position: static; background: none; font-size: .7rem; font-weight: 400;
+#siblings-matrix thead th { background: none; font-size: .7rem; font-weight: 400;
                             text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted);
                             padding: 0 .6rem .3rem; }
 #siblings-matrix tbody tr:hover { background: none; }
@@ -345,7 +345,8 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 .sibling-me { display: block; font-size: .7rem; color: var(--text-muted); }
 .sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
   min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
-  white-space: nowrap; font-size: .8125rem; }
+  white-space: nowrap; }
+.sibling-cell, .sibling-here { font-size: .8125rem; }
 .sibling-cell { color: inherit; text-decoration: none; }
 .sibling-cell:hover { background: var(--hover); }
 .sibling-cell.same { box-shadow: inset 0 0 0 1px var(--border-strong); }

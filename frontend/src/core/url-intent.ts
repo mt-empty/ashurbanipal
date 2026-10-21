@@ -1,14 +1,12 @@
-import type { Swap, SwapKind } from "./types.js";
+import type { SwapKind, UrlIntent } from "./types.js";
 
-// What the page URL asked for at load, so a fallback can tell a name the link
-// named (worth a note) from one restored out of localStorage (reset silently,
-// ui-guidelines R5/R6d). Boot-only: takeSwaps() ends the window, so a later
-// source or schema switch by the user never records anything.
+// What the page URL asked for at load, so the boot note can tell a name the
+// link named (worth a note) from one restored out of localStorage (reset
+// silently, ui-guidelines R5/R6d). Boot-only: takeUrlIntent() ends the window.
 
 const KINDS: readonly SwapKind[] = ["source", "schema", "table", "filter"];
 
-let asked: Partial<Record<SwapKind, string>> | null = null;
-let swaps: Swap[] = [];
+let asked: UrlIntent | null = null;
 
 export function recordUrlIntent(params: URLSearchParams): void {
   asked = {};
@@ -18,14 +16,8 @@ export function recordUrlIntent(params: URLSearchParams): void {
   }
 }
 
-export function noteFallback(kind: SwapKind, from: string | null, got: string | null): void {
-  if (asked === null || from === null || asked[kind] !== from) return;
-  swaps.push({ kind, asked: from, got });
-}
-
-export function takeSwaps(): Swap[] {
-  const taken = swaps;
-  swaps = [];
+export function takeUrlIntent(): UrlIntent {
+  const taken = asked ?? {};
   asked = null;
   return taken;
 }

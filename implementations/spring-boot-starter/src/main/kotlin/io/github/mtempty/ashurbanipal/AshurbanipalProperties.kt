@@ -63,8 +63,8 @@ class AshurbanipalProperties(
     }
 
     /** Configuration order, minus the sibling that is this instance, which never probes itself. */
-    val reportedSiblings: List<Sibling>
-        get() = siblings.filterNot { instance != null && it.name == instance.name && it.label == instance.label }
+    val reportedSiblings: List<Sibling> =
+        siblings.filterNot { instance != null && it.name == instance.name && it.label == instance.label }
 
     val isEnabled: Boolean get() = enabled
 
@@ -84,9 +84,10 @@ data class Instance(
     val label: String = "",
 )
 
+/** `label` is last so a positional `Sibling(name, baseUrl, healthPath)` keeps its meaning. */
 data class Sibling(
     val name: String = "",
-    val label: String? = null,
     val baseUrl: String = "",
     val healthPath: String = "",
+    val label: String? = null,
 )
