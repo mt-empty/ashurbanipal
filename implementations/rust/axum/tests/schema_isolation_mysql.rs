@@ -13,9 +13,8 @@
 //!   version guards against can't recur the same way here; this test is a
 //!   positive assertion, not a regression for a known MySQL bug.
 //!
-//! Requires `MYSQL_TEST_URL` (see `.devcontainer/docker-compose.yml`).
-//! Not run in CI — same zero-CI-footprint precedent as the rest of the
-//! `mysql` feature (see `docs/adapter-decisions.md`).
+//! Requires `MYSQL_TEST_URL` (see `.devcontainer/docker-compose.yml`); CI
+//! runs it via `mise run rust:backends`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

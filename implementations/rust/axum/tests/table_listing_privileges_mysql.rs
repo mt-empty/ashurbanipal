@@ -10,8 +10,7 @@
 //! fetch must surface as `NotAllowed` (→ 400), never a raw driver 500.
 //!
 //! Requires `MYSQL_TEST_URL` / `MARIADB_TEST_URL` (see
-//! `.devcontainer/docker-compose.yml`). Not run in CI — same
-//! zero-CI-footprint precedent as the rest of the `mysql` feature.
+//! `.devcontainer/docker-compose.yml`); CI runs it via `mise run rust:backends`.
 
 use ashurbanipal_axum::{DbError, DbSource, MySqlSource, QueryOpts};
 use sqlx::mysql::MySqlPoolOptions;

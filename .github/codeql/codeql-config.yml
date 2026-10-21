@@ -1,0 +1,4 @@
+# Generated or vendored copies of frontend/src; the source itself is scanned.
+paths-ignore:
+  - "**/dbviewer.html"
+  - docs/demo/index.html

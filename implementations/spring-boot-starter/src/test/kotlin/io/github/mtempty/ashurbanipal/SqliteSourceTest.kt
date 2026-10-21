@@ -9,13 +9,13 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import java.io.File
+import java.nio.file.Files
 import java.sql.DriverManager
 import kotlin.system.measureTimeMillis
 
 /** Uses an on-disk SQLite file so Xerial's driver can interrupt a real slow query. */
 class SqliteSourceTest {
-    private val dbFile = File.createTempFile("ashurbanipal-sqlite-test", ".db")
+    private val dbFile = Files.createTempFile("ashurbanipal-sqlite-test", ".db").toFile()
 
     private fun seededDataSource(): HikariDataSource {
         val jdbcUrl = "jdbc:sqlite:${dbFile.absolutePath}"
@@ -220,7 +220,7 @@ class SqliteSourceTest {
     // semicolon-joined batch passed to a single execute() call — each DDL
     // statement needs its own execute(), same as seededDataSource above.
     private fun dataSourceFor(vararg statements: String): HikariDataSource {
-        val file = File.createTempFile("ashurbanipal-sqlite-shorthand-fk-test", ".db")
+        val file = Files.createTempFile("ashurbanipal-sqlite-shorthand-fk-test", ".db").toFile()
         val jdbcUrl = "jdbc:sqlite:${file.absolutePath}"
         DriverManager.getConnection(jdbcUrl).use { conn ->
             conn.createStatement().use { st -> statements.forEach { st.execute(it) } }
