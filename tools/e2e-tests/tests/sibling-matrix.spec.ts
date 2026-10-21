@@ -213,3 +213,40 @@ test("a failed refresh keeps the last good list and label", async ({ page }) => 
   await expect(page.locator("#siblings")).toBeVisible();
   await expect(page.locator("#view-notice-text")).toContainText("in dev");
 });
+
+test("a refresh keeps focus on an unlabelled row under the grid", async ({ page }) => {
+  await page.clock.install();
+  let healthy = true;
+  await page.route("**/api/siblings", (r) => {
+    const body = structuredClone(LABELLED) as { instance: unknown; siblings: Record<string, unknown>[] };
+    body.siblings.push({ name: "legacy", base_url: base("legacy", "x"), healthy });
+    return r.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+  });
+  await page.goto(APP_PATH);
+  await expect(page.locator("#siblings")).toBeVisible();
+  await openMatrix(page);
+  const row = page.locator("#siblings-list > a");
+  await expect(row.locator(".sibling-name")).toHaveText("legacy");
+  await row.focus();
+
+  healthy = false;
+  const polled = page.waitForResponse((r) => r.url().includes("/api/siblings"));
+  await page.clock.runFor(15_000);
+  await polled;
+  await expect(row.locator(".sibling-state")).toHaveText("down");
+  await expect(row).toBeFocused();
+});
+
+test("the grid does not inherit the data table's styles", async ({ page }) => {
+  await mockSiblings(page, LABELLED);
+  await gotoApp(page);
+  await openMatrix(page);
+  const style = (selector: string) =>
+    page.locator(selector).first().evaluate((e) => {
+      const s = getComputedStyle(e);
+      return { cursor: s.cursor, userSelect: s.userSelect, position: s.position };
+    });
+  expect(await style("#data-table thead th[data-col]")).toMatchObject({ cursor: "pointer", userSelect: "none", position: "sticky" });
+  expect(await style("#siblings-matrix thead th")).toMatchObject({ cursor: "auto", position: "static" });
+  expect((await style("#siblings-matrix thead th")).userSelect).not.toBe("none");
+});

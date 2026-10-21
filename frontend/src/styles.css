@@ -137,26 +137,29 @@ ul { list-style: none; margin: 0; padding: 0; }
 }
 
 /* ==== Data table ==== */
+/* Scoped to #data-table so the Other services grid doesn't inherit these;
+   :where() keeps the id from adding specificity, so every th/td override
+   below still wins as it did against the bare element selectors. */
 /* separate/0, not collapse: verified that collapsed borders let
    scrolled-under row content bleed through a sticky <th>'s background at
    the collapsed border seams in Chromium. Horizontal rules only. */
 /* max-content, not auto: inside #content's own max-content box, auto lets the
    table inflate far past its natural width (a 5-column table rendered 3x wide). */
-table { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
-th, td { padding: .45rem .75rem .45rem 0; text-align: left; }
+:where(#data-table) { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
+:where(#data-table) th, :where(#data-table) td { padding: .45rem .75rem .45rem 0; text-align: left; }
 /* Border-box so the min-width from features/column-widths.ts is the column's
    measured width, not that plus padding (which would grow it every render). */
-th { box-sizing: border-box; }
-td { position: relative; border-bottom: 1px solid var(--rule);
+:where(#data-table) th { box-sizing: border-box; }
+:where(#data-table) td { position: relative; border-bottom: 1px solid var(--rule);
      font-family: var(--font-mono); font-size: .8125rem; }
-tbody tr:hover { background: var(--hover); }
-th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
+:where(#data-table) tbody tr:hover { background: var(--hover); }
+:where(#data-table) th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
      font-size: .75rem; border-bottom: 1px solid var(--rule-strong); }
 /* z-index is load-bearing: td has position:relative (for the cell actions),
    and since tbody follows thead in DOM order, its positioned <td>s paint
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
-thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+:where(#data-table) thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
 /* Capped like the table chips' names; the title carries the full name. */
 .col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
             vertical-align: bottom; }
@@ -214,7 +217,7 @@ td.expandable .cell-text { cursor: zoom-in; }
 td:hover .cell-actions, td:focus-within .cell-actions { opacity: 1; }
 /* No hover on touch: keep the buttons visible, in reserved space. */
 @media (hover: none) {
-  td { padding-right: 4.5rem; }
+  :where(#data-table) td { padding-right: 4.5rem; }
   .cell-actions { opacity: 1; }
 }
 /* Fades out over 3s after a manual refresh; static under reduced motion,
@@ -326,23 +329,20 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 .sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                 white-space: nowrap; font-family: var(--font-mono); }
 .sibling-state { color: var(--text-muted); font-size: .75rem; }
-/* The service × label grid. Resets the data table's global table/th/td rules. */
+/* The service × label grid. */
 #siblings-pop:has(#siblings-matrix:not([hidden])) { max-width: min(34rem, 92vw); }
-#siblings-matrix { margin: 0; width: 100%; }
+#siblings-matrix { border-collapse: collapse; width: 100%; }
 /* Label columns stay narrow; the service-name column takes the slack. */
 #siblings-matrix td { width: 7.5rem; }
-#siblings-matrix th, #siblings-matrix td { padding: 0 .15rem; border: none; cursor: auto;
-                                           font-family: inherit; position: static; }
-#siblings-matrix thead th { background: none; font-size: .7rem; font-weight: 400;
-                            text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted);
-                            padding: 0 .6rem .3rem; }
-#siblings-matrix tbody tr:hover { background: none; }
+#siblings-matrix th, #siblings-matrix td { padding: 0 .15rem; text-align: left; }
+#siblings-matrix thead th { font-size: .7rem; font-weight: 400; text-transform: uppercase;
+                            letter-spacing: .04em; color: var(--text-muted); padding: 0 .6rem .3rem; }
 #siblings-matrix tbody th { font-weight: 400; font-size: .8125rem; padding-left: .6rem;
                             max-width: 14rem; }
 #siblings-matrix tbody tr.instance th, #siblings-matrix tbody tr.instance td {
   border-bottom: 1px solid var(--rule); padding-bottom: .15rem; }
 #siblings-matrix .sibling-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
-.sibling-me { display: block; font-size: .7rem; color: var(--text-muted); }
+.sibling-me { display: block; font-size: .7rem; font-weight: 400; color: var(--text-muted); }
 #siblings-matrix th.mine { font-weight: 600; color: inherit; }
 .sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
   min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
@@ -564,7 +564,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
   --band-3: light-dark(#e6ecf5, #252d3d);
   --band-3-fg: light-dark(#3b5a8a, #9db8e0);
 }
-thead { --band-h: 1.75rem; }
+:where(#data-table) thead { --band-h: 1.75rem; }
 thead tr.bands th { height: var(--band-h); box-sizing: border-box; cursor: default; padding: 0 0 .25rem 0;
                     border-bottom: none; }
 thead tr.bands th.row-actions { padding: 0; }

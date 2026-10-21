@@ -36,6 +36,10 @@ type LinkRef = { a: HTMLAnchorElement; dot: HTMLElement; state: HTMLElement };
 let matrixShape = "";
 let linkRefs: LinkRef[] = [];
 let linkCells: { name: string; label: string; cell: LinkCell }[] = [];
+// The same for the plain list, so a refresh keeps focus there too.
+type RowRef = LinkRef & { name: HTMLElement };
+let listShape = "";
+let rowRefs: RowRef[] = [];
 
 export function startSiblings(): void {
   void loadSiblings();
@@ -115,7 +119,19 @@ function render(body: SiblingsResponse): void {
   if (matrix) renderMatrix(matrix);
   else matrixShape = "";
   // With no labels at all, the plain list opens each service in a new tab.
-  $("siblings-list").replaceChildren(...(matrix ? matrix.unlabelled : siblings).map((s) => listRow(s, !matrix)));
+  renderList(matrix ? matrix.unlabelled : siblings, !matrix);
+}
+
+function renderList(list: Sibling[], newTab: boolean): void {
+  const shape = JSON.stringify([newTab, list.map((s) => s.name)]);
+  if (shape !== listShape) {
+    listShape = shape;
+    rowRefs = list.map(() => listRow(newTab));
+    $("siblings-list").replaceChildren(...rowRefs.map((r) => r.a));
+  }
+  list.forEach((s, i) => {
+    paintRow(rowRefs[i], s, newTab);
+  });
 }
 
 // Health is always in the text too, so the dot's colour is never the only signal.
@@ -138,17 +154,27 @@ function healthDot(healthy: boolean, ariaLabel?: string): HTMLElement {
   return dot;
 }
 
-function listRow(s: Sibling, newTab: boolean): HTMLAnchorElement {
-  const a = el("a");
-  a.href = s.base_url;
+function listRow(newTab: boolean): RowRef {
+  const a = el("a", "sibling-row");
   if (newTab) a.target = "_blank";
   a.rel = "noopener";
-  a.className = "sibling-row";
-  const name = el("span", "sibling-name", s.name);
-  name.title = s.name; // truncation escape hatch
-  const state = el("span", "sibling-state", `${health(s.healthy)}${newTab ? " ↗" : ""}`);
-  a.append(healthDot(s.healthy, s.healthy ? "healthy" : "unhealthy"), name, state);
-  return a;
+  const ref: RowRef = {
+    a,
+    dot: healthDot(true, ""),
+    name: el("span", "sibling-name"),
+    state: el("span", "sibling-state"),
+  };
+  a.append(ref.dot, ref.name, ref.state);
+  return ref;
+}
+
+function paintRow(ref: RowRef, s: Sibling, newTab: boolean): void {
+  ref.a.href = s.base_url;
+  ref.name.textContent = s.name;
+  ref.name.title = s.name; // truncation escape hatch
+  ref.dot.className = dotClass(s.healthy);
+  ref.dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
+  ref.state.textContent = `${health(s.healthy)}${newTab ? " ↗" : ""}`;
 }
 
 function shapeOf(m: SiblingMatrix): string {

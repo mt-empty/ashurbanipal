@@ -2,7 +2,7 @@ import { $, qs } from "../core/dom.js";
 
 // Static markup (index.html), so this resolves once at module init rather
 // than on every fetch and every focus restore.
-export const tableEl = qs<HTMLTableElement>(document, "table");
+export const tableEl = $<HTMLTableElement>("data-table");
 
 // ---- focus preservation across thead/tbody re-renders ----
 // replaceChildren() detaches whatever was focused inside it, and the

@@ -743,26 +743,29 @@ ul { list-style: none; margin: 0; padding: 0; }
 }
 
 /* ==== Data table ==== */
+/* Scoped to #data-table so the Other services grid doesn't inherit these;
+   :where() keeps the id from adding specificity, so every th/td override
+   below still wins as it did against the bare element selectors. */
 /* separate/0, not collapse: verified that collapsed borders let
    scrolled-under row content bleed through a sticky <th>'s background at
    the collapsed border seams in Chromium. Horizontal rules only. */
 /* max-content, not auto: inside #content's own max-content box, auto lets the
    table inflate far past its natural width (a 5-column table rendered 3x wide). */
-table { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
-th, td { padding: .45rem .75rem .45rem 0; text-align: left; }
+:where(#data-table) { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
+:where(#data-table) th, :where(#data-table) td { padding: .45rem .75rem .45rem 0; text-align: left; }
 /* Border-box so the min-width from features/column-widths.ts is the column's
    measured width, not that plus padding (which would grow it every render). */
-th { box-sizing: border-box; }
-td { position: relative; border-bottom: 1px solid var(--rule);
+:where(#data-table) th { box-sizing: border-box; }
+:where(#data-table) td { position: relative; border-bottom: 1px solid var(--rule);
      font-family: var(--font-mono); font-size: .8125rem; }
-tbody tr:hover { background: var(--hover); }
-th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
+:where(#data-table) tbody tr:hover { background: var(--hover); }
+:where(#data-table) th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
      font-size: .75rem; border-bottom: 1px solid var(--rule-strong); }
 /* z-index is load-bearing: td has position:relative (for the cell actions),
    and since tbody follows thead in DOM order, its positioned <td>s paint
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
-thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+:where(#data-table) thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
 /* Capped like the table chips' names; the title carries the full name. */
 .col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
             vertical-align: bottom; }
@@ -820,7 +823,7 @@ td.expandable .cell-text { cursor: zoom-in; }
 td:hover .cell-actions, td:focus-within .cell-actions { opacity: 1; }
 /* No hover on touch: keep the buttons visible, in reserved space. */
 @media (hover: none) {
-  td { padding-right: 4.5rem; }
+  :where(#data-table) td { padding-right: 4.5rem; }
   .cell-actions { opacity: 1; }
 }
 /* Fades out over 3s after a manual refresh; static under reduced motion,
@@ -932,23 +935,20 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 .sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                 white-space: nowrap; font-family: var(--font-mono); }
 .sibling-state { color: var(--text-muted); font-size: .75rem; }
-/* The service × label grid. Resets the data table's global table/th/td rules. */
+/* The service × label grid. */
 #siblings-pop:has(#siblings-matrix:not([hidden])) { max-width: min(34rem, 92vw); }
-#siblings-matrix { margin: 0; width: 100%; }
+#siblings-matrix { border-collapse: collapse; width: 100%; }
 /* Label columns stay narrow; the service-name column takes the slack. */
 #siblings-matrix td { width: 7.5rem; }
-#siblings-matrix th, #siblings-matrix td { padding: 0 .15rem; border: none; cursor: auto;
-                                           font-family: inherit; position: static; }
-#siblings-matrix thead th { background: none; font-size: .7rem; font-weight: 400;
-                            text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted);
-                            padding: 0 .6rem .3rem; }
-#siblings-matrix tbody tr:hover { background: none; }
+#siblings-matrix th, #siblings-matrix td { padding: 0 .15rem; text-align: left; }
+#siblings-matrix thead th { font-size: .7rem; font-weight: 400; text-transform: uppercase;
+                            letter-spacing: .04em; color: var(--text-muted); padding: 0 .6rem .3rem; }
 #siblings-matrix tbody th { font-weight: 400; font-size: .8125rem; padding-left: .6rem;
                             max-width: 14rem; }
 #siblings-matrix tbody tr.instance th, #siblings-matrix tbody tr.instance td {
   border-bottom: 1px solid var(--rule); padding-bottom: .15rem; }
 #siblings-matrix .sibling-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
-.sibling-me { display: block; font-size: .7rem; color: var(--text-muted); }
+.sibling-me { display: block; font-size: .7rem; font-weight: 400; color: var(--text-muted); }
 #siblings-matrix th.mine { font-weight: 600; color: inherit; }
 .sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
   min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
@@ -1170,7 +1170,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
   --band-3: light-dark(#e6ecf5, #252d3d);
   --band-3-fg: light-dark(#3b5a8a, #9db8e0);
 }
-thead { --band-h: 1.75rem; }
+:where(#data-table) thead { --band-h: 1.75rem; }
 thead tr.bands th { height: var(--band-h); box-sizing: border-box; cursor: default; padding: 0 0 .25rem 0;
                     border-bottom: none; }
 thead tr.bands th.row-actions { padding: 0; }
@@ -1384,7 +1384,7 @@ thead tr.bands + tr th { top: var(--band-h); }
     </div>
   </div>
   <div id="content">
-    <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <table id="data-table" tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
     <template id="cell-template"><td><button class="cell-text"></button><span class="cell-actions"><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></span></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
     <div id="pager">
@@ -5331,6 +5331,8 @@ var siblingsWarned = false;
 var matrixShape = "";
 var linkRefs = [];
 var linkCells = [];
+var listShape = "";
+var rowRefs = [];
 function startSiblings() {
   void loadSiblings();
   document.addEventListener("visibilitychange", () => {
@@ -5396,7 +5398,18 @@ function render3(body) {
   );
   if (matrix) renderMatrix(matrix);
   else matrixShape = "";
-  $("siblings-list").replaceChildren(...(matrix ? matrix.unlabelled : siblings).map((s) => listRow(s, !matrix)));
+  renderList(matrix ? matrix.unlabelled : siblings, !matrix);
+}
+function renderList(list, newTab) {
+  const shape = JSON.stringify([newTab, list.map((s) => s.name)]);
+  if (shape !== listShape) {
+    listShape = shape;
+    rowRefs = list.map(() => listRow(newTab));
+    $("siblings-list").replaceChildren(...rowRefs.map((r) => r.a));
+  }
+  list.forEach((s, i) => {
+    paintRow(rowRefs[i], s, newTab);
+  });
 }
 function health(healthy) {
   return healthy ? "up" : "down";
@@ -5413,17 +5426,26 @@ function healthDot(healthy, ariaLabel) {
   }
   return dot;
 }
-function listRow(s, newTab) {
-  const a = el("a");
-  a.href = s.base_url;
+function listRow(newTab) {
+  const a = el("a", "sibling-row");
   if (newTab) a.target = "_blank";
   a.rel = "noopener";
-  a.className = "sibling-row";
-  const name = el("span", "sibling-name", s.name);
-  name.title = s.name;
-  const state2 = el("span", "sibling-state", `${health(s.healthy)}${newTab ? " \u2197" : ""}`);
-  a.append(healthDot(s.healthy, s.healthy ? "healthy" : "unhealthy"), name, state2);
-  return a;
+  const ref = {
+    a,
+    dot: healthDot(true, ""),
+    name: el("span", "sibling-name"),
+    state: el("span", "sibling-state")
+  };
+  a.append(ref.dot, ref.name, ref.state);
+  return ref;
+}
+function paintRow(ref, s, newTab) {
+  ref.a.href = s.base_url;
+  ref.name.textContent = s.name;
+  ref.name.title = s.name;
+  ref.dot.className = dotClass(s.healthy);
+  ref.dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
+  ref.state.textContent = `${health(s.healthy)}${newTab ? " \u2197" : ""}`;
 }
 function shapeOf(m) {
   return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
@@ -5652,7 +5674,7 @@ function syncUrl() {
   applyScopeParams(params);
   if (state.view?.kind === "join") params.set("join", state.view.text);
   if (state.filter) params.set("filter", state.filter);
-  const qs2 = `?${params}`;
+  const qs3 = `?${params}`;
   const key = navViewKey();
   const samePlace = navIndex >= 0 && navStack[navIndex] === key;
   if (restoringFromHistory || navStack.length === 0 || samePlace) {
@@ -5660,12 +5682,12 @@ function syncUrl() {
       navStack = [key];
       navIndex = 0;
     }
-    history.replaceState({ navIndex }, "", qs2);
+    history.replaceState({ navIndex }, "", qs3);
   } else {
     navStack = navStack.slice(0, navIndex + 1);
     navStack.push(key);
     navIndex = navStack.length - 1;
-    history.pushState({ navIndex }, "", qs2);
+    history.pushState({ navIndex }, "", qs3);
   }
   updateNavButtons();
 }
@@ -5701,7 +5723,7 @@ function drillIn(entry, row2, dismiss) {
   dismiss();
   navigateWithSeededFilter(entry.table, entry.schema, () => applyFilterClauses(clauses));
 }
-function renderList(container, entries, row2, dismiss) {
+function renderList2(container, entries, row2, dismiss) {
   if (entries.length === 0) {
     container.replaceChildren(msg2("nothing references this table"));
     return;
@@ -5733,7 +5755,7 @@ function renderReferencedBy(container, row2, dismiss) {
   const key = cacheKey2(table);
   const hit = cache3.get(key);
   if (hit) {
-    renderList(container, hit, row2, dismiss);
+    renderList2(container, hit, row2, dismiss);
     return;
   }
   container.replaceChildren(msg2("loading\u2026"));
@@ -5742,7 +5764,7 @@ function renderReferencedBy(container, row2, dismiss) {
   api(`/tables/referenced-by?${params}`).then((data) => {
     cache3.set(key, data.referenced_by);
     if (renderTokens.get(container) !== token) return;
-    renderList(container, data.referenced_by, row2, dismiss);
+    renderList2(container, data.referenced_by, row2, dismiss);
   }).catch((e) => {
     if (renderTokens.get(container) !== token) return;
     container.replaceChildren(msg2(e.message));
@@ -6064,7 +6086,7 @@ function updatePager(data) {
 }
 
 // src/bootstrap/table-focus.ts
-var tableEl = qs(document, "table");
+var tableEl = $("data-table");
 function captureTableFocus() {
   const active = document.activeElement;
   if (!active || !tableEl.contains(active)) return null;
