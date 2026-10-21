@@ -52,24 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|p| p.parse().ok());
     let mount_prefix: Option<String> = std::env::var("MOUNT_PREFIX").ok().filter(|p| !p.is_empty());
 
-    let siblings_toml = sibling_port
-        .map(|p| {
-            format!(
-                r#"
-                [[siblings]]
-                name = "demo-{p}"
-                base_url = "http://localhost:{p}/__ashurbanipal"
-                health_path = "/health"
-                "#
-            )
-        })
-        .unwrap_or_default();
-    let config = Config::from_toml(&format!(
-        r#"
-        enabled = true
-        {siblings_toml}
-        "#
-    ))?;
+    let config = Config::from_toml(&format!("enabled = true\n{}", siblings_toml(sibling_port)))?;
 
     let db_backend = std::env::var("DB_BACKEND").unwrap_or_else(|_| "postgres".to_string());
     let ashurbanipal = match db_backend.as_str() {
@@ -176,3 +159,53 @@ async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::er
     }
     Ok(ashurbanipal_axum::router(config, sources))
 }
+
+/// `SIBLING_LABEL` labels the `SIBLING_PORT` sibling and `INSTANCE_LABEL`
+/// names this instance, both as service `demo`, so two demos show a labelled
+/// pair. `CONFORMANCE_LABELLED_SIBLINGS=1` replaces all of it with the fixed
+/// config `conformance/runner/labelled_siblings.rs` expects.
+fn siblings_toml(sibling_port: Option<u16>) -> String {
+    if std::env::var("CONFORMANCE_LABELLED_SIBLINGS").is_ok() {
+        return CONFORMANCE_LABELLED_SIBLINGS.to_string();
+    }
+    let label = |var: &str| std::env::var(var).ok().filter(|v| !v.is_empty());
+    let mut toml = String::new();
+    if let Some(label) = label("INSTANCE_LABEL") {
+        toml += &format!("[instance]\nname = \"demo\"\nlabel = {label:?}\n");
+    }
+    if let Some(p) = sibling_port {
+        let (name, label) = match label("SIBLING_LABEL") {
+            Some(l) => ("demo".to_string(), format!("label = {l:?}\n")),
+            None => (format!("demo-{p}"), String::new()),
+        };
+        toml += &format!(
+            "[[siblings]]\nname = {name:?}\n{label}base_url = \"http://localhost:{p}/__ashurbanipal\"\nhealth_path = \"/health\"\n"
+        );
+    }
+    toml
+}
+
+// Port 9 refuses at once, so every health check is a fast `healthy: false`.
+const CONFORMANCE_LABELLED_SIBLINGS: &str = r#"
+[instance]
+name = "conformance"
+label = "a"
+
+[[siblings]]
+name = "conformance"
+label = "a"
+base_url = "http://127.0.0.1:9/__ashurbanipal"
+health_path = "/health"
+
+[[siblings]]
+name = "conformance"
+label = "b"
+base_url = "http://127.0.0.1:9/__ashurbanipal"
+health_path = "/health"
+
+[[siblings]]
+name = "other"
+label = "a"
+base_url = "http://127.0.0.1:9/__ashurbanipal"
+health_path = "/health"
+"#;

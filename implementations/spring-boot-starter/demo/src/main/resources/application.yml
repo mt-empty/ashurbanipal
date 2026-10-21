@@ -31,3 +31,30 @@ ashurbanipal:
     - name: default
     - name: other_schema
       data-source-bean: otherSchemaDataSource
+
+---
+# conformance/runner/labelled_siblings.rs's target — activate with
+# SPRING_PROFILES_ACTIVE=conformance-labelled-siblings. Port 9 refuses at
+# once, so every health check is a fast healthy=false.
+spring:
+  config:
+    activate:
+      on-profile: conformance-labelled-siblings
+
+ashurbanipal:
+  instance:
+    name: conformance
+    label: a
+  siblings:
+    - name: conformance
+      label: a
+      base-url: http://127.0.0.1:9/__ashurbanipal
+      health-path: /health
+    - name: conformance
+      label: b
+      base-url: http://127.0.0.1:9/__ashurbanipal
+      health-path: /health
+    - name: other
+      label: a
+      base-url: http://127.0.0.1:9/__ashurbanipal
+      health-path: /health

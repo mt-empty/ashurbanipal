@@ -44,6 +44,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     bp = Blueprint("ashurbanipal", __name__, url_prefix=mount)
     if not config.is_enabled():
         return bp  # zero routes registered — 404 on every path under `mount`
+    config.validate_siblings()
 
     api_prefix = f"{mount}/api/"
 
@@ -268,8 +269,11 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("/api/siblings")
     def siblings() -> Response:
-        results = _check_siblings(config.siblings)
-        return jsonify({"siblings": results})
+        results = _check_siblings(config.reported_siblings())
+        if config.instance is None:
+            return jsonify({"siblings": results})
+        instance = {"name": config.instance.name, "label": config.instance.label}
+        return jsonify({"instance": instance, "siblings": results})
 
     return bp
 
@@ -378,7 +382,11 @@ def _check_one_sibling(sibling) -> dict:
                 healthy = 200 <= resp.status < 300
         except (urllib.error.URLError, OSError, ValueError):
             healthy = False
-    return {"name": sibling.name, "base_url": sibling.base_url, "healthy": healthy}
+    status = {"name": sibling.name}
+    if sibling.label is not None:
+        status["label"] = sibling.label
+    status.update(base_url=sibling.base_url, healthy=healthy)
+    return status
 
 
 def _check_siblings(siblings: list) -> list[dict]:

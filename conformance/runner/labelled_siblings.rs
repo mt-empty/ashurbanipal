@@ -1,0 +1,80 @@
+//! `spec/protocol.md` §5.6 — `instance`, sibling `label`, and leaving out the
+//! sibling that is this instance. Every test self-skips unless the target
+//! reports an `instance`, so this file runs safely alongside
+//! `html_and_siblings.rs`. CI starts each port's demo with
+//! `CONFORMANCE_LABELLED_SIBLINGS=1`, which every port maps to the same fixed
+//! configuration:
+//!
+//! - instance `conformance` / `a`
+//! - siblings, in order: `conformance`/`a` (this instance), `conformance`/`b`,
+//!   `other`/`a`, all at `http://127.0.0.1:9/__ashurbanipal` (port 9
+//!   refuses at once, so every check is a fast `healthy: false`)
+
+use crate::assert::assert_exact;
+use crate::common::TestServer;
+
+const UNREACHABLE: &str = "http://127.0.0.1:9/__ashurbanipal";
+
+/// `None` when the target has no `instance` configured — every test below
+/// uses this to skip itself rather than fail.
+async fn labelled_siblings(srv: &TestServer) -> Option<serde_json::Value> {
+    let body: serde_json::Value = srv
+        .client()
+        .get(srv.url("/api/siblings"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    if body.get("instance").is_none_or(|v| v.is_null()) {
+        eprintln!(
+            "labelled_siblings: skipping — target reports no instance \
+             (start it with CONFORMANCE_LABELLED_SIBLINGS=1 to exercise this file)"
+        );
+        return None;
+    }
+    Some(body)
+}
+
+#[tokio::test]
+async fn instance_is_echoed_as_configured() {
+    let srv = TestServer::spawn().await;
+    let Some(body) = labelled_siblings(&srv).await else {
+        return;
+    };
+    assert_exact(
+        body["instance"].clone(),
+        serde_json::json!({ "name": "conformance", "label": "a" }),
+        "GET /api/siblings instance",
+    );
+}
+
+#[tokio::test]
+async fn the_sibling_that_is_this_instance_is_left_out() {
+    let srv = TestServer::spawn().await;
+    let Some(body) = labelled_siblings(&srv).await else {
+        return;
+    };
+    let is_self = |s: &serde_json::Value| s["name"] == "conformance" && s["label"] == "a";
+    assert!(
+        !body["siblings"].as_array().unwrap().iter().any(is_self),
+        "GET /api/siblings must leave out the sibling equal to instance: {body}"
+    );
+}
+
+#[tokio::test]
+async fn labels_are_echoed_in_configuration_order() {
+    let srv = TestServer::spawn().await;
+    let Some(body) = labelled_siblings(&srv).await else {
+        return;
+    };
+    assert_exact(
+        body["siblings"].clone(),
+        serde_json::json!([
+            { "name": "conformance", "label": "b", "base_url": UNREACHABLE, "healthy": false },
+            { "name": "other", "label": "a", "base_url": UNREACHABLE, "healthy": false },
+        ]),
+        "GET /api/siblings siblings",
+    );
+}

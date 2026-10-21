@@ -54,6 +54,9 @@ func main() {
 			HealthPath: "/health",
 		}}
 	}
+	if os.Getenv("CONFORMANCE_LABELLED_SIBLINGS") != "" {
+		cfg.Instance, cfg.Siblings = conformanceLabelledSiblings()
+	}
 
 	timeout := cfg.Limits.WithDefaults().QueryTimeoutSecs
 	source := ashurbanipal.NewPostgresSource(db, timeout)
@@ -108,4 +111,16 @@ func envInt(name string, def int) int {
 		log.Fatalf("%s must be an integer, got %q", name, raw)
 	}
 	return v
+}
+
+// conformanceLabelledSiblings is the fixed config
+// conformance/runner/labelled_siblings.rs expects. Port 9 refuses at once,
+// so every health check is a fast healthy=false.
+func conformanceLabelledSiblings() (*ashurbanipal.Instance, []ashurbanipal.Sibling) {
+	const unreachable = "http://127.0.0.1:9/__ashurbanipal"
+	return &ashurbanipal.Instance{Name: "conformance", Label: "a"}, []ashurbanipal.Sibling{
+		{Name: "conformance", Label: "a", BaseURL: unreachable, HealthPath: "/health"},
+		{Name: "conformance", Label: "b", BaseURL: unreachable, HealthPath: "/health"},
+		{Name: "other", Label: "a", BaseURL: unreachable, HealthPath: "/health"},
+	}
 }

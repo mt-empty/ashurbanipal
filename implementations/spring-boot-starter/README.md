@@ -24,7 +24,14 @@ ashurbanipal:
     default-page-size: 50
     max-page-size: 100
     query-timeout-secs: 5
+  instance: # this instance's own name and label (spec/protocol.md §5.6)
+    name: orders
+    label: dev
   siblings:
+    - name: orders
+      label: int # optional
+      base-url: https://orders-int.internal.vpn/__ashurbanipal
+      health-path: /health
     - name: billing
       base-url: https://billing.internal.vpn/__ashurbanipal
       health-path: /health

@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -6,7 +6,16 @@ pub struct Config {
     /// Fail-closed: disabled unless the host enables it (`spec/protocol.md` §4).
     pub enabled: bool,
     pub limits: Limits,
+    pub instance: Option<Instance>,
     pub siblings: Vec<Sibling>,
+}
+
+/// This instance's own name and label. Labels are opaque host strings: echoed,
+/// never parsed or acted on (`spec/protocol.md` §4).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Instance {
+    pub name: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -32,6 +41,13 @@ pub struct Sibling {
     pub name: String,
     pub base_url: String,
     pub health_path: String,
+    pub label: Option<String>,
+}
+
+impl Sibling {
+    fn is(&self, instance: &Instance) -> bool {
+        self.name == instance.name && self.label.as_deref() == Some(instance.label.as_str())
+    }
 }
 
 #[derive(Debug)]
@@ -56,6 +72,40 @@ impl Config {
 
     pub fn is_enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// The `instance`/`label` rules of `spec/protocol.md` §5.6; adapters call
+    /// this once, at router construction.
+    pub fn validate_siblings(&self) -> Result<(), String> {
+        if let Some(instance) = &self.instance {
+            if instance.name.is_empty() || instance.label.is_empty() {
+                return Err("instance needs a non-empty name and label".into());
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        for sibling in &self.siblings {
+            if sibling.label.as_deref() == Some("") {
+                return Err(format!(
+                    "sibling {:?} has an empty label; omit it instead",
+                    sibling.name
+                ));
+            }
+            if !seen.insert((sibling.name.as_str(), sibling.label.as_deref())) {
+                return Err(format!(
+                    "two siblings share the name {:?} and the same label",
+                    sibling.name
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The siblings to health-check and report: configuration order, minus
+    /// the one that is this instance, which never probes itself.
+    pub fn reported_siblings(&self) -> impl Iterator<Item = &Sibling> {
+        self.siblings
+            .iter()
+            .filter(|s| !self.instance.as_ref().is_some_and(|i| s.is(i)))
     }
 }
 
@@ -111,5 +161,93 @@ mod tests {
         assert_eq!(config.limits.max_page_size, 100);
         assert_eq!(config.limits.query_timeout_secs, 5);
         assert!(config.siblings.is_empty());
+        assert!(config.instance.is_none());
+    }
+
+    const LABELLED: &str = r#"
+        [instance]
+        name = "orders"
+        label = "dev"
+
+        [[siblings]]
+        name = "orders"
+        label = "dev"
+        base_url = "http://orders-dev/__ashurbanipal"
+        health_path = "/health"
+
+        [[siblings]]
+        name = "orders"
+        label = "int"
+        base_url = "http://orders-int/__ashurbanipal"
+        health_path = "/health"
+
+        [[siblings]]
+        name = "billing"
+        base_url = "http://billing/__ashurbanipal"
+        health_path = "/health"
+    "#;
+
+    #[test]
+    fn parses_instance_and_labels() {
+        let config = Config::from_toml(LABELLED).unwrap();
+        assert_eq!(
+            config.instance,
+            Some(Instance {
+                name: "orders".into(),
+                label: "dev".into()
+            })
+        );
+        assert_eq!(config.siblings[1].label.as_deref(), Some("int"));
+        assert_eq!(config.siblings[2].label, None);
+        assert_eq!(config.validate_siblings(), Ok(()));
+    }
+
+    #[test]
+    fn reported_siblings_drop_this_instance_and_keep_order() {
+        let config = Config::from_toml(LABELLED).unwrap();
+        let names: Vec<_> = config
+            .reported_siblings()
+            .map(|s| (s.name.as_str(), s.label.as_deref()))
+            .collect();
+        assert_eq!(names, [("orders", Some("int")), ("billing", None)]);
+    }
+
+    #[test]
+    fn reported_siblings_keep_everything_without_an_instance() {
+        let config = Config::from_toml(&LABELLED.replace("[instance]", "[unused]")).unwrap();
+        assert_eq!(config.reported_siblings().count(), 3);
+    }
+
+    #[test]
+    fn instance_with_an_empty_label_is_invalid() {
+        let mut config = Config::from_toml(LABELLED).unwrap();
+        config.instance.as_mut().unwrap().label.clear();
+        assert!(config.validate_siblings().is_err());
+    }
+
+    #[test]
+    fn instance_missing_a_label_does_not_parse() {
+        assert!(Config::from_toml("[instance]\nname = \"orders\"").is_err());
+    }
+
+    #[test]
+    fn empty_sibling_label_is_invalid() {
+        let config =
+            Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"\"")).unwrap();
+        assert!(config.validate_siblings().is_err());
+    }
+
+    #[test]
+    fn duplicate_name_and_label_is_invalid() {
+        let config =
+            Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"dev\"")).unwrap();
+        assert!(config.validate_siblings().is_err());
+    }
+
+    #[test]
+    fn duplicate_unlabelled_name_is_invalid() {
+        let mut config = Config::from_toml(LABELLED).unwrap();
+        config.siblings.push(config.siblings[2].clone());
+        assert!(config.validate_siblings().is_err());
     }
 }

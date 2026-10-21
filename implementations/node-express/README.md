@@ -51,7 +51,9 @@ const viewer = createRouter(
     enabled: true,
     basePath: "/__ashurbanipal", // undefined also means this
     limits: { defaultPageSize: 50, maxPageSize: 100, queryTimeoutSecs: 5 },
+    instance: { name: "orders", label: "dev" }, // spec/protocol.md §5.6
     siblings: [
+      { name: "orders", label: "int", baseUrl: "https://orders-int.internal.vpn/__ashurbanipal", healthPath: "/health" },
       { name: "billing", baseUrl: "https://billing.internal.vpn/__ashurbanipal", healthPath: "/health" },
     ],
   },

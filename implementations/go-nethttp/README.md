@@ -42,7 +42,9 @@ cfg := ashurbanipal.Config{
 	Enabled:  true,
 	BasePath: "/__ashurbanipal", // empty also means this
 	Limits:   ashurbanipal.Limits{DefaultPageSize: 50, MaxPageSize: 100, QueryTimeoutSecs: 5},
+	Instance: &ashurbanipal.Instance{Name: "orders", Label: "dev"}, // spec/protocol.md §5.6
 	Siblings: []ashurbanipal.Sibling{
+		{Name: "orders", Label: "int", BaseURL: "https://orders-int.internal.vpn/__ashurbanipal", HealthPath: "/health"},
 		{Name: "billing", BaseURL: "https://billing.internal.vpn/__ashurbanipal", HealthPath: "/health"},
 	},
 }

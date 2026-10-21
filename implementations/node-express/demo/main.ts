@@ -106,6 +106,18 @@ async function main(): Promise<void> {
     ];
   }
 
+  if (process.env.CONFORMANCE_LABELLED_SIBLINGS) {
+    // The fixed config conformance/runner/labelled_siblings.rs expects. Port 9
+    // refuses at once, so every health check is a fast healthy=false.
+    const baseUrl = "http://127.0.0.1:9/__ashurbanipal";
+    config.instance = { name: "conformance", label: "a" };
+    config.siblings = [
+      { name: "conformance", label: "a", baseUrl, healthPath: "/health" },
+      { name: "conformance", label: "b", baseUrl, healthPath: "/health" },
+      { name: "other", label: "a", baseUrl, healthPath: "/health" },
+    ];
+  }
+
   const sources = [{ name: backend, source: dbSource }];
   if (process.env.CONFORMANCE_SECOND_SOURCE && backend === "postgres") {
     const { Pool } = await loadDriver("pg", () => import("pg"));

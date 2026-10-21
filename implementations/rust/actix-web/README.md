@@ -58,14 +58,20 @@ default_page_size = 50
 max_page_size = 100
 query_timeout_secs = 5
 
+# optional: this instance's own name and label (spec/protocol.md §5.6)
+[instance]
+name = "orders"
+label = "dev"
+
 [[siblings]]
-name = "billing"
-base_url = "https://billing.internal.vpn/__ashurbanipal"
+name = "orders"
+label = "int"   # optional
+base_url = "https://orders-int.internal.vpn/__ashurbanipal"
 health_path = "/health"
 
 [[siblings]]
-name = "notifications"
-base_url = "https://notifications.internal.vpn/__ashurbanipal"
+name = "billing"
+base_url = "https://billing.internal.vpn/__ashurbanipal"
 health_path = "/health"
 ```
 

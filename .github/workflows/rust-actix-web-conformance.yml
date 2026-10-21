@@ -70,6 +70,20 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: conformance-two-source-report-actix-web
 
+  # Same suite again against a demo with an instance and labelled siblings
+  # configured — conformance/runner/labelled_siblings.rs is what this adds.
+  labelled-siblings-conformance:
+    name: Rust actix-web — conformance kit (labelled siblings)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: rust
+      start-command: "cargo run -p ashurbanipal-actix-web --manifest-path implementations/rust/actix-web/Cargo.toml --example demo"
+      start-env: "CONFORMANCE_LABELLED_SIBLINGS=1"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: conformance-labelled-siblings-report-actix-web
+
   schema-conformance:
     name: Rust actix-web — schema conformance
     needs: build-and-test

@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
 use ashurbanipal::{
-    resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec, ProblemDetails,
-    QueryOpts, ReferencedBy, TableInfo,
+    resolve_source, Config, DbError, DbSource, Instance, JoinData, JoinOpts, JoinSpec,
+    ProblemDetails, QueryOpts, ReferencedBy, TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -38,6 +38,11 @@ pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data
         !sources.is_empty(),
         "app_state() requires at least one source"
     );
+    if config.is_enabled() {
+        if let Err(e) = config.validate_siblings() {
+            panic!("app_state(): invalid sibling configuration: {e}");
+        }
+    }
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
@@ -492,17 +497,21 @@ async fn structure<S: DbSource>(
 #[derive(Serialize)]
 struct SiblingStatus {
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
     base_url: String,
     healthy: bool,
 }
 
 #[derive(Serialize)]
 struct SiblingsResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instance: Option<Instance>,
     siblings: Vec<SiblingStatus>,
 }
 
 async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
-    let checks = state.config.siblings.iter().cloned().map(|sibling| {
+    let checks = state.config.reported_siblings().cloned().map(|sibling| {
         let http = state.http.clone();
         async move {
             let health_url = health_url(&sibling.base_url, &sibling.health_path);
@@ -515,13 +524,17 @@ async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
             };
             SiblingStatus {
                 name: sibling.name,
+                label: sibling.label,
                 base_url: sibling.base_url,
                 healthy,
             }
         }
     });
     let siblings = futures_join_all(checks).await;
-    HttpResponse::Ok().json(SiblingsResponse { siblings })
+    HttpResponse::Ok().json(SiblingsResponse {
+        instance: state.config.instance.clone(),
+        siblings,
+    })
 }
 
 /// Resolves against the sibling's origin, not its path.
@@ -655,5 +668,74 @@ mod kill_switch_tests {
         )
         .await;
         assert_eq!(api.status(), 404);
+    }
+
+    // Port 9 refuses at once, so every check is a fast `healthy: false`.
+    const LABELLED: &str = r#"
+        enabled = true
+
+        [instance]
+        name = "orders"
+        label = "dev"
+
+        [[siblings]]
+        name = "orders"
+        label = "dev"
+        base_url = "http://127.0.0.1:9/__ashurbanipal"
+        health_path = "/health"
+
+        [[siblings]]
+        name = "orders"
+        label = "int"
+        base_url = "http://127.0.0.1:9/__ashurbanipal"
+        health_path = "/health"
+
+        [[siblings]]
+        name = "billing"
+        base_url = "http://127.0.0.1:9/__ashurbanipal"
+        health_path = "/health"
+    "#;
+
+    #[actix_web::test]
+    async fn siblings_echo_instance_and_labels_and_drop_this_instance() {
+        let config = Config::from_toml(LABELLED).unwrap();
+        let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
+        let app = test::init_service(App::new().service(service(state))).await;
+        let json: serde_json::Value = test::call_and_read_body_json(
+            &app,
+            test::TestRequest::get()
+                .uri("/__ashurbanipal/api/siblings")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "instance": { "name": "orders", "label": "dev" },
+                "siblings": [
+                    { "name": "orders", "label": "int", "base_url": "http://127.0.0.1:9/__ashurbanipal", "healthy": false },
+                    { "name": "billing", "base_url": "http://127.0.0.1:9/__ashurbanipal", "healthy": false },
+                ],
+            })
+        );
+    }
+
+    #[actix_web::test]
+    #[should_panic(expected = "invalid sibling configuration")]
+    async fn app_state_panics_on_invalid_sibling_config_when_enabled() {
+        let config =
+            Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"dev\"")).unwrap();
+        let _ = app_state(config, vec![("primary".to_string(), NeverQueried)]);
+    }
+
+    #[actix_web::test]
+    async fn app_state_disabled_never_validates_siblings() {
+        let config = Config::from_toml(
+            &LABELLED
+                .replace("enabled = true", "enabled = false")
+                .replace("label = \"int\"", "label = \"dev\""),
+        )
+        .unwrap();
+        let _ = app_state(config, vec![("primary".to_string(), NeverQueried)]);
     }
 }

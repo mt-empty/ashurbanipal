@@ -618,14 +618,21 @@ default_page_size = 50
 max_page_size = 100
 query_timeout_secs = 5
 
+# optional: who this instance is, so the UI can mark "you are here"
+[ashurbanipal.instance]
+name = "orders"
+label = "dev"
+
 [[ashurbanipal.siblings]]
-name = "billing"
-base_url = "https://billing.internal.vpn/__ashurbanipal"
+name = "orders"
+label = "int"          # optional
+base_url = "https://orders-int.internal.vpn/__ashurbanipal"
 health_path = "/health"
 
 [[ashurbanipal.siblings]]
-name = "notifications"
-base_url = "https://notifications.internal.vpn/__ashurbanipal"
+name = "billing"
+label = "dev"
+base_url = "https://billing-dev.internal.vpn/__ashurbanipal"
 health_path = "/health"
 ```
 
@@ -634,6 +641,9 @@ health_path = "/health"
   health endpoint.
 - Config is loaded once at startup; sibling list is static for v1 (no
   service-registry integration).
+- `instance` and `label` are opaque strings the host writes, so one shared
+  sibling list can describe every service in every environment; the rules
+  (validation, leaving out this instance) are `spec/protocol.md` §5.6.
 
 ## 8. Safety properties (carried over from the original concept)
 

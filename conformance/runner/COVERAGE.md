@@ -146,6 +146,9 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.6-ORIGIN-RESOLUTION` | Health resolved against origin, not `base_url` path | covered at the unit level only, not by this HTTP suite — `implementations/rust/axum/src/routes.rs`'s `health_url_resolves_against_origin` (pure function, no live sibling needed) |
 | `P5.6-2XX-ONLY` | `healthy` true iff 2xx; any failure → false, never an error response | **gap** — see [Known gaps](#known-gaps) |
 | `P5.6-PARALLEL-TIMEOUT-BOUND` | Checks SHOULD run in parallel, MUST be individually timeout-bounded | **gap** — see [Known gaps](#known-gaps) |
+| `P5.6-INSTANCE-ECHO` | Configured `instance` is echoed byte-for-byte; absent when not configured | `labelled_siblings::instance_is_echoed_as_configured`, `html_and_siblings::siblings_endpoint_returns_empty_list_by_default` (absent case) |
+| `P5.6-SELF-OMITTED` | The sibling equal to `instance` is left out and not health-checked | `labelled_siblings::the_sibling_that_is_this_instance_is_left_out` (omission; the no-probe half is each port's unit test) |
+| `P5.6-LABEL-ECHO-ORDER` | Sibling `label` echoed when configured; `siblings` in configuration order | `labelled_siblings::labels_are_echoed_in_configuration_order` |
 
 ## §5.7 `GET /api/schemas`
 

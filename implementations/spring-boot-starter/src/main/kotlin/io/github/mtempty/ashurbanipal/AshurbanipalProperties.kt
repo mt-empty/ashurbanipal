@@ -12,6 +12,9 @@ class InvalidBackendException(value: String) : RuntimeException(
 /** Rejects invalid source names before lookup (`spec/protocol.md` §1). */
 class InvalidSourceException(message: String) : RuntimeException(message)
 
+/** Rejects an invalid `instance` or sibling `label` (`spec/protocol.md` §5.6). */
+class InvalidSiblingException(message: String) : RuntimeException(message)
+
 /** A named browsable data source (`spec/protocol.md` §1). */
 data class Source(
     val name: String = "",
@@ -27,6 +30,7 @@ class AshurbanipalProperties(
     /** Empty resolves to the implicit `default` source (`spec/protocol.md` §1). */
     val sources: List<Source> = emptyList(),
     val limits: Limits = Limits(),
+    val instance: Instance? = null,
     val siblings: List<Sibling> = emptyList(),
 ) {
     init {
@@ -42,7 +46,25 @@ class AshurbanipalProperties(
         if (duplicates.isNotEmpty()) {
             throw InvalidSourceException("ashurbanipal.sources names must be unique, duplicated: $duplicates")
         }
+        if (enabled) validateSiblings()
     }
+
+    private fun validateSiblings() {
+        if (instance != null && (instance.name.isEmpty() || instance.label.isEmpty())) {
+            throw InvalidSiblingException("ashurbanipal.instance needs a non-empty name and label")
+        }
+        siblings.firstOrNull { it.label == "" }?.let {
+            throw InvalidSiblingException("ashurbanipal.siblings entry \"${it.name}\" has an empty label; omit it instead")
+        }
+        val duplicates = siblings.groupBy { it.name to it.label }.filterValues { it.size > 1 }.keys
+        if (duplicates.isNotEmpty()) {
+            throw InvalidSiblingException("ashurbanipal.siblings name and label pairs must be unique, duplicated: $duplicates")
+        }
+    }
+
+    /** Configuration order, minus the sibling that is this instance, which never probes itself. */
+    val reportedSiblings: List<Sibling>
+        get() = siblings.filterNot { instance != null && it.name == instance.name && it.label == instance.label }
 
     val isEnabled: Boolean get() = enabled
 
@@ -56,8 +78,15 @@ data class Limits(
     val queryTimeoutSecs: Int = 5,
 )
 
+/** This instance's own name and label. Labels are opaque host strings: echoed, never parsed or acted on (`spec/protocol.md` §4). */
+data class Instance(
+    val name: String = "",
+    val label: String = "",
+)
+
 data class Sibling(
     val name: String = "",
+    val label: String? = null,
     val baseUrl: String = "",
     val healthPath: String = "",
 )

@@ -1,5 +1,10 @@
 package ashurbanipal
 
+import (
+	"errors"
+	"fmt"
+)
+
 // Limits bounds pagination and query duration. The zero value is not
 // usable directly — Router applies defaultLimits() when a field is zero, so
 // a caller can set only the fields they care about.
@@ -28,8 +33,17 @@ func (l Limits) WithDefaults() Limits {
 	return l
 }
 
+// Instance names this instance. Labels are opaque host strings: echoed,
+// never parsed or acted on (`spec/protocol.md` §4).
+type Instance struct {
+	Name  string `json:"name"`
+	Label string `json:"label"`
+}
+
+// Sibling's Label is optional; empty means unset.
 type Sibling struct {
 	Name       string
+	Label      string
 	BaseURL    string
 	HealthPath string
 }
@@ -39,11 +53,41 @@ type Config struct {
 	Enabled  bool
 	BasePath string
 	Limits   Limits
+	Instance *Instance
 	Siblings []Sibling
 }
 
 func (c Config) IsEnabled() bool {
 	return c.Enabled
+}
+
+// validateSiblings applies the instance/label rules of spec/protocol.md §5.6.
+func (c Config) validateSiblings() error {
+	if c.Instance != nil && (c.Instance.Name == "" || c.Instance.Label == "") {
+		return errors.New("Instance needs a non-empty Name and Label")
+	}
+	seen := map[[2]string]bool{}
+	for _, s := range c.Siblings {
+		key := [2]string{s.Name, s.Label}
+		if seen[key] {
+			return fmt.Errorf("two siblings share the name %q and the same label", s.Name)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+// reportedSiblings keeps configuration order, minus the sibling that is
+// this instance, which never probes itself.
+func (c Config) reportedSiblings() []Sibling {
+	out := make([]Sibling, 0, len(c.Siblings))
+	for _, s := range c.Siblings {
+		if c.Instance != nil && s.Name == c.Instance.Name && s.Label == c.Instance.Label {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 func (c Config) basePath() string {

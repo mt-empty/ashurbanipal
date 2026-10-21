@@ -1,5 +1,15 @@
 import express, { type Router as ExpressRouter, type Request, type Response } from "express";
-import { basePath, type Config, isEnabled, type ResolvedLimits, withDefaults } from "./config.js";
+import {
+  basePath,
+  type Config,
+  type Instance,
+  isEnabled,
+  type ResolvedLimits,
+  reportedSiblings,
+  type Sibling,
+  validateSiblings,
+  withDefaults,
+} from "./config.js";
 import type { DbSource } from "./db/types.js";
 import { dbviewerHtml } from "./embed.js";
 import { FilterError, isQueryTimeout, NOT_ALLOWED_CODE, NotAllowedError } from "./errors.js";
@@ -47,6 +57,7 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   if (sources.length === 0) {
     throw new Error("createRouter requires at least one source");
   }
+  validateSiblings(config);
 
   const limits = withDefaults(config.limits);
   const timeoutMs = limits.queryTimeoutSecs * 1000;
@@ -62,7 +73,11 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   registerGet(router, `${mount}/api/tables/referenced-by`, withApiHeaders(referencedByHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/structure`, withApiHeaders(structureHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/join`, withApiHeaders(tableJoinHandler(sources, limits, timeoutMs)));
-  registerGet(router, `${mount}/api/siblings`, withApiHeaders(siblingsHandler(config.siblings ?? [])));
+  registerGet(
+    router,
+    `${mount}/api/siblings`,
+    withApiHeaders(siblingsHandler(config.instance, reportedSiblings(config))),
+  );
 
   return router;
 }
@@ -364,10 +379,14 @@ function structureHandler(sources: NamedSource[], timeoutMs: number) {
   };
 }
 
-function siblingsHandler(siblings: Config["siblings"]) {
+function siblingsHandler(instance: Instance | undefined, siblings: Sibling[]) {
   return async (_req: Request, res: Response): Promise<void> => {
-    const statuses = await checkSiblings(siblings ?? []);
-    res.json({ siblings: statuses });
+    const statuses = await checkSiblings(siblings);
+    res.json(
+      instance
+        ? { instance: { name: instance.name, label: instance.label }, siblings: statuses }
+        : { siblings: statuses },
+    );
   };
 }
 

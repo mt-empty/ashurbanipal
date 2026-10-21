@@ -412,15 +412,33 @@ Response:
 
 ```json
 {
+  "instance": { "name": "orders", "label": "dev" },
   "siblings": [
-    { "name": "billing", "base_url": "https://billing.internal.vpn/__ashurbanipal", "healthy": true },
-    { "name": "notifications", "base_url": "https://notifications.internal.vpn/__ashurbanipal", "healthy": false }
+    { "name": "orders", "label": "int", "base_url": "https://orders-int.internal.vpn/__ashurbanipal", "healthy": true },
+    { "name": "billing", "label": "dev", "base_url": "https://billing-dev.internal.vpn/__ashurbanipal", "healthy": false }
   ]
 }
 ```
 
 - The sibling list is static configuration; an empty configuration yields
   `{"siblings": []}`.
+- Configuration MAY name this instance (`instance`, with a `name` and a
+  `label`, both non-empty) and MAY give each sibling a `label` (non-empty
+  when present). An `instance` missing either field, an empty sibling
+  `label`, or two siblings with the same `name` and the same `label` (both
+  absent counts as the same) is invalid configuration, rejected when the
+  router is constructed, exactly as an enabled router with no sources is.
+- A label is an opaque string the host writes. An implementation echoes it
+  byte-for-byte and MUST NOT parse it, compare it against known names,
+  derive it from any other signal, or let it change any behavior — §4's
+  rule against inferring an environment applies.
+- `instance` is present iff configured; a sibling's `label` is present iff
+  configured. With neither configured the response is exactly the
+  unlabelled shape above.
+- A sibling whose `name` and `label` both equal `instance`'s MUST be left
+  out of `siblings` and MUST NOT be health-checked, so a host can share one
+  sibling list across all its instances.
+- `siblings` keeps configuration order.
 - Health checks are performed synchronously per request: an HTTP GET to
   each sibling's configured health path, resolved against the sibling's
   **origin** (scheme + host + port of `base_url`), not against the

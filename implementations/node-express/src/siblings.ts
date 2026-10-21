@@ -6,6 +6,7 @@ const SIBLING_TIMEOUT_MS = 3000;
 
 export interface SiblingStatus {
   name: string;
+  label?: string;
   base_url: string;
   healthy: boolean;
 }
@@ -32,6 +33,7 @@ export async function checkSiblings(siblings: Sibling[]): Promise<SiblingStatus[
     siblings.map(async (sibling): Promise<SiblingStatus> => {
       const status: SiblingStatus = {
         name: sibling.name,
+        ...(sibling.label !== undefined && { label: sibling.label }),
         base_url: sibling.baseUrl,
         healthy: false,
       };
