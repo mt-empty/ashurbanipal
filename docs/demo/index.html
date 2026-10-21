@@ -280,9 +280,25 @@
   };
   var TABLES = [users, orders, orderItems, products, userProfiles, dailySummary, signupFunnel];
   var SCHEMAS = ["public", "reporting"];
+  var SIBLINGS_INSTANCE = { name: "shop (demo)", label: "dev" };
   var SIBLINGS = [
-    { name: "billing (demo)", base_url: "https://billing.example.com/__ashurbanipal", healthy: true },
-    { name: "notifications (demo)", base_url: "https://notifications.example.com/__ashurbanipal", healthy: false }
+    { name: "shop (demo)", label: "int", base_url: "https://shop-int.example.com/__ashurbanipal", healthy: true },
+    { name: "billing (demo)", label: "dev", base_url: "https://billing-dev.example.com/__ashurbanipal", healthy: true },
+    { name: "billing (demo)", label: "int", base_url: "https://billing-int.example.com/__ashurbanipal", healthy: true },
+    {
+      name: "notifications (demo)",
+      label: "dev",
+      base_url: "https://notifications-dev.example.com/__ashurbanipal",
+      healthy: false
+    },
+    ...["search", "analytics", "inventory"].flatMap(
+      (service) => ["dev", "int"].map((label) => ({
+        name: `${service} (demo)`,
+        label,
+        base_url: `https://${service}-${label}.example.com/__ashurbanipal`,
+        healthy: false
+      }))
+    )
   ];
 
   // src/demo/demo-shim.ts
@@ -517,7 +533,7 @@
     });
   }
   function handleSiblings() {
-    return jsonResponse({ siblings: SIBLINGS });
+    return jsonResponse({ instance: SIBLINGS_INSTANCE, siblings: SIBLINGS });
   }
   var realFetch = window.fetch.bind(window);
   var API_BASE = `${location.pathname.replace(/\/+$/, "")}/api`;
@@ -915,6 +931,38 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 .sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                 white-space: nowrap; font-family: var(--font-mono); }
 .sibling-state { color: var(--text-muted); font-size: .75rem; }
+/* The service × label grid. Resets the data table's global table/th/td rules. */
+#siblings-pop:has(#siblings-matrix:not([hidden])) { max-width: min(34rem, 92vw); }
+#siblings-matrix { margin: 0; width: 100%; }
+/* Label columns stay narrow; the service-name column takes the slack. */
+#siblings-matrix td { width: 7.5rem; }
+#siblings-matrix th, #siblings-matrix td { padding: 0 .15rem; border: none; cursor: auto;
+                                           font-family: inherit; position: static; }
+#siblings-matrix thead th { position: static; background: none; font-size: .7rem; font-weight: 400;
+                            text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted);
+                            padding: 0 .6rem .3rem; }
+#siblings-matrix tbody tr:hover { background: none; }
+#siblings-matrix tbody th { font-weight: 400; font-size: .8125rem; padding-left: .6rem;
+                            max-width: 14rem; }
+#siblings-matrix tbody tr.instance th, #siblings-matrix tbody tr.instance td {
+  border-bottom: 1px solid var(--rule); padding-bottom: .15rem; }
+#siblings-matrix .sibling-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
+.sibling-me { display: block; font-size: .7rem; color: var(--text-muted); }
+.sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
+  min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
+  white-space: nowrap; font-size: .8125rem; }
+.sibling-cell { color: inherit; text-decoration: none; }
+.sibling-cell:hover { background: var(--hover); }
+.sibling-cell.same { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.sibling-cell.same .sibling-state { color: inherit; }
+.sibling-here { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+.sibling-missing { color: var(--text-muted); font-size: .75rem; }
+#siblings-foot { margin: .5rem .6rem .2rem; padding-top: .5rem; border-top: 1px solid var(--rule);
+                 font-size: .75rem; color: var(--text-muted); line-height: 1.5; }
+#siblings-foot p { margin: 0; }
+#siblings-foot p + p { margin-top: .25rem; }
+#siblings-foot kbd { font-family: var(--font-mono); font-size: .7rem; padding: 0 .25rem; border-radius: 4px;
+                     border: 1px solid var(--border-strong); }
 
 /* ==== Pager ==== */
 /* Sticky left, same reasoning as #chrome above: #content (and #pager's
@@ -1419,7 +1467,12 @@ FROM table [alias]
 
 <div id="siblings-pop" popover>
   <p id="siblings-heading">Other services' databases. Opens their Ashurbanipal in a new tab.</p>
+  <table id="siblings-matrix" hidden><thead><tr id="siblings-matrix-head"></tr></thead><tbody id="siblings-matrix-body"></tbody></table>
   <div id="siblings-list"></div>
+  <div id="siblings-foot" hidden>
+    <p>For a new tab: <kbd>Ctrl</kbd>/<kbd>⌘</kbd>-click, middle-click, or right-click › Open Link in New Tab.</p>
+    <p>“Same view” keeps your table, filter and sort. Other services open on their first table.</p>
+  </div>
 </div>
 <div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
 <div id="refby-pop" popover><div id="refby-pop-list"></div></div>
@@ -1472,8 +1525,8 @@ async function errorFromResponse(resp) {
   }
   return new ApiError(`request failed with status ${resp.status}`, void 0);
 }
-async function api(path) {
-  const resp = await fetch(API + path);
+async function api(path, init) {
+  const resp = await fetch(API + path, init);
   if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
   if (!resp.ok) throw await errorFromResponse(resp);
   return resp.json();
@@ -4561,7 +4614,7 @@ function mountJoinSql(onChange) {
     hlText.append("\n");
   }
   attachOverlayHighlight(field, render3);
-  const place2 = () => {
+  const place3 = () => {
     const before = field.value.slice(0, field.selectionStart);
     const line = before.split("\n").length;
     const col = before.length - before.lastIndexOf("\n") - 1;
@@ -4572,7 +4625,7 @@ function mountJoinSql(onChange) {
   const suggest2 = createSuggestList({
     input: field,
     popup: $("join-sql-suggest"),
-    place: place2,
+    place: place3,
     list: $("join-sql-suggest-list"),
     idPrefix: "join-sql-suggest",
     accept: (suggestion, head) => {
@@ -5146,59 +5199,35 @@ async function showCommonValues(e, table, column) {
   renderCommonValues(values, column);
 }
 
-// src/features/siblings.ts
-var siblingsRequestToken = 0;
-var siblingsWarned = false;
-async function loadSiblings() {
-  const token = ++siblingsRequestToken;
-  let siblings = [];
-  try {
-    ({ siblings } = await api("/siblings"));
-    siblingsWarned = false;
-  } catch (e) {
-    if (!siblingsWarned) {
-      console.warn("ashurbanipal: /siblings poll failed; hiding the panel", e);
-      siblingsWarned = true;
-    }
+// src/lib/sibling-matrix.ts
+function buildSiblingMatrix({ instance, siblings }) {
+  const labelled = siblings.filter((s) => s.label !== void 0);
+  if (!instance && labelled.length === 0) return null;
+  const labels = instance ? [instance.label] : [];
+  const names = instance ? [instance.name] : [];
+  for (const s of labelled) {
+    if (!labels.includes(s.label)) labels.push(s.label);
+    if (!names.includes(s.name)) names.push(s.name);
   }
-  if (token !== siblingsRequestToken) return;
-  $("siblings").hidden = siblings.length === 0;
-  const down = siblings.filter((s) => !s.healthy).length;
-  $("siblings-summary").textContent = down > 0 ? `Other services \xB7 ${down} down` : `Other services \xB7 ${siblings.length} up`;
-  $("siblings-dot").className = `dot ${down > 0 ? "down" : "up"}`;
-  $("siblings-list").replaceChildren(
-    ...siblings.map((s) => {
-      const a = el("a");
-      a.href = s.base_url;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.className = "sibling-row";
-      const dot = el("span", `dot ${s.healthy ? "up" : "down"}`);
-      dot.setAttribute("role", "img");
-      dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
-      const name = el("span", "sibling-name", s.name);
-      name.title = s.name;
-      const state2 = el("span", "sibling-state", s.healthy ? "up \u2197" : "down \u2197");
-      a.append(dot, name, state2);
-      return a;
-    })
-  );
+  const rows = names.map((name) => {
+    const isInstance = instance?.name === name;
+    const cells = labels.map((label) => {
+      if (isInstance && instance?.label === label) return { kind: "here" };
+      const sibling = labelled.find((s) => s.name === name && s.label === label);
+      return sibling ? { kind: "link", sibling, sameView: isInstance } : { kind: "missing" };
+    });
+    return { name, isInstance, cells };
+  });
+  return { labels, rows, unlabelled: siblings.filter((s) => s.label === void 0) };
 }
-
-// src/features/sticky-header.ts
-var main = $("main");
-var thead = $("thead");
-function update() {
-  main.classList.toggle("header-stuck", thead.getBoundingClientRect().top < main.getBoundingClientRect().top - 0.5);
+function sameViewHref(baseUrl, search2) {
+  return baseUrl.replace(/\/+$/, "") + search2;
 }
-main.addEventListener("scroll", update, { passive: true });
-window.addEventListener("resize", update);
-update();
 
 // src/lib/fallback-note.ts
 var NAME_ORDER = ["source", "schema", "table"];
-function placeSegments(place2) {
-  return place2.kind === "here" ? [{ text: "here" }] : [{ text: "in " }, { label: place2.label }];
+function placeSegments(place3) {
+  return place3.kind === "here" ? [{ text: "here" }] : [{ text: "in " }, { label: place3.label }];
 }
 function joinOr(items) {
   return items.flatMap((item, i) => {
@@ -5209,19 +5238,19 @@ function joinOr(items) {
 function joinSlash(items) {
   return items.flatMap((item, i) => i === 0 ? item : [{ text: " / " }, ...item]);
 }
-function buildFallbackNote(swaps2, table, place2) {
+function buildFallbackNote(swaps2, table, place3) {
   const named = NAME_ORDER.flatMap((kind) => swaps2.filter((s) => s.kind === kind));
   const filterDropped = swaps2.some((s) => s.kind === "filter");
   if (named.length === 0) {
     if (!filterDropped) return [];
     const target = table ? [{ code: table }, { text: " " }] : [];
-    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(place2), { text: ", so it was removed." }];
+    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(place3), { text: ", so it was removed." }];
   }
   const out = [
     { text: "There is no " },
     ...joinOr(named.map((s) => [{ text: `${s.kind} ` }, { code: s.asked }])),
     { text: " " },
-    ...placeSegments(place2)
+    ...placeSegments(place3)
   ];
   const got = named.filter((s) => s.got !== null);
   if (got.length === 0) {
@@ -5236,6 +5265,8 @@ function buildFallbackNote(swaps2, table, place2) {
 
 // src/features/view-notice.ts
 var shownFor = null;
+var shownSwaps = [];
+var place2 = { kind: "here" };
 function scopeKey2(view, filter) {
   return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
 }
@@ -5248,17 +5279,210 @@ function clearViewNotice() {
   shownFor = null;
   $("view-notice").hidden = true;
 }
+function renderNote() {
+  $("view-notice-text").replaceChildren(...buildFallbackNote(shownSwaps, tableInView(), place2).map(render2));
+}
 function showBootFallbackNote() {
-  const segments = buildFallbackNote(takeSwaps(), tableInView(), { kind: "here" });
-  if (segments.length === 0) return;
+  shownSwaps = takeSwaps();
+  if (shownSwaps.length === 0) return;
   shownFor = scopeKey2(state.view, state.filter);
   $("view-notice").hidden = false;
-  $("view-notice-text").replaceChildren(...segments.map(render2));
+  renderNote();
+}
+function setNoticePlace(label) {
+  const next = label === null ? { kind: "here" } : { kind: "label", label };
+  if (JSON.stringify(next) === JSON.stringify(place2)) return;
+  place2 = next;
+  if (shownFor !== null) renderNote();
 }
 function syncViewNotice(req) {
   if (shownFor !== null && shownFor !== scopeKey2(req?.view ?? null, req?.filter ?? "")) clearViewNotice();
 }
 $("view-notice-close").onclick = clearViewNotice;
+
+// src/features/siblings.ts
+var FRESH_MS = 15e3;
+var FETCH_TIMEOUT_MS = 1e4;
+var lastFetchStarted = Number.NEGATIVE_INFINITY;
+var inFlight = false;
+var openTimer;
+var siblingsWarned = false;
+var matrixShape = "";
+var linkCells = /* @__PURE__ */ new Map();
+var sameViewLinks = [];
+var lastUpdated = null;
+function startSiblings() {
+  void loadSiblings();
+  document.addEventListener("visibilitychange", () => {
+    if ($("siblings-pop").matches(":popover-open")) refreshIfStale();
+  });
+}
+function refreshIfStale() {
+  if (document.hidden || inFlight || performance.now() - lastFetchStarted < FRESH_MS) return;
+  void loadSiblings();
+}
+async function loadSiblings() {
+  inFlight = true;
+  lastFetchStarted = performance.now();
+  let body = { siblings: [] };
+  let fetched = false;
+  try {
+    body = await api("/siblings", {
+      cache: "no-store",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
+    fetched = true;
+    siblingsWarned = false;
+  } catch (e) {
+    if (!siblingsWarned) {
+      console.warn("ashurbanipal: /siblings fetch failed; hiding the panel", e);
+      siblingsWarned = true;
+    }
+  } finally {
+    inFlight = false;
+  }
+  if (fetched) {
+    const at = /* @__PURE__ */ new Date();
+    lastUpdated = el("time", void 0, at.toLocaleTimeString());
+    lastUpdated.dateTime = at.toISOString();
+    lastUpdated.title = at.toLocaleString();
+  }
+  const { siblings } = body;
+  setNoticePlace(body.instance?.label ?? null);
+  $("siblings").hidden = siblings.length === 0;
+  const down = siblings.filter((s) => !s.healthy).length;
+  $("siblings-summary").textContent = down > 0 ? `Other services \xB7 ${down} down` : `Other services \xB7 ${siblings.length} up`;
+  $("siblings-dot").className = `dot ${down > 0 ? "down" : "up"}`;
+  const matrix = buildSiblingMatrix(body);
+  $("siblings-matrix").hidden = matrix === null;
+  $("siblings-foot").hidden = matrix === null;
+  $("siblings-heading").replaceChildren(
+    matrix ? "Other services' databases. " : "Other services' databases. Opens their Ashurbanipal in a new tab. ",
+    ...lastUpdated ? ["Updated ", lastUpdated.cloneNode(true), "."] : []
+  );
+  if (matrix) renderMatrix(matrix);
+  else matrixShape = "";
+  $("siblings-list").replaceChildren(...(matrix ? matrix.unlabelled : siblings).map((s) => listRow(s, !matrix)));
+}
+function healthDot(healthy) {
+  const dot = el("span", `dot ${healthy ? "up" : "down"}`);
+  dot.setAttribute("aria-hidden", "true");
+  return dot;
+}
+function listRow(s, newTab) {
+  const a = el("a");
+  a.href = s.base_url;
+  if (newTab) a.target = "_blank";
+  a.rel = "noopener";
+  a.className = "sibling-row";
+  const dot = el("span", `dot ${s.healthy ? "up" : "down"}`);
+  dot.setAttribute("role", "img");
+  dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
+  const name = el("span", "sibling-name", s.name);
+  name.title = s.name;
+  const state2 = el("span", "sibling-state", `${s.healthy ? "up" : "down"}${newTab ? " \u2197" : ""}`);
+  a.append(dot, name, state2);
+  return a;
+}
+function cellKey(name, label) {
+  return JSON.stringify([name, label]);
+}
+function shapeOf(m) {
+  return JSON.stringify([m.labels, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
+}
+function stateText(healthy, sameView) {
+  return sameView ? "same view" : healthy ? "up" : "down";
+}
+function linkLabel(name, label, healthy, sameView) {
+  return `${name} in ${label}: ${sameView ? "same view, " : ""}${healthy ? "up" : "down"}`;
+}
+function renderCell(name, label, cell) {
+  const td = el("td");
+  if (cell.kind === "here") {
+    const here = el("span", "sibling-here", "you are here");
+    here.setAttribute("aria-current", "page");
+    td.append(here);
+  } else if (cell.kind === "missing") {
+    td.append(el("span", "sibling-missing", "not set up"));
+  } else {
+    const { sibling, sameView } = cell;
+    const a = el("a", sameView ? "sibling-cell same" : "sibling-cell");
+    a.href = sibling.base_url;
+    a.rel = "noopener";
+    a.setAttribute("aria-label", linkLabel(name, label, sibling.healthy, sameView));
+    const dot = healthDot(sibling.healthy);
+    const state2 = el("span", "sibling-state", stateText(sibling.healthy, sameView));
+    a.append(dot, state2);
+    td.append(a);
+    linkCells.set(cellKey(name, label), { a, dot, state: state2 });
+    if (sameView) sameViewLinks.push({ a, base: sibling.base_url });
+  }
+  return td;
+}
+function renderMatrix(m) {
+  const shape = shapeOf(m);
+  if (shape === matrixShape) {
+    for (const row2 of m.rows)
+      row2.cells.forEach((cell, i) => {
+        if (cell.kind !== "link") return;
+        const refs = linkCells.get(cellKey(row2.name, m.labels[i]));
+        if (!refs) return;
+        refs.dot.className = `dot ${cell.sibling.healthy ? "up" : "down"}`;
+        refs.state.textContent = stateText(cell.sibling.healthy, cell.sameView);
+        refs.a.setAttribute("aria-label", linkLabel(row2.name, m.labels[i], cell.sibling.healthy, cell.sameView));
+        if (!cell.sameView) refs.a.href = cell.sibling.base_url;
+      });
+    refreshSameViewHrefs();
+    return;
+  }
+  matrixShape = shape;
+  linkCells.clear();
+  sameViewLinks.length = 0;
+  const corner = el("th");
+  corner.append(el("span", "sr-only", "service"));
+  $("siblings-matrix-head").replaceChildren(
+    corner,
+    ...m.labels.map((label) => {
+      const th = el("th", void 0, label);
+      th.scope = "col";
+      return th;
+    })
+  );
+  $("siblings-matrix-body").replaceChildren(
+    ...m.rows.map((row2) => {
+      const tr = el("tr", row2.isInstance ? "instance" : void 0);
+      const th = el("th");
+      th.scope = "row";
+      const name = el("span", "sibling-name", row2.name);
+      name.title = row2.name;
+      th.append(name);
+      if (row2.isInstance) th.append(el("span", "sibling-me", "this service"));
+      tr.append(th, ...row2.cells.map((cell, i) => renderCell(row2.name, m.labels[i], cell)));
+      return tr;
+    })
+  );
+  refreshSameViewHrefs();
+}
+function refreshSameViewHrefs() {
+  for (const { a, base } of sameViewLinks) a.href = sameViewHref(base, location.search);
+}
+$("siblings-pop").addEventListener("beforetoggle", (e) => {
+  clearInterval(openTimer);
+  if (e.newState !== "open") return;
+  refreshSameViewHrefs();
+  refreshIfStale();
+  openTimer = setInterval(refreshIfStale, FRESH_MS);
+});
+
+// src/features/sticky-header.ts
+var main = $("main");
+var thead = $("thead");
+function update() {
+  main.classList.toggle("header-stuck", thead.getBoundingClientRect().top < main.getBoundingClientRect().top - 0.5);
+}
+main.addEventListener("scroll", update, { passive: true });
+window.addEventListener("resize", update);
+update();
 
 // src/lib/json-tree.ts
 var SCALAR_CLASS = {
@@ -6078,8 +6302,7 @@ $("refresh").onclick = () => {
   loadData2({ resetScroll: false, highlightNew: true });
 };
 loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(showBootFallbackNote);
-loadSiblings();
-setInterval(loadSiblings, 15e3);
+startSiblings();
 </script>
 </body>
 </html>

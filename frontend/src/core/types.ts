@@ -110,8 +110,21 @@ export interface SourceEntry {
 
 export interface Sibling {
   name: string;
+  label?: string;
   base_url: string;
   healthy: boolean;
+}
+
+// Labels are opaque host strings (spec/protocol.md §5.6): compared for
+// equality, never parsed.
+export interface SiblingInstance {
+  name: string;
+  label: string;
+}
+
+export interface SiblingsResponse {
+  instance?: SiblingInstance;
+  siblings: Sibling[];
 }
 
 // A name the page URL asked for that this instance lacks, and what the page

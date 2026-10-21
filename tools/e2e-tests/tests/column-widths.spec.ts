@@ -17,7 +17,7 @@ test("a filter that drops the widest values leaves every column where it was", a
   await selectTable(page, "products");
   const before = await headerBoxes(page);
   await applyFilter(page, "name = 'Organic Cap'");
-  await expect(page.locator("tbody tr")).toHaveCount(1);
+  await expect(page.locator("#tbody tr")).toHaveCount(1);
   const after = await headerBoxes(page);
   for (const [name, box] of Object.entries(before)) {
     expect(after[name].x, name).toBeCloseTo(box.x, 0);

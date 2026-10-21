@@ -122,7 +122,7 @@ tasks.withType<Test> {
 // copy since there is no separate tagged release to vendor from.
 val repoRoot = rootDir.parentFile.parentFile
 val frontendSource = repoRoot.resolve("frontend/dbviewer.html")
-val pinnedFrontendSha256 = "e6cc8c9d14a4141060c1c516f350b34f1929abd9d9aee651165ed3f0b681871b"
+val pinnedFrontendSha256 = "9d18d1fdf62b6e9258912f863b0fef4aa45406dc57f64b1231e00adbd974adf0"
 
 val vendorFrontend = tasks.register("vendorFrontend") {
     description = "Copies frontend/dbviewer.html into generated resources, re-verifying its sha256."

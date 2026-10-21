@@ -3,7 +3,7 @@
 
 import type { FilterCondition, FilterOp } from "../core/types.js";
 import { columnTypeClass } from "../lib/format.js";
-import { type CellValue, SCHEMAS, SIBLINGS, TABLES, type TableDef } from "./demo-fixtures.js";
+import { type CellValue, SCHEMAS, SIBLINGS, SIBLINGS_INSTANCE, TABLES, type TableDef } from "./demo-fixtures.js";
 
 function toWire(v: CellValue): string | null {
   if (v === null || v === undefined) return null;
@@ -275,7 +275,7 @@ function handleStructure(params: URLSearchParams): Response {
   });
 }
 function handleSiblings(): Response {
-  return jsonResponse({ siblings: SIBLINGS });
+  return jsonResponse({ instance: SIBLINGS_INSTANCE, siblings: SIBLINGS });
 }
 
 const realFetch = window.fetch.bind(window);

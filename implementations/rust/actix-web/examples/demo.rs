@@ -98,8 +98,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// `SIBLING_LABEL` labels the `SIBLING_PORT` sibling and `INSTANCE_LABEL`
 /// names this instance, both as service `demo`, so two demos show a labelled
-/// pair. `CONFORMANCE_LABELLED_SIBLINGS=1` replaces all of it with the fixed
-/// config `conformance/runner/labelled_siblings.rs` expects.
+/// pair; either label also adds three services that are down under both
+/// labels, to fill the grid. `CONFORMANCE_LABELLED_SIBLINGS=1` replaces all
+/// of it with the fixed config `conformance/runner/labelled_siblings.rs`
+/// expects.
 fn siblings_toml(sibling_port: Option<u16>) -> String {
     if std::env::var("CONFORMANCE_LABELLED_SIBLINGS").is_ok() {
         return CONFORMANCE_LABELLED_SIBLINGS.to_string();
@@ -117,6 +119,19 @@ fn siblings_toml(sibling_port: Option<u16>) -> String {
         toml += &format!(
             "[[siblings]]\nname = {name:?}\n{label}base_url = \"http://localhost:{p}/__ashurbanipal\"\nhealth_path = \"/health\"\n"
         );
+    }
+    let mut labels: Vec<String> = ["INSTANCE_LABEL", "SIBLING_LABEL"]
+        .iter()
+        .filter_map(|v| label(v))
+        .collect();
+    labels.dedup();
+    // Port 9 refuses at once, so these are a fast `healthy: false`.
+    for name in ["search", "analytics", "inventory"] {
+        for l in &labels {
+            toml += &format!(
+                "[[siblings]]\nname = {name:?}\nlabel = {l:?}\nbase_url = \"http://127.0.0.1:9/__ashurbanipal\"\nhealth_path = \"/health\"\n"
+            );
+        }
     }
     toml
 }

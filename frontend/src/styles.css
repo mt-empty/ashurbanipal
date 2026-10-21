@@ -326,6 +326,38 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 .sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                 white-space: nowrap; font-family: var(--font-mono); }
 .sibling-state { color: var(--text-muted); font-size: .75rem; }
+/* The service × label grid. Resets the data table's global table/th/td rules. */
+#siblings-pop:has(#siblings-matrix:not([hidden])) { max-width: min(34rem, 92vw); }
+#siblings-matrix { margin: 0; width: 100%; }
+/* Label columns stay narrow; the service-name column takes the slack. */
+#siblings-matrix td { width: 7.5rem; }
+#siblings-matrix th, #siblings-matrix td { padding: 0 .15rem; border: none; cursor: auto;
+                                           font-family: inherit; position: static; }
+#siblings-matrix thead th { position: static; background: none; font-size: .7rem; font-weight: 400;
+                            text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted);
+                            padding: 0 .6rem .3rem; }
+#siblings-matrix tbody tr:hover { background: none; }
+#siblings-matrix tbody th { font-weight: 400; font-size: .8125rem; padding-left: .6rem;
+                            max-width: 14rem; }
+#siblings-matrix tbody tr.instance th, #siblings-matrix tbody tr.instance td {
+  border-bottom: 1px solid var(--rule); padding-bottom: .15rem; }
+#siblings-matrix .sibling-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
+.sibling-me { display: block; font-size: .7rem; color: var(--text-muted); }
+.sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
+  min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
+  white-space: nowrap; font-size: .8125rem; }
+.sibling-cell { color: inherit; text-decoration: none; }
+.sibling-cell:hover { background: var(--hover); }
+.sibling-cell.same { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.sibling-cell.same .sibling-state { color: inherit; }
+.sibling-here { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+.sibling-missing { color: var(--text-muted); font-size: .75rem; }
+#siblings-foot { margin: .5rem .6rem .2rem; padding-top: .5rem; border-top: 1px solid var(--rule);
+                 font-size: .75rem; color: var(--text-muted); line-height: 1.5; }
+#siblings-foot p { margin: 0; }
+#siblings-foot p + p { margin-top: .25rem; }
+#siblings-foot kbd { font-family: var(--font-mono); font-size: .7rem; padding: 0 .25rem; border-radius: 4px;
+                     border: 1px solid var(--border-strong); }
 
 /* ==== Pager ==== */
 /* Sticky left, same reasoning as #chrome above: #content (and #pager's

@@ -172,9 +172,10 @@ The frontend reads only the wire shape above.
     "down". Colour is never the only signal.
   - No sibling for that pair: the text "not set up", not a link.
 - **F5. Same view.** In the instance's own row, the other cells link to
-  `base_url` + `/` + the current `location.search`, and read "same view".
-  Only the instance's own row does this, because only that service shares
-  its tables. If `base_url` already ends in `/`, do not add another.
+  `base_url` + the current `location.search`, and read "same view". Only
+  the instance's own row does this, because only that service shares its
+  tables. The page is served at exactly `{mount}`, so a trailing `/` on
+  `base_url` is dropped, never added: some ports' routers 404 `{mount}/`.
 - **F6. Unlabelled siblings** in a labelled config: a flat list under the
   matrix, as today.
 - **F7. Real links.** Every link is a plain `<a href>` with

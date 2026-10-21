@@ -544,7 +544,9 @@ dropdown.
 
 The backend performs the health checks (parallel HTTP GET to each sibling's
 configured health path) synchronously when this endpoint is called. The
-frontend polls `/siblings` every ~15s and re-renders status dots; no
+frontend fetches `/siblings` once at page load, then only while the Other
+services pop-up is open and the tab is visible — every ~15s, and never when
+the last result is younger than that — so a closed pop-up costs nothing; no
 server-side background polling or caching in v1 (see §9 for revisit
 criteria if this gets expensive).
 
