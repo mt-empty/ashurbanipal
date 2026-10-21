@@ -20,6 +20,9 @@ concurrency:
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
 
+permissions:
+  contents: read
+
 jobs:
   verify-tag:
     name: verify tag is on main

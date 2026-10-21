@@ -10,6 +10,9 @@ on:
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: gradle build (vendoring hash re-check + fixture/kill-switch/integration tests)

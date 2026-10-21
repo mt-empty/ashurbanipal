@@ -13,6 +13,9 @@ env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
   NODE_VERSION: "26"
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: biome + npm build/typecheck + fixture/kill-switch/schema tests

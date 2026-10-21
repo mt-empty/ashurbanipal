@@ -31,6 +31,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   # Covers the whole workspace (axum, core, actix-web) in one run — they
   # share implementations/rust/Cargo.lock, so rust-actix-web-conformance.yml

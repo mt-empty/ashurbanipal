@@ -25,6 +25,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   # Submits the resolved Gradle dependency graph to GitHub's native
   # dependency graph — unlike Cargo/Go/npm, GitHub can't parse Gradle
