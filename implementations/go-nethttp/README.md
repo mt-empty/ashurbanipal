@@ -57,7 +57,7 @@ which environment it's running in — that's entirely the host's call.
 
 Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.
 
-Register the wrapped handler at the mount prefix (or `cfg.BasePath`) instead of `/`, so the guard doesn't cover the rest of your mux:
+Register the wrapped handler at the mount prefix (or `cfg.BasePath`) instead of `/`, so the guard doesn't cover the rest of your mux. The UI is served at the bare prefix, so register both the exact path and the subtree:
 
 ```go
 func requireAdmin(next http.Handler) http.Handler {
@@ -70,7 +70,9 @@ func requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
-mux.Handle("/__ashurbanipal/", requireAdmin(viewer))
+guarded := requireAdmin(viewer)
+mux.Handle("/__ashurbanipal", guarded)
+mux.Handle("/__ashurbanipal/", guarded)
 ```
 
 ## Database support
