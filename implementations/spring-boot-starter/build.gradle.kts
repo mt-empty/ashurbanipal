@@ -42,6 +42,13 @@ dependencies {
     val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.1.1")
     implementation(springBootBom)
     compileOnly(springBootBom)
+    // Newer than Spring Boot 4.1.1's managed Jackson; the higher platform wins.
+    implementation(platform("tools.jackson:jackson-bom:3.1.7"))
+    constraints {
+        testImplementation("org.apache.tomcat.embed:tomcat-embed-core:11.0.25")
+        testImplementation("org.apache.tomcat.embed:tomcat-embed-el:11.0.25")
+        testImplementation("org.apache.tomcat.embed:tomcat-embed-websocket:11.0.25")
+    }
 
     // Starter-lean: only what every Spring Boot host already has on its
     // classpath. No JDBC driver, no HTTP client
