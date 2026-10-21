@@ -588,6 +588,38 @@ async fn join_keys_are_matched_exactly() {
     }
 }
 
+/// P5.4.2-NO-5XX, for `join`: malformed input the rules don't name may be
+/// accepted or rejected, but never a 5xx.
+#[tokio::test]
+async fn unnamed_malformed_join_is_not_a_server_error() {
+    let srv = TestServer::spawn().await;
+    let entry = orders_users("left")["joins"][0].to_string();
+    for (what, raw) in [
+        (
+            "lone surrogate in a table name",
+            format!(r#"{{"table":"orders\ud800","joins":[{entry}]}}"#),
+        ),
+        (
+            "repeated key",
+            format!(r#"{{"table":"no_such_table","table":"orders","joins":[{entry}]}}"#),
+        ),
+    ] {
+        let resp = srv
+            .client()
+            .get(srv.url("/api/tables/join"))
+            .query(&[("join", raw.as_str())])
+            .send()
+            .await
+            .unwrap();
+        let status = resp.status();
+        assert!(
+            status == 200 || status == 400,
+            "{what}: expected 200 or 400, got {status}: {}",
+            resp.text().await.unwrap()
+        );
+    }
+}
+
 /// P5.11-JOIN-STRUCTURE: a missing `join` is a missing parameter, not a bad join.
 #[tokio::test]
 async fn missing_join_is_an_invalid_parameter() {

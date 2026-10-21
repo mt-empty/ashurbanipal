@@ -102,7 +102,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.4.2-EMPTY-ARRAY` | Empty array ≡ absent filter | `filter_dsl::empty_param_and_empty_array_mean_no_filter` |
 | `P5.4.2-DSL-TEXT-REJECTED` | DSL text in `filter` is rejected (no server-side grammar) | `filter_dsl::dsl_text_in_filter_param_is_rejected` |
 | `P5.4.2-DEEP-NESTING` | Nesting deep enough to overflow a recursive decoder, under the byte bound → 400 `invalid_filter` | `filter_dsl::deeply_nested_filter_is_rejected` |
-| `P5.4.2-NO-5XX` | Malformed input the rules don't name (a lone UTF-16 surrogate) → 200 or 400, never 5xx | `filter_dsl::lone_surrogate_is_not_a_server_error` |
+| `P5.4.2-NO-5XX` | Malformed `filter` or `join` input the rules don't name (a lone UTF-16 surrogate, a repeated key) → 200 or 400, never 5xx | `filter_dsl::unnamed_malformed_filter_is_not_a_server_error`, `join::unnamed_malformed_join_is_not_a_server_error` |
 | `P5.4.2-COLUMN-VALIDATED` | Column validated against real columns; unknown → 400 | `filter_dsl::unknown_column_rejection_is_a_400`, `filter_dsl::builder_fixture_cases_over_http` (`unknown_column`) |
 | `P5.4.2-OP-HARDCODED-MAP` | `op` mapped through hardcoded table, never client text | `filter_dsl::equality_filter_narrows_rows` (`=` maps correctly), `filter_dsl::injection_value_stays_a_bind_param` (proxy: an operator escape attempt can only be inert if the mapping is hardcoded) |
 | `P5.4.2-VALUE-BOUND-PARAM` | `value` bound as parameter, never concatenated | `filter_dsl::injection_value_stays_a_bind_param` |

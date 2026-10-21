@@ -114,15 +114,26 @@ async fn deeply_nested_filter_is_rejected() {
 /// Malformed input past the documented rules may be accepted or rejected, but
 /// never a 5xx: a lone surrogate is one a database driver may fail to encode.
 #[tokio::test]
-async fn lone_surrogate_is_not_a_server_error() {
+async fn unnamed_malformed_filter_is_not_a_server_error() {
     let srv = TestServer::spawn().await;
-    let resp = fetch(&srv, "orders", r#"[{"column":"status","op":"=","value":"\ud800"}]"#).await;
-    let status = resp.status();
-    assert!(
-        status == 200 || status == 400,
-        "lone surrogate in a filter value: expected 200 or 400, got {status}: {}",
-        resp.text().await.unwrap()
-    );
+    for (what, filter) in [
+        (
+            "lone surrogate in a value",
+            r#"[{"column":"status","op":"=","value":"\ud800"}]"#,
+        ),
+        (
+            "repeated key",
+            r#"[{"column":"nope","column":"status","op":"IS NULL"}]"#,
+        ),
+    ] {
+        let resp = fetch(&srv, "orders", filter).await;
+        let status = resp.status();
+        assert!(
+            status == 200 || status == 400,
+            "{what}: expected 200 or 400, got {status}: {}",
+            resp.text().await.unwrap()
+        );
+    }
 }
 
 /// Empty param and empty JSON array both mean "no filter" (§5.4.2).
