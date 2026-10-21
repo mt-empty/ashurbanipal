@@ -113,12 +113,19 @@ def test_parse_join_rejects_structural_violations() -> None:
         "five tables": json.dumps({"table": "o", "joins": [entry] * 4}),
         "oversize": json.dumps({"table": "t" * 8192, "joins": [entry]}),
         "unknown key": join(x=1),
+        "lone surrogate": f'{{"table":"\\ud800","joins":[{json.dumps(entry)}]}}',
     }
     for name, raw in cases.items():
         with pytest.raises(BadJoin):
             parse_join(raw)
         print(name)
     parse_join(json.dumps({"table": "o", "joins": [entry] * 3}))  # 4 tables is the limit
+
+
+def test_filter_rejects_a_lone_surrogate_but_not_a_pair() -> None:
+    with pytest.raises(FilterError):
+        parse('[{"column":"a","op":"=","value":"\\ud800"}]')
+    assert parse('[{"column":"a","op":"=","value":"\\ud83d\\ude00"}]')[0].value == "\U0001f600"
 
 
 def test_plan_join_rejects_unknown_names_hostile_names_and_incompatible_pairs() -> None:

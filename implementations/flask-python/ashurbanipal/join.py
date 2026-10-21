@@ -8,14 +8,13 @@ emits SQL from catalog names and generated aliases only.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .db import OP_SQL, BadJoin, BadParam, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
-from .filter import Condition
+from .filter import Condition, load_json
 
 MAX_JOIN_BYTES = 8192
 MAX_JOIN_TABLES = 4
@@ -84,8 +83,8 @@ def parse_join(raw: str) -> JoinSpec:
     if size > MAX_JOIN_BYTES:
         raise BadJoin(f"join too long: {size} bytes (max {MAX_JOIN_BYTES})")
     try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as e:
+        parsed = load_json(raw)
+    except ValueError as e:
         raise BadJoin(f"join must be a JSON object of the documented shape: {e}") from e
     if not isinstance(parsed, dict):
         raise BadJoin("join must be a JSON object")

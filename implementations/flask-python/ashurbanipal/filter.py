@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
 MAX_FILTER_BYTES = 8192
 MAX_CONDITIONS = 10
@@ -30,6 +31,17 @@ class FilterError(Exception):
     pass
 
 
+def load_json(raw: str) -> Any:
+    """`json.loads`, but a lone UTF-16 surrogate raises ValueError: psycopg
+    cannot encode one, so it would otherwise surface as a 500."""
+    value = json.loads(raw)
+    try:
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError as e:
+        raise ValueError("a string holds a lone UTF-16 surrogate") from e
+    return value
+
+
 def parse(raw: str) -> list[Condition]:
     return _parse(raw, allow_join=False)
 
@@ -44,8 +56,8 @@ def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
         raise FilterError(f"filter too long: {len(raw.encode('utf-8'))} bytes (max {MAX_FILTER_BYTES})")
 
     try:
-        raw_conditions = json.loads(raw)
-    except json.JSONDecodeError as e:
+        raw_conditions = load_json(raw)
+    except ValueError as e:
         raise FilterError(f"filter must be a JSON array of conditions: {e}") from e
     if not isinstance(raw_conditions, list):
         raise FilterError("filter must be a JSON array of conditions")

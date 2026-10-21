@@ -3635,8 +3635,9 @@ function sanitizeSaved(raw) {
   const store = {};
   if (!isPlainObject2(raw)) return store;
   for (const [source, schemas] of Object.entries(raw)) {
-    if (!isPlainObject2(schemas)) continue;
+    if (source === "__proto__" || !isPlainObject2(schemas)) continue;
     for (const [schema, entries] of Object.entries(schemas)) {
+      if (schema === "__proto__") continue;
       const clean = sanitizeEntries(entries);
       if (clean.length === 0) continue;
       store[source] ??= {};
@@ -5264,12 +5265,14 @@ async function loadData2({
   }
   const view = req.view;
   const token = ++loadDataToken;
+  const scope2 = scopeQuery();
+  const superseded = () => token !== loadDataToken || scopeQuery() !== scope2;
   const widthScope = widthScopeOf(view);
   let data;
   try {
     data = await fetchViewData(req);
   } catch (e) {
-    if (token !== loadDataToken) return;
+    if (superseded()) return;
     if (!next && dropOneStaleInput(e instanceof ApiError ? e.code : void 0))
       return loadData2({ resetScroll, highlightNew });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
@@ -5280,7 +5283,7 @@ async function loadData2({
     reportError(e);
     return;
   }
-  if (token !== loadDataToken) return;
+  if (superseded()) return;
   if (next) commitRequest(next);
   markStoredSortVerified();
   markFilterVerified();
@@ -5297,7 +5300,7 @@ async function loadData2({
   refreshSavedChips();
   syncUrl();
   const renderTable = () => {
-    if (token !== loadDataToken) return;
+    if (superseded()) return;
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
@@ -5313,7 +5316,7 @@ async function loadData2({
   } else {
     renderTable();
   }
-  if (token !== loadDataToken) return;
+  if (superseded()) return;
   updatePager(data);
   if (newRowKeys?.size) {
     setStatus(`${newRowKeys.size} new`);
