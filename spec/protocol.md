@@ -85,7 +85,8 @@ interpreted as described in RFC 2119.
     `order` not `asc`/`desc`), or `not_readable`
     — a table that cleared §5.2's allow-list but the connected role cannot
     actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
-  - **500** — server error: `database_error`, or `query_timeout` (§6).
+  - **500** — server error: `database_error`, `query_timeout` (§6), or
+    `invalid_config` (§5.6's sibling configuration is invalid).
 - Every API response (§5.2–§5.11), success or error, MUST carry the
   protocol version header (§7).
 - Every API response (§5.2–§5.11), success or error, MUST carry
@@ -111,6 +112,8 @@ interpreted as described in RFC 2119.
 - Configuration MUST expose a single on/off switch, and it MUST default to
   off: absent, empty, or malformed configuration MUST result in disabled,
   never enabled.
+  "Malformed" here means the switch itself cannot be read; an invalid
+  setting elsewhere follows its own route's rule (§5.6 for siblings).
 - An implementation MUST NOT infer or police which environment the host
   process is running in (by name, hostname, or any other signal). Where
   and whether to enable the viewer is entirely the host's decision.
@@ -427,8 +430,10 @@ Response:
   `label`, both non-empty) and MAY give each sibling a `label` (non-empty
   when present). An `instance` missing either field, an empty sibling
   `label`, or two siblings with the same `name` and the same `label` (both
-  absent counts as the same) is invalid configuration, rejected when the
-  router is constructed, exactly as an enabled router with no sources is.
+  absent counts as the same) is invalid configuration. It MUST NOT stop the
+  host or the viewer: every other route serves as usual, and this route
+  responds 500 with `code: "invalid_config"` and a `title` naming the broken
+  rule, so the UI can show it. A disabled implementation never checks it.
 - A label is an opaque string the host writes. An implementation echoes it
   byte-for-byte and MUST NOT parse it, compare it against known names,
   derive it from any other signal, or let it change any behavior — §4's

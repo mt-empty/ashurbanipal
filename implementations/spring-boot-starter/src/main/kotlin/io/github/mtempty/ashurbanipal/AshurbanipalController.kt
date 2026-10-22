@@ -222,7 +222,10 @@ class AshurbanipalController(
         apiOk(resolveSource(source).structure(schema, table))
 
     @GetMapping("/api/siblings")
-    fun siblings(): ResponseEntity<SiblingsResponse> {
+    fun siblings(): ResponseEntity<*> {
+        properties.siblingsConfigError?.let {
+            return problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "invalid_config", "invalid sibling configuration: $it")
+        }
         val checks: List<CompletableFuture<SiblingStatus>> = properties.siblings.map { sibling ->
             checkHealth(sibling)
         }

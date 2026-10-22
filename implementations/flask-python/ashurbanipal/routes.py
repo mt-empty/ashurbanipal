@@ -44,7 +44,8 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     bp = Blueprint("ashurbanipal", __name__, url_prefix=mount)
     if not config.is_enabled():
         return bp  # zero routes registered — 404 on every path under `mount`
-    config.validate_siblings()
+    # Never raised: /api/siblings reports it and every other route still serves.
+    siblings_error = config.siblings_config_error()
     own_entry = [config.is_instance(s) for s in config.siblings]
     instance = None if config.instance is None else {"name": config.instance.name, "label": config.instance.label}
 
@@ -271,6 +272,8 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("/api/siblings")
     def siblings() -> Response:
+        if siblings_error is not None:
+            return _problem_response(500, "invalid_config", f"invalid sibling configuration: {siblings_error}")
         results = _check_siblings(config.siblings, own_entry)
         if instance is None:
             return jsonify({"siblings": results})

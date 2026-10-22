@@ -79,9 +79,13 @@ def _with_second_label(label: str) -> Config:
     ],
     ids=["instance without a label", "empty sibling label", "duplicate name and label"],
 )
-def test_rejects_invalid_sibling_config_when_enabled(config: Config) -> None:
-    with pytest.raises(ValueError):
-        router(config, [("primary", _UnusedSource())])
+def test_reports_invalid_sibling_config_from_siblings_only(config: Config) -> None:
+    client = _client(config)
+    resp = client.get("/__ashurbanipal/api/siblings")
+    assert resp.status_code == 500
+    assert resp.get_json()["code"] == "invalid_config"
+    assert resp.get_json()["title"].startswith("invalid sibling configuration: ")
+    assert client.get("/__ashurbanipal/api/sources").status_code == 200
 
 
 def test_never_validates_siblings_when_disabled() -> None:

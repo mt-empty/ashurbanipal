@@ -23,18 +23,27 @@ function labelledConfig(): Config {
   };
 }
 
-async function getSiblings(config: Config): Promise<unknown> {
+async function get(config: Config, ...paths: string[]): Promise<{ status: number; body: unknown }[]> {
   const app = express();
   app.use(createRouter(config, sources));
   const server: Server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/__ashurbanipal/api/siblings`);
-    return await res.json();
+    const results = [];
+    for (const path of paths) {
+      const res = await fetch(`http://127.0.0.1:${port}/__ashurbanipal${path}`);
+      results.push({ status: res.status, body: await res.json() });
+    }
+    return results;
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+}
+
+async function getSiblings(config: Config): Promise<unknown> {
+  const [{ body }] = await get(config, "/api/siblings");
+  return body;
 }
 
 it("reports this instance in place, healthy, without a check", async () => {
@@ -56,14 +65,40 @@ it("omits instance and label when neither is configured", async () => {
 });
 
 it.each([
-  ["an instance without a label", (c: Config) => (c.instance = { name: "orders", label: "" })],
-  ["an empty sibling label", (c: Config) => ((c.siblings ?? [])[1].label = "")],
-  ["a duplicate name and label", (c: Config) => ((c.siblings ?? [])[1].label = "dev")],
-  ["a null sibling label", (c: Config) => ((c.siblings ?? [])[1].label = null as unknown as string)],
-])("rejects %s when enabled", (_name, mutate) => {
+  [
+    "an instance without a label",
+    (c: Config) => (c.instance = { name: "orders", label: "" }),
+    "instance needs a non-empty name and label",
+  ],
+  [
+    "an empty sibling label",
+    (c: Config) => ((c.siblings ?? [])[1].label = ""),
+    'sibling "orders" needs a non-empty string label, or none',
+  ],
+  [
+    "a duplicate name and label",
+    (c: Config) => ((c.siblings ?? [])[1].label = "dev"),
+    'two siblings share the name "orders" and the same label',
+  ],
+  [
+    "a null sibling label",
+    (c: Config) => ((c.siblings ?? [])[1].label = null as unknown as string),
+    'sibling "orders" needs a non-empty string label, or none',
+  ],
+])("reports %s from /api/siblings only", async (_name, mutate, reason) => {
   const config = labelledConfig();
   mutate(config);
-  expect(() => createRouter(config, sources)).toThrow();
+  const [siblings, sourcesList] = await get(config, "/api/siblings", "/api/sources");
+  expect(siblings).toStrictEqual({
+    status: 500,
+    body: {
+      type: "about:blank",
+      title: `invalid sibling configuration: ${reason}`,
+      status: 500,
+      code: "invalid_config",
+    },
+  });
+  expect(sourcesList.status).toBe(200);
 });
 
 it("never validates siblings when disabled", () => {

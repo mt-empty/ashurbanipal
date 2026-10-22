@@ -505,8 +505,9 @@ paths:
       responses:
         "200":
           description: >
-            One entry per configured sibling; health checked per request.
-            Empty configuration yields an empty list.
+            One entry per configured sibling, health-checked per request
+            except this instance's own entry. Empty configuration yields
+            an empty list.
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
@@ -516,6 +517,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SiblingsResponse"
+        "500":
+          description: >
+            The sibling configuration is invalid (`code: invalid_config`);
+            `title` names the broken rule. Every other route still serves.
+          headers:
+            x-ashurbanipal-protocol:
+              $ref: "#/components/headers/ProtocolVersion"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/NoSniff"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
 
 components:
   parameters:
@@ -949,8 +963,10 @@ components:
               healthy:
                 type: boolean
                 description: >
-                  True iff a GET to the sibling's health path (resolved
-                  against its origin) returned 2xx within the timeout.
+                  For this instance's own entry, always true and never
+                  checked. Otherwise true iff a GET to the sibling's health
+                  path (resolved against its origin) returned 2xx within
+                  the timeout.
 
     FilterCondition:
       type: object
@@ -1135,3 +1151,4 @@ components:
             - not_readable
             - database_error
             - query_timeout
+            - invalid_config

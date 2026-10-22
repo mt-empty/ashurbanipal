@@ -53,26 +53,30 @@ class SiblingsConfigTest {
         }
     }
 
-    @Test
-    fun `an instance without a label fails startup`() {
-        runner("ashurbanipal.instance.label=").run { context ->
-            assertThat(context).hasFailed()
-            assertThat(context.startupFailure).hasRootCauseInstanceOf(InvalidSiblingException::class.java)
+    private fun assertInvalidConfig(vararg extra: String) {
+        runner(*extra).run { context ->
+            assertThat(context).hasNotFailed()
+            val response = context.getBean(AshurbanipalController::class.java).siblings()
+            assertThat(response.statusCode.value()).isEqualTo(500)
+            val problem = response.body as ProblemDetails
+            assertThat(problem.code).isEqualTo("invalid_config")
+            assertThat(problem.title).startsWith("invalid sibling configuration: ")
         }
     }
 
     @Test
-    fun `a duplicate name and label fails startup`() {
-        runner("ashurbanipal.siblings[1].label=dev").run { context ->
-            assertThat(context).hasFailed()
-            assertThat(context.startupFailure).hasRootCauseInstanceOf(InvalidSiblingException::class.java)
-        }
-    }
+    fun `an instance without a label is reported by siblings only`() =
+        assertInvalidConfig("ashurbanipal.instance.label=")
+
+    @Test
+    fun `a duplicate name and label is reported by siblings only`() =
+        assertInvalidConfig("ashurbanipal.siblings[1].label=dev")
 
     @Test
     fun `a disabled starter never validates siblings`() {
         runner("ashurbanipal.enabled=false", "ashurbanipal.instance.label=").run { context ->
             assertThat(context).hasNotFailed()
         }
+        assertThat(AshurbanipalProperties(instance = Instance(name = "orders", label = "")).siblingsConfigError).isNull()
     }
 }

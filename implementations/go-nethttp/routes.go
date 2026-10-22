@@ -36,6 +36,8 @@ type NamedSource struct {
 // sources is the one seam to the database (see DbSource in db.go); hosts
 // construct them before routing. sources MUST be non-empty — a host with
 // nothing to browse should pass Enabled: false instead of an empty slice.
+// Invalid sibling config never fails construction: /api/siblings answers
+// invalid_config and every other route still serves.
 //
 // When cfg.Enabled is false — including the zero value Config{}, which
 // MUST mean disabled — Router returns a handler that 404s every request,
@@ -47,9 +49,6 @@ func Router(cfg Config, sources []NamedSource) http.Handler {
 	}
 	if len(sources) == 0 {
 		panic("ashurbanipal.Router: at least one source is required")
-	}
-	if err := cfg.validateSiblings(); err != nil {
-		panic("ashurbanipal.Router: " + err.Error())
 	}
 
 	limits := cfg.Limits.WithDefaults()
@@ -67,7 +66,7 @@ func Router(cfg Config, sources []NamedSource) http.Handler {
 	mux.Handle("GET "+base+"/api/tables/referenced-by", withAPIHeaders(referencedByHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/structure", withAPIHeaders(structureHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/join", withAPIHeaders(tableJoinHandler(sources, limits)))
-	mux.Handle("GET "+base+"/api/siblings", withAPIHeaders(siblingsHandler(client, cfg.Instance, cfg.Siblings)))
+	mux.Handle("GET "+base+"/api/siblings", withAPIHeaders(siblingsHandler(client, cfg.Instance, cfg.Siblings, cfg.validateSiblings())))
 	return mux
 }
 
@@ -491,8 +490,12 @@ func structureHandler(sources []NamedSource) http.HandlerFunc {
 	}
 }
 
-func siblingsHandler(client *http.Client, instance *Instance, siblings []Sibling) http.HandlerFunc {
+func siblingsHandler(client *http.Client, instance *Instance, siblings []Sibling, configErr error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if configErr != nil {
+			httpProblemError(w, http.StatusInternalServerError, "invalid_config", "invalid sibling configuration: "+configErr.Error())
+			return
+		}
 		statuses := checkSiblings(r.Context(), client, instance, siblings)
 		writeJSON(w, struct {
 			Instance *Instance       `json:"instance,omitempty"`

@@ -40,17 +40,18 @@ class Config:
     def is_enabled(self) -> bool:
         return self.enabled
 
-    def validate_siblings(self) -> None:
-        """The instance/label rules of spec/protocol.md §5.6; raises ValueError."""
+    def siblings_config_error(self) -> str | None:
+        """The first instance/label rule of spec/protocol.md §5.6 this config breaks, or None."""
         if self.instance is not None and not (self.instance.name and self.instance.label):
-            raise ValueError("instance needs a non-empty name and label")
+            return "instance needs a non-empty name and label"
         seen: set[tuple[str, str | None]] = set()
         for s in self.siblings:
             if s.label == "":
-                raise ValueError(f"sibling {s.name!r} has an empty label; omit it instead")
+                return f"sibling {s.name!r} has an empty label; omit it instead"
             if (s.name, s.label) in seen:
-                raise ValueError(f"two siblings share the name {s.name!r} and the same label")
+                return f"two siblings share the name {s.name!r} and the same label"
             seen.add((s.name, s.label))
+        return None
 
     def is_instance(self, s: Sibling) -> bool:
         """Whether `s` is this instance's own entry, which is reported healthy

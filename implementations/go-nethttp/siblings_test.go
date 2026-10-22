@@ -24,15 +24,20 @@ func labelledConfig() Config {
 	}
 }
 
-func getSiblings(t *testing.T, cfg Config) map[string]any {
+func get(t *testing.T, handler http.Handler, path string) (int, map[string]any) {
 	t.Helper()
-	handler := Router(cfg, []NamedSource{{Name: "primary", Source: nil}})
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/__ashurbanipal/api/siblings", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decoding /api/siblings: %v", err)
+		t.Fatalf("decoding %s: %v", path, err)
 	}
+	return rec.Code, body
+}
+
+func getSiblings(t *testing.T, cfg Config) map[string]any {
+	t.Helper()
+	_, body := get(t, Router(cfg, []NamedSource{{Name: "primary", Source: nil}}), "/__ashurbanipal/api/siblings")
 	return body
 }
 
@@ -62,20 +67,31 @@ func TestSiblingsWithoutInstanceOmitInstanceAndLabel(t *testing.T) {
 	}
 }
 
-func TestInvalidSiblingConfigPanicsWhenEnabled(t *testing.T) {
-	for name, mutate := range map[string]func(*Config){
-		"instance without a label": func(c *Config) { c.Instance.Label = "" },
-		"duplicate name and label": func(c *Config) { c.Siblings[1].Label = "dev" },
+func TestInvalidSiblingConfigIsReportedBySiblingsOnly(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mutate func(*Config)
+		title  string
+	}{
+		"instance without a label": {
+			func(c *Config) { c.Instance.Label = "" },
+			"invalid sibling configuration: Instance needs a non-empty Name and Label",
+		},
+		"duplicate name and label": {
+			func(c *Config) { c.Siblings[1].Label = "dev" },
+			`invalid sibling configuration: two siblings share the name "orders" and the same label`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := labelledConfig()
-			mutate(&cfg)
-			defer func() {
-				if recover() == nil {
-					t.Error("Router did not panic")
-				}
-			}()
-			Router(cfg, []NamedSource{{Name: "primary", Source: nil}})
+			tc.mutate(&cfg)
+			handler := Router(cfg, []NamedSource{{Name: "primary", Source: nil}})
+			status, body := get(t, handler, "/__ashurbanipal/api/siblings")
+			if status != http.StatusInternalServerError || body["code"] != "invalid_config" || body["title"] != tc.title {
+				t.Errorf("GET /api/siblings = %d %v, want 500 invalid_config %q", status, body, tc.title)
+			}
+			if status, _ := get(t, handler, "/__ashurbanipal/api/sources"); status != http.StatusOK {
+				t.Errorf("GET /api/sources = %d, want 200", status)
+			}
 		})
 	}
 }

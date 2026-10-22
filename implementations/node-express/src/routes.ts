@@ -6,7 +6,7 @@ import {
   isEnabled,
   type ResolvedLimits,
   type Sibling,
-  validateSiblings,
+  siblingsConfigError,
   withDefaults,
 } from "./config.js";
 import type { DbSource } from "./db/types.js";
@@ -38,7 +38,8 @@ export interface NamedSource {
  * `DbSource` implementation(s) (PostgresSource, SqliteSource, MySqlSource)
  * it wants itself; there is no driver auto-detection. `sources` MUST be
  * non-empty — a host with nothing to browse should pass `enabled: false`
- * instead, not an empty list.
+ * instead, not an empty list. Invalid sibling config never throws:
+ * /api/siblings answers invalid_config and every other route still serves.
  *
  * When cfg.enabled is not true — including an empty/undefined Config,
  * which MUST mean disabled — createRouter returns a router that 404s
@@ -56,7 +57,6 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   if (sources.length === 0) {
     throw new Error("createRouter requires at least one source");
   }
-  validateSiblings(config);
 
   const limits = withDefaults(config.limits);
   const timeoutMs = limits.queryTimeoutSecs * 1000;
@@ -72,7 +72,11 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   registerGet(router, `${mount}/api/tables/referenced-by`, withApiHeaders(referencedByHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/structure`, withApiHeaders(structureHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/join`, withApiHeaders(tableJoinHandler(sources, limits, timeoutMs)));
-  registerGet(router, `${mount}/api/siblings`, withApiHeaders(siblingsHandler(config.instance, config.siblings ?? [])));
+  registerGet(
+    router,
+    `${mount}/api/siblings`,
+    withApiHeaders(siblingsHandler(config.instance, config.siblings ?? [], siblingsConfigError(config))),
+  );
 
   return router;
 }
@@ -374,8 +378,12 @@ function structureHandler(sources: NamedSource[], timeoutMs: number) {
   };
 }
 
-function siblingsHandler(instance: Instance | undefined, siblings: Sibling[]) {
+function siblingsHandler(instance: Instance | undefined, siblings: Sibling[], configError: string | undefined) {
   return async (_req: Request, res: Response): Promise<void> => {
+    if (configError !== undefined) {
+      httpProblemError(res, 500, "invalid_config", `invalid sibling configuration: ${configError}`);
+      return;
+    }
     const statuses = await checkSiblings(siblings, instance);
     res.json(
       instance

@@ -57,23 +57,24 @@ export function basePath(config: Config): string {
   return config.basePath && config.basePath.length > 0 ? config.basePath : "/__ashurbanipal";
 }
 
-/** The instance/label rules of spec/protocol.md §5.6; throws on a violation. */
-export function validateSiblings(config: Config): void {
+/** The first instance/label rule of spec/protocol.md §5.6 that `config` breaks, or undefined. */
+export function siblingsConfigError(config: Config): string | undefined {
   const { instance, siblings = [] } = config;
   // Config may come from parsed JSON, so the types are checked, not assumed.
   const nonEmpty = (v: unknown) => typeof v === "string" && v !== "";
   if (instance && (!nonEmpty(instance.name) || !nonEmpty(instance.label))) {
-    throw new Error("instance needs a non-empty name and label");
+    return "instance needs a non-empty name and label";
   }
   const seen = new Set<string>();
   for (const s of siblings) {
     if (s.label !== undefined && !nonEmpty(s.label)) {
-      throw new Error(`sibling ${JSON.stringify(s.name)} needs a non-empty string label, or none`);
+      return `sibling ${JSON.stringify(s.name)} needs a non-empty string label, or none`;
     }
     const key = JSON.stringify([s.name, s.label ?? null]);
-    if (seen.has(key)) throw new Error(`two siblings share the name ${JSON.stringify(s.name)} and the same label`);
+    if (seen.has(key)) return `two siblings share the name ${JSON.stringify(s.name)} and the same label`;
     seen.add(key);
   }
+  return undefined;
 }
 
 /** Whether `s` is this instance's own entry, which is reported healthy without a health check: it is serving the response. */

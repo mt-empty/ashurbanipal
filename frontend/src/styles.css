@@ -321,11 +321,15 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
           padding: .5rem; width: max-content; max-width: min(22rem, 90vw);
           box-shadow: 0 4px 16px #0004; }
 #siblings-heading { margin: .1rem .6rem .5rem; font-size: .75rem; color: var(--text-muted); }
+#siblings-error { margin: 0 .6rem .3rem; font-size: .8125rem; }
+#siblings-error p { margin: 0; }
+#siblings-error p + p { margin-top: .35rem; }
+#siblings-error-text { color: var(--text-muted); overflow-wrap: anywhere; }
 #siblings-list { display: flex; flex-direction: column; }
 .sibling-row { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem;
                border-radius: 6px; color: inherit; text-decoration: none; }
 .sibling-row:hover { background: var(--hover); }
-/* Full name is in `title` (see loadSiblings()) as the truncation escape hatch. */
+/* Full name is in `title` (see paintRow and renderMatrix) as the truncation escape hatch. */
 .sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                 white-space: nowrap; font-family: var(--font-mono); }
 .sibling-state { color: var(--text-muted); font-size: .75rem; }

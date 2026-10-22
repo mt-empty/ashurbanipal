@@ -12,9 +12,6 @@ class InvalidBackendException(value: String) : RuntimeException(
 /** Rejects invalid source names before lookup (`spec/protocol.md` §1). */
 class InvalidSourceException(message: String) : RuntimeException(message)
 
-/** Rejects an invalid `instance` or sibling `label` (`spec/protocol.md` §5.6). */
-class InvalidSiblingException(message: String) : RuntimeException(message)
-
 /** A named browsable data source (`spec/protocol.md` §1). */
 data class Source(
     val name: String = "",
@@ -46,20 +43,27 @@ class AshurbanipalProperties(
         if (duplicates.isNotEmpty()) {
             throw InvalidSourceException("ashurbanipal.sources names must be unique, duplicated: $duplicates")
         }
-        if (enabled) validateSiblings()
     }
 
-    private fun validateSiblings() {
+    /**
+     * The first `instance`/`label` rule of `spec/protocol.md` §5.6 this config
+     * breaks, or null. Never thrown: `/api/siblings` reports it and every
+     * other route still serves.
+     */
+    val siblingsConfigError: String? = if (enabled) findSiblingsConfigError() else null
+
+    private fun findSiblingsConfigError(): String? {
         if (instance != null && (instance.name.isEmpty() || instance.label.isEmpty())) {
-            throw InvalidSiblingException("ashurbanipal.instance needs a non-empty name and label")
+            return "ashurbanipal.instance needs a non-empty name and label"
         }
         siblings.firstOrNull { it.label == "" }?.let {
-            throw InvalidSiblingException("ashurbanipal.siblings entry \"${it.name}\" has an empty label; omit it instead")
+            return "ashurbanipal.siblings entry \"${it.name}\" has an empty label; omit it instead"
         }
         val duplicates = siblings.groupBy { it.name to it.label }.filterValues { it.size > 1 }.keys
         if (duplicates.isNotEmpty()) {
-            throw InvalidSiblingException("ashurbanipal.siblings name and label pairs must be unique, duplicated: $duplicates")
+            return "ashurbanipal.siblings name and label pairs must be unique, duplicated: $duplicates"
         }
+        return null
     }
 
     /** Whether [sibling] is this instance's own entry, reported healthy without a health check: it is serving the response. */

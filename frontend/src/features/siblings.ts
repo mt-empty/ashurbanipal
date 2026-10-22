@@ -1,4 +1,4 @@
-import { api } from "../core/api.js";
+import { ApiError, api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
 import type { Sibling, SiblingsResponse } from "../core/types.js";
 import {
@@ -65,6 +65,7 @@ async function loadSiblings(): Promise<void> {
   inFlight = true;
   lastFetchStarted = performance.now();
   let body: SiblingsResponse | undefined;
+  let configError: string | undefined;
   try {
     // no-store: Chrome otherwise queues an identical GET behind one still in
     // flight, for up to 20 s.
@@ -74,7 +75,9 @@ async function loadSiblings(): Promise<void> {
     });
     siblingsWarned = false;
   } catch (e) {
-    if (!siblingsWarned) {
+    // Stays wrong until the host restarts, so it is shown, not retried.
+    if (e instanceof ApiError && e.code === "invalid_config") configError = e.message;
+    else if (!siblingsWarned) {
       console.warn("ashurbanipal: /siblings fetch failed; retrying", e);
       siblingsWarned = true;
     }
@@ -82,14 +85,38 @@ async function loadSiblings(): Promise<void> {
     inFlight = false;
   }
   // A failure keeps whatever was last shown; only a retry can replace it.
-  if (!body) {
+  if (!body && configError === undefined) {
     scheduleRetry();
     return;
   }
   clearTimeout(retryTimer);
   retryTimer = undefined;
   retryDelay = FRESH_MS;
-  render(body);
+  if (body) render(body);
+  else renderConfigError(configError ?? "");
+}
+
+function stampHeading(prefix: string): void {
+  const at = new Date();
+  const updated = el("time", undefined, at.toLocaleTimeString());
+  updated.dateTime = at.toISOString();
+  updated.title = at.toLocaleString();
+  $("siblings-heading").replaceChildren(prefix, "Updated ", updated, ".");
+}
+
+function renderConfigError(message: string): void {
+  setNoticePlace(null);
+  $("siblings").hidden = false;
+  $("siblings-summary").textContent = "Other services · config error";
+  $("siblings-dot").className = dotClass(false);
+  $("siblings-matrix").hidden = true;
+  $("siblings-foot").hidden = true;
+  matrixShape = "";
+  listShape = "";
+  $("siblings-list").replaceChildren();
+  stampHeading("Other services' databases. ");
+  $("siblings-error-text").textContent = message;
+  $("siblings-error").hidden = false;
 }
 
 function render(body: SiblingsResponse): void {
@@ -102,19 +129,13 @@ function render(body: SiblingsResponse): void {
   $("siblings-summary").textContent =
     down > 0 ? `Other services · ${down} down` : `Other services · ${others.length} up`;
   $("siblings-dot").className = dotClass(down === 0);
+  $("siblings-error").hidden = true;
 
   const matrix = buildSiblingMatrix(body);
   $("siblings-matrix").hidden = matrix === null;
   $("siblings-foot").hidden = matrix === null;
-  const at = new Date();
-  const updated = el("time", undefined, at.toLocaleTimeString());
-  updated.dateTime = at.toISOString();
-  updated.title = at.toLocaleString();
-  $("siblings-heading").replaceChildren(
+  stampHeading(
     matrix ? "Other services' databases. " : "Other services' databases. Opens their Ashurbanipal in a new tab. ",
-    "Updated ",
-    updated,
-    ".",
   );
   if (matrix) renderMatrix(matrix);
   else matrixShape = "";
