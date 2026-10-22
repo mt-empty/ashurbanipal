@@ -1,5 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
-import { $, el, reportError } from "../core/dom.js";
+import { $, clearError, el, reportError } from "../core/dom.js";
+import { state } from "../core/state.js";
 import { formatClock } from "../lib/format.js";
 import { startCountdown, stopCountdown } from "./load-bar.js";
 import { showViewNotice } from "./view-notice.js";
@@ -28,6 +29,7 @@ let chipTimer: ReturnType<typeof setTimeout> | undefined;
 let deadline = 0;
 let fetching = false;
 let failures = 0;
+let tickError = "";
 let lastInput = Date.now();
 
 function arm(remainingMs: number): void {
@@ -54,10 +56,12 @@ function tick(): void {
     return;
   }
   if (fetching) return;
-  void loadData({ resetScroll: false, highlightNew: true, auto: true }).finally(() => {
-    // A load that never fetched (no view yet) leaves nothing else to restart the countdown.
-    if (intervalMs > 0 && Date.now() >= deadline) restart();
-  });
+  // No view while a source or schema switch loads its tables, or in an empty one: keep counting, fetch nothing.
+  if (!state.view) {
+    restart();
+    return;
+  }
+  void loadData({ resetScroll: false, highlightNew: true, auto: true });
 }
 
 function render(): void {
@@ -74,6 +78,12 @@ function render(): void {
   for (const radio of document.querySelectorAll<HTMLInputElement>("#refresh-pop-list input")) {
     radio.checked = Number(radio.value) === intervalMs;
   }
+}
+
+function closeMenu(): void {
+  const pop = $("refresh-pop");
+  if (pop.matches(":popover-open")) pop.hidePopover();
+  $("refresh-menu-btn").focus();
 }
 
 function noteInput(): void {
@@ -105,18 +115,31 @@ export function setFetching(on: boolean): void {
   if (!on) restart();
 }
 
+function showTickError(message: string): void {
+  tickError = message;
+  reportError(new Error(message));
+}
+
 export function noteLoadOk(): void {
   failures = 0;
+  // A tick's own error goes once a tick succeeds; one the user's action left stays until their next action.
+  if (tickError && $("error").textContent === tickError) clearError();
+  tickError = "";
   const updated = $("row-updated");
   updated.textContent = ` · updated ${formatClock(new Date())}`;
   updated.hidden = false;
 }
 
 export function noteTickFailed(e: unknown): void {
-  if (++failures < MAX_FAILURES) return;
-  const last = e instanceof Error ? e.message : String(e);
+  const message = e instanceof Error ? e.message : String(e);
+  if (++failures < MAX_FAILURES) {
+    showTickError(message);
+    return;
+  }
   stop();
-  reportError(new Error(`Auto-refresh turned off after ${MAX_FAILURES} failed refreshes. Last error: ${last}.`));
+  showTickError(
+    `Auto-refresh turned off after ${MAX_FAILURES} failed refreshes. Last error: ${message.replace(/\.$/, "")}.`,
+  );
 }
 
 // Also the manual refresh's count; 0 hides it, so a chip never outlives the view it described.
@@ -139,16 +162,22 @@ export function startAutoRefresh(): void {
       radio.type = "radio";
       radio.name = "refresh-interval";
       radio.value = String(ms);
-      radio.onchange = () => {
-        chooseInterval(ms);
-        $("refresh-pop").hidePopover();
-        $("refresh-menu-btn").focus();
-      };
+      // Arrow keys move the choice like any radio group; only a pointer click or Enter closes the menu.
+      radio.onchange = () => chooseInterval(ms);
       const row = el("label");
       row.append(radio, label);
+      row.onclick = (e) => {
+        if (e.detail > 0) closeMenu();
+      };
       return row;
     }),
   );
+  list.onkeydown = (e) => {
+    if (e.key !== "Enter") return;
+    // Otherwise the Enter goes on to activate the ▾ button that now has focus and reopens the menu.
+    e.preventDefault();
+    closeMenu();
+  };
   render();
 
   document.addEventListener("visibilitychange", () => {

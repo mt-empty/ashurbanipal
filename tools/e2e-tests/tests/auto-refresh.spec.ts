@@ -17,18 +17,19 @@ function payload(rows: Row[]) {
   };
 }
 
+type Failure = { status: number; title: string; code: string };
+const UNAVAILABLE: Failure = { status: 503, title: "Service Unavailable", code: "unavailable" };
+
 async function setup(page: Page, rows: Row[] = [[1, "a"], [2, "b"]]) {
-  const mock = { body: payload(rows), status: 200, hits: 0, gate: null as Promise<void> | null };
+  const mock = { body: payload(rows), fail: null as Failure | null, hits: 0, gate: null as Promise<void> | null };
   await page.clock.install();
   await gotoApp(page);
   await page.route("**/api/tables/data*", async (route) => {
     mock.hits++;
     if (mock.gate) await mock.gate;
-    if (mock.status !== 200) {
-      await route.fulfill({ status: mock.status, json: { title: "Service Unavailable", code: "unavailable" } });
-    } else {
-      await route.fulfill({ json: mock.body });
-    }
+    const { fail } = mock;
+    if (fail) await route.fulfill({ status: fail.status, json: { title: fail.title, code: fail.code } });
+    else await route.fulfill({ json: mock.body });
   });
   await selectTable(page, "users");
   return mock;
@@ -126,7 +127,14 @@ test("a hidden tab pauses ticks and refreshes on return when overdue", async ({ 
 test("five failed refreshes turn it off and report the last error", async ({ page }) => {
   const mock = await setup(page);
   await choose(page, "5 s");
-  mock.status = 503;
+  mock.fail = UNAVAILABLE;
+  await tick(page, mock);
+  await expect(page.locator("#error")).toHaveText("Service Unavailable");
+  mock.fail = null;
+  await tick(page, mock);
+  await expect(page.locator("#error")).toBeEmpty();
+
+  mock.fail = UNAVAILABLE;
   for (let i = 0; i < 4; i++) await tick(page, mock);
   await expect(page.locator("#refresh-interval")).toHaveText("· 5 s");
 
@@ -165,4 +173,56 @@ test("a tick tints new rows, shows the +N chip and the updated time", async ({ p
 
   await tick(page, mock);
   await expect(page.locator("#status")).toHaveText("");
+});
+
+test("arrow keys move the interval choice without closing the menu; Enter closes it", async ({ page }) => {
+  await setup(page);
+  await page.locator("#refresh-menu-btn").click();
+  await page.getByRole("radio", { name: "Off", exact: true }).focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator("#refresh-pop")).toBeVisible();
+  await expect(page.getByRole("radio", { name: "10 s", exact: true })).toBeChecked();
+
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#refresh-pop")).toBeHidden();
+  await expect(page.locator("#refresh-menu-btn")).toBeFocused();
+  await expect(page.locator("#refresh-interval")).toHaveText("· 10 s");
+});
+
+test("a tick leaves an error from the user's own action in place", async ({ page }) => {
+  const mock = await setup(page);
+  await choose(page, "5 s");
+  mock.fail = UNAVAILABLE;
+  await page.locator("#refresh").click();
+  await expect(page.locator("#error")).toHaveText("Service Unavailable");
+
+  mock.fail = null;
+  await tick(page, mock);
+  await expect(page.locator("#error")).toHaveText("Service Unavailable");
+});
+
+test("a slow tick shows the bar but does not announce loading", async ({ page }) => {
+  const mock = await setup(page);
+  await choose(page, "5 s");
+  let release!: () => void;
+  mock.gate = new Promise<void>((r) => (release = r));
+  const before = mock.hits;
+  await page.clock.fastForward(5000);
+  await expect.poll(() => mock.hits).toBe(before + 1);
+  await page.clock.fastForward(300);
+
+  await expect(page.locator("#load-bar")).toHaveAttribute("data-state", "loading");
+  await expect(page.locator("#status")).not.toHaveText("loading…");
+  mock.gate = null;
+  release();
+  await waitForIdle(page);
+});
+
+test("a tick the role can't read gets the plain-language message", async ({ page }) => {
+  const mock = await setup(page);
+  await choose(page, "5 s");
+  mock.fail = { status: 403, title: "permission denied for table users", code: "not_readable" };
+  await tick(page, mock);
+  await expect(page.locator("#error")).toHaveText("you don't have access to users");
 });

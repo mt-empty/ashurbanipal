@@ -68,9 +68,11 @@ main { height: 100%; overflow: auto; }
    dragged along horizontally. */
 #content { box-sizing: border-box; padding: 0 var(--gap-xl) var(--gap-lg); width: max-content; min-width: 100%; }
 /* Pinned to the scroller's top and viewport-wide (not table-wide); the negative
-   margin keeps it out of the flow, like the row spinner. */
+   margin keeps it out of the flow, like the row spinner. 100vw counts a classic
+   vertical scrollbar, so min() keeps a narrow table's page from growing a
+   horizontal one. */
 #load-bar { position: sticky; top: 0; left: var(--gap-xl); z-index: 2; box-sizing: border-box;
-            width: calc(100vw - 2 * var(--gap-xl)); height: 2px; margin-bottom: -2px;
+            width: min(100%, calc(100vw - 2 * var(--gap-xl))); height: 2px; margin-bottom: -2px;
             overflow: hidden; background: var(--rule); }
 #load-bar:not([data-state]) { display: none; }
 #load-bar i { display: block; height: 100%; background: var(--rule-strong); transform-origin: left; }

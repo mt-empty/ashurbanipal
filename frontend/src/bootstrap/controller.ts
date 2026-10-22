@@ -52,11 +52,22 @@ let inFlightFetches = 0;
 const LOADING_DELAY_MS = 250;
 let slowTimer: ReturnType<typeof setTimeout> | undefined;
 
-// Everything a sighted or screen-reader user sees of a slow fetch comes on together.
-function setSlow(slow: boolean): void {
+// Everything a sighted or screen-reader user sees of a slow fetch comes on
+// together; an auto tick stays silent so a screen reader isn't told every interval.
+function setSlow(slow: boolean, announce = true): void {
   tableEl.toggleAttribute("data-slow", slow);
   setLoadingBar(slow);
-  setStatus(slow ? "loading…" : "");
+  if (announce || !slow) setStatus(slow ? "loading…" : "");
+}
+
+// The one code the frontend branches on (ui-guidelines R9): a table that
+// cleared the table listing but the role can't actually read (e.g. a stale
+// MySQL/MariaDB listing, docs/adapter-decisions.md §5.2/§5.3) gets a
+// plain-language message instead of the server's implementation-defined title.
+function plainError(e: unknown, view: View): unknown {
+  return e instanceof ApiError && e.code === "not_readable"
+    ? new Error(`you don't have access to ${startTable(view)}`)
+    : e;
 }
 
 // `alias.*` has no wire form, so those tables' column names come from the catalog.
@@ -117,7 +128,7 @@ function dataPath(view: View, params: URLSearchParams): Promise<string> | string
   }
 }
 
-async function fetchViewData(req: ViewRequest): Promise<ViewData> {
+async function fetchViewData(req: ViewRequest, auto: boolean): Promise<ViewData> {
   const { view, sort, order } = req;
   // Captured once, never re-read later: without this, a slow fetch for
   // table A would clear table B's row-loading flag (whatever the view
@@ -144,7 +155,7 @@ async function fetchViewData(req: ViewRequest): Promise<ViewData> {
   if (inFlightFetches++ === 0) {
     setFetching(true);
     setTableBusy(true);
-    slowTimer = setTimeout(() => setSlow(true), LOADING_DELAY_MS);
+    slowTimer = setTimeout(() => setSlow(true, !auto), LOADING_DELAY_MS);
   }
   setRowLoading(table, true);
   try {
@@ -192,13 +203,16 @@ export async function loadData({
 }: {
   resetScroll?: boolean;
   highlightNew?: boolean;
-  // An auto-refresh tick: it only re-fetches, so it never retries a dropped sort or filter or opens the join dialog.
+  // An auto-refresh tick: it only re-fetches, so it never retries a dropped sort or filter,
+  // opens the join dialog, or clears a message the user's own last action left.
   auto?: boolean;
   // A view to try; it replaces the state only if its data arrives.
   next?: ViewRequest;
 } = {}): Promise<void> {
-  clearError();
-  clearJoinNotice();
+  if (!auto) {
+    clearError();
+    clearJoinNotice();
+  }
   const req = next ?? currentRequest();
   syncViewNotice(req);
   if (req === null) {
@@ -213,12 +227,11 @@ export async function loadData({
   const widthScope = widthScopeOf(view);
   let data: ViewData;
   try {
-    data = await fetchViewData(req);
+    data = await fetchViewData(req, auto);
   } catch (e) {
     if (superseded()) return;
     if (auto) {
-      reportError(e);
-      noteTickFailed(e);
+      noteTickFailed(plainError(e, view));
       return;
     }
     // A restored sort or a URL-restored filter can each name a column that no
@@ -227,17 +240,8 @@ export async function loadData({
     // A view not yet in view restored nothing; its failure leaves the state alone.
     if (!next && dropOneStaleInput(e instanceof ApiError ? e.code : undefined))
       return loadData({ resetScroll, highlightNew });
-    // The one code the frontend branches on (ui-guidelines R9): a table
-    // that cleared the table listing but the role can't actually
-    // read (e.g. a stale MySQL/MariaDB listing, docs/adapter-decisions.md
-    // §5.2/§5.3) gets a plain-language message instead of the server's
-    // implementation-defined title text.
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
-    if (e instanceof ApiError && e.code === "not_readable") {
-      reportError(new Error(`you don't have access to ${startTable(view)}`));
-      return;
-    }
-    reportError(e);
+    reportError(plainError(e, view));
     return;
   }
   if (superseded()) return;

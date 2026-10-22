@@ -90,9 +90,11 @@ main { height: 100%; overflow: auto; }
    dragged along horizontally. */
 #content { box-sizing: border-box; padding: 0 var(--gap-xl) var(--gap-lg); width: max-content; min-width: 100%; }
 /* Pinned to the scroller's top and viewport-wide (not table-wide); the negative
-   margin keeps it out of the flow, like the row spinner. */
+   margin keeps it out of the flow, like the row spinner. 100vw counts a classic
+   vertical scrollbar, so min() keeps a narrow table's page from growing a
+   horizontal one. */
 #load-bar { position: sticky; top: 0; left: var(--gap-xl); z-index: 2; box-sizing: border-box;
-            width: calc(100vw - 2 * var(--gap-xl)); height: 2px; margin-bottom: -2px;
+            width: min(100%, calc(100vw - 2 * var(--gap-xl))); height: 2px; margin-bottom: -2px;
             overflow: hidden; background: var(--rule); }
 #load-bar:not([data-state]) { display: none; }
 #load-bar i { display: block; height: 100%; background: var(--rule-strong); transform-origin: left; }
@@ -2509,6 +2511,7 @@ var chipTimer;
 var deadline = 0;
 var fetching = false;
 var failures = 0;
+var tickError = "";
 var lastInput = Date.now();
 function arm(remainingMs) {
   clearTimeout(timer);
@@ -2530,9 +2533,11 @@ function tick() {
     return;
   }
   if (fetching) return;
-  void loadData({ resetScroll: false, highlightNew: true, auto: true }).finally(() => {
-    if (intervalMs > 0 && Date.now() >= deadline) restart();
-  });
+  if (!state.view) {
+    restart();
+    return;
+  }
+  void loadData({ resetScroll: false, highlightNew: true, auto: true });
 }
 function render3() {
   const on = intervalMs > 0;
@@ -2548,6 +2553,11 @@ function render3() {
   for (const radio of document.querySelectorAll("#refresh-pop-list input")) {
     radio.checked = Number(radio.value) === intervalMs;
   }
+}
+function closeMenu() {
+  const pop2 = $("refresh-pop");
+  if (pop2.matches(":popover-open")) pop2.hidePopover();
+  $("refresh-menu-btn").focus();
 }
 function noteInput() {
   lastInput = Date.now();
@@ -2573,17 +2583,28 @@ function setFetching(on) {
   fetching = on;
   if (!on) restart();
 }
+function showTickError(message) {
+  tickError = message;
+  reportError(new Error(message));
+}
 function noteLoadOk() {
   failures = 0;
+  if (tickError && $("error").textContent === tickError) clearError();
+  tickError = "";
   const updated = $("row-updated");
   updated.textContent = ` \xB7 updated ${formatClock(/* @__PURE__ */ new Date())}`;
   updated.hidden = false;
 }
 function noteTickFailed(e) {
-  if (++failures < MAX_FAILURES) return;
-  const last = e instanceof Error ? e.message : String(e);
+  const message = e instanceof Error ? e.message : String(e);
+  if (++failures < MAX_FAILURES) {
+    showTickError(message);
+    return;
+  }
   stop();
-  reportError(new Error(`Auto-refresh turned off after ${MAX_FAILURES} failed refreshes. Last error: ${last}.`));
+  showTickError(
+    `Auto-refresh turned off after ${MAX_FAILURES} failed refreshes. Last error: ${message.replace(/\.$/, "")}.`
+  );
 }
 function setNewChip(count) {
   const chip = $("row-new-chip");
@@ -2603,16 +2624,20 @@ function startAutoRefresh() {
       radio.type = "radio";
       radio.name = "refresh-interval";
       radio.value = String(ms);
-      radio.onchange = () => {
-        chooseInterval(ms);
-        $("refresh-pop").hidePopover();
-        $("refresh-menu-btn").focus();
-      };
+      radio.onchange = () => chooseInterval(ms);
       const row2 = el("label");
       row2.append(radio, label);
+      row2.onclick = (e) => {
+        if (e.detail > 0) closeMenu();
+      };
       return row2;
     })
   );
+  list.onkeydown = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    closeMenu();
+  };
   render3();
   document.addEventListener("visibilitychange", () => {
     if (intervalMs === 0) return;
@@ -3200,7 +3225,7 @@ var current = null;
 function lastDropdownLabel() {
   return current?.ariaLabel ?? "";
 }
-function closeMenu() {
+function closeMenu2() {
   if (pop().matches(":popover-open")) pop().hidePopover();
 }
 var search = () => $("dd-pop-search");
@@ -3228,7 +3253,7 @@ function renderRows(opts, query) {
       }
       row2.onclick = () => {
         if (o.blocked) return;
-        closeMenu();
+        closeMenu2();
         opts.onPick(o.value);
       };
       return row2;
@@ -5832,10 +5857,13 @@ function setTableBusy(busy) {
 var inFlightFetches = 0;
 var LOADING_DELAY_MS = 250;
 var slowTimer;
-function setSlow(slow) {
+function setSlow(slow, announce = true) {
   tableEl.toggleAttribute("data-slow", slow);
   setLoadingBar(slow);
-  setStatus(slow ? "loading\u2026" : "");
+  if (announce || !slow) setStatus(slow ? "loading\u2026" : "");
+}
+function plainError(e, view) {
+  return e instanceof ApiError && e.code === "not_readable" ? new Error(`you don't have access to ${startTable(view)}`) : e;
 }
 async function joinPath(def, params) {
   const names = /* @__PURE__ */ new Map();
@@ -5885,7 +5913,7 @@ function dataPath(view, params) {
     }
   }
 }
-async function fetchViewData(req) {
+async function fetchViewData(req, auto) {
   const { view, sort, order } = req;
   const table = startTable(view);
   const params = new URLSearchParams({
@@ -5906,7 +5934,7 @@ async function fetchViewData(req) {
   if (inFlightFetches++ === 0) {
     setFetching(true);
     setTableBusy(true);
-    slowTimer = setTimeout(() => setSlow(true), LOADING_DELAY_MS);
+    slowTimer = setTimeout(() => setSlow(true, !auto), LOADING_DELAY_MS);
   }
   setRowLoading(table, true);
   try {
@@ -5946,8 +5974,10 @@ async function loadData2({
   auto = false,
   next
 } = {}) {
-  clearError();
-  clearJoinNotice();
+  if (!auto) {
+    clearError();
+    clearJoinNotice();
+  }
   const req = next ?? currentRequest();
   syncViewNotice(req);
   if (req === null) {
@@ -5961,22 +5991,17 @@ async function loadData2({
   const widthScope = widthScopeOf(view);
   let data;
   try {
-    data = await fetchViewData(req);
+    data = await fetchViewData(req, auto);
   } catch (e) {
     if (superseded()) return;
     if (auto) {
-      reportError(e);
-      noteTickFailed(e);
+      noteTickFailed(plainError(e, view));
       return;
     }
     if (!next && dropOneStaleInput(e instanceof ApiError ? e.code : void 0))
       return loadData2({ resetScroll, highlightNew });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
-    if (e instanceof ApiError && e.code === "not_readable") {
-      reportError(new Error(`you don't have access to ${startTable(view)}`));
-      return;
-    }
-    reportError(e);
+    reportError(plainError(e, view));
     return;
   }
   if (superseded()) return;
