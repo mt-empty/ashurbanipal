@@ -24,16 +24,17 @@ interface SuggestOptions {
 }
 
 export interface SuggestList {
-  show(matches: Suggestion[], head: string, index: number): void;
+  show(matches: Suggestion[], head: string): void;
   close(): void;
   // Bumped on every show and close, so a slow lookup can tell its text has changed.
   token(): number;
 }
 
-// A listbox of suggestions under a text field: the arrow keys move a highlight,
-// Tab accepts (the first row when none is highlighted), Enter accepts only a
-// highlighted row so it still submits otherwise, Escape and a click elsewhere
-// close it. The field keeps focus throughout.
+// A listbox of suggestions under a text field. It opens with no row
+// highlighted; the arrow keys move a highlight, Tab accepts (the first
+// unblocked row when none is highlighted), Enter accepts only a highlighted
+// row so it still submits otherwise, Escape and a click elsewhere close it.
+// The field keeps focus throughout.
 export function createSuggestList(opts: SuggestOptions): SuggestList {
   const { input, popup, list, idPrefix } = opts;
   let matches: Suggestion[] = [];
@@ -125,10 +126,10 @@ export function createSuggestList(opts: SuggestOptions): SuggestList {
   });
 
   return {
-    show(next, nextHead, nextIndex) {
+    show(next, nextHead) {
       matches = next;
       head = nextHead;
-      index = nextIndex;
+      index = -1;
       render();
       popup.hidden = false;
       opts.place?.();

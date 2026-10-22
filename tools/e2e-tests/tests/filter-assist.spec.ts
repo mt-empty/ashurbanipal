@@ -51,6 +51,33 @@ test("Enter submits what is typed even while a value list is open", async ({ pag
   await expect(page.locator("#filter-suggest")).toBeHidden();
 });
 
+test("Enter on a cleared filter resets the view instead of completing a column", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await applyFilter(page, "status = completed");
+  const input = page.locator("#filter");
+  await input.fill("");
+  await expect(suggestions(page).first()).toBeVisible();
+  await input.press("Enter");
+  await waitForIdle(page);
+  await expect(input).toHaveValue("");
+  expect(new URL(page.url()).searchParams.get("filter")).toBeNull();
+  await expect(page.locator("#filter-suggest")).toBeHidden();
+});
+
+test("Enter submits a part-typed column instead of completing it", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const input = page.locator("#filter");
+  await input.fill("sta");
+  await expect(suggestions(page)).toHaveText(["status"]);
+  await input.press("Enter");
+  // Only a submit runs parseFilterDsl, so the parse error proves Enter submitted.
+  await expect(page.locator("#error")).toContainText("expected operator");
+  await expect(input).toHaveValue("sta");
+  await expect(page.locator("#filter-suggest")).toBeHidden();
+});
+
 test("an arrow key highlights a row and Enter then accepts it", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
@@ -154,6 +181,8 @@ test("the suggestion popup is exposed as a combobox with the highlighted row act
   await expect(input).toHaveAttribute("aria-expanded", "false");
   await input.focus();
   await expect(input).toHaveAttribute("aria-expanded", "true");
+  await expect(input).not.toHaveAttribute("aria-activedescendant");
+  await input.press("ArrowDown");
   await expect(input).toHaveAttribute("aria-activedescendant", "filter-suggest-0");
   await expect(suggestions(page).first()).toHaveAttribute("aria-selected", "true");
   await input.press("Escape");

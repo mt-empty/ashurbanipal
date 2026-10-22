@@ -140,9 +140,9 @@ Two components, same as the original concept:
     operator after a column, the column's common values (§4, same endpoint
     as the header ▾) after an operator, and `AND`/`OR` once a letter is
     typed after a finished condition. Accepting a row adds a space, so the
-    next list follows. Columns highlight their first row, so Enter accepts
-    it; the other lists highlight nothing, so Enter still submits what is
-    typed (Tab or an arrow key picks a row). What is allowed next comes from
+    next list follows. Every list opens with no row highlighted, so Enter
+    still submits what is typed (Tab or an arrow key picks a row). What is
+    allowed next comes from
     a lenient tokenizer (`lib/filter-tokens.ts`) that only looks at the text
     before the caret; `parseFilterDsl` (`spec/filter-dsl.md`) alone decides
     what is accepted.

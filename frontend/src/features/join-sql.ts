@@ -258,7 +258,7 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     const only =
       rows.length === 1 && !rows[0].blocked && rows[0].insert.trim().toLowerCase() === ctx.partial.toLowerCase();
     if (only) return;
-    suggest.show(rows, ctx.head, -1);
+    suggest.show(rows, ctx.head);
   }
 
   // Column names and types are what catches an unknown column or a mismatched pair; read them for every table the text names.
