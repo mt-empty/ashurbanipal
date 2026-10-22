@@ -6,6 +6,19 @@ import { defineConfig, devices } from "@playwright/test";
 // isn't touched just to support this.
 const CRATE_ROOT = "../../implementations/rust/axum";
 const PORT = 4320;
+const SECOND_PORT = 4321;
+
+// A labelled dev/int pair so Other services shows a switchable environment.
+function demoServer(port: number, env: Record<string, string>) {
+  return {
+    command: "cargo run -p ashurbanipal-axum --example demo",
+    cwd: CRATE_ROOT,
+    url: `http://localhost:${port}/health`,
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+    env: { ...process.env, PORT: String(port), SIBLINGS_UP: "1", ...env },
+  };
+}
 
 export default defineConfig({
   testDir: "./tests",
@@ -19,12 +32,8 @@ export default defineConfig({
     video: { mode: "on", size: { width: 1280, height: 720 } },
     ...devices["Desktop Chrome"],
   },
-  webServer: {
-    command: "cargo run -p ashurbanipal-axum --example demo",
-    cwd: CRATE_ROOT,
-    url: `http://localhost:${PORT}/health`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    env: { ...process.env, PORT: String(PORT), SIBLING_PORT: "" },
-  },
+  webServer: [
+    demoServer(PORT, { INSTANCE_LABEL: "dev", SIBLING_PORT: String(SECOND_PORT), SIBLING_LABEL: "int" }),
+    demoServer(SECOND_PORT, { INSTANCE_LABEL: "int", SIBLING_PORT: String(PORT), SIBLING_LABEL: "dev" }),
+  ],
 });
