@@ -2,6 +2,8 @@ import { expect, type Page, type Response } from "@playwright/test";
 import { APP_PATH, gotoApp, selectTable, waitForIdle } from "./helpers";
 
 export const ORDERS_USERS = "FROM orders o LEFT JOIN users u ON o.user_id = u.id";
+/** ORDERS_USERS as the page prints it, and as it rides in `?join=`. */
+export const ORDERS_USERS_CANONICAL = "SELECT *\nFROM orders o\nLEFT JOIN users u ON o.user_id = u.id";
 
 /** Resolves with the next /api/tables/join response; arm it before the action. */
 export function nextJoinResponse(page: Page): Promise<Response> {

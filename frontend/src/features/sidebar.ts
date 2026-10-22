@@ -1,6 +1,6 @@
 import { loadData, supersedeLoads } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
-import { $, el, isPlainClick, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
+import { $, el, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
 import {
   applyStoredSort,
   clearFilter,
@@ -230,8 +230,7 @@ export async function loadTables(): Promise<void> {
     // Always set, not just when commented: long names get CSS-truncated
     // (see .row-name), so the title tooltip is the escape hatch.
     chip.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
-    chip.href = viewHref(t.name);
-    openInPlace(chip, () => {
+    linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
       switchTable(t.name);
       loadData();
     });
@@ -286,12 +285,23 @@ export interface JoinChip {
   href?: string;
 }
 
-function openInPlace(a: HTMLAnchorElement, run: () => void): void {
+// A plain click runs in place; every other click (middle, modified) is the
+// browser's new-tab/new-window gesture and must reach it.
+function linkTo(a: HTMLAnchorElement, href: string, run: () => void): HTMLAnchorElement {
+  a.href = href;
   a.onclick = (e) => {
-    if (!isPlainClick(e)) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     run();
   };
+  return a;
+}
+
+function actionButton(run: () => void): HTMLButtonElement {
+  const btn = el("button");
+  btn.type = "button";
+  btn.onclick = run;
+  return btn;
 }
 
 // Replaces the chips after the divider; called whenever the join in view or the saved list changes.
@@ -304,18 +314,7 @@ export function setJoinChips(chips: JoinChip[]): void {
   for (const e of joinEntries) e.li.remove();
   joinEntries = chips.map((c, i) => {
     const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
-    let chip: HTMLElement;
-    if (c.href) {
-      const a = el("a");
-      a.href = c.href;
-      openInPlace(a, c.run);
-      chip = a;
-    } else {
-      const btn = el("button");
-      btn.type = "button";
-      btn.onclick = c.run;
-      chip = btn;
-    }
+    const chip = c.href ? linkTo(el("a"), c.href, c.run) : actionButton(c.run);
     chip.textContent = c.label;
     chip.title = c.title;
     chip.classList.toggle("active", c.active);
