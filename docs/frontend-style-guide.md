@@ -207,8 +207,9 @@ a broken page.
   `aria-sort` on sortable headers, `aria-current="true"` on the active
   table chip, `aria-label` on icon-only buttons, text alternatives on
   the sibling health dots (never color-only status).
-- Every interactive affordance is keyboard-reachable — a real `<button>` as
-  the click target, not a bare `onclick` on a `<div>`/`<td>`.
+- Every interactive affordance is keyboard-reachable — a real `<button>`
+  (or `<a href>` when it navigates, `ui-guidelines.md` R13) as the click
+  target, not a bare `onclick` on a `<div>`/`<td>`.
 - Focus survives re-renders. Table redraws (`replaceChildren()`) must
   capture and restore focus (or move it somewhere stable), never let it
   silently fall through to `<body>`.
