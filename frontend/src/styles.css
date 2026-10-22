@@ -152,10 +152,32 @@ ul { list-style: none; margin: 0; padding: 0; }
    timer) so a sub-100ms re-fetch still acknowledges the click, separately
    from #status/aria-busy. inline-block so the rotate applies. */
 #refresh-icon { display: inline-block; }
+#refresh-icon svg { vertical-align: -3px; }
 #refresh.spinning #refresh-icon { animation: spin .5s linear; }
 @media (prefers-reduced-motion: reduce) {
   #refresh.spinning #refresh-icon { animation: none; }
 }
+
+/* Split button: #refresh plus the interval menu. The popover aligns to its right edge. */
+#refresh-split { display: inline-flex; border-radius: 6px; anchor-name: --refresh-anchor; }
+#refresh-split.on { background: var(--surface); }
+#refresh-split.on #refresh { color: CanvasText; }
+#actions #refresh-menu-btn { padding: .25rem .4rem; }
+#refresh-pop { position: fixed; position-anchor: --refresh-anchor;
+          position-try-fallbacks: flip-block, flip-inline;
+          inset: auto; top: calc(anchor(bottom) + .3rem); right: anchor(right);
+          margin: 0; border: 1px solid var(--border-strong); border-radius: 8px;
+          padding: .3rem; width: 14rem; box-shadow: 0 4px 16px #0004; }
+#refresh-pop-head { font-size: .6875rem; letter-spacing: .04em; text-transform: uppercase;
+          color: var(--text-muted); padding: .25rem .5rem .35rem; }
+#refresh-pop label { display: flex; align-items: center; gap: .5rem;
+          padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+#refresh-pop label:hover { background: var(--hover); }
+#refresh-pop input { accent-color: CanvasText; }
+#refresh-pop-foot { margin: .3rem 0 0; padding: .4rem .5rem .15rem; border-top: 1px solid var(--rule);
+          font-size: .75rem; line-height: 1.4; color: var(--text-muted); }
+#row-new-chip { margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px;
+          background: var(--row-new-bg); color: CanvasText; font-size: .75rem; }
 
 /* ==== Data table ==== */
 /* Scoped to #data-table so the Other services grid doesn't inherit these;

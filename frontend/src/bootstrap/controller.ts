@@ -1,5 +1,5 @@
 import { ApiError, api } from "../core/api.js";
-import { $, clearError, flashIcon, reportError, setStatus } from "../core/dom.js";
+import { $, clearError, reportError, setStatus } from "../core/dom.js";
 import {
   applyScopeParams,
   commitRequest,
@@ -15,6 +15,7 @@ import {
   type ViewRequest,
 } from "../core/state.js";
 import type { JoinDef, View, ViewData } from "../core/types.js";
+import { fetchEnded, fetchStarted, noteLoadOk, noteTickFailed, showNewChip } from "../features/auto-refresh.js";
 import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
@@ -140,6 +141,7 @@ async function fetchViewData(req: ViewRequest): Promise<ViewData> {
   // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
   // box's DSL text — URLSearchParams handles the URL-encoding.
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
+  fetchStarted();
   if (inFlightFetches++ === 0) {
     setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true), LOADING_DELAY_MS);
@@ -154,6 +156,7 @@ async function fetchViewData(req: ViewRequest): Promise<ViewData> {
       setSlow(false);
       setTableBusy(false);
     }
+    fetchEnded();
   }
 }
 
@@ -184,10 +187,13 @@ function updateViewChrome(): void {
 export async function loadData({
   resetScroll = true,
   highlightNew = false,
+  auto = false,
   next,
 }: {
   resetScroll?: boolean;
   highlightNew?: boolean;
+  // An auto-refresh tick: it only re-fetches, so it never retries a dropped sort or filter or opens the join dialog.
+  auto?: boolean;
   // A view to try; it replaces the state only if its data arrives.
   next?: ViewRequest;
 } = {}): Promise<void> {
@@ -210,6 +216,11 @@ export async function loadData({
     data = await fetchViewData(req);
   } catch (e) {
     if (superseded()) return;
+    if (auto) {
+      reportError(e);
+      noteTickFailed(e);
+      return;
+    }
     // A restored sort or a URL-restored filter can each name a column that no
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
@@ -244,6 +255,7 @@ export async function loadData({
   $<HTMLButtonElement>("columns-btn").disabled = false;
   $<HTMLButtonElement>("structure-btn").disabled = false;
   $<HTMLButtonElement>("refresh").disabled = false;
+  $<HTMLButtonElement>("refresh-menu-btn").disabled = false;
   updateColumnsButtonLabel();
   updateJoinChrome();
   refreshSavedChips();
@@ -277,16 +289,16 @@ export async function loadData({
   // this load, and its pager/#status must not overwrite the newer one's.
   if (superseded()) return;
   updatePager(data);
+  noteLoadOk();
   // Sighted users see the tint; announce the count for everyone else. The
   // next loadData clears #status the same way it clears "loading…".
   if (newRowKeys?.size) {
     setStatus(`${newRowKeys.size} new`);
-  } else if (highlightNew && newRowKeys) {
-    // A refresh that found nothing new: the row tint won't fire, so the
-    // button gets its own "done, unchanged" cue — a ✓ glyph swap mirroring
-    // the copy buttons, plus the sr-only #status line.
+    if (auto) showNewChip(newRowKeys.size);
+  } else if (highlightNew && newRowKeys && !auto) {
+    // Nothing new, so no tint: the icon's spin and the "updated" time are the
+    // sighted cue; this line is for everyone else.
     setStatus("no changes");
-    flashIcon($("refresh-icon"), "✓", 1000);
   }
   // Default true: table switch and filter submit jump to a new row 0, so
   // snapping to the top orients the user. Sort and prev/next explicitly

@@ -24,7 +24,8 @@ a different feature.
   first load.
 - `frontend/src/bootstrap/main.ts:65-…` — refresh click handler.
 - `frontend/src/bootstrap/controller.ts:272-276` — the "nothing new"
-  check mark. An auto tick does not trigger it (see "Tick feedback").
+  check mark. It is removed for manual and auto refreshes alike (see
+  "Tick feedback").
 - `frontend/src/features/siblings.ts` — the existing 15 s timer. It is the
   only interval in the frontend today, and it is for siblings only.
 
@@ -67,10 +68,12 @@ a different feature.
   skip for open dialogs or selections.
 - **Row tint.** Auto ticks tint new rows the same way a manual refresh
   does (R10).
-- **Tick feedback.** An auto tick does not flash the ✓ or set `#status`
-  to "no changes". After each tick, the row meta shows a quiet "updated
-  14:32:05". A tick that brings new rows also shows a "+2 new" chip that
-  fades with the tint. Design: canvas board AL, option 4.
+- **Tick feedback.** No refresh flashes the ✓ any more. A manual refresh
+  spins the icon, then the row meta shows a quiet "updated 14:32:05"; it
+  updates after every successful fetch, with auto-refresh on or off. An
+  auto tick does not set `#status` to "no changes". A tick that brings
+  new rows also shows a "+2 new" chip that fades with the tint. Design:
+  canvas board AL, option 4.
 - **Loading.** Auto ticks show the in-flight state only after story 37's
   delay, so a fast tick never flashes.
 - **Accessibility.** The bar is decorative (`aria-hidden`). The `▾`

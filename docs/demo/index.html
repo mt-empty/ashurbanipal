@@ -758,10 +758,32 @@ ul { list-style: none; margin: 0; padding: 0; }
    timer) so a sub-100ms re-fetch still acknowledges the click, separately
    from #status/aria-busy. inline-block so the rotate applies. */
 #refresh-icon { display: inline-block; }
+#refresh-icon svg { vertical-align: -3px; }
 #refresh.spinning #refresh-icon { animation: spin .5s linear; }
 @media (prefers-reduced-motion: reduce) {
   #refresh.spinning #refresh-icon { animation: none; }
 }
+
+/* Split button: #refresh plus the interval menu. The popover aligns to its right edge. */
+#refresh-split { display: inline-flex; border-radius: 6px; anchor-name: --refresh-anchor; }
+#refresh-split.on { background: var(--surface); }
+#refresh-split.on #refresh { color: CanvasText; }
+#actions #refresh-menu-btn { padding: .25rem .4rem; }
+#refresh-pop { position: fixed; position-anchor: --refresh-anchor;
+          position-try-fallbacks: flip-block, flip-inline;
+          inset: auto; top: calc(anchor(bottom) + .3rem); right: anchor(right);
+          margin: 0; border: 1px solid var(--border-strong); border-radius: 8px;
+          padding: .3rem; width: 14rem; box-shadow: 0 4px 16px #0004; }
+#refresh-pop-head { font-size: .6875rem; letter-spacing: .04em; text-transform: uppercase;
+          color: var(--text-muted); padding: .25rem .5rem .35rem; }
+#refresh-pop label { display: flex; align-items: center; gap: .5rem;
+          padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+#refresh-pop label:hover { background: var(--hover); }
+#refresh-pop input { accent-color: CanvasText; }
+#refresh-pop-foot { margin: .3rem 0 0; padding: .4rem .5rem .15rem; border-top: 1px solid var(--rule);
+          font-size: .75rem; line-height: 1.4; color: var(--text-muted); }
+#row-new-chip { margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px;
+          background: var(--row-new-bg); color: CanvasText; font-size: .75rem; }
 
 /* ==== Data table ==== */
 /* Scoped to #data-table so the Other services grid doesn't inherit these;
@@ -1395,13 +1417,13 @@ thead tr.bands + tr th { top: var(--band-h); }
         <button id="view-notice-close" type="button" aria-label="Close this note">✕</button>
       </div>
       <div id="meta">
-        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span></span>
+        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
         <span id="actions">
           <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
           <button id="join-edit-btn" type="button" hidden title="change the tables, columns or join type of this view"><span aria-hidden="true">⋈</span> edit join</button>
           <button id="join-link-btn" type="button" hidden title="copy a link that opens this join"><span class="copy-icon" aria-hidden="true">⧉</span> copy link</button>
-          <button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true">⟳</span> refresh</button>
+          <span id="refresh-split"><button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8a6 6 0 0 1 6-6 6.5 6.5 0 0 1 4.49 1.83L14 5.33"/><path d="M14 2v3.33h-3.33"/><path d="M14 8a6 6 0 0 1-6 6 6.5 6.5 0 0 1-4.49-1.83L2 10.67"/><path d="M5.33 10.67H2V14"/></svg></span> refresh<span id="refresh-interval" hidden></span></button><button id="refresh-menu-btn" type="button" popovertarget="refresh-pop" disabled aria-label="auto-refresh interval" title="auto-refresh interval">▾</button></span>
           <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
           <button id="structure-btn" type="button" disabled title="indexes and constraints for this table">structure</button>
           <button id="payload" disabled title="raw JSON response for the current view">payload</button>
@@ -1508,6 +1530,11 @@ FROM table [alias]
 <div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
 <div id="refby-pop" popover><div id="refby-pop-list"></div></div>
 <div id="cv-pop" popover><div id="cv-pop-list"></div></div>
+<div id="refresh-pop" popover>
+  <div id="refresh-pop-head">auto-refresh</div>
+  <div id="refresh-pop-list" role="radiogroup" aria-label="auto-refresh interval"></div>
+  <p id="refresh-pop-foot">Pauses while this tab is hidden. Turns off after 30 minutes idle.</p>
+</div>
 <div id="columns-pop" popover><div id="columns-pop-list"></div></div>
 
 <dialog id="api-help-dialog" closedby="any">
@@ -2826,6 +2853,361 @@ function initState() {
   applyUrlOverlay(params);
 }
 
+// src/bootstrap/reload.ts
+var impl = null;
+function registerLoadData(fn) {
+  impl = fn;
+}
+function loadData(opts) {
+  return impl ? impl(opts) : Promise.resolve();
+}
+var loadToken = 0;
+function nextLoadToken() {
+  return ++loadToken;
+}
+function isCurrentLoad(token) {
+  return token === loadToken;
+}
+function supersedeLoads() {
+  loadToken++;
+}
+
+// src/lib/format.ts
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function formatClock(at) {
+  return at.toLocaleTimeString([], { hourCycle: "h23" });
+}
+function formatApproxCount(n) {
+  return n == null || n < 0 ? "?" : `~${n}`;
+}
+var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
+var TYPE_ALIASES = {
+  smallint: "number",
+  integer: "number",
+  int: "number",
+  int2: "number",
+  int4: "number",
+  int8: "number",
+  bigint: "number",
+  mediumint: "number",
+  tinyint: "number",
+  numeric: "number",
+  decimal: "number",
+  real: "number",
+  double: "number",
+  "double precision": "number",
+  float: "number",
+  number: "number",
+  serial: "number",
+  smallserial: "number",
+  bigserial: "number",
+  boolean: "bool",
+  bool: "bool",
+  date: "date",
+  timestamp: "date",
+  timestamptz: "date",
+  datetime: "date",
+  "timestamp with time zone": "date",
+  "timestamp without time zone": "date",
+  uuid: "uuid",
+  json: "json",
+  jsonb: "json"
+};
+function columnTypeClass(rawType) {
+  const key = rawType.toLowerCase().replace(/\s*\(.*$/, "").trim();
+  return TYPE_ALIASES[key] ?? null;
+}
+var TYPE_CLASS_CSS = {
+  number: "cell-type-number",
+  bool: "cell-type-bool",
+  uuid: "cell-type-uuid"
+};
+function rendersAsJson(col, raw) {
+  const klass = columnTypeClass(col.type);
+  return klass === "json" || klass === null && /^\s*[[{]/.test(raw);
+}
+function warnBadJsonCell(col, err) {
+  if (columnTypeClass(col.type) === "json") {
+    console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
+  }
+}
+function formatCellValue(col, raw) {
+  const klass = columnTypeClass(col.type);
+  if (klass === "date") {
+    const time = document.createElement("time");
+    time.textContent = raw;
+    time.className = "cell-type-date";
+    return time;
+  }
+  let cls;
+  if (klass) cls = TYPE_CLASS_CSS[klass];
+  else if (UUID_RE.test(raw)) cls = "cell-type-uuid";
+  if (cls) {
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = raw;
+    return span;
+  }
+  return document.createTextNode(raw);
+}
+
+// src/features/load-bar.ts
+var bar = $("load-bar");
+var loading = false;
+var counting = false;
+function render() {
+  if (loading) bar.dataset.state = "loading";
+  else if (counting) bar.dataset.state = "countdown";
+  else delete bar.dataset.state;
+}
+function setLoadingBar(on) {
+  loading = on;
+  render();
+}
+function startCountdown(durationMs, elapsedMs = 0) {
+  counting = true;
+  delete bar.dataset.state;
+  bar.style.setProperty("--bar-duration", `${durationMs}ms`);
+  bar.style.setProperty("--bar-elapsed", `${elapsedMs}ms`);
+  void bar.offsetWidth;
+  render();
+}
+function stopCountdown() {
+  counting = false;
+  render();
+}
+
+// src/lib/fallback-note.ts
+var ORDER = ["source", "schema", "table", "filter"];
+function swapsFrom(asked2, settled) {
+  return ORDER.flatMap((kind) => {
+    const want = asked2[kind];
+    const got = settled[kind];
+    if (want === void 0 || want === got) return [];
+    if ((kind === "source" || kind === "schema") && got === null) return [];
+    return [{ kind, asked: want, got }];
+  });
+}
+function placeSegments(label) {
+  return label === null ? [{ text: "here" }] : [{ text: "in " }, { label }];
+}
+function joinWith(items, sep, lastSep = sep) {
+  return items.flatMap((item, i) => i === 0 ? item : [{ text: i === items.length - 1 ? lastSep : sep }, ...item]);
+}
+function buildFallbackNote(swaps, table, label) {
+  const named = ORDER.flatMap((kind) => kind === "filter" ? [] : swaps.filter((s) => s.kind === kind));
+  const filterDropped = named.length < swaps.length;
+  if (named.length === 0) {
+    if (!filterDropped) return [];
+    const target = table ? [{ code: table }, { text: " " }] : [];
+    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(label), { text: ", so it was removed." }];
+  }
+  const out = [
+    { text: "There is no " },
+    ...joinWith(
+      named.map((s) => [{ text: `${s.kind} ` }, { code: s.asked }]),
+      ", ",
+      " or "
+    ),
+    { text: " " },
+    ...placeSegments(label)
+  ];
+  const shown2 = named.flatMap((s) => s.got === null ? [] : [[{ code: s.got }]]);
+  if (shown2.length === 0) {
+    out.push({ text: filterDropped ? ". Your filter was removed." : "." });
+    return out;
+  }
+  out.push({ text: ". Showing " }, ...joinWith(shown2, " / "), {
+    text: filterDropped ? " instead, without your filter." : " instead."
+  });
+  return out;
+}
+
+// src/features/view-notice.ts
+var shownFor = null;
+var shownSwaps = [];
+var placeLabel = null;
+var customText = null;
+function noticeKey(view, filter) {
+  return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
+}
+function render2(segment) {
+  if ("code" in segment) return el("code", void 0, segment.code);
+  if ("label" in segment) return el("span", "tag", segment.label);
+  return document.createTextNode(segment.text);
+}
+function clearViewNotice() {
+  shownFor = null;
+  customText = null;
+  $("view-notice").hidden = true;
+}
+function renderNote() {
+  $("view-notice-text").replaceChildren(
+    ...customText === null ? buildFallbackNote(shownSwaps, tableInView(), placeLabel).map(render2) : [document.createTextNode(customText)]
+  );
+}
+function showViewNotice(text) {
+  customText = text;
+  shownFor = noticeKey(state.view, state.filter);
+  $("view-notice").hidden = false;
+  renderNote();
+}
+function showBootFallbackNote() {
+  shownSwaps = swapsFrom(takeUrlIntent(), {
+    source: state.source,
+    schema: state.schema,
+    table: startTable(state.view),
+    filter: state.filter || null
+  });
+  if (shownSwaps.length === 0) return;
+  shownFor = noticeKey(state.view, state.filter);
+  $("view-notice").hidden = false;
+  renderNote();
+}
+function setNoticePlace(label) {
+  if (label === placeLabel) return;
+  placeLabel = label;
+  if (shownFor !== null) renderNote();
+}
+function syncViewNotice(req) {
+  if (shownFor !== null && shownFor !== noticeKey(req?.view ?? null, req?.filter ?? "")) clearViewNotice();
+}
+$("view-notice-close").onclick = clearViewNotice;
+
+// src/features/auto-refresh.ts
+var STEPS = [
+  { seconds: 0, label: "Off" },
+  { seconds: 5, label: "5 s" },
+  { seconds: 10, label: "10 s" },
+  { seconds: 15, label: "15 s" },
+  { seconds: 30, label: "30 s" },
+  { seconds: 60, label: "1 min" }
+];
+var MAX_FAILURES = 5;
+var IDLE_MS = 30 * 6e4;
+var IDLE_NOTICE = "Auto-refresh turned off after 30 minutes without activity.";
+var CHIP_MS = 3e3;
+var intervalMs = 0;
+var timer;
+var chipTimer;
+var deadline = 0;
+var busy = 0;
+var failures = 0;
+var lastInput = Date.now();
+function arm(remainingMs) {
+  clearTimeout(timer);
+  deadline = Date.now() + remainingMs;
+  startCountdown(intervalMs, intervalMs - remainingMs);
+  timer = setTimeout(tick, remainingMs);
+}
+function restart() {
+  if (intervalMs > 0 && !document.hidden) arm(intervalMs);
+}
+function tick() {
+  if (Date.now() - lastInput > IDLE_MS) {
+    stop(IDLE_NOTICE);
+    return;
+  }
+  if (busy > 0) return;
+  void loadData({ resetScroll: false, highlightNew: true, auto: true }).finally(() => {
+    if (intervalMs > 0 && Date.now() >= deadline) restart();
+  });
+}
+function render3() {
+  const step = STEPS.find((s) => s.seconds * 1e3 === intervalMs) ?? STEPS[0];
+  const on = intervalMs > 0;
+  $("refresh-split").classList.toggle("on", on);
+  const suffix = $("refresh-interval");
+  suffix.hidden = !on;
+  suffix.textContent = on ? ` \xB7 ${step.label}` : "";
+  $("refresh").setAttribute("aria-label", on ? `refresh, automatically every ${step.label}` : "refresh");
+  for (const radio of document.querySelectorAll("#refresh-pop-list input")) {
+    radio.checked = Number(radio.value) * 1e3 === intervalMs;
+  }
+}
+function chooseInterval(seconds) {
+  intervalMs = seconds * 1e3;
+  failures = 0;
+  lastInput = Date.now();
+  clearTimeout(timer);
+  if (intervalMs > 0) restart();
+  else stopCountdown();
+  render3();
+}
+function stop(notice) {
+  chooseInterval(0);
+  if (notice) showViewNotice(notice);
+}
+function fetchStarted() {
+  busy++;
+}
+function fetchEnded() {
+  busy--;
+  restart();
+}
+function noteLoadOk() {
+  failures = 0;
+  const updated = $("row-updated");
+  updated.textContent = ` \xB7 updated ${formatClock(/* @__PURE__ */ new Date())}`;
+  updated.hidden = false;
+}
+function noteTickFailed(e) {
+  if (++failures < MAX_FAILURES) return;
+  const last = e instanceof Error ? e.message : String(e);
+  stop();
+  reportError(new Error(`Auto-refresh turned off after ${MAX_FAILURES} failed refreshes. Last error: ${last}.`));
+}
+function showNewChip(count) {
+  const chip = $("row-new-chip");
+  chip.textContent = `+${count} new`;
+  chip.hidden = false;
+  clearTimeout(chipTimer);
+  chipTimer = setTimeout(() => {
+    chip.hidden = true;
+  }, CHIP_MS);
+}
+function startAutoRefresh() {
+  const list = $("refresh-pop-list");
+  list.replaceChildren(
+    ...STEPS.map(({ seconds, label }) => {
+      const radio = el("input");
+      radio.type = "radio";
+      radio.name = "refresh-interval";
+      radio.value = String(seconds);
+      radio.onchange = () => {
+        chooseInterval(seconds);
+        $("refresh-pop").hidePopover();
+        $("refresh-menu-btn").focus();
+      };
+      const row2 = el("label");
+      row2.append(radio, label);
+      return row2;
+    })
+  );
+  render3();
+  const noteInput = () => {
+    lastInput = Date.now();
+  };
+  for (const type of ["pointermove", "pointerdown", "keydown", "scroll", "touchstart"]) {
+    document.addEventListener(type, noteInput, { passive: true, capture: true });
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (intervalMs === 0) return;
+    if (document.hidden) {
+      clearTimeout(timer);
+      stopCountdown();
+      return;
+    }
+    if (Date.now() - lastInput > IDLE_MS) {
+      stop(IDLE_NOTICE);
+      return;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) tick();
+    else arm(remaining);
+  });
+}
+
 // src/features/column-widths.ts
 var scope = "";
 var widths = /* @__PURE__ */ new Map();
@@ -2981,7 +3363,7 @@ function endsInUnfinishedWord(text) {
 }
 
 // src/features/overlay-highlight.ts
-function attachOverlayHighlight(field, render5) {
+function attachOverlayHighlight(field, render6) {
   const proto = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
   const valueProp = Object.getOwnPropertyDescriptor(proto, "value");
   if (valueProp?.get && valueProp.set) {
@@ -2993,13 +3375,13 @@ function attachOverlayHighlight(field, render5) {
       },
       set(v) {
         set.call(this, v);
-        render5();
+        render6();
       }
     });
   }
-  field.addEventListener("input", render5);
-  new ResizeObserver(render5).observe(field);
-  render5();
+  field.addEventListener("input", render6);
+  new ResizeObserver(render6).observe(field);
+  render6();
 }
 function tokenSpans(text, tokens, isError) {
   return tokens.map((t) => {
@@ -3013,7 +3395,7 @@ var input = $("filter");
 var wrap = $("filter-wrap");
 var textEl = $("filter-hl-text");
 var MAX_HIGHLIGHT_CHARS = 1024;
-function render() {
+function render4() {
   const text = input.value;
   if (text.length > MAX_HIGHLIGHT_CHARS) {
     textEl.replaceChildren();
@@ -3030,26 +3412,7 @@ function render() {
   textEl.replaceChildren(...tokenSpans(text, tokens, (t) => t.start <= at && at < t.end));
   wrap.classList.toggle("plain", input.scrollWidth > input.clientWidth);
 }
-attachOverlayHighlight(input, render);
-
-// src/bootstrap/reload.ts
-var impl = null;
-function registerLoadData(fn) {
-  impl = fn;
-}
-function loadData(opts) {
-  return impl ? impl(opts) : Promise.resolve();
-}
-var loadToken = 0;
-function nextLoadToken() {
-  return ++loadToken;
-}
-function isCurrentLoad(token) {
-  return token === loadToken;
-}
-function supersedeLoads() {
-  loadToken++;
-}
+attachOverlayHighlight(input, render4);
 
 // src/lib/join-draft.ts
 var emptyPair = () => ({ leftJoin: 0, leftColumn: "", rightColumn: "" });
@@ -3519,169 +3882,6 @@ pop().addEventListener("toggle", (e) => {
   }
 });
 
-// src/lib/format.ts
-var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function formatApproxCount(n) {
-  return n == null || n < 0 ? "?" : `~${n}`;
-}
-var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
-var TYPE_ALIASES = {
-  smallint: "number",
-  integer: "number",
-  int: "number",
-  int2: "number",
-  int4: "number",
-  int8: "number",
-  bigint: "number",
-  mediumint: "number",
-  tinyint: "number",
-  numeric: "number",
-  decimal: "number",
-  real: "number",
-  double: "number",
-  "double precision": "number",
-  float: "number",
-  number: "number",
-  serial: "number",
-  smallserial: "number",
-  bigserial: "number",
-  boolean: "bool",
-  bool: "bool",
-  date: "date",
-  timestamp: "date",
-  timestamptz: "date",
-  datetime: "date",
-  "timestamp with time zone": "date",
-  "timestamp without time zone": "date",
-  uuid: "uuid",
-  json: "json",
-  jsonb: "json"
-};
-function columnTypeClass(rawType) {
-  const key = rawType.toLowerCase().replace(/\s*\(.*$/, "").trim();
-  return TYPE_ALIASES[key] ?? null;
-}
-var TYPE_CLASS_CSS = {
-  number: "cell-type-number",
-  bool: "cell-type-bool",
-  uuid: "cell-type-uuid"
-};
-function rendersAsJson(col, raw) {
-  const klass = columnTypeClass(col.type);
-  return klass === "json" || klass === null && /^\s*[[{]/.test(raw);
-}
-function warnBadJsonCell(col, err) {
-  if (columnTypeClass(col.type) === "json") {
-    console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
-  }
-}
-function formatCellValue(col, raw) {
-  const klass = columnTypeClass(col.type);
-  if (klass === "date") {
-    const time = document.createElement("time");
-    time.textContent = raw;
-    time.className = "cell-type-date";
-    return time;
-  }
-  let cls;
-  if (klass) cls = TYPE_CLASS_CSS[klass];
-  else if (UUID_RE.test(raw)) cls = "cell-type-uuid";
-  if (cls) {
-    const span = document.createElement("span");
-    span.className = cls;
-    span.textContent = raw;
-    return span;
-  }
-  return document.createTextNode(raw);
-}
-
-// src/lib/fallback-note.ts
-var ORDER = ["source", "schema", "table", "filter"];
-function swapsFrom(asked2, settled) {
-  return ORDER.flatMap((kind) => {
-    const want = asked2[kind];
-    const got = settled[kind];
-    if (want === void 0 || want === got) return [];
-    if ((kind === "source" || kind === "schema") && got === null) return [];
-    return [{ kind, asked: want, got }];
-  });
-}
-function placeSegments(label) {
-  return label === null ? [{ text: "here" }] : [{ text: "in " }, { label }];
-}
-function joinWith(items, sep, lastSep = sep) {
-  return items.flatMap((item, i) => i === 0 ? item : [{ text: i === items.length - 1 ? lastSep : sep }, ...item]);
-}
-function buildFallbackNote(swaps, table, label) {
-  const named = ORDER.flatMap((kind) => kind === "filter" ? [] : swaps.filter((s) => s.kind === kind));
-  const filterDropped = named.length < swaps.length;
-  if (named.length === 0) {
-    if (!filterDropped) return [];
-    const target = table ? [{ code: table }, { text: " " }] : [];
-    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(label), { text: ", so it was removed." }];
-  }
-  const out = [
-    { text: "There is no " },
-    ...joinWith(
-      named.map((s) => [{ text: `${s.kind} ` }, { code: s.asked }]),
-      ", ",
-      " or "
-    ),
-    { text: " " },
-    ...placeSegments(label)
-  ];
-  const shown2 = named.flatMap((s) => s.got === null ? [] : [[{ code: s.got }]]);
-  if (shown2.length === 0) {
-    out.push({ text: filterDropped ? ". Your filter was removed." : "." });
-    return out;
-  }
-  out.push({ text: ". Showing " }, ...joinWith(shown2, " / "), {
-    text: filterDropped ? " instead, without your filter." : " instead."
-  });
-  return out;
-}
-
-// src/features/view-notice.ts
-var shownFor = null;
-var shownSwaps = [];
-var placeLabel = null;
-function noticeKey(view, filter) {
-  return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
-}
-function render2(segment) {
-  if ("code" in segment) return el("code", void 0, segment.code);
-  if ("label" in segment) return el("span", "tag", segment.label);
-  return document.createTextNode(segment.text);
-}
-function clearViewNotice() {
-  shownFor = null;
-  $("view-notice").hidden = true;
-}
-function renderNote() {
-  $("view-notice-text").replaceChildren(...buildFallbackNote(shownSwaps, tableInView(), placeLabel).map(render2));
-}
-function showBootFallbackNote() {
-  shownSwaps = swapsFrom(takeUrlIntent(), {
-    source: state.source,
-    schema: state.schema,
-    table: startTable(state.view),
-    filter: state.filter || null
-  });
-  if (shownSwaps.length === 0) return;
-  shownFor = noticeKey(state.view, state.filter);
-  $("view-notice").hidden = false;
-  renderNote();
-}
-function setNoticePlace(label) {
-  if (label === placeLabel) return;
-  placeLabel = label;
-  if (shownFor !== null) renderNote();
-}
-function syncViewNotice(req) {
-  if (shownFor !== null && shownFor !== noticeKey(req?.view ?? null, req?.filter ?? "")) clearViewNotice();
-}
-$("view-notice-close").onclick = clearViewNotice;
-
 // src/features/sidebar.ts
 var tableEntries = [];
 var chipCounts = /* @__PURE__ */ new Map();
@@ -4109,13 +4309,13 @@ function mountJoinForm(root, onChange) {
       const fk = first && first.leftColumn === "" && first.rightColumn === "" ? foreignKey(i + 1) : null;
       if (fk) j.on[0] = fk;
     });
-    render5();
+    render6();
     onChange();
   }
   const changed = (fromMenu = false) => {
     const active = document.activeElement;
     const focused = fromMenu ? lastDropdownLabel() : root.contains(active) ? active?.getAttribute("aria-label") : null;
-    render5();
+    render6();
     if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
   };
@@ -4334,7 +4534,7 @@ function mountJoinForm(root, onChange) {
     wrap2.append(el("div", "jlab", `Columns \xB7 ${picked} of ${total}`), grid);
     return wrap2;
   }
-  function render5() {
+  function render6() {
     const parts = [];
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
@@ -4378,7 +4578,7 @@ function mountJoinForm(root, onChange) {
   return {
     setDraft(next) {
       draft = next;
-      render5();
+      render6();
     },
     draft: () => draft,
     problem() {
@@ -4601,7 +4801,7 @@ function createSuggestList(opts) {
   const accept = (i) => {
     if (matches[i] && !matches[i].blocked) opts.accept(matches[i], head);
   };
-  const render5 = () => {
+  const render6 = () => {
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
         const btn = el("button");
@@ -4640,11 +4840,11 @@ function createSuggestList(opts) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       index = (index + 1) % count;
-      render5();
+      render6();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       index = index <= 0 ? count - 1 : index - 1;
-      render5();
+      render6();
     } else if (e.key === "Enter" && index >= 0) {
       e.preventDefault();
       accept(index);
@@ -4665,7 +4865,7 @@ function createSuggestList(opts) {
       matches = next;
       head = nextHead;
       index = nextIndex;
-      render5();
+      render6();
       popup.hidden = false;
       opts.place?.();
       input2.setAttribute("aria-expanded", "true");
@@ -4738,7 +4938,7 @@ function mountJoinSql(onChange) {
       memo = { text, version: version2, result: parseJoin(text, { catalog: knownCatalog(), pairCheck }) };
     return memo.result;
   };
-  function render5() {
+  function render6() {
     const text = field.value;
     field.style.height = "";
     if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
@@ -4750,7 +4950,7 @@ function mountJoinSql(onChange) {
     hlText.replaceChildren(...tokenSpans(text, shown2, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     hlText.append("\n");
   }
-  attachOverlayHighlight(field, render5);
+  attachOverlayHighlight(field, render6);
   const place2 = () => {
     const before = field.value.slice(0, field.selectionStart);
     const line = before.split("\n").length;
@@ -4865,7 +5065,7 @@ function mountJoinSql(onChange) {
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
       if (!anyRead(results)) return;
-      render5();
+      render6();
       onChange();
     });
   }
@@ -5447,7 +5647,7 @@ async function loadSiblings() {
   clearTimeout(retryTimer);
   retryTimer = void 0;
   retryDelay = FRESH_MS;
-  render3(body);
+  render5(body);
 }
 function renderWarnings(warnings) {
   $("siblings-warnings").hidden = warnings.length === 0;
@@ -5461,7 +5661,7 @@ function renderWarnings(warnings) {
     })
   );
 }
-function render3(body) {
+function render5(body) {
   const { siblings } = body;
   setNoticePlace(body.instance?.label ?? null);
   const others = siblings.filter((s) => !isOwnEntry(body.instance, s));
@@ -6177,20 +6377,6 @@ function updatePager(data) {
   $("next").disabled = data.rows.length < state.limit;
 }
 
-// src/features/load-bar.ts
-var bar = $("load-bar");
-var loading = false;
-var counting = false;
-function render4() {
-  if (loading) bar.dataset.state = "loading";
-  else if (counting) bar.dataset.state = "countdown";
-  else delete bar.dataset.state;
-}
-function setLoadingBar(on) {
-  loading = on;
-  render4();
-}
-
 // src/bootstrap/table-focus.ts
 var tableEl = $("data-table");
 function captureTableFocus() {
@@ -6217,8 +6403,8 @@ function restoreTableFocus(captured) {
 }
 
 // src/bootstrap/controller.ts
-function setTableBusy(busy) {
-  if (busy) tableEl.setAttribute("aria-busy", "true");
+function setTableBusy(busy2) {
+  if (busy2) tableEl.setAttribute("aria-busy", "true");
   else tableEl.removeAttribute("aria-busy");
 }
 var inFlightFetches = 0;
@@ -6295,6 +6481,7 @@ async function fetchViewData(req) {
   }
   applyScopeParams(params);
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
+  fetchStarted();
   if (inFlightFetches++ === 0) {
     setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true), LOADING_DELAY_MS);
@@ -6309,6 +6496,7 @@ async function fetchViewData(req) {
       setSlow(false);
       setTableBusy(false);
     }
+    fetchEnded();
   }
 }
 function viewTitle(view) {
@@ -6333,6 +6521,7 @@ function updateViewChrome() {
 async function loadData2({
   resetScroll = true,
   highlightNew = false,
+  auto = false,
   next
 } = {}) {
   clearError();
@@ -6353,6 +6542,11 @@ async function loadData2({
     data = await fetchViewData(req);
   } catch (e) {
     if (superseded()) return;
+    if (auto) {
+      reportError(e);
+      noteTickFailed(e);
+      return;
+    }
     if (!next && dropOneStaleInput(e instanceof ApiError ? e.code : void 0))
       return loadData2({ resetScroll, highlightNew });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
@@ -6375,6 +6569,7 @@ async function loadData2({
   $("columns-btn").disabled = false;
   $("structure-btn").disabled = false;
   $("refresh").disabled = false;
+  $("refresh-menu-btn").disabled = false;
   updateColumnsButtonLabel();
   updateJoinChrome();
   refreshSavedChips();
@@ -6398,11 +6593,12 @@ async function loadData2({
   }
   if (superseded()) return;
   updatePager(data);
+  noteLoadOk();
   if (newRowKeys?.size) {
     setStatus(`${newRowKeys.size} new`);
-  } else if (highlightNew && newRowKeys) {
+    if (auto) showNewChip(newRowKeys.size);
+  } else if (highlightNew && newRowKeys && !auto) {
     setStatus("no changes");
-    flashIcon($("refresh-icon"), "\u2713", 1e3);
   }
   if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
 }
@@ -6465,6 +6661,7 @@ $("refresh").onclick = () => {
 };
 loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(showBootFallbackNote);
 startSiblings();
+startAutoRefresh();
 </script>
 </body>
 </html>

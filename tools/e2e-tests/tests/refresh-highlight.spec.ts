@@ -59,8 +59,9 @@ test("refresh with no change highlights nothing", async ({ page }) => {
   await waitForIdle(page);
   await expect(page.locator("#tbody tr.row-new")).toHaveCount(0);
   // No tint fired, so #status carries the "done, unchanged" cue instead.
-  // (The ⟳→✓ glyph swap isn't asserted — it self-reverts on a timer.)
   await expect(page.locator("#status")).toHaveText("no changes");
+  await expect(page.locator("#row-updated")).toContainText(/updated \d{2}:\d{2}:\d{2}/);
+  await expect(page.locator("#refresh-icon")).not.toHaveText("✓");
 });
 
 test("a table with no primary key gets no highlight on refresh", async ({ page }) => {

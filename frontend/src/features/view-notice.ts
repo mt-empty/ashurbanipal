@@ -10,6 +10,7 @@ import { buildFallbackNote, type NoteSegment, swapsFrom } from "../lib/fallback-
 let shownFor: string | null = null;
 let shownSwaps: Swap[] = [];
 let placeLabel: string | null = null;
+let customText: string | null = null;
 
 function noticeKey(view: ViewRequest["view"] | null, filter: string): string {
   return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
@@ -23,11 +24,24 @@ function render(segment: NoteSegment): Node {
 
 function clearViewNotice(): void {
   shownFor = null;
+  customText = null;
   $("view-notice").hidden = true;
 }
 
 function renderNote(): void {
-  $("view-notice-text").replaceChildren(...buildFallbackNote(shownSwaps, tableInView(), placeLabel).map(render));
+  $("view-notice-text").replaceChildren(
+    ...(customText === null
+      ? buildFallbackNote(shownSwaps, tableInView(), placeLabel).map(render)
+      : [document.createTextNode(customText)]),
+  );
+}
+
+// A plain note for the view on screen; like the fallback note it drops on any view change.
+export function showViewNotice(text: string): void {
+  customText = text;
+  shownFor = noticeKey(state.view, state.filter);
+  $("view-notice").hidden = false;
+  renderNote();
 }
 
 // Called once the boot load settles: whatever the URL asked for that the page

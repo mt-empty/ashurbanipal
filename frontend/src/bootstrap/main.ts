@@ -2,6 +2,7 @@ import { onProtocolSkew } from "../core/api.js";
 import "../features/api-reference.js";
 import { $, reportError } from "../core/dom.js";
 import { getLastPayload, initState, state } from "../core/state.js";
+import { startAutoRefresh } from "../features/auto-refresh.js";
 import { resetColumnWidths } from "../features/column-widths.js";
 import "../features/filter-highlight.js";
 import "../features/join-dialog.js";
@@ -83,3 +84,4 @@ $<HTMLButtonElement>("refresh").onclick = () => {
 // awaited first load.
 loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(showBootFallbackNote);
 startSiblings();
+startAutoRefresh();
