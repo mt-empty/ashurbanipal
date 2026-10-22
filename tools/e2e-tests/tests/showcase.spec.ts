@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
 import { gotoApp, selectTable, applyFilter, waitForIdle } from "./support/helpers";
+import { pick, showResult } from "./support/join";
 
 // The refresh segment inserts a handful of rows straight into the
 // devcontainer Postgres so the app can discover them on re-fetch. Marked
@@ -23,7 +24,7 @@ const psql = (sql: string) => {
 // no-waitForTimeout rule those tests follow.
 const beat = (page: import("@playwright/test").Page) => page.waitForTimeout(700);
 
-test("showcase: browse tables, filter down to one row, inspect jsonb, catch live rows on refresh, open API reference", async ({
+test("showcase: browse tables, filter down to one row, inspect jsonb, view structure, join tables, switch environment, catch live rows on refresh, open API reference", async ({
   page,
 }) => {
   // Pins dark theme before the app's own head-inline script reads
@@ -72,6 +73,50 @@ test("showcase: browse tables, filter down to one row, inspect jsonb, catch live
 
   await page.locator("#current").click();
   await expect(page.locator("#cell-pop")).toBeHidden();
+
+  // Structure: indexes and constraints for the table.
+  await page.locator("#structure-btn").click();
+  await expect(page.locator("#structure-body").getByText("orders_pending_idx")).toBeVisible();
+  await beat(page);
+  await beat(page);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#structure-dialog")).toBeHidden();
+
+  // Join: orders -> users on the suggested foreign key.
+  await page.locator("#join-btn").click();
+  await expect(page.locator("#join-dialog")).toBeVisible();
+  await beat(page);
+  await beat(page);
+  await pick(page, "join 1 type", "left");
+  await beat(page);
+  await pick(page, "join 1 table", "users");
+  await expect(page.locator("#join-preview")).toContainText("LEFT JOIN users");
+  await beat(page);
+  await beat(page);
+  await showResult(page);
+  await expect(page.locator("th.band")).toHaveText(["orders", "users"]);
+  for (let i = 0; i < 5; i++) await beat(page);
+
+  // Other services: switch to the same view in the int environment.
+  await page.locator("#siblings-btn").click();
+  await expect(page.locator("#siblings-matrix")).toBeVisible();
+  await beat(page);
+  await beat(page);
+  await page
+    .locator("#siblings-matrix-body tr")
+    .filter({ has: page.locator('th:has-text("demo")') })
+    .locator("a", { hasText: "same view" })
+    .click();
+  await page.waitForURL(/localhost:4321/);
+  await page.locator("th.band").first().waitFor();
+  await waitForIdle(page);
+  await beat(page);
+  await page.locator("#siblings-btn").click();
+  await expect(page.locator("#siblings-matrix-head th.mine")).toHaveText("int");
+  await beat(page);
+  await beat(page);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#siblings-matrix")).toBeHidden();
 
   // Refresh: rows added since the last look wash in green for 3s. events
   // has a bigint identity PK, so sorting it id-descending parks anything
