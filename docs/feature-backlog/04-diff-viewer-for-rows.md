@@ -2,87 +2,90 @@
 
 > **Status:** OPEN · **Area:** frontend
 
-**Where logged:** `design.md` §9.
+## 1. The ask
 
-**What it is:** the originally-scoped feature — a diff editor for comparing
-two whole rows against each other, column by column. Deferred to a later
-iteration; not built. `jsonb` columns are the main reason a real diff tool
-is needed at all — plain scalar columns can be eyeballed side by side, but
-a `jsonb` value only becomes comparable once pretty-printed, and that's
-where the candidates below (Monaco, `@pierre/diffs`) come in: text/line
-diff on the pretty-printed value, not structural JSON diff.
+Compare two rows of the same view, column by column, and see at a glance
+what differs. Scalar columns can be eyeballed side by side; `jsonb` / `json`
+values are the real reason for the feature, because two large documents are
+only comparable once pretty-printed and diffed line by line.
 
-## Candidates evaluated
+## 2. Constraints
 
-Constraint for all three: framework-agnostic, loadable via a
-`<script>`/ESM CDN tag, no bundler added to the shipped `dbviewer.html` —
-per the single-file frontend property in `design.md`.
+- **Everything ships inside `dbviewer.html`.** The frontend is one
+  self-contained file with no CDN dependency (`docs/design.md` §3.1).
+  `docs/ui-guidelines.md` R3 would allow a CDN script as an enhancement,
+  but a strict host CSP blocks external scripts (`PORTING.md` "CSP and
+  inline scripts"), offline hosts can't reach a CDN, and R3 needs a
+  working fallback anyway. That is the same reason the JSON tree ended up
+  hand-rolled instead of `@alenaksu/json-viewer` (`docs/design.md` §3.1):
+  the fallback is most of the work.
+- **So the diff logic is in the bundle:** hand-rolled, or an npm package
+  that esbuild inlines at build time. The second would be the frontend's
+  first runtime dependency (`frontend/package.json` has only dev
+  dependencies today) and brings licence/`NOTICE` handling into every
+  port's vendored copy — a governance call, like story 27's layout library.
+- **No server change.** Both rows are already in the client's data.
 
-**Monaco diff editor (default plan).** Framework-agnostic (AMD-loaded via
-`loader.js` from CDN), mature, MIT-licensed, actively maintained by
-Microsoft. Built-in side-by-side diff editor mode. Text/line diff, not
-object-structural diff — but pretty-printing the `jsonb` value before
-diffing gets clean, readable results, same as any text differ would need.
-Heavier download than the alternatives (tens of MB unpacked, though only
-the used pieces are fetched/cached), which is the known tradeoff for
-choosing it.
+Rejected: Monaco's diff editor (tens of MB plus web workers, CDN-only in
+practice) and `@pierre/diffs` (pulls in `shiki`, needs an import map or
+`esm.sh`). Neither fits a single inlined file or a strict CSP.
 
-**`@pierre/diffs` — reopened as a candidate, not fully vetted.** Originally
-ruled out outright over a hard `react`/`react-dom` peer dependency. Reopened
-2026-07-20: as of `@pierre/diffs@1.2.12` (same story on the `1.3.0-beta.11`
-beta line), the package split into a vanilla core plus optional React
-bindings —
+## 3. Shape
 
-- `README.md` now says explicitly: "Available as vanilla JavaScript and
-  React components."
-- Exports split by subpath: `.` (vanilla, Web-Components-based —
-  `customElements.define` + Shadow DOM, confirmed by reading
-  `src/components/web-components.ts`), `./react` (React wrapper), `./ssr`,
-  `./worker`.
-- Checked all 170 source files under `packages/diffs/src` in the
-  [pierrecomputer/pierre](https://github.com/pierrecomputer/pierre) repo:
-  the only file outside `src/react/` that imports `react`/`react-dom` is
-  `src/ssr/FileDiffReact.tsx`, an opt-in SSR helper not reachable from the
-  `.` export.
-- `package.json` still lists `react`/`react-dom` as unconditional
-  `peerDependencies` for the whole package (not marked optional via
-  `peerDependenciesMeta`) — looks like an unfixed packaging detail, not a
-  functional requirement. It only matters to npm-install-based tooling and
-  is irrelevant to a CDN-script/ESM consumer like this frontend, since
-  nothing here runs `npm install`.
-- `dist/index.js` (the vanilla entry) is unbundled multi-file ESM with one
-  bare-specifier dependency, `"shiki"` (plus, transitively,
-  `hast-util-to-html`, `lru_map`, `@pierre/theme`, `@pierre/theming`,
-  `@shikijs/transformers`). Loading it via a plain `<script type="module">`
-  needs either `esm.sh` (which rewrites bare imports to also resolve from
-  esm.sh) or a browser import map — `unpkg.com/@pierre/diffs@1.2.12/dist/index.js`
-  200s on its own but won't resolve `"shiki"` without one of those.
+- **Pick two rows.** A "compare" action in the record view
+  (`frontend/src/features/record-view.ts`) marks row A; the same action on
+  a second row opens the comparison. Marking is in memory only, never
+  persisted (`docs/ui-guidelines.md` R6).
+- **Comparison dialog.** The record view's `<dialog>` chrome: one line per
+  column — name, value A, value B — with differing columns marked and a
+  "hide equal columns" toggle. Primary-key columns first.
+- **Scalars** compare by their wire text, the same text copy uses. No
+  type-aware equality.
+- **JSON values** are pretty-printed (`JSON.stringify(value, null, 2)`, as
+  the record view's copy does) and line-diffed; added/removed lines are
+  marked with the existing theme tokens.
+- **Size cap.** Above a line limit, show "values differ" and both raw
+  values instead of a diff, so a multi-MB `jsonb` can't freeze the tab.
 
-It should no longer be treated as ruled out, but hasn't been re-evaluated
-against Monaco on actual fit (API ergonomics, real bundle weight once
-`shiki` is pulled in, editor-chrome needs) — that comparison should happen
-when the diff viewer is actually implemented, not be prejudged here.
+## 4. Diff algorithm
 
-**`diff2html` + `jsdiff` — lighter-weight fallback.** `jsdiff` computes the
-diff, `diff2html` renders it; vanilla JS, CDN bundles confirmed available
-at `cdn.jsdelivr.net/npm/diff2html/bundles/`, supports side-by-side mode.
-No structural JSON awareness, no editor chrome (folding, minimap) — purely
-a diff renderer. Worth a look if either Monaco's or `@pierre/diffs`'s
-payload size becomes a real complaint later — not the primary plan.
+Default: a hand-rolled Myers line diff (O(ND), about 100 lines) as a pure
+module in `frontend/src/lib/`, unit-tested in `frontend/test/`. Fallback,
+only if hand-rolling proves fragile: bundle `diff` (jsdiff, BSD-3-Clause)
+through esbuild, with the governance call above.
 
-## Recommendation
+## 5. Touchpoints
 
-Keep **Monaco** as the default plan for now — it's the only option of the
-three fully vetted against this project's constraints. `@pierre/diffs` is a
-real contender and deserves a proper bake-off against Monaco when the diff
-viewer actually gets built; don't default back to Monaco without that
-comparison just because it was the original plan.
+- `frontend/src/lib/` — pure row compare + line diff, with unit tests.
+- `frontend/src/features/record-view.ts` — the compare action.
+- `frontend/src/index.html`, `frontend/src/styles.css` — dialog and diff
+  styling, both themes.
+- `docs/design.md` §2/§9 — already point here.
+- `tools/e2e-tests/tests/` — one spec.
 
-## Related
+## 6. What "done" means
 
-The jsonb tree-view/coloring work this would build on (pretty-printing,
-structure-aware rendering) already shipped as a hand-rolled
-`<details>`/`<summary>` tree (`renderJsonTree` in `dbviewer.html`) rather
-than a CDN library. A diff viewer would still need its own
-pretty-print-then-diff step; it doesn't get that for free from
-`renderJsonTree`.
+- Comparing two rows lists every column and marks the differing ones;
+  "hide equal columns" hides the rest.
+- Two `jsonb` values differing in one key show one changed line.
+- Opening a comparison sends no request, and nothing loads from outside
+  the page.
+- Over the size cap, the dialog shows both raw values without a diff.
+- Playwright asserts DOM state and text, not screenshots, and the full
+  suite passes at default parallelism.
+
+## 7. References
+
+Prior art for the diff rendering, not dependencies (see §2 for why):
+
+- Monaco diff editor — https://microsoft.github.io/monaco-editor/
+- `@pierre/diffs` — https://github.com/pierrecomputer/pierre
+- https://diffs.com/
+
+## 8. Open questions
+
+- Same view only, or keep row A marked across table/page switches to
+  compare rows from different pages or tables?
+- `json` (unlike `jsonb`) keeps the stored key order, so two equal
+  objects can differ only in order. Sort keys before diffing?
+- The size cap's value.

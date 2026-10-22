@@ -8,7 +8,7 @@ captured here so the clarity gained isn't lost before it's picked up.
 ## 1. The ask
 
 Today, every click-to-filter action (`applyFilterClause()` in
-`src/frontend/dbviewer.html`) **replaces** `#filter` wholly — the per-cell
+`frontend/src/features/filter-ui.ts`) **replaces** `#filter` wholly — the per-cell
 "filter by this value" button, the null-cell filter button, the
 common-values dropdown, and FK-cell navigation all go through the same
 helper and all discard whatever filter was there before.
@@ -65,7 +65,7 @@ discussion into a concrete semantic:
 - **FK-cell navigation stays replace-only, unconditionally**, regardless of
   whatever gets built here — it also switches tables, and a filter's
   columns don't carry over across tables (already fixed as a bug, see
-  `src/frontend/dbviewer.html`'s table-switch handler).
+  the table-switch reset in `frontend/src/features/sidebar.ts`).
 - **Common-values dropdown scope is undecided under every approach.** It
   uses the same `applyFilterClause()` helper as the per-cell buttons — does
   it get the same compose behavior, or stay replace-only? Not discussed in

@@ -1,6 +1,6 @@
 # Frontend architecture refactor — deferred follow-ups
 
-> **Status:** PARTIAL · **Area:** frontend · **Ref:** items 2, 3, 7, 9 done; 1, 4, 5, 6, 8 open
+> **Status:** PARTIAL · **Area:** frontend · **Ref:** items 2, 3, 7, 9 done; 5 moved to story 43; 1, 4, 6, 8 open
 
 The nine-phase `frontend/src/` refactor (commits `47d10a7`..`7d86976`)
 landed the import-cycle break, the Biome adoption, the `state.ts` split,
@@ -66,7 +66,11 @@ will surface real sites that rely on the current (flag-off) default — the cell
 and row builders in `sidebar.ts` / `filter-ui.ts` / `grid.ts`, and the demo
 fixtures. Land it after 1–3 so the type surface is settled.
 
-## 5. A normative home for `max_json_bytes`
+## 5. A normative home for `max_json_bytes` — moved to story 43
+
+Story 43 replaces the per-parameter byte bounds with one query-string
+budget that every port MUST enforce; do this item there. Original notes:
+
 
 `spec/protocol.md` §5.4.2 describes only the Rust port's 8192-byte filter-AST
 bound, as an example — not a cross-port MUST — and `spec/openapi.yaml` puts no
@@ -114,7 +118,8 @@ refactor).
 
 Replacements to weigh: `madge --circular`, `dpdm`, `eslint-plugin-import`'s
 `import/no-cycle` (if ESLint is ever added alongside Biome), or Biome's own
-cycle rule once it ships. Any replacement must keep all three current
+cycle rule — check first whether Biome 2 (the frontend already runs it)
+now has one that meets the properties below. Any replacement must keep all three current
 properties: `import type` edges excluded, re-export (`export … from`) edges
 included, and the `src/` → `src/demo/` boundary assertion.
 

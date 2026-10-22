@@ -1,14 +1,13 @@
 # Split each port into a framework-agnostic core + thin framework adapter
 
-> **Status:** PARTIAL · **Area:** rust, ports · **Ref:** Rust core+adapter split shipped; Node/Flask/Spring deferred, Go exempt
+> **Status:** DONE · **Area:** rust, ports · **Ref:** Rust core + axum + actix-web split shipped; other ports split only when they add a second framework (`PORTING.md` Governance)
 
-Discussed alongside the Rust crate rename `ashurbanipal` →
-`ashurbanipal-axum` (`docs/publishing-checklist.md`'s "Decided: no bare
-`ashurbanipal` package name" section). The Rust split has since shipped — a
-framework-agnostic `ashurbanipal` core crate plus `ashurbanipal-axum` and
-`ashurbanipal-actix-web` adapters (`implementations/rust/`). The other
-ports remain single-framework; the per-language feasibility notes below
-are unchanged.
+The Rust split has shipped: a framework-agnostic `ashurbanipal` core crate
+plus `ashurbanipal-axum` and `ashurbanipal-actix-web` adapters
+(`implementations/rust/`). The other ports stay single-framework. The rule
+for them — split when, and only when, a second framework is added — lives
+in `PORTING.md`'s Governance section; the feasibility notes below are kept
+for whoever does that split.
 
 **Ask:** if a port ever needs to support a second web framework in the
 same language (Actix alongside Axum, FastAPI alongside Flask, Fastify
@@ -30,13 +29,9 @@ each language's own normal tooling.
 
 **Per-language feasibility (checked, not assumed):**
 
-- **Rust — clean split, already verified.** `implementations/rust/src/config.rs`,
-  `filter.rs`, and every file under `db/` have zero `axum` references;
-  only `routes.rs` (7 hits) and `lib.rs`'s doctest touch it. Extracting
-  `routes.rs` into `ashurbanipal-axum` (already the crate's name) and
-  everything else into a new `ashurbanipal` core crate would be a clean
-  workspace split, reclaiming the bare name for the framework-agnostic
-  piece — consistent with the `juniper`/`async-graphql` naming precedent.
+- **Rust — done.** `implementations/rust/core/` holds config, `DbSource`
+  and its backends, the filter AST, joins and sibling checks;
+  `axum/` and `actix-web/` hold only routing.
 - **Node — clean split, same shape, not yet verified as thoroughly.**
   `implementations/node-express/src/{config,embed,errors,filter,siblings}.ts`
   have zero `express` references; only `routes.ts` (3 hits) and the demo
@@ -81,7 +76,7 @@ each language's own normal tooling.
 - Naming: bare `<language-native-name>` (e.g. plain `ashurbanipal` for
   Rust) is reserved for the eventual framework-agnostic core, per
   `docs/publishing-checklist.md`; each framework adapter is suffixed
-  (`ashurbanipal-axum`, `ashurbanipal-actix`, ...). Node/Flask/Spring
+  (`ashurbanipal-axum`, `ashurbanipal-actix-web`, ...). Node/Flask/Spring
   already publish under framework-suffixed names
   (`ashurbanipal-node-express`, `ashurbanipal-flask`,
   `ashurbanipal-spring-boot-starter`) so the same reservation question

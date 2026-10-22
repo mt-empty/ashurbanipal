@@ -73,9 +73,13 @@ with it.
 
 ## 4. Touchpoints
 
-- `spec/protocol.md` — a new `GET {mount}/api/tables/{table}/ddl` returning
-  `{ "ddl": "…" }` as text, or fold it into the combined schema endpoint
-  proposed in stories 23 / 26. Views included once story 25 lists them.
+- `spec/protocol.md` — a new lazy route in the style of §5.9 and §5.10,
+  e.g. `GET {mount}/api/tables/ddl?table=…` returning `{ "ddl": "…" }`.
+  Story 26 settled that per-table metadata gets its own lazy route, not a
+  combined endpoint. Indexes and constraints are already served by §5.10;
+  this route adds only the assembled `CREATE` text, and the Postgres
+  assembly can reuse §5.10's catalog queries. Views included once story 25
+  lists them.
 - Frontend — reuse the payload-viewer `<dialog>` + copy button; no new
   interaction model.
 - Conformance — a schema-test asserting the endpoint returns a non-empty
@@ -85,9 +89,6 @@ with it.
 
 ## 5. Open questions
 
-- One combined `…/schema` endpoint (columns + indexes + constraints + DDL)
-  or a dedicated `…/ddl` route — combined is one fetch, dedicated keeps
-  each story shippable alone.
 - How faithful must the Postgres reconstruction be — is "valid and
   semantically equivalent" enough, or do users expect it to match
   `pg_dump` output?

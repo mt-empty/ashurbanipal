@@ -348,6 +348,12 @@ following are true — green CI is necessary, not sufficient:
   field, a new allow-listed value) keep the same major version. Anything
   behavioral or shape-changing bumps the version and gets a migration
   note in `spec/CHANGELOG.md`.
+- **Second framework, same language.** A port that adds a second web
+  framework first splits into a framework-agnostic core package plus one
+  thin adapter package per framework, as Rust's `core/` + `axum/` +
+  `actix-web/` does. Don't split before a second framework is real. Go is
+  exempt: its router already returns `http.Handler`. Per-language notes:
+  `docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`.
 - **Registry staleness.** Each port pins the protocol version it
   implements (the `readme.md` table's "Protocol version" column). When
   the version moves, the registry marks any row still on the old version

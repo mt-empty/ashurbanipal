@@ -44,7 +44,8 @@ unchanged to both adapters.
 - Multi-column sort (single column only; multi-column is a future addition).
 - Writes of any kind.
 - Dynamic sibling discovery (service registry, k8s, etc.) — static config only.
-- Diff viewer (Monaco / `@pierre/diffs`) — deferred to a later iteration.
+- Diff viewer for two rows — deferred to a later iteration
+  (`docs/feature-backlog/04-diff-viewer-for-rows.md`).
 - Non-Postgres backends beyond SQLite and MySQL — the DB layer is
   trait-based so these are additive changes later, not a rewrite. A SQLite
   `DbSource` (`implementations/rust/core/src/db/sqlite.rs`, opt-in `sqlite`
@@ -77,8 +78,8 @@ Two components, same as the original concept:
   `@alenaksu/json-viewer`/Prism.js plan was superseded once building a
   working plain-text fallback (required anyway by `ui-guidelines.md` R3)
   turned out to be most of the implementation work either way.
-  Monaco's diff editor is a separate, further-out deferral (see §9) and is
-  the one place a CDN dependency is still under consideration.
+  The deferred row diff viewer (§9) follows the same rule: its diff logic
+  ships inside the bundle.
 - Embedded into the Rust binary at compile time via `include_str!`, so the
   crate ships as one artifact — no separate static file to build, deploy, or
   whitelist per environment.
@@ -673,17 +674,11 @@ health_path = "/health"
 
 ## 9. Deferred / explicitly out of scope for v1
 
-- **Diff viewer**: Monaco's diff editor, as originally scoped, for comparing
-  two whole rows against each other, column by column — `jsonb` columns are
-  the main reason a real diff tool is needed at all, since a `jsonb` value
-  only becomes comparable once pretty-printed. `@pierre/diffs` was initially
-  evaluated and ruled out for declaring `react`/`react-dom` as peer
-  dependencies, but that finding is now stale — the package has since split
-  into a vanilla-JS core (Web Components, no React) plus optional React
-  bindings, so it's back in play as a candidate (see
-  `docs/feature-backlog/04-diff-viewer-for-rows.md`). Do the Monaco vs.
-  `@pierre/diffs` bake-off when implementation is actually revisited, once
-  the core browser is in use.
+- **Diff viewer**: comparing two whole rows column by column — `jsonb`
+  columns are the main reason, since a `jsonb` value only becomes comparable
+  once pretty-printed. CDN editors (Monaco, `@pierre/diffs`) don't fit the
+  single-file, no-CDN artifact, so the diff is planned as a bundled line
+  diff; see `docs/feature-backlog/04-diff-viewer-for-rows.md`.
 - **Multi-column sort.**
 - **Dynamic sibling discovery.**
 - **Non-Postgres `DbSource` implementations beyond SQLite and MySQL** — a

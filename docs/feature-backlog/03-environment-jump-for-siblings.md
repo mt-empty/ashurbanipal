@@ -1,6 +1,6 @@
 # Jump between dev / int / staging environments of the same app
 
-> **Status:** DONE · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** PR #173 (open)
+> **Status:** DONE · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** PR #173, released in 0.8.0
 
 ## 1. The ask
 

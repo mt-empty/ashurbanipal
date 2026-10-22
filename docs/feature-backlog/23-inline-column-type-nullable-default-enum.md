@@ -32,11 +32,11 @@ Divergence in what "type" and "enum" mean across the three belongs in
 
 ## 3. Touchpoints
 
-- `spec/protocol.md` — the `/tables/{table}` (or columns) response grows
-  `type`, `nullable`, `default`, `enum_values?` per column. Keep it one
-  fetch; this is metadata the frontend already asks for.
-- Frontend — header popover + record view rendering only; no new fetch
-  path.
+- `spec/protocol.md` — `nullable`, `default` and `enum_values?` per
+  column, either on §5.4.1's `columns[]` or on the lazy §5.10 structure
+  route (see §4). `type` is already in §5.4.1.
+- Frontend — header popover + record view rendering; it reuses the §5.10
+  fetch if the fields go there.
 - Conformance — schema-test assertions for the new fields across engines.
 
 ## 4. Open questions
@@ -48,6 +48,10 @@ Divergence in what "type" and "enum" mean across the three belongs in
   raw string, bucket it tolerantly in the frontend); if this story adds a
   popover, the same `<code>`-wrapped raw type and the same `columnTypeClass`
   helper apply.
+- §5.4.1 or §5.10? Story 26 put indexes and constraints on the lazy §5.10
+  route so `/tables/data` stays cheap on every page. These fields are the
+  same kind of per-table data, so §5.10 is the likely home unless the grid
+  needs them before the popover opens.
 - Does the enum list feed the filter's value autocomplete (currently
   column-name only)? Natural follow-on, separate story.
 
