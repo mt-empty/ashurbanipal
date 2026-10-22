@@ -1,6 +1,6 @@
 # Jump between dev / int / staging environments of the same app
 
-> **Status:** OPEN · **Area:** spec, ports, conformance, frontend, docs, e2e
+> **Status:** DONE · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** PR #173 (open)
 
 ## 1. The ask
 
@@ -21,7 +21,7 @@ and were not chosen.
 also helps a shared link whose table was renamed. §4 needs the spec change
 and every port.
 
-## 2. Current state
+## 2. State before this story
 
 - Config: each sibling has `name`, `base_url`, `health_path` and nothing
   else (`implementations/rust/core/src/config.rs:31`, `docs/design.md` §7).
@@ -91,13 +91,15 @@ Per-port field names follow each port's existing idiom:
 
 Configuration rules:
 
-- **C1.** `instance` with a missing or empty `name` or `label` is malformed
-  configuration (§4: disabled, handled the way the port already handles
-  invalid config).
-- **C2.** An empty-string sibling `label` is malformed configuration. Omit
-  the key instead.
+- **C1.** `instance` with a missing or empty `name` or `label` is invalid
+  sibling configuration.
+- **C2.** An empty-string sibling `label` is invalid sibling configuration.
+  Omit the key instead.
 - **C3.** Two siblings with the same `name` and the same `label` (both
-  unset counts as the same) are malformed configuration.
+  unset counts as the same) are invalid sibling configuration.
+
+Invalid sibling configuration never stops the host or the viewer, and is
+checked only when the viewer is enabled. See W5.
 - **C4.** A sibling whose `name` and `label` equal the `instance`'s is
   allowed, and recommended: one shared sibling list, in the same order, on
   every instance gives every instance the same grid. See W2.
@@ -125,6 +127,9 @@ Configuration rules:
   and columns from it.
 - **W4.** Every existing §5.6 rule (origin-relative health path, 2xx means
   healthy, per-check timeout, parallel checks) is unchanged.
+- **W5.** With invalid sibling configuration (C1–C3), this route answers
+  500 problem+json with `code: "invalid_config"` and a `title` naming the
+  broken rule. Every other route serves as usual.
 
 Both fields are optional additions, so the protocol stays v1
 (`spec/protocol.md` §7 versioning policy).
@@ -191,10 +196,13 @@ The frontend reads only the wire shape above.
 - **F8. Markup.** A real `<table>`: labels are `<th scope="col">`, names are
   `<th scope="row">`. Long names truncate with an ellipsis and keep the full
   name in `title`.
-- **F9. Polling.** The 15 s poll re-renders cells in place. It must not
-  close the popover or move keyboard focus.
+- **F9. Refresh.** A refresh while the pop-up is open re-renders cells in
+  place. It must not close the popover or move keyboard focus.
 - **F10. Trigger.** The pill text is unchanged: "Other services · N up" or
   "· N down".
+- **F11. Invalid config.** On `invalid_config` (W5) the pill reads "Other
+  services · config error" and the pop-up shows the `title` with a note to
+  fix the config and restart. It is not retried in the background.
 
 ## 5. Fallback note (ships first)
 
