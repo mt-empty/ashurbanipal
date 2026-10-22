@@ -44,10 +44,10 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     bp = Blueprint("ashurbanipal", __name__, url_prefix=mount)
     if not config.is_enabled():
         return bp  # zero routes registered — 404 on every path under `mount`
-    # Never raised: /api/siblings reports it and every other route still serves.
-    siblings_error = config.siblings_config_error()
-    own_entry = [config.is_instance(s) for s in config.siblings]
-    instance = None if config.instance is None else {"name": config.instance.name, "label": config.instance.label}
+    # Never rejected: /api/siblings reports what it corrected in "warnings".
+    view = config.siblings_view()
+    own_entry = [view.is_instance(s) for s in view.siblings]
+    instance = None if view.instance is None else {"name": view.instance.name, "label": view.instance.label}
 
     api_prefix = f"{mount}/api/"
 
@@ -272,12 +272,12 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("/api/siblings")
     def siblings() -> Response:
-        if siblings_error is not None:
-            return _problem_response(500, "invalid_config", f"invalid sibling configuration: {siblings_error}")
-        results = _check_siblings(config.siblings, own_entry)
-        if instance is None:
-            return jsonify({"siblings": results})
-        return jsonify({"instance": instance, "siblings": results})
+        body: dict = {"siblings": _check_siblings(view.siblings, own_entry)}
+        if instance is not None:
+            body = {"instance": instance, **body}
+        if view.warnings:
+            body["warnings"] = view.warnings
+        return jsonify(body)
 
     return bp
 

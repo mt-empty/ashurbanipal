@@ -193,29 +193,42 @@ test("a failed first fetch retries on its own", async ({ page }) => {
   await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 down");
 });
 
-test("an invalid sibling config is shown in the pop-up, not retried", async ({ page }) => {
-  await page.clock.install();
-  const title = 'invalid sibling configuration: two siblings share the name "orders" and the same label';
-  let calls = 0;
-  await page.route("**/api/siblings", (r) => {
-    calls++;
-    return r.fulfill({
-      status: 500,
-      contentType: "application/problem+json",
-      body: JSON.stringify({ type: "about:blank", title, status: 500, code: "invalid_config" }),
-    });
+test("config warnings show above the grid, and duplicates are listed under it", async ({ page }) => {
+  const audit = (host: string) => ({ name: "audit", base_url: `https://${host}/__ashurbanipal`, healthy: true });
+  await mockSiblings(page, {
+    ...LABELLED,
+    siblings: [
+      ...LABELLED.siblings,
+      { name: "billing", label: "dev", base_url: "https://billing-dev-2.example/__ashurbanipal", healthy: true },
+      audit("audit-dev.example"),
+      audit("audit-int.example"),
+    ],
+    warnings: [
+      'two siblings share the name "billing" and the label "dev"',
+      'two siblings share the name "audit" and no label',
+    ],
   });
   await gotoApp(page);
-  await expect(page.locator("#siblings-summary")).toHaveText("Other services · config error");
-  await page.locator("#siblings-btn").click();
-  await expect(page.locator("#siblings-error")).toBeVisible();
-  await expect(page.locator("#siblings-error-text")).toHaveText(title);
-  await expect(page.locator("#siblings-matrix")).toBeHidden();
-  await expect(page.locator("#siblings-list a")).toHaveCount(0);
+  await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 down · 2 warnings");
+  await openMatrix(page);
 
-  await page.keyboard.press("Escape");
-  await page.clock.runFor(60_000);
-  expect(calls).toBe(1);
+  await expect(page.locator("#siblings-warnings .sibling-warning-text")).toHaveText([
+    'Config: two siblings share the name "billing" and the label "dev"',
+    'Config: two siblings share the name "audit" and no label',
+  ]);
+  await expect(cell(page, "billing", 0).locator("a")).toHaveAttribute("href", base("billing", "dev"));
+  const rows = page.locator("#siblings-list .sibling-row");
+  await expect(rows.locator(".sibling-name")).toHaveText(["billing", "audit", "audit"]);
+  await expect(rows.locator(".sibling-note")).toHaveText(["dev · duplicate", "audit-dev.example", "audit-int.example"]);
+  await expect(rows.nth(1)).toHaveAttribute("href", "https://audit-dev.example/__ashurbanipal");
+});
+
+test("a clean config shows no warnings", async ({ page }) => {
+  await mockSiblings(page, LABELLED);
+  await gotoApp(page);
+  await openMatrix(page);
+  await expect(page.locator("#siblings-warnings")).toBeHidden();
+  await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 down");
 });
 
 test("a failed refresh keeps the last good list and label", async ({ page }) => {

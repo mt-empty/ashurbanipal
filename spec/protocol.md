@@ -85,8 +85,7 @@ interpreted as described in RFC 2119.
     `order` not `asc`/`desc`), or `not_readable`
     — a table that cleared §5.2's allow-list but the connected role cannot
     actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
-  - **500** — server error: `database_error`, `query_timeout` (§6), or
-    `invalid_config` (§5.6's sibling configuration is invalid).
+  - **500** — server error: `database_error`, or `query_timeout` (§6).
 - Every API response (§5.2–§5.11), success or error, MUST carry the
   protocol version header (§7).
 - Every API response (§5.2–§5.11), success or error, MUST carry
@@ -427,13 +426,19 @@ Response:
 - The sibling list is static configuration; an empty configuration yields
   `{"siblings": []}`.
 - Configuration MAY name this instance (`instance`, with a `name` and a
-  `label`, both non-empty) and MAY give each sibling a `label` (non-empty
-  when present). An `instance` missing either field, an empty sibling
-  `label`, or two siblings with the same `name` and the same `label` (both
-  absent counts as the same) is invalid configuration. It MUST NOT stop the
-  host or the viewer: every other route serves as usual, and this route
-  responds 500 with `code: "invalid_config"` and a `title` naming the broken
-  rule, so the UI can show it. A disabled implementation never checks it.
+  `label`) and MAY give each sibling a `label`.
+- Sibling configuration is never rejected, and never stops the host or the
+  viewer. An implementation corrects these mistakes and reports each one in
+  `warnings`:
+  - an `instance` with an empty or missing `name` or `label` is ignored, as
+    if not configured;
+  - an empty sibling `label` is treated as absent;
+  - two or more siblings with the same `name` and the same `label` (both
+    absent counts as the same) are all kept, in configuration order, with
+    one warning for the pair.
+- `warnings` is present iff at least one correction was made: an array of
+  human-readable strings whose wording is implementation-defined and MUST
+  NOT be parsed. A disabled implementation never checks the configuration.
 - A label is an opaque string the host writes. An implementation echoes it
   byte-for-byte and MUST NOT parse it, compare it against known names,
   derive it from any other signal, or let it change any behavior — §4's

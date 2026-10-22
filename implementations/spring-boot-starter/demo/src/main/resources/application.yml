@@ -58,3 +58,7 @@ ashurbanipal:
       label: a
       base-url: http://127.0.0.1:9/__ashurbanipal
       health-path: /health
+    - name: other
+      label: a
+      base-url: http://127.0.0.1:9/__ashurbanipal
+      health-path: /health

@@ -104,7 +104,7 @@ def main() -> None:
         config.instance = Instance(name="conformance", label="a")
         config.siblings = [
             Sibling(name=n, label=label, base_url=unreachable, health_path="/health")
-            for n, label in [("conformance", "a"), ("conformance", "b"), ("other", "a")]
+            for n, label in [("conformance", "a"), ("conformance", "b"), ("other", "a"), ("other", "a")]
         ]
 
     app = Flask(__name__)

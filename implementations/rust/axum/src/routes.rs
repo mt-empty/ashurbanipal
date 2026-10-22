@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use ashurbanipal::filter;
 use ashurbanipal::{
     resolve_source, Config, DbError, DbSource, Instance, JoinData, JoinOpts, JoinSpec,
-    ProblemDetails, QueryOpts, ReferencedBy, Structure, TableInfo,
+    ProblemDetails, QueryOpts, ReferencedBy, SiblingsView, Structure, TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -31,9 +31,7 @@ pub(crate) struct AppState<S> {
     /// listing order, which callers can rely on for the same reason).
     pub sources: Vec<(String, S)>,
     pub http: reqwest::Client,
-    /// Why the sibling config is invalid; `/api/siblings` reports it instead
-    /// of a list, and every other route still serves.
-    pub siblings_error: Option<String>,
+    pub siblings: SiblingsView,
 }
 
 /// If `config.enabled` is false (the default), every route (including the
@@ -42,14 +40,14 @@ pub(crate) struct AppState<S> {
 /// environment names.
 ///
 /// `sources` MUST be non-empty — a host with nothing to browse should pass
-/// `enabled = false` instead, not an empty list. Invalid sibling config
-/// never fails construction: `/api/siblings` answers `invalid_config`.
+/// `enabled = false` instead, not an empty list. Sibling config is never
+/// rejected: `/api/siblings` reports what it corrected in `warnings`.
 pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router {
     if !config.is_enabled() {
         return Router::new();
     }
     assert!(!sources.is_empty(), "router() requires at least one source");
-    let siblings_error = config.validate_siblings().err();
+    let siblings_view = config.siblings_view();
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
@@ -58,7 +56,7 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
         config,
         sources,
         http,
-        siblings_error,
+        siblings: siblings_view,
     });
     // The version header goes on every API response (errors included) but
     // not the HTML route, hence the separate layered sub-router.
@@ -102,7 +100,6 @@ async fn stamp_api_headers(mut response: Response) -> Response {
 enum ApiError {
     Db(DbError),
     BadRequest(String),
-    InvalidConfig(String),
 }
 
 impl From<DbError> for ApiError {
@@ -115,11 +112,6 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, title) = match self {
             ApiError::BadRequest(msg) => (400, "invalid_parameter", msg),
-            ApiError::InvalidConfig(reason) => (
-                500,
-                "invalid_config",
-                format!("invalid sibling configuration: {reason}"),
-            ),
             ApiError::Db(err) => err.problem(),
         };
         // Never `Json<ProblemDetails>` — that sets `application/json`, and
@@ -493,15 +485,15 @@ struct SiblingsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     instance: Option<Instance>,
     siblings: Vec<SiblingStatus>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 async fn siblings<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Response {
-    if let Some(reason) = &state.siblings_error {
-        return ApiError::InvalidConfig(reason.clone()).into_response();
-    }
-    let checks = state.config.siblings.iter().cloned().map(|sibling| {
+    let view = &state.siblings;
+    let checks = view.siblings.iter().cloned().map(|sibling| {
         let http = state.http.clone();
-        let is_instance = state.config.is_instance(&sibling);
+        let is_instance = view.is_instance(&sibling);
         async move {
             let health_url = health_url(&sibling.base_url, &sibling.health_path);
             let healthy = match health_url {
@@ -522,8 +514,9 @@ async fn siblings<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Respons
     });
     let siblings = futures_join_all(checks).await;
     Json(SiblingsResponse {
-        instance: state.config.instance.clone(),
+        instance: view.instance.clone(),
         siblings,
+        warnings: view.warnings.clone(),
     })
     .into_response()
 }
@@ -696,41 +689,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_sibling_config_is_reported_by_siblings_only() {
+    async fn sibling_config_mistakes_are_kept_and_warned() {
         use tower::ServiceExt;
         let config =
             Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"dev\"")).unwrap();
         let app = router(config, vec![("primary".to_string(), NeverQueriedSource)]);
-        let get = |uri: &'static str| {
-            let app = app.clone();
-            async move {
-                let resp = app
-                    .oneshot(
-                        axum::http::Request::builder()
-                            .uri(uri)
-                            .body(axum::body::Body::empty())
-                            .unwrap(),
-                    )
-                    .await
-                    .unwrap();
-                let status = resp.status();
-                let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-                    .await
-                    .unwrap();
-                (
-                    status,
-                    serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
-                )
-            }
-        };
-        let (status, json) = get("/__ashurbanipal/api/siblings").await;
-        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(json["code"], "invalid_config");
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/__ashurbanipal/api/siblings")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["siblings"].as_array().unwrap().len(), 3);
         assert_eq!(
-            json["title"],
-            "invalid sibling configuration: two siblings share the name \"orders\" and the same label"
+            json["warnings"],
+            serde_json::json!(["two siblings share the name \"orders\" and the label \"dev\""])
         );
-        let (status, _) = get("/__ashurbanipal/api/sources").await;
-        assert_eq!(status, StatusCode::OK);
     }
 }

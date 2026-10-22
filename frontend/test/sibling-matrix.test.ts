@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Sibling } from "../src/core/types.ts";
-import { buildSiblingMatrix, type MatrixCell, sameViewHref } from "../src/lib/sibling-matrix.ts";
+import { buildSiblingMatrix, listSiblings, type MatrixCell, sameViewHref } from "../src/lib/sibling-matrix.ts";
 
 const sib = (name: string, label?: string, healthy = true): Sibling => ({
   name,
@@ -79,8 +79,51 @@ test("an instance with no labelled siblings still shows its own cell", () => {
     [["orders", "here"]],
   );
   assert.deepEqual(
-    m.unlabelled.map((s) => s.name),
+    m.listed.map((l) => l.sibling.name),
     ["billing"],
+  );
+});
+
+test("a duplicate name and label fills the cell once and is listed after the grid", () => {
+  const first = sib("billing", "dev", true);
+  const copy = { ...sib("billing", "dev", false), base_url: "https://billing-dev-2.example/__ashurbanipal" };
+  const m = buildSiblingMatrix({
+    instance: { name: "orders", label: "dev" },
+    siblings: [sib("orders", "dev"), sib("orders", "dev"), first, copy],
+  });
+  assert.ok(m);
+  const billing = m.rows.find((r) => r.name === "billing");
+  assert.equal(billing?.cells[0].kind === "link" && billing.cells[0].sibling, first);
+  assert.deepEqual(
+    m.listed.map((l) => [l.sibling.name, l.note]),
+    [
+      ["orders", "dev · duplicate"],
+      ["billing", "dev · duplicate"],
+    ],
+  );
+});
+
+test("repeated unlabelled names are told apart by host", () => {
+  const audit = (host: string): Sibling => ({
+    name: "audit",
+    base_url: `https://${host}/__ashurbanipal`,
+    healthy: true,
+  });
+  const m = buildSiblingMatrix({
+    siblings: [sib("orders", "dev"), audit("audit-dev"), audit("audit-int"), sib("users")],
+  });
+  assert.ok(m);
+  assert.deepEqual(
+    m.listed.map((l) => [l.sibling.name, l.note]),
+    [
+      ["audit", "audit-dev"],
+      ["audit", "audit-int"],
+      ["users", undefined],
+    ],
+  );
+  assert.deepEqual(
+    listSiblings([audit("a.example:8080"), audit("b.example")]).map((l) => l.note),
+    ["a.example:8080", "b.example"],
   );
 });
 

@@ -547,9 +547,10 @@ dropdown.
 `instance` and `label` are optional and opaque (§7 has the config). The
 entry matching `instance` is this instance itself: it stays in place, so
 every instance sharing one list shows the same grid, and is never
-health-checked. An invalid sibling config answers 500 `invalid_config`
-here, so the pop-up can say what is wrong, while every other route keeps
-serving.
+health-checked. Sibling config is never rejected: an incomplete
+`instance` is ignored, an empty label dropped and duplicates kept, each
+reported in an optional `warnings` array that the pop-up shows above the
+grid.
 
 The backend performs the other health checks (parallel HTTP GET to each
 sibling's configured health path) synchronously when this endpoint is

@@ -91,15 +91,14 @@ Per-port field names follow each port's existing idiom:
 
 Configuration rules:
 
-- **C1.** `instance` with a missing or empty `name` or `label` is invalid
-  sibling configuration.
-- **C2.** An empty-string sibling `label` is invalid sibling configuration.
-  Omit the key instead.
+- **C1.** `instance` with a missing or empty `name` or `label` is ignored.
+- **C2.** An empty-string sibling `label` is treated as no label.
 - **C3.** Two siblings with the same `name` and the same `label` (both
-  unset counts as the same) are invalid sibling configuration.
+  unset counts as the same) are both kept, in configuration order.
 
-Invalid sibling configuration never stops the host or the viewer, and is
-checked only when the viewer is enabled. See W5.
+Sibling configuration is never rejected and never stops the host or the
+viewer. Each correction above is reported as a warning (W5). It is checked
+only when the viewer is enabled.
 - **C4.** A sibling whose `name` and `label` equal the `instance`'s is
   allowed, and recommended: one shared sibling list, in the same order, on
   every instance gives every instance the same grid. See W2.
@@ -127,9 +126,9 @@ checked only when the viewer is enabled. See W5.
   and columns from it.
 - **W4.** Every existing §5.6 rule (origin-relative health path, 2xx means
   healthy, per-check timeout, parallel checks) is unchanged.
-- **W5.** With invalid sibling configuration (C1–C3), this route answers
-  500 problem+json with `code: "invalid_config"` and a `title` naming the
-  broken rule. Every other route serves as usual.
+- **W5.** Each correction from C1–C3 adds one human-readable string to an
+  optional `warnings` array, present only when there is at least one. Its
+  wording is implementation-defined and never parsed.
 
 Both fields are optional additions, so the protocol stays v1
 (`spec/protocol.md` §7 versioning policy).
@@ -200,9 +199,10 @@ The frontend reads only the wire shape above.
   place. It must not close the popover or move keyboard focus.
 - **F10. Trigger.** The pill text is unchanged: "Other services · N up" or
   "· N down".
-- **F11. Invalid config.** On `invalid_config` (W5) the pill reads "Other
-  services · config error" and the pop-up shows the `title` with a note to
-  fix the config and restart. It is not retried in the background.
+- **F11. Warnings.** With `warnings` (W5) the pill adds "· N warnings" and
+  the pop-up lists each one above the grid. A repeated name and label fills
+  its cell once; later copies are listed under the grid as "<label> ·
+  duplicate". Unlabelled entries sharing a name show their host.
 
 ## 5. Fallback note (ships first)
 

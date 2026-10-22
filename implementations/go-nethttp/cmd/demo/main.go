@@ -122,5 +122,6 @@ func conformanceLabelledSiblings() (*ashurbanipal.Instance, []ashurbanipal.Sibli
 		{Name: "conformance", Label: "a", BaseURL: unreachable, HealthPath: "/health"},
 		{Name: "conformance", Label: "b", BaseURL: unreachable, HealthPath: "/health"},
 		{Name: "other", Label: "a", BaseURL: unreachable, HealthPath: "/health"},
+		{Name: "other", Label: "a", BaseURL: unreachable, HealthPath: "/health"},
 	}
 }

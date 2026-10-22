@@ -24,6 +24,8 @@
 //! PORT=4001 INSTANCE_LABEL=int SIBLING_PORT=4000 SIBLING_LABEL=dev cargo run -p ashurbanipal-axum --example demo
 //! ```
 //!
+//! Add `SIBLING_MISTAKES=1` to either to see the config warnings.
+//!
 //! To demo multi-source browsing (a second, distinctly-seeded database —
 //! `.devcontainer/db/init/02-reporting-seed.sql` — registered as a
 //! `reporting` source alongside `primary`):
@@ -173,7 +175,9 @@ async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::er
 /// `SIBLING_LABEL` labels the `SIBLING_PORT` sibling and `INSTANCE_LABEL`
 /// names this instance, both as service `demo`, so two demos show a labelled
 /// pair; either label also adds three services that are down under both
-/// labels, to fill the grid. `CONFORMANCE_LABELLED_SIBLINGS=1` replaces all
+/// labels, to fill the grid. `SIBLING_MISTAKES=1` adds a duplicate and two
+/// unlabelled entries sharing a name, to show the pop-up's warnings.
+/// `CONFORMANCE_LABELLED_SIBLINGS=1` replaces all
 /// of it with the fixed config `conformance/runner/labelled_siblings.rs`
 /// expects.
 fn siblings_toml(port: u16, sibling_port: Option<u16>) -> String {
@@ -229,6 +233,13 @@ label = {l:?}
             toml += &entry(name, Some(l), "http://127.0.0.1:9");
         }
     }
+    if std::env::var("SIBLING_MISTAKES").is_ok() {
+        if let Some((l, _)) = demos.first() {
+            toml += &entry("search", Some(l), "http://127.0.0.1:9");
+        }
+        toml += &entry("audit", None, "http://audit-dev.invalid:9");
+        toml += &entry("audit", None, "http://audit-int.invalid:9");
+    }
     toml
 }
 
@@ -247,6 +258,12 @@ health_path = "/health"
 [[siblings]]
 name = "conformance"
 label = "b"
+base_url = "http://127.0.0.1:9/__ashurbanipal"
+health_path = "/health"
+
+[[siblings]]
+name = "other"
+label = "a"
 base_url = "http://127.0.0.1:9/__ashurbanipal"
 health_path = "/health"
 

@@ -68,37 +68,37 @@ it.each([
   [
     "an instance without a label",
     (c: Config) => (c.instance = { name: "orders", label: "" }),
-    "instance needs a non-empty name and label",
+    "instance needs a non-empty name and label; ignored",
   ],
   [
     "an empty sibling label",
     (c: Config) => ((c.siblings ?? [])[1].label = ""),
-    'sibling "orders" needs a non-empty string label, or none',
+    'sibling "orders" has an empty or non-string label; treated as unlabelled',
   ],
   [
     "a duplicate name and label",
     (c: Config) => ((c.siblings ?? [])[1].label = "dev"),
-    'two siblings share the name "orders" and the same label',
+    'two siblings share the name "orders" and the label "dev"',
   ],
   [
     "a null sibling label",
     (c: Config) => ((c.siblings ?? [])[1].label = null as unknown as string),
-    'sibling "orders" needs a non-empty string label, or none',
+    'sibling "orders" has an empty or non-string label; treated as unlabelled',
   ],
-])("reports %s from /api/siblings only", async (_name, mutate, reason) => {
+])("keeps the siblings and warns on %s", async (_name, mutate, warning) => {
   const config = labelledConfig();
   mutate(config);
-  const [siblings, sourcesList] = await get(config, "/api/siblings", "/api/sources");
-  expect(siblings).toStrictEqual({
-    status: 500,
-    body: {
-      type: "about:blank",
-      title: `invalid sibling configuration: ${reason}`,
-      status: 500,
-      code: "invalid_config",
-    },
-  });
-  expect(sourcesList.status).toBe(200);
+  const [{ status, body }] = await get(config, "/api/siblings");
+  expect(status).toBe(200);
+  expect((body as { siblings: unknown[] }).siblings).toHaveLength(3);
+  expect((body as { warnings: string[] }).warnings).toStrictEqual([warning]);
+});
+
+it("lists an unlabelled sibling under its own name, not its emptied label", async () => {
+  const config = labelledConfig();
+  (config.siblings ?? [])[1].label = "";
+  const body = (await getSiblings(config)) as { siblings: Record<string, unknown>[] };
+  expect(body.siblings[1]).toStrictEqual({ name: "orders", base_url: baseUrl, healthy: false });
 });
 
 it("never validates siblings when disabled", () => {

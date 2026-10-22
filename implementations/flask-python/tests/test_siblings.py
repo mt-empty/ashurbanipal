@@ -71,21 +71,34 @@ def _with_second_label(label: str) -> Config:
 
 
 @pytest.mark.parametrize(
-    "config",
+    ("config", "siblings", "warning"),
     [
-        replace(_labelled(), instance=Instance(name="orders", label="")),
-        _with_second_label(""),
-        _with_second_label("dev"),
+        (
+            replace(_labelled(), instance=Instance(name="orders", label="")),
+            3,
+            "instance needs a non-empty name and label; ignored",
+        ),
+        (_with_second_label(""), 3, 'sibling "orders" has an empty label; treated as unlabelled'),
+        (_with_second_label("dev"), 3, 'two siblings share the name "orders" and the label "dev"'),
+        (
+            replace(_labelled(), siblings=[*_labelled().siblings, _labelled().siblings[2]]),
+            4,
+            'two siblings share the name "billing" and no label',
+        ),
     ],
-    ids=["instance without a label", "empty sibling label", "duplicate name and label"],
+    ids=[
+        "instance without a label",
+        "empty sibling label",
+        "duplicate name and label",
+        "duplicate unlabelled name",
+    ],
 )
-def test_reports_invalid_sibling_config_from_siblings_only(config: Config) -> None:
-    client = _client(config)
-    resp = client.get("/__ashurbanipal/api/siblings")
-    assert resp.status_code == 500
-    assert resp.get_json()["code"] == "invalid_config"
-    assert resp.get_json()["title"].startswith("invalid sibling configuration: ")
-    assert client.get("/__ashurbanipal/api/sources").status_code == 200
+def test_keeps_siblings_and_warns_on_config_mistakes(config: Config, siblings: int, warning: str) -> None:
+    resp = _client(config).get("/__ashurbanipal/api/siblings")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert len(body["siblings"]) == siblings
+    assert body["warnings"] == [warning]
 
 
 def test_never_validates_siblings_when_disabled() -> None:

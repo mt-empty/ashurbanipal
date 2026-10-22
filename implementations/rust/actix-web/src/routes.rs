@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use ashurbanipal::filter;
 use ashurbanipal::{
     resolve_source, Config, DbError, DbSource, Instance, JoinData, JoinOpts, JoinSpec,
-    ProblemDetails, QueryOpts, ReferencedBy, TableInfo,
+    ProblemDetails, QueryOpts, ReferencedBy, SiblingsView, TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -26,26 +26,25 @@ pub struct AppState<S> {
     /// listing order, which callers can rely on for the same reason).
     pub sources: Vec<(String, S)>,
     pub http: reqwest::Client,
-    /// Why the sibling config is invalid; `/api/siblings` reports it instead
-    /// of a list, and every other route still serves.
-    pub siblings_error: Option<String>,
+    pub siblings: SiblingsView,
 }
 
 /// Built once, not per worker — cheap to share via `web::Data`'s `Arc`,
 /// unlike [`service`]'s route tree, which Actix rebuilds per worker anyway.
 ///
 /// `sources` MUST be non-empty — a host with nothing to browse should pass
-/// `enabled = false` instead, not an empty list. Invalid sibling config
-/// never fails construction: `/api/siblings` answers `invalid_config`.
+/// `enabled = false` instead, not an empty list. Sibling config is never
+/// rejected: `/api/siblings` reports what it corrected in `warnings`.
 pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data<AppState<S>> {
     assert!(
         !sources.is_empty(),
         "app_state() requires at least one source"
     );
-    let siblings_error = config
-        .is_enabled()
-        .then(|| config.validate_siblings().err())
-        .flatten();
+    let siblings = if config.is_enabled() {
+        config.siblings_view()
+    } else {
+        SiblingsView::default()
+    };
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
@@ -54,7 +53,7 @@ pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data
         config,
         sources,
         http,
-        siblings_error,
+        siblings,
     })
 }
 
@@ -120,7 +119,6 @@ async fn stamp_api_headers(
 enum ApiError {
     Db(DbError),
     BadRequest(String),
-    InvalidConfig(String),
 }
 
 impl From<DbError> for ApiError {
@@ -135,11 +133,6 @@ impl ApiError {
     fn problem(&self) -> (u16, &'static str, String) {
         match self {
             ApiError::BadRequest(msg) => (400, "invalid_parameter", msg.clone()),
-            ApiError::InvalidConfig(reason) => (
-                500,
-                "invalid_config",
-                format!("invalid sibling configuration: {reason}"),
-            ),
             ApiError::Db(err) => err.problem(),
         }
     }
@@ -518,15 +511,15 @@ struct SiblingsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     instance: Option<Instance>,
     siblings: Vec<SiblingStatus>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
-async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> Result<HttpResponse, ApiError> {
-    if let Some(reason) = &state.siblings_error {
-        return Err(ApiError::InvalidConfig(reason.clone()));
-    }
-    let checks = state.config.siblings.iter().cloned().map(|sibling| {
+async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
+    let view = &state.siblings;
+    let checks = view.siblings.iter().cloned().map(|sibling| {
         let http = state.http.clone();
-        let is_instance = state.config.is_instance(&sibling);
+        let is_instance = view.is_instance(&sibling);
         async move {
             let health_url = health_url(&sibling.base_url, &sibling.health_path);
             let healthy = match health_url {
@@ -546,10 +539,11 @@ async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> Result<HttpResponse,
         }
     });
     let siblings = futures_join_all(checks).await;
-    Ok(HttpResponse::Ok().json(SiblingsResponse {
-        instance: state.config.instance.clone(),
+    HttpResponse::Ok().json(SiblingsResponse {
+        instance: view.instance.clone(),
         siblings,
-    }))
+        warnings: view.warnings.clone(),
+    })
 }
 
 /// Resolves against the sibling's origin, not its path.
@@ -737,33 +731,23 @@ mod kill_switch_tests {
     }
 
     #[actix_web::test]
-    async fn invalid_sibling_config_is_reported_by_siblings_only() {
+    async fn sibling_config_mistakes_are_kept_and_warned() {
         let config =
             Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"dev\"")).unwrap();
         let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
         let app = test::init_service(App::new().service(service(state))).await;
-        let resp = test::call_service(
+        let json: serde_json::Value = test::call_and_read_body_json(
             &app,
             test::TestRequest::get()
                 .uri("/__ashurbanipal/api/siblings")
                 .to_request(),
         )
         .await;
-        assert_eq!(resp.status(), 500);
-        let json: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(json["code"], "invalid_config");
+        assert_eq!(json["siblings"].as_array().unwrap().len(), 3);
         assert_eq!(
-            json["title"],
-            "invalid sibling configuration: two siblings share the name \"orders\" and the same label"
+            json["warnings"],
+            serde_json::json!(["two siblings share the name \"orders\" and the label \"dev\""])
         );
-        let resp = test::call_service(
-            &app,
-            test::TestRequest::get()
-                .uri("/__ashurbanipal/api/sources")
-                .to_request(),
-        )
-        .await;
-        assert_eq!(resp.status(), 200);
     }
 
     #[actix_web::test]
@@ -775,6 +759,6 @@ mod kill_switch_tests {
         )
         .unwrap();
         let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
-        assert!(state.siblings_error.is_none());
+        assert!(state.siblings.warnings.is_empty());
     }
 }

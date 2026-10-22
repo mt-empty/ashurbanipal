@@ -6,7 +6,8 @@ import {
   isEnabled,
   type ResolvedLimits,
   type Sibling,
-  siblingsConfigError,
+  type SiblingsView,
+  siblingsView,
   withDefaults,
 } from "./config.js";
 import type { DbSource } from "./db/types.js";
@@ -38,8 +39,8 @@ export interface NamedSource {
  * `DbSource` implementation(s) (PostgresSource, SqliteSource, MySqlSource)
  * it wants itself; there is no driver auto-detection. `sources` MUST be
  * non-empty — a host with nothing to browse should pass `enabled: false`
- * instead, not an empty list. Invalid sibling config never throws:
- * /api/siblings answers invalid_config and every other route still serves.
+ * instead, not an empty list. Sibling config is never rejected:
+ * /api/siblings reports what it corrected in `warnings`.
  *
  * When cfg.enabled is not true — including an empty/undefined Config,
  * which MUST mean disabled — createRouter returns a router that 404s
@@ -72,11 +73,7 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   registerGet(router, `${mount}/api/tables/referenced-by`, withApiHeaders(referencedByHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/structure`, withApiHeaders(structureHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/join`, withApiHeaders(tableJoinHandler(sources, limits, timeoutMs)));
-  registerGet(
-    router,
-    `${mount}/api/siblings`,
-    withApiHeaders(siblingsHandler(config.instance, config.siblings ?? [], siblingsConfigError(config))),
-  );
+  registerGet(router, `${mount}/api/siblings`, withApiHeaders(siblingsHandler(siblingsView(config))));
 
   return router;
 }
@@ -378,18 +375,14 @@ function structureHandler(sources: NamedSource[], timeoutMs: number) {
   };
 }
 
-function siblingsHandler(instance: Instance | undefined, siblings: Sibling[], configError: string | undefined) {
+function siblingsHandler({ instance, siblings, warnings }: SiblingsView) {
   return async (_req: Request, res: Response): Promise<void> => {
-    if (configError !== undefined) {
-      httpProblemError(res, 500, "invalid_config", `invalid sibling configuration: ${configError}`);
-      return;
-    }
     const statuses = await checkSiblings(siblings, instance);
-    res.json(
-      instance
-        ? { instance: { name: instance.name, label: instance.label }, siblings: statuses }
-        : { siblings: statuses },
-    );
+    res.json({
+      ...(instance && { instance: { name: instance.name, label: instance.label } }),
+      siblings: statuses,
+      ...(warnings.length > 0 && { warnings }),
+    });
   };
 }
 

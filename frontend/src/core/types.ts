@@ -125,6 +125,8 @@ export interface SiblingInstance {
 export interface SiblingsResponse {
   instance?: SiblingInstance;
   siblings: Sibling[];
+  // Config mistakes the server corrected; human-readable, never parsed.
+  warnings?: string[];
 }
 
 // A name the page URL asked for that this instance lacks, and what the page

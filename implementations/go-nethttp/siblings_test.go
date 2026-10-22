@@ -67,30 +67,35 @@ func TestSiblingsWithoutInstanceOmitInstanceAndLabel(t *testing.T) {
 	}
 }
 
-func TestInvalidSiblingConfigIsReportedBySiblingsOnly(t *testing.T) {
+func TestSiblingConfigMistakesAreKeptAndWarned(t *testing.T) {
 	for name, tc := range map[string]struct {
-		mutate func(*Config)
-		title  string
+		mutate   func(*Config)
+		siblings int
+		warning  string
 	}{
 		"instance without a label": {
 			func(c *Config) { c.Instance.Label = "" },
-			"invalid sibling configuration: Instance needs a non-empty Name and Label",
+			3,
+			"instance needs a non-empty name and label; ignored",
 		},
 		"duplicate name and label": {
 			func(c *Config) { c.Siblings[1].Label = "dev" },
-			`invalid sibling configuration: two siblings share the name "orders" and the same label`,
+			3,
+			`two siblings share the name "orders" and the label "dev"`,
+		},
+		"duplicate unlabelled name": {
+			func(c *Config) { c.Siblings = append(c.Siblings, c.Siblings[2], c.Siblings[2]) },
+			5,
+			`two siblings share the name "billing" and no label`,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := labelledConfig()
 			tc.mutate(&cfg)
-			handler := Router(cfg, []NamedSource{{Name: "primary", Source: nil}})
-			status, body := get(t, handler, "/__ashurbanipal/api/siblings")
-			if status != http.StatusInternalServerError || body["code"] != "invalid_config" || body["title"] != tc.title {
-				t.Errorf("GET /api/siblings = %d %v, want 500 invalid_config %q", status, body, tc.title)
-			}
-			if status, _ := get(t, handler, "/__ashurbanipal/api/sources"); status != http.StatusOK {
-				t.Errorf("GET /api/sources = %d, want 200", status)
+			status, body := get(t, Router(cfg, []NamedSource{{Name: "primary", Source: nil}}), "/__ashurbanipal/api/siblings")
+			want := []any{tc.warning}
+			if status != http.StatusOK || len(body["siblings"].([]any)) != tc.siblings || !reflect.DeepEqual(body["warnings"], want) {
+				t.Errorf("GET /api/siblings = %d %v, want 200 with %d siblings and warnings %v", status, body, tc.siblings, want)
 			}
 		})
 	}

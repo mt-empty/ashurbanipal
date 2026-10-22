@@ -149,7 +149,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.6-INSTANCE-ECHO` | Configured `instance` is echoed byte-for-byte; absent when not configured | `labelled_siblings::instance_is_echoed_as_configured`, `html_and_siblings::siblings_endpoint_returns_empty_list_by_default` (absent case) |
 | `P5.6-SELF-IN-PLACE` | The sibling equal to `instance` stays in place, `healthy: true`, and is not health-checked | `labelled_siblings::this_instance_is_listed_healthy_without_a_check` (its base_url refuses connections, so `true` proves no probe) |
 | `P5.6-LABEL-ECHO-ORDER` | Sibling `label` echoed when configured; `siblings` in configuration order | `labelled_siblings::labels_are_echoed_in_configuration_order` |
-| `P5.6-INVALID-CONFIG` | Invalid `instance`/`label` config, or a duplicate name and label, never stops the host: this route answers 500 `invalid_config`, every other route serves; never checked when disabled | covered at the unit level only, in each port's siblings tests (e.g. `implementations/go-nethttp/siblings_test.go`'s `TestInvalidSiblingConfigIsReportedBySiblingsOnly`) — black-box coverage would need one more demo config, and so one more CI job per port |
+| `P5.6-CONFIG-WARNINGS` | Sibling config is never rejected: duplicates are kept in order with one warning; `warnings` absent when there is nothing to report | `labelled_siblings::a_duplicate_is_kept_and_warned_once`, `labelled_siblings::labels_are_echoed_in_configuration_order` (the duplicate is listed), `html_and_siblings::siblings_endpoint_returns_empty_list_by_default` (absent case). The incomplete-instance and empty-label corrections are covered by each port's unit tests only (Go cannot express an empty label) |
 
 ## §5.7 `GET /api/schemas`
 

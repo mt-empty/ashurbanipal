@@ -343,10 +343,12 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
           padding: .5rem; width: max-content; max-width: min(22rem, 90vw);
           box-shadow: 0 4px 16px #0004; }
 #siblings-heading { margin: .1rem .6rem .5rem; font-size: .75rem; color: var(--text-muted); }
-#siblings-error { margin: 0 .6rem .3rem; font-size: .8125rem; }
-#siblings-error p { margin: 0; }
-#siblings-error p + p { margin-top: .35rem; }
-#siblings-error-text { color: var(--text-muted); overflow-wrap: anywhere; }
+#siblings-warnings { margin: 0 .6rem .5rem; padding: 0; list-style: none; font-size: .75rem;
+                     overflow-wrap: anywhere; }
+#siblings-warnings li { display: flex; gap: .4rem; }
+#siblings-warnings li + li { margin-top: .25rem; }
+.sibling-warning-icon { color: var(--text-muted); }
+.sibling-note { color: var(--text-muted); font-size: .75rem; white-space: nowrap; }
 #siblings-list { display: flex; flex-direction: column; }
 .sibling-row { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem;
                border-radius: 6px; color: inherit; text-decoration: none; }
@@ -890,11 +892,7 @@ FROM table [alias]
 
 <div id="siblings-pop" popover>
   <p id="siblings-heading">Other services' databases. Opens their Ashurbanipal in a new tab.</p>
-  <div id="siblings-error" hidden>
-    <p>Links to other services are off.</p>
-    <p id="siblings-error-text"></p>
-    <p>Fix this service's configuration and restart it.</p>
-  </div>
+  <ul id="siblings-warnings" hidden></ul>
   <table id="siblings-matrix" hidden><thead><tr id="siblings-matrix-head"></tr></thead><tbody id="siblings-matrix-body"></tbody></table>
   <div id="siblings-list"></div>
   <div id="siblings-foot" hidden>
@@ -4724,12 +4722,27 @@ function buildSiblingMatrix({ instance, siblings }) {
     });
     return { name, isInstance, cells };
   });
-  return {
-    labels,
-    ownLabel: instance?.label ?? null,
-    rows,
-    unlabelled: siblings.filter((s) => s.label === void 0)
-  };
+  const listed = siblings.flatMap((s) => {
+    if (s.label === void 0) return [{ sibling: s }];
+    return labelled.find((t) => t.name === s.name && t.label === s.label) === s ? [] : [{ sibling: s, note: `${s.label} \xB7 duplicate` }];
+  });
+  return { labels, ownLabel: instance?.label ?? null, rows, listed: withHosts(listed) };
+}
+function listSiblings(siblings) {
+  return withHosts(siblings.map((sibling) => ({ sibling })));
+}
+function withHosts(listed) {
+  const unlabelled = listed.filter((l) => l.note === void 0).map((l) => l.sibling.name);
+  return listed.map(
+    (l) => l.note === void 0 && unlabelled.indexOf(l.sibling.name) !== unlabelled.lastIndexOf(l.sibling.name) ? { ...l, note: hostOf(l.sibling.base_url) } : l
+  );
+}
+function hostOf(baseUrl) {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
 }
 function sameViewHref(baseUrl, search2) {
   let url;
@@ -4777,7 +4790,6 @@ async function loadSiblings() {
   inFlight = true;
   lastFetchStarted = performance.now();
   let body;
-  let configError;
   try {
     body = await api("/siblings", {
       cache: "no-store",
@@ -4785,23 +4797,21 @@ async function loadSiblings() {
     });
     siblingsWarned = false;
   } catch (e) {
-    if (e instanceof ApiError && e.code === "invalid_config") configError = e.message;
-    else if (!siblingsWarned) {
+    if (!siblingsWarned) {
       console.warn("ashurbanipal: /siblings fetch failed; retrying", e);
       siblingsWarned = true;
     }
   } finally {
     inFlight = false;
   }
-  if (!body && configError === void 0) {
+  if (!body) {
     scheduleRetry();
     return;
   }
   clearTimeout(retryTimer);
   retryTimer = void 0;
   retryDelay = FRESH_MS;
-  if (body) render3(body);
-  else renderConfigError(configError ?? "");
+  render3(body);
 }
 function stampHeading(prefix) {
   const at = /* @__PURE__ */ new Date();
@@ -4810,19 +4820,17 @@ function stampHeading(prefix) {
   updated.title = at.toLocaleString();
   $("siblings-heading").replaceChildren(prefix, "Updated ", updated, ".");
 }
-function renderConfigError(message) {
-  setNoticePlace(null);
-  $("siblings").hidden = false;
-  $("siblings-summary").textContent = "Other services \xB7 config error";
-  $("siblings-dot").className = dotClass(false);
-  $("siblings-matrix").hidden = true;
-  $("siblings-foot").hidden = true;
-  matrixShape = "";
-  listShape = "";
-  $("siblings-list").replaceChildren();
-  stampHeading("Other services' databases. ");
-  $("siblings-error-text").textContent = message;
-  $("siblings-error").hidden = false;
+function renderWarnings(warnings) {
+  $("siblings-warnings").hidden = warnings.length === 0;
+  $("siblings-warnings").replaceChildren(
+    ...warnings.map((w) => {
+      const li = el("li");
+      const icon = el("span", "sibling-warning-icon", "\u26A0");
+      icon.setAttribute("aria-hidden", "true");
+      li.append(icon, el("span", "sibling-warning-text", `Config: ${w}`));
+      return li;
+    })
+  );
 }
 function render3(body) {
   const { siblings } = body;
@@ -4830,9 +4838,14 @@ function render3(body) {
   const others = siblings.filter((s) => !isOwnEntry(body.instance, s));
   $("siblings").hidden = others.length === 0;
   const down = others.filter((s) => !s.healthy).length;
-  $("siblings-summary").textContent = down > 0 ? `Other services \xB7 ${down} down` : `Other services \xB7 ${others.length} up`;
+  const warnings = body.warnings ?? [];
+  $("siblings-summary").textContent = [
+    "Other services",
+    down > 0 ? `${down} down` : `${others.length} up`,
+    ...warnings.length > 0 ? [`${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`] : []
+  ].join(" \xB7 ");
   $("siblings-dot").className = dotClass(down === 0);
-  $("siblings-error").hidden = true;
+  renderWarnings(warnings);
   const matrix = buildSiblingMatrix(body);
   $("siblings-matrix").hidden = matrix === null;
   $("siblings-foot").hidden = matrix === null;
@@ -4841,17 +4854,17 @@ function render3(body) {
   );
   if (matrix) renderMatrix(matrix);
   else matrixShape = "";
-  renderList(matrix ? matrix.unlabelled : siblings, !matrix);
+  renderList(matrix ? matrix.listed : listSiblings(siblings), !matrix);
 }
 function renderList(list, newTab) {
-  const shape = JSON.stringify([newTab, list.map((s) => s.name)]);
+  const shape = JSON.stringify([newTab, list.map((l) => [l.sibling.name, l.note])]);
   if (shape !== listShape) {
     listShape = shape;
     rowRefs = list.map(() => listRow(newTab));
     $("siblings-list").replaceChildren(...rowRefs.map((r) => r.a));
   }
-  list.forEach((s, i) => {
-    paintRow(rowRefs[i], s, newTab);
+  list.forEach((l, i) => {
+    paintRow(rowRefs[i], l, newTab);
   });
 }
 function health(healthy) {
@@ -4877,15 +4890,18 @@ function listRow(newTab) {
     a,
     dot: healthDot(true, ""),
     name: el("span", "sibling-name"),
+    note: el("span", "sibling-note"),
     state: el("span", "sibling-state")
   };
-  a.append(ref.dot, ref.name, ref.state);
+  a.append(ref.dot, ref.name, ref.note, ref.state);
   return ref;
 }
-function paintRow(ref, s, newTab) {
+function paintRow(ref, { sibling: s, note }, newTab) {
   ref.a.href = s.base_url;
   ref.name.textContent = s.name;
   ref.name.title = s.name;
+  ref.note.textContent = note ?? "";
+  ref.note.hidden = note === void 0;
   ref.dot.className = dotClass(s.healthy);
   ref.dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
   ref.state.textContent = `${health(s.healthy)}${newTab ? " \u2197" : ""}`;
@@ -5117,7 +5133,7 @@ function syncUrl() {
   applyScopeParams(params);
   if (state.view?.kind === "join") params.set("join", state.view.text);
   if (state.filter) params.set("filter", state.filter);
-  const qs3 = `?${params}`;
+  const qs2 = `?${params}`;
   const key = navViewKey();
   const samePlace = navIndex >= 0 && navStack[navIndex] === key;
   if (restoringFromHistory || navStack.length === 0 || samePlace) {
@@ -5125,12 +5141,12 @@ function syncUrl() {
       navStack = [key];
       navIndex = 0;
     }
-    history.replaceState({ navIndex }, "", qs3);
+    history.replaceState({ navIndex }, "", qs2);
   } else {
     navStack = navStack.slice(0, navIndex + 1);
     navStack.push(key);
     navIndex = navStack.length - 1;
-    history.pushState({ navIndex }, "", qs3);
+    history.pushState({ navIndex }, "", qs2);
   }
   updateNavButtons();
 }

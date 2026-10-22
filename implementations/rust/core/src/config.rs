@@ -74,32 +74,67 @@ impl Config {
         self.enabled
     }
 
-    /// The `instance`/`label` rules of `spec/protocol.md` §5.6; adapters call
-    /// this once, at router construction.
-    pub fn validate_siblings(&self) -> Result<(), String> {
-        if let Some(instance) = &self.instance {
-            if instance.name.is_empty() || instance.label.is_empty() {
-                return Err("instance needs a non-empty name and label".into());
+    /// What `/api/siblings` reports. Adapters build it once, at router
+    /// construction.
+    pub fn siblings_view(&self) -> SiblingsView {
+        let mut warnings = Vec::new();
+        let instance = match &self.instance {
+            Some(i) if i.name.is_empty() || i.label.is_empty() => {
+                warnings.push("instance needs a non-empty name and label; ignored".into());
+                None
             }
+            other => other.clone(),
+        };
+        let mut seen = std::collections::HashMap::new();
+        let siblings = self
+            .siblings
+            .iter()
+            .map(|sibling| {
+                let mut sibling = sibling.clone();
+                if sibling.label.as_deref() == Some("") {
+                    warnings.push(format!(
+                        "sibling {:?} has an empty label; treated as unlabelled",
+                        sibling.name
+                    ));
+                    sibling.label = None;
+                }
+                let copies = seen
+                    .entry((sibling.name.clone(), sibling.label.clone()))
+                    .or_insert(0);
+                *copies += 1;
+                if *copies == 2 {
+                    warnings.push(match &sibling.label {
+                        Some(label) => format!(
+                            "two siblings share the name {:?} and the label {label:?}",
+                            sibling.name
+                        ),
+                        None => format!(
+                            "two siblings share the name {:?} and no label",
+                            sibling.name
+                        ),
+                    });
+                }
+                sibling
+            })
+            .collect();
+        SiblingsView {
+            instance,
+            siblings,
+            warnings,
         }
-        let mut seen = std::collections::HashSet::new();
-        for sibling in &self.siblings {
-            if sibling.label.as_deref() == Some("") {
-                return Err(format!(
-                    "sibling {:?} has an empty label; omit it instead",
-                    sibling.name
-                ));
-            }
-            if !seen.insert((sibling.name.as_str(), sibling.label.as_deref())) {
-                return Err(format!(
-                    "two siblings share the name {:?} and the same label",
-                    sibling.name
-                ));
-            }
-        }
-        Ok(())
     }
+}
 
+/// The sibling config after `spec/protocol.md` §5.6's corrections, which
+/// never reject it: each correction is reported in `warnings` instead.
+#[derive(Debug, Clone, Default)]
+pub struct SiblingsView {
+    pub instance: Option<Instance>,
+    pub siblings: Vec<Sibling>,
+    pub warnings: Vec<String>,
+}
+
+impl SiblingsView {
     /// Whether `sibling` is this instance's own entry, which is reported
     /// healthy without a health check: it is serving the response.
     pub fn is_instance(&self, sibling: &Sibling) -> bool {
@@ -197,31 +232,34 @@ mod tests {
         );
         assert_eq!(config.siblings[1].label.as_deref(), Some("int"));
         assert_eq!(config.siblings[2].label, None);
-        assert_eq!(config.validate_siblings(), Ok(()));
+        assert!(config.siblings_view().warnings.is_empty());
     }
 
     #[test]
     fn only_the_matching_name_and_label_is_this_instance() {
-        let config = Config::from_toml(LABELLED).unwrap();
-        let mine: Vec<_> = config
-            .siblings
-            .iter()
-            .map(|s| config.is_instance(s))
-            .collect();
+        let view = Config::from_toml(LABELLED).unwrap().siblings_view();
+        let mine: Vec<_> = view.siblings.iter().map(|s| view.is_instance(s)).collect();
         assert_eq!(mine, [true, false, false]);
     }
 
     #[test]
     fn nothing_is_this_instance_without_an_instance() {
-        let config = Config::from_toml(&LABELLED.replace("[instance]", "[unused]")).unwrap();
-        assert!(!config.siblings.iter().any(|s| config.is_instance(s)));
+        let view = Config::from_toml(&LABELLED.replace("[instance]", "[unused]"))
+            .unwrap()
+            .siblings_view();
+        assert!(!view.siblings.iter().any(|s| view.is_instance(s)));
     }
 
     #[test]
-    fn instance_with_an_empty_label_is_invalid() {
+    fn instance_with_an_empty_label_is_ignored_with_a_warning() {
         let mut config = Config::from_toml(LABELLED).unwrap();
         config.instance.as_mut().unwrap().label.clear();
-        assert!(config.validate_siblings().is_err());
+        let view = config.siblings_view();
+        assert_eq!(view.instance, None);
+        assert_eq!(
+            view.warnings,
+            ["instance needs a non-empty name and label; ignored"]
+        );
     }
 
     #[test]
@@ -230,23 +268,31 @@ mod tests {
     }
 
     #[test]
-    fn empty_sibling_label_is_invalid() {
-        let config =
-            Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"\"")).unwrap();
-        assert!(config.validate_siblings().is_err());
+    fn empty_sibling_label_is_unlabelled_with_a_warning() {
+        let view = Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"\""))
+            .unwrap()
+            .siblings_view();
+        assert_eq!(view.siblings[1].label, None);
+        assert_eq!(
+            view.warnings,
+            ["sibling \"orders\" has an empty label; treated as unlabelled"]
+        );
     }
 
     #[test]
-    fn duplicate_name_and_label_is_invalid() {
-        let config =
+    fn duplicates_are_all_kept_with_one_warning() {
+        let mut config =
             Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"dev\"")).unwrap();
-        assert!(config.validate_siblings().is_err());
-    }
-
-    #[test]
-    fn duplicate_unlabelled_name_is_invalid() {
-        let mut config = Config::from_toml(LABELLED).unwrap();
         config.siblings.push(config.siblings[2].clone());
-        assert!(config.validate_siblings().is_err());
+        config.siblings.push(config.siblings[2].clone());
+        let view = config.siblings_view();
+        assert_eq!(view.siblings.len(), 5);
+        assert_eq!(
+            view.warnings,
+            [
+                "two siblings share the name \"orders\" and the label \"dev\"",
+                "two siblings share the name \"billing\" and no label",
+            ]
+        );
     }
 }

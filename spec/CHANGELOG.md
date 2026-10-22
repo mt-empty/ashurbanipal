@@ -26,11 +26,10 @@ Additive — a response header an existing caller can ignore — so v1 stands.
 `/api/siblings` (§5.6) gains an optional `instance` object and an optional
 `label` on each sibling, both host-configured opaque strings. The sibling
 matching `instance` is reported healthy without a health check. Additive —
-both fields are absent unless configured — so v1 stands. An invalid
-`instance` or `label`, or two siblings with the same name and label (two
-unlabelled siblings with one name included), now makes `/api/siblings`
-answer 500 `invalid_config` instead of a list; every other route still
-serves.
+both fields are absent unless configured — so v1 stands. Sibling
+configuration is never rejected: an incomplete `instance` is ignored, an
+empty `label` is dropped, and duplicates are kept, each reported in an
+optional `warnings` array that is absent when there is nothing to report.
 
 Error bodies (§2) changed from plain text (`text/plain`) to RFC 9457
 Problem Details (`application/problem+json`), adding a stable

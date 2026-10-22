@@ -517,19 +517,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SiblingsResponse"
-        "500":
-          description: >
-            The sibling configuration is invalid (`code: invalid_config`);
-            `title` names the broken rule. Every other route still serves.
-          headers:
-            x-ashurbanipal-protocol:
-              $ref: "#/components/headers/ProtocolVersion"
-            X-Content-Type-Options:
-              $ref: "#/components/headers/NoSniff"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/ProblemDetails"
 
 components:
   parameters:
@@ -944,9 +931,9 @@ components:
         siblings:
           type: array
           description: >
-            Configuration order. The sibling whose name and label equal
-            `instance`'s is listed in place with healthy true and is never
-            health-checked.
+            Configuration order, duplicates included. A sibling whose name
+            and label equal `instance`'s is listed in place with healthy true
+            and is never health-checked.
           items:
             type: object
             required: [name, base_url, healthy]
@@ -967,6 +954,16 @@ components:
                   checked. Otherwise true iff a GET to the sibling's health
                   path (resolved against its origin) returned 2xx within
                   the timeout.
+        warnings:
+          type: array
+          minItems: 1
+          description: >
+            One human-readable string per configuration mistake the server
+            corrected (an incomplete instance ignored, an empty label
+            dropped, a duplicate name and label kept). Absent when there
+            were none. Wording is implementation-defined; do not parse.
+          items:
+            type: string
 
     FilterCondition:
       type: object
@@ -1151,4 +1148,3 @@ components:
             - not_readable
             - database_error
             - query_timeout
-            - invalid_config

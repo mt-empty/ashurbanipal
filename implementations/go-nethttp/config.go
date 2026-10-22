@@ -1,7 +1,6 @@
 package ashurbanipal
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -61,20 +60,34 @@ func (c Config) IsEnabled() bool {
 	return c.Enabled
 }
 
-// validateSiblings applies the instance/label rules of spec/protocol.md §5.6.
-func (c Config) validateSiblings() error {
-	if c.Instance != nil && (c.Instance.Name == "" || c.Instance.Label == "") {
-		return errors.New("Instance needs a non-empty Name and Label")
+// siblingsView is the sibling config after spec/protocol.md §5.6's
+// corrections, which never reject it: each one is reported in Warnings.
+type siblingsView struct {
+	Instance *Instance
+	Siblings []Sibling
+	Warnings []string
+}
+
+func (c Config) siblingsView() siblingsView {
+	v := siblingsView{Instance: c.Instance, Siblings: c.Siblings}
+	if v.Instance != nil && (v.Instance.Name == "" || v.Instance.Label == "") {
+		v.Warnings = append(v.Warnings, "instance needs a non-empty name and label; ignored")
+		v.Instance = nil
 	}
-	seen := map[[2]string]bool{}
+	copies := map[[2]string]int{}
 	for _, s := range c.Siblings {
 		key := [2]string{s.Name, s.Label}
-		if seen[key] {
-			return fmt.Errorf("two siblings share the name %q and the same label", s.Name)
+		copies[key]++
+		if copies[key] != 2 {
+			continue
 		}
-		seen[key] = true
+		if s.Label == "" {
+			v.Warnings = append(v.Warnings, fmt.Sprintf("two siblings share the name %q and no label", s.Name))
+		} else {
+			v.Warnings = append(v.Warnings, fmt.Sprintf("two siblings share the name %q and the label %q", s.Name, s.Label))
+		}
 	}
-	return nil
+	return v
 }
 
 // isInstance reports whether s is this instance's own entry, which is

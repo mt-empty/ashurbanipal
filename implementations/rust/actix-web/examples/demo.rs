@@ -191,4 +191,10 @@ name = "other"
 label = "a"
 base_url = "http://127.0.0.1:9/__ashurbanipal"
 health_path = "/health"
+
+[[siblings]]
+name = "other"
+label = "a"
+base_url = "http://127.0.0.1:9/__ashurbanipal"
+health_path = "/health"
 "#;

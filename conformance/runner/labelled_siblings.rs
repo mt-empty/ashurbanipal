@@ -8,8 +8,9 @@
 //!
 //! - instance `conformance` / `a`
 //! - siblings, in order: `conformance`/`a` (this instance), `conformance`/`b`,
-//!   `other`/`a`, all at `http://127.0.0.1:9/__ashurbanipal` (port 9
-//!   refuses at once, so every check made is a fast `healthy: false`)
+//!   `other`/`a` twice (a deliberate duplicate), all at
+//!   `http://127.0.0.1:9/__ashurbanipal` (port 9 refuses at once, so every
+//!   check made is a fast `healthy: false`)
 
 use crate::assert::assert_exact;
 use crate::common::TestServer;
@@ -78,7 +79,29 @@ async fn labels_are_echoed_in_configuration_order() {
             { "name": "conformance", "label": "a", "base_url": UNREACHABLE, "healthy": true },
             { "name": "conformance", "label": "b", "base_url": UNREACHABLE, "healthy": false },
             { "name": "other", "label": "a", "base_url": UNREACHABLE, "healthy": false },
+            { "name": "other", "label": "a", "base_url": UNREACHABLE, "healthy": false },
         ]),
         "GET /api/siblings siblings",
+    );
+}
+
+/// Wording is implementation-defined, so only the count and type are checked.
+#[tokio::test]
+async fn a_duplicate_is_kept_and_warned_once() {
+    let srv = TestServer::spawn().await;
+    let Some(body) = labelled_siblings(&srv).await else {
+        return;
+    };
+    let warnings = body["warnings"]
+        .as_array()
+        .unwrap_or_else(|| panic!("GET /api/siblings: expected a warnings array, got {body}"));
+    assert_eq!(
+        warnings.len(),
+        1,
+        "GET /api/siblings warnings: {warnings:?}"
+    );
+    assert!(
+        warnings[0].as_str().is_some_and(|w| !w.is_empty()),
+        "GET /api/siblings warnings: {warnings:?}"
     );
 }

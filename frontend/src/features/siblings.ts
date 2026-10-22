@@ -1,9 +1,11 @@
-import { ApiError, api } from "../core/api.js";
+import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
-import type { Sibling, SiblingsResponse } from "../core/types.js";
+import type { SiblingsResponse } from "../core/types.js";
 import {
   buildSiblingMatrix,
   isOwnEntry,
+  type ListedSibling,
+  listSiblings,
   type MatrixCell,
   type SiblingMatrix,
   sameViewHref,
@@ -37,7 +39,7 @@ let matrixShape = "";
 let linkRefs: LinkRef[] = [];
 let linkCells: { name: string; label: string; cell: LinkCell }[] = [];
 // The same for the plain list, so a refresh keeps focus there too.
-type RowRef = LinkRef & { name: HTMLElement };
+type RowRef = LinkRef & { name: HTMLElement; note: HTMLElement };
 let listShape = "";
 let rowRefs: RowRef[] = [];
 
@@ -65,7 +67,6 @@ async function loadSiblings(): Promise<void> {
   inFlight = true;
   lastFetchStarted = performance.now();
   let body: SiblingsResponse | undefined;
-  let configError: string | undefined;
   try {
     // no-store: Chrome otherwise queues an identical GET behind one still in
     // flight, for up to 20 s.
@@ -75,9 +76,7 @@ async function loadSiblings(): Promise<void> {
     });
     siblingsWarned = false;
   } catch (e) {
-    // Stays wrong until the host restarts, so it is shown, not retried.
-    if (e instanceof ApiError && e.code === "invalid_config") configError = e.message;
-    else if (!siblingsWarned) {
+    if (!siblingsWarned) {
       console.warn("ashurbanipal: /siblings fetch failed; retrying", e);
       siblingsWarned = true;
     }
@@ -85,15 +84,14 @@ async function loadSiblings(): Promise<void> {
     inFlight = false;
   }
   // A failure keeps whatever was last shown; only a retry can replace it.
-  if (!body && configError === undefined) {
+  if (!body) {
     scheduleRetry();
     return;
   }
   clearTimeout(retryTimer);
   retryTimer = undefined;
   retryDelay = FRESH_MS;
-  if (body) render(body);
-  else renderConfigError(configError ?? "");
+  render(body);
 }
 
 function stampHeading(prefix: string): void {
@@ -104,19 +102,17 @@ function stampHeading(prefix: string): void {
   $("siblings-heading").replaceChildren(prefix, "Updated ", updated, ".");
 }
 
-function renderConfigError(message: string): void {
-  setNoticePlace(null);
-  $("siblings").hidden = false;
-  $("siblings-summary").textContent = "Other services · config error";
-  $("siblings-dot").className = dotClass(false);
-  $("siblings-matrix").hidden = true;
-  $("siblings-foot").hidden = true;
-  matrixShape = "";
-  listShape = "";
-  $("siblings-list").replaceChildren();
-  stampHeading("Other services' databases. ");
-  $("siblings-error-text").textContent = message;
-  $("siblings-error").hidden = false;
+function renderWarnings(warnings: string[]): void {
+  $("siblings-warnings").hidden = warnings.length === 0;
+  $("siblings-warnings").replaceChildren(
+    ...warnings.map((w) => {
+      const li = el("li");
+      const icon = el("span", "sibling-warning-icon", "⚠");
+      icon.setAttribute("aria-hidden", "true");
+      li.append(icon, el("span", "sibling-warning-text", `Config: ${w}`));
+      return li;
+    }),
+  );
 }
 
 function render(body: SiblingsResponse): void {
@@ -126,10 +122,14 @@ function render(body: SiblingsResponse): void {
   const others = siblings.filter((s) => !isOwnEntry(body.instance, s));
   $("siblings").hidden = others.length === 0;
   const down = others.filter((s) => !s.healthy).length;
-  $("siblings-summary").textContent =
-    down > 0 ? `Other services · ${down} down` : `Other services · ${others.length} up`;
+  const warnings = body.warnings ?? [];
+  $("siblings-summary").textContent = [
+    "Other services",
+    down > 0 ? `${down} down` : `${others.length} up`,
+    ...(warnings.length > 0 ? [`${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`] : []),
+  ].join(" · ");
   $("siblings-dot").className = dotClass(down === 0);
-  $("siblings-error").hidden = true;
+  renderWarnings(warnings);
 
   const matrix = buildSiblingMatrix(body);
   $("siblings-matrix").hidden = matrix === null;
@@ -140,18 +140,18 @@ function render(body: SiblingsResponse): void {
   if (matrix) renderMatrix(matrix);
   else matrixShape = "";
   // With no labels at all, the plain list opens each service in a new tab.
-  renderList(matrix ? matrix.unlabelled : siblings, !matrix);
+  renderList(matrix ? matrix.listed : listSiblings(siblings), !matrix);
 }
 
-function renderList(list: Sibling[], newTab: boolean): void {
-  const shape = JSON.stringify([newTab, list.map((s) => s.name)]);
+function renderList(list: ListedSibling[], newTab: boolean): void {
+  const shape = JSON.stringify([newTab, list.map((l) => [l.sibling.name, l.note])]);
   if (shape !== listShape) {
     listShape = shape;
     rowRefs = list.map(() => listRow(newTab));
     $("siblings-list").replaceChildren(...rowRefs.map((r) => r.a));
   }
-  list.forEach((s, i) => {
-    paintRow(rowRefs[i], s, newTab);
+  list.forEach((l, i) => {
+    paintRow(rowRefs[i], l, newTab);
   });
 }
 
@@ -183,16 +183,19 @@ function listRow(newTab: boolean): RowRef {
     a,
     dot: healthDot(true, ""),
     name: el("span", "sibling-name"),
+    note: el("span", "sibling-note"),
     state: el("span", "sibling-state"),
   };
-  a.append(ref.dot, ref.name, ref.state);
+  a.append(ref.dot, ref.name, ref.note, ref.state);
   return ref;
 }
 
-function paintRow(ref: RowRef, s: Sibling, newTab: boolean): void {
+function paintRow(ref: RowRef, { sibling: s, note }: ListedSibling, newTab: boolean): void {
   ref.a.href = s.base_url;
   ref.name.textContent = s.name;
   ref.name.title = s.name; // truncation escape hatch
+  ref.note.textContent = note ?? "";
+  ref.note.hidden = note === undefined;
   ref.dot.className = dotClass(s.healthy);
   ref.dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
   ref.state.textContent = `${health(s.healthy)}${newTab ? " ↗" : ""}`;

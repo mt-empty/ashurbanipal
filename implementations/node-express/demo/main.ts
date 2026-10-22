@@ -115,6 +115,7 @@ async function main(): Promise<void> {
       { name: "conformance", label: "a", baseUrl, healthPath: "/health" },
       { name: "conformance", label: "b", baseUrl, healthPath: "/health" },
       { name: "other", label: "a", baseUrl, healthPath: "/health" },
+      { name: "other", label: "a", baseUrl, healthPath: "/health" },
     ];
   }
 

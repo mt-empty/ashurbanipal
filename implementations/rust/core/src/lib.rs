@@ -8,7 +8,7 @@ pub mod db;
 pub mod filter;
 pub mod join;
 
-pub use config::{Config, ConfigError, Instance, Limits, Sibling};
+pub use config::{Config, ConfigError, Instance, Limits, Sibling, SiblingsView};
 #[cfg(feature = "mysql")]
 pub use db::MySqlSource;
 #[cfg(feature = "postgres")]

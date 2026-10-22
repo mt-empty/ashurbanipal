@@ -12,8 +12,14 @@ export interface SiblingMatrix {
   // The instance's own label, so its column can be marked; null without one.
   ownLabel: string | null;
   rows: { name: string; isInstance: boolean; cells: MatrixCell[] }[];
-  // Siblings without a label, listed under the grid.
-  unlabelled: Sibling[];
+  // Siblings the grid has no cell for, listed under it.
+  listed: ListedSibling[];
+}
+
+// `note` tells apart entries the name alone does not.
+export interface ListedSibling {
+  sibling: Sibling;
+  note?: string;
 }
 
 type Labelled = Sibling & { label: string };
@@ -43,12 +49,37 @@ export function buildSiblingMatrix({ instance, siblings }: SiblingsResponse): Si
     });
     return { name, isInstance, cells };
   });
-  return {
-    labels,
-    ownLabel: instance?.label ?? null,
-    rows,
-    unlabelled: siblings.filter((s) => s.label === undefined),
-  };
+  // A repeated name and label has one cell, which the first entry fills.
+  const listed = siblings.flatMap((s): ListedSibling[] => {
+    if (s.label === undefined) return [{ sibling: s }];
+    return labelled.find((t) => t.name === s.name && t.label === s.label) === s
+      ? []
+      : [{ sibling: s, note: `${s.label} · duplicate` }];
+  });
+  return { labels, ownLabel: instance?.label ?? null, rows, listed: withHosts(listed) };
+}
+
+// The plain list, for a response with nothing labelled.
+export function listSiblings(siblings: Sibling[]): ListedSibling[] {
+  return withHosts(siblings.map((sibling) => ({ sibling })));
+}
+
+// An unlabelled name that repeats is told apart by its host.
+function withHosts(listed: ListedSibling[]): ListedSibling[] {
+  const unlabelled = listed.filter((l) => l.note === undefined).map((l) => l.sibling.name);
+  return listed.map((l) =>
+    l.note === undefined && unlabelled.indexOf(l.sibling.name) !== unlabelled.lastIndexOf(l.sibling.name)
+      ? { ...l, note: hostOf(l.sibling.base_url) }
+      : l,
+  );
+}
+
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
 }
 
 // A link to the same view elsewhere: the target's base plus this page's query
