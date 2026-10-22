@@ -24,7 +24,15 @@ ashurbanipal:
     default-page-size: 50
     max-page-size: 100
     query-timeout-secs: 5
+  instance: # this instance's own name and label (spec/protocol.md §5.6)
+    name: orders
+    label: dev
+  # One shared list, in the same order, on every instance keeps the grid the same everywhere.
   siblings:
+    - name: orders
+      label: int # optional; typically an environment (dev, int) or a region (eu, us)
+      base-url: https://orders-int.internal.vpn/__ashurbanipal
+      health-path: /health
     - name: billing
       base-url: https://billing.internal.vpn/__ashurbanipal
       health-path: /health

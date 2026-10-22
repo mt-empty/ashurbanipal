@@ -23,6 +23,14 @@ all keeping v1 (they change nothing an existing caller observes — see
 Every API response also carries `X-Content-Type-Options: nosniff` (§2).
 Additive — a response header an existing caller can ignore — so v1 stands.
 
+`/api/siblings` (§5.6) gains an optional `instance` object and an optional
+`label` on each sibling, both host-configured opaque strings. The sibling
+matching `instance` is reported healthy without a health check. Additive —
+both fields are absent unless configured — so v1 stands. Sibling
+configuration is never rejected: an incomplete `instance` is ignored, an
+empty `label` is dropped, and duplicates are kept, each reported in an
+optional `warnings` array that is absent when there is nothing to report.
+
 Error bodies (§2) changed from plain text (`text/plain`) to RFC 9457
 Problem Details (`application/problem+json`), adding a stable
 machine-readable `code`. This is a serialization change that would

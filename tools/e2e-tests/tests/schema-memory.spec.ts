@@ -65,7 +65,7 @@ test("a malformed schemaBySource is discarded, not fatal", async ({ page }) => {
     // Still boots and loads a table (R5).
     await page.locator("#tables button.active").waitFor();
     await waitForIdle(page);
-    await expect(page.locator("table tbody tr").first()).toBeVisible();
+    await expect(page.locator("#tbody tr").first()).toBeVisible();
   } finally {
     await demo.stop();
   }

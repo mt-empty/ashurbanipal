@@ -16,6 +16,7 @@ const siblingTimeout = 3 * time.Second
 // SiblingStatus is one entry of GET {mount}/api/siblings.
 type SiblingStatus struct {
 	Name    string `json:"name"`
+	Label   string `json:"label,omitempty"`
 	BaseURL string `json:"base_url"`
 	Healthy bool   `json:"healthy"`
 }
@@ -25,13 +26,17 @@ type SiblingStatus struct {
 // error, non-2xx, timeout, unresolvable URL) yields healthy=false, never
 // an error response — errgroup's error return is unused for exactly that
 // reason (spec/protocol.md §5.6: "never an error response").
-func checkSiblings(ctx context.Context, client *http.Client, siblings []Sibling) []SiblingStatus {
-	statuses := make([]SiblingStatus, len(siblings))
+func checkSiblings(ctx context.Context, client *http.Client, view siblingsView) []SiblingStatus {
+	statuses := make([]SiblingStatus, len(view.Siblings))
 	g, ctx := errgroup.WithContext(ctx)
-	for i, sibling := range siblings {
+	for i, sibling := range view.Siblings {
 		i, sibling := i, sibling
 		g.Go(func() error {
-			statuses[i] = SiblingStatus{Name: sibling.Name, BaseURL: sibling.BaseURL}
+			statuses[i] = SiblingStatus{Name: sibling.Name, Label: sibling.Label, BaseURL: sibling.BaseURL}
+			if view.isInstance(sibling) {
+				statuses[i].Healthy = true
+				return nil
+			}
 			healthURL, ok := siblingHealthURL(sibling.BaseURL, sibling.HealthPath)
 			if !ok {
 				return nil

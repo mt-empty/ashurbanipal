@@ -17,7 +17,7 @@ test("UI loads tables and data when mounted under a path prefix", async ({ page 
     await page.goto(`${demo.baseUrl}/svc/__ashurbanipal`);
     await expect(page.locator("#tables button").first()).toBeVisible();
     await dataLoaded;
-    await expect(page.locator("table tbody tr").first()).toBeVisible();
+    await expect(page.locator("#tbody tr").first()).toBeVisible();
   } finally {
     await demo.stop();
   }

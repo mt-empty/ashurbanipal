@@ -61,8 +61,8 @@ async function errorFromResponse(resp: Response): Promise<ApiError> {
   return new ApiError(`request failed with status ${resp.status}`, undefined);
 }
 
-export async function api<T = unknown>(path: string): Promise<T> {
-  const resp = await fetch(API + path);
+export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(API + path, init);
   // path may carry a query string (e.g. "/tables?schema=…") — compare just
   // the route, not the whole path, so the version check still fires.
   if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);

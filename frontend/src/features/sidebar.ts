@@ -16,6 +16,7 @@ import {
 } from "../core/state.js";
 import type { SourceEntry, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
+import { syncViewNotice } from "./view-notice.js";
 
 // ---- table chips: transient, session-local state, not part of
 // `state`/localStorage — resets on reload ----
@@ -200,7 +201,7 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 // A slower earlier loadTables() (e.g. from a schema switch quickly
 // followed by another) resolving after a faster later one would otherwise
 // clobber the chip row with the wrong schema's table list — same shape of
-// guard as loadDataToken/cvRequestToken/siblingsRequestToken.
+// guard as loadDataToken/cvRequestToken.
 let loadTablesToken = 0;
 
 export async function loadTables(): Promise<void> {
@@ -240,7 +241,7 @@ export async function loadTables(): Promise<void> {
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
-  // Stale persisted state must never wedge the UI: fall back silently.
+  // Stale persisted state must never wedge the UI: fall back (R5).
   if (!tableNames.includes(startTable(state.view) ?? "")) {
     enterTable(tableNames[0] ?? null);
     // A ?filter= was written against the table the URL named; that table
@@ -257,7 +258,11 @@ export async function loadTables(): Promise<void> {
   // must still be true when loadData()'s syncUrl() call runs, or a
   // history restoration would push a new entry instead of replacing it.
   if (state.view) await loadData();
-  else setStatus("");
+  else {
+    // loadData() is what normally drops a stale note; an empty scope never reaches it.
+    syncViewNotice(null);
+    setStatus("");
+  }
 }
 
 export function listedTableNames(): string[] {

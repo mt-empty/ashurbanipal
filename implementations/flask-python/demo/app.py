@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flask import Flask, Response, redirect
 
-from ashurbanipal import Config, Sibling, router
+from ashurbanipal import Config, Instance, Sibling, router
 
 
 def _env_int(name: str, fallback: int) -> int:
@@ -95,6 +95,16 @@ def main() -> None:
                 base_url=f"http://localhost:{sibling_port}/__ashurbanipal",
                 health_path="/health",
             )
+        ]
+
+    if os.environ.get("CONFORMANCE_LABELLED_SIBLINGS"):
+        # The fixed config conformance/runner/labelled_siblings.rs expects. Port 9
+        # refuses at once, so every health check is a fast healthy=false.
+        unreachable = "http://127.0.0.1:9/__ashurbanipal"
+        config.instance = Instance(name="conformance", label="a")
+        config.siblings = [
+            Sibling(name=n, label=label, base_url=unreachable, health_path="/health")
+            for n, label in [("conformance", "a"), ("conformance", "b"), ("other", "a"), ("other", "a")]
         ]
 
     app = Flask(__name__)

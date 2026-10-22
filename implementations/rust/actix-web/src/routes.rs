@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use ashurbanipal::filter;
 use ashurbanipal::{
     resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec, ProblemDetails,
-    QueryOpts, ReferencedBy, TableInfo,
+    QueryOpts, ReferencedBy, SiblingChecker, TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -25,27 +25,25 @@ pub struct AppState<S> {
     /// request with no `source` param resolves to (mirrors `api/sources`'
     /// listing order, which callers can rely on for the same reason).
     pub sources: Vec<(String, S)>,
-    pub http: reqwest::Client,
+    pub siblings: SiblingChecker,
 }
 
 /// Built once, not per worker — cheap to share via `web::Data`'s `Arc`,
 /// unlike [`service`]'s route tree, which Actix rebuilds per worker anyway.
 ///
 /// `sources` MUST be non-empty — a host with nothing to browse should pass
-/// `enabled = false` instead, not an empty list.
+/// `enabled = false` instead, not an empty list. Sibling config is never
+/// rejected: `/api/siblings` reports what it corrected in `warnings`.
 pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data<AppState<S>> {
     assert!(
         !sources.is_empty(),
         "app_state() requires at least one source"
     );
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-        .expect("reqwest client construction only fails on TLS backend misconfiguration");
+    let siblings = SiblingChecker::new(&config);
     Data::new(AppState {
         config,
         sources,
-        http,
+        siblings,
     })
 }
 
@@ -489,82 +487,8 @@ async fn structure<S: DbSource>(
     Ok(HttpResponse::Ok().json(structure))
 }
 
-#[derive(Serialize)]
-struct SiblingStatus {
-    name: String,
-    base_url: String,
-    healthy: bool,
-}
-
-#[derive(Serialize)]
-struct SiblingsResponse {
-    siblings: Vec<SiblingStatus>,
-}
-
 async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
-    let checks = state.config.siblings.iter().cloned().map(|sibling| {
-        let http = state.http.clone();
-        async move {
-            let health_url = health_url(&sibling.base_url, &sibling.health_path);
-            let healthy = match health_url {
-                Some(url) => matches!(
-                    http.get(url).send().await,
-                    Ok(resp) if resp.status().is_success()
-                ),
-                None => false,
-            };
-            SiblingStatus {
-                name: sibling.name,
-                base_url: sibling.base_url,
-                healthy,
-            }
-        }
-    });
-    let siblings = futures_join_all(checks).await;
-    HttpResponse::Ok().json(SiblingsResponse { siblings })
-}
-
-/// Resolves against the sibling's origin, not its path.
-fn health_url(base_url: &str, health_path: &str) -> Option<String> {
-    let scheme_end = base_url.find("://")? + 3;
-    let host_end = base_url[scheme_end..]
-        .find('/')
-        .map(|i| scheme_end + i)
-        .unwrap_or(base_url.len());
-    Some(format!("{}{}", &base_url[..host_end], health_path))
-}
-
-/// Uses Actix's own runtime spawn (not `tokio::spawn` directly) so the
-/// sibling fan-out works regardless of which executor Actix is running on.
-async fn futures_join_all<F, T>(futures: impl IntoIterator<Item = F>) -> Vec<T>
-where
-    F: std::future::Future<Output = T> + Send + 'static,
-    T: Send + 'static,
-{
-    let handles: Vec<_> = futures.into_iter().map(actix_web::rt::spawn).collect();
-    let mut results = Vec::with_capacity(handles.len());
-    for handle in handles {
-        results.push(handle.await.expect("sibling check task panicked"));
-    }
-    results
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn health_url_resolves_against_origin() {
-        assert_eq!(
-            health_url("https://billing.internal.vpn/__ashurbanipal", "/health"),
-            Some("https://billing.internal.vpn/health".to_string())
-        );
-        assert_eq!(
-            health_url("http://localhost:4001/__ashurbanipal", "/healthz"),
-            Some("http://localhost:4001/healthz".to_string())
-        );
-        assert_eq!(health_url("not-a-url", "/health"), None);
-    }
+    HttpResponse::Ok().json(state.siblings.check().await)
 }
 
 #[cfg(test)]
@@ -655,5 +579,76 @@ mod kill_switch_tests {
         )
         .await;
         assert_eq!(api.status(), 404);
+    }
+
+    // Port 9 refuses at once, so every check is a fast `healthy: false`.
+    const LABELLED: &str = r#"
+        enabled = true
+
+        [instance]
+        name = "orders"
+        label = "dev"
+
+        [[siblings]]
+        name = "orders"
+        label = "dev"
+        base_url = "http://127.0.0.1:9/__ashurbanipal"
+        health_path = "/health"
+
+        [[siblings]]
+        name = "orders"
+        label = "int"
+        base_url = "http://127.0.0.1:9/__ashurbanipal"
+        health_path = "/health"
+
+        [[siblings]]
+        name = "billing"
+        base_url = "http://127.0.0.1:9/__ashurbanipal"
+        health_path = "/health"
+    "#;
+
+    #[actix_web::test]
+    async fn siblings_report_this_instance_in_place_without_a_check() {
+        let config = Config::from_toml(LABELLED).unwrap();
+        let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
+        let app = test::init_service(App::new().service(service(state))).await;
+        let json: serde_json::Value = test::call_and_read_body_json(
+            &app,
+            test::TestRequest::get()
+                .uri("/__ashurbanipal/api/siblings")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "instance": { "name": "orders", "label": "dev" },
+                "siblings": [
+                    { "name": "orders", "label": "dev", "base_url": "http://127.0.0.1:9/__ashurbanipal", "healthy": true },
+                    { "name": "orders", "label": "int", "base_url": "http://127.0.0.1:9/__ashurbanipal", "healthy": false },
+                    { "name": "billing", "base_url": "http://127.0.0.1:9/__ashurbanipal", "healthy": false },
+                ],
+            })
+        );
+    }
+
+    #[actix_web::test]
+    async fn sibling_config_mistakes_are_kept_and_warned() {
+        let config =
+            Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"dev\"")).unwrap();
+        let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
+        let app = test::init_service(App::new().service(service(state))).await;
+        let json: serde_json::Value = test::call_and_read_body_json(
+            &app,
+            test::TestRequest::get()
+                .uri("/__ashurbanipal/api/siblings")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(json["siblings"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            json["warnings"],
+            serde_json::json!(["two siblings share the name \"orders\" and the label \"dev\""])
+        );
     }
 }

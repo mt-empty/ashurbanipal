@@ -7,10 +7,11 @@ import "../features/filter-highlight.js";
 import "../features/join-dialog.js";
 import { clearCommonValueCache } from "../features/filter-ui.js";
 import { clearJoinCatalog } from "../features/join-catalog.js";
-import { loadSiblings } from "../features/siblings.js";
+import { startSiblings } from "../features/siblings.js";
 import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
 import "../features/sticky-header.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";
+import { showBootFallbackNote } from "../features/view-notice.js";
 import { loadData } from "./controller.js";
 import { registerLoadData } from "./reload.js";
 import "../features/theme.js";
@@ -23,9 +24,10 @@ import "../features/theme.js";
 initState();
 registerLoadData(loadData);
 
-// loadData()/loadSiblings() run unawaited and their own try/catch covers only
-// the fetch, so a render-phase throw would otherwise vanish. Console only — the
-// #error banner is for user-actionable failures, which a background poll is not.
+// loadData() and the sibling fetches run unawaited and their own try/catch
+// covers only the fetch, so a render-phase throw would otherwise vanish.
+// Console only — the #error banner is for user-actionable failures, which a
+// sibling refresh is not.
 window.addEventListener("unhandledrejection", (ev) => {
   console.error("ashurbanipal: unhandled promise rejection", ev.reason);
 });
@@ -76,7 +78,8 @@ $<HTMLButtonElement>("refresh").onclick = () => {
 // loadSources resolves state.source before loadSchemas needs it, which in
 // turn resolves state.schema before loadTables' first request needs it —
 // bootstrap-only ordering; loadSchemas/loadTables are safe to call on their
-// own after this (source/schema switching does exactly that).
-loadSources().then(loadSchemas).then(loadTables).catch(reportError);
-loadSiblings();
-setInterval(loadSiblings, 15_000);
+// own after this (source/schema switching does exactly that). The fallback
+// note runs last because a URL filter can still be dropped by loadTables'
+// awaited first load.
+loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(showBootFallbackNote);
+startSiblings();

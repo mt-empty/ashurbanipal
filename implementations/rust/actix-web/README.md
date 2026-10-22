@@ -58,14 +58,22 @@ default_page_size = 50
 max_page_size = 100
 query_timeout_secs = 5
 
+# optional: this instance's own name and label (spec/protocol.md §5.6)
+[instance]
+name = "orders"
+label = "dev"
+
+# One shared list, in the same order, on every instance (own entry included)
+# keeps the grid's rows and columns the same everywhere.
 [[siblings]]
-name = "billing"
-base_url = "https://billing.internal.vpn/__ashurbanipal"
+name = "orders"
+label = "int"   # optional; typically an environment (dev, int) or a region (eu, us)
+base_url = "https://orders-int.internal.vpn/__ashurbanipal"
 health_path = "/health"
 
 [[siblings]]
-name = "notifications"
-base_url = "https://notifications.internal.vpn/__ashurbanipal"
+name = "billing"
+base_url = "https://billing.internal.vpn/__ashurbanipal"
 health_path = "/health"
 ```
 

@@ -1,6 +1,6 @@
 # ashurbanipal
 
-Framework-agnostic core (config, `DbSource` backends, filter DSL) behind
+Framework-agnostic core (config, `DbSource` backends, filter DSL, sibling health checks) behind
 [`ashurbanipal-axum`](../axum/README.md) and
 [`ashurbanipal-actix-web`](../actix-web/README.md) — most hosts should
 depend on one of those adapters instead of this crate directly, unless

@@ -84,7 +84,7 @@ dir = "implementations/rust/axum"
 sources = ["src/**/*", "../core/src/**/*", "examples/**/*.rs", "Cargo.toml", "../core/Cargo.toml", "frontend/dbviewer.html"]
 
 ["rust:demo-sibling"]
-description = "run a second demo instance on 4001, sibling-polling the one on 4000"
+description = "run a second demo instance on 4001, listing the one on 4000 under Other services (labels: see examples/demo.rs)"
 run = "cargo run -p ashurbanipal-axum --example demo"
 env = { PORT = "4001", SIBLING_PORT = "4000" }
 dir = "implementations/rust/axum"

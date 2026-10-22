@@ -14,7 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 from flask import Blueprint, Response, jsonify, request
 
 from . import filter as filter_module
-from .config import Config
+from .config import Config, SiblingsView
 from .db import (
     BadJoin,
     BadParam,
@@ -44,6 +44,8 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     bp = Blueprint("ashurbanipal", __name__, url_prefix=mount)
     if not config.is_enabled():
         return bp  # zero routes registered — 404 on every path under `mount`
+    # Never rejected: /api/siblings reports what it corrected in "warnings".
+    view = config.siblings_view()
 
     api_prefix = f"{mount}/api/"
 
@@ -268,8 +270,13 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("/api/siblings")
     def siblings() -> Response:
-        results = _check_siblings(config.siblings)
-        return jsonify({"siblings": results})
+        body: dict = {}
+        if view.instance is not None:
+            body["instance"] = {"name": view.instance.name, "label": view.instance.label}
+        body["siblings"] = _check_siblings(view)
+        if view.warnings:
+            body["warnings"] = view.warnings
+        return jsonify(body)
 
     return bp
 
@@ -369,23 +376,27 @@ def _health_url(base_url: str, health_path: str):
     return urlunsplit((parts.scheme, parts.netloc, health_path, "", ""))
 
 
-def _check_one_sibling(sibling) -> dict:
+def _check_one_sibling(sibling, is_instance: bool) -> dict:
     url = _health_url(sibling.base_url, sibling.health_path)
-    healthy = False
-    if url is not None:
+    healthy = is_instance
+    if url is not None and not is_instance:
         try:
             with urllib.request.urlopen(url, timeout=_SIBLING_HEALTH_TIMEOUT_SECS) as resp:
                 healthy = 200 <= resp.status < 300
         except (urllib.error.URLError, OSError, ValueError):
             healthy = False
-    return {"name": sibling.name, "base_url": sibling.base_url, "healthy": healthy}
+    status = {"name": sibling.name}
+    if sibling.label is not None:
+        status["label"] = sibling.label
+    status.update(base_url=sibling.base_url, healthy=healthy)
+    return status
 
 
-def _check_siblings(siblings: list) -> list[dict]:
+def _check_siblings(view: SiblingsView) -> list[dict]:
     """Checks SHOULD run in parallel and MUST be individually bounded by a
     timeout, so one dead sibling can't stall the response (§5.6).
     """
-    if not siblings:
+    if not view.siblings:
         return []
-    with ThreadPoolExecutor(max_workers=len(siblings)) as pool:
-        return list(pool.map(_check_one_sibling, siblings))
+    with ThreadPoolExecutor(max_workers=len(view.siblings)) as pool:
+        return list(pool.map(lambda s: _check_one_sibling(s, view.is_instance(s)), view.siblings))

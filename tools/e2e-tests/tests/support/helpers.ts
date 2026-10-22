@@ -25,7 +25,7 @@ export const APP_PATH = "/__ashurbanipal";
  * both are post-settle decorations, not part of the render, and counting
  * them would add their duration to every wait after a highlighted refresh. */
 export async function waitForIdle(page: Page) {
-  await expect(page.locator("table")).not.toHaveAttribute("aria-busy", "true");
+  await expect(page.locator("#data-table")).not.toHaveAttribute("aria-busy", "true");
   await expect
     .poll(() =>
       page.evaluate(() =>

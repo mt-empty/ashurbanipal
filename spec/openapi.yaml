@@ -505,8 +505,9 @@ paths:
       responses:
         "200":
           description: >
-            One entry per configured sibling; health checked per request.
-            Empty configuration yields an empty list.
+            One entry per configured sibling, health-checked per request
+            except this instance's own entry. Empty configuration yields
+            an empty list.
           headers:
             x-ashurbanipal-protocol:
               $ref: "#/components/headers/ProtocolVersion"
@@ -914,21 +915,55 @@ components:
       type: object
       required: [siblings]
       properties:
+        instance:
+          type: object
+          required: [name, label]
+          description: >
+            This instance's own name and label, as the host configured them.
+            Absent when not configured. Opaque: never parsed or acted on.
+          properties:
+            name:
+              type: string
+              minLength: 1
+            label:
+              type: string
+              minLength: 1
         siblings:
           type: array
+          description: >
+            Configuration order, duplicates included. A sibling whose name
+            and label equal `instance`'s is listed in place with healthy true
+            and is never health-checked.
           items:
             type: object
             required: [name, base_url, healthy]
             properties:
               name:
                 type: string
+              label:
+                type: string
+                minLength: 1
+                description: >
+                  Opaque host-written label. Absent when not configured.
               base_url:
                 type: string
               healthy:
                 type: boolean
                 description: >
-                  True iff a GET to the sibling's health path (resolved
-                  against its origin) returned 2xx within the timeout.
+                  For this instance's own entry, always true and never
+                  checked. Otherwise true iff a GET to the sibling's health
+                  path (resolved against its origin) returned 2xx within
+                  the timeout.
+        warnings:
+          type: array
+          minItems: 1
+          description: >
+            One human-readable string per configuration mistake the server
+            corrected (an incomplete instance ignored, an empty label
+            dropped, a duplicate name and label kept). Absent when there
+            were none. Wording is implementation-defined; do not parse.
+          items:
+            type: string
 
     FilterCondition:
       type: object

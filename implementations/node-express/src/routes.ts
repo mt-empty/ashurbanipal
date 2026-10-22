@@ -1,5 +1,15 @@
 import express, { type Router as ExpressRouter, type Request, type Response } from "express";
-import { basePath, type Config, isEnabled, type ResolvedLimits, withDefaults } from "./config.js";
+import {
+  basePath,
+  type Config,
+  type Instance,
+  isEnabled,
+  type ResolvedLimits,
+  type Sibling,
+  type SiblingsView,
+  siblingsView,
+  withDefaults,
+} from "./config.js";
 import type { DbSource } from "./db/types.js";
 import { dbviewerHtml } from "./embed.js";
 import { FilterError, isQueryTimeout, NOT_ALLOWED_CODE, NotAllowedError } from "./errors.js";
@@ -29,7 +39,8 @@ export interface NamedSource {
  * `DbSource` implementation(s) (PostgresSource, SqliteSource, MySqlSource)
  * it wants itself; there is no driver auto-detection. `sources` MUST be
  * non-empty — a host with nothing to browse should pass `enabled: false`
- * instead, not an empty list.
+ * instead, not an empty list. Sibling config is never rejected:
+ * /api/siblings reports what it corrected in `warnings`.
  *
  * When cfg.enabled is not true — including an empty/undefined Config,
  * which MUST mean disabled — createRouter returns a router that 404s
@@ -62,7 +73,7 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   registerGet(router, `${mount}/api/tables/referenced-by`, withApiHeaders(referencedByHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/structure`, withApiHeaders(structureHandler(sources, timeoutMs)));
   registerGet(router, `${mount}/api/tables/join`, withApiHeaders(tableJoinHandler(sources, limits, timeoutMs)));
-  registerGet(router, `${mount}/api/siblings`, withApiHeaders(siblingsHandler(config.siblings ?? [])));
+  registerGet(router, `${mount}/api/siblings`, withApiHeaders(siblingsHandler(siblingsView(config))));
 
   return router;
 }
@@ -364,10 +375,14 @@ function structureHandler(sources: NamedSource[], timeoutMs: number) {
   };
 }
 
-function siblingsHandler(siblings: Config["siblings"]) {
+function siblingsHandler({ instance, siblings, warnings }: SiblingsView) {
   return async (_req: Request, res: Response): Promise<void> => {
-    const statuses = await checkSiblings(siblings ?? []);
-    res.json({ siblings: statuses });
+    const statuses = await checkSiblings(siblings, instance);
+    res.json({
+      ...(instance && { instance: { name: instance.name, label: instance.label } }),
+      siblings: statuses,
+      ...(warnings.length > 0 && { warnings }),
+    });
   };
 }
 

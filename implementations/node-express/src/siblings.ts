@@ -1,4 +1,4 @@
-import type { Sibling } from "./config.js";
+import { type Instance, isInstance, type Sibling } from "./config.js";
 
 // Bounds each individual health check so one dead sibling can't stall the
 // /api/siblings response (spec/protocol.md §5.6).
@@ -6,6 +6,7 @@ const SIBLING_TIMEOUT_MS = 3000;
 
 export interface SiblingStatus {
   name: string;
+  label?: string;
   base_url: string;
   healthy: boolean;
 }
@@ -27,14 +28,16 @@ function siblingHealthUrl(baseUrl: string, healthPath: string): string | undefin
  * unresolvable URL) yields healthy=false, never an error response
  * (spec/protocol.md §5.6).
  */
-export async function checkSiblings(siblings: Sibling[]): Promise<SiblingStatus[]> {
+export async function checkSiblings(siblings: Sibling[], instance?: Instance): Promise<SiblingStatus[]> {
   return Promise.all(
     siblings.map(async (sibling): Promise<SiblingStatus> => {
       const status: SiblingStatus = {
         name: sibling.name,
+        ...(sibling.label !== undefined && { label: sibling.label }),
         base_url: sibling.baseUrl,
-        healthy: false,
+        healthy: isInstance(instance, sibling),
       };
+      if (status.healthy) return status;
       const healthUrl = siblingHealthUrl(sibling.baseUrl, sibling.healthPath);
       if (!healthUrl) return status;
 

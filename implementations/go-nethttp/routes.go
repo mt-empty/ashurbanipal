@@ -36,6 +36,8 @@ type NamedSource struct {
 // sources is the one seam to the database (see DbSource in db.go); hosts
 // construct them before routing. sources MUST be non-empty — a host with
 // nothing to browse should pass Enabled: false instead of an empty slice.
+// Sibling config is never rejected: /api/siblings reports what it
+// corrected in "warnings".
 //
 // When cfg.Enabled is false — including the zero value Config{}, which
 // MUST mean disabled — Router returns a handler that 404s every request,
@@ -64,7 +66,7 @@ func Router(cfg Config, sources []NamedSource) http.Handler {
 	mux.Handle("GET "+base+"/api/tables/referenced-by", withAPIHeaders(referencedByHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/structure", withAPIHeaders(structureHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/join", withAPIHeaders(tableJoinHandler(sources, limits)))
-	mux.Handle("GET "+base+"/api/siblings", withAPIHeaders(siblingsHandler(client, cfg.Siblings)))
+	mux.Handle("GET "+base+"/api/siblings", withAPIHeaders(siblingsHandler(client, cfg.siblingsView())))
 	return mux
 }
 
@@ -488,12 +490,14 @@ func structureHandler(sources []NamedSource) http.HandlerFunc {
 	}
 }
 
-func siblingsHandler(client *http.Client, siblings []Sibling) http.HandlerFunc {
+func siblingsHandler(client *http.Client, view siblingsView) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		statuses := checkSiblings(r.Context(), client, siblings)
+		statuses := checkSiblings(r.Context(), client, view)
 		writeJSON(w, struct {
+			Instance *Instance       `json:"instance,omitempty"`
 			Siblings []SiblingStatus `json:"siblings"`
-		}{statuses})
+			Warnings []string        `json:"warnings,omitempty"`
+		}{view.Instance, statuses, view.Warnings})
 	}
 }
 

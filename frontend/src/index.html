@@ -71,6 +71,11 @@
       </search>
       <div id="error" role="alert"></div>
       <div id="join-notice" hidden><span id="join-notice-text"></span><span id="join-notice-actions"></span></div>
+      <div id="view-notice" role="status" hidden>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="6.3"/><path d="M8 7.2v4"/><circle cx="8" cy="4.9" r=".5" fill="currentColor"/></svg>
+        <span id="view-notice-text"></span>
+        <button id="view-notice-close" type="button" aria-label="Close this note">✕</button>
+      </div>
       <div id="meta">
         <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
@@ -87,7 +92,7 @@
     </div>
   </div>
   <div id="content">
-    <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <table id="data-table" tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
     <template id="cell-template"><td><button class="cell-text"></button><span class="cell-actions"><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></span></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
     <div id="pager">
@@ -173,7 +178,13 @@ FROM table [alias]
 
 <div id="siblings-pop" popover>
   <p id="siblings-heading">Other services' databases. Opens their Ashurbanipal in a new tab.</p>
+  <ul id="siblings-warnings" hidden></ul>
+  <table id="siblings-matrix" hidden><thead><tr id="siblings-matrix-head"></tr></thead><tbody id="siblings-matrix-body"></tbody></table>
   <div id="siblings-list"></div>
+  <div id="siblings-foot" hidden>
+    <p>For a new tab: <kbd>Ctrl</kbd>/<kbd>⌘</kbd>-click, middle-click, or right-click › Open Link in New Tab.</p>
+    <p>“Same view” keeps your table, filter and sort. Other services open on their first table.</p>
+  </div>
 </div>
 <div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
 <div id="refby-pop" popover><div id="refby-pop-list"></div></div>

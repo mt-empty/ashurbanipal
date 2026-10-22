@@ -40,12 +40,21 @@ call entirely.
 The optional fields, shown here at their defaults/example values:
 
 ```python
-from ashurbanipal import Config, Limits, Sibling
+from ashurbanipal import Config, Instance, Limits, Sibling
 
 config = Config(
     enabled=True,
     limits=Limits(default_page_size=50, max_page_size=100, query_timeout_secs=5),
+    instance=Instance(name="orders", label="dev"),  # spec/protocol.md §5.6
+    # One shared list, in the same order, on every instance keeps the grid the same
+    # everywhere. label is optional; typically an environment (dev, int) or a region (eu, us).
     siblings=[
+        Sibling(
+            name="orders",
+            label="int",
+            base_url="https://orders-int.internal.vpn/__ashurbanipal",
+            health_path="/health",
+        ),
         Sibling(
             name="billing",
             base_url="https://billing.internal.vpn/__ashurbanipal",

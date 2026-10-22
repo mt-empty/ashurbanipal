@@ -16,8 +16,8 @@ sqlite3, PyMySQL), so importing this package alone never requires all
 three to be installed.
 """
 
-from .config import Config, Limits, Sibling
+from .config import Config, Instance, Limits, Sibling
 from .db import DbSource
 from .routes import router
 
-__all__ = ["Config", "DbSource", "Limits", "Sibling", "router"]
+__all__ = ["Config", "DbSource", "Instance", "Limits", "Sibling", "router"]

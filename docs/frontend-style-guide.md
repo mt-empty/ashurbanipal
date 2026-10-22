@@ -28,21 +28,24 @@ value-import cycle, which a back-edge would create.
 src/
   index.html   styles.css
   bootstrap/   main, controller, reload, table-focus
-  features/    grid, filter-ui, sidebar (source/schema selectors + table chips),
-               nav, record-view, siblings, api-reference, theme,
+  features/    grid, column-widths, sticky-header, filter-ui, filter-highlight,
+               sidebar (source/schema selectors + table chips), nav, record-view,
+               referenced-by, structure, siblings, view-notice, api-reference, theme,
                join-dialog / join-form / join-sql / join-view / join-saved /
                join-catalog, dropdown (the join builder), suggest-list, overlay-highlight
-  core/        api, dom, types, state (+ store, url)
-  lib/         filter-dsl, filter-tokens, join-dsl, join-def, join-draft,
-               join-tokens, join-types, join-saved, json-tree, format, row-diff
+  core/        api, dom, types, state (+ store, url), url-intent
+  lib/         filter-dsl, filter-tokens, fuzzy, join-dsl, join-def, join-draft,
+               join-tokens, join-types, join-saved, json-tree, format, row-diff,
+               fallback-note, sibling-matrix
   demo/        demo-shim, demo-fixtures — offline demo backend only
 ```
 
 - `bootstrap/` wires the app and owns render orchestration. `main.ts` is
   *wiring only*: side-effect imports, `registerLoadData(loadData)`, the
   toolbar/dialog event wiring, and the bootstrap calls at the bottom
-  (`loadSources().then(loadSchemas).then(loadTables)`, `loadSiblings()`,
-  the polling `setInterval`). `controller.ts` owns `loadData` /
+  (`loadSources().then(loadSchemas).then(loadTables)`, then
+  `showBootFallbackNote`, and `startSiblings()`; the siblings refresh timer
+  lives in `features/siblings.ts`). `controller.ts` owns `loadData` /
   `fetchViewData`; it imports feature modules *downward* and they never
   import it (that would re-form a cycle) — they call `loadData` through
   `reload.ts`, an import-free seam `main.ts` wires at bootstrap.
@@ -129,7 +132,7 @@ misplaced import shows up as a wrong-looking path.
   is a real, observed failure mode here (stuck loading spinners, and a
   table's chrome/label disagreeing with the rows actually rendered), not a
   hypothetical. `cvRequestToken` (`showCommonValues`), `loadDataToken`
-  (`loadData`), `siblingsRequestToken` (`loadSiblings`), `loadTablesToken`
+  (`loadData`), `loadTablesToken`
   (`loadTables`), and `loadSchemasToken` (`loadSchemas`) are the existing
   instances of this pattern — copy their shape for the next one rather
   than reinventing it.
@@ -220,8 +223,8 @@ a broken page.
   be persisted at all: a filter the user typed persists; a value the UI
   copied from a fetched row does not (`ui-guidelines.md` R6).
 - Stale or malformed persisted state (an unknown table, unparseable JSON,
-  a filter that no longer parses) resets silently to the default view. It
-  never wedges the UI or errors.
+  a filter that no longer parses) resets to the default view. It never
+  wedges the UI or errors; whether it says so is `ui-guidelines.md` R6d.
 
 ## 7. What not to introduce
 

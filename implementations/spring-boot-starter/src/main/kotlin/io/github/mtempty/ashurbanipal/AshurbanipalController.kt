@@ -1,5 +1,6 @@
 package io.github.mtempty.ashurbanipal
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import org.springframework.core.io.ClassPathResource
 import org.springframework.dao.DataAccessException
@@ -41,8 +42,17 @@ data class TableDataResponse(
 )
 data class CommonValuesResponse(val values: List<CommonValueEntry>)
 data class ReferencedByResponse(@JsonProperty("referenced_by") val referencedBy: List<ReferencedByEntry>)
-data class SiblingStatus(val name: String, @JsonProperty("base_url") val baseUrl: String, val healthy: Boolean)
-data class SiblingsResponse(val siblings: List<SiblingStatus>)
+data class SiblingStatus(
+    val name: String,
+    @JsonInclude(JsonInclude.Include.NON_NULL) val label: String?,
+    @JsonProperty("base_url") val baseUrl: String,
+    val healthy: Boolean,
+)
+data class SiblingsResponse(
+    @JsonInclude(JsonInclude.Include.NON_NULL) val instance: Instance?,
+    val siblings: List<SiblingStatus>,
+    @JsonInclude(JsonInclude.Include.NON_EMPTY) val warnings: List<String>,
+)
 
 /**
  * `@RestController` on `${ashurbanipal.base-path:/__ashurbanipal}`: the HTML
@@ -214,25 +224,29 @@ class AshurbanipalController(
 
     @GetMapping("/api/siblings")
     fun siblings(): ResponseEntity<SiblingsResponse> {
-        val checks: List<CompletableFuture<SiblingStatus>> = properties.siblings.map { sibling ->
+        val view = properties.siblingsView
+        val checks: List<CompletableFuture<SiblingStatus>> = view.siblings.map { sibling ->
             checkHealth(sibling)
         }
         val statuses = CompletableFuture.allOf(*checks.toTypedArray())
             .thenApply { checks.map { it.join() } }
             .join()
-        return apiOk(SiblingsResponse(statuses))
+        return apiOk(SiblingsResponse(view.instance, statuses, view.warnings))
     }
 
     private fun checkHealth(sibling: Sibling): CompletableFuture<SiblingStatus> {
+        if (properties.siblingsView.isInstance(sibling)) {
+            return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.label, sibling.baseUrl, true))
+        }
         val healthUrl = healthUrl(sibling.baseUrl, sibling.healthPath)
-            ?: return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.baseUrl, false))
+            ?: return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.label, sibling.baseUrl, false))
         val request = try {
             HttpRequest.newBuilder(URI(healthUrl)).timeout(Duration.ofSeconds(3)).GET().build()
         } catch (e: Exception) {
-            return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.baseUrl, false))
+            return CompletableFuture.completedFuture(SiblingStatus(sibling.name, sibling.label, sibling.baseUrl, false))
         }
         return httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-            .handle { response, _ -> SiblingStatus(sibling.name, sibling.baseUrl, response != null && response.statusCode() in 200..299) }
+            .handle { response, _ -> SiblingStatus(sibling.name, sibling.label, sibling.baseUrl, response != null && response.statusCode() in 200..299) }
     }
 
     // ==================== plumbing ====================

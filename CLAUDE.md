@@ -73,7 +73,7 @@ Two kinds of component — `docs/design.md` §3 has the full architecture:
   in most depth, as the working example: a three-crate Cargo workspace at
   `implementations/rust/` — `core/` (framework-agnostic — config,
   `DbSource` and its Postgres/SQLite/MySQL implementations, the filter
-  AST), `axum/` (the `ashurbanipal-axum` adapter), and `actix-web/` (a
+  AST, the `/api/siblings` health checks), `axum/` (the `ashurbanipal-axum` adapter), and `actix-web/` (a
   second adapter reusing `core/`) — mirrors how
   `juniper`/`async-graphql`/`utoipa` split core-plus-adapter crates; see
   `docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`

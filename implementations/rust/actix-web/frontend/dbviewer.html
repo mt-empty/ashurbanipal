@@ -159,26 +159,29 @@ ul { list-style: none; margin: 0; padding: 0; }
 }
 
 /* ==== Data table ==== */
+/* Scoped to #data-table so the Other services grid doesn't inherit these;
+   :where() keeps the id from adding specificity, so every th/td override
+   below still wins as it did against the bare element selectors. */
 /* separate/0, not collapse: verified that collapsed borders let
    scrolled-under row content bleed through a sticky <th>'s background at
    the collapsed border seams in Chromium. Horizontal rules only. */
 /* max-content, not auto: inside #content's own max-content box, auto lets the
    table inflate far past its natural width (a 5-column table rendered 3x wide). */
-table { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
-th, td { padding: .45rem .75rem .45rem 0; text-align: left; }
+:where(#data-table) { border-collapse: separate; border-spacing: 0; width: max-content; margin-top: var(--gap-lg); }
+:where(#data-table) th, :where(#data-table) td { padding: .45rem .75rem .45rem 0; text-align: left; }
 /* Border-box so the min-width from features/column-widths.ts is the column's
    measured width, not that plus padding (which would grow it every render). */
-th { box-sizing: border-box; }
-td { position: relative; border-bottom: 1px solid var(--rule);
+:where(#data-table) th { box-sizing: border-box; }
+:where(#data-table) td { position: relative; border-bottom: 1px solid var(--rule);
      font-family: var(--font-mono); font-size: .8125rem; }
-tbody tr:hover { background: var(--hover); }
-th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
+:where(#data-table) tbody tr:hover { background: var(--hover); }
+:where(#data-table) th { cursor: pointer; user-select: none; white-space: nowrap; font-weight: 500;
      font-size: .75rem; border-bottom: 1px solid var(--rule-strong); }
 /* z-index is load-bearing: td has position:relative (for the cell actions),
    and since tbody follows thead in DOM order, its positioned <td>s paint
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
-thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+:where(#data-table) thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
 /* Capped like the table chips' names; the title carries the full name. */
 .col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
             vertical-align: bottom; }
@@ -236,7 +239,7 @@ td.expandable .cell-text { cursor: zoom-in; }
 td:hover .cell-actions, td:focus-within .cell-actions { opacity: 1; }
 /* No hover on touch: keep the buttons visible, in reserved space. */
 @media (hover: none) {
-  td { padding-right: 4.5rem; }
+  :where(#data-table) td { padding-right: 4.5rem; }
   .cell-actions { opacity: 1; }
 }
 /* Fades out over 3s after a manual refresh; static under reduced motion,
@@ -286,6 +289,17 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #error { color: var(--danger); margin-top: var(--gap); white-space: pre-wrap;
          font-family: var(--font-mono); font-size: .8rem; }
 #error:empty { display: none; }
+/* Neutral, not --danger: the page made a safe choice, nothing failed. */
+#view-notice { display: flex; align-items: flex-start; gap: var(--gap); margin-top: var(--gap);
+               padding-left: .75rem; border: 1px solid var(--border-strong); border-radius: 8px; }
+#view-notice svg { flex: none; margin-top: .8rem; color: var(--text-muted); }
+#view-notice-text { flex: 1; min-width: 0; padding: .65rem 0; line-height: 1.4; }
+#view-notice-text code { font-family: var(--font-mono); font-size: .8125rem; }
+#view-notice-text .tag { font-family: var(--font-mono); font-size: .75rem; padding: .05rem .35rem;
+                         border-radius: 4px; background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#view-notice-close { flex: none; min-width: 44px; min-height: 44px; background: none; border: none;
+                     border-radius: 8px; font: inherit; color: var(--text-muted); cursor: pointer; }
+#view-notice-close:hover { background: var(--hover); color: inherit; }
 #meta { display: flex; justify-content: space-between; align-items: center;
         flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); }
 #meta-title { color: var(--text-muted); }
@@ -329,14 +343,50 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
           padding: .5rem; width: max-content; max-width: min(22rem, 90vw);
           box-shadow: 0 4px 16px #0004; }
 #siblings-heading { margin: .1rem .6rem .5rem; font-size: .75rem; color: var(--text-muted); }
+#siblings-warnings { margin: 0 .6rem .5rem; font-size: .75rem; overflow-wrap: anywhere; }
+#siblings-warnings li { display: flex; gap: .4rem; }
+#siblings-warnings li + li { margin-top: .25rem; }
+.sibling-warning-icon { color: var(--text-muted); }
+.sibling-note { white-space: nowrap; }
 #siblings-list { display: flex; flex-direction: column; }
 .sibling-row { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem;
                border-radius: 6px; color: inherit; text-decoration: none; }
 .sibling-row:hover { background: var(--hover); }
-/* Full name is in `title` (see loadSiblings()) as the truncation escape hatch. */
+/* Full name is in `title` (see paintRow and renderMatrix) as the truncation escape hatch. */
 .sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                 white-space: nowrap; font-family: var(--font-mono); }
-.sibling-state { color: var(--text-muted); font-size: .75rem; }
+.sibling-note, .sibling-state { color: var(--text-muted); font-size: .75rem; }
+/* The service × label grid. */
+#siblings-pop:has(#siblings-matrix:not([hidden])) { max-width: min(34rem, 92vw); }
+#siblings-matrix { border-collapse: collapse; width: 100%; }
+/* Label columns stay narrow; the service-name column takes the slack. */
+#siblings-matrix td { width: 7.5rem; }
+#siblings-matrix th, #siblings-matrix td { padding: 0 .15rem; text-align: left; }
+#siblings-matrix thead th { font-size: .7rem; font-weight: 400; text-transform: uppercase;
+                            letter-spacing: .04em; color: var(--text-muted); padding: 0 .6rem .3rem; }
+#siblings-matrix tbody th { font-weight: 400; font-size: .8125rem; padding-left: .6rem;
+                            max-width: 14rem; }
+#siblings-matrix tbody tr.instance th, #siblings-matrix tbody tr.instance td {
+  border-bottom: 1px solid var(--rule); padding-bottom: .15rem; }
+#siblings-matrix .sibling-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
+.sibling-me { display: block; font-size: .7rem; font-weight: 400; color: var(--text-muted); }
+#siblings-matrix th.mine { font-weight: 600; color: inherit; }
+.sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
+  min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
+  white-space: nowrap; }
+.sibling-cell, .sibling-here { font-size: .8125rem; }
+.sibling-cell { color: inherit; text-decoration: none; }
+.sibling-cell:hover { background: var(--hover); }
+.sibling-cell.same { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.sibling-cell.same .sibling-state { color: inherit; }
+.sibling-here { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+.sibling-missing { color: var(--text-muted); font-size: .75rem; }
+#siblings-foot { margin: .5rem .6rem .2rem; padding-top: .5rem; border-top: 1px solid var(--rule);
+                 font-size: .75rem; color: var(--text-muted); line-height: 1.5; }
+#siblings-foot p { margin: 0; }
+#siblings-foot p + p { margin-top: .25rem; }
+#siblings-foot kbd { font-family: var(--font-mono); font-size: .7rem; padding: 0 .25rem; border-radius: 4px;
+                     border: 1px solid var(--border-strong); }
 
 /* ==== Pager ==== */
 /* Sticky left, same reasoning as #chrome above: #content (and #pager's
@@ -541,7 +591,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
   --band-3: light-dark(#e6ecf5, #252d3d);
   --band-3-fg: light-dark(#3b5a8a, #9db8e0);
 }
-thead { --band-h: 1.75rem; }
+:where(#data-table) thead { --band-h: 1.75rem; }
 thead tr.bands th { height: var(--band-h); box-sizing: border-box; cursor: default; padding: 0 0 .25rem 0;
                     border-bottom: none; }
 thead tr.bands th.row-actions { padding: 0; }
@@ -734,6 +784,11 @@ thead tr.bands + tr th { top: var(--band-h); }
       </search>
       <div id="error" role="alert"></div>
       <div id="join-notice" hidden><span id="join-notice-text"></span><span id="join-notice-actions"></span></div>
+      <div id="view-notice" role="status" hidden>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="6.3"/><path d="M8 7.2v4"/><circle cx="8" cy="4.9" r=".5" fill="currentColor"/></svg>
+        <span id="view-notice-text"></span>
+        <button id="view-notice-close" type="button" aria-label="Close this note">✕</button>
+      </div>
       <div id="meta">
         <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
@@ -750,7 +805,7 @@ thead tr.bands + tr th { top: var(--band-h); }
     </div>
   </div>
   <div id="content">
-    <table tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <table id="data-table" tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
     <template id="cell-template"><td><button class="cell-text"></button><span class="cell-actions"><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></span></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
     <div id="pager">
@@ -836,7 +891,13 @@ FROM table [alias]
 
 <div id="siblings-pop" popover>
   <p id="siblings-heading">Other services' databases. Opens their Ashurbanipal in a new tab.</p>
+  <ul id="siblings-warnings" hidden></ul>
+  <table id="siblings-matrix" hidden><thead><tr id="siblings-matrix-head"></tr></thead><tbody id="siblings-matrix-body"></tbody></table>
   <div id="siblings-list"></div>
+  <div id="siblings-foot" hidden>
+    <p>For a new tab: <kbd>Ctrl</kbd>/<kbd>⌘</kbd>-click, middle-click, or right-click › Open Link in New Tab.</p>
+    <p>“Same view” keeps your table, filter and sort. Other services open on their first table.</p>
+  </div>
 </div>
 <div id="cell-pop" popover><pre id="cell-pre"></pre><div id="cell-json" class="json-tree"></div></div>
 <div id="refby-pop" popover><div id="refby-pop-list"></div></div>
@@ -889,8 +950,8 @@ async function errorFromResponse(resp) {
   }
   return new ApiError(`request failed with status ${resp.status}`, void 0);
 }
-async function api(path) {
-  const resp = await fetch(API + path);
+async function api(path, init) {
+  const resp = await fetch(API + path, init);
   if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
   if (!resp.ok) throw await errorFromResponse(resp);
   return resp.json();
@@ -2092,6 +2153,22 @@ function diffNewRows(data, highlightNew) {
   return result;
 }
 
+// src/core/url-intent.ts
+var KINDS = ["source", "schema", "table", "filter"];
+var asked = null;
+function recordUrlIntent(params) {
+  asked = {};
+  for (const kind of KINDS) {
+    const value = params.get(kind);
+    if (value) asked[kind] = value;
+  }
+}
+function takeUrlIntent() {
+  const taken = asked ?? {};
+  asked = null;
+  return taken;
+}
+
 // src/core/url.ts
 function applyUrlOverlay(params) {
   if (params.has("source")) state.source = params.get("source");
@@ -2128,8 +2205,10 @@ function sourceQuery() {
   return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
 }
 function initState() {
+  const params = new URLSearchParams(location.search);
   restoreFromStorage();
-  applyUrlOverlay(new URLSearchParams(location.search));
+  recordUrlIntent(params);
+  applyUrlOverlay(params);
 }
 
 // src/features/column-widths.ts
@@ -2287,7 +2366,7 @@ function endsInUnfinishedWord(text) {
 }
 
 // src/features/overlay-highlight.ts
-function attachOverlayHighlight(field, render2) {
+function attachOverlayHighlight(field, render4) {
   const proto = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
   const valueProp = Object.getOwnPropertyDescriptor(proto, "value");
   if (valueProp?.get && valueProp.set) {
@@ -2299,13 +2378,13 @@ function attachOverlayHighlight(field, render2) {
       },
       set(v) {
         set.call(this, v);
-        render2();
+        render4();
       }
     });
   }
-  field.addEventListener("input", render2);
-  new ResizeObserver(render2).observe(field);
-  render2();
+  field.addEventListener("input", render4);
+  new ResizeObserver(render4).observe(field);
+  render4();
 }
 function tokenSpans(text, tokens, isError) {
   return tokens.map((t) => {
@@ -2901,6 +2980,93 @@ function formatCellValue(col, raw) {
   return document.createTextNode(raw);
 }
 
+// src/lib/fallback-note.ts
+var ORDER = ["source", "schema", "table", "filter"];
+function swapsFrom(asked2, settled) {
+  return ORDER.flatMap((kind) => {
+    const want = asked2[kind];
+    const got = settled[kind];
+    if (want === void 0 || want === got) return [];
+    if ((kind === "source" || kind === "schema") && got === null) return [];
+    return [{ kind, asked: want, got }];
+  });
+}
+function placeSegments(label) {
+  return label === null ? [{ text: "here" }] : [{ text: "in " }, { label }];
+}
+function joinWith(items, sep, lastSep = sep) {
+  return items.flatMap((item, i) => i === 0 ? item : [{ text: i === items.length - 1 ? lastSep : sep }, ...item]);
+}
+function buildFallbackNote(swaps, table, label) {
+  const named = ORDER.flatMap((kind) => kind === "filter" ? [] : swaps.filter((s) => s.kind === kind));
+  const filterDropped = named.length < swaps.length;
+  if (named.length === 0) {
+    if (!filterDropped) return [];
+    const target = table ? [{ code: table }, { text: " " }] : [];
+    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(label), { text: ", so it was removed." }];
+  }
+  const out = [
+    { text: "There is no " },
+    ...joinWith(
+      named.map((s) => [{ text: `${s.kind} ` }, { code: s.asked }]),
+      ", ",
+      " or "
+    ),
+    { text: " " },
+    ...placeSegments(label)
+  ];
+  const shown2 = named.flatMap((s) => s.got === null ? [] : [[{ code: s.got }]]);
+  if (shown2.length === 0) {
+    out.push({ text: filterDropped ? ". Your filter was removed." : "." });
+    return out;
+  }
+  out.push({ text: ". Showing " }, ...joinWith(shown2, " / "), {
+    text: filterDropped ? " instead, without your filter." : " instead."
+  });
+  return out;
+}
+
+// src/features/view-notice.ts
+var shownFor = null;
+var shownSwaps = [];
+var placeLabel = null;
+function noticeKey(view, filter) {
+  return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
+}
+function render2(segment) {
+  if ("code" in segment) return el("code", void 0, segment.code);
+  if ("label" in segment) return el("span", "tag", segment.label);
+  return document.createTextNode(segment.text);
+}
+function clearViewNotice() {
+  shownFor = null;
+  $("view-notice").hidden = true;
+}
+function renderNote() {
+  $("view-notice-text").replaceChildren(...buildFallbackNote(shownSwaps, tableInView(), placeLabel).map(render2));
+}
+function showBootFallbackNote() {
+  shownSwaps = swapsFrom(takeUrlIntent(), {
+    source: state.source,
+    schema: state.schema,
+    table: startTable(state.view),
+    filter: state.filter || null
+  });
+  if (shownSwaps.length === 0) return;
+  shownFor = noticeKey(state.view, state.filter);
+  $("view-notice").hidden = false;
+  renderNote();
+}
+function setNoticePlace(label) {
+  if (label === placeLabel) return;
+  placeLabel = label;
+  if (shownFor !== null) renderNote();
+}
+function syncViewNotice(req) {
+  if (shownFor !== null && shownFor !== noticeKey(req?.view ?? null, req?.filter ?? "")) clearViewNotice();
+}
+$("view-notice-close").onclick = clearViewNotice;
+
 // src/features/sidebar.ts
 var tableEntries = [];
 var chipCounts = /* @__PURE__ */ new Map();
@@ -3063,7 +3229,10 @@ async function loadTables() {
   const table = tableInView();
   if (table && state.sort === null) applyStoredSort(table);
   if (state.view) await loadData();
-  else setStatus("");
+  else {
+    syncViewNotice(null);
+    setStatus("");
+  }
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
@@ -3232,19 +3401,19 @@ function tableColumns(table) {
     const params = new URLSearchParams({ table, limit: "1", offset: "0" });
     applyScopeParams(params);
     const started = generation;
-    const asked = api(`/tables/data?${params}`).then((d) => {
+    const asked2 = api(`/tables/data?${params}`).then((d) => {
       if (started === generation) {
         resolved.set(key, d.columns);
         version++;
       }
       return d.columns;
     });
-    cache2.set(key, asked);
-    asked.catch((e) => {
+    cache2.set(key, asked2);
+    asked2.catch((e) => {
       const lasting = e instanceof ApiError && (e.code === "unknown_table" || e.code === "not_readable");
-      if (!lasting && cache2.get(key) === asked) cache2.delete(key);
+      if (!lasting && cache2.get(key) === asked2) cache2.delete(key);
     });
-    columns = asked;
+    columns = asked2;
   }
   return columns;
 }
@@ -3258,12 +3427,12 @@ function indexedColumns(table) {
   const key = keyOf(table);
   let found = indexes.get(key);
   if (!found) {
-    const asked = generation;
+    const asked2 = generation;
     found = tableStructure(table).then(
       (s) => new Set(s.indexes.map((i) => i.columns[0])),
       () => /* @__PURE__ */ new Set()
     ).then((set) => {
-      if (asked === generation) indexesRead.set(key, set);
+      if (asked2 === generation) indexesRead.set(key, set);
       return set;
     });
     indexes.set(key, found);
@@ -3312,13 +3481,13 @@ function mountJoinForm(root, onChange) {
       const fk = first && first.leftColumn === "" && first.rightColumn === "" ? foreignKey(i + 1) : null;
       if (fk) j.on[0] = fk;
     });
-    render2();
+    render4();
     onChange();
   }
   const changed = (fromMenu = false) => {
     const active = document.activeElement;
     const focused = fromMenu ? lastDropdownLabel() : root.contains(active) ? active?.getAttribute("aria-label") : null;
-    render2();
+    render4();
     if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
   };
@@ -3537,7 +3706,7 @@ function mountJoinForm(root, onChange) {
     wrap2.append(el("div", "jlab", `Columns \xB7 ${picked} of ${total}`), grid);
     return wrap2;
   }
-  function render2() {
+  function render4() {
     const parts = [];
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
@@ -3581,7 +3750,7 @@ function mountJoinForm(root, onChange) {
   return {
     setDraft(next) {
       draft = next;
-      render2();
+      render4();
     },
     draft: () => draft,
     problem() {
@@ -3797,7 +3966,7 @@ function createSuggestList(opts) {
   const accept = (i) => {
     if (matches[i] && !matches[i].blocked) opts.accept(matches[i], head);
   };
-  const render2 = () => {
+  const render4 = () => {
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
         const btn = el("button");
@@ -3836,11 +4005,11 @@ function createSuggestList(opts) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       index = (index + 1) % count;
-      render2();
+      render4();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       index = index <= 0 ? count - 1 : index - 1;
-      render2();
+      render4();
     } else if (e.key === "Enter" && index >= 0) {
       e.preventDefault();
       accept(index);
@@ -3861,7 +4030,7 @@ function createSuggestList(opts) {
       matches = next;
       head = nextHead;
       index = nextIndex;
-      render2();
+      render4();
       popup.hidden = false;
       opts.place?.();
       input2.setAttribute("aria-expanded", "true");
@@ -3934,7 +4103,7 @@ function mountJoinSql(onChange) {
       memo = { text, version: version2, result: parseJoin(text, { catalog: knownCatalog(), pairCheck }) };
     return memo.result;
   };
-  function render2() {
+  function render4() {
     const text = field.value;
     field.style.height = "";
     if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
@@ -3946,7 +4115,7 @@ function mountJoinSql(onChange) {
     hlText.replaceChildren(...tokenSpans(text, shown2, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     hlText.append("\n");
   }
-  attachOverlayHighlight(field, render2);
+  attachOverlayHighlight(field, render4);
   const place2 = () => {
     const before = field.value.slice(0, field.selectionStart);
     const line = before.split("\n").length;
@@ -4061,7 +4230,7 @@ function mountJoinSql(onChange) {
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
       if (!anyRead(results)) return;
-      render2();
+      render4();
       onChange();
     });
   }
@@ -4532,44 +4701,292 @@ async function showCommonValues(e, table, column) {
   renderCommonValues(values, column);
 }
 
-// src/features/siblings.ts
-var siblingsRequestToken = 0;
-var siblingsWarned = false;
-async function loadSiblings() {
-  const token = ++siblingsRequestToken;
-  let siblings = [];
+// src/lib/sibling-matrix.ts
+var keyOf2 = (name, label) => JSON.stringify([name, label ?? null]);
+function firstEntries(siblings) {
+  const first = /* @__PURE__ */ new Map();
+  for (const s of siblings) {
+    const key = keyOf2(s.name, s.label);
+    if (!first.has(key)) first.set(key, s);
+  }
+  return first;
+}
+function isOwnEntry(instance, s) {
+  return instance !== void 0 && s.name === instance.name && s.label === instance.label;
+}
+function buildSiblingMatrix({ instance, siblings }) {
+  const labelled = siblings.filter((s) => s.label !== void 0);
+  if (!instance && labelled.length === 0) return null;
+  const labels = [...new Set(labelled.map((s) => s.label))];
+  const names = [...new Set(labelled.map((s) => s.name))];
+  if (instance && !labels.includes(instance.label)) labels.unshift(instance.label);
+  if (instance && !names.includes(instance.name)) names.unshift(instance.name);
+  const first = firstEntries(labelled);
+  const rows = names.map((name) => {
+    const isInstance = instance?.name === name;
+    const cells = labels.map((label) => {
+      if (isInstance && instance?.label === label) return { kind: "here" };
+      const sibling = first.get(keyOf2(name, label));
+      return sibling ? { kind: "link", sibling, sameView: isInstance } : { kind: "missing" };
+    });
+    return { name, isInstance, cells };
+  });
+  return { labels, ownLabel: instance?.label ?? null, rows };
+}
+function listedSiblings(siblings) {
+  const first = firstEntries(siblings);
+  const copies = /* @__PURE__ */ new Map();
+  for (const s of siblings) copies.set(keyOf2(s.name, s.label), (copies.get(keyOf2(s.name, s.label)) ?? 0) + 1);
+  return siblings.flatMap((s) => {
+    const key = keyOf2(s.name, s.label);
+    if (s.label !== void 0) return first.get(key) === s ? [] : [{ sibling: s, note: `${s.label} \xB7 duplicate` }];
+    return [(copies.get(key) ?? 0) > 1 ? { sibling: s, note: hostOf(s.base_url) } : { sibling: s }];
+  });
+}
+function hostOf(baseUrl) {
   try {
-    ({ siblings } = await api("/siblings"));
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
+}
+function sameViewHref(baseUrl, search2) {
+  let url;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return baseUrl;
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  for (const [key, value] of new URLSearchParams(search2)) url.searchParams.set(key, value);
+  return url.toString();
+}
+
+// src/features/siblings.ts
+var FRESH_MS = 15e3;
+var FETCH_TIMEOUT_MS = 1e4;
+var MAX_RETRY_MS = 6e4;
+var lastFetchStarted = Number.NEGATIVE_INFINITY;
+var inFlight = false;
+var openTimer;
+var retryTimer;
+var retryDelay = FRESH_MS;
+var siblingsWarned = false;
+var matrixShape = "";
+var linkRefs = [];
+var linkCells = [];
+var listShape = "";
+var rowRefs = [];
+function startSiblings() {
+  void loadSiblings();
+  document.addEventListener("visibilitychange", () => {
+    if (retryTimer !== void 0 || $("siblings-pop").matches(":popover-open")) refreshIfStale();
+  });
+}
+function scheduleRetry() {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(refreshIfStale, retryDelay);
+  retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+}
+function refreshIfStale() {
+  if (document.hidden || inFlight || performance.now() - lastFetchStarted < FRESH_MS) return;
+  void loadSiblings();
+}
+async function loadSiblings() {
+  inFlight = true;
+  lastFetchStarted = performance.now();
+  let body;
+  try {
+    body = await api("/siblings", {
+      cache: "no-store",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
     siblingsWarned = false;
   } catch (e) {
     if (!siblingsWarned) {
-      console.warn("ashurbanipal: /siblings poll failed; hiding the panel", e);
+      console.warn("ashurbanipal: /siblings fetch failed; retrying", e);
       siblingsWarned = true;
     }
+  } finally {
+    inFlight = false;
   }
-  if (token !== siblingsRequestToken) return;
-  $("siblings").hidden = siblings.length === 0;
-  const down = siblings.filter((s) => !s.healthy).length;
-  $("siblings-summary").textContent = down > 0 ? `Other services \xB7 ${down} down` : `Other services \xB7 ${siblings.length} up`;
-  $("siblings-dot").className = `dot ${down > 0 ? "down" : "up"}`;
-  $("siblings-list").replaceChildren(
-    ...siblings.map((s) => {
-      const a = el("a");
-      a.href = s.base_url;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.className = "sibling-row";
-      const dot = el("span", `dot ${s.healthy ? "up" : "down"}`);
-      dot.setAttribute("role", "img");
-      dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
-      const name = el("span", "sibling-name", s.name);
-      name.title = s.name;
-      const state2 = el("span", "sibling-state", s.healthy ? "up \u2197" : "down \u2197");
-      a.append(dot, name, state2);
-      return a;
+  if (!body) {
+    scheduleRetry();
+    return;
+  }
+  clearTimeout(retryTimer);
+  retryTimer = void 0;
+  retryDelay = FRESH_MS;
+  render3(body);
+}
+function renderWarnings(warnings) {
+  $("siblings-warnings").hidden = warnings.length === 0;
+  $("siblings-warnings").replaceChildren(
+    ...warnings.map((w) => {
+      const li = el("li");
+      const icon = el("span", "sibling-warning-icon", "\u26A0");
+      icon.setAttribute("aria-hidden", "true");
+      li.append(icon, el("span", "sibling-warning-text", `Config: ${w}`));
+      return li;
     })
   );
 }
+function render3(body) {
+  const { siblings } = body;
+  setNoticePlace(body.instance?.label ?? null);
+  const others = siblings.filter((s) => !isOwnEntry(body.instance, s));
+  const warnings = body.warnings ?? [];
+  $("siblings").hidden = others.length === 0 && warnings.length === 0;
+  const down = others.filter((s) => !s.healthy).length;
+  $("siblings-summary").textContent = [
+    "Other services",
+    down > 0 ? `${down} down` : `${others.length} up`,
+    ...warnings.length > 0 ? [`${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`] : []
+  ].join(" \xB7 ");
+  $("siblings-dot").className = dotClass(down === 0);
+  renderWarnings(warnings);
+  const matrix = buildSiblingMatrix(body);
+  $("siblings-matrix").hidden = matrix === null;
+  $("siblings-foot").hidden = matrix === null;
+  const at = /* @__PURE__ */ new Date();
+  const updated = el("time", void 0, at.toLocaleTimeString());
+  updated.dateTime = at.toISOString();
+  updated.title = at.toLocaleString();
+  $("siblings-heading").replaceChildren(
+    "Other services' databases. ",
+    matrix ? "" : "Opens their Ashurbanipal in a new tab. ",
+    "Updated ",
+    updated,
+    "."
+  );
+  if (matrix) renderMatrix(matrix);
+  else matrixShape = "";
+  renderList(listedSiblings(siblings), !matrix);
+}
+function renderList(list, newTab) {
+  const shape = JSON.stringify([newTab, list.map((l) => [l.sibling.name, l.note])]);
+  if (shape !== listShape) {
+    listShape = shape;
+    rowRefs = list.map(() => listRow(newTab));
+    $("siblings-list").replaceChildren(...rowRefs.map((r) => r.a));
+  }
+  list.forEach((l, i) => {
+    paintRow(rowRefs[i], l, newTab);
+  });
+}
+function health(healthy) {
+  return healthy ? "up" : "down";
+}
+function dotClass(healthy) {
+  return `dot ${health(healthy)}`;
+}
+function healthDot(healthy, ariaLabel) {
+  const dot = el("span", dotClass(healthy));
+  if (ariaLabel === void 0) dot.setAttribute("aria-hidden", "true");
+  else {
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", ariaLabel);
+  }
+  return dot;
+}
+function listRow(newTab) {
+  const a = el("a", "sibling-row");
+  if (newTab) a.target = "_blank";
+  a.rel = "noopener";
+  const ref = {
+    a,
+    dot: healthDot(true, ""),
+    name: el("span", "sibling-name"),
+    note: el("span", "sibling-note"),
+    state: el("span", "sibling-state")
+  };
+  a.append(ref.dot, ref.name, ref.note, ref.state);
+  return ref;
+}
+function paintRow(ref, { sibling: s, note }, newTab) {
+  ref.a.href = s.base_url;
+  ref.name.textContent = s.name;
+  ref.name.title = s.name;
+  ref.note.textContent = note ?? "";
+  ref.note.hidden = note === void 0;
+  ref.dot.className = dotClass(s.healthy);
+  ref.dot.setAttribute("aria-label", s.healthy ? "healthy" : "unhealthy");
+  ref.state.textContent = `${health(s.healthy)}${newTab ? " \u2197" : ""}`;
+}
+function shapeOf(m) {
+  return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
+}
+function paintLink(ref, name, label, { sibling, sameView }) {
+  const state2 = sameView ? `same view \xB7 ${health(sibling.healthy)}` : health(sibling.healthy);
+  ref.dot.className = dotClass(sibling.healthy);
+  ref.state.textContent = state2;
+  ref.a.setAttribute("aria-label", `${name} in ${label}: ${state2}`);
+  ref.a.href = sameView ? sameViewHref(sibling.base_url, location.search) : sibling.base_url;
+}
+function renderCell(cell) {
+  const td = el("td");
+  if (cell.kind === "here") {
+    const here = el("span", "sibling-here", "you are here");
+    here.setAttribute("aria-current", "page");
+    td.append(here);
+  } else if (cell.kind === "missing") {
+    td.append(el("span", "sibling-missing", "not set up"));
+  } else {
+    const a = el("a", cell.sameView ? "sibling-cell same" : "sibling-cell");
+    a.rel = "noopener";
+    const ref = { a, dot: healthDot(cell.sibling.healthy), state: el("span", "sibling-state") };
+    a.append(ref.dot, ref.state);
+    td.append(a);
+    linkRefs.push(ref);
+  }
+  return td;
+}
+function renderMatrix(m) {
+  linkCells = m.rows.flatMap(
+    (row2) => row2.cells.flatMap((cell, i) => cell.kind === "link" ? [{ name: row2.name, label: m.labels[i], cell }] : [])
+  );
+  const shape = shapeOf(m);
+  if (shape !== matrixShape) {
+    matrixShape = shape;
+    linkRefs = [];
+    const corner = el("th");
+    corner.append(el("span", "sr-only", "service"));
+    $("siblings-matrix-head").replaceChildren(
+      corner,
+      ...m.labels.map((label) => {
+        const th = el("th", label === m.ownLabel ? "mine" : void 0, label);
+        th.scope = "col";
+        return th;
+      })
+    );
+    $("siblings-matrix-body").replaceChildren(
+      ...m.rows.map((row2) => {
+        const tr = el("tr", row2.isInstance ? "instance" : void 0);
+        const th = el("th", row2.isInstance ? "mine" : void 0);
+        th.scope = "row";
+        const name = el("span", "sibling-name", row2.name);
+        name.title = row2.name;
+        th.append(name);
+        if (row2.isInstance) th.append(el("span", "sibling-me", "this service"));
+        tr.append(th, ...row2.cells.map(renderCell));
+        return tr;
+      })
+    );
+  }
+  repaintLinks();
+}
+function repaintLinks() {
+  linkCells.forEach(({ name, label, cell }, i) => {
+    paintLink(linkRefs[i], name, label, cell);
+  });
+}
+$("siblings-pop").addEventListener("beforetoggle", (e) => {
+  clearInterval(openTimer);
+  if (e.newState !== "open") return;
+  repaintLinks();
+  refreshIfStale();
+  openTimer = setInterval(refreshIfStale, FRESH_MS);
+});
 
 // src/features/sticky-header.ts
 var main = $("main");
@@ -4772,7 +5189,7 @@ function drillIn(entry, row2, dismiss) {
   dismiss();
   navigateWithSeededFilter(entry.table, entry.schema, () => applyFilterClauses(clauses));
 }
-function renderList(container, entries, row2, dismiss) {
+function renderList2(container, entries, row2, dismiss) {
   if (entries.length === 0) {
     container.replaceChildren(msg2("nothing references this table"));
     return;
@@ -4804,7 +5221,7 @@ function renderReferencedBy(container, row2, dismiss) {
   const key = cacheKey2(table);
   const hit = cache3.get(key);
   if (hit) {
-    renderList(container, hit, row2, dismiss);
+    renderList2(container, hit, row2, dismiss);
     return;
   }
   container.replaceChildren(msg2("loading\u2026"));
@@ -4813,7 +5230,7 @@ function renderReferencedBy(container, row2, dismiss) {
   api(`/tables/referenced-by?${params}`).then((data) => {
     cache3.set(key, data.referenced_by);
     if (renderTokens.get(container) !== token) return;
-    renderList(container, data.referenced_by, row2, dismiss);
+    renderList2(container, data.referenced_by, row2, dismiss);
   }).catch((e) => {
     if (renderTokens.get(container) !== token) return;
     container.replaceChildren(msg2(e.message));
@@ -5135,7 +5552,7 @@ function updatePager(data) {
 }
 
 // src/bootstrap/table-focus.ts
-var tableEl = qs(document, "table");
+var tableEl = $("data-table");
 function captureTableFocus() {
   const active = document.activeElement;
   if (!active || !tableEl.contains(active)) return null;
@@ -5273,6 +5690,7 @@ async function loadData2({
   clearError();
   clearJoinNotice();
   const req = next ?? currentRequest();
+  syncViewNotice(req);
   if (req === null) {
     updateViewChrome();
     setStatus("");
@@ -5397,9 +5815,8 @@ $("refresh").onclick = () => {
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });
 };
-loadSources().then(loadSchemas).then(loadTables).catch(reportError);
-loadSiblings();
-setInterval(loadSiblings, 15e3);
+loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(showBootFallbackNote);
+startSiblings();
 </script>
 </body>
 </html>

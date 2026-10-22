@@ -144,8 +144,12 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 |---|---|---|
 | `P5.6-EMPTY-CONFIG` | Empty config → `{"siblings": []}` | `html_and_siblings::siblings_endpoint_returns_empty_list_by_default` |
 | `P5.6-ORIGIN-RESOLUTION` | Health resolved against origin, not `base_url` path | covered at the unit level only, not by this HTTP suite — `implementations/rust/axum/src/routes.rs`'s `health_url_resolves_against_origin` (pure function, no live sibling needed) |
-| `P5.6-2XX-ONLY` | `healthy` true iff 2xx; any failure → false, never an error response | **gap** — see [Known gaps](#known-gaps) |
+| `P5.6-2XX-ONLY` | `healthy` true iff 2xx; any failure → false, never an error response | partial — the unreachable case: `labelled_siblings::labels_are_echoed_in_configuration_order` (refused connections give `healthy: false` in a 200). Real 2xx/non-2xx/timeout outcomes are a **gap** — see [Known gaps](#known-gaps) |
 | `P5.6-PARALLEL-TIMEOUT-BOUND` | Checks SHOULD run in parallel, MUST be individually timeout-bounded | **gap** — see [Known gaps](#known-gaps) |
+| `P5.6-INSTANCE-ECHO` | Configured `instance` is echoed byte-for-byte; absent when not configured | `labelled_siblings::instance_is_echoed_as_configured`, `html_and_siblings::siblings_endpoint_returns_empty_list_by_default` (absent case) |
+| `P5.6-SELF-IN-PLACE` | The sibling equal to `instance` stays in place, `healthy: true`, and is not health-checked | `labelled_siblings::this_instance_is_listed_healthy_without_a_check` (its base_url refuses connections, so `true` proves no probe) |
+| `P5.6-LABEL-ECHO-ORDER` | Sibling `label` echoed when configured; `siblings` in configuration order | `labelled_siblings::labels_are_echoed_in_configuration_order` |
+| `P5.6-CONFIG-WARNINGS` | Sibling config is never rejected: duplicates are kept in order with one warning; `warnings` absent when there is nothing to report | `labelled_siblings::a_duplicate_is_kept_and_warned_once`, `labelled_siblings::labels_are_echoed_in_configuration_order` (the duplicate is listed), `html_and_siblings::siblings_endpoint_returns_empty_list_by_default` (absent case). The incomplete-instance and empty-label corrections are covered by each port's unit tests only (Go cannot express an empty label) |
 
 ## §5.7 `GET /api/schemas`
 
@@ -299,8 +303,9 @@ to trigger deterministically):
   instance (or a deliberately slow/black-hole one) as a fixture —
   `tools/e2e-tests`' `siblings.spec.ts` already exercises the
   paired-instance case at the UI level (`mise run rust:demo-sibling`'s
-  pattern); this runner only proves the protocol-shape default (empty
-  config ⇒ empty list).
+  pattern); this runner proves the protocol-shape default (empty config ⇒
+  empty list) and, via `labelled_siblings.rs`, that a refused connection is
+  `healthy: false` rather than an error.
 - **§6 query timeout bound (`P6-QUERY-TIMEOUT-BOUNDED`).** There's no
   channel through the documented API surface to make a query
   pathologically slow — filter values are always bound parameters, never

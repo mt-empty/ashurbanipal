@@ -22,6 +22,7 @@ import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
 import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
+import { syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
 import { isCurrentLoad, nextLoadToken } from "./reload.js";
@@ -180,6 +181,7 @@ export async function loadData({
   clearError();
   clearJoinNotice();
   const req = next ?? currentRequest();
+  syncViewNotice(req);
   if (req === null) {
     updateViewChrome();
     setStatus("");

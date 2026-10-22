@@ -111,6 +111,8 @@ interpreted as described in RFC 2119.
 - Configuration MUST expose a single on/off switch, and it MUST default to
   off: absent, empty, or malformed configuration MUST result in disabled,
   never enabled.
+  "Malformed" here means the switch itself cannot be read; an invalid
+  setting elsewhere follows its own route's rule (§5.6 for siblings).
 - An implementation MUST NOT infer or police which environment the host
   process is running in (by name, hostname, or any other signal). Where
   and whether to enable the viewer is entirely the host's decision.
@@ -412,15 +414,46 @@ Response:
 
 ```json
 {
+  "instance": { "name": "orders", "label": "dev" },
   "siblings": [
-    { "name": "billing", "base_url": "https://billing.internal.vpn/__ashurbanipal", "healthy": true },
-    { "name": "notifications", "base_url": "https://notifications.internal.vpn/__ashurbanipal", "healthy": false }
+    { "name": "orders", "label": "dev", "base_url": "https://orders-dev.internal.vpn/__ashurbanipal", "healthy": true },
+    { "name": "orders", "label": "int", "base_url": "https://orders-int.internal.vpn/__ashurbanipal", "healthy": true },
+    { "name": "billing", "label": "dev", "base_url": "https://billing-dev.internal.vpn/__ashurbanipal", "healthy": false }
   ]
 }
 ```
 
 - The sibling list is static configuration; an empty configuration yields
   `{"siblings": []}`.
+- Configuration MAY name this instance (`instance`, with a `name` and a
+  `label`) and MAY give each sibling a `label`.
+- Sibling configuration is never rejected, and never stops the host or the
+  viewer. An implementation corrects these mistakes and reports each one in
+  `warnings`:
+  - an `instance` with an empty or missing `name` or `label` is ignored, as
+    if not configured;
+  - an empty sibling `label` is treated as absent;
+  - two or more siblings with the same `name` and the same `label` (both
+    absent counts as the same) are all kept, in configuration order, with
+    one warning for the pair.
+- `warnings` is present iff at least one correction was made: an array of
+  human-readable strings whose wording is implementation-defined and MUST
+  NOT be parsed.
+- A label is an opaque string the host writes. An implementation echoes it
+  byte-for-byte and MUST NOT parse it, compare it against known names,
+  derive it from any other signal, or let it change any behavior — §4's
+  rule against inferring an environment applies.
+- `instance` is present iff configured; a sibling's `label` is present iff
+  configured. With neither configured the response is exactly the
+  unlabelled shape above.
+- A sibling whose `name` and `label` both equal `instance`'s MUST NOT be
+  health-checked; it stays in `siblings` at its configuration position with
+  `healthy: true` (this instance is serving the response). A host can then
+  share one sibling list across all its instances, and every instance
+  reports the same order.
+- `siblings` keeps configuration order. A client that lays siblings out in
+  a grid SHOULD take rows and columns from it, so the layout is the same on
+  every instance that shares the list.
 - Health checks are performed synchronously per request: an HTTP GET to
   each sibling's configured health path, resolved against the sibling's
   **origin** (scheme + host + port of `base_url`), not against the

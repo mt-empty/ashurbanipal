@@ -7,10 +7,17 @@
 //! # then open http://localhost:4000/__ashurbanipal
 //! ```
 //!
-//! To demo sibling health-polling, run a second instance:
+//! To demo Other services, run a second instance:
 //!
 //! ```sh
 //! PORT=4001 SIBLING_PORT=4000 cargo run --example demo
+//! ```
+//!
+//! To see the service × label grid instead of the flat list, label both:
+//!
+//! ```sh
+//! INSTANCE_LABEL=dev SIBLING_PORT=4001 SIBLING_LABEL=int cargo run --example demo
+//! PORT=4001 INSTANCE_LABEL=int SIBLING_PORT=4000 SIBLING_LABEL=dev cargo run --example demo
 //! ```
 //!
 //! `CONFORMANCE_SECOND_SOURCE=1` registers a second source, pinned to
@@ -41,23 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&database_url)
         .await?;
 
-    let siblings_toml = sibling_port
-        .map(|p| {
-            format!(
-                r#"
-                [[siblings]]
-                name = "demo-{p}"
-                base_url = "http://localhost:{p}/__ashurbanipal"
-                health_path = "/health"
-                "#
-            )
-        })
-        .unwrap_or_default();
     let config = Config::from_toml(&format!(
-        r#"
-        enabled = true
-        {siblings_toml}
-        "#
+        "enabled = true\n{}",
+        siblings_toml(port, sibling_port)
     ))?;
 
     let mut sources = vec![("primary".to_string(), PgPoolSource::new(pool))];
@@ -112,3 +105,80 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     Ok(())
 }
+
+/// `SIBLING_LABEL` labels the `SIBLING_PORT` sibling and `INSTANCE_LABEL`
+/// names this instance, both as service `demo`, so two demos show a labelled
+/// pair; either label also adds three services that are down under both
+/// labels, to fill the grid. `CONFORMANCE_LABELLED_SIBLINGS=1` replaces all
+/// of it with the fixed config `conformance/runner/labelled_siblings.rs`
+/// expects.
+fn siblings_toml(port: u16, sibling_port: Option<u16>) -> String {
+    if std::env::var("CONFORMANCE_LABELLED_SIBLINGS").is_ok() {
+        return CONFORMANCE_LABELLED_SIBLINGS.to_string();
+    }
+    let label = |var: &str| std::env::var(var).ok().filter(|v| !v.is_empty());
+    let entry = |name: &str, label: Option<&str>, base: &str| {
+        let label = label
+            .map(|l| format!("label = {l:?}\n"))
+            .unwrap_or_default();
+        format!("[[siblings]]\nname = {name:?}\n{label}base_url = \"{base}/__ashurbanipal\"\nhealth_path = \"/health\"\n")
+    };
+    let mut toml = String::new();
+    let own = label("INSTANCE_LABEL");
+    if let Some(l) = &own {
+        toml += &format!("[instance]\nname = \"demo\"\nlabel = {l:?}\n");
+    }
+    // Both demos of a labelled pair build the same list, sorted by label and
+    // including their own entry, so both show the same grid.
+    let mut demos: Vec<(String, u16)> = own.iter().map(|l| (l.clone(), port)).collect();
+    match (sibling_port, label("SIBLING_LABEL")) {
+        (Some(p), Some(l)) => demos.push((l, p)),
+        (Some(p), None) => {
+            toml += &entry(&format!("demo-{p}"), None, &format!("http://localhost:{p}"))
+        }
+        _ => {}
+    }
+    demos.sort();
+    demos.dedup_by(|a, b| a.0 == b.0);
+    for (l, p) in &demos {
+        toml += &entry("demo", Some(l), &format!("http://localhost:{p}"));
+    }
+    // Port 9 refuses at once, so these are a fast `healthy: false`.
+    for name in ["search", "analytics", "inventory"] {
+        for (l, _) in &demos {
+            toml += &entry(name, Some(l), "http://127.0.0.1:9");
+        }
+    }
+    toml
+}
+
+// Port 9 refuses at once, so every health check is a fast `healthy: false`.
+const CONFORMANCE_LABELLED_SIBLINGS: &str = r#"
+[instance]
+name = "conformance"
+label = "a"
+
+[[siblings]]
+name = "conformance"
+label = "a"
+base_url = "http://127.0.0.1:9/__ashurbanipal"
+health_path = "/health"
+
+[[siblings]]
+name = "conformance"
+label = "b"
+base_url = "http://127.0.0.1:9/__ashurbanipal"
+health_path = "/health"
+
+[[siblings]]
+name = "other"
+label = "a"
+base_url = "http://127.0.0.1:9/__ashurbanipal"
+health_path = "/health"
+
+[[siblings]]
+name = "other"
+label = "a"
+base_url = "http://127.0.0.1:9/__ashurbanipal"
+health_path = "/health"
+"#;
