@@ -5,6 +5,12 @@ Notable changes to the `ashurbanipal` core crate (framework-agnostic config, `Db
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.9.0] - 2026-10-22
+
+### Changed
+
+- No changes in this crate; version aligned with the 0.9.0 release of the other ports.
+
 ## [0.8.0] - 2026-10-22
 
 ### Features

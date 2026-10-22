@@ -5,6 +5,16 @@ Notable changes to the `ashurbanipal-actix-web` adapter. Format follows
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.9.0] - 2026-10-22
+
+### Features
+
+- *(frontend)* Opt-in auto-refresh and a visible loading bar (#182)
+
+### Bug Fixes
+
+- *(frontend)* Open suggestion lists with no row highlighted so Enter submits (#183)
+
 ## [0.8.0] - 2026-10-22
 
 ### Features
