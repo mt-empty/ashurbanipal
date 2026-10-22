@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::extract::{FromRequestParts, State};
 use axum::http::header::X_CONTENT_TYPE_OPTIONS;
@@ -13,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
 use ashurbanipal::{
-    resolve_source, Config, DbError, DbSource, Instance, JoinData, JoinOpts, JoinSpec,
-    ProblemDetails, QueryOpts, ReferencedBy, SiblingsView, Structure, TableInfo,
+    resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec, ProblemDetails,
+    QueryOpts, ReferencedBy, SiblingChecker, Structure, TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -30,8 +29,7 @@ pub(crate) struct AppState<S> {
     /// request with no `source` param resolves to (mirrors `api/sources`'
     /// listing order, which callers can rely on for the same reason).
     pub sources: Vec<(String, S)>,
-    pub http: reqwest::Client,
-    pub siblings: SiblingsView,
+    pub siblings: SiblingChecker,
 }
 
 /// If `config.enabled` is false (the default), every route (including the
@@ -47,16 +45,11 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
         return Router::new();
     }
     assert!(!sources.is_empty(), "router() requires at least one source");
-    let siblings_view = config.siblings_view();
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()
-        .expect("reqwest client construction only fails on TLS backend misconfiguration");
+    let checker = SiblingChecker::new(&config);
     let state = Arc::new(AppState {
         config,
         sources,
-        http,
-        siblings: siblings_view,
+        siblings: checker,
     });
     // The version header goes on every API response (errors included) but
     // not the HTML route, hence the separate layered sub-router.
@@ -471,94 +464,13 @@ async fn structure<S: DbSource>(
     Ok(Json(structure))
 }
 
-#[derive(Serialize)]
-struct SiblingStatus {
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    label: Option<String>,
-    base_url: String,
-    healthy: bool,
-}
-
-#[derive(Serialize)]
-struct SiblingsResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    instance: Option<Instance>,
-    siblings: Vec<SiblingStatus>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    warnings: Vec<String>,
-}
-
 async fn siblings<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Response {
-    let view = &state.siblings;
-    let checks = view.siblings.iter().cloned().map(|sibling| {
-        let http = state.http.clone();
-        let is_instance = view.is_instance(&sibling);
-        async move {
-            let healthy = is_instance
-                || match health_url(&sibling.base_url, &sibling.health_path) {
-                    Some(url) => matches!(
-                        http.get(url).send().await,
-                        Ok(resp) if resp.status().is_success()
-                    ),
-                    None => false,
-                };
-            SiblingStatus {
-                name: sibling.name,
-                label: sibling.label,
-                base_url: sibling.base_url,
-                healthy,
-            }
-        }
-    });
-    let siblings = futures_join_all(checks).await;
-    Json(SiblingsResponse {
-        instance: view.instance.clone(),
-        siblings,
-        warnings: view.warnings.clone(),
-    })
-    .into_response()
-}
-
-/// Resolves against the sibling's origin, not its path.
-fn health_url(base_url: &str, health_path: &str) -> Option<String> {
-    let scheme_end = base_url.find("://")? + 3;
-    let host_end = base_url[scheme_end..]
-        .find('/')
-        .map(|i| scheme_end + i)
-        .unwrap_or(base_url.len());
-    Some(format!("{}{}", &base_url[..host_end], health_path))
-}
-
-async fn futures_join_all<F, T>(futures: impl IntoIterator<Item = F>) -> Vec<T>
-where
-    F: std::future::Future<Output = T> + Send + 'static,
-    T: Send + 'static,
-{
-    let handles: Vec<_> = futures.into_iter().map(tokio::spawn).collect();
-    let mut results = Vec::with_capacity(handles.len());
-    for handle in handles {
-        results.push(handle.await.expect("sibling check task panicked"));
-    }
-    results
+    Json(state.siblings.check().await).into_response()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn health_url_resolves_against_origin() {
-        assert_eq!(
-            health_url("https://billing.internal.vpn/__ashurbanipal", "/health"),
-            Some("https://billing.internal.vpn/health".to_string())
-        );
-        assert_eq!(
-            health_url("http://localhost:4001/__ashurbanipal", "/healthz"),
-            Some("http://localhost:4001/healthz".to_string())
-        );
-        assert_eq!(health_url("not-a-url", "/health"), None);
-    }
 
     // resolve_source itself now lives in ashurbanipal-core (see its own
     // tests there) — only the router()-specific behavior below is

@@ -234,6 +234,8 @@ dependencies = [
 name = "ashurbanipal"
 version = "0.7.0"
 dependencies = [
+ "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",
@@ -248,7 +250,6 @@ dependencies = [
  "actix-web",
  "ashurbanipal",
  "dotenvy",
- "reqwest",
  "serde",
  "serde_json",
  "sqlx",

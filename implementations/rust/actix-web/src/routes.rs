@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
 use ashurbanipal::{
-    resolve_source, Config, DbError, DbSource, Instance, JoinData, JoinOpts, JoinSpec,
-    ProblemDetails, QueryOpts, ReferencedBy, SiblingsView, TableInfo,
+    resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec, ProblemDetails,
+    QueryOpts, ReferencedBy, SiblingChecker, TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -25,8 +25,7 @@ pub struct AppState<S> {
     /// request with no `source` param resolves to (mirrors `api/sources`'
     /// listing order, which callers can rely on for the same reason).
     pub sources: Vec<(String, S)>,
-    pub http: reqwest::Client,
-    pub siblings: SiblingsView,
+    pub siblings: SiblingChecker,
 }
 
 /// Built once, not per worker — cheap to share via `web::Data`'s `Arc`,
@@ -40,15 +39,10 @@ pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data
         !sources.is_empty(),
         "app_state() requires at least one source"
     );
-    let siblings = config.siblings_view();
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-        .expect("reqwest client construction only fails on TLS backend misconfiguration");
+    let siblings = SiblingChecker::new(&config);
     Data::new(AppState {
         config,
         sources,
-        http,
         siblings,
     })
 }
@@ -493,95 +487,8 @@ async fn structure<S: DbSource>(
     Ok(HttpResponse::Ok().json(structure))
 }
 
-#[derive(Serialize)]
-struct SiblingStatus {
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    label: Option<String>,
-    base_url: String,
-    healthy: bool,
-}
-
-#[derive(Serialize)]
-struct SiblingsResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    instance: Option<Instance>,
-    siblings: Vec<SiblingStatus>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    warnings: Vec<String>,
-}
-
 async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
-    let view = &state.siblings;
-    let checks = view.siblings.iter().cloned().map(|sibling| {
-        let http = state.http.clone();
-        let is_instance = view.is_instance(&sibling);
-        async move {
-            let healthy = is_instance
-                || match health_url(&sibling.base_url, &sibling.health_path) {
-                    Some(url) => matches!(
-                        http.get(url).send().await,
-                        Ok(resp) if resp.status().is_success()
-                    ),
-                    None => false,
-                };
-            SiblingStatus {
-                name: sibling.name,
-                label: sibling.label,
-                base_url: sibling.base_url,
-                healthy,
-            }
-        }
-    });
-    let siblings = futures_join_all(checks).await;
-    HttpResponse::Ok().json(SiblingsResponse {
-        instance: view.instance.clone(),
-        siblings,
-        warnings: view.warnings.clone(),
-    })
-}
-
-/// Resolves against the sibling's origin, not its path.
-fn health_url(base_url: &str, health_path: &str) -> Option<String> {
-    let scheme_end = base_url.find("://")? + 3;
-    let host_end = base_url[scheme_end..]
-        .find('/')
-        .map(|i| scheme_end + i)
-        .unwrap_or(base_url.len());
-    Some(format!("{}{}", &base_url[..host_end], health_path))
-}
-
-/// Uses Actix's own runtime spawn (not `tokio::spawn` directly) so the
-/// sibling fan-out works regardless of which executor Actix is running on.
-async fn futures_join_all<F, T>(futures: impl IntoIterator<Item = F>) -> Vec<T>
-where
-    F: std::future::Future<Output = T> + Send + 'static,
-    T: Send + 'static,
-{
-    let handles: Vec<_> = futures.into_iter().map(actix_web::rt::spawn).collect();
-    let mut results = Vec::with_capacity(handles.len());
-    for handle in handles {
-        results.push(handle.await.expect("sibling check task panicked"));
-    }
-    results
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn health_url_resolves_against_origin() {
-        assert_eq!(
-            health_url("https://billing.internal.vpn/__ashurbanipal", "/health"),
-            Some("https://billing.internal.vpn/health".to_string())
-        );
-        assert_eq!(
-            health_url("http://localhost:4001/__ashurbanipal", "/healthz"),
-            Some("http://localhost:4001/healthz".to_string())
-        );
-        assert_eq!(health_url("not-a-url", "/health"), None);
-    }
+    HttpResponse::Ok().json(state.siblings.check().await)
 }
 
 #[cfg(test)]
