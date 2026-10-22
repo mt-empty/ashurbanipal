@@ -101,11 +101,12 @@ ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
 ul { list-style: none; margin: 0; padding: 0; }
-#tables li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
-                    cursor: pointer; font: inherit; color: inherit; border-radius: 999px;
-                    display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
-#tables li button:hover { background: var(--hover); }
-#tables li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#tables li :is(a, button) { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
+                            cursor: pointer; font: inherit; color: inherit; text-decoration: none;
+                            border-radius: 999px; display: flex; align-items: center; gap: .4rem;
+                            white-space: nowrap; }
+#tables li :is(a, button):hover { background: var(--hover); }
+#tables li :is(a, button).active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
 /* min-width:0 plus the cap lets one very long name ellipsize instead of
    widening the row; the full name is in `title` (see loadTables()). */
 .row-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
@@ -117,11 +118,11 @@ ul { list-style: none; margin: 0; padding: 0; }
 .row-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
                border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent;
                visibility: hidden; }
-#tables li button.loading .count { visibility: hidden; }
-#tables li button.loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
+#tables li :is(a, button).loading .count { visibility: hidden; }
+#tables li :is(a, button).loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  #tables li button.loading .row-spinner { animation: none; border-top-color: currentColor; }
+  #tables li :is(a, button).loading .row-spinner { animation: none; border-top-color: currentColor; }
 }
 #tables-more { flex: none; background: none; border: none; font: inherit; font-size: .8rem;
                color: var(--text-muted); height: var(--chip-h); padding: 0 .5rem;
@@ -555,7 +556,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #tables li.join-first { position: relative; margin-left: .5rem; }
 #tables li.join-first::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                                 width: 1px; background: var(--border-strong); }
-#tables li.join-chip button { font-family: var(--font-mono); font-size: .8125rem; }
+#tables li.join-chip :is(a, button) { font-family: var(--font-mono); font-size: .8125rem; }
 #tables li.join-chip.unsaved button { border: 1px dashed var(--border-strong); }
 #tables li.join-chip.muted button { color: var(--text-muted); }
 /* One tint per table position in a join, shared by the bands over the headers. */

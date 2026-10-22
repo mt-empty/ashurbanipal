@@ -183,3 +183,9 @@ should block on.
   mirrored to the URL — a shared link's explicit `?schema=` still wins on
   load; the per-source memory only fills in on an in-app source switch.
   *(Derives from: recognition rather than recall.)*
+- **R13 — A chip that navigates is a real link.** Table chips, and saved-join
+  chips other than the one in view, are `<a href>`s to the view they open.
+  A plain left-click (or Enter) switches in place; middle-click, a modified
+  click and the context menu stay the browser's, so "open in new tab" works.
+  A chip that runs an action (edit, save, new join) stays a `<button>`.
+  *(Derives from: least astonishment, §1.)*

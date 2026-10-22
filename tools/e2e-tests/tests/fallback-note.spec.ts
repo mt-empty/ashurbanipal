@@ -72,7 +72,7 @@ test("a missing source falls back to the first source and says so", async ({ pag
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
   try {
     await page.goto(`${demo.baseUrl}${APP_PATH}?source=nosuch`);
-    await page.locator("#tables button.active").waitFor();
+    await page.locator("#tables [data-table].active").waitFor();
     await waitForIdle(page);
     await expect(page.locator("#view-notice-text")).toHaveText("There is no source nosuch here. Showing primary instead.");
   } finally {

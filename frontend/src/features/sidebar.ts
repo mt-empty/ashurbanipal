@@ -1,6 +1,6 @@
 import { loadData, supersedeLoads } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
-import { $, el, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
+import { $, el, isPlainClick, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
 import {
   applyStoredSort,
   clearFilter,
@@ -13,6 +13,7 @@ import {
   switchSource,
   switchTable,
   tableInView,
+  viewHref,
 } from "../core/state.js";
 import type { SourceEntry, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
@@ -23,7 +24,7 @@ import { syncViewNotice } from "./view-notice.js";
 interface TableEntry {
   name: string;
   li: HTMLLIElement;
-  btn: HTMLButtonElement;
+  chip: HTMLElement;
 }
 let tableEntries: TableEntry[] = [];
 const chipCounts = new Map<string, string>();
@@ -53,7 +54,7 @@ let cappedActive: string | null = null;
 // lines and tracks the list's width without a per-chip width model.
 function updateTablesCap(): void {
   const entries = allEntries();
-  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
+  cappedActive = tableEntries.find((e) => e.chip.classList.contains("active"))?.name ?? null;
   for (const e of entries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
@@ -61,7 +62,7 @@ function updateTablesCap(): void {
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastRowTop = tops[TABLE_CAP_LINES - 1];
   const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
-  const active = beyond.find((e) => e.btn.classList.contains("active"));
+  const active = beyond.find((e) => e.chip.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
   if (tablesMoreItem.hidden) return;
@@ -219,22 +220,23 @@ export async function loadTables(): Promise<void> {
   chipCounts.clear();
   for (const t of tables) {
     const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
-    const btn = qs<HTMLButtonElement>(li, "button");
+    const chip = qs<HTMLAnchorElement>(li, "a");
     qs<HTMLElement>(li, ".row-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     chipCounts.set(t.name, countEl.textContent);
     countEl.title = APPROX_COUNT_TITLE;
-    btn.dataset.table = t.name;
+    chip.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
     // (see .row-name), so the title tooltip is the escape hatch.
-    btn.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
-    btn.onclick = () => {
+    chip.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
+    chip.href = viewHref(t.name);
+    openInPlace(chip, () => {
       switchTable(t.name);
       loadData();
-    };
+    });
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn });
+    tableEntries.push({ name: t.name, li, chip });
   }
   if (joinScope !== scopeOfChips()) joinEntries = [];
   for (const e of joinEntries) ul.appendChild(e.li);
@@ -280,6 +282,16 @@ export interface JoinChip {
   className: string;
   active: boolean;
   run: () => void;
+  // Set for a chip that navigates, so it renders as a link the browser can open in a new tab.
+  href?: string;
+}
+
+function openInPlace(a: HTMLAnchorElement, run: () => void): void {
+  a.onclick = (e) => {
+    if (!isPlainClick(e)) return;
+    e.preventDefault();
+    run();
+  };
 }
 
 // Replaces the chips after the divider; called whenever the join in view or the saved list changes.
@@ -292,16 +304,25 @@ export function setJoinChips(chips: JoinChip[]): void {
   for (const e of joinEntries) e.li.remove();
   joinEntries = chips.map((c, i) => {
     const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
-    const btn = el("button");
-    btn.type = "button";
-    btn.textContent = c.label;
-    btn.title = c.title;
-    btn.classList.toggle("active", c.active);
-    if (c.active) btn.setAttribute("aria-current", "true");
-    btn.onclick = c.run;
-    li.appendChild(btn);
+    let chip: HTMLElement;
+    if (c.href) {
+      const a = el("a");
+      a.href = c.href;
+      openInPlace(a, c.run);
+      chip = a;
+    } else {
+      const btn = el("button");
+      btn.type = "button";
+      btn.onclick = c.run;
+      chip = btn;
+    }
+    chip.textContent = c.label;
+    chip.title = c.title;
+    chip.classList.toggle("active", c.active);
+    if (c.active) chip.setAttribute("aria-current", "true");
+    li.appendChild(chip);
     ul.insertBefore(li, tablesMoreItem);
-    return { name: `join:${c.label}`, li, btn };
+    return { name: `join:${c.label}`, li, chip };
   });
   joinScope = scopeOfChips();
   updateTablesCap();
@@ -310,7 +331,7 @@ export function setJoinChips(chips: JoinChip[]): void {
 // Keyed by table name rather than "whichever row is .active" so it's
 // still correct if tableEntries is ever rebuilt mid-fetch.
 export function setRowLoading(name: string, loading: boolean): void {
-  tableEntries.find((e) => e.name === name)?.btn.classList.toggle("loading", loading);
+  tableEntries.find((e) => e.name === name)?.chip.classList.toggle("loading", loading);
 }
 
 // Same tableEntries lookup as setRowLoading, so "find the row for table X"
@@ -320,9 +341,9 @@ export function setRowLoading(name: string, loading: boolean): void {
 export function setActiveTable(name: string | null): void {
   for (const e of tableEntries) {
     const isActive = e.name === name;
-    e.btn.classList.toggle("active", isActive);
-    if (isActive) e.btn.setAttribute("aria-current", "true");
-    else e.btn.removeAttribute("aria-current");
+    e.chip.classList.toggle("active", isActive);
+    if (isActive) e.chip.setAttribute("aria-current", "true");
+    else e.chip.removeAttribute("aria-current");
   }
   if (name !== cappedActive) updateTablesCap();
 }

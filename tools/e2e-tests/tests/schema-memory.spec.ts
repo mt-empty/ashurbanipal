@@ -28,7 +28,7 @@ test("schema is remembered per source across a source switch", async ({ page }) 
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
   try {
     await page.goto(`${demo.baseUrl}${APP}`);
-    await page.locator("#tables button.active").waitFor();
+    await page.locator("#tables [data-table].active").waitFor();
     await waitForIdle(page);
 
     // Both selectors render: two sources, and `primary` has three schemas.
@@ -63,7 +63,7 @@ test("a malformed schemaBySource is discarded, not fatal", async ({ page }) => {
     );
     await page.reload();
     // Still boots and loads a table (R5).
-    await page.locator("#tables button.active").waitFor();
+    await page.locator("#tables [data-table].active").waitFor();
     await waitForIdle(page);
     await expect(page.locator("#tbody tr").first()).toBeVisible();
   } finally {

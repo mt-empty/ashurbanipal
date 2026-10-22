@@ -26,6 +26,12 @@ export function qs<T extends Element>(root: ParentNode, selector: string): T {
   return el;
 }
 
+// A chip link handles only this click in place; every other click (middle,
+// modified) is the browser's new-tab/new-window gesture and must reach it.
+export function isPlainClick(e: MouseEvent): boolean {
+  return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+}
+
 export function setStatus(text: string): void {
   $("status").textContent = text;
 }

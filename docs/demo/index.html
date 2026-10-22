@@ -707,11 +707,12 @@ ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
 ul { list-style: none; margin: 0; padding: 0; }
-#tables li button { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
-                    cursor: pointer; font: inherit; color: inherit; border-radius: 999px;
-                    display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
-#tables li button:hover { background: var(--hover); }
-#tables li button.active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#tables li :is(a, button) { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
+                            cursor: pointer; font: inherit; color: inherit; text-decoration: none;
+                            border-radius: 999px; display: flex; align-items: center; gap: .4rem;
+                            white-space: nowrap; }
+#tables li :is(a, button):hover { background: var(--hover); }
+#tables li :is(a, button).active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
 /* min-width:0 plus the cap lets one very long name ellipsize instead of
    widening the row; the full name is in `title` (see loadTables()). */
 .row-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
@@ -723,11 +724,11 @@ ul { list-style: none; margin: 0; padding: 0; }
 .row-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
                border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent;
                visibility: hidden; }
-#tables li button.loading .count { visibility: hidden; }
-#tables li button.loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
+#tables li :is(a, button).loading .count { visibility: hidden; }
+#tables li :is(a, button).loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  #tables li button.loading .row-spinner { animation: none; border-top-color: currentColor; }
+  #tables li :is(a, button).loading .row-spinner { animation: none; border-top-color: currentColor; }
 }
 #tables-more { flex: none; background: none; border: none; font: inherit; font-size: .8rem;
                color: var(--text-muted); height: var(--chip-h); padding: 0 .5rem;
@@ -1161,7 +1162,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #tables li.join-first { position: relative; margin-left: .5rem; }
 #tables li.join-first::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                                 width: 1px; background: var(--border-strong); }
-#tables li.join-chip button { font-family: var(--font-mono); font-size: .8125rem; }
+#tables li.join-chip :is(a, button) { font-family: var(--font-mono); font-size: .8125rem; }
 #tables li.join-chip.unsaved button { border: 1px dashed var(--border-strong); }
 #tables li.join-chip.muted button { color: var(--text-muted); }
 /* One tint per table position in a join, shared by the bands over the headers. */
@@ -1353,7 +1354,7 @@ thead tr.bands + tr th { top: var(--band-h); }
         <button id="nav-forward" type="button" disabled title="forward to next table view" aria-label="forward">›</button>
       </span>
       <ul id="tables"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
-      <template id="table-row-template"><li><button><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></button></li></template>
+      <template id="table-row-template"><li><a><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
     </nav>
     <div id="toolbar">
       <search id="controls">
@@ -1557,6 +1558,9 @@ function qs(root, selector) {
   const el2 = root.querySelector(selector);
   if (!el2) throw new Error(`no element matches ${selector}`);
   return el2;
+}
+function isPlainClick(e) {
+  return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
 }
 function setStatus(text) {
   $("status").textContent = text;
@@ -2785,6 +2789,12 @@ function scopeQuery() {
   applyScopeParams(params);
   return params.size ? `?${params}` : "";
 }
+function viewHref(table, join) {
+  const params = new URLSearchParams({ table });
+  applyScopeParams(params);
+  if (join) params.set("join", join);
+  return `?${params}`;
+}
 function sourceQuery() {
   return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
 }
@@ -3666,7 +3676,7 @@ var tablesExpanded = false;
 var cappedActive = null;
 function updateTablesCap() {
   const entries = allEntries();
-  cappedActive = tableEntries.find((e) => e.btn.classList.contains("active"))?.name ?? null;
+  cappedActive = tableEntries.find((e) => e.chip.classList.contains("active"))?.name ?? null;
   for (const e of entries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
@@ -3674,7 +3684,7 @@ function updateTablesCap() {
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastRowTop = tops[TABLE_CAP_LINES - 1];
   const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
-  const active = beyond.find((e) => e.btn.classList.contains("active"));
+  const active = beyond.find((e) => e.chip.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
   if (tablesMoreItem.hidden) return;
@@ -3786,20 +3796,21 @@ async function loadTables() {
   chipCounts.clear();
   for (const t of tables) {
     const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
-    const btn = qs(li, "button");
+    const chip = qs(li, "a");
     qs(li, ".row-name").textContent = t.name;
     const countEl = qs(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     chipCounts.set(t.name, countEl.textContent);
     countEl.title = APPROX_COUNT_TITLE;
-    btn.dataset.table = t.name;
-    btn.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
-    btn.onclick = () => {
+    chip.dataset.table = t.name;
+    chip.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
+    chip.href = viewHref(t.name);
+    openInPlace(chip, () => {
       switchTable(t.name);
       loadData();
-    };
+    });
     ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, btn });
+    tableEntries.push({ name: t.name, li, chip });
   }
   if (joinScope !== scopeOfChips()) joinEntries = [];
   for (const e of joinEntries) ul.appendChild(e.li);
@@ -3824,6 +3835,13 @@ function listedTableNames() {
 function tableChipCount(name) {
   return chipCounts.get(name) ?? "";
 }
+function openInPlace(a, run) {
+  a.onclick = (e) => {
+    if (!isPlainClick(e)) return;
+    e.preventDefault();
+    run();
+  };
+}
 function hasJoinChips() {
   return joinEntries.length > 0;
 }
@@ -3832,29 +3850,38 @@ function setJoinChips(chips) {
   for (const e of joinEntries) e.li.remove();
   joinEntries = chips.map((c, i) => {
     const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
-    const btn = el("button");
-    btn.type = "button";
-    btn.textContent = c.label;
-    btn.title = c.title;
-    btn.classList.toggle("active", c.active);
-    if (c.active) btn.setAttribute("aria-current", "true");
-    btn.onclick = c.run;
-    li.appendChild(btn);
+    let chip;
+    if (c.href) {
+      const a = el("a");
+      a.href = c.href;
+      openInPlace(a, c.run);
+      chip = a;
+    } else {
+      const btn = el("button");
+      btn.type = "button";
+      btn.onclick = c.run;
+      chip = btn;
+    }
+    chip.textContent = c.label;
+    chip.title = c.title;
+    chip.classList.toggle("active", c.active);
+    if (c.active) chip.setAttribute("aria-current", "true");
+    li.appendChild(chip);
     ul.insertBefore(li, tablesMoreItem);
-    return { name: `join:${c.label}`, li, btn };
+    return { name: `join:${c.label}`, li, chip };
   });
   joinScope = scopeOfChips();
   updateTablesCap();
 }
 function setRowLoading(name, loading) {
-  tableEntries.find((e) => e.name === name)?.btn.classList.toggle("loading", loading);
+  tableEntries.find((e) => e.name === name)?.chip.classList.toggle("loading", loading);
 }
 function setActiveTable(name) {
   for (const e of tableEntries) {
     const isActive = e.name === name;
-    e.btn.classList.toggle("active", isActive);
-    if (isActive) e.btn.setAttribute("aria-current", "true");
-    else e.btn.removeAttribute("aria-current");
+    e.chip.classList.toggle("active", isActive);
+    if (isActive) e.chip.setAttribute("aria-current", "true");
+    else e.chip.removeAttribute("aria-current");
   }
   if (name !== cappedActive) updateTablesCap();
 }
@@ -4496,12 +4523,14 @@ function renderSavedChips(actions) {
   const inSaved = saved.some((s) => s.text === current2?.text);
   const chips = saved.map((s) => {
     const active = s.text === current2?.text;
+    const parsed = active ? null : parseJoin(s.text);
     return {
       label: `\u22C8 ${s.name}`,
       title: active ? `${s.name}: click to edit, rename or delete` : `${s.name} \u2014 ${s.text.replaceAll("\n", " ")}`,
       className: "saved",
       active,
-      run: active ? actions.edit : () => actions.open(s.text)
+      run: active ? actions.edit : () => actions.open(s.text),
+      href: parsed && !("error" in parsed) ? viewHref(parsed.def.tables[0].table, s.text) : void 0
     };
   });
   if (current2 && !inSaved) {
