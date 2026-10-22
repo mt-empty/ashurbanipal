@@ -1,6 +1,13 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { APP_PATH, gotoApp, selectTable, waitForIdle } from "./support/helpers";
-import { expandTableChips, ORDERS_USERS, openJoinOverlay, showResult, writeSql } from "./support/join";
+import {
+  expandTableChips,
+  ORDERS_USERS,
+  ORDERS_USERS_CANONICAL,
+  openJoinOverlay,
+  showResult,
+  writeSql,
+} from "./support/join";
 
 // Table chips and inactive saved-join chips are real links: a plain click
 // switches in place, every other click is the browser's to open a new tab.
@@ -22,6 +29,21 @@ async function documentKept(page: Page): Promise<boolean> {
 
 async function activeTable(page: Page): Promise<string | null> {
   return page.locator("#tables [data-table].active").getAttribute("data-table");
+}
+
+// Clicks `chip` with a new-tab gesture and returns that tab once `current` is in view there.
+async function openInNewTab(
+  page: Page,
+  chip: Locator,
+  options: Parameters<Locator["click"]>[0],
+  current: string,
+): Promise<Page> {
+  const opened = page.context().waitForEvent("page");
+  await chip.click(options);
+  const tab = await opened;
+  await tab.locator("#current").getByText(current, { exact: true }).waitFor();
+  await waitForIdle(tab);
+  return tab;
 }
 
 test("a table chip links to its table in the current schema", async ({ page }) => {
@@ -53,42 +75,33 @@ const NEW_TAB_GESTURES: [string, Parameters<Locator["click"]>[0]][] = [
 ];
 
 for (const [gesture, options] of NEW_TAB_GESTURES) {
-  test(`${gesture} on a table chip opens it in a new tab and leaves this one alone`, async ({ page, context }) => {
+  test(`${gesture} on a table chip opens it in a new tab and leaves this one alone`, async ({ page }) => {
     await gotoApp(page);
     const before = await activeTable(page);
     expect(before).not.toBe("users");
-    const opened = context.waitForEvent("page");
-    await page.locator('#tables [data-table="users"]').click(options);
-    const tab = await opened;
-    await tab.locator("#current").getByText("users", { exact: true }).waitFor();
-    await waitForIdle(tab);
+    await openInNewTab(page, page.locator('#tables [data-table="users"]'), options, "users");
 
     expect(await activeTable(page)).toBe(before);
     expect(new URL(page.url()).searchParams.get("table")).not.toBe("users");
   });
 }
 
-test("an inactive saved-join chip links to its join; the one in view stays an edit button", async ({ page, context }) => {
+test("an inactive saved-join chip links to its join; the one in view stays an edit button", async ({ page }) => {
   await openJoinOverlay(page);
   await writeSql(page, ORDERS_USERS);
   await page.locator("#join-name").fill("kept");
   await showResult(page);
   await expandTableChips(page);
-  const active = page.locator("#tables li.join-chip.saved > *", { hasText: "kept" });
-  await expect(active).toHaveJSProperty("tagName", "BUTTON");
+  await expect(page.locator("#tables li.join-chip.saved > button", { hasText: "kept" })).toBeVisible();
 
   await selectTable(page, "users");
   await expandTableChips(page);
   const link = page.locator("#tables li.join-chip.saved > a", { hasText: "kept" });
   const href = await hrefOf(link);
   expect(href.searchParams.get("table")).toBe("orders");
-  expect(href.searchParams.get("join")).toBe("SELECT *\nFROM orders o\nLEFT JOIN users u ON o.user_id = u.id");
+  expect(href.searchParams.get("join")).toBe(ORDERS_USERS_CANONICAL);
 
-  const opened = context.waitForEvent("page");
-  await link.click({ modifiers: ["ControlOrMeta"] });
-  const tab = await opened;
-  await tab.locator("#current").getByText("orders o ⟕ users u").waitFor();
-  await waitForIdle(tab);
+  const tab = await openInNewTab(page, link, { modifiers: ["ControlOrMeta"] }, "orders o ⟕ users u");
   await expect(tab.locator("th.band")).toHaveText(["orders o", "users u"]);
   await expect(page.locator("#current").getByText("users", { exact: true })).toBeVisible();
 });

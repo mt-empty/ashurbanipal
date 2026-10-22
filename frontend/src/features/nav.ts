@@ -1,15 +1,14 @@
 import { supersedeLoads } from "../bootstrap/reload.js";
 import { $, reportError } from "../core/dom.js";
 import {
-  applyScopeParams,
   applyUrlExact,
   enterTable,
   persist,
   setSchema,
-  startTable,
   state,
   tableInView,
   viewKey,
+  viewParams,
 } from "../core/state.js";
 import { loadTables } from "./sidebar.js";
 
@@ -72,17 +71,13 @@ function updateNavButtons(): void {
 // entry like a sort click or a page turn, never pushing a new back-stack stop.
 // The join is part of the key: entering or leaving a join view is a new stop.
 export function syncUrl(): void {
-  const params = new URLSearchParams({
-    table: startTable(state.view) ?? "",
-    limit: String(state.limit),
-    offset: String(state.offset),
-  });
+  const params = viewParams(state.view);
+  params.set("limit", String(state.limit));
+  params.set("offset", String(state.offset));
   if (state.sort) {
     params.set("sort", state.sort);
     params.set("order", state.order);
   }
-  applyScopeParams(params);
-  if (state.view?.kind === "join") params.set("join", state.view.text);
   if (state.filter) params.set("filter", state.filter);
   const qs = `?${params}`;
   const key = navViewKey();
