@@ -47,6 +47,7 @@ test("refresh tints a row that appeared since the last fetch, leaving the rest u
   await expect(rowFor(page, "1")).not.toHaveClass(/row-new/);
   await expect(rowFor(page, "2")).not.toHaveClass(/row-new/);
   await expect(page.locator("#status")).toHaveText("1 new");
+  await expect(page.locator("#row-new-chip")).toHaveText("+1 new");
 });
 
 test("refresh with no change highlights nothing", async ({ page }) => {
@@ -59,8 +60,9 @@ test("refresh with no change highlights nothing", async ({ page }) => {
   await waitForIdle(page);
   await expect(page.locator("#tbody tr.row-new")).toHaveCount(0);
   // No tint fired, so #status carries the "done, unchanged" cue instead.
-  // (The ⟳→✓ glyph swap isn't asserted — it self-reverts on a timer.)
   await expect(page.locator("#status")).toHaveText("no changes");
+  await expect(page.locator("#row-updated")).toContainText(/updated \d{2}:\d{2}:\d{2}/);
+  await expect(page.locator("#refresh-icon")).not.toHaveText("✓");
 });
 
 test("a table with no primary key gets no highlight on refresh", async ({ page }) => {

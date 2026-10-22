@@ -1,6 +1,6 @@
 # Table auto-refresh with interval and countdown
 
-> **Status:** OPEN · **Area:** frontend, docs
+> **Status:** DONE · **Area:** frontend, docs · **Ref:** implemented 2026-10-22 (`features/auto-refresh.ts`, `auto-refresh.spec.ts`)
 
 ## 1. The ask
 
@@ -24,37 +24,61 @@ a different feature.
   first load.
 - `frontend/src/bootstrap/main.ts:65-…` — refresh click handler.
 - `frontend/src/bootstrap/controller.ts:272-276` — the "nothing new"
-  check mark, which an auto tick also triggers.
+  check mark. It is removed for manual and auto refreshes alike (see
+  "Tick feedback").
 - `frontend/src/features/siblings.ts` — the existing 15 s timer. It is the
   only interval in the frontend today, and it is for siblings only.
 
 ## 3. Proposed behavior
 
-- **Control.** A small `<select>` next to `#refresh`: `Off`, `5 s`,
-  `15 s`, `30 s`, `1 min`, `5 min`. Off on every page load. The choice is
-  not persisted: no `localStorage`, no URL.
-- **One progress bar.** Sits at the top edge of the table panel, where
-  story 37 puts its in-flight bar. It has two states:
+- **Control.** A split button: `#refresh` plus a `▾` that opens a menu
+  of `Off`, `5 s`, `10 s`, `15 s`, `30 s`, `1 min`. 1 min is the longest.
+  While on, the button shows the interval (`refresh · 15 s`). Off on every
+  page load. The choice is not persisted: no `localStorage`, no URL.
+  The menu footer reads "Pauses while this tab is hidden. Turns off after
+  30 minutes idle." Design: canvas board AF. The `⟳` glyph is replaced by
+  the two-chasing-arrows SVG icon (board AK, option 2).
+- **One progress bar.** One element at the top edge of the table panel,
+  shared with story 37's in-flight bar. It carries no text. Design: boards
+  AJ (option 1) and AM (panel 3). It has two states:
   - While a fetch is running (after story 37's delay), it shows the
-    in-flight state.
-  - Otherwise, while auto-refresh is on, it empties over the interval and
-    resets on each refresh, manual or auto.
+    in-flight state: a darker moving segment, with the old rows dimmed.
+    Under reduced motion it is a full-width striped bar.
+  - Otherwise, while auto-refresh is on, it empties over the interval.
   - Hidden when auto-refresh is Off and no fetch is slow.
+  The countdown restarts at full width when a fetch ends, whether the
+  fetch was an auto tick, a manual refresh, or a sort or page click.
 - **Skip, don't queue.** If a fetch is still in flight when a tick
   fires, skip that tick. Never stack requests. A slow query therefore
-  slows the cadence instead of piling up.
+  slows the cadence instead of piling up. Because the countdown restarts
+  when a fetch ends, this only applies to fetches the user starts.
 - **Pause when hidden.** Pause the timer while `document.visibilityState`
   is `hidden`. On return, refresh at once if the interval has passed.
-- **Stop on repeated failure.** After 3 consecutive failed auto-refreshes,
-  turn auto-refresh off and show the existing `#error` banner. A broken
+- **Stop on repeated failure.** After 5 consecutive failed auto-refreshes,
+  turn auto-refresh off and show the existing `#error` banner with the
+  last error: "Auto-refresh turned off after 5 failed refreshes. Last
+  error: 503 Service Unavailable." No instruction to re-enable it, since
+  the service is the problem; the refresh button still works. A broken
   connection must not keep retrying silently.
+- **Stop when idle.** After 30 minutes with no pointer, key, scroll, or
+  touch input on the page, turn auto-refresh off. Show the calm
+  `#view-notice` note (not the `#error` alert, since nothing failed):
+  "Auto-refresh turned off after 30 minutes without activity." The grid
+  may change under the user during a tick. That is accepted: the user can stop it at once, so ticks do not
+  skip for open dialogs or selections.
 - **Row tint.** Auto ticks tint new rows the same way a manual refresh
   does (R10).
+- **Tick feedback.** No refresh flashes the ✓ any more. A manual refresh
+  spins the icon, then the row meta shows a quiet "updated 14:32:05"; it
+  updates after every successful fetch, with auto-refresh on or off. An
+  auto tick does not set `#status` to "no changes". A tick that brings
+  new rows also shows a "+2 new" chip that fades with the tint. Design:
+  canvas board AL, option 4.
 - **Loading.** Auto ticks show the in-flight state only after story 37's
   delay, so a fast tick never flashes.
-- **Accessibility.** The bar is decorative (`aria-hidden`). The select
-  has a label. Auto ticks do not announce through `#status` each time.
-  Only the "new rows" count and failures are announced.
+- **Accessibility.** The bar is decorative (`aria-hidden`). The `▾`
+  button has an `aria-label`. Auto ticks do not announce through
+  `#status` each time. Only the "new rows" count and failures are announced.
 - **Reduced motion.** The bar still moves, because it shows state, but
   it has no animation of its own. A stepped update is acceptable.
 
@@ -63,7 +87,7 @@ refresh does now.
 
 ## 4. Touchpoints
 
-- `frontend/src/index.html` — select beside `#refresh`; the shared bar
+- `frontend/src/index.html` — the `▾` menu button beside `#refresh`; the shared bar
   sits at the top of the table panel (story 37's element).
 - `frontend/src/bootstrap/main.ts` — one timer owner for the grid. Clear
   it on table switch and on scope change, so an old timer cannot refresh
@@ -90,9 +114,11 @@ request.
 - Switching table, sort, filter, or scope resets the timer to the new
   view.
 - Hiding the tab pauses ticks. Showing it again refreshes when overdue.
-- Three consecutive failures turn the interval off and show `#error`.
+- Five consecutive failures turn the interval off and show `#error`.
 - The shared bar empties over the interval, resets on any refresh, and
   switches to the in-flight state during a slow fetch.
+- 30 minutes without input turns the interval off and shows the
+  `#view-notice` note.
 - Auto ticks tint new rows.
 - Full Playwright suite at default parallelism before the change is done.
 

@@ -1,5 +1,5 @@
 import { ApiError, api } from "../core/api.js";
-import { $, clearError, flashIcon, reportError, setStatus } from "../core/dom.js";
+import { $, clearError, reportError, setStatus } from "../core/dom.js";
 import {
   applyScopeParams,
   commitRequest,
@@ -15,11 +15,13 @@ import {
   type ViewRequest,
 } from "../core/state.js";
 import type { JoinDef, View, ViewData } from "../core/types.js";
+import { noteLoadOk, noteTickFailed, setFetching, setNewChip } from "../features/auto-refresh.js";
 import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
 import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
+import { setLoadingBar } from "../features/load-bar.js";
 import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
 import { syncViewNotice } from "../features/view-notice.js";
@@ -45,6 +47,28 @@ function setTableBusy(busy: boolean): void {
 // resolves), and a plain true/false pair would let the first fetch to
 // finish clear aria-busy/#status while another is still running.
 let inFlightFetches = 0;
+
+// A fetch that answers within this delay shows nothing, so fast ones never flash.
+const LOADING_DELAY_MS = 250;
+let slowTimer: ReturnType<typeof setTimeout> | undefined;
+
+// Everything a sighted or screen-reader user sees of a slow fetch comes on
+// together; an auto tick stays silent so a screen reader isn't told every interval.
+function setSlow(slow: boolean, announce = true): void {
+  tableEl.toggleAttribute("data-slow", slow);
+  setLoadingBar(slow);
+  if (announce || !slow) setStatus(slow ? "loading…" : "");
+}
+
+// The one code the frontend branches on (ui-guidelines R9): a table that
+// cleared the table listing but the role can't actually read (e.g. a stale
+// MySQL/MariaDB listing, docs/adapter-decisions.md §5.2/§5.3) gets a
+// plain-language message instead of the server's implementation-defined title.
+function plainError(e: unknown, view: View): unknown {
+  return e instanceof ApiError && e.code === "not_readable"
+    ? new Error(`you don't have access to ${startTable(view)}`)
+    : e;
+}
 
 // `alias.*` has no wire form, so those tables' column names come from the catalog.
 async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> {
@@ -104,7 +128,7 @@ function dataPath(view: View, params: URLSearchParams): Promise<string> | string
   }
 }
 
-async function fetchViewData(req: ViewRequest): Promise<ViewData> {
+async function fetchViewData(req: ViewRequest, auto: boolean): Promise<ViewData> {
   const { view, sort, order } = req;
   // Captured once, never re-read later: without this, a slow fetch for
   // table A would clear table B's row-loading flag (whatever the view
@@ -129,8 +153,9 @@ async function fetchViewData(req: ViewRequest): Promise<ViewData> {
   // box's DSL text — URLSearchParams handles the URL-encoding.
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
   if (inFlightFetches++ === 0) {
-    setStatus("loading…");
+    setFetching(true);
     setTableBusy(true);
+    slowTimer = setTimeout(() => setSlow(true, !auto), LOADING_DELAY_MS);
   }
   setRowLoading(table, true);
   try {
@@ -138,8 +163,10 @@ async function fetchViewData(req: ViewRequest): Promise<ViewData> {
   } finally {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
-      setStatus("");
+      clearTimeout(slowTimer);
+      setSlow(false);
       setTableBusy(false);
+      setFetching(false);
     }
   }
 }
@@ -171,15 +198,21 @@ function updateViewChrome(): void {
 export async function loadData({
   resetScroll = true,
   highlightNew = false,
+  auto = false,
   next,
 }: {
   resetScroll?: boolean;
   highlightNew?: boolean;
+  // An auto-refresh tick: it only re-fetches, so it never retries a dropped sort or filter,
+  // opens the join dialog, or clears a message the user's own last action left.
+  auto?: boolean;
   // A view to try; it replaces the state only if its data arrives.
   next?: ViewRequest;
 } = {}): Promise<void> {
-  clearError();
-  clearJoinNotice();
+  if (!auto) {
+    clearError();
+    clearJoinNotice();
+  }
   const req = next ?? currentRequest();
   syncViewNotice(req);
   if (req === null) {
@@ -194,26 +227,21 @@ export async function loadData({
   const widthScope = widthScopeOf(view);
   let data: ViewData;
   try {
-    data = await fetchViewData(req);
+    data = await fetchViewData(req, auto);
   } catch (e) {
     if (superseded()) return;
+    if (auto) {
+      noteTickFailed(plainError(e, view));
+      return;
+    }
     // A restored sort or a URL-restored filter can each name a column that no
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
     // A view not yet in view restored nothing; its failure leaves the state alone.
     if (!next && dropOneStaleInput(e instanceof ApiError ? e.code : undefined))
       return loadData({ resetScroll, highlightNew });
-    // The one code the frontend branches on (ui-guidelines R9): a table
-    // that cleared the table listing but the role can't actually
-    // read (e.g. a stale MySQL/MariaDB listing, docs/adapter-decisions.md
-    // §5.2/§5.3) gets a plain-language message instead of the server's
-    // implementation-defined title text.
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
-    if (e instanceof ApiError && e.code === "not_readable") {
-      reportError(new Error(`you don't have access to ${startTable(view)}`));
-      return;
-    }
-    reportError(e);
+    reportError(plainError(e, view));
     return;
   }
   if (superseded()) return;
@@ -231,6 +259,7 @@ export async function loadData({
   $<HTMLButtonElement>("columns-btn").disabled = false;
   $<HTMLButtonElement>("structure-btn").disabled = false;
   $<HTMLButtonElement>("refresh").disabled = false;
+  $<HTMLButtonElement>("refresh-menu-btn").disabled = false;
   updateColumnsButtonLabel();
   updateJoinChrome();
   refreshSavedChips();
@@ -264,16 +293,16 @@ export async function loadData({
   // this load, and its pager/#status must not overwrite the newer one's.
   if (superseded()) return;
   updatePager(data);
+  noteLoadOk();
   // Sighted users see the tint; announce the count for everyone else. The
   // next loadData clears #status the same way it clears "loading…".
+  setNewChip(newRowKeys?.size ?? 0);
   if (newRowKeys?.size) {
     setStatus(`${newRowKeys.size} new`);
-  } else if (highlightNew && newRowKeys) {
-    // A refresh that found nothing new: the row tint won't fire, so the
-    // button gets its own "done, unchanged" cue — a ✓ glyph swap mirroring
-    // the copy buttons, plus the sr-only #status line.
+  } else if (highlightNew && newRowKeys && !auto) {
+    // Nothing new, so no tint: the icon's spin and the "updated" time are the
+    // sighted cue; this line is for everyone else.
     setStatus("no changes");
-    flashIcon($("refresh-icon"), "✓", 1000);
   }
   // Default true: table switch and filter submit jump to a new row 0, so
   // snapping to the top orients the user. Sort and prev/next explicitly

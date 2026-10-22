@@ -142,10 +142,12 @@ should block on.
   point that doesn't wire this up is a bug, not a style choice. *(Derives
   from: visibility of system status, user control and freedom.)*
 - **R9 — Every async action reports its own status.** Loading, success, and
-  error are all visible states — not just error (a `#status` live region,
-  a spinner on the table's chip, and `aria-busy` on the table cover
-  loading; `#error` covers failure). *(Derives from: visibility of system
-  status — heuristic #1, given full weight above.)*
+  error are all visible states — not just error. A fetch that outlasts a
+  short delay shows a progress bar on the grid's top edge with the old rows
+  dimmed, and posts `loading…` to the `#status` live region; `aria-busy` on
+  the table and a spinner on the table's chip cover the rest. `#error`
+  covers failure. *(Derives from: visibility of system status — heuristic
+  #1, given full weight above.)*
 - **R10 — The `refresh` button and its new-row tint are the sanctioned
   "what changed" affordance.** A user-clicked re-fetch of the current view;
   rows absent from the previous same-scope response briefly wash

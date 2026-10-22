@@ -4,7 +4,7 @@
 // real implementation at bootstrap; a call before then is a no-op.
 import type { ViewRequest } from "../core/store.js";
 
-type LoadDataOpts = { resetScroll?: boolean; highlightNew?: boolean; next?: ViewRequest };
+type LoadDataOpts = { resetScroll?: boolean; highlightNew?: boolean; auto?: boolean; next?: ViewRequest };
 
 let impl: ((opts?: LoadDataOpts) => Promise<void>) | null = null;
 

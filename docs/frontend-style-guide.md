@@ -30,7 +30,8 @@ src/
   bootstrap/   main, controller, reload, table-focus
   features/    grid, column-widths, sticky-header, filter-ui, filter-highlight,
                sidebar (source/schema selectors + table chips), nav, record-view,
-               referenced-by, structure, siblings, view-notice, api-reference, theme,
+               referenced-by, structure, siblings, auto-refresh, load-bar, view-notice,
+               api-reference, theme,
                join-dialog / join-form / join-sql / join-view / join-saved /
                join-catalog, dropdown (the join builder), suggest-list, overlay-highlight
   core/        api, dom, types, state (+ store, url), url-intent
@@ -44,8 +45,9 @@ src/
   *wiring only*: side-effect imports, `registerLoadData(loadData)`, the
   toolbar/dialog event wiring, and the bootstrap calls at the bottom
   (`loadSources().then(loadSchemas).then(loadTables)`, then
-  `showBootFallbackNote`, and `startSiblings()`; the siblings refresh timer
-  lives in `features/siblings.ts`). `controller.ts` owns `loadData` /
+  `showBootFallbackNote`, `startSiblings()` and `startAutoRefresh()`; the
+  siblings poll lives in `features/siblings.ts` and the grid's opt-in
+  auto-refresh timer in `features/auto-refresh.ts`, unrelated to each other). `controller.ts` owns `loadData` /
   `fetchViewData`; it imports feature modules *downward* and they never
   import it (that would re-form a cycle) — they call `loadData` through
   `reload.ts`, an import-free seam `main.ts` wires at bootstrap.

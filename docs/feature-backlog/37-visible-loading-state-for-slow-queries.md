@@ -1,6 +1,6 @@
 # Visible loading state for slow queries
 
-> **Status:** OPEN · **Area:** frontend, e2e
+> **Status:** DONE · **Area:** frontend, e2e · **Ref:** implemented 2026-10-22 with story 38 (`features/load-bar.ts`, `loading-bar.spec.ts`); the elapsed-time text and Cancel were left out
 
 ## 1. The ask
 

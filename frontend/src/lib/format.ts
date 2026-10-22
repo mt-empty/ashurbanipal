@@ -8,6 +8,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // imports) so grid.ts / sidebar.ts / record-view.ts can share them without
 // importing each other.
 
+export function formatClock(at: Date): string {
+  return at.toLocaleTimeString([], { hourCycle: "h23" });
+}
+
 // approx_rows/total_approx is -1 when the backend has no cheap estimate for
 // this table (e.g. Postgres before ANALYZE, or an engine with no such
 // catalog at all — see docs/adapter-decisions.md); show "?" rather than a
