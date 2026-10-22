@@ -11,10 +11,17 @@
 //! `-p` disambiguates against the sibling `ashurbanipal-actix-web` crate's
 //! own `examples/demo.rs` in the same workspace.
 //!
-//! To demo sibling health-polling, run a second instance:
+//! To demo Other services, run a second instance:
 //!
 //! ```sh
 //! PORT=4001 SIBLING_PORT=4000 cargo run -p ashurbanipal-axum --example demo
+//! ```
+//!
+//! To see the service × label grid instead of the flat list, label both:
+//!
+//! ```sh
+//! INSTANCE_LABEL=dev SIBLING_PORT=4001 SIBLING_LABEL=int cargo run -p ashurbanipal-axum --example demo
+//! PORT=4001 INSTANCE_LABEL=int SIBLING_PORT=4000 SIBLING_LABEL=dev cargo run -p ashurbanipal-axum --example demo
 //! ```
 //!
 //! To demo multi-source browsing (a second, distinctly-seeded database —

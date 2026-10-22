@@ -201,7 +201,7 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 // A slower earlier loadTables() (e.g. from a schema switch quickly
 // followed by another) resolving after a faster later one would otherwise
 // clobber the chip row with the wrong schema's table list — same shape of
-// guard as loadDataToken/cvRequestToken/siblingsRequestToken.
+// guard as loadDataToken/cvRequestToken.
 let loadTablesToken = 0;
 
 export async function loadTables(): Promise<void> {

@@ -7,10 +7,17 @@
 //! # then open http://localhost:4000/__ashurbanipal
 //! ```
 //!
-//! To demo sibling health-polling, run a second instance:
+//! To demo Other services, run a second instance:
 //!
 //! ```sh
 //! PORT=4001 SIBLING_PORT=4000 cargo run --example demo
+//! ```
+//!
+//! To see the service × label grid instead of the flat list, label both:
+//!
+//! ```sh
+//! INSTANCE_LABEL=dev SIBLING_PORT=4001 SIBLING_LABEL=int cargo run --example demo
+//! PORT=4001 INSTANCE_LABEL=int SIBLING_PORT=4000 SIBLING_LABEL=dev cargo run --example demo
 //! ```
 //!
 //! `CONFORMANCE_SECOND_SOURCE=1` registers a second source, pinned to

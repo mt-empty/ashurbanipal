@@ -535,20 +535,30 @@ dropdown.
 
 ```json
 {
+  "instance": { "name": "orders", "label": "dev" },
   "siblings": [
-    { "name": "billing", "base_url": "https://billing.internal.vpn/__ashurbanipal", "healthy": true },
-    { "name": "notifications", "base_url": "https://notifications.internal.vpn/__ashurbanipal", "healthy": false }
+    { "name": "orders", "label": "dev", "base_url": "https://orders-dev.internal.vpn/__ashurbanipal", "healthy": true },
+    { "name": "orders", "label": "int", "base_url": "https://orders-int.internal.vpn/__ashurbanipal", "healthy": true },
+    { "name": "billing", "label": "dev", "base_url": "https://billing-dev.internal.vpn/__ashurbanipal", "healthy": false }
   ]
 }
 ```
 
-The backend performs the health checks (parallel HTTP GET to each sibling's
-configured health path) synchronously when this endpoint is called. The
-frontend fetches `/siblings` once at page load, then only while the Other
-services pop-up is open and the tab is visible — every ~15s, and never when
-the last result is younger than that — so a closed pop-up costs nothing; no
-server-side background polling or caching in v1 (see §9 for revisit
-criteria if this gets expensive).
+`instance` and `label` are optional and opaque (§7 has the config). The
+entry matching `instance` is this instance itself: it stays in place, so
+every instance sharing one list shows the same grid, and is never
+health-checked. An invalid sibling config answers 500 `invalid_config`
+here, so the pop-up can say what is wrong, while every other route keeps
+serving.
+
+The backend performs the other health checks (parallel HTTP GET to each
+sibling's configured health path) synchronously when this endpoint is
+called. The frontend fetches `/siblings` once at page load, then only while
+the Other services pop-up is open and the tab is visible — every ~15s, and
+never when the last result is younger than that. With the pop-up closed,
+the only further fetches are retries after a failure, backing off from 15s
+to 60s until one succeeds. No server-side background polling or caching in
+v1 (see §9 for revisit criteria if this gets expensive).
 
 ## 5. DB integration
 

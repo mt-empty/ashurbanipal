@@ -2,7 +2,8 @@
 //! is this instance reported in place without a health check. Every test
 //! self-skips unless the target reports an `instance`, so this file runs
 //! safely alongside `html_and_siblings.rs`. CI starts each port's demo with
-//! `CONFORMANCE_LABELLED_SIBLINGS=1`, which every port maps to the same fixed
+//! `CONFORMANCE_LABELLED_SIBLINGS=1` (Spring: profile
+//! `conformance-labelled-siblings`), which every port maps to the same fixed
 //! configuration:
 //!
 //! - instance `conformance` / `a`
