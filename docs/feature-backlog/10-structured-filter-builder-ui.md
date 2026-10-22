@@ -1,6 +1,6 @@
 # Structured filter builder UI (Airtable/Notion/Linear-style)
 
-> **Status:** OPEN · **Area:** frontend
+> **Status:** DECLINED · **Area:** frontend · **Ref:** 2026-10-22 — the filter stays one plain text field (decided 2026-10-14); help comes from colouring and suggestions on that field (#147)
 
 The client-side-AST filter decision this builds on has since shipped — the
 wire format is the JSON AST, and `filter.rs` no longer parses DSL text at

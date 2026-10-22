@@ -14,9 +14,7 @@ onboarding aid for a dev landing on an unfamiliar service.
 ## 2. The constraint that shapes it
 
 `frontend/dbviewer.html` is one self-contained file with no CDN dependency
-(`CLAUDE.md`, `docs/design.md` §3.1). Monaco's diff editor is noted there
-as the *one* place a CDN dependency is still even under consideration —
-everything else is hand-rolled. So a graph-layout library is either:
+(`CLAUDE.md`, `docs/design.md` §3.1), so a graph-layout library is either:
 
 - vendored and inlined at build time into `dbviewer.html` (bundle-size
   hit, licence review), or
@@ -32,8 +30,9 @@ a renderer.
 
 - `spec/protocol.md` — a schema-wide relationship endpoint
   (`GET {mount}/api/schema/graph`?) returning `{ tables[], edges[] }`.
-  Today FK data is only available per-table via column metadata; this
-  aggregates it in one catalog query per backend, honouring the same
+  Today FK data is per table: outgoing via §5.4.1's `references` and
+  §5.10's `foreign_keys`, incoming via §5.9. This route aggregates it in
+  one catalog query per backend, honouring the same
   table allow-list / privilege gate as `/tables`.
 - Frontend — new view, SVG render, pan/zoom, node → grid navigation reuses
   the existing table-switch path.

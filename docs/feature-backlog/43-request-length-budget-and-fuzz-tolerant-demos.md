@@ -104,10 +104,12 @@ table. The frontend's pre-check (below) makes that visible before sending.
 - `spec/openapi.yaml`: add `request_too_long` to the problem codes; update
   the `filter` and `join` descriptions.
 - `spec/CHANGELOG.md`.
-- **Breaking for `filter`:** the 8192-byte decoded bound has been released.
-  An ASCII filter of about 4.5 KB or more decoded will now be refused.
-  Decide the protocol version bump before starting. `join` is not released
-  yet if this lands before it is.
+- **Breaking for `filter` and `join`:** both 8192-byte decoded bounds are
+  released (`join` since 0.7.0). An ASCII filter of about 4.5 KB or more
+  decoded, or a join listing about 110 columns, will now be refused. Decide
+  the protocol version bump before starting.
+- This makes the bound a cross-port MUST, which also gives
+  `max_json_bytes` its normative home (story 31, item 5).
 
 ### Ports
 
@@ -149,7 +151,7 @@ fuzzer sees. The longest fuzzed URL seen so far was about 24 KB.
 | Port | Demo change | Default today |
 |---|---|---|
 | Node | `demo/main.ts`: `http.createServer({ maxHeaderSize: 65536 }, app).listen(…)` in place of `app.listen` | 16 KB, answers 431 |
-| Spring | demo `application.yml`: `server.max-http-request-header-size: 64KB` | 8 KB (Tomcat); check whether it answers 400 or 431, and whether a 7,168-byte query plus normal headers fits today |
+| Spring | none: the demo `application.yml` already sets `server.max-http-request-header-size: 64KB` (#148) | 64 KB |
 | Flask | check the server the demo and CI use and its request-line limit | not measured |
 | Go | none expected (`net/http` default is 1 MB); confirm | 1 MB |
 | Rust axum, actix | none expected; confirm | not hit in 30 runs |

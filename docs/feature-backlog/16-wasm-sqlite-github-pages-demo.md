@@ -3,8 +3,8 @@
 > **Status:** OPEN · **Area:** frontend
 
 **What it is:** replace `docs/demo/`'s fetch-shim backend
-(`frontend/src/demo-shim.ts` answering `/api/*` from JS-array fixtures in
-`demo-fixtures.ts`) with a real SQLite database compiled to WebAssembly
+(`frontend/src/demo/demo-shim.ts` answering `/api/*` from JS-array fixtures
+in `frontend/src/demo/demo-fixtures.ts`) with a real SQLite database compiled to WebAssembly
 (`sql.js` or `wa-sqlite`) running in the browser, so the demo executes
 genuine SQL instead of replaying canned fixture logic.
 
@@ -22,6 +22,6 @@ genuine SQL instead of replaying canned fixture logic.
   operators, `NULLS LAST` defaults — see `docs/adapter-decisions.md` for
   the same class of divergence across real backends), and a second build
   pipeline alongside `frontend/build-demo.mjs`.
-- Would still need a translation shim between the six `spec/protocol.md`
-  routes and SQL text — same shape as `demo-shim.ts`, just delegating to
+- Would still need a translation shim between the `spec/protocol.md`
+  routes (eleven today) and SQL text — same shape as `demo-shim.ts`, just delegating to
   the WASM engine instead of computing answers in JS.

@@ -20,10 +20,10 @@ a different feature.
 
 ## 2. Current state
 
-- `frontend/src/index.html:82` — `#refresh` button, disabled until the
+- `frontend/src/index.html:86` — `#refresh` button, disabled until the
   first load.
-- `frontend/src/bootstrap/main.ts:64-…` — refresh click handler.
-- `frontend/src/bootstrap/controller.ts:164-168` — the "nothing new"
+- `frontend/src/bootstrap/main.ts:65-…` — refresh click handler.
+- `frontend/src/bootstrap/controller.ts:272-276` — the "nothing new"
   check mark, which an auto tick also triggers.
 - `frontend/src/features/siblings.ts` — the existing 15 s timer. It is the
   only interval in the frontend today, and it is for siblings only.
@@ -69,7 +69,7 @@ refresh does now.
   it on table switch and on scope change, so an old timer cannot refresh
   the new view.
 - `frontend/src/bootstrap/controller.ts` — the in-flight guard
-  (`inFlightFetches`, `:34`) already exists; reuse it for the skip rule.
+  (`inFlightFetches`, `:47`) already exists; reuse it for the skip rule.
 - `frontend/src/styles.css` — bar and select rules, using existing tokens.
 - `docs/ui-guidelines.md` R10 — done: the "manual only" clause is removed.
 - `docs/frontend-style-guide.md` — note the new timer owner, so it is not

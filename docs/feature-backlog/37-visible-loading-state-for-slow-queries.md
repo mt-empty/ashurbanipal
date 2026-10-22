@@ -13,19 +13,19 @@ for seconds, and nothing on screen says the query is running.
 
 The loading signals are real but none is visible where the user acts.
 
-- `frontend/src/bootstrap/controller.ts:54-58` — the first in-flight
+- `frontend/src/bootstrap/controller.ts:131-134` — the first in-flight
   fetch sets `#status` to `loading…` and `aria-busy` on the table.
-- `frontend/src/index.html:74` — `#status` is an `sr-only` live region.
+- `frontend/src/index.html:81` — `#status` is an `sr-only` live region.
   Screen readers hear it; sighted users do not.
-- `frontend/src/styles.css:221` — `.sr-only` hides it visually.
+- `frontend/src/styles.css:265` — `.sr-only` hides it visually.
 - `frontend/src/styles.css` — no rule reads `aria-busy`, so the table
   gives no visual cue.
-- `frontend/src/styles.css:97-100` — the only visible cue is the
+- `frontend/src/styles.css:118-125` — the only visible cue is the
   per-row spinner in the sidebar (`setRowLoading`,
-  `controller.ts:58`). It sits on the table list, far from the sort
+  `controller.ts:135`). It sits on the table list, far from the sort
   headers and pager the user just clicked.
 
-So `docs/ui-guidelines.md` R9 (line 137-140) is only true for assistive
+So `docs/ui-guidelines.md` R9 (line 144) is only true for assistive
 tech. Its "loading is a visible state" claim does not hold for the grid.
 
 ## 3. Proposed behavior
@@ -49,7 +49,7 @@ tech. Its "loading is a visible state" claim does not hold for the grid.
 - **Errors.** A failed slow fetch still goes to `#error`, and the
   indicator clears on settle either way.
 - **No layout change.** The indicator takes no space in the flow,
-  matching the pattern in `styles.css:93-100`.
+  matching the pattern in `styles.css:118-125`.
 
 Sort and page clicks stay enabled during a load. The existing
 `loadDataToken` guard already drops stale responses.
@@ -57,8 +57,8 @@ Sort and page clicks stay enabled during a load. The existing
 ## 4. Touchpoints
 
 - `frontend/src/bootstrap/controller.ts` — start a delay timer in
-  `fetchTableData()` (`:44-68`); clear it in the `finally`. Reuse the
-  reference count already at `:34`, so overlapping fetches share one
+  `fetchViewData()` (`:107-145`); clear it in the `finally`. Reuse the
+  reference count already at `:47`, so overlapping fetches share one
   indicator.
 - `frontend/src/index.html` — a container for the indicator inside the
   table panel.
