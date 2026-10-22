@@ -1,9 +1,9 @@
 import { loadData } from "../bootstrap/reload.js";
-import { $, copyText, el, reportError } from "../core/dom.js";
+import { $, copyText, el } from "../core/dom.js";
 import { clearJoin, joinInView, joinRequest, persist, startTable, state, viewIsShown } from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
 import { type Draft, defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
-import { parseJoin, printJoin } from "../lib/join-dsl.js";
+import { printJoin } from "../lib/join-dsl.js";
 import { tokenizeJoinText } from "../lib/join-tokens.js";
 import { mountJoinForm } from "./join-form.js";
 import { deleteSavedJoin, renderSavedChips, savedJoinFor, saveJoin } from "./join-saved.js";
@@ -99,16 +99,9 @@ export function openJoinDialog(
   if (opts.focusName) $<HTMLInputElement>("join-name").focus();
 }
 
-// A saved join is canonical text; a name the page cannot parse again is a bug to show, not hide.
-function openSaved(text: string): void {
-  const parsed = parseJoin(text);
-  if ("error" in parsed) reportError(new Error(`saved join: ${parsed.error.message}`));
-  else applyJoin(parsed.def);
-}
-
 export function refreshSavedChips(): void {
   renderSavedChips({
-    open: openSaved,
+    open: applyJoin,
     edit: () => openJoinDialog(),
     startNew: () => openJoinDialog({ fresh: true }),
     saveCurrent: () => openJoinDialog({ focusName: true }),

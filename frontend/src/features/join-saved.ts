@@ -1,4 +1,6 @@
+import { reportError } from "../core/dom.js";
 import { joinInView, state, viewHref } from "../core/state.js";
+import type { JoinDef } from "../core/types.js";
 import { joinLabel } from "../lib/join-def.js";
 import { parseJoin } from "../lib/join-dsl.js";
 import {
@@ -63,7 +65,7 @@ export function deleteSavedJoin(name: string): void {
 }
 
 interface ChipActions {
-  open: (text: string) => void;
+  open: (def: JoinDef) => void;
   edit: () => void;
   startNew: () => void;
   saveCurrent: () => void;
@@ -84,15 +86,21 @@ export function renderSavedChips(actions: ChipActions): void {
   // The chip of the join in view opens it for editing, which is also where it is renamed or deleted.
   const chips: JoinChip[] = saved.map((s) => {
     const active = s.text === current?.text;
-    const parsed = active ? null : parseJoin(s.text);
-    return {
-      label: `⋈ ${s.name}`,
-      title: active ? `${s.name}: click to edit, rename or delete` : `${s.name} — ${s.text.replaceAll("\n", " ")}`,
-      className: "saved",
-      active,
-      run: active ? actions.edit : () => actions.open(s.text),
-      href: parsed && !("error" in parsed) ? viewHref(parsed.def.tables[0].table, s.text) : undefined,
-    };
+    const label = `⋈ ${s.name}`;
+    if (active)
+      return {
+        label,
+        title: `${s.name}: click to edit, rename or delete`,
+        className: "saved",
+        active,
+        run: actions.edit,
+      };
+    const chip = { label, title: `${s.name} — ${s.text.replaceAll("\n", " ")}`, className: "saved", active };
+    // A saved join is canonical text; one the page cannot parse again is a bug to show, not hide.
+    const parsed = parseJoin(s.text);
+    if ("error" in parsed) return { ...chip, run: () => reportError(new Error(`saved join: ${parsed.error.message}`)) };
+    const { def } = parsed;
+    return { ...chip, run: () => actions.open(def), href: viewHref({ kind: "join", def, text: s.text, hidden: [] }) };
   });
   if (current && !inSaved) {
     chips.push({

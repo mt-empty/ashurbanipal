@@ -1,4 +1,12 @@
-import { restoreFilterFromParams, restoreFromStorage, restoreJoinFromParams, state, tableView } from "./store.js";
+import {
+  restoreFilterFromParams,
+  restoreFromStorage,
+  restoreJoinFromParams,
+  startTable,
+  state,
+  tableView,
+} from "./store.js";
+import type { View } from "./types.js";
 import { recordUrlIntent } from "./url-intent.js";
 
 // URL <-> state, read side (nav.ts owns the write side, syncUrl). There are
@@ -55,13 +63,18 @@ export function scopeQuery(): string {
   return params.size ? `?${params}` : "";
 }
 
+// The params that name a view, shared by syncUrl and chip links.
+export function viewParams(view: View | null): URLSearchParams {
+  const params = new URLSearchParams({ table: startTable(view) ?? "" });
+  applyScopeParams(params);
+  if (view?.kind === "join") params.set("join", view.text);
+  return params;
+}
+
 // A chip's href. Paging, sort and filter are left out: a fresh tab takes them
 // from stored prefs, the same way an in-place switch does.
-export function viewHref(table: string, join?: string): string {
-  const params = new URLSearchParams({ table });
-  applyScopeParams(params);
-  if (join) params.set("join", join);
-  return `?${params}`;
+export function viewHref(view: View): string {
+  return `?${viewParams(view)}`;
 }
 
 // `api/schemas` (spec/protocol.md §5.7) takes `source` but not `schema` —

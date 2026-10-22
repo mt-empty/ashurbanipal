@@ -7,6 +7,7 @@ import {
   nextJoinResponse,
   openJoinOverlay,
   ORDERS_USERS,
+  ORDERS_USERS_CANONICAL,
   pick,
   showResult,
   writeSql,
@@ -213,7 +214,7 @@ test("an unsaved join gets a dashed chip with Save…, and its URL reproduces it
   await page.keyboard.press("Escape");
 
   const url = page.url();
-  expect(new URL(url).searchParams.get("join")).toBe("SELECT *\nFROM orders o\nLEFT JOIN users u ON o.user_id = u.id");
+  expect(new URL(url).searchParams.get("join")).toBe(ORDERS_USERS_CANONICAL);
   await expect(page.locator("#join-link-btn")).toBeVisible();
   await gotoApp(page);
   await page.goto(url);

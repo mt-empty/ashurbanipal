@@ -16,8 +16,7 @@ test("UI loads tables and data when mounted under a path prefix", async ({ page 
     );
     await page.goto(`${demo.baseUrl}/svc/__ashurbanipal`);
     await expect(page.locator("#tables [data-table]").first()).toBeVisible();
-    const href = await page.locator("#tables [data-table]").first().evaluate((a) => (a as HTMLAnchorElement).href);
-    expect(new URL(href).pathname).toBe("/svc/__ashurbanipal");
+    await expect(page.locator("#tables [data-table]").first()).toHaveJSProperty("pathname", "/svc/__ashurbanipal");
     await dataLoaded;
     await expect(page.locator("#tbody tr").first()).toBeVisible();
   } finally {
