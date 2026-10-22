@@ -5,6 +5,17 @@ Notable changes to the Kotlin/Spring Boot starter. Format follows
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.8.0] - 2026-10-22
+
+### Features
+
+- *(siblings)* Switch environments from Other services, with a fallback note (#173)
+- *(frontend)* Table and saved-join chips are real links (#174)
+
+### Refactor
+
+- *(frontend)* Share one view-URL builder between history and chip links (#179)
+
 ## [0.7.0] - 2026-10-21
 
 ### Features
