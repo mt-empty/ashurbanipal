@@ -67,6 +67,26 @@ main { height: 100%; overflow: auto; }
    viewport, so once scrolled past that it runs out of stickiness and gets
    dragged along horizontally. */
 #content { box-sizing: border-box; padding: 0 var(--gap-xl) var(--gap-lg); width: max-content; min-width: 100%; }
+/* Pinned to the scroller's top and viewport-wide (not table-wide); the negative
+   margin keeps it out of the flow, like the row spinner. */
+#load-bar { position: sticky; top: 0; left: var(--gap-xl); z-index: 2; box-sizing: border-box;
+            width: calc(100vw - 2 * var(--gap-xl)); height: 2px; margin-bottom: -2px;
+            overflow: hidden; background: var(--rule); }
+#load-bar:not([data-state]) { display: none; }
+#load-bar i { display: block; height: 100%; background: var(--rule-strong); transform-origin: left; }
+#load-bar[data-state="countdown"] i { animation: bar-drain var(--bar-duration) linear forwards;
+                                      animation-delay: calc(-1 * var(--bar-elapsed)); }
+#load-bar[data-state="loading"] i { width: 34%; background: linear-gradient(90deg, transparent, currentColor 30%, currentColor 70%, transparent);
+                                    animation: bar-run 1.2s ease-in-out infinite; }
+@keyframes bar-drain { to { transform: scaleX(0); } }
+@keyframes bar-run { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) {
+  #load-bar[data-state="countdown"] i { animation-timing-function: steps(20, end); }
+  #load-bar[data-state="loading"] i { width: 100%; animation: none;
+    background: repeating-linear-gradient(45deg, currentColor 0 4px, var(--rule) 4px 8px); }
+}
+/* The stale rows stay readable while a slow fetch runs. */
+#data-table[data-slow] tbody { opacity: .5; }
 
 /* ==== Top bar ==== */
 #topbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-lg); }

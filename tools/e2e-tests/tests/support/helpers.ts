@@ -23,7 +23,9 @@ export const APP_PATH = "/__ashurbanipal";
  * Excludes .row-new (the 3s new-row wash after a manual refresh) and
  * #refresh-icon (its ~0.5s click-acknowledge spin) for the same reason:
  * both are post-settle decorations, not part of the render, and counting
- * them would add their duration to every wait after a highlighted refresh. */
+ * them would add their duration to every wait after a highlighted refresh.
+ * #load-bar's animations (the slow-fetch sweep and the auto-refresh
+ * countdown) are excluded for the same reason: a countdown outlives the render. */
 export async function waitForIdle(page: Page) {
   await expect(page.locator("#data-table")).not.toHaveAttribute("aria-busy", "true");
   await expect
@@ -32,7 +34,12 @@ export async function waitForIdle(page: Page) {
         document.getAnimations().filter((a) => {
           const target = (a.effect as KeyframeEffect)?.target as Element | undefined;
           const cls = target?.classList;
-          return target?.id !== "refresh-icon" && !cls?.contains("row-spinner") && !cls?.contains("row-new");
+          return (
+            target?.id !== "refresh-icon" &&
+            !target?.closest("#load-bar") &&
+            !cls?.contains("row-spinner") &&
+            !cls?.contains("row-new")
+          );
         }).length,
       ),
     )

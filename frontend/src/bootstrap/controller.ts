@@ -20,6 +20,7 @@ import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, u
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
 import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
+import { setLoadingBar } from "../features/load-bar.js";
 import { syncUrl } from "../features/nav.js";
 import { setActiveTable, setRowLoading } from "../features/sidebar.js";
 import { syncViewNotice } from "../features/view-notice.js";
@@ -45,6 +46,17 @@ function setTableBusy(busy: boolean): void {
 // resolves), and a plain true/false pair would let the first fetch to
 // finish clear aria-busy/#status while another is still running.
 let inFlightFetches = 0;
+
+// A fetch that answers within this delay shows nothing, so fast ones never flash.
+const LOADING_DELAY_MS = 250;
+let slowTimer: ReturnType<typeof setTimeout> | undefined;
+
+// Everything a sighted or screen-reader user sees of a slow fetch comes on together.
+function setSlow(slow: boolean): void {
+  tableEl.toggleAttribute("data-slow", slow);
+  setLoadingBar(slow);
+  setStatus(slow ? "loading…" : "");
+}
 
 // `alias.*` has no wire form, so those tables' column names come from the catalog.
 async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> {
@@ -129,8 +141,8 @@ async function fetchViewData(req: ViewRequest): Promise<ViewData> {
   // box's DSL text — URLSearchParams handles the URL-encoding.
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
   if (inFlightFetches++ === 0) {
-    setStatus("loading…");
     setTableBusy(true);
+    slowTimer = setTimeout(() => setSlow(true), LOADING_DELAY_MS);
   }
   setRowLoading(table, true);
   try {
@@ -138,7 +150,8 @@ async function fetchViewData(req: ViewRequest): Promise<ViewData> {
   } finally {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
-      setStatus("");
+      clearTimeout(slowTimer);
+      setSlow(false);
       setTableBusy(false);
     }
   }

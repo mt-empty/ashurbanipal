@@ -673,6 +673,26 @@ main { height: 100%; overflow: auto; }
    viewport, so once scrolled past that it runs out of stickiness and gets
    dragged along horizontally. */
 #content { box-sizing: border-box; padding: 0 var(--gap-xl) var(--gap-lg); width: max-content; min-width: 100%; }
+/* Pinned to the scroller's top and viewport-wide (not table-wide); the negative
+   margin keeps it out of the flow, like the row spinner. */
+#load-bar { position: sticky; top: 0; left: var(--gap-xl); z-index: 2; box-sizing: border-box;
+            width: calc(100vw - 2 * var(--gap-xl)); height: 2px; margin-bottom: -2px;
+            overflow: hidden; background: var(--rule); }
+#load-bar:not([data-state]) { display: none; }
+#load-bar i { display: block; height: 100%; background: var(--rule-strong); transform-origin: left; }
+#load-bar[data-state="countdown"] i { animation: bar-drain var(--bar-duration) linear forwards;
+                                      animation-delay: calc(-1 * var(--bar-elapsed)); }
+#load-bar[data-state="loading"] i { width: 34%; background: linear-gradient(90deg, transparent, currentColor 30%, currentColor 70%, transparent);
+                                    animation: bar-run 1.2s ease-in-out infinite; }
+@keyframes bar-drain { to { transform: scaleX(0); } }
+@keyframes bar-run { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) {
+  #load-bar[data-state="countdown"] i { animation-timing-function: steps(20, end); }
+  #load-bar[data-state="loading"] i { width: 100%; animation: none;
+    background: repeating-linear-gradient(45deg, currentColor 0 4px, var(--rule) 4px 8px); }
+}
+/* The stale rows stay readable while a slow fetch runs. */
+#data-table[data-slow] tbody { opacity: .5; }
 
 /* ==== Top bar ==== */
 #topbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-lg); }
@@ -1390,6 +1410,7 @@ thead tr.bands + tr th { top: var(--band-h); }
     </div>
   </div>
   <div id="content">
+    <div id="load-bar" aria-hidden="true"><i></i></div>
     <table id="data-table" tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
     <template id="cell-template"><td><button class="cell-text"></button><span class="cell-actions"><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></span></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
@@ -2960,7 +2981,7 @@ function endsInUnfinishedWord(text) {
 }
 
 // src/features/overlay-highlight.ts
-function attachOverlayHighlight(field, render4) {
+function attachOverlayHighlight(field, render5) {
   const proto = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
   const valueProp = Object.getOwnPropertyDescriptor(proto, "value");
   if (valueProp?.get && valueProp.set) {
@@ -2972,13 +2993,13 @@ function attachOverlayHighlight(field, render4) {
       },
       set(v) {
         set.call(this, v);
-        render4();
+        render5();
       }
     });
   }
-  field.addEventListener("input", render4);
-  new ResizeObserver(render4).observe(field);
-  render4();
+  field.addEventListener("input", render5);
+  new ResizeObserver(render5).observe(field);
+  render5();
 }
 function tokenSpans(text, tokens, isError) {
   return tokens.map((t) => {
@@ -3869,8 +3890,8 @@ function setJoinChips(chips) {
   joinScope = scopeOfChips();
   updateTablesCap();
 }
-function setRowLoading(name, loading) {
-  tableEntries.find((e) => e.name === name)?.chip.classList.toggle("loading", loading);
+function setRowLoading(name, loading2) {
+  tableEntries.find((e) => e.name === name)?.chip.classList.toggle("loading", loading2);
 }
 function setActiveTable(name) {
   for (const e of tableEntries) {
@@ -4088,13 +4109,13 @@ function mountJoinForm(root, onChange) {
       const fk = first && first.leftColumn === "" && first.rightColumn === "" ? foreignKey(i + 1) : null;
       if (fk) j.on[0] = fk;
     });
-    render4();
+    render5();
     onChange();
   }
   const changed = (fromMenu = false) => {
     const active = document.activeElement;
     const focused = fromMenu ? lastDropdownLabel() : root.contains(active) ? active?.getAttribute("aria-label") : null;
-    render4();
+    render5();
     if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
   };
@@ -4313,7 +4334,7 @@ function mountJoinForm(root, onChange) {
     wrap2.append(el("div", "jlab", `Columns \xB7 ${picked} of ${total}`), grid);
     return wrap2;
   }
-  function render4() {
+  function render5() {
     const parts = [];
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
@@ -4357,7 +4378,7 @@ function mountJoinForm(root, onChange) {
   return {
     setDraft(next) {
       draft = next;
-      render4();
+      render5();
     },
     draft: () => draft,
     problem() {
@@ -4580,7 +4601,7 @@ function createSuggestList(opts) {
   const accept = (i) => {
     if (matches[i] && !matches[i].blocked) opts.accept(matches[i], head);
   };
-  const render4 = () => {
+  const render5 = () => {
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
         const btn = el("button");
@@ -4619,11 +4640,11 @@ function createSuggestList(opts) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       index = (index + 1) % count;
-      render4();
+      render5();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       index = index <= 0 ? count - 1 : index - 1;
-      render4();
+      render5();
     } else if (e.key === "Enter" && index >= 0) {
       e.preventDefault();
       accept(index);
@@ -4644,7 +4665,7 @@ function createSuggestList(opts) {
       matches = next;
       head = nextHead;
       index = nextIndex;
-      render4();
+      render5();
       popup.hidden = false;
       opts.place?.();
       input2.setAttribute("aria-expanded", "true");
@@ -4717,7 +4738,7 @@ function mountJoinSql(onChange) {
       memo = { text, version: version2, result: parseJoin(text, { catalog: knownCatalog(), pairCheck }) };
     return memo.result;
   };
-  function render4() {
+  function render5() {
     const text = field.value;
     field.style.height = "";
     if (field.scrollHeight > field.clientHeight) field.style.height = `${field.scrollHeight}px`;
@@ -4729,7 +4750,7 @@ function mountJoinSql(onChange) {
     hlText.replaceChildren(...tokenSpans(text, shown2, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     hlText.append("\n");
   }
-  attachOverlayHighlight(field, render4);
+  attachOverlayHighlight(field, render5);
   const place2 = () => {
     const before = field.value.slice(0, field.selectionStart);
     const line = before.split("\n").length;
@@ -4844,7 +4865,7 @@ function mountJoinSql(onChange) {
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
       if (!anyRead(results)) return;
-      render4();
+      render5();
       onChange();
     });
   }
@@ -5293,8 +5314,8 @@ async function showCommonValues(e, table, column) {
   cvAnchor = btn;
   cvAnchor.style.anchorName = "--cv-anchor";
   const list = $("cv-pop-list");
-  const loading = el("p", "cv-empty", "loading\u2026");
-  list.replaceChildren(loading);
+  const loading2 = el("p", "cv-empty", "loading\u2026");
+  list.replaceChildren(loading2);
   $("cv-pop").showPopover();
   const token = ++cvRequestToken;
   let values;
@@ -6156,6 +6177,20 @@ function updatePager(data) {
   $("next").disabled = data.rows.length < state.limit;
 }
 
+// src/features/load-bar.ts
+var bar = $("load-bar");
+var loading = false;
+var counting = false;
+function render4() {
+  if (loading) bar.dataset.state = "loading";
+  else if (counting) bar.dataset.state = "countdown";
+  else delete bar.dataset.state;
+}
+function setLoadingBar(on) {
+  loading = on;
+  render4();
+}
+
 // src/bootstrap/table-focus.ts
 var tableEl = $("data-table");
 function captureTableFocus() {
@@ -6187,6 +6222,13 @@ function setTableBusy(busy) {
   else tableEl.removeAttribute("aria-busy");
 }
 var inFlightFetches = 0;
+var LOADING_DELAY_MS = 250;
+var slowTimer;
+function setSlow(slow) {
+  tableEl.toggleAttribute("data-slow", slow);
+  setLoadingBar(slow);
+  setStatus(slow ? "loading\u2026" : "");
+}
 async function joinPath(def, params) {
   const names = /* @__PURE__ */ new Map();
   await Promise.all(
@@ -6254,8 +6296,8 @@ async function fetchViewData(req) {
   applyScopeParams(params);
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
   if (inFlightFetches++ === 0) {
-    setStatus("loading\u2026");
     setTableBusy(true);
+    slowTimer = setTimeout(() => setSlow(true), LOADING_DELAY_MS);
   }
   setRowLoading(table, true);
   try {
@@ -6263,7 +6305,8 @@ async function fetchViewData(req) {
   } finally {
     setRowLoading(table, false);
     if (--inFlightFetches === 0) {
-      setStatus("");
+      clearTimeout(slowTimer);
+      setSlow(false);
       setTableBusy(false);
     }
   }
