@@ -47,6 +47,7 @@ test("refresh tints a row that appeared since the last fetch, leaving the rest u
   await expect(rowFor(page, "1")).not.toHaveClass(/row-new/);
   await expect(rowFor(page, "2")).not.toHaveClass(/row-new/);
   await expect(page.locator("#status")).toHaveText("1 new");
+  await expect(page.locator("#row-new-chip")).toHaveText("+1 new");
 });
 
 test("refresh with no change highlights nothing", async ({ page }) => {

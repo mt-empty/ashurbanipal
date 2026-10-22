@@ -15,7 +15,7 @@ import {
   type ViewRequest,
 } from "../core/state.js";
 import type { JoinDef, View, ViewData } from "../core/types.js";
-import { fetchEnded, fetchStarted, noteLoadOk, noteTickFailed, showNewChip } from "../features/auto-refresh.js";
+import { fetchEnded, fetchStarted, noteLoadOk, noteTickFailed, setNewChip } from "../features/auto-refresh.js";
 import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
@@ -292,9 +292,9 @@ export async function loadData({
   noteLoadOk();
   // Sighted users see the tint; announce the count for everyone else. The
   // next loadData clears #status the same way it clears "loading…".
+  setNewChip(newRowKeys?.size ?? 0);
   if (newRowKeys?.size) {
     setStatus(`${newRowKeys.size} new`);
-    if (auto) showNewChip(newRowKeys.size);
   } else if (highlightNew && newRowKeys && !auto) {
     // Nothing new, so no tint: the icon's spin and the "updated" time are the
     // sighted cue; this line is for everyone else.

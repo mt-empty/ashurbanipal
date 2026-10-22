@@ -104,11 +104,13 @@ export function noteTickFailed(e: unknown): void {
   reportError(new Error(`Auto-refresh turned off after ${MAX_FAILURES} failed refreshes. Last error: ${last}.`));
 }
 
-export function showNewChip(count: number): void {
+// Also the manual refresh's count; 0 hides it, so a chip never outlives the view it described.
+export function setNewChip(count: number): void {
   const chip = $("row-new-chip");
-  chip.textContent = `+${count} new`;
-  chip.hidden = false;
   clearTimeout(chipTimer);
+  chip.hidden = count === 0;
+  if (count === 0) return;
+  chip.textContent = `+${count} new`;
   chipTimer = setTimeout(() => {
     chip.hidden = true;
   }, CHIP_MS);

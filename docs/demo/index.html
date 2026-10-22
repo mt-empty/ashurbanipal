@@ -3157,11 +3157,12 @@ function noteTickFailed(e) {
   stop();
   reportError(new Error(`Auto-refresh turned off after ${MAX_FAILURES} failed refreshes. Last error: ${last}.`));
 }
-function showNewChip(count) {
+function setNewChip(count) {
   const chip = $("row-new-chip");
-  chip.textContent = `+${count} new`;
-  chip.hidden = false;
   clearTimeout(chipTimer);
+  chip.hidden = count === 0;
+  if (count === 0) return;
+  chip.textContent = `+${count} new`;
   chipTimer = setTimeout(() => {
     chip.hidden = true;
   }, CHIP_MS);
@@ -6594,9 +6595,9 @@ async function loadData2({
   if (superseded()) return;
   updatePager(data);
   noteLoadOk();
+  setNewChip(newRowKeys?.size ?? 0);
   if (newRowKeys?.size) {
     setStatus(`${newRowKeys.size} new`);
-    if (auto) showNewChip(newRowKeys.size);
   } else if (highlightNew && newRowKeys && !auto) {
     setStatus("no changes");
   }
