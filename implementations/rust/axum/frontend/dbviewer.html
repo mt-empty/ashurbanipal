@@ -4308,10 +4308,10 @@ function createSuggestList(opts) {
     if (matches.length > 0 && !input2.contains(e.target) && !popup.contains(e.target)) close();
   });
   return {
-    show(next, nextHead, nextIndex) {
+    show(next, nextHead) {
       matches = next;
       head = nextHead;
-      index = nextIndex;
+      index = -1;
       render6();
       popup.hidden = false;
       opts.place?.();
@@ -4502,7 +4502,7 @@ function mountJoinSql(onChange) {
     if (token !== suggest2.token() || document.activeElement !== field || rows.length === 0) return;
     const only = rows.length === 1 && !rows[0].blocked && rows[0].insert.trim().toLowerCase() === ctx.partial.toLowerCase();
     if (only) return;
-    suggest2.show(rows, ctx.head, -1);
+    suggest2.show(rows, ctx.head);
   }
   function prefetch() {
     const listed = new Set(listedTableNames());
@@ -4888,7 +4888,7 @@ function commonValuesFor(table, column) {
   }
   return values;
 }
-function showFilterSuggestions(ctx, all, index) {
+function showFilterSuggestions(ctx, all) {
   const partial = ctx.partial.toLowerCase();
   const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
   const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
@@ -4896,7 +4896,7 @@ function showFilterSuggestions(ctx, all, index) {
     suggest.close();
     return;
   }
-  suggest.show(matches, ctx.head, index);
+  suggest.show(matches, ctx.head);
 }
 function isColumn(name) {
   return name !== null && (getLastPayload()?.columns.some((c) => columnKey(c) === name || c.join === 0 && c.column === name) ?? false);
@@ -4914,16 +4914,16 @@ function updateFilterSuggestions() {
   const table = tableInView();
   const plain = (labels) => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
-    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map(columnKey)), 0);
+    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map(columnKey)));
   } else if (ctx.expect === "operator") {
-    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")), -1);
+    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
-    showFilterSuggestions(ctx, plain(optionsFor("joiner")), -1);
+    showFilterSuggestions(ctx, plain(optionsFor("joiner")));
   } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column) && table !== null) {
     commonValuesFor(table, ctx.column).then((values) => {
       if (token !== suggest.token() || document.activeElement !== input2) return;
       const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
-      showFilterSuggestions(ctx, rows, -1);
+      showFilterSuggestions(ctx, rows);
     });
   }
 }

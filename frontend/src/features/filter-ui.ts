@@ -76,8 +76,8 @@ $<HTMLInputElement>("filter").addEventListener("search", () => {
 //
 // Arrow keys/Enter/Tab/Escape and light-dismiss (pointerdown listener below)
 // are hand-rolled. Enter accepts only a highlighted row, so Enter still
-// submits; operator, value and joiner lists start with no row highlighted
-// (Tab or an arrow key picks one). ----
+// submits; every list starts with no row highlighted (Tab or an arrow key
+// picks one). ----
 const CARET_MIRROR_PROPS: Extract<keyof CSSStyleDeclaration, string>[] = [
   "boxSizing",
   "width",
@@ -197,7 +197,7 @@ function commonValuesFor(table: string, column: string): Promise<string[]> {
   return values;
 }
 
-function showFilterSuggestions(ctx: Completion, all: Suggestion[], index: number): void {
+function showFilterSuggestions(ctx: Completion, all: Suggestion[]): void {
   const partial = ctx.partial.toLowerCase();
   const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
   // Nothing left to complete: a lone row identical to what is typed, except columns.
@@ -206,7 +206,7 @@ function showFilterSuggestions(ctx: Completion, all: Suggestion[], index: number
     suggest.close();
     return;
   }
-  suggest.show(matches, ctx.head, index);
+  suggest.show(matches, ctx.head);
 }
 
 // In a join view a plain name is the start table's column (spec/filter-dsl.md).
@@ -231,16 +231,16 @@ function updateFilterSuggestions(): void {
   const table = tableInView();
   const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
-    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map(columnKey)), 0);
+    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map(columnKey)));
   } else if (ctx.expect === "operator") {
-    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")), -1);
+    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
-    showFilterSuggestions(ctx, plain(optionsFor("joiner")), -1);
+    showFilterSuggestions(ctx, plain(optionsFor("joiner")));
   } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column) && table !== null) {
     commonValuesFor(table, ctx.column).then((values) => {
       if (token !== suggest.token() || document.activeElement !== input) return;
       const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
-      showFilterSuggestions(ctx, rows, -1);
+      showFilterSuggestions(ctx, rows);
     });
   }
 }
