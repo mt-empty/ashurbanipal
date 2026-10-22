@@ -1,6 +1,6 @@
 # Incoming FK references ("referenced by")
 
-> **Status:** DONE · **Area:** spec, ports, frontend, docs · **Ref:** PR #119 (open)
+> **Status:** DONE · **Area:** spec, ports, frontend, docs · **Ref:** PR #119, released in 0.6.0
 
 **Ask:** alongside the outgoing `references` Ashurbanipal already reports
 per column (`spec/protocol.md` §5.4.1 — "this column points at

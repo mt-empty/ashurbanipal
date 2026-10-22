@@ -1,6 +1,6 @@
 # Spec-hardening review: wire-contract and doc red flags
 
-> **Status:** OPEN · **Area:** spec, ports, frontend, docs
+> **Status:** PARTIAL · **Area:** spec, ports, frontend, docs · **Ref:** B3 and S3 done; B1, B2, B4, B5, B6, S1, S2, S4, D1, D2, D3 open
 
 **Ask:** a review pass on 2026-09-08, done while planning
 [[14-incoming-fk-references]], turned up a set of best-practice concerns
@@ -135,6 +135,10 @@ row counts as always-visible fact. Right after a bulk load the estimate
 can be 0 or off by an order of magnitude.
 
 Fix: render it as an estimate (`~108k`), and degrade gracefully at `-1`.
+
+**Actioned:** the frontend shows the estimate as `~N`, and `?` when it is
+`-1` (`formatApproxCount` in `frontend/src/lib/format.ts`), with a tooltip
+that explains both.
 
 ### S4 — Stateless mandate vs per-request catalog cost
 

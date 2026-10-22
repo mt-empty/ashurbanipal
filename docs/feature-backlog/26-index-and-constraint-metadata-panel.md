@@ -1,6 +1,6 @@
 # Per-table index and constraint metadata panel
 
-> **Status:** OPEN · **Area:** spec, frontend
+> **Status:** DONE · **Area:** spec, frontend · **Ref:** PR #148, released in 0.7.0 (spec §5.10, all five ports, `frontend/src/features/structure.ts`)
 
 Read-only — catalog introspection only.
 
@@ -182,11 +182,7 @@ Decided:
   they are real indexes.
 - **Check expression text** is an optional field, omitted where the engine
   cannot supply it.
-
-Open:
-
-- **Index/constraint name stability on SQLite.** Indexes and named unique
-  constraints exist there, but FK constraints don't have names at all —
-  same synthesized-label treatment §5.9 already uses for `constraint`
-  (`fk_<id>`, stable within one read, not across schema changes), or a
-  different mechanism for this endpoint?
+- **FK names on SQLite** are synthesized labels, as in §5.9: `spec/protocol.md`
+  §5.10 lets `name` be a label on an engine that does not name FK
+  constraints, and clients must not treat it as a DDL identifier or as
+  stable across schema changes.
