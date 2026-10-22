@@ -11,13 +11,13 @@ test("a failed load leaves the previous table's rows and active state untouched"
     .textContent();
 
   await page.route("**/api/tables/data*", (route) => route.abort("failed"));
-  await page.locator('#tables button[data-table="users"]').click();
+  await page.locator('#tables [data-table="users"]').click();
   await expect(page.locator("#error")).not.toBeEmpty();
 
   // Chrome/status must still describe the table that's actually rendered.
   await expect(page.locator("#current")).toHaveText("orders");
-  await expect(page.locator('#tables button[data-table="orders"]')).toHaveClass(/active/);
-  await expect(page.locator('#tables button[data-table="users"]')).not.toHaveClass(/active/);
+  await expect(page.locator('#tables [data-table="orders"]')).toHaveClass(/active/);
+  await expect(page.locator('#tables [data-table="users"]')).not.toHaveClass(/active/);
   const firstIdAfter = await page
     .locator('#tbody tr').first().locator('td[data-col="id"] .cell-text')
     .textContent();
@@ -46,8 +46,8 @@ test("a slow, superseded response never overwrites a newer table's render", asyn
   const staleOrdersResponse = page.waitForResponse(
     (r) => new URL(r.url()).searchParams.get("table") === "orders",
   );
-  await page.locator('#tables button[data-table="orders"]').click(); // slow, started first
-  await page.locator('#tables button[data-table="users"]').click(); // fast, resolves first
+  await page.locator('#tables [data-table="orders"]').click(); // slow, started first
+  await page.locator('#tables [data-table="users"]').click(); // fast, resolves first
   await page.locator("#current").getByText("users", { exact: true }).waitFor();
 
   // Wait for the delayed "orders" response to actually land before
@@ -56,7 +56,7 @@ test("a slow, superseded response never overwrites a newer table's render", asyn
   await staleOrdersResponse;
 
   await expect(page.locator("#current")).toHaveText("users");
-  await expect(page.locator('#tables button[data-table="users"]')).toHaveClass(/active/);
+  await expect(page.locator('#tables [data-table="users"]')).toHaveClass(/active/);
   await expect(page.locator('#tbody td[data-col="email"]').first()).toBeVisible();
   await expect(page.locator('#tbody td[data-col="status"]')).toHaveCount(0); // orders' column
 });

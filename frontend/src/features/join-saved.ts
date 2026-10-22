@@ -1,5 +1,6 @@
-import { joinInView, state } from "../core/state.js";
+import { joinInView, state, viewHref } from "../core/state.js";
 import { joinLabel } from "../lib/join-def.js";
+import { parseJoin } from "../lib/join-dsl.js";
 import {
   type SavedJoin,
   type SavedStore,
@@ -83,12 +84,14 @@ export function renderSavedChips(actions: ChipActions): void {
   // The chip of the join in view opens it for editing, which is also where it is renamed or deleted.
   const chips: JoinChip[] = saved.map((s) => {
     const active = s.text === current?.text;
+    const parsed = active ? null : parseJoin(s.text);
     return {
       label: `⋈ ${s.name}`,
       title: active ? `${s.name}: click to edit, rename or delete` : `${s.name} — ${s.text.replaceAll("\n", " ")}`,
       className: "saved",
       active,
       run: active ? actions.edit : () => actions.open(s.text),
+      href: parsed && !("error" in parsed) ? viewHref(parsed.def.tables[0].table, s.text) : undefined,
     };
   });
   if (current && !inSaved) {

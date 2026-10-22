@@ -57,11 +57,11 @@ export async function gotoApp(page: Page, query = "") {
   await page.goto(APP_PATH + query);
   // Bounded/tolerant: a deliberately-erroring initial load (e.g.
   // loading-and-errors.spec.ts's invalid-sort-column case) never gets an
-  // .active button at all — that's a legitimate scenario, not something
+  // .active chip at all — that's a legitimate scenario, not something
   // to hang on, so this gives up after a few seconds rather than the
   // default 30s if nothing shows up.
   await page
-    .locator("#tables button.active")
+    .locator("#tables [data-table].active")
     .waitFor({ timeout: 5_000 })
     .catch(() => {});
   await waitForIdle(page);
@@ -72,7 +72,7 @@ export async function gotoApp(page: Page, query = "") {
  * successful loadData() (see dbviewer.html's updateViewChrome), so
  * this also doubles as "wait for the fetch to resolve." */
 export async function selectTable(page: Page, table: string) {
-  await page.locator(`#tables button[data-table="${table}"]`).click();
+  await page.locator(`#tables [data-table="${table}"]`).click();
   await page.locator("#current").getByText(table, { exact: true }).waitFor();
   await waitForIdle(page);
 }

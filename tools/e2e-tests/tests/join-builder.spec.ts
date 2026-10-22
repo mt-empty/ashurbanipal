@@ -185,7 +185,7 @@ test("a saved join becomes a chip after the table chips that survives a reload a
   await page.locator("#join-name").fill("orders with users");
   await showResult(page);
   await expandTableChips(page);
-  const chip = page.locator("#tables li.join-chip button", { hasText: "orders with users" });
+  const chip = page.locator("#tables li.join-chip :is(a, button)", { hasText: "orders with users" });
   await expect(chip).toHaveAttribute("aria-current", "true");
   await expect(page.locator("#tables li.join-first")).toBeVisible();
 
@@ -231,13 +231,13 @@ test("renaming and deleting a saved join from the overlay", async ({ page }) => 
   await page.locator("#join-name").fill("second");
   await showResult(page);
   await expandTableChips(page);
-  await expect(page.locator("#tables li.join-chip button", { hasText: "second" })).toBeVisible();
-  await expect(page.locator("#tables li.join-chip button", { hasText: "first" })).toHaveCount(0);
+  await expect(page.locator("#tables li.join-chip :is(a, button)", { hasText: "second" })).toBeVisible();
+  await expect(page.locator("#tables li.join-chip :is(a, button)", { hasText: "first" })).toHaveCount(0);
 
   await page.locator("#join-edit-btn").click();
   await page.locator("#join-delete").click();
   await expandTableChips(page);
-  await expect(page.locator("#tables li.join-chip button", { hasText: "second" })).toHaveCount(0);
+  await expect(page.locator("#tables li.join-chip :is(a, button)", { hasText: "second" })).toHaveCount(0);
   await expect(page.locator("#tables li.join-chip.unsaved")).toBeVisible();
 });
 

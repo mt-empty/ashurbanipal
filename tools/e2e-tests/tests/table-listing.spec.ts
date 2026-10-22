@@ -21,7 +21,7 @@ const SEEDED_TABLES = [
 
 test("table chips list all seeded tables alphabetically with approx row counts", async ({ page }) => {
   await gotoApp(page);
-  const buttons = page.locator("#tables button[data-table]");
+  const buttons = page.locator("#tables [data-table]");
   await expect(buttons).toHaveCount(SEEDED_TABLES.length);
   // _conformance_meta/feature_flags are deliberately never ANALYZEd, so
   // the frontend shows "?" (formatApproxCount) instead of a raw -1.
@@ -37,11 +37,11 @@ test("title tooltip includes the comment when present, and is just the name othe
   // Every button gets a title (name is the R8 truncation escape hatch for
   // a long table name, see .row-name's CSS) — commented tables get the
   // comment appended, uncommented ones just the bare name.
-  await expect(page.locator('#tables button[data-table="users"]')).toHaveAttribute(
+  await expect(page.locator('#tables [data-table="users"]')).toHaveAttribute(
     "title",
     /^users — .+/,
   );
-  await expect(page.locator('#tables button[data-table="products"]')).toHaveAttribute(
+  await expect(page.locator('#tables [data-table="products"]')).toHaveAttribute(
     "title",
     "products",
   );
@@ -49,7 +49,7 @@ test("title tooltip includes the comment when present, and is just the name othe
 
 test("a long table name truncates instead of pushing the row count out", async ({ page }) => {
   await gotoApp(page);
-  const nameSpan = page.locator('#tables button[data-table="support_tickets"] .row-name');
+  const nameSpan = page.locator('#tables [data-table="support_tickets"] .row-name');
   const overflow = await nameSpan.evaluate((el) => getComputedStyle(el).overflow);
   const textOverflow = await nameSpan.evaluate((el) => getComputedStyle(el).textOverflow);
   const minWidth = await nameSpan.evaluate((el) => getComputedStyle(el).minWidth);
@@ -59,7 +59,7 @@ test("a long table name truncates instead of pushing the row count out", async (
   // The count must stay fully visible regardless of name length — this is
   // the actual symptom being fixed (a long name pushing/clipping it).
   await expect(
-    page.locator('#tables button[data-table="support_tickets"] .count'),
+    page.locator('#tables [data-table="support_tickets"] .count'),
   ).toBeVisible();
 });
 
@@ -128,7 +128,7 @@ test("the active table stays visible in a collapsed list, and 'show fewer' keeps
   await page.setViewportSize(NARROW);
   // users is past line three at this width, so it starts out in the hidden part.
   await gotoApp(page, "?table=users");
-  const users = page.locator('#tables button[data-table="users"]');
+  const users = page.locator('#tables [data-table="users"]');
   const more = page.locator("#tables-more");
   await expect(users).toHaveClass(/active/);
   await expect(users).toBeVisible();
@@ -148,7 +148,7 @@ test("a chip pulled up from the hidden part gets a divider only on a line with o
 }) => {
   await page.setViewportSize(NARROW);
   await gotoApp(page, "?table=users");
-  await expect(page.locator('#tables button[data-table="users"]')).toBeVisible();
+  await expect(page.locator('#tables [data-table="users"]')).toBeVisible();
   const pulled = page.locator("#tables li.pulled");
   expect(await pulled.count()).toBeLessThanOrEqual(1);
   if ((await pulled.count()) === 1) {
@@ -159,14 +159,14 @@ test("a chip pulled up from the hidden part gets a divider only on a line with o
     });
     expect(sharesLine).toBe(true);
   }
-  await page.locator('#tables button[data-table="audit_log"]').click();
+  await page.locator('#tables [data-table="audit_log"]').click();
   await expect(page.locator("#tables li.pulled")).toHaveCount(0);
 });
 
 test("a wide window shows every seeded table without expanding the list", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 800 });
   await gotoApp(page);
-  for (const name of SEEDED_TABLES) await expect(page.locator(`#tables button[data-table="${name}"]`)).toBeVisible();
+  for (const name of SEEDED_TABLES) await expect(page.locator(`#tables [data-table="${name}"]`)).toBeVisible();
 });
 
 test("a column name is capped with an ellipsis and keeps its full name in a title", async ({
@@ -188,10 +188,10 @@ test("selecting a table updates the current-table chrome", async ({ page }) => {
   await selectTable(page, "products");
   await expect(page.locator("#current")).toHaveText("products");
   await expect(page).toHaveTitle("products — Ashurbanipal");
-  await expect(page.locator('#tables button[data-table="products"]')).toHaveClass(/active/);
-  await expect(page.locator('#tables button[data-table="products"]')).toHaveAttribute(
+  await expect(page.locator('#tables [data-table="products"]')).toHaveClass(/active/);
+  await expect(page.locator('#tables [data-table="products"]')).toHaveAttribute(
     "aria-current",
     "true",
   );
-  await expect(page.locator('#tables button[data-table="users"]')).not.toHaveClass(/active/);
+  await expect(page.locator('#tables [data-table="users"]')).not.toHaveClass(/active/);
 });

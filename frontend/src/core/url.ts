@@ -55,6 +55,15 @@ export function scopeQuery(): string {
   return params.size ? `?${params}` : "";
 }
 
+// A chip's href. Paging, sort and filter are left out: a fresh tab takes them
+// from stored prefs, the same way an in-place switch does.
+export function viewHref(table: string, join?: string): string {
+  const params = new URLSearchParams({ table });
+  applyScopeParams(params);
+  if (join) params.set("join", join);
+  return `?${params}`;
+}
+
 // `api/schemas` (spec/protocol.md §5.7) takes `source` but not `schema` —
 // it's what resolves schema in the first place — so it gets its own query
 // builder rather than scopeQuery()'s combined source+schema.

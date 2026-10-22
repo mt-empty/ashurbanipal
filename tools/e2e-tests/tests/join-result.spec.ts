@@ -119,7 +119,7 @@ test("an inner join with no match shows an empty state that offers a left join",
 
 test("leaving a join view for a table chip drops the join, back returns to it", async ({ page }) => {
   await gotoJoin(page, ORDERS_USERS);
-  await page.locator('#tables button[data-table="users"]').click();
+  await page.locator('#tables [data-table="users"]').click();
   await expect(page.locator("#current")).toHaveText("users");
   await waitForIdle(page);
   await expect(page.locator("th.band")).toHaveCount(0);
