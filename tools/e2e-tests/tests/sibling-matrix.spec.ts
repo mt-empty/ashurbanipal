@@ -223,6 +223,19 @@ test("config warnings show above the grid, and duplicates are listed under it", 
   await expect(rows.nth(1)).toHaveAttribute("href", "https://audit-dev.example/__ashurbanipal");
 });
 
+test("warnings keep the pill visible when nothing else is listed", async ({ page }) => {
+  const own = LABELLED.siblings[0];
+  await mockSiblings(page, {
+    instance: LABELLED.instance,
+    siblings: [own, own],
+    warnings: ['two siblings share the name "orders" and the label "dev"'],
+  });
+  await gotoApp(page);
+  await expect(page.locator("#siblings")).toBeVisible();
+  await page.locator("#siblings-btn").click();
+  await expect(page.locator("#siblings-warnings")).toBeVisible();
+});
+
 test("a clean config shows no warnings", async ({ page }) => {
   await mockSiblings(page, LABELLED);
   await gotoApp(page);

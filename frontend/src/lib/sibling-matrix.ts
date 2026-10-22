@@ -12,8 +12,6 @@ export interface SiblingMatrix {
   // The instance's own label, so its column can be marked; null without one.
   ownLabel: string | null;
   rows: { name: string; isInstance: boolean; cells: MatrixCell[] }[];
-  // Siblings the grid has no cell for, listed under it.
-  listed: ListedSibling[];
 }
 
 // `note` tells apart entries the name alone does not.
@@ -23,6 +21,18 @@ export interface ListedSibling {
 }
 
 type Labelled = Sibling & { label: string };
+
+const keyOf = (name: string, label: string | undefined) => JSON.stringify([name, label ?? null]);
+
+// A name and label listed more than once has one cell, which the first fills.
+function firstEntries(siblings: Sibling[]): Map<string, Sibling> {
+  const first = new Map<string, Sibling>();
+  for (const s of siblings) {
+    const key = keyOf(s.name, s.label);
+    if (!first.has(key)) first.set(key, s);
+  }
+  return first;
+}
 
 export function isOwnEntry(instance: SiblingInstance | undefined, s: Sibling): boolean {
   return instance !== undefined && s.name === instance.name && s.label === instance.label;
@@ -40,38 +50,30 @@ export function buildSiblingMatrix({ instance, siblings }: SiblingsResponse): Si
   if (instance && !labels.includes(instance.label)) labels.unshift(instance.label);
   if (instance && !names.includes(instance.name)) names.unshift(instance.name);
 
+  const first = firstEntries(labelled);
   const rows = names.map((name) => {
     const isInstance = instance?.name === name;
     const cells = labels.map((label): MatrixCell => {
       if (isInstance && instance?.label === label) return { kind: "here" };
-      const sibling = labelled.find((s) => s.name === name && s.label === label);
+      const sibling = first.get(keyOf(name, label));
       return sibling ? { kind: "link", sibling, sameView: isInstance } : { kind: "missing" };
     });
     return { name, isInstance, cells };
   });
-  // A repeated name and label has one cell, which the first entry fills.
-  const listed = siblings.flatMap((s): ListedSibling[] => {
-    if (s.label === undefined) return [{ sibling: s }];
-    return labelled.find((t) => t.name === s.name && t.label === s.label) === s
-      ? []
-      : [{ sibling: s, note: `${s.label} · duplicate` }];
+  return { labels, ownLabel: instance?.label ?? null, rows };
+}
+
+// What the grid has no cell for, in list order: every unlabelled sibling and
+// each later copy of a name and label. Repeated unlabelled names show their host.
+export function listedSiblings(siblings: Sibling[]): ListedSibling[] {
+  const first = firstEntries(siblings);
+  const copies = new Map<string, number>();
+  for (const s of siblings) copies.set(keyOf(s.name, s.label), (copies.get(keyOf(s.name, s.label)) ?? 0) + 1);
+  return siblings.flatMap((s): ListedSibling[] => {
+    const key = keyOf(s.name, s.label);
+    if (s.label !== undefined) return first.get(key) === s ? [] : [{ sibling: s, note: `${s.label} · duplicate` }];
+    return [(copies.get(key) ?? 0) > 1 ? { sibling: s, note: hostOf(s.base_url) } : { sibling: s }];
   });
-  return { labels, ownLabel: instance?.label ?? null, rows, listed: withHosts(listed) };
-}
-
-// The plain list, for a response with nothing labelled.
-export function listSiblings(siblings: Sibling[]): ListedSibling[] {
-  return withHosts(siblings.map((sibling) => ({ sibling })));
-}
-
-// An unlabelled name that repeats is told apart by its host.
-function withHosts(listed: ListedSibling[]): ListedSibling[] {
-  const unlabelled = listed.filter((l) => l.note === undefined).map((l) => l.sibling.name);
-  return listed.map((l) =>
-    l.note === undefined && unlabelled.indexOf(l.sibling.name) !== unlabelled.lastIndexOf(l.sibling.name)
-      ? { ...l, note: hostOf(l.sibling.base_url) }
-      : l,
-  );
 }
 
 function hostOf(baseUrl: string): string {

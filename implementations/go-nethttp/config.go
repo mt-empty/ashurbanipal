@@ -92,8 +92,8 @@ func (c Config) siblingsView() siblingsView {
 
 // isInstance reports whether s is this instance's own entry, which is
 // reported healthy without a health check: it is serving the response.
-func (i *Instance) isInstance(s Sibling) bool {
-	return i != nil && s.Name == i.Name && s.Label == i.Label
+func (v siblingsView) isInstance(s Sibling) bool {
+	return v.Instance != nil && s.Name == v.Instance.Name && s.Label == v.Instance.Label
 }
 
 func (c Config) basePath() string {

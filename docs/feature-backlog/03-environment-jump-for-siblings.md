@@ -97,8 +97,7 @@ Configuration rules:
   unset counts as the same) are both kept, in configuration order.
 
 Sibling configuration is never rejected and never stops the host or the
-viewer. Each correction above is reported as a warning (W5). It is checked
-only when the viewer is enabled.
+viewer. Each correction above is reported as a warning (W5).
 - **C4.** A sibling whose `name` and `label` equal the `instance`'s is
   allowed, and recommended: one shared sibling list, in the same order, on
   every instance gives every instance the same grid. See W2.

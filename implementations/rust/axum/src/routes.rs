@@ -495,15 +495,14 @@ async fn siblings<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Respons
         let http = state.http.clone();
         let is_instance = view.is_instance(&sibling);
         async move {
-            let health_url = health_url(&sibling.base_url, &sibling.health_path);
-            let healthy = match health_url {
-                _ if is_instance => true,
-                Some(url) => matches!(
-                    http.get(url).send().await,
-                    Ok(resp) if resp.status().is_success()
-                ),
-                None => false,
-            };
+            let healthy = is_instance
+                || match health_url(&sibling.base_url, &sibling.health_path) {
+                    Some(url) => matches!(
+                        http.get(url).send().await,
+                        Ok(resp) if resp.status().is_success()
+                    ),
+                    None => false,
+                };
             SiblingStatus {
                 name: sibling.name,
                 label: sibling.label,

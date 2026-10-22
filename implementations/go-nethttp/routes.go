@@ -492,7 +492,7 @@ func structureHandler(sources []NamedSource) http.HandlerFunc {
 
 func siblingsHandler(client *http.Client, view siblingsView) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		statuses := checkSiblings(r.Context(), client, view.Instance, view.Siblings)
+		statuses := checkSiblings(r.Context(), client, view)
 		writeJSON(w, struct {
 			Instance *Instance       `json:"instance,omitempty"`
 			Siblings []SiblingStatus `json:"siblings"`

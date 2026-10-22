@@ -69,12 +69,4 @@ class SiblingsConfigTest {
     @Test
     fun `a duplicate name and label is kept with a warning`() =
         assertWarned("two siblings share the name \"orders\" and the label \"dev\"", "ashurbanipal.siblings[1].label=dev")
-
-    @Test
-    fun `a disabled starter never validates siblings`() {
-        runner("ashurbanipal.enabled=false", "ashurbanipal.instance.label=").run { context ->
-            assertThat(context).hasNotFailed()
-        }
-        assertThat(AshurbanipalProperties(instance = Instance(name = "orders", label = "")).siblingsView.warnings).isEmpty()
-    }
 }

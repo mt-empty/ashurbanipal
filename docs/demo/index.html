@@ -927,12 +927,11 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
           padding: .5rem; width: max-content; max-width: min(22rem, 90vw);
           box-shadow: 0 4px 16px #0004; }
 #siblings-heading { margin: .1rem .6rem .5rem; font-size: .75rem; color: var(--text-muted); }
-#siblings-warnings { margin: 0 .6rem .5rem; padding: 0; list-style: none; font-size: .75rem;
-                     overflow-wrap: anywhere; }
+#siblings-warnings { margin: 0 .6rem .5rem; font-size: .75rem; overflow-wrap: anywhere; }
 #siblings-warnings li { display: flex; gap: .4rem; }
 #siblings-warnings li + li { margin-top: .25rem; }
 .sibling-warning-icon { color: var(--text-muted); }
-.sibling-note { color: var(--text-muted); font-size: .75rem; white-space: nowrap; }
+.sibling-note { white-space: nowrap; }
 #siblings-list { display: flex; flex-direction: column; }
 .sibling-row { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem;
                border-radius: 6px; color: inherit; text-decoration: none; }
@@ -940,7 +939,7 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 /* Full name is in `title` (see paintRow and renderMatrix) as the truncation escape hatch. */
 .sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                 white-space: nowrap; font-family: var(--font-mono); }
-.sibling-state { color: var(--text-muted); font-size: .75rem; }
+.sibling-note, .sibling-state { color: var(--text-muted); font-size: .75rem; }
 /* The service × label grid. */
 #siblings-pop:has(#siblings-matrix:not([hidden])) { max-width: min(34rem, 92vw); }
 #siblings-matrix { border-collapse: collapse; width: 100%; }
@@ -5287,6 +5286,15 @@ async function showCommonValues(e, table, column) {
 }
 
 // src/lib/sibling-matrix.ts
+var keyOf2 = (name, label) => JSON.stringify([name, label ?? null]);
+function firstEntries(siblings) {
+  const first = /* @__PURE__ */ new Map();
+  for (const s of siblings) {
+    const key = keyOf2(s.name, s.label);
+    if (!first.has(key)) first.set(key, s);
+  }
+  return first;
+}
 function isOwnEntry(instance, s) {
   return instance !== void 0 && s.name === instance.name && s.label === instance.label;
 }
@@ -5297,29 +5305,27 @@ function buildSiblingMatrix({ instance, siblings }) {
   const names = [...new Set(labelled.map((s) => s.name))];
   if (instance && !labels.includes(instance.label)) labels.unshift(instance.label);
   if (instance && !names.includes(instance.name)) names.unshift(instance.name);
+  const first = firstEntries(labelled);
   const rows = names.map((name) => {
     const isInstance = instance?.name === name;
     const cells = labels.map((label) => {
       if (isInstance && instance?.label === label) return { kind: "here" };
-      const sibling = labelled.find((s) => s.name === name && s.label === label);
+      const sibling = first.get(keyOf2(name, label));
       return sibling ? { kind: "link", sibling, sameView: isInstance } : { kind: "missing" };
     });
     return { name, isInstance, cells };
   });
-  const listed = siblings.flatMap((s) => {
-    if (s.label === void 0) return [{ sibling: s }];
-    return labelled.find((t) => t.name === s.name && t.label === s.label) === s ? [] : [{ sibling: s, note: `${s.label} \xB7 duplicate` }];
+  return { labels, ownLabel: instance?.label ?? null, rows };
+}
+function listedSiblings(siblings) {
+  const first = firstEntries(siblings);
+  const copies = /* @__PURE__ */ new Map();
+  for (const s of siblings) copies.set(keyOf2(s.name, s.label), (copies.get(keyOf2(s.name, s.label)) ?? 0) + 1);
+  return siblings.flatMap((s) => {
+    const key = keyOf2(s.name, s.label);
+    if (s.label !== void 0) return first.get(key) === s ? [] : [{ sibling: s, note: `${s.label} \xB7 duplicate` }];
+    return [(copies.get(key) ?? 0) > 1 ? { sibling: s, note: hostOf(s.base_url) } : { sibling: s }];
   });
-  return { labels, ownLabel: instance?.label ?? null, rows, listed: withHosts(listed) };
-}
-function listSiblings(siblings) {
-  return withHosts(siblings.map((sibling) => ({ sibling })));
-}
-function withHosts(listed) {
-  const unlabelled = listed.filter((l) => l.note === void 0).map((l) => l.sibling.name);
-  return listed.map(
-    (l) => l.note === void 0 && unlabelled.indexOf(l.sibling.name) !== unlabelled.lastIndexOf(l.sibling.name) ? { ...l, note: hostOf(l.sibling.base_url) } : l
-  );
 }
 function hostOf(baseUrl) {
   try {
@@ -5397,13 +5403,6 @@ async function loadSiblings() {
   retryDelay = FRESH_MS;
   render3(body);
 }
-function stampHeading(prefix) {
-  const at = /* @__PURE__ */ new Date();
-  const updated = el("time", void 0, at.toLocaleTimeString());
-  updated.dateTime = at.toISOString();
-  updated.title = at.toLocaleString();
-  $("siblings-heading").replaceChildren(prefix, "Updated ", updated, ".");
-}
 function renderWarnings(warnings) {
   $("siblings-warnings").hidden = warnings.length === 0;
   $("siblings-warnings").replaceChildren(
@@ -5420,9 +5419,9 @@ function render3(body) {
   const { siblings } = body;
   setNoticePlace(body.instance?.label ?? null);
   const others = siblings.filter((s) => !isOwnEntry(body.instance, s));
-  $("siblings").hidden = others.length === 0;
-  const down = others.filter((s) => !s.healthy).length;
   const warnings = body.warnings ?? [];
+  $("siblings").hidden = others.length === 0 && warnings.length === 0;
+  const down = others.filter((s) => !s.healthy).length;
   $("siblings-summary").textContent = [
     "Other services",
     down > 0 ? `${down} down` : `${others.length} up`,
@@ -5433,12 +5432,20 @@ function render3(body) {
   const matrix = buildSiblingMatrix(body);
   $("siblings-matrix").hidden = matrix === null;
   $("siblings-foot").hidden = matrix === null;
-  stampHeading(
-    matrix ? "Other services' databases. " : "Other services' databases. Opens their Ashurbanipal in a new tab. "
+  const at = /* @__PURE__ */ new Date();
+  const updated = el("time", void 0, at.toLocaleTimeString());
+  updated.dateTime = at.toISOString();
+  updated.title = at.toLocaleString();
+  $("siblings-heading").replaceChildren(
+    "Other services' databases. ",
+    matrix ? "" : "Opens their Ashurbanipal in a new tab. ",
+    "Updated ",
+    updated,
+    "."
   );
   if (matrix) renderMatrix(matrix);
   else matrixShape = "";
-  renderList(matrix ? matrix.listed : listSiblings(siblings), !matrix);
+  renderList(listedSiblings(siblings), !matrix);
 }
 function renderList(list, newTab) {
   const shape = JSON.stringify([newTab, list.map((l) => [l.sibling.name, l.note])]);

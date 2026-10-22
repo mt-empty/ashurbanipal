@@ -5,7 +5,7 @@ import {
   buildSiblingMatrix,
   isOwnEntry,
   type ListedSibling,
-  listSiblings,
+  listedSiblings,
   type MatrixCell,
   type SiblingMatrix,
   sameViewHref,
@@ -94,14 +94,6 @@ async function loadSiblings(): Promise<void> {
   render(body);
 }
 
-function stampHeading(prefix: string): void {
-  const at = new Date();
-  const updated = el("time", undefined, at.toLocaleTimeString());
-  updated.dateTime = at.toISOString();
-  updated.title = at.toLocaleString();
-  $("siblings-heading").replaceChildren(prefix, "Updated ", updated, ".");
-}
-
 function renderWarnings(warnings: string[]): void {
   $("siblings-warnings").hidden = warnings.length === 0;
   $("siblings-warnings").replaceChildren(
@@ -120,9 +112,9 @@ function render(body: SiblingsResponse): void {
   setNoticePlace(body.instance?.label ?? null);
   // The instance's own entry is in the list for its position, not its health.
   const others = siblings.filter((s) => !isOwnEntry(body.instance, s));
-  $("siblings").hidden = others.length === 0;
-  const down = others.filter((s) => !s.healthy).length;
   const warnings = body.warnings ?? [];
+  $("siblings").hidden = others.length === 0 && warnings.length === 0;
+  const down = others.filter((s) => !s.healthy).length;
   $("siblings-summary").textContent = [
     "Other services",
     down > 0 ? `${down} down` : `${others.length} up`,
@@ -134,13 +126,21 @@ function render(body: SiblingsResponse): void {
   const matrix = buildSiblingMatrix(body);
   $("siblings-matrix").hidden = matrix === null;
   $("siblings-foot").hidden = matrix === null;
-  stampHeading(
-    matrix ? "Other services' databases. " : "Other services' databases. Opens their Ashurbanipal in a new tab. ",
+  const at = new Date();
+  const updated = el("time", undefined, at.toLocaleTimeString());
+  updated.dateTime = at.toISOString();
+  updated.title = at.toLocaleString();
+  $("siblings-heading").replaceChildren(
+    "Other services' databases. ",
+    matrix ? "" : "Opens their Ashurbanipal in a new tab. ",
+    "Updated ",
+    updated,
+    ".",
   );
   if (matrix) renderMatrix(matrix);
   else matrixShape = "";
   // With no labels at all, the plain list opens each service in a new tab.
-  renderList(matrix ? matrix.listed : listSiblings(siblings), !matrix);
+  renderList(listedSiblings(siblings), !matrix);
 }
 
 function renderList(list: ListedSibling[], newTab: boolean): void {

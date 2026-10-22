@@ -438,7 +438,7 @@ Response:
     one warning for the pair.
 - `warnings` is present iff at least one correction was made: an array of
   human-readable strings whose wording is implementation-defined and MUST
-  NOT be parsed. A disabled implementation never checks the configuration.
+  NOT be parsed.
 - A label is an opaque string the host writes. An implementation echoes it
   byte-for-byte and MUST NOT parse it, compare it against known names,
   derive it from any other signal, or let it change any behavior — §4's

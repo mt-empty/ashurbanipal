@@ -40,11 +40,7 @@ pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data
         !sources.is_empty(),
         "app_state() requires at least one source"
     );
-    let siblings = if config.is_enabled() {
-        config.siblings_view()
-    } else {
-        SiblingsView::default()
-    };
+    let siblings = config.siblings_view();
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
         .build()
@@ -521,15 +517,14 @@ async fn siblings<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
         let http = state.http.clone();
         let is_instance = view.is_instance(&sibling);
         async move {
-            let health_url = health_url(&sibling.base_url, &sibling.health_path);
-            let healthy = match health_url {
-                _ if is_instance => true,
-                Some(url) => matches!(
-                    http.get(url).send().await,
-                    Ok(resp) if resp.status().is_success()
-                ),
-                None => false,
-            };
+            let healthy = is_instance
+                || match health_url(&sibling.base_url, &sibling.health_path) {
+                    Some(url) => matches!(
+                        http.get(url).send().await,
+                        Ok(resp) if resp.status().is_success()
+                    ),
+                    None => false,
+                };
             SiblingStatus {
                 name: sibling.name,
                 label: sibling.label,
@@ -748,17 +743,5 @@ mod kill_switch_tests {
             json["warnings"],
             serde_json::json!(["two siblings share the name \"orders\" and the label \"dev\""])
         );
-    }
-
-    #[actix_web::test]
-    async fn app_state_disabled_never_validates_siblings() {
-        let config = Config::from_toml(
-            &LABELLED
-                .replace("enabled = true", "enabled = false")
-                .replace("label = \"int\"", "label = \"dev\""),
-        )
-        .unwrap();
-        let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
-        assert!(state.siblings.warnings.is_empty());
     }
 }

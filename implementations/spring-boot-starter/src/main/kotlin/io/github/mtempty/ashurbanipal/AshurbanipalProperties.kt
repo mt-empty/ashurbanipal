@@ -46,7 +46,7 @@ class AshurbanipalProperties(
     }
 
     /** What `/api/siblings` reports; never rejected, see [SiblingsView]. */
-    val siblingsView: SiblingsView = if (enabled) buildSiblingsView() else SiblingsView(null, emptyList(), emptyList())
+    val siblingsView: SiblingsView = buildSiblingsView()
 
     private fun buildSiblingsView(): SiblingsView {
         val warnings = mutableListOf<String>()

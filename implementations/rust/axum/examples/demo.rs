@@ -187,30 +187,14 @@ fn siblings_toml(port: u16, sibling_port: Option<u16>) -> String {
     let label = |var: &str| std::env::var(var).ok().filter(|v| !v.is_empty());
     let entry = |name: &str, label: Option<&str>, base: &str| {
         let label = label
-            .map(|l| {
-                format!(
-                    "label = {l:?}
-"
-                )
-            })
+            .map(|l| format!("label = {l:?}\n"))
             .unwrap_or_default();
-        format!(
-            "[[siblings]]
-name = {name:?}
-{label}base_url = \"{base}/__ashurbanipal\"
-health_path = \"/health\"
-"
-        )
+        format!("[[siblings]]\nname = {name:?}\n{label}base_url = \"{base}/__ashurbanipal\"\nhealth_path = \"/health\"\n")
     };
     let mut toml = String::new();
     let own = label("INSTANCE_LABEL");
     if let Some(l) = &own {
-        toml += &format!(
-            "[instance]
-name = \"demo\"
-label = {l:?}
-"
-        );
+        toml += &format!("[instance]\nname = \"demo\"\nlabel = {l:?}\n");
     }
     // Both demos of a labelled pair build the same list, sorted by label and
     // including their own entry, so both show the same grid.
