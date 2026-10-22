@@ -1,6 +1,6 @@
 # Table auto-refresh with interval and countdown
 
-> **Status:** OPEN · **Area:** frontend, docs
+> **Status:** DONE · **Area:** frontend, docs · **Ref:** implemented 2026-10-22 (`features/auto-refresh.ts`, `auto-refresh.spec.ts`)
 
 ## 1. The ask
 
