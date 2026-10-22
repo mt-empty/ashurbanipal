@@ -73,33 +73,21 @@ jobs:
       report-name: conformance-report
 
   # Same suite, run again (not instead) against a demo started with a
-  # second source registered — conformance/runner/two_source.rs is the
-  # only thing this proves beyond the job above.
+  # second source and labelled siblings — conformance/runner/two_source.rs
+  # and labelled_siblings.rs are what this proves beyond the job above. The
+  # two configs are independent, so one demo carries both; the job above
+  # must stay unconfigured to prove /api/siblings' default shape.
   two-source-conformance:
-    name: Rust — conformance kit (two-source round-trip)
+    name: Rust — conformance kit (two-source round-trip, labelled siblings)
     needs: build-and-test
     uses: ./.github/workflows/_conformance-behavior.yml
     with:
       toolchain: rust
       start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/axum/Cargo.toml --example demo"
-      start-env: "CONFORMANCE_SECOND_SOURCE=1"
+      start-env: "CONFORMANCE_SECOND_SOURCE=1 CONFORMANCE_LABELLED_SIBLINGS=1"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: conformance-two-source-report
-
-  # Same suite again against a demo with an instance and labelled siblings
-  # configured — conformance/runner/labelled_siblings.rs is what this adds.
-  labelled-siblings-conformance:
-    name: Rust — conformance kit (labelled siblings)
-    needs: build-and-test
-    uses: ./.github/workflows/_conformance-behavior.yml
-    with:
-      toolchain: rust
-      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/axum/Cargo.toml --example demo"
-      start-env: "CONFORMANCE_LABELLED_SIBLINGS=1"
-      health-url: "http://localhost:4000/health"
-      conformance-url: "http://localhost:4000/__ashurbanipal"
-      report-name: conformance-labelled-siblings-report
 
   schema-conformance:
     name: Rust — schema conformance

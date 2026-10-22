@@ -49,10 +49,10 @@ jobs:
       report-name: flask-python-conformance-report
 
   # Same suite, run again (not instead) against a demo started with a
-  # second source registered — see rust-axum-conformance.yml's identical
-  # job for the rationale.
+  # second source and labelled siblings — see rust-axum-conformance.yml's
+  # identical job for the rationale.
   two-source-conformance:
-    name: Flask — conformance kit (two-source round-trip)
+    name: Flask — conformance kit (two-source round-trip, labelled siblings)
     needs: build-and-test
     uses: ./.github/workflows/_conformance-behavior.yml
     with:
@@ -63,29 +63,10 @@ jobs:
         cd implementations/flask-python &&
         uv sync --extra postgres &&
         PORT=4000 uv run python demo/app.py
-      start-env: "CONFORMANCE_SECOND_SOURCE=1"
+      start-env: "CONFORMANCE_SECOND_SOURCE=1 CONFORMANCE_LABELLED_SIBLINGS=1"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: flask-python-conformance-two-source-report
-
-  # Same suite again against a demo with an instance and labelled siblings
-  # configured — conformance/runner/labelled_siblings.rs is what this adds.
-  labelled-siblings-conformance:
-    name: Flask — conformance kit (labelled siblings)
-    needs: build-and-test
-    uses: ./.github/workflows/_conformance-behavior.yml
-    with:
-      toolchain: python
-      python-version: "3.12"
-      start-command: >-
-        tools/sync-ports-frontend.sh &&
-        cd implementations/flask-python &&
-        uv sync --extra postgres &&
-        PORT=4000 uv run python demo/app.py
-      start-env: "CONFORMANCE_LABELLED_SIBLINGS=1"
-      health-url: "http://localhost:4000/health"
-      conformance-url: "http://localhost:4000/__ashurbanipal"
-      report-name: flask-python-conformance-labelled-siblings-report
 
   schema-conformance:
     name: Flask — schema conformance
