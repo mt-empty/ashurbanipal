@@ -1043,13 +1043,13 @@ function populateSelect(select, values, selected) {
   );
   select.value = selected;
 }
-function flashIcon(el2, glyph, ms = 800) {
+function flashIcon(el2, glyph) {
   if (el2.dataset.rest === void 0) el2.dataset.rest = el2.textContent ?? "";
   const rest = el2.dataset.rest ?? "";
   el2.textContent = glyph;
   setTimeout(() => {
     el2.textContent = rest;
-  }, ms);
+  }, 800);
 }
 async function copyText(text, btn) {
   const mark = btn.querySelector(".copy-icon") ?? btn;
@@ -2380,12 +2380,12 @@ function setLoadingBar(on) {
   loading = on;
   render();
 }
-function startCountdown(durationMs, elapsedMs = 0) {
+function startCountdown(durationMs, elapsedMs) {
   counting = true;
   delete bar.dataset.state;
   bar.style.setProperty("--bar-duration", `${durationMs}ms`);
   bar.style.setProperty("--bar-elapsed", `${elapsedMs}ms`);
-  void bar.offsetWidth;
+  void getComputedStyle(bar).animationName;
   render();
 }
 function stopCountdown() {
@@ -2492,12 +2492,12 @@ $("view-notice-close").onclick = clearViewNotice;
 
 // src/features/auto-refresh.ts
 var STEPS = [
-  { seconds: 0, label: "Off" },
-  { seconds: 5, label: "5 s" },
-  { seconds: 10, label: "10 s" },
-  { seconds: 15, label: "15 s" },
-  { seconds: 30, label: "30 s" },
-  { seconds: 60, label: "1 min" }
+  { ms: 0, label: "Off" },
+  { ms: 5e3, label: "5 s" },
+  { ms: 1e4, label: "10 s" },
+  { ms: 15e3, label: "15 s" },
+  { ms: 3e4, label: "30 s" },
+  { ms: 6e4, label: "1 min" }
 ];
 var MAX_FAILURES = 5;
 var IDLE_MS = 30 * 6e4;
@@ -2507,7 +2507,7 @@ var intervalMs = 0;
 var timer;
 var chipTimer;
 var deadline = 0;
-var busy = 0;
+var fetching = false;
 var failures = 0;
 var lastInput = Date.now();
 function arm(remainingMs) {
@@ -2519,47 +2519,59 @@ function arm(remainingMs) {
 function restart() {
   if (intervalMs > 0 && !document.hidden) arm(intervalMs);
 }
+function disarm() {
+  clearTimeout(timer);
+  stopCountdown();
+}
+var isIdle = () => Date.now() - lastInput > IDLE_MS;
 function tick() {
-  if (Date.now() - lastInput > IDLE_MS) {
+  if (isIdle()) {
     stop(IDLE_NOTICE);
     return;
   }
-  if (busy > 0) return;
+  if (fetching) return;
   void loadData({ resetScroll: false, highlightNew: true, auto: true }).finally(() => {
     if (intervalMs > 0 && Date.now() >= deadline) restart();
   });
 }
 function render3() {
-  const step = STEPS.find((s) => s.seconds * 1e3 === intervalMs) ?? STEPS[0];
   const on = intervalMs > 0;
   $("refresh-split").classList.toggle("on", on);
   const suffix = $("refresh-interval");
   suffix.hidden = !on;
-  suffix.textContent = on ? ` \xB7 ${step.label}` : "";
-  $("refresh").setAttribute("aria-label", on ? `refresh, automatically every ${step.label}` : "refresh");
+  $("refresh").setAttribute("aria-label", "refresh");
+  if (on) {
+    const { label } = STEPS.find((s) => s.ms === intervalMs) ?? STEPS[0];
+    suffix.textContent = ` \xB7 ${label}`;
+    $("refresh").setAttribute("aria-label", `refresh, automatically every ${label}`);
+  }
   for (const radio of document.querySelectorAll("#refresh-pop-list input")) {
-    radio.checked = Number(radio.value) * 1e3 === intervalMs;
+    radio.checked = Number(radio.value) === intervalMs;
   }
 }
-function chooseInterval(seconds) {
-  intervalMs = seconds * 1e3;
-  failures = 0;
+function noteInput() {
   lastInput = Date.now();
-  clearTimeout(timer);
-  if (intervalMs > 0) restart();
-  else stopCountdown();
+}
+var INPUT_EVENTS = ["pointermove", "pointerdown", "keydown", "scroll", "touchstart"];
+function chooseInterval(ms) {
+  intervalMs = ms;
+  failures = 0;
+  noteInput();
+  for (const type of INPUT_EVENTS) {
+    if (ms > 0) document.addEventListener(type, noteInput, { passive: true, capture: true });
+    else document.removeEventListener(type, noteInput, { capture: true });
+  }
+  if (ms > 0) restart();
+  else disarm();
   render3();
 }
 function stop(notice) {
   chooseInterval(0);
   if (notice) showViewNotice(notice);
 }
-function fetchStarted() {
-  busy++;
-}
-function fetchEnded() {
-  busy--;
-  restart();
+function setFetching(on) {
+  fetching = on;
+  if (!on) restart();
 }
 function noteLoadOk() {
   failures = 0;
@@ -2586,13 +2598,13 @@ function setNewChip(count) {
 function startAutoRefresh() {
   const list = $("refresh-pop-list");
   list.replaceChildren(
-    ...STEPS.map(({ seconds, label }) => {
+    ...STEPS.map(({ ms, label }) => {
       const radio = el("input");
       radio.type = "radio";
       radio.name = "refresh-interval";
-      radio.value = String(seconds);
+      radio.value = String(ms);
       radio.onchange = () => {
-        chooseInterval(seconds);
+        chooseInterval(ms);
         $("refresh-pop").hidePopover();
         $("refresh-menu-btn").focus();
       };
@@ -2602,20 +2614,13 @@ function startAutoRefresh() {
     })
   );
   render3();
-  const noteInput = () => {
-    lastInput = Date.now();
-  };
-  for (const type of ["pointermove", "pointerdown", "keydown", "scroll", "touchstart"]) {
-    document.addEventListener(type, noteInput, { passive: true, capture: true });
-  }
   document.addEventListener("visibilitychange", () => {
     if (intervalMs === 0) return;
     if (document.hidden) {
-      clearTimeout(timer);
-      stopCountdown();
+      disarm();
       return;
     }
-    if (Date.now() - lastInput > IDLE_MS) {
+    if (isIdle()) {
       stop(IDLE_NOTICE);
       return;
     }
@@ -5820,8 +5825,8 @@ function restoreTableFocus(captured) {
 }
 
 // src/bootstrap/controller.ts
-function setTableBusy(busy2) {
-  if (busy2) tableEl.setAttribute("aria-busy", "true");
+function setTableBusy(busy) {
+  if (busy) tableEl.setAttribute("aria-busy", "true");
   else tableEl.removeAttribute("aria-busy");
 }
 var inFlightFetches = 0;
@@ -5898,8 +5903,8 @@ async function fetchViewData(req) {
   }
   applyScopeParams(params);
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
-  fetchStarted();
   if (inFlightFetches++ === 0) {
+    setFetching(true);
     setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true), LOADING_DELAY_MS);
   }
@@ -5912,8 +5917,8 @@ async function fetchViewData(req) {
       clearTimeout(slowTimer);
       setSlow(false);
       setTableBusy(false);
+      setFetching(false);
     }
-    fetchEnded();
   }
 }
 function viewTitle(view) {

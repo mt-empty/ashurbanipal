@@ -19,13 +19,13 @@ export function setLoadingBar(on: boolean): void {
   render();
 }
 
-// Restarting needs a reflow between the two states, or the CSS animation keeps its old progress.
-export function startCountdown(durationMs: number, elapsedMs = 0): void {
+// Restarting needs a style flush between the two states, or the CSS animation keeps its old progress.
+export function startCountdown(durationMs: number, elapsedMs: number): void {
   counting = true;
   delete bar.dataset.state;
   bar.style.setProperty("--bar-duration", `${durationMs}ms`);
   bar.style.setProperty("--bar-elapsed", `${elapsedMs}ms`);
-  void bar.offsetWidth;
+  void getComputedStyle(bar).animationName;
   render();
 }
 

@@ -15,7 +15,7 @@ import {
   type ViewRequest,
 } from "../core/state.js";
 import type { JoinDef, View, ViewData } from "../core/types.js";
-import { fetchEnded, fetchStarted, noteLoadOk, noteTickFailed, setNewChip } from "../features/auto-refresh.js";
+import { noteLoadOk, noteTickFailed, setFetching, setNewChip } from "../features/auto-refresh.js";
 import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
 import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
@@ -141,8 +141,8 @@ async function fetchViewData(req: ViewRequest): Promise<ViewData> {
   // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
   // box's DSL text — URLSearchParams handles the URL-encoding.
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
-  fetchStarted();
   if (inFlightFetches++ === 0) {
+    setFetching(true);
     setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true), LOADING_DELAY_MS);
   }
@@ -155,8 +155,8 @@ async function fetchViewData(req: ViewRequest): Promise<ViewData> {
       clearTimeout(slowTimer);
       setSlow(false);
       setTableBusy(false);
+      setFetching(false);
     }
-    fetchEnded();
   }
 }
 

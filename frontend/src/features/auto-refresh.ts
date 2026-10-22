@@ -4,17 +4,17 @@ import { formatClock } from "../lib/format.js";
 import { startCountdown, stopCountdown } from "./load-bar.js";
 import { showViewNotice } from "./view-notice.js";
 
-// Opt-in re-fetch of the current view on a fixed interval (story 38). Off on
-// every page load and never persisted. The countdown restarts whenever any
+// Opt-in re-fetch of the current view on a fixed interval. Off on every page
+// load and never persisted. The countdown restarts whenever the last in-flight
 // fetch ends, so a tick is only ever skipped for a fetch the user started.
 
-const STEPS: ReadonlyArray<{ seconds: number; label: string }> = [
-  { seconds: 0, label: "Off" },
-  { seconds: 5, label: "5 s" },
-  { seconds: 10, label: "10 s" },
-  { seconds: 15, label: "15 s" },
-  { seconds: 30, label: "30 s" },
-  { seconds: 60, label: "1 min" },
+const STEPS: ReadonlyArray<{ ms: number; label: string }> = [
+  { ms: 0, label: "Off" },
+  { ms: 5_000, label: "5 s" },
+  { ms: 10_000, label: "10 s" },
+  { ms: 15_000, label: "15 s" },
+  { ms: 30_000, label: "30 s" },
+  { ms: 60_000, label: "1 min" },
 ];
 const MAX_FAILURES = 5;
 const IDLE_MS = 30 * 60_000;
@@ -26,7 +26,7 @@ let intervalMs = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let chipTimer: ReturnType<typeof setTimeout> | undefined;
 let deadline = 0;
-let busy = 0;
+let fetching = false;
 let failures = 0;
 let lastInput = Date.now();
 
@@ -41,12 +41,19 @@ function restart(): void {
   if (intervalMs > 0 && !document.hidden) arm(intervalMs);
 }
 
+function disarm(): void {
+  clearTimeout(timer);
+  stopCountdown();
+}
+
+const isIdle = () => Date.now() - lastInput > IDLE_MS;
+
 function tick(): void {
-  if (Date.now() - lastInput > IDLE_MS) {
+  if (isIdle()) {
     stop(IDLE_NOTICE);
     return;
   }
-  if (busy > 0) return;
+  if (fetching) return;
   void loadData({ resetScroll: false, highlightNew: true, auto: true }).finally(() => {
     // A load that never fetched (no view yet) leaves nothing else to restart the countdown.
     if (intervalMs > 0 && Date.now() >= deadline) restart();
@@ -54,25 +61,37 @@ function tick(): void {
 }
 
 function render(): void {
-  const step = STEPS.find((s) => s.seconds * 1000 === intervalMs) ?? STEPS[0];
   const on = intervalMs > 0;
   $("refresh-split").classList.toggle("on", on);
   const suffix = $("refresh-interval");
   suffix.hidden = !on;
-  suffix.textContent = on ? ` · ${step.label}` : "";
-  $("refresh").setAttribute("aria-label", on ? `refresh, automatically every ${step.label}` : "refresh");
+  $("refresh").setAttribute("aria-label", "refresh");
+  if (on) {
+    const { label } = STEPS.find((s) => s.ms === intervalMs) ?? STEPS[0];
+    suffix.textContent = ` · ${label}`;
+    $("refresh").setAttribute("aria-label", `refresh, automatically every ${label}`);
+  }
   for (const radio of document.querySelectorAll<HTMLInputElement>("#refresh-pop-list input")) {
-    radio.checked = Number(radio.value) * 1000 === intervalMs;
+    radio.checked = Number(radio.value) === intervalMs;
   }
 }
 
-function chooseInterval(seconds: number): void {
-  intervalMs = seconds * 1000;
-  failures = 0;
+function noteInput(): void {
   lastInput = Date.now();
-  clearTimeout(timer);
-  if (intervalMs > 0) restart();
-  else stopCountdown();
+}
+const INPUT_EVENTS = ["pointermove", "pointerdown", "keydown", "scroll", "touchstart"];
+
+function chooseInterval(ms: number): void {
+  intervalMs = ms;
+  failures = 0;
+  noteInput();
+  // Same handler and options, so adding again is a no-op; they only listen while the interval is on.
+  for (const type of INPUT_EVENTS) {
+    if (ms > 0) document.addEventListener(type, noteInput, { passive: true, capture: true });
+    else document.removeEventListener(type, noteInput, { capture: true });
+  }
+  if (ms > 0) restart();
+  else disarm();
   render();
 }
 
@@ -81,13 +100,9 @@ function stop(notice?: string): void {
   if (notice) showViewNotice(notice);
 }
 
-export function fetchStarted(): void {
-  busy++;
-}
-
-export function fetchEnded(): void {
-  busy--;
-  restart();
+export function setFetching(on: boolean): void {
+  fetching = on;
+  if (!on) restart();
 }
 
 export function noteLoadOk(): void {
@@ -119,13 +134,13 @@ export function setNewChip(count: number): void {
 export function startAutoRefresh(): void {
   const list = $("refresh-pop-list");
   list.replaceChildren(
-    ...STEPS.map(({ seconds, label }) => {
+    ...STEPS.map(({ ms, label }) => {
       const radio = el("input");
       radio.type = "radio";
       radio.name = "refresh-interval";
-      radio.value = String(seconds);
+      radio.value = String(ms);
       radio.onchange = () => {
-        chooseInterval(seconds);
+        chooseInterval(ms);
         $("refresh-pop").hidePopover();
         $("refresh-menu-btn").focus();
       };
@@ -136,21 +151,14 @@ export function startAutoRefresh(): void {
   );
   render();
 
-  const noteInput = () => {
-    lastInput = Date.now();
-  };
-  for (const type of ["pointermove", "pointerdown", "keydown", "scroll", "touchstart"]) {
-    document.addEventListener(type, noteInput, { passive: true, capture: true });
-  }
-
   document.addEventListener("visibilitychange", () => {
     if (intervalMs === 0) return;
     if (document.hidden) {
-      clearTimeout(timer);
-      stopCountdown();
+      disarm();
       return;
     }
-    if (Date.now() - lastInput > IDLE_MS) {
+    // Checked here, not left to the next tick: the first input after a long absence would reset the idle clock.
+    if (isIdle()) {
       stop(IDLE_NOTICE);
       return;
     }

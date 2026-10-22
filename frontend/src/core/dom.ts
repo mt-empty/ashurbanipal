@@ -57,13 +57,13 @@ export function populateSelect(select: HTMLSelectElement, values: string[], sele
 // Flashes `glyph` on `el`, then restores whatever glyph was resting there.
 // The resting value is recorded on dataset.rest the first time only, so a
 // re-click mid-flash restores the real glyph rather than the transient one.
-export function flashIcon(el: HTMLElement, glyph: string, ms = 800): void {
+export function flashIcon(el: HTMLElement, glyph: string): void {
   if (el.dataset.rest === undefined) el.dataset.rest = el.textContent ?? "";
   const rest = el.dataset.rest ?? "";
   el.textContent = glyph;
   setTimeout(() => {
     el.textContent = rest;
-  }, ms);
+  }, 800);
 }
 
 // ---- per-cell copy (Clipboard API) ----
