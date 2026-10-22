@@ -1559,9 +1559,6 @@ function qs(root, selector) {
   if (!el2) throw new Error(`no element matches ${selector}`);
   return el2;
 }
-function isPlainClick(e) {
-  return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
-}
 function setStatus(text) {
   $("status").textContent = text;
 }
@@ -2789,11 +2786,14 @@ function scopeQuery() {
   applyScopeParams(params);
   return params.size ? `?${params}` : "";
 }
-function viewHref(table, join) {
-  const params = new URLSearchParams({ table });
+function viewParams(view) {
+  const params = new URLSearchParams({ table: startTable(view) ?? "" });
   applyScopeParams(params);
-  if (join) params.set("join", join);
-  return `?${params}`;
+  if (view?.kind === "join") params.set("join", view.text);
+  return params;
+}
+function viewHref(view) {
+  return `?${viewParams(view)}`;
 }
 function sourceQuery() {
   return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
@@ -3804,8 +3804,7 @@ async function loadTables() {
     countEl.title = APPROX_COUNT_TITLE;
     chip.dataset.table = t.name;
     chip.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
-    chip.href = viewHref(t.name);
-    openInPlace(chip, () => {
+    linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
       switchTable(t.name);
       loadData();
     });
@@ -3835,12 +3834,20 @@ function listedTableNames() {
 function tableChipCount(name) {
   return chipCounts.get(name) ?? "";
 }
-function openInPlace(a, run) {
+function linkTo(a, href, run) {
+  a.href = href;
   a.onclick = (e) => {
-    if (!isPlainClick(e)) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     run();
   };
+  return a;
+}
+function actionButton(run) {
+  const btn = el("button");
+  btn.type = "button";
+  btn.onclick = run;
+  return btn;
 }
 function hasJoinChips() {
   return joinEntries.length > 0;
@@ -3850,18 +3857,7 @@ function setJoinChips(chips) {
   for (const e of joinEntries) e.li.remove();
   joinEntries = chips.map((c, i) => {
     const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
-    let chip;
-    if (c.href) {
-      const a = el("a");
-      a.href = c.href;
-      openInPlace(a, c.run);
-      chip = a;
-    } else {
-      const btn = el("button");
-      btn.type = "button";
-      btn.onclick = c.run;
-      chip = btn;
-    }
+    const chip = c.href ? linkTo(el("a"), c.href, c.run) : actionButton(c.run);
     chip.textContent = c.label;
     chip.title = c.title;
     chip.classList.toggle("active", c.active);
@@ -4523,15 +4519,20 @@ function renderSavedChips(actions) {
   const inSaved = saved.some((s) => s.text === current2?.text);
   const chips = saved.map((s) => {
     const active = s.text === current2?.text;
-    const parsed = active ? null : parseJoin(s.text);
-    return {
-      label: `\u22C8 ${s.name}`,
-      title: active ? `${s.name}: click to edit, rename or delete` : `${s.name} \u2014 ${s.text.replaceAll("\n", " ")}`,
-      className: "saved",
-      active,
-      run: active ? actions.edit : () => actions.open(s.text),
-      href: parsed && !("error" in parsed) ? viewHref(parsed.def.tables[0].table, s.text) : void 0
-    };
+    const label = `\u22C8 ${s.name}`;
+    if (active)
+      return {
+        label,
+        title: `${s.name}: click to edit, rename or delete`,
+        className: "saved",
+        active,
+        run: actions.edit
+      };
+    const chip = { label, title: `${s.name} \u2014 ${s.text.replaceAll("\n", " ")}`, className: "saved", active };
+    const parsed = parseJoin(s.text);
+    if ("error" in parsed) return { ...chip, run: () => reportError(new Error(`saved join: ${parsed.error.message}`)) };
+    const { def } = parsed;
+    return { ...chip, run: () => actions.open(def), href: viewHref({ kind: "join", def, text: s.text, hidden: [] }) };
   });
   if (current2 && !inSaved) {
     chips.push({
@@ -4930,14 +4931,9 @@ function openJoinDialog(opts = {}) {
   if (!dialog.open) dialog.showModal();
   if (opts.focusName) $("join-name").focus();
 }
-function openSaved(text) {
-  const parsed = parseJoin(text);
-  if ("error" in parsed) reportError(new Error(`saved join: ${parsed.error.message}`));
-  else applyJoin(parsed.def);
-}
 function refreshSavedChips() {
   renderSavedChips({
-    open: openSaved,
+    open: applyJoin,
     edit: () => openJoinDialog(),
     startNew: () => openJoinDialog({ fresh: true }),
     saveCurrent: () => openJoinDialog({ focusName: true })
@@ -5741,17 +5737,13 @@ function updateNavButtons() {
   $("nav-forward").disabled = navIndex >= navStack.length - 1;
 }
 function syncUrl() {
-  const params = new URLSearchParams({
-    table: startTable(state.view) ?? "",
-    limit: String(state.limit),
-    offset: String(state.offset)
-  });
+  const params = viewParams(state.view);
+  params.set("limit", String(state.limit));
+  params.set("offset", String(state.offset));
   if (state.sort) {
     params.set("sort", state.sort);
     params.set("order", state.order);
   }
-  applyScopeParams(params);
-  if (state.view?.kind === "join") params.set("join", state.view.text);
   if (state.filter) params.set("filter", state.filter);
   const qs2 = `?${params}`;
   const key = navViewKey();
