@@ -143,6 +143,24 @@ test("the active table stays visible in a collapsed list, and 'show fewer' keeps
   await expect(page.locator("#tables li[hidden]:not(#tables-more-item)").first()).toBeAttached();
 });
 
+test("an expanded table list stays expanded after a reload, and a collapsed one collapsed", async ({
+  page,
+}) => {
+  await page.setViewportSize(NARROW);
+  await gotoApp(page);
+  const more = page.locator("#tables-more");
+  await more.click();
+  await expect(more).toHaveText("show fewer");
+  await page.reload();
+  await expect(more).toHaveText("show fewer");
+  await expect(more).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator("#tables li[hidden]:not(#tables-more-item)")).toHaveCount(0);
+  await more.click();
+  await expect(more).toHaveText(/^\+ \d+ more$/);
+  await page.reload();
+  await expect(more).toHaveText(/^\+ \d+ more$/);
+});
+
 test("a chip pulled up from the hidden part gets a divider only on a line with other chips", async ({
   page,
 }) => {

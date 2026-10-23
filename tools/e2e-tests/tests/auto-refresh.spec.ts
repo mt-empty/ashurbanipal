@@ -226,3 +226,61 @@ test("a tick the role can't read gets the plain-language message", async ({ page
   await tick(page, mock);
   await expect(page.locator("#error")).toHaveText("you don't have access to users");
 });
+
+test("the countdown bar stays under the open filter suggestion list", async ({ page }) => {
+  await setup(page);
+  await choose(page, "5 s");
+  await expect(page.locator("#load-bar")).toHaveAttribute("data-state", "countdown");
+  await page.locator("#filter").click();
+  await expect(page.locator("#filter-suggest")).toBeVisible();
+  const topAtBar = () =>
+    page.evaluate(() => {
+      const bar = (document.getElementById("load-bar") as HTMLElement).getBoundingClientRect();
+      const list = (document.getElementById("filter-suggest") as HTMLElement).getBoundingClientRect();
+      if (bar.top < list.top || bar.bottom > list.bottom) return "no overlap";
+      const hit = document.elementFromPoint(list.left + list.width / 2, bar.top + 1);
+      // Names whatever is on top, so a failure says what covered the list.
+      if (hit?.closest("#filter-suggest")) return "filter-suggest";
+      return hit?.closest("[id]")?.id ?? hit?.tagName ?? null;
+    });
+  await expect.poll(topAtBar).toBe("filter-suggest");
+});
+
+test("once the header pins, the open suggestion list slides behind it and the countdown bar", async ({ page }) => {
+  // The real users table, tall enough to scroll; the paused clock keeps the countdown from firing.
+  await page.clock.install();
+  await gotoApp(page);
+  await selectTable(page, "users");
+  await choose(page, "5 s");
+  await page.locator("#filter").click();
+  await expect(page.locator("#filter-suggest")).toBeVisible();
+  // Brings the table header a few pixels past the scroller's top, where it pins (WebKit
+  // rounds scroll offsets to whole pixels).
+  await page.evaluate(() => {
+    const main = document.getElementById("main") as HTMLElement;
+    const thead = document.getElementById("thead") as HTMLElement;
+    main.scrollBy(0, thead.getBoundingClientRect().top - main.getBoundingClientRect().top + 4);
+  });
+  await expect(page.locator("#main")).toHaveClass(/header-stuck/);
+  // Names what is on top where the list crosses the bar and where it crosses the header.
+  const onTop = () =>
+    page.evaluate(() => {
+      const box = (id: string) => (document.getElementById(id) as HTMLElement).getBoundingClientRect();
+      const bar = box("load-bar");
+      const list = box("filter-suggest");
+      const th = (document.querySelector("#data-table thead th") as HTMLElement).getBoundingClientRect();
+      const name = (y: number) => {
+        const hit = document.elementFromPoint(list.left + list.width / 2, y);
+        if (hit?.closest("#filter-suggest")) return "filter-suggest";
+        if (hit?.closest("th")) return "th";
+        return hit?.closest("[id]")?.id ?? hit?.tagName ?? null;
+      };
+      const headerTop = Math.max(bar.bottom, list.top, th.top);
+      const headerBottom = Math.min(list.bottom, th.bottom);
+      return {
+        atBar: list.top <= bar.top && list.bottom >= bar.bottom ? name(bar.top + 1) : "no overlap",
+        atHeader: headerBottom - headerTop > 2 ? name((headerTop + headerBottom) / 2) : "no overlap",
+      };
+    });
+  await expect.poll(onTop).toEqual({ atBar: "load-bar", atHeader: "th" });
+});

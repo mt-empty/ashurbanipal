@@ -101,7 +101,11 @@ Two components, same as the original concept:
   - *Cell preview* — clicking a `jsonb` cell, or any cell truncated by the
     max cell width (~24rem), opens a native Popover API popup
     (`popover` attribute: non-modal, light-dismiss) near the cell with the
-    full content; JSON-shaped values pretty-print.
+    full content; JSON-shaped values pretty-print. A popover always renders
+    in the top layer, so scrolling with it open draws it over the pinned
+    table header (the referenced-by popover too). Accepted: keeping the
+    native light-dismiss, Escape handling and popover stacking is worth
+    more than avoiding the overlap.
   - *Record / vertical view* — a per-row button opens that row as a stacked
     `column: value` list, reusing the same `<dialog>` chrome as the payload
     viewer. Per-field copy buttons plus a whole-row-as-JSON copy button.
@@ -189,7 +193,8 @@ Two components, same as the original concept:
     on the last row; when collapsed, chips at the end of row three make room
     for it, so the rows above never move. The active table stays visible when
     collapsed: it is shown right after the last visible chip, with a divider
-    when that moves it out of alphabetical order. There is no table search box.
+    when that moves it out of alphabetical order. The expanded state is
+    remembered across reloads. There is no table search box.
 - **UI state persistence**: `localStorage` remembers lightweight UI state
   across visits — currently selected source, schema (remembered per
   source), table, sort column/direction (remembered per table, like
@@ -197,8 +202,11 @@ Two components, same as the original concept:
   same state (except hidden columns and the filter) is mirrored into the
   URL's query params via `history.replaceState`, so the address bar is
   always a shareable link for the current view. Properties:
-  - One `localStorage` key, `ashurbanipal_ui`, value is a small JSON
-    object. Nothing sensitive ever goes in it — table/column names only,
+  - The view state is one `localStorage` key, `ashurbanipal_ui`, value a
+    small JSON object. Saved joins (`ashurbanipal_joins`) and the display
+    preferences — theme (`ashurbanipal_theme`) and the expanded table list
+    (`ashurbanipal_tables_expanded`) — each have their own key, outside
+    the URL mirror. Nothing sensitive ever goes in any of them — table/column names only,
     no row data, no filters. The *applied* filter is the one exception,
     and it's asymmetric by design: it's carried in the URL (as the raw DSL
     text the user typed, verbatim — no JSON-AST param, no separate
