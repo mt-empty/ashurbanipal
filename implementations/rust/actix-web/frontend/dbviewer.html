@@ -65,6 +65,13 @@
   --type-date: light-dark(#3f7a5c, #8cc4a8);
   /* Transient wash on rows added since the last manual refresh. */
   --row-new-bg: light-dark(#e3f6e6, #1f3a26);
+  /* The scroller's layers, lowest first. #chrome is on top at rest and drops
+     to the header's level once the header pins (features/sticky-header.ts),
+     where the header wins by coming later: the filter's suggestion list
+     covers the header and #load-bar at rest and slides behind both on scroll. */
+  --z-header: 1;
+  --z-load-bar: 2;
+  --z-chrome: 3;
 }
 
 /* ==== Layout ==== */
@@ -77,11 +84,8 @@ body { margin: 0; height: 100vh; font-size: .875rem; }
 main { height: 100%; overflow: auto; }
 /* sticky left keeps the chrome in view when a wide table scrolls sideways;
    it works because #content below is as wide as the table (see #content). */
-#chrome { position: sticky; left: 0; z-index: 2; padding: var(--gap-lg) var(--gap-xl) 0; }
-/* Above the table header until the header is pinned (features/sticky-header.ts),
-   then level with it, and the header comes later so it wins: the filter's
-   suggestion list covers the header at rest and slides behind it on scroll. */
-#main.header-stuck #chrome { z-index: 1; }
+#chrome { position: sticky; left: 0; z-index: var(--z-chrome); padding: var(--gap-lg) var(--gap-xl) 0; }
+#main.header-stuck #chrome { z-index: var(--z-header); }
 /* width: max-content (floored at 100%) makes #content's own box grow to
    match a wide table's overflow instead of staying clipped to main's
    visible width. Without this, #pager's sticky `left` has no room to
@@ -93,7 +97,7 @@ main { height: 100%; overflow: auto; }
    margin keeps it out of the flow, like the row spinner. 100vw counts a classic
    vertical scrollbar, so min() keeps a narrow table's page from growing a
    horizontal one. */
-#load-bar { position: sticky; top: 0; left: var(--gap-xl); z-index: 2; box-sizing: border-box;
+#load-bar { position: sticky; top: 0; left: var(--gap-xl); z-index: var(--z-load-bar); box-sizing: border-box;
             width: min(100%, calc(100vw - 2 * var(--gap-xl))); height: 2px; margin-bottom: -2px;
             overflow: hidden; background: var(--rule); }
 #load-bar:not([data-state]) { display: none; }
@@ -226,7 +230,7 @@ ul { list-style: none; margin: 0; padding: 0; }
    and since tbody follows thead in DOM order, its positioned <td>s paint
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
-:where(#data-table) thead th { position: sticky; top: 0; z-index: 1; background: canvas; }
+:where(#data-table) thead th { position: sticky; top: 0; z-index: var(--z-header); background: canvas; }
 /* Capped like the table chips' names; the title carries the full name. */
 .col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
             vertical-align: bottom; }
@@ -1891,6 +1895,25 @@ function collectNewRowKeys(prev, next, opts) {
   return { newRowKeys, pkNames };
 }
 
+// src/core/storage.ts
+function readStored(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writeStored(key, value, failure) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    if (failure) console.warn(failure, e);
+    return false;
+  }
+}
+
 // src/core/store.ts
 var UI_KEY = "ashurbanipal_ui";
 var state = {
@@ -2034,7 +2057,7 @@ function isPlainObject(v) {
 }
 function restoreFromStorage() {
   try {
-    const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+    const saved = JSON.parse(readStored(UI_KEY) || "{}");
     if (typeof saved.source === "string") state.source = saved.source;
     if (typeof saved.schema === "string") state.schema = saved.schema;
     if (typeof saved.table === "string") state.view = tableView(saved.table);
@@ -2060,23 +2083,17 @@ function restoreFromStorage() {
     }
   } catch (e) {
     console.warn("ashurbanipal: discarding unreadable view state", e);
-    try {
-      localStorage.removeItem(UI_KEY);
-    } catch {
-    }
+    writeStored(UI_KEY, null);
   }
 }
 function persist() {
   const { source, schema, limit, hiddenColumns: hiddenColumns2, sortByTable, schemaBySource } = state;
   const table = startTable(state.view);
-  try {
-    localStorage.setItem(
-      UI_KEY,
-      JSON.stringify({ source, schema, table, limit, hiddenColumns: hiddenColumns2, sortByTable, schemaBySource })
-    );
-  } catch (e) {
-    console.warn("ashurbanipal: could not persist view state", e);
-  }
+  writeStored(
+    UI_KEY,
+    JSON.stringify({ source, schema, table, limit, hiddenColumns: hiddenColumns2, sortByTable, schemaBySource }),
+    "ashurbanipal: could not persist view state"
+  );
 }
 function hiddenColumns() {
   const view = state.view;
@@ -3340,7 +3357,8 @@ var tableRowTemplate = $("table-row-template");
 var TABLE_CAP_LINES = 3;
 var tablesMore = $("tables-more");
 var tablesMoreItem = $("tables-more-item");
-var tablesExpanded = false;
+var TABLES_EXPANDED_KEY = "ashurbanipal_tables_expanded";
+var tablesExpanded = readStored(TABLES_EXPANDED_KEY) === "true";
 var cappedActive = null;
 function updateTablesCap() {
   const entries = allEntries();
@@ -3379,6 +3397,7 @@ function updateTablesCap() {
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
+  writeStored(TABLES_EXPANDED_KEY, tablesExpanded ? "true" : null);
   updateTablesCap();
 };
 var tablesWidth = 0;
@@ -4146,7 +4165,7 @@ window.addEventListener("storage", (e) => {
 function read() {
   if (stored) return stored;
   try {
-    stored = sanitizeSaved(JSON.parse(localStorage.getItem(SAVED_KEY) || "{}"));
+    stored = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"));
   } catch (e) {
     console.warn("ashurbanipal: discarding unreadable saved joins", e);
     stored = {};
@@ -4154,14 +4173,9 @@ function read() {
   return stored;
 }
 function write(store) {
-  try {
-    localStorage.setItem(SAVED_KEY, JSON.stringify(store));
-    stored = store;
-    return true;
-  } catch (e) {
-    console.warn("ashurbanipal: could not save joins", e);
-    return false;
-  }
+  if (!writeStored(SAVED_KEY, JSON.stringify(store), "ashurbanipal: could not save joins")) return false;
+  stored = store;
+  return true;
 }
 function savedJoins() {
   return scopeEntries(read(), state.source, state.schema);
@@ -6062,10 +6076,7 @@ $("theme-toggle").onclick = () => {
   const next = currentTheme() === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   $("theme-toggle").setAttribute("aria-pressed", String(next === "dark"));
-  try {
-    localStorage.setItem(THEME_KEY, next);
-  } catch {
-  }
+  writeStored(THEME_KEY, next);
 };
 
 // src/bootstrap/main.ts

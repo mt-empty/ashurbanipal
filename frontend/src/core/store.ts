@@ -2,6 +2,7 @@ import { tryParseFilterDsl } from "../lib/filter-dsl.js";
 import { effectiveName, parseJoin, printJoin } from "../lib/join-dsl.js";
 import { collectNewRowKeys } from "../lib/row-diff.js";
 import { $ } from "./dom.js";
+import { readStored, writeStored } from "./storage.js";
 import type { FilterCondition, JoinDef, JoinView, TableView, View, ViewData } from "./types.js";
 
 const UI_KEY = "ashurbanipal_ui";
@@ -250,7 +251,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // initState() runs this before layering the URL over it.
 export function restoreFromStorage(): void {
   try {
-    const saved = JSON.parse(localStorage.getItem(UI_KEY) || "{}");
+    const saved = JSON.parse(readStored(UI_KEY) || "{}");
     if (typeof saved.source === "string") state.source = saved.source;
     if (typeof saved.schema === "string") state.schema = saved.schema;
     if (typeof saved.table === "string") state.view = tableView(saved.table);
@@ -282,33 +283,23 @@ export function restoreFromStorage(): void {
     }
   } catch (e) {
     // A corrupt persisted blob (truncated write, pre-migration schema) otherwise
-    // reverts the view to defaults with no trace. removeItem can itself throw
-    // where getItem did (site data blocked), and this runs at bootstrap.
+    // reverts the view to defaults with no trace.
     console.warn("ashurbanipal: discarding unreadable view state", e);
-    try {
-      localStorage.removeItem(UI_KEY);
-    } catch {
-      /* best-effort */
-    }
+    writeStored(UI_KEY, null);
   }
 }
 
 export function persist(): void {
   const { source, schema, limit, hiddenColumns, sortByTable, schemaBySource } = state;
   const table = startTable(state.view);
-  // Best-effort: a throw here (quota, private mode) must not abort the caller,
-  // which almost always follows persist() with a loadData()/loadTables() the
-  // user still needs. Unlike the single-string write in theme.ts, this
-  // blob grows per table/source touched, so a quota
+  // The caller almost always follows persist() with a loadData()/loadTables()
+  // the user still needs. This blob grows per table/source touched, so a quota
   // failure is plausible on a long session — warn so it isn't wholly invisible.
-  try {
-    localStorage.setItem(
-      UI_KEY,
-      JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }),
-    );
-  } catch (e) {
-    console.warn("ashurbanipal: could not persist view state", e);
-  }
+  writeStored(
+    UI_KEY,
+    JSON.stringify({ source, schema, table, limit, hiddenColumns, sortByTable, schemaBySource }),
+    "ashurbanipal: could not persist view state",
+  );
 }
 
 // A stale table key or column name absent from the current table's

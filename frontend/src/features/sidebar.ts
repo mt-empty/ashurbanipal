@@ -15,12 +15,13 @@ import {
   tableInView,
   viewHref,
 } from "../core/state.js";
+import { readStored, writeStored } from "../core/storage.js";
 import type { SourceEntry, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
 import { syncViewNotice } from "./view-notice.js";
 
 // ---- table chips: transient, session-local state, not part of
-// `state`/localStorage — resets on reload ----
+// `state`/localStorage — resets on reload (except the expanded flag below) ----
 interface TableEntry {
   name: string;
   li: HTMLLIElement;
@@ -45,7 +46,10 @@ const tablesMore = $<HTMLButtonElement>("tables-more");
 // Last item in the list, right-aligned (see styles.css), so it follows the
 // final chip instead of taking width from the rows above it.
 const tablesMoreItem = $("tables-more-item");
-let tablesExpanded = false;
+// A display preference like the theme, so its own key rather than the view
+// blob that mirrors to the URL.
+const TABLES_EXPANDED_KEY = "ashurbanipal_tables_expanded";
+let tablesExpanded = readStored(TABLES_EXPANDED_KEY) === "true";
 // The active table chip the last cap pass saw; a repeat load of the same view
 // skips the measuring (an active join chip is setJoinChips' to measure).
 let cappedActive: string | null = null;
@@ -96,6 +100,7 @@ function updateTablesCap(): void {
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
+  writeStored(TABLES_EXPANDED_KEY, tablesExpanded ? "true" : null);
   updateTablesCap();
 };
 // A width change only: updateTablesCap itself changes the height, which must

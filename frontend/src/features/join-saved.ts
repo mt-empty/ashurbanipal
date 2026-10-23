@@ -1,5 +1,6 @@
 import { reportError } from "../core/dom.js";
 import { joinInView, state, viewHref } from "../core/state.js";
+import { readStored, writeStored } from "../core/storage.js";
 import type { JoinDef } from "../core/types.js";
 import { joinLabel } from "../lib/join-def.js";
 import { parseJoin } from "../lib/join-dsl.js";
@@ -27,7 +28,7 @@ window.addEventListener("storage", (e) => {
 function read(): SavedStore {
   if (stored) return stored;
   try {
-    stored = sanitizeSaved(JSON.parse(localStorage.getItem(SAVED_KEY) || "{}"));
+    stored = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"));
   } catch (e) {
     console.warn("ashurbanipal: discarding unreadable saved joins", e);
     stored = {};
@@ -36,14 +37,9 @@ function read(): SavedStore {
 }
 
 function write(store: SavedStore): boolean {
-  try {
-    localStorage.setItem(SAVED_KEY, JSON.stringify(store));
-    stored = store;
-    return true;
-  } catch (e) {
-    console.warn("ashurbanipal: could not save joins", e);
-    return false;
-  }
+  if (!writeStored(SAVED_KEY, JSON.stringify(store), "ashurbanipal: could not save joins")) return false;
+  stored = store;
+  return true;
 }
 
 export function savedJoins(): SavedJoin[] {
