@@ -92,7 +92,9 @@ main { height: 100%; overflow: auto; }
     background: repeating-linear-gradient(45deg, currentColor 0 4px, var(--rule) 4px 8px); }
 }
 /* The stale rows stay readable while a slow fetch runs. */
-#data-table[data-slow] tbody { opacity: .5; }
+#data-table[data-slow] tbody, #data-table[data-stale] tbody { opacity: .5; }
+/* An inert table is skipped by hit-testing, so the cursor is set on its container. */
+#content:has(> #data-table[data-stale]) { cursor: not-allowed; }
 
 /* ==== Top bar ==== */
 #topbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-lg); }

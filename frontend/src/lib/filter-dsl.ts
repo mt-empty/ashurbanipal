@@ -256,6 +256,17 @@ export function quoteFilterValue(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+// value is omitted for a valueless predicate (IS NULL). quoteFilterValue
+// guarantees the clause parses like a hand-typed one.
+export function filterClause(column: string, op: FilterOp, value?: string): string {
+  return value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
+}
+
+// AND of `column = value`: the composite-key drill-in from referenced-by.
+export function filterClauses(pairs: { column: string; value: string }[]): string {
+  return pairs.map((p) => filterClause(p.column, "=", p.value)).join(" AND ");
+}
+
 // Where parseFilterDsl rejects `input`, as a string index; null when it parses.
 export function filterDslErrorAt(
   input: string,

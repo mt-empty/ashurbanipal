@@ -114,7 +114,9 @@ main { height: 100%; overflow: auto; }
     background: repeating-linear-gradient(45deg, currentColor 0 4px, var(--rule) 4px 8px); }
 }
 /* The stale rows stay readable while a slow fetch runs. */
-#data-table[data-slow] tbody { opacity: .5; }
+#data-table[data-slow] tbody, #data-table[data-stale] tbody { opacity: .5; }
+/* An inert table is skipped by hit-testing, so the cursor is set on its container. */
+#content:has(> #data-table[data-stale]) { cursor: not-allowed; }
 
 /* ==== Top bar ==== */
 #topbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-lg); }
@@ -1533,6 +1535,12 @@ function quoteFilterValue(value) {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return `'${value.replace(/'/g, "''")}'`;
 }
+function filterClause(column, op, value) {
+  return value === void 0 ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
+}
+function filterClauses(pairs) {
+  return pairs.map((p) => filterClause(p.column, "=", p.value)).join(" AND ");
+}
 function filterDslErrorAt(input2, aliases) {
   try {
     parseFilterDsl(input2, aliases);
@@ -2047,6 +2055,18 @@ function joinRequest(def) {
   if (current2 && viewKey(current2.view) === viewKey(view)) return { ...current2, view };
   return { view, sort: null, order: "asc", offset: 0, filter: "", ast: [] };
 }
+function tableRequest(name) {
+  const stored2 = state.sortByTable[scopeTableKey(name)];
+  return {
+    view: { kind: "table", table: name },
+    sort: stored2?.col ?? null,
+    order: stored2?.order ?? "asc",
+    offset: 0,
+    filter: "",
+    ast: [],
+    restoredSort: stored2 !== void 0
+  };
+}
 function commitRequest(r) {
   ({ view: state.view, sort: state.sort, order: state.order, offset: state.offset, filter: state.filter } = r);
   appliedFilterAst = [...r.ast];
@@ -2212,6 +2232,13 @@ function dropOneStaleInput(code) {
   return false;
 }
 var NOT_THE_INPUTS = /* @__PURE__ */ new Set(["query_timeout", "invalid_join", "not_readable"]);
+function dropStaleSort(req, code) {
+  if (!req.restoredSort || NOT_THE_INPUTS.has(code ?? "")) return null;
+  const table = startTable(req.view);
+  delete state.sortByTable[scopeTableKey(table)];
+  persist();
+  return { ...req, sort: null, order: "asc", restoredSort: false };
+}
 var FILTER_FAULTS = /* @__PURE__ */ new Set(["unknown_column", "invalid_filter", "invalid_parameter"]);
 function rememberSchema() {
   if (state.source && state.schema) state.schemaBySource[state.source] = state.schema;
@@ -2237,13 +2264,6 @@ function switchSchema(name) {
   state.sort = null;
   state.offset = 0;
   clearFilter();
-}
-function switchTable(name) {
-  enterTable(name);
-  state.offset = 0;
-  applyStoredSort(name);
-  clearFilter();
-  persist();
 }
 function scopeKey() {
   return JSON.stringify([
@@ -3398,6 +3418,54 @@ pop().addEventListener("toggle", (e) => {
   }
 });
 
+// src/bootstrap/table-focus.ts
+var tableEl = $("data-table");
+function captureTableFocus() {
+  const active = document.activeElement;
+  if (!active || !tableEl.contains(active)) return null;
+  const cell = active.closest("th, td");
+  const tr = active.closest("tr");
+  const section2 = tr?.parentElement;
+  if (!cell || !tr || !section2) return null;
+  return {
+    region: section2.id,
+    rowIndex: [...section2.children].indexOf(tr),
+    colIndex: [...tr.children].indexOf(cell),
+    className: active.className
+  };
+}
+function restoreTableFocus(captured) {
+  if (!captured) return;
+  const tr = $(captured.region)?.children[captured.rowIndex];
+  const cell = tr?.children[captured.colIndex];
+  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
+  const target = classSelector ? cell?.querySelector(classSelector) : null;
+  (target ?? tableEl).focus();
+}
+
+// src/features/grid-lock.ts
+var gridKey = null;
+var stateKey = () => JSON.stringify([state.source, state.schema, viewKey(state.view)]);
+function markGridDrawn() {
+  gridKey = stateKey();
+}
+function gridIsStale() {
+  return gridKey !== null && gridKey !== stateKey();
+}
+function syncGridLock() {
+  if (gridKey === null) return;
+  const locked = gridIsStale();
+  tableEl.inert = locked;
+  tableEl.toggleAttribute("data-stale", locked);
+  for (const id of ["columns-btn", "structure-btn", "sort-note-show", "all-hidden-show"]) {
+    $(id).disabled = locked;
+  }
+  if (!locked) return;
+  $("prev").disabled = true;
+  $("next").disabled = true;
+  for (const id of ["columns-pop", "cell-pop", "refby-pop", "cv-pop"]) $(id).hidePopover();
+}
+
 // src/features/sidebar.ts
 var tableEntries = [];
 var chipCounts = /* @__PURE__ */ new Map();
@@ -3489,6 +3557,7 @@ $("source-select").onchange = () => {
 };
 var loadSchemasToken = 0;
 async function loadSchemas() {
+  syncGridLock();
   const token = ++loadSchemasToken;
   let schemas;
   try {
@@ -3521,6 +3590,7 @@ $("schema-select").onchange = () => {
 };
 var loadTablesToken = 0;
 async function loadTables() {
+  syncGridLock();
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
   const [{ tables }, { counts: counts2 }] = await Promise.all([
@@ -3544,8 +3614,7 @@ async function loadTables() {
     chip.dataset.table = t.name;
     chip.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
     linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
-      switchTable(t.name);
-      loadData();
+      loadData({ next: tableRequest(t.name) });
     });
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
@@ -4839,12 +4908,7 @@ function submitFilter(text) {
   loadData();
 }
 function applyFilterClause(column, op, value) {
-  const clause = value === void 0 ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
-  $("filter").value = clause;
-  submitFilter(clause);
-}
-function applyFilterClauses(pairs) {
-  const clause = pairs.map((p) => `${p.column} = ${quoteFilterValue(p.value)}`).join(" AND ");
+  const clause = filterClause(column, op, value);
   $("filter").value = clause;
   submitFilter(clause);
 }
@@ -5341,31 +5405,6 @@ main.addEventListener("scroll", update, { passive: true });
 window.addEventListener("resize", update);
 update();
 
-// src/bootstrap/table-focus.ts
-var tableEl = $("data-table");
-function captureTableFocus() {
-  const active = document.activeElement;
-  if (!active || !tableEl.contains(active)) return null;
-  const cell = active.closest("th, td");
-  const tr = active.closest("tr");
-  const section2 = tr?.parentElement;
-  if (!cell || !tr || !section2) return null;
-  return {
-    region: section2.id,
-    rowIndex: [...section2.children].indexOf(tr),
-    colIndex: [...tr.children].indexOf(cell),
-    className: active.className
-  };
-}
-function restoreTableFocus(captured) {
-  if (!captured) return;
-  const tr = $(captured.region)?.children[captured.rowIndex];
-  const cell = tr?.children[captured.colIndex];
-  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
-  const target = classSelector ? cell?.querySelector(classSelector) : null;
-  (target ?? tableEl).focus();
-}
-
 // src/lib/json-tree.ts
 var SCALAR_CLASS = {
   null: "json-null",
@@ -5468,22 +5507,38 @@ function scalarSpan(node) {
 }
 
 // src/features/nav.ts
-function navigateWithSeededFilter(table, schema, applyFilter) {
-  enterTable(table);
-  state.sort = null;
-  if (schema && schema !== state.schema) {
-    setSchema(schema);
-    loadTables().then(() => {
-      if (tableInView() !== table) {
-        reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
-        return;
-      }
-      applyFilter();
-    }).catch(reportError);
+function navigateWithSeededFilter(table, schema, clause) {
+  let ast;
+  try {
+    ast = parseFilterDsl(clause);
+  } catch (e) {
+    reportError(e);
     return;
   }
-  persist();
-  applyFilter();
+  const req = {
+    ...tableRequest(table),
+    sort: null,
+    order: "asc",
+    restoredSort: false,
+    filter: clause,
+    ast
+  };
+  if (!schema || schema === state.schema) {
+    loadData({ next: req });
+    return;
+  }
+  enterTable(table);
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
+  setSchema(schema);
+  loadTables().then(() => {
+    if (tableInView() !== table) {
+      reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
+      return;
+    }
+    loadData({ next: req });
+  }).catch(reportError);
 }
 var navStack = [];
 var navIndex = -1;
@@ -5550,7 +5605,7 @@ function msg2(text) {
 function drillIn(entry, row2, dismiss) {
   const clauses = entry.columns.map((c) => ({ column: c.from, value: row2[c.to] }));
   dismiss();
-  navigateWithSeededFilter(entry.table, entry.schema, () => applyFilterClauses(clauses));
+  navigateWithSeededFilter(entry.table, entry.schema, filterClauses(clauses));
 }
 function renderList2(container, entries, row2, dismiss) {
   if (entries.length === 0) {
@@ -5713,6 +5768,7 @@ function countColumns() {
 function renderHeader(columns) {
   columnsInView = columns;
   viewInGrid = state.view;
+  markGridDrawn();
   countColumns();
   const { hidden } = counts;
   const table = tableInView();
@@ -5833,11 +5889,7 @@ function buildCell(col, row2, hidden) {
     cellText.classList.add("fk-cell");
     const refLabel = references.schema ? `${references.schema}.${references.table}` : references.table;
     cellText.title = `go to ${refLabel}.${references.column} = ${raw}`;
-    cellText.onclick = () => navigateWithSeededFilter(
-      references.table,
-      references.schema,
-      () => applyFilterClause(references.column, "=", raw)
-    );
+    cellText.onclick = () => navigateWithSeededFilter(references.table, references.schema, filterClause(references.column, "=", raw));
   } else if (col.key === "pk" && tableInView() !== null) {
     cellText.classList.add("pk-cell");
     cellText.title = `${raw} \u2014 what references this row`;
@@ -6131,6 +6183,12 @@ function viewTitle(view) {
     }
   }
 }
+function failedLoadError(e, view, next) {
+  const plain = plainError(e, view);
+  const switching = next !== void 0 && viewKey(next.view) !== viewKey(state.view) || gridIsStale();
+  if (!switching || plain !== e) return plain;
+  return new Error(`Couldn't open ${viewTitle(view)}: ${e instanceof Error ? e.message : String(e)}`);
+}
 function updateViewChrome() {
   const title = viewTitle(state.view);
   setActiveTable(tableInView());
@@ -6149,6 +6207,7 @@ async function loadData2({
   }
   const req = next ?? currentRequest();
   syncViewNotice(req);
+  syncGridLock();
   if (req === null) {
     updateViewChrome();
     hideColumnNotes();
@@ -6168,10 +6227,12 @@ async function loadData2({
       noteTickFailed(plainError(e, view));
       return;
     }
-    if (!next && dropOneStaleInput(e instanceof ApiError ? e.code : void 0))
-      return loadData2({ resetScroll, highlightNew });
+    const code = e instanceof ApiError ? e.code : void 0;
+    if (!next && dropOneStaleInput(code)) return loadData2({ resetScroll, highlightNew });
+    const retry = next && dropStaleSort(next, code);
+    if (retry) return loadData2({ next: retry, resetScroll, highlightNew });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
-    reportError(plainError(e, view));
+    reportError(failedLoadError(e, view, next));
     return;
   }
   if (superseded()) return;
@@ -6184,8 +6245,6 @@ async function loadData2({
   updateViewChrome();
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
   $("payload").disabled = false;
-  $("columns-btn").disabled = false;
-  $("structure-btn").disabled = false;
   $("refresh").disabled = false;
   $("refresh-menu-btn").disabled = false;
   updateJoinChrome();
@@ -6199,6 +6258,7 @@ async function loadData2({
     renderRows2(data, newRowKeys, pkNames);
     rememberColumnWidths();
     renderColumnMenu();
+    syncGridLock();
     restoreTableFocus(focusCapture);
   };
   if (document.startViewTransition) {

@@ -241,6 +241,8 @@ Two components, same as the original concept:
     URL filter are both in play, they're dropped one at a time (sort
     first, so the link's filtered view still renders — `ui-guidelines.md`
     R11).
+  - A view switch commits only once its data arrives, or locks the old
+    grid when it cannot wait (`ui-guidelines.md` R14).
   Detailed behavioral rules for all of the above (what may/may not be
   persisted, how affordances must degrade, no-client-parsing constraints)
   live in `ui-guidelines.md` and `frontend-style-guide.md` — this section

@@ -219,6 +219,9 @@ test("a toggle on a grid left by a failed load changes only that column", async 
   await menuItem(page, "price").locator("input").uncheck();
   await expect(page.locator('th[data-col="price"]')).toHaveClass(/col-hidden/);
   await expect(page.locator('th[data-col="sku"]')).toHaveClass(/col-hidden/);
+  const stored = (await uiState(page)).hiddenColumns;
+  expect(stored[tableKey("products")]).toEqual(["sku", "price"]);
+  expect(stored[tableKey("orders")]).toBeUndefined();
 });
 
 test("the record dialog of a join grid left by a failed load keeps its table groups", async ({ page }) => {

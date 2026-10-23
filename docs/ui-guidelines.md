@@ -191,3 +191,13 @@ should block on.
   click and the context menu stay the browser's, so "open in new tab" works.
   A chip that runs an action (edit, save, new join) stays a `<button>`.
   *(Derives from: least astonishment, §1.)*
+- **R14 — A view switch never leaves controls acting on another view.** A
+  switch to another table or join (a chip, an FK cell, a referenced-by
+  drill-in, Show result) replaces the grid only once its data arrives;
+  until then the old grid, title and URL stay, and its controls act on the
+  view they show. A switch that replaces the table list first (schema,
+  source, Back/Forward, a cross-schema FK cell) cannot wait, so the old grid
+  stays dimmed and inert under a not-allowed cursor, with its columns,
+  structure and pager buttons disabled, until the new grid renders. A failed switch names what it could
+  not open (`Couldn't open orders: …`). *(Derives from: visibility of system
+  status, error prevention.)*

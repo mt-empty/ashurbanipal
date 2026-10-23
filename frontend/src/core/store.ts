@@ -39,10 +39,10 @@ export interface State {
 // sort/page click.
 //
 // Feature modules mutate scope through the named transitions below
-// (switchSource / switchSchema / switchTable / clearJoin, and joinRequest +
-// commitRequest for a new join), not by assigning fields ad hoc; the one sanctioned divergence is nav.ts's
-// navigateWithSeededFilter (FK-cell nav and the referenced-by drill-in),
-// which seeds a filter rather than clearing one.
+// (switchSource / switchSchema / clearJoin), or build a request (tableRequest,
+// joinRequest) that commitRequest applies once its data arrives; never by
+// assigning fields ad hoc. nav.ts's navigateWithSeededFilter builds its own
+// request, seeding a filter rather than clearing one.
 export const state: State = {
   source: null,
   schema: null,
@@ -166,8 +166,9 @@ function staleRiskFlag() {
 const filterRisk = staleRiskFlag();
 const sortRisk = staleRiskFlag();
 
-// One load's view and query. A new join travels as one of these and becomes the
-// state only once its data arrives, so a refused or failed join changes nothing.
+// One load's view and query. A new table or join travels as one of these and
+// becomes the state only once its data arrives, so a refused or failed switch
+// changes nothing.
 export interface ViewRequest {
   readonly view: View;
   readonly sort: string | null;
@@ -175,6 +176,8 @@ export interface ViewRequest {
   readonly offset: number;
   readonly filter: string;
   readonly ast: readonly FilterCondition[];
+  // The sort came from storage, so a refusal may be its fault (R11).
+  readonly restoredSort?: boolean;
 }
 
 export function currentRequest(): ViewRequest | null {
@@ -189,6 +192,21 @@ export function joinRequest(def: JoinDef): ViewRequest {
   const current = currentRequest();
   if (current && viewKey(current.view) === viewKey(view)) return { ...current, view };
   return { view, sort: null, order: "asc", offset: 0, filter: "", ast: [] };
+}
+
+// Table chip click: the filter was written against the previous table's
+// columns so it clears; the sort is the one last used on this table.
+export function tableRequest(name: string): ViewRequest {
+  const stored = state.sortByTable[scopeTableKey(name)];
+  return {
+    view: { kind: "table", table: name },
+    sort: stored?.col ?? null,
+    order: stored?.order ?? "asc",
+    offset: 0,
+    filter: "",
+    ast: [],
+    restoredSort: stored !== undefined,
+  };
 }
 
 export function commitRequest(r: ViewRequest): void {
@@ -423,6 +441,16 @@ export function dropOneStaleInput(code: string | undefined): boolean {
   return false;
 }
 const NOT_THE_INPUTS = new Set(["query_timeout", "invalid_join", "not_readable"]);
+
+// The same ladder's sort step for a request not yet in view: its stored sort
+// is forgotten and the request retried without it.
+export function dropStaleSort(req: ViewRequest, code: string | undefined): ViewRequest | null {
+  if (!req.restoredSort || NOT_THE_INPUTS.has(code ?? "")) return null;
+  const table = startTable(req.view);
+  delete state.sortByTable[scopeTableKey(table)];
+  persist();
+  return { ...req, sort: null, order: "asc", restoredSort: false };
+}
 const FILTER_FAULTS = new Set(["unknown_column", "invalid_filter", "invalid_parameter"]);
 
 // Records the active schema against the current source (ui-guidelines R12),
@@ -436,11 +464,8 @@ export function rememberSchema(): void {
 }
 
 // ---- named scope transitions ----
-// Each of the three scope switches (source, schema, table) has exactly one caller, so they take
-// no options. nav.ts's navigateWithSeededFilter is the sanctioned bypass —
-// it seeds a filter rather than clearing one, drops the remembered sort (a
-// stale one would defeat loadData's drop-and-retry against the same-fetch
-// filter), and lets submitFilter own the offset reset.
+// Each scope switch (source, schema) has exactly one caller, so they take
+// no options.
 
 // Pins state.schema to a concrete name and syncs the #schema-select value +
 // the per-source memory (R12). The step shared by an explicit schema switch
@@ -474,16 +499,6 @@ export function switchSchema(name: string): void {
   state.sort = null;
   state.offset = 0;
   clearFilter();
-}
-
-// Table chip click: the filter was written against this table's columns
-// so it clears; the sort is restored to whatever was last used on this table.
-export function switchTable(name: string): void {
-  enterTable(name);
-  state.offset = 0;
-  applyStoredSort(name);
-  clearFilter();
-  persist();
 }
 
 // ---- new-rows-since-refresh bookkeeping ----
