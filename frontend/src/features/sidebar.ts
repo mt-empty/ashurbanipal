@@ -11,13 +11,14 @@ import {
   state,
   switchSchema,
   switchSource,
-  switchTable,
   tableInView,
+  tableRequest,
   viewHref,
 } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
 import type { SourceEntry, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
+import { syncGridLock } from "./grid-lock.js";
 
 // ---- table chips: transient, session-local state, not part of
 // `state`/localStorage — resets on reload (except the expanded flag below) ----
@@ -166,6 +167,7 @@ $<HTMLSelectElement>("source-select").onchange = () => {
 let loadSchemasToken = 0;
 
 export async function loadSchemas(): Promise<void> {
+  syncGridLock();
   const token = ++loadSchemasToken;
   let schemas: string[];
   try {
@@ -210,6 +212,7 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 let loadTablesToken = 0;
 
 export async function loadTables(): Promise<void> {
+  syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
@@ -235,8 +238,7 @@ export async function loadTables(): Promise<void> {
     // (see .row-name), so the title tooltip is the escape hatch.
     chip.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
     linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
-      switchTable(t.name);
-      loadData();
+      loadData({ next: tableRequest(t.name) });
     });
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });

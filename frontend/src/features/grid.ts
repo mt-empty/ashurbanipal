@@ -3,6 +3,7 @@ import { tableEl } from "../bootstrap/table-focus.js";
 import { $, copyText, el, qs } from "../core/dom.js";
 import { hiddenColumns, joinInView, rememberSort, setHiddenColumns, state, tableInView } from "../core/state.js";
 import type { Column, Row, View, ViewData } from "../core/types.js";
+import { filterClause } from "../lib/filter-dsl.js";
 import {
   APPROX_COUNT_TITLE,
   formatApproxCount,
@@ -15,6 +16,7 @@ import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { columnMinWidth } from "./column-widths.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
+import { markGridDrawn } from "./grid-lock.js";
 import { switchToLeftJoin } from "./join-dialog.js";
 import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands } from "./join-view.js";
 import { navigateWithSeededFilter } from "./nav.js";
@@ -59,6 +61,7 @@ function countColumns(): void {
 export function renderHeader(columns: Column[]): void {
   columnsInView = columns;
   viewInGrid = state.view;
+  markGridDrawn();
   countColumns();
   const { hidden } = counts;
   // Common values are a per-table query; a join column has no single table to ask.
@@ -216,9 +219,7 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
     const refLabel = references.schema ? `${references.schema}.${references.table}` : references.table;
     cellText.title = `go to ${refLabel}.${references.column} = ${raw}`;
     cellText.onclick = () =>
-      navigateWithSeededFilter(references.table, references.schema, () =>
-        applyFilterClause(references.column, "=", raw),
-      );
+      navigateWithSeededFilter(references.table, references.schema, filterClause(references.column, "=", raw));
   } else if (col.key === "pk" && tableInView() !== null) {
     // Reverse of the FK-cell click: what points *at* this row. A pk+fk
     // column took the branch above; those rows, and no-PK tables, reach the

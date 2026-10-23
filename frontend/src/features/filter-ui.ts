@@ -11,7 +11,7 @@ import {
   tableInView,
 } from "../core/state.js";
 import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
-import { parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
+import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
 import { columnKey } from "./join-view.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
@@ -34,19 +34,7 @@ export function submitFilter(text: string): void {
 }
 
 export function applyFilterClause(column: string, op: FilterOp, value?: string): void {
-  // value is omitted for a valueless predicate (IS NULL). The composed
-  // text round-trips through parseFilterDsl like a hand-typed clause —
-  // quoteFilterValue guarantees it parses.
-  const clause = value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
-  $<HTMLInputElement>("filter").value = clause;
-  submitFilter(clause);
-}
-
-// AND-join of `column = value` clauses — the composite-key drill-in from
-// referenced-by. quoteFilterValue on each value keeps the whole string
-// parseable by parseFilterDsl (which handles AND between conditions).
-export function applyFilterClauses(pairs: { column: string; value: string }[]): void {
-  const clause = pairs.map((p) => `${p.column} = ${quoteFilterValue(p.value)}`).join(" AND ");
+  const clause = filterClause(column, op, value);
   $<HTMLInputElement>("filter").value = clause;
   submitFilter(clause);
 }

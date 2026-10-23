@@ -64,11 +64,13 @@ src/
   cache, delegating the actual diff to the pure `lib/row-diff.ts`) and
   `url.ts` (URL params ⇄ state, read side — two readers that differ on
   purpose, see the header comment there). `store.ts` exposes named
-  transitions (`switchSource` / `switchSchema` / `switchTable`) that run the
-  resets and persistence each implies; feature modules call those rather
-  than assigning scope fields ad
-  hoc, and a site that deliberately diverges (grid.ts's FK navigation,
-  which seeds a filter instead of clearing one) says why inline. A value a
+  transitions (`switchSource` / `switchSchema`) that run the resets and
+  persistence each implies, and request builders (`tableRequest` /
+  `joinRequest`) whose result `loadData({ next })` commits only once its
+  data arrives (`ui-guidelines.md` R14); feature modules use those rather
+  than assigning scope fields ad hoc, and a site that deliberately diverges
+  (nav.ts's FK navigation, which seeds a filter instead of clearing one)
+  says why inline. A value a
   plain `let` export can't expose (the applied filter AST) stays behind a
   getter/setter pair.
 - `lib/` — pure leaves: import only `core/types.ts`, or nothing.

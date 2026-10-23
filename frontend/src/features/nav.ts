@@ -1,48 +1,66 @@
-import { supersedeLoads } from "../bootstrap/reload.js";
+import { loadData, supersedeLoads } from "../bootstrap/reload.js";
 import { $, reportError } from "../core/dom.js";
 import {
   applyUrlExact,
+  clearFilter,
   enterTable,
   persist,
   setSchema,
   state,
   tableInView,
+  tableRequest,
+  type ViewRequest,
   viewKey,
   viewParams,
 } from "../core/state.js";
+import type { FilterCondition } from "../core/types.js";
+import { parseFilterDsl } from "../lib/filter-dsl.js";
 import { loadTables } from "./sidebar.js";
 
-// The one sanctioned bypass of the switchSource/switchSchema/switchTable
-// transitions: it *seeds* a filter instead of clearing one, and clears the
-// remembered sort because a stale stored column would defeat loadData's
-// drop-and-retry against the filter submitted in the same fetch. `schema`
-// is set only for a cross-schema target (it's absent otherwise), so
-// setSchema() runs first and loadTables()'s auto-load is superseded by
-// applyFilter's own. Shared by grid.ts's FK-cell nav and the
-// referenced-by drill-in.
-export function navigateWithSeededFilter(table: string, schema: string | undefined, applyFilter: () => void): void {
-  enterTable(table);
-  state.sort = null;
-  if (schema && schema !== state.schema) {
-    setSchema(schema);
-    loadTables()
-      .then(() => {
-        // loadTables()'s stale-state fallback (sidebar.ts) silently resets
-        // the view when `table` isn't in this schema's own /api/tables
-        // listing (e.g. a partitioned referrer, which list_tables excludes)
-        // — applying the filter here would seed it onto whatever table that
-        // fallback landed on instead.
-        if (tableInView() !== table) {
-          reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
-          return;
-        }
-        applyFilter();
-      })
-      .catch(reportError);
+// FK-cell nav and the referenced-by drill-in: `table` filtered by `clause`,
+// with no sort (a stale stored one would defeat loadData's drop-and-retry
+// against the filter). `schema` is set only for a cross-schema target.
+export function navigateWithSeededFilter(table: string, schema: string | undefined, clause: string): void {
+  let ast: FilterCondition[];
+  try {
+    ast = parseFilterDsl(clause);
+  } catch (e) {
+    reportError(e);
     return;
   }
-  persist();
-  applyFilter();
+  const req: ViewRequest = {
+    ...tableRequest(table),
+    sort: null,
+    order: "asc",
+    restoredSort: false,
+    filter: clause,
+    ast,
+  };
+  if (!schema || schema === state.schema) {
+    loadData({ next: req });
+    return;
+  }
+  // The other schema's table list replaces this one first, so this switch
+  // cannot wait for its rows (ui-guidelines R14).
+  enterTable(table);
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
+  setSchema(schema);
+  loadTables()
+    .then(() => {
+      // loadTables()'s stale-state fallback (sidebar.ts) silently resets
+      // the view when `table` isn't in this schema's own /api/tables
+      // listing (e.g. a partitioned referrer, which list_tables excludes)
+      // — applying the filter here would seed it onto whatever table that
+      // fallback landed on instead.
+      if (tableInView() !== table) {
+        reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
+        return;
+      }
+      loadData({ next: req });
+    })
+    .catch(reportError);
 }
 
 // Back/forward navigation stops at table/schema/source switches, not every

@@ -6,6 +6,7 @@ import {
   currentRequest,
   diffNewRows,
   dropOneStaleInput,
+  dropStaleSort,
   markFilterVerified,
   markStoredSortVerified,
   markViewShown,
@@ -14,11 +15,13 @@ import {
   state,
   tableInView,
   type ViewRequest,
+  viewKey,
 } from "../core/state.js";
 import type { JoinDef, View, ViewData } from "../core/types.js";
 import { noteLoadOk, noteTickFailed, setFetching, setNewChip } from "../features/auto-refresh.js";
 import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
 import { hideColumnNotes, renderColumnMenu, renderHeader, renderRows, updatePager } from "../features/grid.js";
+import { gridIsStale, syncGridLock } from "../features/grid-lock.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
 import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
@@ -186,6 +189,15 @@ function viewTitle(view: View | null): string | null {
   }
 }
 
+// A switch failed while the grid still shows another view, so the message
+// names the one it could not open; the access message already does.
+function failedLoadError(e: unknown, view: View, next: ViewRequest | undefined): unknown {
+  const plain = plainError(e, view);
+  const switching = (next !== undefined && viewKey(next.view) !== viewKey(state.view)) || gridIsStale();
+  if (!switching || plain !== e) return plain;
+  return new Error(`Couldn't open ${viewTitle(view)}: ${e instanceof Error ? e.message : String(e)}`);
+}
+
 // Must only ever move in lockstep with a *successful* render, never ahead
 // of it — a failed fetchViewData() (see loadData) must leave these
 // exactly as they were, matching the stale <table> body they describe.
@@ -216,6 +228,7 @@ export async function loadData({
   }
   const req = next ?? currentRequest();
   syncViewNotice(req);
+  syncGridLock();
   if (req === null) {
     updateViewChrome();
     hideColumnNotes();
@@ -236,14 +249,16 @@ export async function loadData({
       noteTickFailed(plainError(e, view));
       return;
     }
+    const code = e instanceof ApiError ? e.code : undefined;
     // A restored sort or a URL-restored filter can each name a column that no
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
-    // A view not yet in view restored nothing; its failure leaves the state alone.
-    if (!next && dropOneStaleInput(e instanceof ApiError ? e.code : undefined))
-      return loadData({ resetScroll, highlightNew });
+    // A view not yet in view can only have restored its sort; its failure leaves the state alone.
+    if (!next && dropOneStaleInput(code)) return loadData({ resetScroll, highlightNew });
+    const retry = next && dropStaleSort(next, code);
+    if (retry) return loadData({ next: retry, resetScroll, highlightNew });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
-    reportError(plainError(e, view));
+    reportError(failedLoadError(e, view, next));
     return;
   }
   if (superseded()) return;
@@ -259,8 +274,6 @@ export async function loadData({
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
 
   $<HTMLButtonElement>("payload").disabled = false;
-  $<HTMLButtonElement>("columns-btn").disabled = false;
-  $<HTMLButtonElement>("structure-btn").disabled = false;
   $<HTMLButtonElement>("refresh").disabled = false;
   $<HTMLButtonElement>("refresh-menu-btn").disabled = false;
   updateJoinChrome();
@@ -275,6 +288,7 @@ export async function loadData({
     renderRows(data, newRowKeys, pkNames);
     rememberColumnWidths();
     renderColumnMenu();
+    syncGridLock();
     restoreTableFocus(focusCapture);
   };
   // startViewTransition's callback isn't guaranteed to run synchronously —

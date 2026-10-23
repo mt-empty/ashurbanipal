@@ -2,7 +2,7 @@ import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
 import { applyScopeParams, scopeTableKey, tableInView } from "../core/state.js";
 import type { ReferencedByEntry, Row } from "../core/types.js";
-import { applyFilterClauses } from "./filter-ui.js";
+import { filterClauses } from "../lib/filter-dsl.js";
 import { navigateWithSeededFilter } from "./nav.js";
 
 // ---- "referenced by": the incoming FKs that target the viewed table
@@ -39,7 +39,7 @@ function drillIn(entry: ReferencedByEntry, row: Row, dismiss: () => void): void 
   // here has an expressible `=` clause.
   const clauses = entry.columns.map((c) => ({ column: c.from, value: row[c.to] as string }));
   dismiss();
-  navigateWithSeededFilter(entry.table, entry.schema, () => applyFilterClauses(clauses));
+  navigateWithSeededFilter(entry.table, entry.schema, filterClauses(clauses));
 }
 
 function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: Row, dismiss: () => void): void {

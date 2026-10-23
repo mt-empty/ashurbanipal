@@ -83,14 +83,33 @@ test("a stored hidden column the table no longer has is not counted and is dropp
 });
 
 test("hidden columns stay with their schema: a same-named table elsewhere is unaffected", async ({ page }) => {
+  // The seed has no table name in two schemas, so `warehouse` is given a
+  // `users` that serves public.users' rows; the keying is the frontend's alone.
+  await page.route(
+    (url) => url.pathname.endsWith("/api/tables") && url.searchParams.get("schema") === "warehouse",
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      await route.fulfill({ response, json: { tables: [...json.tables, { name: "users" }] } });
+    },
+  );
+  await page.route("**/api/tables/data*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("schema") !== "warehouse" || url.searchParams.get("table") !== "users") {
+      return route.continue();
+    }
+    url.searchParams.set("schema", "public");
+    await route.fulfill({ response: await route.fetch({ url: url.toString() }) });
+  });
+
   await gotoApp(page);
   await selectTable(page, "users");
   await page.locator("#columns-btn").click();
   await menuItem(page, "id").locator("input").uncheck();
   await page.keyboard.press("Escape");
 
-  const other = page.waitForResponse((r) => r.url().includes("/api/tables/data") && r.url().includes("schema=ashb_test") && r.ok());
-  await page.locator("#schema-select").selectOption("ashb_test_referenced_by_partitioning");
+  const other = page.waitForResponse((r) => r.url().includes("/api/tables/data") && r.url().includes("schema=warehouse") && r.ok());
+  await page.locator("#schema-select").selectOption("warehouse");
   await other;
   await waitForIdle(page);
   await selectTable(page, "users");
@@ -103,6 +122,7 @@ test("hidden columns stay with their schema: a same-named table elsewhere is una
   await waitForIdle(page);
   await selectTable(page, "users");
   await expect(page.locator('th[data-col="id"]')).toHaveClass(/col-hidden/);
+  expect(Object.keys((await uiState(page)).hiddenColumns)).toEqual([tableKey("users")]);
 });
 
 test("a join shows plain column names and groups the menu by table", async ({ page }) => {
@@ -219,6 +239,9 @@ test("a toggle on a grid left by a failed load changes only that column", async 
   await menuItem(page, "price").locator("input").uncheck();
   await expect(page.locator('th[data-col="price"]')).toHaveClass(/col-hidden/);
   await expect(page.locator('th[data-col="sku"]')).toHaveClass(/col-hidden/);
+  const stored = (await uiState(page)).hiddenColumns;
+  expect(stored[tableKey("products")]).toEqual(["sku", "price"]);
+  expect(stored[tableKey("orders")]).toBeUndefined();
 });
 
 test("the record dialog of a join grid left by a failed load keeps its table groups", async ({ page }) => {
