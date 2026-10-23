@@ -1,7 +1,8 @@
 import { loadData } from "../bootstrap/reload.js";
+import { tableEl } from "../bootstrap/table-focus.js";
 import { $, copyText, el, qs } from "../core/dom.js";
 import { hiddenColumns, joinInView, rememberSort, setHiddenColumns, state, tableInView } from "../core/state.js";
-import type { Column, Row, ViewData } from "../core/types.js";
+import type { Column, Row, View, ViewData } from "../core/types.js";
 import {
   APPROX_COUNT_TITLE,
   formatApproxCount,
@@ -9,12 +10,13 @@ import {
   rendersAsJson,
   warnBadJsonCell,
 } from "../lib/format.js";
+import { tableLabel } from "../lib/join-def.js";
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { columnMinWidth } from "./column-widths.js";
 import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { switchToLeftJoin } from "./join-dialog.js";
-import { buildBands, buildEmptyJoin, columnKey, refreshBands } from "./join-view.js";
+import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands } from "./join-view.js";
 import { navigateWithSeededFilter } from "./nav.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
@@ -34,8 +36,31 @@ function commonValuesButton(table: string, column: string): HTMLButtonElement {
   return btn;
 }
 
+// The columns and view the grid last rendered; the columns menu, the counts,
+// the sort note and the record dialog all describe these. state.view moves to
+// a newly chosen view before its data arrives, and a failed load never brings
+// that view to the grid.
+let columnsInView: Column[] = [];
+let viewInGrid: View | null = null;
+
+interface ColumnCounts {
+  hidden: Set<string>;
+  shown: number;
+  total: number;
+}
+
+let counts: ColumnCounts = { hidden: new Set(), shown: 0, total: 0 };
+
+function countColumns(): void {
+  const hidden = new Set(hiddenColumns());
+  counts = { hidden, shown: columnsInView.filter((c) => !hidden.has(c.name)).length, total: columnsInView.length };
+}
+
 export function renderHeader(columns: Column[]): void {
-  const hidden = hiddenColumns();
+  columnsInView = columns;
+  viewInGrid = state.view;
+  countColumns();
+  const { hidden } = counts;
   // Common values are a per-table query; a join column has no single table to ask.
   const table = tableInView();
   const tr = el("tr");
@@ -47,8 +72,10 @@ export function renderHeader(columns: Column[]): void {
     if (col.join !== undefined) th.dataset.join = String(col.join);
     const minWidth = columnMinWidth(col.name);
     if (minWidth) th.style.minWidth = `${minWidth}px`;
-    if (hidden.includes(col.name)) th.classList.add("col-hidden");
-    const label = `${col.name} (${col.type})`;
+    if (hidden.has(col.name)) th.classList.add("col-hidden");
+    // Also the sort key: sort and filter name a column the same way.
+    const fullName = columnKey(col);
+    const label = `${fullName} (${col.type})`;
     // The visible header renders the engine-native type spelling as inline
     // code; `label` stays the plain-text form for the aria-label only.
     const typeCode = el("code", "col-type", col.type);
@@ -56,9 +83,11 @@ export function renderHeader(columns: Column[]): void {
     // Name, ▾ and the sort arrow share one line; the type chip sits under it.
     const head = el("span", "th-name");
     // Capped in CSS (a 63-char identifier would otherwise set the column's
-    // width); the title is the escape hatch (R8).
-    const nameEl = el("span", "col-name", col.name);
-    nameEl.title = col.comment ? `${col.name} — ${col.comment}` : col.name;
+    // width); the title is the escape hatch (R8). A button so the sort is
+    // reachable by keyboard: its click bubbles to th.onclick.
+    const nameEl = el("button", "col-name sort-btn", displayName(col));
+    nameEl.type = "button";
+    nameEl.title = col.comment ? `${fullName} — ${col.comment}` : fullName;
     if (col.key === "pk" || col.key === "fk") {
       // A column can be its own table's PK and an FK at once (1:1 detail
       // table shape) — key still reports "pk", but references is populated
@@ -81,14 +110,13 @@ export function renderHeader(columns: Column[]): void {
       head.append(nameEl, " ");
     }
     if (col.comment) th.title = col.comment;
-    const sortKey = columnKey(col);
     th.setAttribute(
       "aria-sort",
-      sortKey === state.sort ? (state.order === "desc" ? "descending" : "ascending") : "none",
+      fullName === state.sort ? (state.order === "desc" ? "descending" : "ascending") : "none",
     );
     th.onclick = () => {
-      state.order = state.sort === sortKey && state.order === "asc" ? "desc" : "asc";
-      state.sort = sortKey;
+      state.order = state.sort === fullName && state.order === "asc" ? "desc" : "asc";
+      state.sort = fullName;
       state.offset = 0;
       rememberSort();
       loadData({ resetScroll: false });
@@ -216,42 +244,169 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
 
 // ---- column show/hide: toggles a CSS class on already-rendered
 // header/data cells, never a refetch. Matched by column name (data-col),
-// not position, so it can't fall out of sync with header/cell alignment.
-// A stale column name simply matches nothing — silent no-op. ----
-function setColumnVisibility(name: string, hidden: boolean): void {
-  const current = hiddenColumns();
-  const next = hidden ? [...current, name] : current.filter((c) => c !== name);
-  setHiddenColumns(next);
-  for (const el of document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
-    el.classList.toggle("col-hidden", hidden);
+// not position, so it can't fall out of sync with header/cell alignment. ----
+function setHidden(next: readonly string[]): void {
+  const before = new Set(hiddenColumns());
+  const after = new Set(next);
+  setHiddenColumns([...after]);
+  // Only the names that changed: while another view loads, the stored set is
+  // that view's, not the one the grid shows.
+  for (const name of new Set([...before, ...after])) {
+    if (before.has(name) === after.has(name)) continue;
+    for (const cell of tableEl.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
+      cell.classList.toggle("col-hidden", after.has(name));
+    }
   }
+  countColumns();
   refreshBands();
-  updateColumnsButtonLabel();
+  syncColumnChrome();
+  writeRowMeta();
 }
 
-export function updateColumnsButtonLabel(): void {
-  const n = hiddenColumns().length;
-  $("columns-btn").textContent = n > 0 ? `columns (${n} hidden)` : "columns";
+function setColumnHidden(name: string, hide: boolean): void {
+  const current = hiddenColumns();
+  setHidden(hide ? [...current, name] : current.filter((c) => c !== name));
 }
 
-export function renderColumnMenu(columns: Column[]): void {
-  const hidden = hiddenColumns();
-  $("columns-pop-list").replaceChildren(
-    ...columns.map((col) => {
-      const label = el("label");
-      const input = el("input");
-      input.type = "checkbox";
-      input.checked = !hidden.includes(col.name);
-      input.onchange = () => setColumnVisibility(col.name, !input.checked);
-      label.append(input, col.name);
-      return label;
-    }),
+function sortedColumn(): Column | undefined {
+  return state.sort === null ? undefined : columnsInView.find((c) => columnKey(c) === state.sort);
+}
+
+// The rows part of #row-meta, set by updatePager once a load has rendered.
+let rowsMeta = "";
+
+function writeRowMeta(): void {
+  const { shown, total } = counts;
+  $("row-meta").textContent = `${rowsMeta} · ${shown < total ? `${shown} of ${total}` : total} columns`;
+}
+
+const sortArrow = (): string => (state.order === "desc" ? "↓" : "↑");
+
+// With nothing in view the grid is left as it was, but nothing is sorted or hidden.
+export function hideColumnNotes(): void {
+  $("sort-note").hidden = true;
+  $("all-hidden").hidden = true;
+}
+
+// Everything that describes which columns show, kept in step after a load
+// and after every toggle.
+function syncColumnChrome(): void {
+  const { hidden, shown, total } = counts;
+  $("columns-btn").textContent = shown < total ? `columns (${total - shown} hidden)` : "columns";
+
+  const sorted = sortedColumn();
+  for (const item of $("columns-pop-list").querySelectorAll<HTMLElement>("label[data-name]")) {
+    const name = item.dataset.name as string;
+    qs<HTMLInputElement>(item, "input").checked = !hidden.has(name);
+    const tag = qs<HTMLElement>(item, ".cols-sorted");
+    tag.hidden = sorted?.name !== name;
+    tag.textContent = tag.hidden ? "" : `sorted ${sortArrow()}`;
+  }
+  for (const group of $("columns-pop-list").querySelectorAll<HTMLElement>(".cols-group")) {
+    const names = [...group.querySelectorAll<HTMLElement>("label[data-name]")].map((l) => l.dataset.name as string);
+    qs<HTMLElement>(group, ".cols-count").textContent =
+      `${names.filter((n) => !hidden.has(n)).length} of ${names.length}`;
+  }
+
+  // Named even when its header is in view: on a wide table it is often scrolled out of sight.
+  $("sort-note").hidden = sorted === undefined;
+  if (sorted) {
+    $("sort-note-col").textContent = columnKey(sorted);
+    $("sort-note-col").title = columnKey(sorted);
+    $("sort-note-dir").textContent = sortArrow();
+    $("sort-note-show").hidden = !hidden.has(sorted.name);
+  }
+
+  $("all-hidden").hidden = total === 0 || shown > 0;
+  $("all-hidden-text").textContent = `All ${total} columns are hidden.`;
+  // Set when the rows rendered; a column shown since then must widen it.
+  const emptyCell = $("tbody").querySelector<HTMLTableCellElement>("tr.empty > td");
+  if (emptyCell) emptyCell.colSpan = shown + 1;
+}
+
+$("sort-note-show").onclick = () => {
+  const sorted = sortedColumn();
+  if (sorted) setColumnHidden(sorted.name, false);
+};
+$("all-hidden-show").onclick = () => setHidden([]);
+
+interface ColumnGroup {
+  label: string;
+  band: number;
+  columns: Column[];
+}
+
+// A join's columns under the table each came from, in table order (one group
+// per table even when the select list alternates); a table view is one group.
+function columnGroups(columns: Column[]): ColumnGroup[] {
+  if (viewInGrid?.kind !== "join") return [{ label: viewInGrid?.table ?? "", band: 0, columns }];
+  return viewInGrid.def.tables
+    .map((t, i) => ({ label: tableLabel(t), band: i, columns: columns.filter((c) => c.join === i) }))
+    .filter((g) => g.columns.length > 0);
+}
+
+function groupButton(action: "all" | "none", label: string, names: ReadonlySet<string>): HTMLButtonElement {
+  const btn = el("button", "cols-action", action);
+  btn.type = "button";
+  btn.setAttribute("aria-label", `${action === "all" ? "show" : "hide"} all ${label} columns`);
+  btn.onclick = () => {
+    const rest = hiddenColumns().filter((n) => !names.has(n));
+    setHidden(action === "all" ? rest : [...rest, ...names]);
+  };
+  return btn;
+}
+
+function buildMenuItem(col: Column): HTMLLabelElement {
+  const label = el("label");
+  label.dataset.name = col.name;
+  const input = el("input");
+  input.type = "checkbox";
+  input.onchange = () => setColumnHidden(col.name, !input.checked);
+  const fullName = columnKey(col);
+  // In a join the visible name drops the table, which the heading carries.
+  if (fullName !== displayName(col)) input.setAttribute("aria-label", fullName);
+  const text = el("span", "cols-name", displayName(col));
+  text.title = fullName;
+  label.append(input, text, el("span", "cols-sorted"));
+  return label;
+}
+
+function buildMenuGroup(group: ColumnGroup): HTMLElement {
+  const box = el("div", "cols-group");
+  box.dataset.band = String(group.band);
+  const head = el("div", "cols-head");
+  const pill = el("span", "cols-pill", group.label);
+  pill.title = group.label;
+  const names = new Set(group.columns.map((c) => c.name));
+  head.append(
+    pill,
+    el("span", "cols-count"),
+    groupButton("all", group.label, names),
+    groupButton("none", group.label, names),
   );
+  box.append(head, ...group.columns.map(buildMenuItem));
+  return box;
+}
+
+// What the menu's controls were built for. A load that returns the same
+// columns (an auto-refresh tick, a sort, a page) keeps them, so focus and
+// hover in an open menu stay put; syncColumnChrome updates their state.
+let menuShape = "";
+
+export function renderColumnMenu(): void {
+  const groups = columnGroups(columnsInView);
+  const shape = JSON.stringify(groups.map((g) => [g.band, g.label, g.columns.map((c) => [c.name, columnKey(c)])]));
+  if (shape !== menuShape) {
+    menuShape = shape;
+    $("columns-pop-list").replaceChildren(...groups.map(buildMenuGroup));
+  }
+  syncColumnChrome();
 }
 
 function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
   const td = (rowActionTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
-  qs<HTMLElement>(td, ".record-btn").onclick = () => openRecordView(columns, row);
+  const def = viewInGrid?.kind === "join" ? viewInGrid.def : undefined;
+  qs<HTMLElement>(td, ".record-btn").onclick = () => openRecordView(columns, row, def);
   return td;
 }
 
@@ -259,14 +414,11 @@ function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
 // passed only on an explicit refresh) tint those rows via .row-new;
 // pkNames is the matching PK column list, computed once by the caller.
 export function renderRows(data: ViewData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
-  // Same for every cell in this render, so computed once rather than
-  // re-derived (array rebuild + linear scan) per cell.
-  const hidden = new Set(hiddenColumns());
+  const { hidden, shown } = counts;
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
     // hidden columns (display:none) aren't counted.
-    const visible = data.columns.filter((c) => !hidden.has(c.name)).length;
-    renderEmptyState(visible + 1);
+    renderEmptyState(shown + 1);
     return;
   }
   const tbody = $("tbody");
@@ -297,14 +449,15 @@ export function updatePager(data: ViewData): void {
   if (joinInView()) {
     // A join has no total (spec/protocol.md §5.11.4): the page says whether more follows.
     $("page").textContent = `page ${page} · ${data.has_more ? "more rows available" : "last page"}`;
-    $("row-meta").textContent =
-      ` · ${data.rows.length}${data.has_more ? "+" : ""} rows · ${data.columns.length} columns`;
+    rowsMeta = ` · ${data.rows.length}${data.has_more ? "+" : ""} rows`;
+    writeRowMeta();
     $("row-meta").removeAttribute("title");
     $<HTMLButtonElement>("next").disabled = !data.has_more;
     return;
   }
   $("page").textContent = `page ${page}`;
-  $("row-meta").textContent = ` · ${formatApproxCount(data.total_approx ?? -1)} rows · ${data.columns.length} columns`;
+  rowsMeta = ` · ${formatApproxCount(data.total_approx ?? -1)} rows`;
+  writeRowMeta();
   $("row-meta").title = APPROX_COUNT_TITLE;
   $<HTMLButtonElement>("next").disabled = data.rows.length < state.limit;
 }

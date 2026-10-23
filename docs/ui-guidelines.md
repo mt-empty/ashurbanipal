@@ -163,7 +163,7 @@ should block on.
 - **R11 — Sort is remembered per table.** (A join view keeps its sort and
   hidden columns for the visit only; both reset with the join.) `sort` +
   `order` persist keyed by
-  table name (like hidden columns), so returning to a table restores the
+  table within its source and schema (like hidden columns), so returning to a table restores the
   sort last chosen there — which is what lets R10's refresh surface new
   rows without re-sorting every visit. A restored sort column the backend
   rejects (400 — the schema changed, or storage carried over from another

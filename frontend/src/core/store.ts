@@ -16,6 +16,7 @@ export interface State {
   order: "asc" | "desc";
   limit: number;
   offset: number;
+  // Keyed by scopeTableKey, like sortByTable.
   hiddenColumns: Record<string, string[]>;
   // sort/order remembered per table, so returning to a table restores the
   // sort last chosen there (what lets the refresh button surface new rows
@@ -245,6 +246,28 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
+// A table's name only means one table within its source and schema, so the
+// per-table maps are keyed by all three.
+export function scopeTableKey(table: string): string {
+  return JSON.stringify([state.source, state.schema, table]);
+}
+
+// A stored key not shaped [source, schema, table] is dropped, so the next
+// persist() removes it.
+function isScopeTableKey(key: string): boolean {
+  try {
+    const v: unknown = JSON.parse(key);
+    return (
+      Array.isArray(v) &&
+      v.length === 3 &&
+      v.slice(0, 2).every((s) => s === null || typeof s === "string") &&
+      typeof v[2] === "string"
+    );
+  } catch {
+    return false;
+  }
+}
+
 // Restores the persisted view (never the filter — ui-guidelines R6). A
 // malformed blob is discarded wholesale rather than migrated: it is cheap to
 // lose and there is no reliable way to guess what it meant. url.ts's
@@ -258,20 +281,19 @@ export function restoreFromStorage(): void {
     // isFinite, not just typeof: a corrupted NaN/Infinity is still type
     // "number" but breaks the pager arithmetic in grid.ts that divides by it.
     if (typeof saved.limit === "number" && Number.isFinite(saved.limit)) state.limit = saved.limit;
-    // Keyed by table name so hiding a column on one table never hides a
+    // Keyed per table so hiding a column on one table never hides a
     // same-named column on another.
     if (isPlainObject(saved.hiddenColumns)) {
-      for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
-        if (!Array.isArray(cols)) continue;
+      for (const [key, cols] of Object.entries(saved.hiddenColumns)) {
+        if (!isScopeTableKey(key) || !Array.isArray(cols)) continue;
         const clean = cols.filter((c) => typeof c === "string");
-        if (clean.length) state.hiddenColumns[table] = clean;
+        if (clean.length) state.hiddenColumns[key] = clean;
       }
     }
-    // Same per-table keying as hiddenColumns.
     if (isPlainObject(saved.sortByTable)) {
-      for (const [table, v] of Object.entries(saved.sortByTable)) {
-        if (isPlainObject(v) && typeof v.col === "string") {
-          state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
+      for (const [key, v] of Object.entries(saved.sortByTable)) {
+        if (isScopeTableKey(key) && isPlainObject(v) && typeof v.col === "string") {
+          state.sortByTable[key] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
         }
       }
     }
@@ -302,15 +324,14 @@ export function persist(): void {
   );
 }
 
-// A stale table key or column name absent from the current table's
-// columns simply matches nothing wherever it's consulted, so no separate
-// validation pass is needed here.
+// Names of columns no longer in view are dropped after each load
+// (pruneHiddenColumns), so they never count as hidden.
 export function hiddenColumns(): readonly string[] {
   const view = state.view;
   if (view === null) return [];
   switch (view.kind) {
     case "table":
-      return state.hiddenColumns[view.table] ?? [];
+      return state.hiddenColumns[scopeTableKey(view.table)] ?? [];
     case "join":
       return view.hidden;
     default: {
@@ -325,11 +346,13 @@ export function setHiddenColumns(next: readonly string[]): void {
   const view = state.view;
   if (view === null) return;
   switch (view.kind) {
-    case "table":
-      if (next.length) state.hiddenColumns[view.table] = [...next];
-      else delete state.hiddenColumns[view.table];
+    case "table": {
+      const key = scopeTableKey(view.table);
+      if (next.length) state.hiddenColumns[key] = [...next];
+      else delete state.hiddenColumns[key];
       persist();
       return;
+    }
     case "join":
       state.view = { ...view, hidden: next };
       return;
@@ -339,20 +362,30 @@ export function setHiddenColumns(next: readonly string[]): void {
   }
 }
 
+// A column renamed or dropped since it was hidden would otherwise count as
+// hidden forever, with no checkbox left to show it again.
+export function pruneHiddenColumns(live: readonly string[]): void {
+  const current = hiddenColumns();
+  const names = new Set(live);
+  const kept = current.filter((c) => names.has(c));
+  if (kept.length !== current.length) setHiddenColumns(kept);
+}
+
 // sort + order are remembered per table (like hiddenColumns): a column
 // name is table-specific, so this never carries a sort across tables.
 export function rememberSort(): void {
   const table = tableInView();
   if (!table) return;
-  if (state.sort) state.sortByTable[table] = { col: state.sort, order: state.order };
-  else delete state.sortByTable[table];
+  const key = scopeTableKey(table);
+  if (state.sort) state.sortByTable[key] = { col: state.sort, order: state.order };
+  else delete state.sortByTable[key];
   sortRisk.set(false); // came from a click on a live header
   persist();
 }
 
 // Sets the active sort from what's stored for `table` (or clears it).
 export function applyStoredSort(table: string | null): void {
-  const stored = table ? state.sortByTable[table] : undefined;
+  const stored = table ? state.sortByTable[scopeTableKey(table)] : undefined;
   state.sort = stored?.col ?? null;
   state.order = stored?.order ?? "asc";
   sortRisk.set(state.sort !== null);
@@ -361,7 +394,7 @@ export function applyStoredSort(table: string | null): void {
 // The backend rejected a restored sort column (400). Drop it so the caller
 // can retry unsorted (ui-guidelines R5).
 function dropStoredSort(table: string | null): void {
-  if (table) delete state.sortByTable[table];
+  if (table) delete state.sortByTable[scopeTableKey(table)];
   state.sort = null;
   state.order = "asc";
   sortRisk.set(false);

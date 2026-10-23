@@ -815,9 +815,16 @@ ul { list-style: none; margin: 0; padding: 0; }
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
 :where(#data-table) thead th { position: sticky; top: 0; z-index: var(--z-header); background: canvas; }
-/* Capped like the table chips' names; the title carries the full name. */
-.col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
-            vertical-align: bottom; }
+/* Names capped like the table chips' (a header's, the sort note's, a band's):
+   a 63-char identifier would otherwise set a column's width, and the title
+   carries the full name (R8). The block padding keeps overflow:hidden from
+   clipping an underscore's descent; the margin cancels it in layout. */
+.col-name, #sort-note-col, .band-pill-text {
+  display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: bottom; padding-block: .15em; margin-block: -.15em; }
+.sort-btn { background: none; border: none; padding-inline: 0; font: inherit; color: inherit; cursor: pointer;
+            text-align: left; }
+.sort-btn:focus-visible { outline: 2px solid var(--chip-active-bg); outline-offset: 1px; }
 /* Arrow always rendered (dim when unsorted), not just on the active
    column: keeps every th's width stable across sort changes and shows
    sortability before the first click. "↑" default previews the real
@@ -936,6 +943,12 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #meta { display: flex; justify-content: space-between; align-items: center;
         flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); }
 #meta-title { color: var(--text-muted); }
+#sort-note { color: CanvasText; }
+#sort-note-col { font-family: var(--font-mono); }
+#sort-note-show { background: none; border: none; padding: 0 .15rem; font: inherit; color: inherit;
+                  text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+#all-hidden { display: flex; align-items: center; gap: var(--gap); width: fit-content; margin: var(--gap) 0;
+              padding: .6rem .8rem; border: 1px solid var(--rule); border-radius: 6px; }
 /* Data and identifiers stay monospace; the chrome around them is system-ui. */
 .json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value,
 #filter-suggest button { font-family: var(--font-mono); }
@@ -1045,11 +1058,13 @@ dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
                         max-height: var(--dialog-body-max-h); box-sizing: border-box; }
 dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
             gap: .3rem var(--gap-lg); }
-dialog dl dt { font-weight: 600; }
+/* A 63-char name would otherwise take the dialog's width from the values. */
+dialog dl dt { font-weight: 600; max-width: 16rem; overflow-wrap: anywhere; }
 dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A join row's fields are grouped under the table they came from. */
 dialog dl dt.record-group { grid-column: 1 / -1; color: var(--text-muted); font-size: .75rem;
-                           border-bottom: 1px solid var(--rule); padding-top: .5rem; }
+                           border-bottom: 1px solid var(--rule); padding-top: .5rem; max-width: none;
+                           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A grid item, not absolutely positioned over a td, so it needs
    `position: static`; hover-to-reveal otherwise matches the table's
    copy button, keyed off dd:hover since dt/dd/button are flat grid
@@ -1190,6 +1205,21 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #columns-pop label { display: flex; align-items: center; gap: .4rem;
           padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
 #columns-pop label:hover { background: var(--hover); }
+/* Sticky so a long list keeps its table's all / none in reach. */
+.cols-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .4rem;
+             padding: .3rem .5rem; background: canvas; }
+.cols-group + .cols-group { margin-top: .3rem; }
+/* Names and table labels ellipsize; their titles carry the full text (R8). */
+.cols-pill, .cols-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cols-pill { padding: .1rem .45rem; border-radius: 4px; font-family: var(--font-mono); font-size: .75rem;
+             background: var(--band-0); color: var(--band-0-fg); }
+/* padding-block: overflow:hidden would otherwise clip an underscore's descent. */
+.cols-name { font-family: var(--font-mono); padding-block: .15em; }
+.cols-count, .cols-sorted { flex: none; margin-left: auto; font-size: .75rem; color: var(--text-muted); }
+.cols-sorted { padding: 0 .35rem; border-radius: 4px; background: var(--hover); }
+.cols-action { flex: none; background: none; border: 1px solid var(--border-strong); border-radius: 4px;
+               padding: 0 .4rem; font: inherit; font-size: .6875rem; color: inherit; cursor: pointer; }
+.cols-action:hover { background: var(--hover); }
 .col-hidden { display: none; }
 
 /* Absolutely positioned under the field at the caret (left set from
@@ -1231,9 +1261,10 @@ thead tr.bands th.row-actions { padding: 0; }
 .band-pill { display: block; margin-right: .75rem; padding: .15rem .5rem; border-radius: 4px; overflow: hidden;
              text-overflow: ellipsis; font-family: var(--font-mono); font-size: .75rem; font-weight: 400;
              background: var(--band-0); color: var(--band-0-fg); }
-tr.bands th[data-band="1"] .band-pill { background: var(--band-1); color: var(--band-1-fg); }
-tr.bands th[data-band="2"] .band-pill { background: var(--band-2); color: var(--band-2-fg); }
-tr.bands th[data-band="3"] .band-pill { background: var(--band-3); color: var(--band-3-fg); }
+/* The columns menu's table headings take their band's colour. */
+tr.bands th[data-band="1"] .band-pill, .cols-group[data-band="1"] .cols-pill { background: var(--band-1); color: var(--band-1-fg); }
+tr.bands th[data-band="2"] .band-pill, .cols-group[data-band="2"] .cols-pill { background: var(--band-2); color: var(--band-2-fg); }
+tr.bands th[data-band="3"] .band-pill, .cols-group[data-band="3"] .cols-pill { background: var(--band-3); color: var(--band-3-fg); }
 thead tr.bands + tr th { top: var(--band-h); }
 #join-notice { display: flex; gap: .75rem; align-items: center; margin: .5rem 0; padding: .6rem .9rem;
                border-radius: 8px; background: color-mix(in srgb, var(--danger) 12%, transparent); }
@@ -1423,7 +1454,7 @@ thead tr.bands + tr th { top: var(--band-h); }
         <button id="view-notice-close" type="button" aria-label="Close this note">✕</button>
       </div>
       <div id="meta">
-        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span></span>
+        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="sort-note" hidden> · sorted by <code id="sort-note-col"></code> <span id="sort-note-dir"></span> <button id="sort-note-show" type="button">show it</button></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
         <span id="actions">
           <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
@@ -1440,6 +1471,7 @@ thead tr.bands + tr th { top: var(--band-h); }
   <div id="content">
     <div id="load-bar" aria-hidden="true"><i></i></div>
     <table id="data-table" tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <p id="all-hidden" hidden><span id="all-hidden-text"></span> <button id="all-hidden-show" class="btn" type="button">Show all</button></p>
     <template id="cell-template"><td><button class="cell-text"></button><span class="cell-actions"><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></span></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
     <div id="pager">
@@ -1541,7 +1573,7 @@ FROM table [alias]
   <div id="refresh-pop-list" role="radiogroup" aria-label="auto-refresh interval"></div>
   <p id="refresh-pop-foot">Pauses while this tab is hidden. Turns off after 30 minutes idle.</p>
 </div>
-<div id="columns-pop" popover><div id="columns-pop-list"></div></div>
+<div id="columns-pop" popover tabindex="-1"><div id="columns-pop-list"></div></div>
 
 <dialog id="api-help-dialog" closedby="any">
   <div class="dialog-head">
@@ -2639,6 +2671,17 @@ function restoreFilterFromParams(params) {
 function isPlainObject(v) {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
+function scopeTableKey(table) {
+  return JSON.stringify([state.source, state.schema, table]);
+}
+function isScopeTableKey(key) {
+  try {
+    const v = JSON.parse(key);
+    return Array.isArray(v) && v.length === 3 && v.slice(0, 2).every((s) => s === null || typeof s === "string") && typeof v[2] === "string";
+  } catch {
+    return false;
+  }
+}
 function restoreFromStorage() {
   try {
     const saved = JSON.parse(readStored(UI_KEY) || "{}");
@@ -2647,16 +2690,16 @@ function restoreFromStorage() {
     if (typeof saved.table === "string") state.view = tableView(saved.table);
     if (typeof saved.limit === "number" && Number.isFinite(saved.limit)) state.limit = saved.limit;
     if (isPlainObject(saved.hiddenColumns)) {
-      for (const [table, cols] of Object.entries(saved.hiddenColumns)) {
-        if (!Array.isArray(cols)) continue;
+      for (const [key, cols] of Object.entries(saved.hiddenColumns)) {
+        if (!isScopeTableKey(key) || !Array.isArray(cols)) continue;
         const clean = cols.filter((c) => typeof c === "string");
-        if (clean.length) state.hiddenColumns[table] = clean;
+        if (clean.length) state.hiddenColumns[key] = clean;
       }
     }
     if (isPlainObject(saved.sortByTable)) {
-      for (const [table, v] of Object.entries(saved.sortByTable)) {
-        if (isPlainObject(v) && typeof v.col === "string") {
-          state.sortByTable[table] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
+      for (const [key, v] of Object.entries(saved.sortByTable)) {
+        if (isScopeTableKey(key) && isPlainObject(v) && typeof v.col === "string") {
+          state.sortByTable[key] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
         }
       }
     }
@@ -2684,7 +2727,7 @@ function hiddenColumns() {
   if (view === null) return [];
   switch (view.kind) {
     case "table":
-      return state.hiddenColumns[view.table] ?? [];
+      return state.hiddenColumns[scopeTableKey(view.table)] ?? [];
     case "join":
       return view.hidden;
     default: {
@@ -2697,11 +2740,13 @@ function setHiddenColumns(next) {
   const view = state.view;
   if (view === null) return;
   switch (view.kind) {
-    case "table":
-      if (next.length) state.hiddenColumns[view.table] = [...next];
-      else delete state.hiddenColumns[view.table];
+    case "table": {
+      const key = scopeTableKey(view.table);
+      if (next.length) state.hiddenColumns[key] = [...next];
+      else delete state.hiddenColumns[key];
       persist();
       return;
+    }
     case "join":
       state.view = { ...view, hidden: next };
       return;
@@ -2710,22 +2755,29 @@ function setHiddenColumns(next) {
     }
   }
 }
+function pruneHiddenColumns(live) {
+  const current2 = hiddenColumns();
+  const names = new Set(live);
+  const kept = current2.filter((c) => names.has(c));
+  if (kept.length !== current2.length) setHiddenColumns(kept);
+}
 function rememberSort() {
   const table = tableInView();
   if (!table) return;
-  if (state.sort) state.sortByTable[table] = { col: state.sort, order: state.order };
-  else delete state.sortByTable[table];
+  const key = scopeTableKey(table);
+  if (state.sort) state.sortByTable[key] = { col: state.sort, order: state.order };
+  else delete state.sortByTable[key];
   sortRisk.set(false);
   persist();
 }
 function applyStoredSort(table) {
-  const stored2 = table ? state.sortByTable[table] : void 0;
+  const stored2 = table ? state.sortByTable[scopeTableKey(table)] : void 0;
   state.sort = stored2?.col ?? null;
   state.order = stored2?.order ?? "asc";
   sortRisk.set(state.sort !== null);
 }
 function dropStoredSort(table) {
-  if (table) delete state.sortByTable[table];
+  if (table) delete state.sortByTable[scopeTableKey(table)];
   state.sort = null;
   state.order = "asc";
   sortRisk.set(false);
@@ -4055,12 +4107,12 @@ var loadTablesToken = 0;
 async function loadTables() {
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
-  const [{ tables }, { counts }] = await Promise.all([
+  const [{ tables }, { counts: counts2 }] = await Promise.all([
     api(`/tables${scopeQuery()}`),
     api(`/table-counts${scopeQuery()}`)
   ]);
   if (token !== loadTablesToken) return;
-  const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
+  const countMap = Object.fromEntries(counts2.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
@@ -4093,11 +4145,7 @@ async function loadTables() {
   }
   const table = tableInView();
   if (table && state.sort === null) applyStoredSort(table);
-  if (state.view) await loadData();
-  else {
-    syncViewNotice(null);
-    setStatus("");
-  }
+  await loadData();
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
@@ -4155,7 +4203,6 @@ function setActiveTable(name) {
 
 // src/features/structure.ts
 var cache = /* @__PURE__ */ new Map();
-var cacheKey = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
 var cacheGeneration = 0;
 function clearStructureCache() {
   cache.clear();
@@ -4216,7 +4263,7 @@ function renderStructure(data) {
   );
 }
 function tableStructure(table) {
-  const key = cacheKey(table);
+  const key = scopeTableKey(table);
   const generation2 = cacheGeneration;
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
@@ -4233,7 +4280,7 @@ function openStructure() {
   const token = ++requestToken;
   $("structure-title").textContent = `structure \u2014 ${state.schema ? `${state.schema}.${table}` : table}`;
   $("structure-dialog").showModal();
-  const hit = cache.get(cacheKey(table));
+  const hit = cache.get(scopeTableKey(table));
   if (hit) {
     renderStructure(hit);
     return;
@@ -4253,7 +4300,6 @@ var indexes = /* @__PURE__ */ new Map();
 var indexesRead = /* @__PURE__ */ new Map();
 var generation = 0;
 var version = 0;
-var keyOf = (table) => `${state.source}|${state.schema}|${table}`;
 function clearJoinCatalog() {
   cache2.clear();
   resolved.clear();
@@ -4266,14 +4312,14 @@ function catalogVersion() {
   return version;
 }
 function seedColumns(table, columns) {
-  const key = keyOf(table);
+  const key = scopeTableKey(table);
   if (resolved.has(key)) return;
   resolved.set(key, columns);
   version++;
   cache2.set(key, Promise.resolve(columns));
 }
 function tableColumns(table) {
-  const key = keyOf(table);
+  const key = scopeTableKey(table);
   let columns = cache2.get(key);
   if (!columns) {
     const params = new URLSearchParams({ table, limit: "1", offset: "0" });
@@ -4296,13 +4342,13 @@ function tableColumns(table) {
   return columns;
 }
 function cachedColumns(table) {
-  return resolved.get(keyOf(table));
+  return resolved.get(scopeTableKey(table));
 }
 function knownCatalog() {
   return Object.fromEntries(listedTableNames().map((t) => [t, cachedColumns(t)?.map((c) => c.name) ?? null]));
 }
 function indexedColumns(table) {
-  const key = keyOf(table);
+  const key = scopeTableKey(table);
   let found = indexes.get(key);
   if (!found) {
     const asked2 = generation;
@@ -4318,7 +4364,7 @@ function indexedColumns(table) {
   return found;
 }
 function readIndexedColumns(table) {
-  return indexesRead.get(keyOf(table));
+  return indexesRead.get(scopeTableKey(table));
 }
 
 // src/features/join-form.ts
@@ -4644,9 +4690,11 @@ function mountJoinForm(root, onChange) {
 }
 
 // src/lib/join-def.ts
+function tableLabel(t) {
+  return t.alias === null ? t.table : `${t.table} ${t.alias}`;
+}
 function joinLabel(def) {
-  const ref = (t) => t.alias === null ? t.table : `${t.table} ${t.alias}`;
-  return def.tables.map((t, i) => i === 0 ? ref(t) : `${def.joins[i - 1].type === "left" ? "\u27D5" : "\u22C8"} ${ref(t)}`).join(" ");
+  return def.tables.map((t, i) => i === 0 ? tableLabel(t) : `${def.joins[i - 1].type === "left" ? "\u27D5" : "\u22C8"} ${tableLabel(t)}`).join(" ");
 }
 function selectsEverything(def) {
   if (def.columns === null) return true;
@@ -5270,10 +5318,12 @@ $("join-edit-btn").onclick = () => openJoinDialog();
 
 // src/features/join-view.ts
 var filterQualifier = (name) => /^(AND|OR|NOT)$/i.test(name) ? `"${name}"` : quoteJoinName(name);
-function columnKey(col) {
-  const def = joinInView()?.def;
+function columnKey(col, def = joinInView()?.def) {
   if (!def || col.join === void 0 || col.column === void 0) return col.name;
   return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
+}
+function displayName(col) {
+  return col.column ?? col.name;
 }
 var QUALIFIED = /^(?:([A-Za-z_][A-Za-z0-9_]*)|"((?:[^"]|"")+)")\.(.+)$/s;
 function splitColumnKey(key, def) {
@@ -5296,8 +5346,10 @@ function buildBands(columns, heads) {
       band = el("th", "band");
       band.dataset.band = String(col.join);
       band.dataset.run = String(tr.cells.length);
-      const pill = el("span", "band-pill", t.alias === null ? t.table : `${t.table} ${t.alias}`);
-      pill.title = pill.textContent;
+      const label = tableLabel(t);
+      const pill = el("span", "band-pill");
+      pill.title = label;
+      pill.appendChild(el("span", "band-pill-text", label));
       band.appendChild(pill);
       tr.appendChild(band);
     }
@@ -5512,7 +5564,7 @@ function updateFilterSuggestions() {
   const table = tableInView();
   const plain = (labels) => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
-    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map(columnKey)));
+    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => columnKey(c))));
   } else if (ctx.expect === "operator") {
     if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
@@ -5577,11 +5629,11 @@ async function showCommonValues(e, table, column) {
 }
 
 // src/lib/sibling-matrix.ts
-var keyOf2 = (name, label) => JSON.stringify([name, label ?? null]);
+var keyOf = (name, label) => JSON.stringify([name, label ?? null]);
 function firstEntries(siblings) {
   const first = /* @__PURE__ */ new Map();
   for (const s of siblings) {
-    const key = keyOf2(s.name, s.label);
+    const key = keyOf(s.name, s.label);
     if (!first.has(key)) first.set(key, s);
   }
   return first;
@@ -5601,7 +5653,7 @@ function buildSiblingMatrix({ instance, siblings }) {
     const isInstance = instance?.name === name;
     const cells = labels.map((label) => {
       if (isInstance && instance?.label === label) return { kind: "here" };
-      const sibling = first.get(keyOf2(name, label));
+      const sibling = first.get(keyOf(name, label));
       return sibling ? { kind: "link", sibling, sameView: isInstance } : { kind: "missing" };
     });
     return { name, isInstance, cells };
@@ -5611,9 +5663,9 @@ function buildSiblingMatrix({ instance, siblings }) {
 function listedSiblings(siblings) {
   const first = firstEntries(siblings);
   const copies = /* @__PURE__ */ new Map();
-  for (const s of siblings) copies.set(keyOf2(s.name, s.label), (copies.get(keyOf2(s.name, s.label)) ?? 0) + 1);
+  for (const s of siblings) copies.set(keyOf(s.name, s.label), (copies.get(keyOf(s.name, s.label)) ?? 0) + 1);
   return siblings.flatMap((s) => {
-    const key = keyOf2(s.name, s.label);
+    const key = keyOf(s.name, s.label);
     if (s.label !== void 0) return first.get(key) === s ? [] : [{ sibling: s, note: `${s.label} \xB7 duplicate` }];
     return [(copies.get(key) ?? 0) > 1 ? { sibling: s, note: hostOf(s.base_url) } : { sibling: s }];
   });
@@ -5873,6 +5925,31 @@ main.addEventListener("scroll", update, { passive: true });
 window.addEventListener("resize", update);
 update();
 
+// src/bootstrap/table-focus.ts
+var tableEl = $("data-table");
+function captureTableFocus() {
+  const active = document.activeElement;
+  if (!active || !tableEl.contains(active)) return null;
+  const cell = active.closest("th, td");
+  const tr = active.closest("tr");
+  const section2 = tr?.parentElement;
+  if (!cell || !tr || !section2) return null;
+  return {
+    region: section2.id,
+    rowIndex: [...section2.children].indexOf(tr),
+    colIndex: [...tr.children].indexOf(cell),
+    className: active.className
+  };
+}
+function restoreTableFocus(captured) {
+  if (!captured) return;
+  const tr = $(captured.region)?.children[captured.rowIndex];
+  const cell = tr?.children[captured.colIndex];
+  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
+  const target = classSelector ? cell?.querySelector(classSelector) : null;
+  (target ?? tableEl).focus();
+}
+
 // src/lib/json-tree.ts
 var SCALAR_CLASS = {
   null: "json-null",
@@ -6049,7 +6126,6 @@ window.addEventListener("popstate", (ev) => {
 
 // src/features/referenced-by.ts
 var cache3 = /* @__PURE__ */ new Map();
-var cacheKey2 = (table) => `${state.source ?? ""}${state.schema ?? ""}${table}`;
 var renderTokens = /* @__PURE__ */ new Map();
 function msg2(text) {
   const p = el("p", "refby-empty", text);
@@ -6089,7 +6165,7 @@ function renderReferencedBy(container, row2, dismiss) {
   renderTokens.set(container, token);
   const table = tableInView();
   if (table === null) return;
-  const key = cacheKey2(table);
+  const key = scopeTableKey(table);
   const hit = cache3.get(key);
   if (hit) {
     renderList2(container, hit, row2, dismiss);
@@ -6117,17 +6193,19 @@ function openReferencedByPopover(e, row2) {
 }
 
 // src/features/record-view.ts
-function buildRecordEntries(columns, row2) {
+function buildRecordEntries(columns, row2, def) {
   const nodes = [];
   let group;
   for (const col of columns) {
-    if (col.join !== void 0 && col.join !== group) {
+    if (def && col.join !== void 0 && col.join !== group) {
       group = col.join;
-      const heading = el("dt", "record-group", col.table ?? "");
+      const heading = el("dt", "record-group", tableLabel(def.tables[col.join]));
+      heading.title = heading.textContent;
       nodes.push(heading);
     }
     const dt = el("dt");
-    dt.textContent = col.name;
+    dt.textContent = displayName(col);
+    dt.title = columnKey(col, def);
     const dd = el("dd");
     const raw = row2[col.name];
     let action = document.createElement("span");
@@ -6180,8 +6258,8 @@ function sqlLiteral(col, raw) {
   if (columnTypeClass(col.type) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
   return `'${raw.replace(/'/g, "''")}'`;
 }
-function openRecordView(columns, row2) {
-  $("record-dl").replaceChildren(...buildRecordEntries(columns, row2));
+function openRecordView(columns, row2, def) {
+  $("record-dl").replaceChildren(...buildRecordEntries(columns, row2, def));
   const table = tableInView();
   $("record-referenced-by-wrap").hidden = table === null;
   const copyInsertBtn = $("record-copy-insert");
@@ -6209,8 +6287,18 @@ function commonValuesButton(table, column) {
   };
   return btn;
 }
+var columnsInView = [];
+var viewInGrid = null;
+var counts = { hidden: /* @__PURE__ */ new Set(), shown: 0, total: 0 };
+function countColumns() {
+  const hidden = new Set(hiddenColumns());
+  counts = { hidden, shown: columnsInView.filter((c) => !hidden.has(c.name)).length, total: columnsInView.length };
+}
 function renderHeader(columns) {
-  const hidden = hiddenColumns();
+  columnsInView = columns;
+  viewInGrid = state.view;
+  countColumns();
+  const { hidden } = counts;
   const table = tableInView();
   const tr = el("tr");
   const actionsTh = el("th", "row-actions");
@@ -6221,13 +6309,15 @@ function renderHeader(columns) {
     if (col.join !== void 0) th.dataset.join = String(col.join);
     const minWidth = columnMinWidth(col.name);
     if (minWidth) th.style.minWidth = `${minWidth}px`;
-    if (hidden.includes(col.name)) th.classList.add("col-hidden");
-    const label = `${col.name} (${col.type})`;
+    if (hidden.has(col.name)) th.classList.add("col-hidden");
+    const fullName = columnKey(col);
+    const label = `${fullName} (${col.type})`;
     const typeCode = el("code", "col-type", col.type);
     typeCode.title = col.type;
     const head = el("span", "th-name");
-    const nameEl = el("span", "col-name", col.name);
-    nameEl.title = col.comment ? `${col.name} \u2014 ${col.comment}` : col.name;
+    const nameEl = el("button", "col-name sort-btn", displayName(col));
+    nameEl.type = "button";
+    nameEl.title = col.comment ? `${fullName} \u2014 ${col.comment}` : fullName;
     if (col.key === "pk" || col.key === "fk") {
       const keyLabel = col.key === "pk" ? col.references ? `primary key, also references ${col.references.table}.${col.references.column}` : "primary key" : `foreign key, references ${col.references.table}.${col.references.column}`;
       const icon = el("span", "key-icon");
@@ -6240,14 +6330,13 @@ function renderHeader(columns) {
       head.append(nameEl, " ");
     }
     if (col.comment) th.title = col.comment;
-    const sortKey = columnKey(col);
     th.setAttribute(
       "aria-sort",
-      sortKey === state.sort ? state.order === "desc" ? "descending" : "ascending" : "none"
+      fullName === state.sort ? state.order === "desc" ? "descending" : "ascending" : "none"
     );
     th.onclick = () => {
-      state.order = state.sort === sortKey && state.order === "asc" ? "desc" : "asc";
-      state.sort = sortKey;
+      state.order = state.sort === fullName && state.order === "asc" ? "desc" : "asc";
+      state.sort = fullName;
       state.offset = 0;
       rememberSort();
       loadData({ resetScroll: false });
@@ -6348,44 +6437,133 @@ function buildCell(col, row2, hidden) {
   }
   return td;
 }
-function setColumnVisibility(name, hidden) {
-  const current2 = hiddenColumns();
-  const next = hidden ? [...current2, name] : current2.filter((c) => c !== name);
-  setHiddenColumns(next);
-  for (const el2 of document.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
-    el2.classList.toggle("col-hidden", hidden);
+function setHidden(next) {
+  const before = new Set(hiddenColumns());
+  const after = new Set(next);
+  setHiddenColumns([...after]);
+  for (const name of /* @__PURE__ */ new Set([...before, ...after])) {
+    if (before.has(name) === after.has(name)) continue;
+    for (const cell of tableEl.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
+      cell.classList.toggle("col-hidden", after.has(name));
+    }
   }
+  countColumns();
   refreshBands();
-  updateColumnsButtonLabel();
+  syncColumnChrome();
+  writeRowMeta();
 }
-function updateColumnsButtonLabel() {
-  const n = hiddenColumns().length;
-  $("columns-btn").textContent = n > 0 ? `columns (${n} hidden)` : "columns";
+function setColumnHidden(name, hide) {
+  const current2 = hiddenColumns();
+  setHidden(hide ? [...current2, name] : current2.filter((c) => c !== name));
 }
-function renderColumnMenu(columns) {
-  const hidden = hiddenColumns();
-  $("columns-pop-list").replaceChildren(
-    ...columns.map((col) => {
-      const label = el("label");
-      const input2 = el("input");
-      input2.type = "checkbox";
-      input2.checked = !hidden.includes(col.name);
-      input2.onchange = () => setColumnVisibility(col.name, !input2.checked);
-      label.append(input2, col.name);
-      return label;
-    })
+function sortedColumn() {
+  return state.sort === null ? void 0 : columnsInView.find((c) => columnKey(c) === state.sort);
+}
+var rowsMeta = "";
+function writeRowMeta() {
+  const { shown: shown2, total } = counts;
+  $("row-meta").textContent = `${rowsMeta} \xB7 ${shown2 < total ? `${shown2} of ${total}` : total} columns`;
+}
+var sortArrow = () => state.order === "desc" ? "\u2193" : "\u2191";
+function hideColumnNotes() {
+  $("sort-note").hidden = true;
+  $("all-hidden").hidden = true;
+}
+function syncColumnChrome() {
+  const { hidden, shown: shown2, total } = counts;
+  $("columns-btn").textContent = shown2 < total ? `columns (${total - shown2} hidden)` : "columns";
+  const sorted = sortedColumn();
+  for (const item of $("columns-pop-list").querySelectorAll("label[data-name]")) {
+    const name = item.dataset.name;
+    qs(item, "input").checked = !hidden.has(name);
+    const tag = qs(item, ".cols-sorted");
+    tag.hidden = sorted?.name !== name;
+    tag.textContent = tag.hidden ? "" : `sorted ${sortArrow()}`;
+  }
+  for (const group of $("columns-pop-list").querySelectorAll(".cols-group")) {
+    const names = [...group.querySelectorAll("label[data-name]")].map((l) => l.dataset.name);
+    qs(group, ".cols-count").textContent = `${names.filter((n) => !hidden.has(n)).length} of ${names.length}`;
+  }
+  $("sort-note").hidden = sorted === void 0;
+  if (sorted) {
+    $("sort-note-col").textContent = columnKey(sorted);
+    $("sort-note-col").title = columnKey(sorted);
+    $("sort-note-dir").textContent = sortArrow();
+    $("sort-note-show").hidden = !hidden.has(sorted.name);
+  }
+  $("all-hidden").hidden = total === 0 || shown2 > 0;
+  $("all-hidden-text").textContent = `All ${total} columns are hidden.`;
+  const emptyCell = $("tbody").querySelector("tr.empty > td");
+  if (emptyCell) emptyCell.colSpan = shown2 + 1;
+}
+$("sort-note-show").onclick = () => {
+  const sorted = sortedColumn();
+  if (sorted) setColumnHidden(sorted.name, false);
+};
+$("all-hidden-show").onclick = () => setHidden([]);
+function columnGroups(columns) {
+  if (viewInGrid?.kind !== "join") return [{ label: viewInGrid?.table ?? "", band: 0, columns }];
+  return viewInGrid.def.tables.map((t, i) => ({ label: tableLabel(t), band: i, columns: columns.filter((c) => c.join === i) })).filter((g) => g.columns.length > 0);
+}
+function groupButton(action, label, names) {
+  const btn = el("button", "cols-action", action);
+  btn.type = "button";
+  btn.setAttribute("aria-label", `${action === "all" ? "show" : "hide"} all ${label} columns`);
+  btn.onclick = () => {
+    const rest = hiddenColumns().filter((n) => !names.has(n));
+    setHidden(action === "all" ? rest : [...rest, ...names]);
+  };
+  return btn;
+}
+function buildMenuItem(col) {
+  const label = el("label");
+  label.dataset.name = col.name;
+  const input2 = el("input");
+  input2.type = "checkbox";
+  input2.onchange = () => setColumnHidden(col.name, !input2.checked);
+  const fullName = columnKey(col);
+  if (fullName !== displayName(col)) input2.setAttribute("aria-label", fullName);
+  const text = el("span", "cols-name", displayName(col));
+  text.title = fullName;
+  label.append(input2, text, el("span", "cols-sorted"));
+  return label;
+}
+function buildMenuGroup(group) {
+  const box = el("div", "cols-group");
+  box.dataset.band = String(group.band);
+  const head = el("div", "cols-head");
+  const pill = el("span", "cols-pill", group.label);
+  pill.title = group.label;
+  const names = new Set(group.columns.map((c) => c.name));
+  head.append(
+    pill,
+    el("span", "cols-count"),
+    groupButton("all", group.label, names),
+    groupButton("none", group.label, names)
   );
+  box.append(head, ...group.columns.map(buildMenuItem));
+  return box;
+}
+var menuShape = "";
+function renderColumnMenu() {
+  const groups = columnGroups(columnsInView);
+  const shape = JSON.stringify(groups.map((g) => [g.band, g.label, g.columns.map((c) => [c.name, columnKey(c)])]));
+  if (shape !== menuShape) {
+    menuShape = shape;
+    $("columns-pop-list").replaceChildren(...groups.map(buildMenuGroup));
+  }
+  syncColumnChrome();
 }
 function buildRowActionCell(columns, row2) {
   const td = rowActionTemplate.content.cloneNode(true).firstElementChild;
-  qs(td, ".record-btn").onclick = () => openRecordView(columns, row2);
+  const def = viewInGrid?.kind === "join" ? viewInGrid.def : void 0;
+  qs(td, ".record-btn").onclick = () => openRecordView(columns, row2, def);
   return td;
 }
 function renderRows2(data, newRowKeys, pkNames = []) {
-  const hidden = new Set(hiddenColumns());
+  const { hidden, shown: shown2 } = counts;
   if (data.rows.length === 0) {
-    const visible = data.columns.filter((c) => !hidden.has(c.name)).length;
-    renderEmptyState(visible + 1);
+    renderEmptyState(shown2 + 1);
     return;
   }
   const tbody = $("tbody");
@@ -6411,40 +6589,17 @@ function updatePager(data) {
   $("prev").disabled = state.offset === 0;
   if (joinInView()) {
     $("page").textContent = `page ${page} \xB7 ${data.has_more ? "more rows available" : "last page"}`;
-    $("row-meta").textContent = ` \xB7 ${data.rows.length}${data.has_more ? "+" : ""} rows \xB7 ${data.columns.length} columns`;
+    rowsMeta = ` \xB7 ${data.rows.length}${data.has_more ? "+" : ""} rows`;
+    writeRowMeta();
     $("row-meta").removeAttribute("title");
     $("next").disabled = !data.has_more;
     return;
   }
   $("page").textContent = `page ${page}`;
-  $("row-meta").textContent = ` \xB7 ${formatApproxCount(data.total_approx ?? -1)} rows \xB7 ${data.columns.length} columns`;
+  rowsMeta = ` \xB7 ${formatApproxCount(data.total_approx ?? -1)} rows`;
+  writeRowMeta();
   $("row-meta").title = APPROX_COUNT_TITLE;
   $("next").disabled = data.rows.length < state.limit;
-}
-
-// src/bootstrap/table-focus.ts
-var tableEl = $("data-table");
-function captureTableFocus() {
-  const active = document.activeElement;
-  if (!active || !tableEl.contains(active)) return null;
-  const cell = active.closest("th, td");
-  const tr = active.closest("tr");
-  const section2 = tr?.parentElement;
-  if (!cell || !tr || !section2) return null;
-  return {
-    region: section2.id,
-    rowIndex: [...section2.children].indexOf(tr),
-    colIndex: [...tr.children].indexOf(cell),
-    className: active.className
-  };
-}
-function restoreTableFocus(captured) {
-  if (!captured) return;
-  const tr = $(captured.region)?.children[captured.rowIndex];
-  const cell = tr?.children[captured.colIndex];
-  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
-  const target = classSelector ? cell?.querySelector(classSelector) : null;
-  (target ?? tableEl).focus();
 }
 
 // src/bootstrap/controller.ts
@@ -6580,6 +6735,7 @@ async function loadData2({
   syncViewNotice(req);
   if (req === null) {
     updateViewChrome();
+    hideColumnNotes();
     setStatus("");
     return;
   }
@@ -6608,6 +6764,7 @@ async function loadData2({
   markFilterVerified();
   markViewShown();
   if (view.kind === "table") seedColumns(view.table, data.columns);
+  pruneHiddenColumns(data.columns.map((c) => c.name));
   updateViewChrome();
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
   $("payload").disabled = false;
@@ -6615,7 +6772,6 @@ async function loadData2({
   $("structure-btn").disabled = false;
   $("refresh").disabled = false;
   $("refresh-menu-btn").disabled = false;
-  updateColumnsButtonLabel();
   updateJoinChrome();
   refreshSavedChips();
   syncUrl();
@@ -6626,7 +6782,7 @@ async function loadData2({
     renderHeader(data.columns);
     renderRows2(data, newRowKeys, pkNames);
     rememberColumnWidths();
-    renderColumnMenu(data.columns);
+    renderColumnMenu();
     restoreTableFocus(focusCapture);
   };
   if (document.startViewTransition) {

@@ -9,6 +9,7 @@ import {
   markFilterVerified,
   markStoredSortVerified,
   markViewShown,
+  pruneHiddenColumns,
   startTable,
   state,
   tableInView,
@@ -17,7 +18,7 @@ import {
 import type { JoinDef, View, ViewData } from "../core/types.js";
 import { noteLoadOk, noteTickFailed, setFetching, setNewChip } from "../features/auto-refresh.js";
 import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
-import { renderColumnMenu, renderHeader, renderRows, updateColumnsButtonLabel, updatePager } from "../features/grid.js";
+import { hideColumnNotes, renderColumnMenu, renderHeader, renderRows, updatePager } from "../features/grid.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
 import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
@@ -217,6 +218,7 @@ export async function loadData({
   syncViewNotice(req);
   if (req === null) {
     updateViewChrome();
+    hideColumnNotes();
     setStatus("");
     return;
   }
@@ -250,6 +252,7 @@ export async function loadData({
   markFilterVerified();
   markViewShown();
   if (view.kind === "table") seedColumns(view.table, data.columns);
+  pruneHiddenColumns(data.columns.map((c) => c.name));
   updateViewChrome();
 
   // Row keys come from primary keys, which a join of several tables does not have.
@@ -260,7 +263,6 @@ export async function loadData({
   $<HTMLButtonElement>("structure-btn").disabled = false;
   $<HTMLButtonElement>("refresh").disabled = false;
   $<HTMLButtonElement>("refresh-menu-btn").disabled = false;
-  updateColumnsButtonLabel();
   updateJoinChrome();
   refreshSavedChips();
   syncUrl();
@@ -272,7 +274,7 @@ export async function loadData({
     renderHeader(data.columns);
     renderRows(data, newRowKeys, pkNames);
     rememberColumnWidths();
-    renderColumnMenu(data.columns);
+    renderColumnMenu();
     restoreTableFocus(focusCapture);
   };
   // startViewTransition's callback isn't guaranteed to run synchronously —

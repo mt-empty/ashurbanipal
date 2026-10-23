@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 test("a table keeps the sort last chosen on it when you leave and come back", async ({ page }) => {
   await gotoApp(page);
@@ -15,6 +15,18 @@ test("a table keeps the sort last chosen on it when you leave and come back", as
   await expect(page.locator('th[data-col="price"]')).toHaveAttribute("aria-sort", "ascending");
 });
 
+test("a sort stored under a bare table name, from before keys were scoped, is dropped", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "ashurbanipal_ui",
+      JSON.stringify({ table: "products", sortByTable: { products: { col: "price", order: "desc" } } }),
+    );
+  });
+  await gotoApp(page);
+  await page.locator("#current").getByText("products", { exact: true }).waitFor();
+  await expect(page.locator('thead th[data-col]:not([aria-sort="none"])')).toHaveCount(0);
+});
+
 test("switching to a table that was never sorted carries no sort", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
@@ -28,12 +40,12 @@ test("switching to a table that was never sorted carries no sort", async ({ page
 test("a remembered sort column the backend rejects is dropped and the view recovers", async ({ page }) => {
   // Storage from before a schema change: `ghost_col` no longer exists, so
   // the first fetch 400s and loadData must retry unsorted (Option A / R11).
-  await page.addInitScript(() => {
+  await page.addInitScript((key) => {
     localStorage.setItem(
       "ashurbanipal_ui",
-      JSON.stringify({ table: "products", sortByTable: { products: { col: "ghost_col", order: "asc" } } }),
+      JSON.stringify({ table: "products", sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }),
     );
-  });
+  }, tableKey("products"));
   await page.route("**/api/tables/data*", (r) => {
     if (new URL(r.request().url()).searchParams.get("sort") === "ghost_col") {
       return r.fulfill({
@@ -57,8 +69,7 @@ test("a remembered sort column the backend rejects is dropped and the view recov
   await expect(page.locator("#tbody tr").first()).toBeVisible();
   await expect(page.locator('thead th[data-col]:not([aria-sort="none"])')).toHaveCount(0);
 
-  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("ashurbanipal_ui")!));
-  expect(stored.sortByTable.products).toBeUndefined();
+  expect((await uiState(page)).sortByTable[tableKey("products")]).toBeUndefined();
 });
 
 test("a stale remembered sort is dropped without discarding a shared link's filter", async ({
@@ -68,12 +79,9 @@ test("a stale remembered sort is dropped without discarding a shared link's filt
   // dead column, while the link's ?filter= is perfectly valid. The sort is
   // this visitor's incidental state, the filter is the link's whole point —
   // so the sort is dropped first and the filtered view still renders.
-  await page.addInitScript(() => {
-    localStorage.setItem(
-      "ashurbanipal_ui",
-      JSON.stringify({ sortByTable: { orders: { col: "ghost_col", order: "asc" } } }),
-    );
-  });
+  await page.addInitScript((key) => {
+    localStorage.setItem("ashurbanipal_ui", JSON.stringify({ sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }));
+  }, tableKey("orders"));
   await page.route("**/api/tables/data*", (r) => {
     if (new URL(r.request().url()).searchParams.get("sort") === "ghost_col") {
       return r.fulfill({

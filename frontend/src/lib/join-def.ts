@@ -2,11 +2,15 @@ import type { JoinDef, JoinTable, WireJoin } from "../core/types.js";
 
 // ==== Join definition helpers (wire request, labels) ====
 
+// One table of a join as the label, bands, menu headings and record groups name it.
+export function tableLabel(t: JoinTable): string {
+  return t.alias === null ? t.table : `${t.table} ${t.alias}`;
+}
+
 // `orders ⟕ users o` style one-line summary for the meta row and the chips.
 export function joinLabel(def: JoinDef): string {
-  const ref = (t: JoinTable): string => (t.alias === null ? t.table : `${t.table} ${t.alias}`);
   return def.tables
-    .map((t, i) => (i === 0 ? ref(t) : `${def.joins[i - 1].type === "left" ? "⟕" : "⋈"} ${ref(t)}`))
+    .map((t, i) => (i === 0 ? tableLabel(t) : `${def.joins[i - 1].type === "left" ? "⟕" : "⋈"} ${tableLabel(t)}`))
     .join(" ");
 }
 

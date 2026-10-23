@@ -1,6 +1,7 @@
 import { $, el } from "../core/dom.js";
 import { joinInView } from "../core/state.js";
 import type { Column, JoinDef } from "../core/types.js";
+import { tableLabel } from "../lib/join-def.js";
 import { effectiveName, quoteJoinName } from "../lib/join-dsl.js";
 
 // The filter DSL reads a bare AND, OR or NOT as a keyword, so a join alias spelled so is quoted there.
@@ -8,10 +9,16 @@ const filterQualifier = (name: string): string => (/^(AND|OR|NOT)$/i.test(name) 
 
 // How a column is named where the user types or links it (sort, filter clause):
 // `alias.column` in a join view, the plain name otherwise.
-export function columnKey(col: Column): string {
-  const def = joinInView()?.def;
+export function columnKey(col: Column, def: JoinDef | undefined = joinInView()?.def): string {
   if (!def || col.join === undefined || col.column === undefined) return col.name;
   return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
+}
+
+// What a column is called on screen: its own name, since the band, menu
+// heading or record group above it already names the table. The server's
+// label exists only to keep `name` unique and is never shown.
+export function displayName(col: Column): string {
+  return col.column ?? col.name;
 }
 
 const QUALIFIED = /^(?:([A-Za-z_][A-Za-z0-9_]*)|"((?:[^"]|"")+)")\.(.+)$/s;
@@ -42,8 +49,10 @@ export function buildBands(columns: Column[], heads: readonly HTMLElement[]): HT
       band = el("th", "band");
       band.dataset.band = String(col.join);
       band.dataset.run = String(tr.cells.length);
-      const pill = el("span", "band-pill", t.alias === null ? t.table : `${t.table} ${t.alias}`);
-      pill.title = pill.textContent;
+      const label = tableLabel(t);
+      const pill = el("span", "band-pill");
+      pill.title = label;
+      pill.appendChild(el("span", "band-pill-text", label));
       band.appendChild(pill);
       tr.appendChild(band);
     }

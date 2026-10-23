@@ -231,7 +231,7 @@ function updateFilterSuggestions(): void {
   const table = tableInView();
   const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
-    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map(columnKey)));
+    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => columnKey(c))));
   } else if (ctx.expect === "operator") {
     if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {

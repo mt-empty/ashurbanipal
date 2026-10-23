@@ -209,9 +209,16 @@ ul { list-style: none; margin: 0; padding: 0; }
    over a sticky <th> with the default stacking order unless the header is
    explicitly raised. */
 :where(#data-table) thead th { position: sticky; top: 0; z-index: var(--z-header); background: canvas; }
-/* Capped like the table chips' names; the title carries the full name. */
-.col-name { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis;
-            vertical-align: bottom; }
+/* Names capped like the table chips' (a header's, the sort note's, a band's):
+   a 63-char identifier would otherwise set a column's width, and the title
+   carries the full name (R8). The block padding keeps overflow:hidden from
+   clipping an underscore's descent; the margin cancels it in layout. */
+.col-name, #sort-note-col, .band-pill-text {
+  display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: bottom; padding-block: .15em; margin-block: -.15em; }
+.sort-btn { background: none; border: none; padding-inline: 0; font: inherit; color: inherit; cursor: pointer;
+            text-align: left; }
+.sort-btn:focus-visible { outline: 2px solid var(--chip-active-bg); outline-offset: 1px; }
 /* Arrow always rendered (dim when unsorted), not just on the active
    column: keeps every th's width stable across sort changes and shows
    sortability before the first click. "↑" default previews the real
@@ -330,6 +337,12 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #meta { display: flex; justify-content: space-between; align-items: center;
         flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); }
 #meta-title { color: var(--text-muted); }
+#sort-note { color: CanvasText; }
+#sort-note-col { font-family: var(--font-mono); }
+#sort-note-show { background: none; border: none; padding: 0 .15rem; font: inherit; color: inherit;
+                  text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+#all-hidden { display: flex; align-items: center; gap: var(--gap); width: fit-content; margin: var(--gap) 0;
+              padding: .6rem .8rem; border: 1px solid var(--rule); border-radius: 6px; }
 /* Data and identifiers stay monospace; the chrome around them is system-ui. */
 .json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value,
 #filter-suggest button { font-family: var(--font-mono); }
@@ -439,11 +452,13 @@ dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
                         max-height: var(--dialog-body-max-h); box-sizing: border-box; }
 dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
             gap: .3rem var(--gap-lg); }
-dialog dl dt { font-weight: 600; }
+/* A 63-char name would otherwise take the dialog's width from the values. */
+dialog dl dt { font-weight: 600; max-width: 16rem; overflow-wrap: anywhere; }
 dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A join row's fields are grouped under the table they came from. */
 dialog dl dt.record-group { grid-column: 1 / -1; color: var(--text-muted); font-size: .75rem;
-                           border-bottom: 1px solid var(--rule); padding-top: .5rem; }
+                           border-bottom: 1px solid var(--rule); padding-top: .5rem; max-width: none;
+                           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A grid item, not absolutely positioned over a td, so it needs
    `position: static`; hover-to-reveal otherwise matches the table's
    copy button, keyed off dd:hover since dt/dd/button are flat grid
@@ -584,6 +599,21 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #columns-pop label { display: flex; align-items: center; gap: .4rem;
           padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
 #columns-pop label:hover { background: var(--hover); }
+/* Sticky so a long list keeps its table's all / none in reach. */
+.cols-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .4rem;
+             padding: .3rem .5rem; background: canvas; }
+.cols-group + .cols-group { margin-top: .3rem; }
+/* Names and table labels ellipsize; their titles carry the full text (R8). */
+.cols-pill, .cols-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cols-pill { padding: .1rem .45rem; border-radius: 4px; font-family: var(--font-mono); font-size: .75rem;
+             background: var(--band-0); color: var(--band-0-fg); }
+/* padding-block: overflow:hidden would otherwise clip an underscore's descent. */
+.cols-name { font-family: var(--font-mono); padding-block: .15em; }
+.cols-count, .cols-sorted { flex: none; margin-left: auto; font-size: .75rem; color: var(--text-muted); }
+.cols-sorted { padding: 0 .35rem; border-radius: 4px; background: var(--hover); }
+.cols-action { flex: none; background: none; border: 1px solid var(--border-strong); border-radius: 4px;
+               padding: 0 .4rem; font: inherit; font-size: .6875rem; color: inherit; cursor: pointer; }
+.cols-action:hover { background: var(--hover); }
 .col-hidden { display: none; }
 
 /* Absolutely positioned under the field at the caret (left set from
@@ -625,9 +655,10 @@ thead tr.bands th.row-actions { padding: 0; }
 .band-pill { display: block; margin-right: .75rem; padding: .15rem .5rem; border-radius: 4px; overflow: hidden;
              text-overflow: ellipsis; font-family: var(--font-mono); font-size: .75rem; font-weight: 400;
              background: var(--band-0); color: var(--band-0-fg); }
-tr.bands th[data-band="1"] .band-pill { background: var(--band-1); color: var(--band-1-fg); }
-tr.bands th[data-band="2"] .band-pill { background: var(--band-2); color: var(--band-2-fg); }
-tr.bands th[data-band="3"] .band-pill { background: var(--band-3); color: var(--band-3-fg); }
+/* The columns menu's table headings take their band's colour. */
+tr.bands th[data-band="1"] .band-pill, .cols-group[data-band="1"] .cols-pill { background: var(--band-1); color: var(--band-1-fg); }
+tr.bands th[data-band="2"] .band-pill, .cols-group[data-band="2"] .cols-pill { background: var(--band-2); color: var(--band-2-fg); }
+tr.bands th[data-band="3"] .band-pill, .cols-group[data-band="3"] .cols-pill { background: var(--band-3); color: var(--band-3-fg); }
 thead tr.bands + tr th { top: var(--band-h); }
 #join-notice { display: flex; gap: .75rem; align-items: center; margin: .5rem 0; padding: .6rem .9rem;
                border-radius: 8px; background: color-mix(in srgb, var(--danger) 12%, transparent); }
