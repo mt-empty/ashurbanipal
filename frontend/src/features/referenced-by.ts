@@ -1,6 +1,6 @@
 import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
-import { applyScopeParams, state, tableInView } from "../core/state.js";
+import { applyScopeParams, scopeTableKey, tableInView } from "../core/state.js";
 import type { ReferencedByEntry, Row } from "../core/types.js";
 import { applyFilterClauses } from "./filter-ui.js";
 import { navigateWithSeededFilter } from "./nav.js";
@@ -19,7 +19,6 @@ import { navigateWithSeededFilter } from "./nav.js";
 // source/schema switch invalidates implicitly; only mid-session DDL goes
 // stale, which nothing else in the app guards against either.
 const cache = new Map<string, ReferencedByEntry[]>();
-const cacheKey = (table: string) => `${state.source ?? ""}\x1f${state.schema ?? ""}\x1f${table}`;
 
 // Same staleness guard as cvRequestToken: a second call targeting the same
 // container before the first response lands must not overwrite the list
@@ -84,7 +83,7 @@ export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: ()
   if (table === null) return;
   // Key captured now, alongside applyScopeParams' read of the same scope,
   // so a mid-flight scope switch can't file the result under the wrong key.
-  const key = cacheKey(table);
+  const key = scopeTableKey(table);
   const hit = cache.get(key);
   if (hit) {
     renderList(container, hit, row, dismiss);

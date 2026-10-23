@@ -181,9 +181,17 @@ Two components, same as the original concept:
     its header, with a text alternative (not color-only).
 - **Grid customization**:
   - *Column show/hide* — a header popover toggles per-column visibility,
-    scoped per table (hiding a column on one table never hides a
-    same-named column on another); a hidden-count indicator shows in the
-    toolbar. Column reorder/resize are researched but not built
+    scoped per table within its source and schema (hiding a column on one
+    table never hides a same-named column on another). The popover lists
+    columns under a heading per table (one in a table view, one per joined
+    table, named and coloured like its band), each with *all* / *none*.
+    The toolbar shows the hidden count, the header line reads "7 of 9
+    columns" and names the sort column (tagged in the popover too), with
+    a *show it* button while that column is hidden, and hiding every
+    column leaves a message with *Show all* in place of an empty grid.
+    A join shows each column's own name; the band above it names the
+    table, and `alias.column` is the title. Hidden names a table no longer
+    has are dropped after each load. Column reorder/resize are researched but not built
     (`docs/feature-backlog/09-column-reorder-and-resize.md`).
   - *Sticky table header* — the header row stays pinned while scrolling a
     long result set vertically.
@@ -198,7 +206,8 @@ Two components, same as the original concept:
 - **UI state persistence**: `localStorage` remembers lightweight UI state
   across visits — currently selected source, schema (remembered per
   source), table, sort column/direction (remembered per table, like
-  hidden columns), page size, and per-table hidden-column sets — and the
+  hidden columns), page size, and per-table hidden-column sets, both
+  keyed by source, schema and table — and the
   same state (except hidden columns and the filter) is mirrored into the
   URL's query params via `history.replaceState`, so the address bar is
   always a shareable link for the current view. Properties:

@@ -1,5 +1,5 @@
 import { ApiError, api } from "../core/api.js";
-import { applyScopeParams, state } from "../core/state.js";
+import { applyScopeParams, scopeTableKey } from "../core/state.js";
 import type { Column, ViewData } from "../core/types.js";
 import type { JoinCatalog } from "../lib/join-dsl.js";
 import { listedTableNames } from "./sidebar.js";
@@ -15,7 +15,6 @@ const indexes = new Map<string, Promise<Set<string>>>();
 const indexesRead = new Map<string, Set<string>>();
 let generation = 0;
 let version = 0;
-const keyOf = (table: string): string => `${state.source}|${state.schema}|${table}`;
 
 export function clearJoinCatalog(): void {
   cache.clear();
@@ -33,7 +32,7 @@ export function catalogVersion(): number {
 
 // The columns of the table in view arrive with its data; no need to ask again.
 export function seedColumns(table: string, columns: Column[]): void {
-  const key = keyOf(table);
+  const key = scopeTableKey(table);
   if (resolved.has(key)) return;
   resolved.set(key, columns);
   version++;
@@ -41,7 +40,7 @@ export function seedColumns(table: string, columns: Column[]): void {
 }
 
 export function tableColumns(table: string): Promise<Column[]> {
-  const key = keyOf(table);
+  const key = scopeTableKey(table);
   let columns = cache.get(key);
   if (!columns) {
     const params = new URLSearchParams({ table, limit: "1", offset: "0" });
@@ -67,7 +66,7 @@ export function tableColumns(table: string): Promise<Column[]> {
 
 // What is already known, for places that cannot wait on a request.
 export function cachedColumns(table: string): Column[] | undefined {
-  return resolved.get(keyOf(table));
+  return resolved.get(scopeTableKey(table));
 }
 
 // Every listed table, with its columns where they have been read.
@@ -77,7 +76,7 @@ export function knownCatalog(): JoinCatalog {
 
 // Columns that lead an index, so a join on them is cheap. A table whose structure cannot be read has none.
 export function indexedColumns(table: string): Promise<Set<string>> {
-  const key = keyOf(table);
+  const key = scopeTableKey(table);
   let found = indexes.get(key);
   if (!found) {
     const asked = generation;
@@ -97,5 +96,5 @@ export function indexedColumns(table: string): Promise<Set<string>> {
 }
 
 export function readIndexedColumns(table: string): ReadonlySet<string> | undefined {
-  return indexesRead.get(keyOf(table));
+  return indexesRead.get(scopeTableKey(table));
 }

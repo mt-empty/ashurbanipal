@@ -77,7 +77,7 @@
         <button id="view-notice-close" type="button" aria-label="Close this note">✕</button>
       </div>
       <div id="meta">
-        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span></span>
+        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="sort-note" hidden> · sorted by <code id="sort-note-col"></code> <span id="sort-note-dir"></span> <button id="sort-note-show" type="button">show it</button></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
         <span id="actions">
           <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
@@ -94,6 +94,7 @@
   <div id="content">
     <div id="load-bar" aria-hidden="true"><i></i></div>
     <table id="data-table" tabindex="-1"><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <p id="all-hidden" hidden><span id="all-hidden-text"></span> <button id="all-hidden-show" class="btn" type="button">Show all</button></p>
     <template id="cell-template"><td><button class="cell-text"></button><span class="cell-actions"><button class="filter-eq" aria-label="filter by this value">=</button><button class="copy" aria-label="copy cell value">⧉</button></span></td></template>
     <template id="row-action-template"><td class="row-actions"><button class="record-btn" aria-label="view row as record">▤</button></td></template>
     <div id="pager">
@@ -195,7 +196,7 @@ FROM table [alias]
   <div id="refresh-pop-list" role="radiogroup" aria-label="auto-refresh interval"></div>
   <p id="refresh-pop-foot">Pauses while this tab is hidden. Turns off after 30 minutes idle.</p>
 </div>
-<div id="columns-pop" popover><div id="columns-pop-list"></div></div>
+<div id="columns-pop" popover tabindex="-1"><div id="columns-pop-list"></div></div>
 
 <dialog id="api-help-dialog" closedby="any">
   <div class="dialog-head">

@@ -1,24 +1,28 @@
 import { $, copyText, el } from "../core/dom.js";
 import { state, tableInView } from "../core/state.js";
-import type { Column, Row } from "../core/types.js";
+import type { Column, JoinDef, Row } from "../core/types.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
+import { tableLabel } from "../lib/join-def.js";
 import { renderJsonTree } from "../lib/json-tree.js";
+import { columnKey, displayName } from "./join-view.js";
 import { renderReferencedBy } from "./referenced-by.js";
 
 // ---- record / vertical view: one already-fetched row as a stacked
 // column:value list, for tables too wide to scan across ----
-export function buildRecordEntries(columns: Column[], row: Row): Node[] {
+export function buildRecordEntries(columns: Column[], row: Row, def: JoinDef | undefined): Node[] {
   const nodes: Node[] = [];
   let group: number | undefined;
   for (const col of columns) {
     // A join row is grouped by the table each column came from.
-    if (col.join !== undefined && col.join !== group) {
+    if (def && col.join !== undefined && col.join !== group) {
       group = col.join;
-      const heading = el("dt", "record-group", col.table ?? "");
+      const heading = el("dt", "record-group", tableLabel(def.tables[col.join]));
+      heading.title = heading.textContent;
       nodes.push(heading);
     }
     const dt = el("dt");
-    dt.textContent = col.name;
+    dt.textContent = displayName(col);
+    dt.title = columnKey(col, def);
     const dd = el("dd");
     const raw = row[col.name];
     // Nothing to copy for a null field, but the grid's three-column
@@ -86,8 +90,9 @@ function sqlLiteral(col: Column, raw: string | null): string {
   return `'${raw.replace(/'/g, "''")}'`;
 }
 
-export function openRecordView(columns: Column[], row: Row): void {
-  $("record-dl").replaceChildren(...buildRecordEntries(columns, row));
+// `def` is the join the row was rendered for, which state.view may have moved on from.
+export function openRecordView(columns: Column[], row: Row, def: JoinDef | undefined): void {
+  $("record-dl").replaceChildren(...buildRecordEntries(columns, row, def));
   // Both name one table; a join row has several.
   const table = tableInView();
   $("record-referenced-by-wrap").hidden = table === null;

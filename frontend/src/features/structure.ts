@@ -1,13 +1,12 @@
 import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
-import { applyScopeParams, state, tableInView } from "../core/state.js";
+import { applyScopeParams, scopeTableKey, state, tableInView } from "../core/state.js";
 import type { ConstraintFk, StructureResponse } from "../core/types.js";
 
 // ---- structure dialog: a table's indexes and constraints (spec/protocol.md
 // §5.10), cached per (source, schema, table); errors are never cached. ----
 
 const cache = new Map<string, StructureResponse>();
-const cacheKey = (table: string) => `${state.source ?? ""}\x1f${state.schema ?? ""}\x1f${table}`;
 
 // Bumped by the refresh button so a response already in flight cannot write
 // its pre-refresh result back into the cache.
@@ -81,7 +80,7 @@ function renderStructure(data: StructureResponse): void {
 
 // One table's structure through the same cache the dialog uses; errors are not cached.
 export function tableStructure(table: string): Promise<StructureResponse> {
-  const key = cacheKey(table);
+  const key = scopeTableKey(table);
   const generation = cacheGeneration;
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
@@ -100,7 +99,7 @@ export function openStructure(): void {
   $("structure-title").textContent = `structure — ${state.schema ? `${state.schema}.${table}` : table}`;
   $<HTMLDialogElement>("structure-dialog").showModal();
 
-  const hit = cache.get(cacheKey(table));
+  const hit = cache.get(scopeTableKey(table));
   if (hit) {
     renderStructure(hit);
     return;

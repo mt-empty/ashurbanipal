@@ -22,6 +22,23 @@ test("a join view labels columns by table and pages without a total", async ({ p
   await expect(page.locator("#page")).toContainText("page 2");
 });
 
+test("a band's pill spans all its columns, and a long alias widens them only up to the cap", async ({ page }) => {
+  const fill = () =>
+    page.$$eval("th.band", (bands) =>
+      bands.map((b) => b.getBoundingClientRect().width - b.querySelector(".band-pill")!.getBoundingClientRect().width),
+    );
+  await gotoJoin(page, ORDERS_USERS);
+  // What is left is the pill's right margin only.
+  for (const gap of await fill()) expect(gap).toBeLessThan(16);
+
+  const alias = "customers_who_placed_the_order_and_signed_up_during_the_spring";
+  await gotoJoin(page, `SELECT o.status, "${alias}".age FROM orders o LEFT JOIN users "${alias}" ON o.user_id = "${alias}".id`);
+  const band = page.locator('th.band[data-band="1"]');
+  await expect(band.locator(".band-pill")).toHaveAttribute("title", `users ${alias}`);
+  expect((await band.boundingBox())!.width).toBeLessThan(320);
+  for (const gap of await fill()) expect(gap).toBeLessThan(16);
+});
+
 test("the last page says so and disables next", async ({ page }) => {
   await gotoJoin(page, "FROM orders o JOIN order_extra x ON x.order_id = o.id", 100);
   await expect(page.locator("#page")).toHaveText("page 1 · last page");
@@ -67,10 +84,12 @@ test("a qualifier that is not in the join is a filter error, not a request", asy
   await expect(page.locator("#error")).toContainText("unknown table alias z");
 });
 
-test("the record dialog groups a joined row by table", async ({ page }) => {
+test("the record dialog groups a joined row by table, under the band's name", async ({ page }) => {
   await gotoJoin(page, ORDERS_USERS);
   await page.locator("#tbody tr").first().locator(".record-btn").click();
-  await expect(page.locator("#record-dl dt.record-group")).toHaveText(["orders", "users"]);
+  await expect(page.locator("#record-dl dt.record-group")).toHaveText(["orders o", "users u"]);
+  // Fields carry the column's own name; the group above names the table.
+  await expect(page.locator("#record-dl dt:not(.record-group)").first()).toHaveText("id");
   await expect(page.locator("#record-copy-insert")).toBeHidden();
   await expect(page.locator("#record-referenced-by-wrap")).toBeHidden();
 });

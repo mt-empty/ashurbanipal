@@ -106,6 +106,12 @@ export async function clearFilterViaSearchEvent(page: Page) {
   await waitForIdle(page);
 }
 
+/** The key of a table's entry in uiState's per-table maps (hiddenColumns,
+ * sortByTable): source, schema and table. The demo is single-source. */
+export function tableKey(table: string, schema = "public"): string {
+  return JSON.stringify([null, schema, table]);
+}
+
 export function uiState(page: Page) {
   return page.evaluate(() => {
     const raw = localStorage.getItem("ashurbanipal_ui");

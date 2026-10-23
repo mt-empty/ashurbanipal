@@ -18,7 +18,6 @@ import {
 import { readStored, writeStored } from "../core/storage.js";
 import type { SourceEntry, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
-import { syncViewNotice } from "./view-notice.js";
 
 // ---- table chips: transient, session-local state, not part of
 // `state`/localStorage — resets on reload (except the expanded flag below) ----
@@ -263,12 +262,7 @@ export async function loadTables(): Promise<void> {
   // reset restoringFromHistory once this promise settles, and that flag
   // must still be true when loadData()'s syncUrl() call runs, or a
   // history restoration would push a new entry instead of replacing it.
-  if (state.view) await loadData();
-  else {
-    // loadData() is what normally drops a stale note; an empty scope never reaches it.
-    syncViewNotice(null);
-    setStatus("");
-  }
+  await loadData();
 }
 
 export function listedTableNames(): string[] {
