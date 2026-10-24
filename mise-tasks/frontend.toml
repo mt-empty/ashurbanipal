@@ -68,9 +68,10 @@ run = "tools/sync-ports-frontend.sh"
 description = "verify vendored frontend copies and pins match frontend/dbviewer.html"
 run = "tools/sync-ports-frontend.sh --check"
 
+# E2E_BROWSERS (e.g. "webkit") narrows the install, as CI's one-browser shards do.
 ["frontend:test-e2e-install"]
 description = "one-time Playwright browser install (Chromium, Firefox, WebKit) for the e2e suite"
-run = "pnpm install && pnpm exec playwright install --with-deps chromium firefox webkit"
+run = 'pnpm install && pnpm exec playwright install --with-deps $(echo "${E2E_BROWSERS:-chromium,firefox,webkit}" | tr , " ")'
 dir = "tools/e2e-tests"
 
 # Serves axum's vendored dbviewer.html, so run frontend:sync-ports after a build first.
