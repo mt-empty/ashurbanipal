@@ -201,3 +201,11 @@ should block on.
   structure and pager buttons disabled, until the new grid renders. A failed switch names what it could
   not open (`Couldn't open orders: …`). *(Derives from: visibility of system
   status, error prevention.)*
+- **R15 — Reduced motion removes motion, not feedback.** Under
+  `prefers-reduced-motion: reduce` every animation becomes static, stepped
+  or instant while its state stays visible: the loading bar stripes instead
+  of sweeping, the auto-refresh countdown drains in steps, spinners and the
+  refresh icon stand still, the new-row tint
+  (R10) is a flat colour, and a re-render swaps without its cross-fade.
+  *(Derives from: aesthetic and minimalist design, visibility of system
+  status.)*

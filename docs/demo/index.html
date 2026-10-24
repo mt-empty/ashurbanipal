@@ -771,6 +771,10 @@ ul { list-style: none; margin: 0; padding: 0; }
 @media (prefers-reduced-motion: reduce) {
   #refresh.spinning #refresh-icon { animation: none; }
 }
+/* A re-render still runs as a view transition (the swap stays atomic); it just isn't cross-faded. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
+}
 
 /* Split button: #refresh plus the interval menu. The popover aligns to its right edge. */
 #refresh-split { display: inline-flex; border-radius: 6px; anchor-name: --refresh-anchor; }
