@@ -1,5 +1,5 @@
-import { test, expect, type Route } from "./support/fixtures";
-import { dataWith, gotoApp, holdRequests, problem, selectTable } from "./support/helpers";
+import { test, expect } from "./support/fixtures";
+import { dataWith, failRequests, gotoApp, holdRequests, selectTable } from "./support/helpers";
 import { freePort, spawnDemo } from "./support/second-server";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({
@@ -87,12 +87,11 @@ test("errors are surfaced as a visible role=alert region, not just logged", asyn
 });
 
 // spec/protocol.md makes /sources and /schemas mandatory; a failing one degrades to a single source or schema (R5).
-const serverError = (route: Route) => route.fulfill(problem(500, "Internal Server Error", "database_error"));
 
 test("a failing /sources hides the source picker and the tables still load", async ({ page }) => {
   const demo = await spawnDemo({ port: await freePort(), conformanceSecondSource: true });
   try {
-    await page.route((url) => url.pathname.endsWith("/api/sources"), serverError);
+    await failRequests(page, (url) => url.pathname.endsWith("/api/sources"));
     await gotoApp(page, "", demo.baseUrl);
     await expect(page.locator("#source-select-wrap")).toBeHidden();
     await expect(page.locator("#error")).toBeEmpty();
@@ -103,7 +102,7 @@ test("a failing /sources hides the source picker and the tables still load", asy
 });
 
 test("a failing /schemas hides the schema picker and the tables still load", async ({ page }) => {
-  await page.route((url) => url.pathname.endsWith("/api/schemas"), serverError);
+  await failRequests(page, (url) => url.pathname.endsWith("/api/schemas"));
   await gotoApp(page);
   await expect(page.locator("#schema-select-wrap")).toBeHidden();
   await expect(page.locator("#error")).toBeEmpty();

@@ -1,8 +1,6 @@
 import { test, expect, type Page } from "./support/fixtures";
 import { gotoApp, holdRequests, selectTable, tableData, waitForIdle } from "./support/helpers";
 
-const DATA = "**/api/tables/data*";
-
 const expectBarIdle = (page: Page) => expect(page.locator("#load-bar")).not.toHaveAttribute("data-state", /.*/);
 
 test("a fast fetch shows no bar, no dimming and no loading text", async ({ page }) => {
@@ -46,7 +44,7 @@ test("overlapping fetches keep the bar until the last one settles", async ({ pag
   await selectTable(page, "orders");
   let calls = 0;
   const releases: Array<() => void> = [];
-  await page.route(DATA, async (route) => {
+  await page.route(tableData, async (route) => {
     const n = calls++;
     await new Promise<void>((r) => (releases[n] = r));
     await route.continue();

@@ -5,9 +5,11 @@ export const ORDERS_USERS = "FROM orders o LEFT JOIN users u ON o.user_id = u.id
 /** ORDERS_USERS as the page prints it, and as it rides in `?join=`. */
 export const ORDERS_USERS_CANONICAL = "SELECT *\nFROM orders o\nLEFT JOIN users u ON o.user_id = u.id";
 
+export const joinRequest = (url: URL) => url.pathname.endsWith("/api/tables/join");
+
 /** Resolves with the next /api/tables/join response; arm it before the action. */
 export function nextJoinResponse(page: Page): Promise<Response> {
-  return page.waitForResponse((r) => r.url().includes("/api/tables/join"));
+  return page.waitForResponse((r) => joinRequest(new URL(r.url())));
 }
 
 /** The decoded `join` query parameter of a request URL. */
@@ -44,9 +46,10 @@ export async function showResult(page: Page): Promise<Response> {
   return r;
 }
 
-/** The query string of a join view starting from `orders`, for gotoApp. */
+/** The query string of a join view, for gotoApp; `table` is the join's FROM table, as the app writes it. */
 export function joinQuery(text: string, limit = 5): string {
-  return `?table=orders&limit=${limit}&join=${encodeURIComponent(text)}`;
+  const table = /\bFROM\s+(\w+)/i.exec(text)?.[1] ?? "";
+  return `?table=${table}&limit=${limit}&join=${encodeURIComponent(text)}`;
 }
 
 /** Loads the page straight into a join view through its URL. */

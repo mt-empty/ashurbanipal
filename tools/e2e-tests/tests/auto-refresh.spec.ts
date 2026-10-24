@@ -18,7 +18,7 @@ function payload(rows: Row[]) {
 }
 
 type Failure = { status: number; title: string; code: string };
-const UNAVAILABLE: Failure = { status: 503, title: "Service Unavailable", code: "database_error" };
+const UNAVAILABLE: Failure = { status: 500, title: "database unavailable", code: "database_error" };
 
 async function setup(page: Page, rows: Row[] = [[1, "a"], [2, "b"]]) {
   const mock = { body: payload(rows), fail: null as Failure | null, hits: 0, gate: null as Promise<void> | null };
@@ -129,7 +129,7 @@ test("five failed refreshes turn it off and report the last error", async ({ pag
   await choose(page, "5 s");
   mock.fail = UNAVAILABLE;
   await tick(page, mock);
-  await expect(page.locator("#error")).toHaveText("Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("database unavailable");
   mock.fail = null;
   await tick(page, mock);
   await expect(page.locator("#error")).toBeEmpty();
@@ -140,7 +140,7 @@ test("five failed refreshes turn it off and report the last error", async ({ pag
 
   await tick(page, mock);
   await expect(page.locator("#error")).toHaveText(
-    "Auto-refresh turned off after 5 failed refreshes. Last error: Service Unavailable.",
+    "Auto-refresh turned off after 5 failed refreshes. Last error: database unavailable.",
   );
   await expect(page.locator("#refresh-interval")).toBeHidden();
   const after = mock.hits;
@@ -195,11 +195,11 @@ test("a tick leaves an error from the user's own action in place", async ({ page
   await choose(page, "5 s");
   mock.fail = UNAVAILABLE;
   await page.locator("#refresh").click();
-  await expect(page.locator("#error")).toHaveText("Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("database unavailable");
 
   mock.fail = null;
   await tick(page, mock);
-  await expect(page.locator("#error")).toHaveText("Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("database unavailable");
 });
 
 test("a slow tick shows the bar but does not announce loading", async ({ page }) => {

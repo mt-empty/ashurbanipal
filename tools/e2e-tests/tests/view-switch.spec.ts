@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { dataWith, failTableData, gotoApp, holdRequests, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { dataWith, failRequests, gotoApp, holdRequests, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 // The real-fade canary: docs/e2e-testing-guidelines.md §2.
 test.use({ realFades: true });
@@ -41,10 +41,10 @@ test("while a chip's table loads, the old grid's columns menu still changes the 
 test("a chip whose table fails to load leaves the view where it was and names the table", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  await failTableData(page, dataWith("table", "orders"));
+  await failRequests(page, dataWith("table", "orders"));
   await page.locator('#tables [data-table="orders"]').click();
 
-  await expect(page.locator("#error")).toHaveText("Couldn't open orders: Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("Couldn't open orders: database unavailable");
   await expect(page.locator("#current")).toHaveText("products");
   await expect(page.locator('#tables [data-table="products"]')).toHaveClass(/active/);
   expect(new URL(page.url()).searchParams.get("table")).toBe("products");
@@ -74,10 +74,10 @@ test("a chip's remembered sort the backend refuses is dropped and the table open
 test("an FK cell whose table fails to load leaves the view and the filter box as they were", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  await failTableData(page, dataWith("table", "users"));
+  await failRequests(page, dataWith("table", "users"));
   await page.locator("#tbody tr").first().locator('td[data-col="user_id"] .fk-cell').click();
 
-  await expect(page.locator("#error")).toHaveText("Couldn't open users: Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("Couldn't open users: database unavailable");
   await expect(page.locator("#current")).toHaveText("orders");
   await expect(page.locator("#filter")).toHaveValue("");
 });
@@ -85,10 +85,10 @@ test("an FK cell whose table fails to load leaves the view and the filter box as
 test("a schema switch whose first load fails leaves the old grid locked until a grid renders", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  await failTableData(page, dataWith("schema", "warehouse"));
+  await failRequests(page, dataWith("schema", "warehouse"));
   await page.locator("#schema-select").selectOption("warehouse");
 
-  await expect(page.locator("#error")).toHaveText("Couldn't open carriers: Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("Couldn't open carriers: database unavailable");
   await expect(page.locator("#data-table")).toHaveAttribute("data-stale", "");
   expect(await isLocked(page)).toBe(true);
   expect(await cursorOverCell(page)).toBe("not-allowed");
@@ -98,7 +98,7 @@ test("a schema switch whose first load fails leaves the old grid locked until a 
 
   // The grid's view is not the one in the state, so a failed chip names its table too.
   await page.locator('#tables [data-table="carriers"]').click();
-  await expect(page.locator("#error")).toHaveText("Couldn't open carriers: Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("Couldn't open carriers: database unavailable");
 
   const back = page.waitForResponse((r) => dataWith("schema", "public")(r.url()));
   await page.locator("#schema-select").selectOption("public");
@@ -138,7 +138,7 @@ test("a locked grid's all-hidden Show all cannot change the view that replaced i
   await page.keyboard.press("Escape");
   await expect(page.locator("#all-hidden-show")).toBeEnabled();
 
-  await failTableData(page, dataWith("schema", "warehouse"));
+  await failRequests(page, dataWith("schema", "warehouse"));
   await page.locator("#schema-select").selectOption("warehouse");
   await expect(page.locator("#data-table")).toHaveAttribute("data-stale", "");
   await expect(page.locator("#all-hidden-show")).toBeDisabled();

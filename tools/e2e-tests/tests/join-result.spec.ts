@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "./support/fixtures";
-import { gotoApp, holdRequests, problem, selectTable, waitForIdle } from "./support/helpers";
-import { gotoJoin, joinParam, joinQuery, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
+import { gotoApp, holdRequests, problem, selectTable, tableList, waitForIdle } from "./support/helpers";
+import { gotoJoin, joinParam, joinQuery, joinRequest, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
 
 // The result of a join in the normal grid.
 
@@ -233,16 +233,12 @@ test("a new join that times out leaves the table in view as it was", async ({ pa
   expect(new URL(page.url()).searchParams.get("join")).toBeNull();
 });
 
-const isJoin = (url: URL) => url.pathname.endsWith("/api/tables/join");
-const isTableList = (schema: string) => (url: URL) =>
-  url.pathname.endsWith("/api/tables") && url.searchParams.get("schema") === schema;
-
 // Runs ORDERS_USERS from the join dialog and returns once its request is held in flight.
 async function startHeldJoin(page: Page): Promise<() => void> {
-  const releaseJoin = await holdRequests(page, isJoin);
+  const releaseJoin = await holdRequests(page, joinRequest);
   await page.locator("#join-btn").click();
   await writeSql(page, ORDERS_USERS);
-  const joinSent = page.waitForRequest((r) => isJoin(new URL(r.url())));
+  const joinSent = page.waitForRequest((r) => joinRequest(new URL(r.url())));
   await page.locator("#join-run").click();
   await joinSent;
   return releaseJoin;
@@ -259,8 +255,8 @@ test("a join still loading when the schema changes is dropped, not shown under t
   await gotoApp(page);
   await selectTable(page, "orders");
   const releaseJoin = await startHeldJoin(page);
-  const releaseTables = await holdRequests(page, isTableList("warehouse"));
-  const tablesSent = page.waitForRequest((r) => isTableList("warehouse")(new URL(r.url())));
+  const releaseTables = await holdRequests(page, tableList("warehouse"));
+  const tablesSent = page.waitForRequest((r) => tableList("warehouse")(new URL(r.url())));
   await page.locator("#schema-select").selectOption("warehouse");
   await tablesSent;
 
@@ -280,10 +276,10 @@ test("a join still loading is dropped after switching schema away and back", asy
   await gotoApp(page);
   await selectTable(page, "orders");
   const releaseJoin = await startHeldJoin(page);
-  const releaseWarehouse = await holdRequests(page, isTableList("warehouse"));
-  const releasePublic = await holdRequests(page, isTableList("public"));
+  const releaseWarehouse = await holdRequests(page, tableList("warehouse"));
+  const releasePublic = await holdRequests(page, tableList("public"));
   await page.locator("#schema-select").selectOption("warehouse");
-  const backSent = page.waitForRequest((r) => isTableList("public")(new URL(r.url())));
+  const backSent = page.waitForRequest((r) => tableList("public")(new URL(r.url())));
   await page.locator("#schema-select").selectOption("public");
   await backSent;
 
@@ -302,8 +298,8 @@ test("a join still loading is dropped when Back restores the previous table", as
   await selectTable(page, "users");
   await selectTable(page, "orders");
   const releaseJoin = await startHeldJoin(page);
-  const releaseTables = await holdRequests(page, isTableList("public"));
-  const tablesSent = page.waitForRequest((r) => isTableList("public")(new URL(r.url())));
+  const releaseTables = await holdRequests(page, tableList("public"));
+  const tablesSent = page.waitForRequest((r) => tableList("public")(new URL(r.url())));
   await page.locator("#nav-back").click();
   await tablesSent;
 
