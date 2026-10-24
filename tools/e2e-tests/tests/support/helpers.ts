@@ -38,9 +38,9 @@ export async function reloadApp(page: Page) {
   await waitForFirstLoad(page);
 }
 
-// <main> is aria-busy from the first byte until the app's start-up chain settles.
+// The table list is aria-busy from the first byte until the app's start-up chain settles.
 async function waitForFirstLoad(page: Page) {
-  await expect(page.locator("#main")).not.toHaveAttribute("aria-busy", "true");
+  await expect(page.locator("#tables")).not.toHaveAttribute("aria-busy", "true");
   await waitForIdle(page);
 }
 
@@ -76,6 +76,8 @@ export function tableKey(table: string, schema = "public"): string {
 }
 
 export const tableData = (url: URL) => url.pathname.endsWith("/api/tables/data");
+export const tableList = (schema: string) => (url: URL) =>
+  url.pathname.endsWith("/api/tables") && url.searchParams.get("schema") === schema;
 
 /** Matches /api/tables/data requests whose `param` is `value`; takes a URL or its text. */
 export const dataWith = (param: string, value: string) => (url: URL | string) => {
@@ -83,9 +85,9 @@ export const dataWith = (param: string, value: string) => (url: URL | string) =>
   return tableData(u) && u.searchParams.get(param) === value;
 };
 
-/** Fails the requests `match` accepts with a 503, as an unavailable database would. */
-export const failTableData = (page: Page, match: (url: URL) => boolean) =>
-  page.route(match, (route) => route.fulfill(problem(503, "Service Unavailable", "database_error")));
+/** Fails the requests `match` accepts with spec/protocol.md §2's 500 for a database error. */
+export const failRequests = (page: Page, match: (url: URL) => boolean) =>
+  page.route(match, (route) => route.fulfill(problem(500, "database unavailable", "database_error")));
 
 /** Answers data requests sorted by `col` with the backend's 400 for a column the table lacks. */
 export const rejectSort = (page: Page, col: string) =>

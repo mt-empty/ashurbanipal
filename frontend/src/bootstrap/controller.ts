@@ -327,6 +327,6 @@ export async function loadData({
   // triggered them would be disorienting, not helpful.
   if (resetScroll) {
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "auto" : "smooth" });
+    $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "instant" : "smooth" });
   }
 }

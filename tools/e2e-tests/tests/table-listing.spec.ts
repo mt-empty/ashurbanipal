@@ -190,8 +190,12 @@ test("an active chip that ends the third line stays visible when the list collap
   ] as const) {
     await page.setViewportSize({ width, height: 800 });
     await gotoApp(page, `?table=${table}`);
-    await expect(page.locator(`#tables [data-table="${table}"]`), `${table} at ${width}px`).toBeVisible();
+    const chip = page.locator(`#tables [data-table="${table}"]`);
+    await expect(chip, `${table} at ${width}px`).toBeVisible();
     await expect(page.locator("#tables-more")).toHaveText(/^\+ \d+ more$/);
+    await expect(page.locator(`#tables li:has([data-table="${table}"])`)).toHaveClass(/pulled/);
+    // Its divider's margin must not push the list onto a fourth line.
+    await expectButtonOnLastRowAtRight(page);
   }
 });
 

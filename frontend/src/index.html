@@ -24,7 +24,7 @@
 </style>
 </head>
 <body>
-<main id="main" aria-busy="true">
+<main id="main">
   <div id="chrome">
     <header id="topbar">
       <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
@@ -55,7 +55,7 @@
         <button id="nav-back" type="button" disabled title="back to previous table view" aria-label="back">‹</button>
         <button id="nav-forward" type="button" disabled title="forward to next table view" aria-label="forward">›</button>
       </span>
-      <ul id="tables"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
+      <ul id="tables" aria-busy="true"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
       <template id="table-row-template"><li><a><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
     </nav>
     <div id="toolbar">

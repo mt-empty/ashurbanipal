@@ -29,20 +29,22 @@ snapshot overlay. `waitForIdle` (`support/helpers.ts`) also waits for
 `document.getAnimations()` to empty out — use it (or extend it) rather
 than adding a `waitForTimeout`-shaped workaround for a similar gap.
 
-Every spec imports `test` and `expect` from `support/fixtures.ts`, not
-`@playwright/test`. Its `page` fixture makes view-transition fades zero
-length, which cut about 30% of suite time: no app code waits on a fade,
-so only the wait shrinks. `view-switch.spec.ts` sets
-`test.use({ realFades: true })` so the real fade, and `waitForIdle`'s wait
-on it, stay exercised.
+Every spec except `showcase.spec.ts` (a recording, which keeps real
+fades) imports `test` and `expect` from `support/fixtures.ts`, not
+`@playwright/test`. Its `context` fixture makes view-transition fades zero
+length in every page a test opens, which cut about 30% of suite time: no
+app code waits on a fade, so only the wait shrinks. Specs that need the
+real fade set `test.use({ realFades: true })`: `view-switch.spec.ts`, so
+`waitForIdle`'s wait on it stays exercised, and `reduced-motion.spec.ts`,
+which checks the fade is there or gone.
 
 ## 3. Don't assume a page's own automatic state has settled before you act
 
 `gotoApp` waits for the app's own automatic initial-table load to finish
 before returning, not just for navigation to complete. Its signal is
-`<main aria-busy="true">`, which the page carries from the first byte until
-its start-up chain settles, so it works the same for a failed first load
-or a join link. Without that wait,
+`<ul id="tables" aria-busy="true">`, which the page carries from the first
+byte until its start-up chain settles, so it works the same for a failed
+first load or a join link. Without that wait,
 a test's first `selectTable()` click could race the page's own default-
 table fetch — whichever response lands last wins the render, which used
 to be able to leave `#current` labeled correctly while the grid showed the

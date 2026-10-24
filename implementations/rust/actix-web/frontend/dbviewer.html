@@ -146,7 +146,7 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
 #nav-history button:disabled { opacity: .3; cursor: default; }
 ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
 #tables-more-item { margin-left: auto; }
-/* A chip pulled up from the hidden part of a collapsed list (see features/sidebar.ts). */
+/* The active chip of a collapsed list when a hidden chip sits before it (see features/sidebar.ts). */
 #tables li.pulled { position: relative; margin-left: .5rem; }
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
@@ -827,7 +827,7 @@ thead tr.bands + tr th { top: var(--band-h); }
 </style>
 </head>
 <body>
-<main id="main" aria-busy="true">
+<main id="main">
   <div id="chrome">
     <header id="topbar">
       <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
@@ -858,7 +858,7 @@ thead tr.bands + tr th { top: var(--band-h); }
         <button id="nav-back" type="button" disabled title="back to previous table view" aria-label="back">‹</button>
         <button id="nav-forward" type="button" disabled title="forward to next table view" aria-label="forward">›</button>
       </span>
-      <ul id="tables"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
+      <ul id="tables" aria-busy="true"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
       <template id="table-row-template"><li><a><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
     </nav>
     <div id="toolbar">
@@ -3508,6 +3508,7 @@ function updateTablesCap() {
     return;
   }
   for (const e of hidden) e.li.hidden = true;
+  active?.li.classList.add("pulled");
   const shown2 = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
   while (tablesMoreItem.offsetTop > lastRowTop && shown2.length) {
@@ -3520,8 +3521,8 @@ function updateTablesCap() {
   const at = entries.indexOf(active);
   const movedUp = [...hidden].some((e) => entries.indexOf(e) < at);
   const before = entries.slice(0, at).filter((e) => !e.li.hidden).pop();
-  if (movedUp && before && before.li.offsetTop === active.li.offsetTop && !active.li.classList.contains("join-first"))
-    active.li.classList.add("pulled");
+  if (!movedUp || !before || before.li.offsetTop !== active.li.offsetTop || active.li.classList.contains("join-first"))
+    active.li.classList.remove("pulled");
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;
@@ -6287,7 +6288,7 @@ async function loadData2({
   }
   if (resetScroll) {
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "auto" : "smooth" });
+    $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "instant" : "smooth" });
   }
 }
 
@@ -6348,7 +6349,7 @@ loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(() =
   try {
     showBootFallbackNote();
   } finally {
-    $("main").removeAttribute("aria-busy");
+    $("tables").removeAttribute("aria-busy");
   }
 });
 startSiblings();

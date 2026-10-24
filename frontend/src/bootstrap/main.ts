@@ -76,13 +76,10 @@ $<HTMLButtonElement>("refresh").onclick = () => {
   loadData({ resetScroll: false, highlightNew: true });
 };
 
-// loadSources resolves state.source before loadSchemas needs it, which in
-// turn resolves state.schema before loadTables' first request needs it —
-// bootstrap-only ordering; loadSchemas/loadTables are safe to call on their
-// own after this (source/schema switching does exactly that). The fallback
-// note runs last because a URL filter can still be dropped by loadTables'
-// awaited first load. <main> starts aria-busy in the markup, so it reads as
-// loading from the first byte until this settles, whether it worked or not.
+// Bootstrap-only order (a source switch reruns the last two alone): the source,
+// then the schema, are fixed before the next step's first request. The fallback
+// note waits for loadTables' first load; #tables' markup aria-busy (on the list,
+// not <main>, so live regions still announce) clears once all of it settles.
 loadSources()
   .then(loadSchemas)
   .then(loadTables)
@@ -91,7 +88,7 @@ loadSources()
     try {
       showBootFallbackNote();
     } finally {
-      $("main").removeAttribute("aria-busy");
+      $("tables").removeAttribute("aria-busy");
     }
   });
 startSiblings();
