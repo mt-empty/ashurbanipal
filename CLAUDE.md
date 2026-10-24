@@ -124,9 +124,9 @@ mise run frontend:dev                    # frontend:watch + the Node demo at htt
 mise run conformance:seed-gen            # regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql
 mise run conformance:seed-check          # verify both seed files still match tools/seed-gen's output
 mise run frontend:test-e2e-install       # one-time Playwright browser install (Chromium/Firefox/WebKit)
-mise run frontend:test-e2e-spec tests/<name>.spec.ts   # one spec, Chromium + Firefox (iterating)
-mise run frontend:test-e2e-quick         # whole suite, Chromium + Firefox
-mise run frontend:test-e2e               # full three-browser suite against frontend/dbviewer.html (tools/e2e-tests)
+mise run frontend:test-e2e-spec tests/<name>.spec.ts   # rebuild + sync, then one spec on Chromium + Firefox (iterating)
+mise run frontend:test-e2e-quick         # rebuild + sync, then the whole suite on Chromium + Firefox
+mise run frontend:test-e2e               # full three-browser suite against axum's vendored dbviewer.html
 ```
 
 The `rust:*` tasks `cd` into `implementations/rust` (the workspace root —
@@ -136,26 +136,15 @@ axum-specific) via mise's `dir` field — you don't need to `cd` yourself
 when using `mise run`.
 
 `rust:dev` and the e2e suite serve axum's vendored copy, not
-`frontend/dbviewer.html`, so a frontend change shows up in neither until
-`frontend:sync-ports` has run after `frontend:build` (`frontend:watch` does
-both).
+`frontend/dbviewer.html`, so a frontend change shows up in `rust:dev` only
+once `frontend:sync-ports` has run after `frontend:build`
+(`frontend:watch` does both).
 
-`frontend:test-e2e` is a separate, standalone-dev-only suite (pnpm/Playwright,
-`tools/e2e-tests/`) that doesn't run in the Rust `cargo test` suite; run it
-in tiers for any change that touches `dbviewer.html` beyond a trivial edit:
-while iterating, only the affected spec via `frontend:test-e2e-spec`; once
-the change looks finished, `frontend:test-e2e-quick`; and once, at the end
-of the work, the full three-browser `frontend:test-e2e` at its default
-parallelism — that final run is what makes a frontend change done. It is
-never a per-edit check. The worst races here (stale-response overwrites,
-stuck spinners) only ever surfaced under real concurrency, never in a
-serial pass, and the faster tiers skip WebKit, so a Safari-only bug first
-shows up in that final run. Don't run `mise run check` or the `frontend`
-umbrella task for a frontend tweak. When writing tests, assert on DOM
-state/attributes/text, not screenshots (screenshot diffs were dropped
-project-wide for flakiness — see git history around `157fc12`), and wait
-on the actual signal that matters (`waitForResponse`, `getAnimations()`),
-never `waitForTimeout` with a guessed duration.
+The Playwright suite (`tools/e2e-tests/`, not part of `cargo test`) is
+required for any change that touches `dbviewer.html` beyond a trivial
+edit. `docs/e2e-testing-guidelines.md` owns how to run it (§5: which tier
+when; the full three-browser run, once, at the end, is what makes a change
+done) and how to write reliable specs (§1–§4).
 
 If mise isn't available, every port's own README documents its raw
 build/test/demo commands (`implementations/<port>/README.md`). Rust's one
@@ -191,14 +180,16 @@ expression of a protocol-level requirement every port is independently
 held to (fail-closed kill switch, no unvalidated identifier reaching SQL,
 schema isolation, the filter contract, the single-file frontend
 artifact) — checked via conformance CI and `PORTING.md`'s hardening
-checklist, not repeated here per language. Three are Rust-specific hygiene
-with no cross-language analog: rustls-only,
-demo-deps-stay-dev-dependencies, and the Rust comment-style rule.
+checklist, not repeated here per language. Two are Rust-specific hygiene
+with no cross-language analog: rustls-only and
+demo-deps-stay-dev-dependencies.
 
 - **`DbSource` is the only seam to the database.** Route handlers never touch
-  `sqlx` directly. Its implementations are `postgres.rs`'s `PgPoolSource`
-  (the default), `sqlite.rs`'s `SqliteSource`, and `mysql.rs`'s
-  `MySqlSource` (each opt-in via its Cargo feature, off by default). Keep
+  `sqlx` directly. Each implementation sits behind its own Cargo feature:
+  `postgres.rs`'s `PgPoolSource` (`postgres`, on by default but removable
+  with `default-features = false`), `sqlite.rs`'s `SqliteSource` and
+  `mysql.rs`'s `MySqlSource` (`sqlite`, `mysql`, both off by default), so
+  code that names one needs the matching `#[cfg(feature = …)]`. Keep
   the trait native async-fn-in-trait (no `async_trait`) and the router
   generic over it (`router<S: DbSource>`, no `dyn`); per-backend behavioral
   differences belong in `docs/adapter-decisions.md`, not in a
@@ -255,9 +246,6 @@ demo-deps-stay-dev-dependencies, and the Rust comment-style rule.
   `native-tls`/OpenSSL.
 - **Demo-only deps stay in `[dev-dependencies]`.** `tracing-subscriber`,
   `dotenvy` etc. must never leak into the published crate's dependency list.
-- **Comments in `implementations/rust/{axum/src,core/src}/**/*.rs` follow the same discipline `frontend-style-guide.md`
-  §3 already enforces for `dbviewer.html`.** A comment earns its place only
-  by stating a non-obvious *why* — a security invariant, a Postgres quirk, a
-  bug it guards against — in one or two sentences, never a *what* the
-  type/function name already says, and never a citation-heavy restatement
-  of a design doc.
+- **Comments follow the repo-wide rule under Working style**, the same
+  discipline `frontend-style-guide.md` §3 sets for `dbviewer.html` — and
+  are never a citation-heavy restatement of a design doc.
