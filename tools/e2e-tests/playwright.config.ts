@@ -55,6 +55,8 @@ export default defineConfig({
   testIgnore: SHOWCASE_IGNORE,
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
+  // Playwright's CI default is half the cores: 2 on a 4-vCPU ubuntu-latest runner.
+  workers: process.env.CI ? 4 : undefined,
   reporter: "html",
   use: {
     trace: "on-first-retry",
