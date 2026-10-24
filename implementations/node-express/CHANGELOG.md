@@ -5,6 +5,23 @@ Notable changes to the Node/Express port. Format follows
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.10.0] - 2026-10-24
+
+### Features
+
+- *(frontend)* Mark start-up busy, keep the active chip visible, honour reduced motion, and speed up the e2e suite (#191)
+
+### Bug Fixes
+
+- *(frontend)* Keep the filter suggestions over the countdown bar and remember an expanded table list (#185)
+- *(frontend)* Group the columns menu by table and make header sort keyboard-reachable (#186)
+- *(frontend)* Switch views only once their data arrives, and lock the old grid when a switch cannot wait (#187)
+- *(frontend)* Keep the title row and copy buttons steady when a glyph comes from a fallback font (#189)
+
+### Security
+
+- *(deps)* Refresh every port's dependencies and patch open advisories (#190)
+
 ## [0.9.0] - 2026-10-22
 
 ### Features
