@@ -1,4 +1,4 @@
-import { test as base } from "@playwright/test";
+import { test as base, expect } from "@playwright/test";
 import { recordCoverage } from "./coverage";
 
 export * from "@playwright/test";
@@ -21,8 +21,15 @@ export const test = base.extend<{ realFades: boolean }>({
         });
       }, INSTANT_FADES);
     }
+    // ui-guidelines R4: the page never opens alert/confirm/prompt, so any native dialog fails the test.
+    const dialogs: string[] = [];
+    page.on("dialog", (d) => {
+      dialogs.push(`${d.type()}: ${d.message()}`);
+      void d.dismiss();
+    });
     // Set by `mise run frontend:test-e2e-coverage`; Chromium is the only browser exposing JS coverage.
     if (process.env.E2E_COVERAGE && browserName === "chromium") await recordCoverage(page, info, () => use(page));
     else await use(page);
+    expect(dialogs, "native dialogs opened").toEqual([]);
   },
 });

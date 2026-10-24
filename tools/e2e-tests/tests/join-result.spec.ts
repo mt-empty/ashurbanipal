@@ -102,6 +102,21 @@ test("the server's 400 for a join it refuses shows in the overlay", async ({ pag
   await expect(page.locator("#join-error")).toContainText("cannot be joined");
 });
 
+test("closing the overlay of a refused join link opens the join's start table", async ({ page }) => {
+  const response = nextJoinResponse(page);
+  await page.goto(joinUrl("FROM users u JOIN orders o ON u.id = o.status"));
+  expect((await response).status()).toBe(400);
+  await expect(page.locator("#join-dialog")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#join-dialog")).toBeHidden();
+  await page.locator("#current").getByText("users", { exact: true }).waitFor();
+  await waitForIdle(page);
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
+  await expect(page.locator("#error")).toBeEmpty();
+  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+});
+
 test("a timeout offers Retry and Edit join", async ({ page }) => {
   await page.route("**/api/tables/join*", (route) =>
     route.fulfill({

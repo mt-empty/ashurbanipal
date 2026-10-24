@@ -203,6 +203,20 @@ test("a saved join becomes a chip after the table chips that survives a reload a
   await expect(page.locator("th.band")).toHaveText(["orders o", "users u"]);
 });
 
+test("unreadable saved joins are discarded, and saving a join still works", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("ashurbanipal_joins", "{not json"));
+  await openJoinOverlay(page);
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect(page.locator("#tables li.join-chip.saved")).toHaveCount(0);
+
+  await writeSql(page, ORDERS_USERS);
+  await page.locator("#join-name").fill("orders with users");
+  await showResult(page);
+  await expandTableChips(page);
+  await expect(page.locator("#tables li.join-chip :is(a, button)", { hasText: "orders with users" })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("ashurbanipal_joins"))).toContain("orders with users");
+});
+
 test("an unsaved join gets a dashed chip with Save…, and its URL reproduces it", async ({ page }) => {
   await openJoinOverlay(page);
   await writeSql(page, ORDERS_USERS);
