@@ -1,6 +1,6 @@
 [project]
 name = "ashurbanipal-flask"
-version = "0.9.0"
+version = "0.10.0"
 description = "Flask port of Ashurbanipal — spec/protocol.md read-only DB-browsing web UI"
 readme = "README.md"
 license = "MIT"
