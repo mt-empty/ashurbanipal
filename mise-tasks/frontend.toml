@@ -105,8 +105,8 @@ description = "rebuild and re-sync every port's vendored page whenever frontend/
 run = "mise watch -w frontend/src frontend:rebuild"
 
 # node:dev restarts without a compile step, unlike rust:dev's include_str! rebuild.
-# Port 4001 lets it run beside rust:dev on 4000; a task's `env` never reaches its
+# Port 4002 clears rust:dev (4000) and rust:demo-sibling (4001); a task's `env` never reaches its
 # `depends`, so the port is set on the command that starts both.
 ["frontend:dev"]
-description = "edit frontend/src/ live: rebuild + sync on change, with the Node demo restarting at http://localhost:4001/__ashurbanipal"
-run = "PORT=4001 mise run frontend:watch ::: node:dev"
+description = "edit frontend/src/ live: rebuild + sync on change, with the Node demo restarting at http://localhost:4002/__ashurbanipal"
+run = "PORT=4002 mise run frontend:watch ::: node:dev"
