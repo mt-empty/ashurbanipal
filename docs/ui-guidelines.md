@@ -206,6 +206,7 @@ should block on.
   or instant while its state stays visible: the loading bar stripes instead
   of sweeping, the auto-refresh countdown drains in steps, spinners and the
   refresh icon stand still, the new-row tint
-  (R10) is a flat colour, and a re-render swaps without its cross-fade.
+  (R10) is a flat colour, a re-render swaps without its cross-fade, and a
+  view switch jumps to the top instead of scrolling there smoothly.
   *(Derives from: aesthetic and minimalist design, visibility of system
   status.)*

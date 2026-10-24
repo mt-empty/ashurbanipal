@@ -187,10 +187,6 @@ ul { list-style: none; margin: 0; padding: 0; }
 @media (prefers-reduced-motion: reduce) {
   #refresh.spinning #refresh-icon { animation: none; }
 }
-/* A re-render still runs as a view transition (the swap stays atomic); it just isn't cross-faded. */
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
-}
 
 /* Split button: #refresh plus the interval menu. The popover aligns to its right edge. */
 #refresh-split { display: inline-flex; border-radius: 6px; anchor-name: --refresh-anchor; }
@@ -311,6 +307,10 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 @keyframes row-new-fade { from { background: var(--row-new-bg); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) {
   tbody tr.row-new { animation: none; background: var(--row-new-bg); }
+}
+/* startViewTransition (table render, record dialog) cross-fades by default. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
 }
 
 /* ==== Controls / status ==== */
@@ -6285,7 +6285,10 @@ async function loadData2({
   } else if (highlightNew && newRowKeys && !auto) {
     setStatus("no changes");
   }
-  if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  if (resetScroll) {
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "auto" : "smooth" });
+  }
 }
 
 // src/features/theme.ts
