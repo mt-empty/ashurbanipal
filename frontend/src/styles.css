@@ -336,8 +336,10 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #view-notice-close { flex: none; min-width: 44px; min-height: 44px; background: none; border: none;
                      border-radius: 8px; font: inherit; color: var(--text-muted); cursor: pointer; }
 #view-notice-close:hover { background: var(--hover); color: inherit; }
+/* A fixed line height: with `normal`, a glyph the font lacks (⟕, ⧉, a non-Latin name)
+   takes a taller fallback font's metrics, grows its line and shifts the whole row. */
 #meta { display: flex; justify-content: space-between; align-items: center;
-        flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); }
+        flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); line-height: 1.25; }
 #meta-title { color: var(--text-muted); }
 #sort-note { color: CanvasText; }
 #sort-note-col { font-family: var(--font-mono); }
@@ -474,7 +476,9 @@ dialog dl .copy:hover { opacity: 1; }
 .dialog-head .copy { position: static; top: auto; transform: none; opacity: 1;
                      border: 1px solid var(--border); border-radius: 4px;
                      padding: .1rem .4rem; font-size: .85em; }
-.copy-icon { display: inline-block; width: 1.2em; text-align: center; }
+/* Fixed box: ⧉ and the ✓/✗ that replaces it come from different fallback fonts,
+   whose sizes would otherwise resize the button and shift its row on every copy. */
+.copy-icon { display: inline-block; width: 1.2em; text-align: center; line-height: 1.25; }
 
 /* white-space: normal resets the pre-wrap inherited from ancestors
    (#cell-pop / dialog dl dd's plain-text case). */
