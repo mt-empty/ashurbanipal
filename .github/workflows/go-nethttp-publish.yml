@@ -80,6 +80,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: implementations/go-nethttp/go.mod
+          cache-dependency-path: implementations/go-nethttp/go.sum
 
       - name: Build
         working-directory: implementations/go-nethttp
