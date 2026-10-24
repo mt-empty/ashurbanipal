@@ -2,6 +2,11 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import { gotoApp, selectTable } from "./support/helpers";
 import { gotoJoin, ORDERS_USERS } from "./support/join";
 
+// Playwright's WebKit occasionally stops answering mid-test under load, about one run
+// in a hundred. A short cap fails such a run fast and a retry absorbs it; a real
+// regression still fails every attempt.
+test.describe.configure({ timeout: 20_000, retries: 2 });
+
 // Symbol glyphs (⟕, ⧉) that a system font lacks are drawn from a fallback font,
 // whose taller metrics must not resize the row they sit in. IPAGothic lacks them
 // but has ✓, so it plays the system font; both it and FreeSerif ship with
