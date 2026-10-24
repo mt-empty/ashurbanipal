@@ -81,11 +81,13 @@ jobs:
         working-directory: implementations/go-nethttp
         run: go vet ./...
 
+      # Both version inputs stay empty so the action reuses the Go installed
+      # above: its pinned setup-go ignores go.mod's toolchain line and would
+      # scan the older stdlib named by the go line.
       - name: govulncheck
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:
           go-version-input: ''
-          go-version-file: implementations/go-nethttp/go.mod
           cache-dependency-path: implementations/go-nethttp/go.sum
           work-dir: implementations/go-nethttp
 
