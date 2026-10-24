@@ -99,9 +99,11 @@ left in the shell can't drop a browser from the final run.
 
 ## 6. Measure coverage on demand
 
-`mise run frontend:test-e2e-coverage` runs the suite on Chromium with JS
-coverage (the `E2E_COVERAGE` switch in `support/fixtures.ts`) and prints,
-per `frontend/src` module, how many runnable lines ran and how many tests
-reach it past start-up, plus, per spec, the lines no other spec runs. The
-result also lands in `tools/e2e-tests/coverage-results/summary.txt`. It is
-a review aid, not a gate: a line that ran is not a line a test checked.
+`mise run frontend:test-e2e-coverage [spec or -g title…]` runs the suite on
+Chromium with JS coverage (the `E2E_COVERAGE` switch in
+`support/fixtures.ts`) and prints line, branch and function coverage per
+`frontend/src` file, with an HTML report at
+`tools/e2e-tests/coverage-results/report/index.html`. monocart-coverage-reports
+maps the page's V8 coverage back to `frontend/src` through a source map that
+`coverage/build-map.mjs` builds beside the page, never into it. It is a
+review aid, not a gate: a line that ran is not a line a test checked.

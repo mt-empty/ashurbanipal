@@ -30,9 +30,9 @@ export const test = base.extend<{ realFades: boolean }>({
     await use(context);
     expect(dialogs, "native dialogs opened").toEqual([]);
   },
-  page: async ({ page, browserName }, use, info) => {
+  page: async ({ page, browserName }, use) => {
     // Set by `mise run frontend:test-e2e-coverage`; Chromium is the only browser exposing JS coverage.
-    if (process.env.E2E_COVERAGE && browserName === "chromium") await recordCoverage(page, info, () => use(page));
+    if (process.env.E2E_COVERAGE && browserName === "chromium") await recordCoverage(page, () => use(page));
     else await use(page);
   },
 });
