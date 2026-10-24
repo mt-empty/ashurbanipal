@@ -43,7 +43,7 @@ export function buildRecordEntries(columns: Column[], row: Row, def: JoinDef | u
       } else dd.appendChild(formatCellValue(col, raw));
       const btn = el("button", "copy");
       btn.setAttribute("aria-label", "copy cell value");
-      btn.textContent = "⧉";
+      btn.append(el("span", "copy-icon", "⧉"));
       btn.onclick = () => copyText(raw, btn);
       action = btn;
     }
