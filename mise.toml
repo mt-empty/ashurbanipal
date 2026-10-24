@@ -2,7 +2,7 @@
 watchexec = "latest"
 node = "26"
 pnpm = "latest"
-go = "1.25.3"
+go = "1.26.10"
 java = "temurin-21"
 uv = "latest"
 "aqua:orhun/git-cliff" = "2"

@@ -39,15 +39,17 @@ dependencyLocking {
 }
 
 dependencies {
-    val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.1.1")
+    val springBootBom = platform("org.springframework.boot:spring-boot-dependencies:4.1.2")
     implementation(springBootBom)
     compileOnly(springBootBom)
-    // Newer than Spring Boot 4.1.1's managed Jackson; the higher platform wins.
-    implementation(platform("tools.jackson:jackson-bom:3.1.7"))
+    // Newer than Spring Boot 4.1.2's managed Jackson; the higher platform wins.
+    implementation(platform("tools.jackson:jackson-bom:3.1.8"))
+    // The Kotlin Gradle plugin's build-time BouncyCastle (never shipped) resolves a
+    // version affected by GHSA-9pwp-9qqc-pr26; the four bc* artifacts must stay aligned.
     constraints {
-        testImplementation("org.apache.tomcat.embed:tomcat-embed-core:11.0.25")
-        testImplementation("org.apache.tomcat.embed:tomcat-embed-el:11.0.25")
-        testImplementation("org.apache.tomcat.embed:tomcat-embed-websocket:11.0.25")
+        listOf("bcprov", "bcpkix", "bcpg", "bcutil").forEach {
+            add("kotlinBouncyCastleConfiguration", "org.bouncycastle:$it-jdk18on:1.86")
+        }
     }
 
     // Starter-lean: only what every Spring Boot host already has on its
@@ -87,7 +89,7 @@ dependencies {
     // to provide at runtime (via their own DataSource bean), never a main
     // dependency of this starter (mirrors the Rust crate's mysql/sqlite
     // Cargo features being opt-in, not always-linked).
-    testImplementation("com.mysql:mysql-connector-j:26.7.0")
+    testImplementation("com.mysql:mysql-connector-j:26.10.0")
     testImplementation("org.xerial:sqlite-jdbc:3.53.4.0")
     // Gradle's own test worker bundles an older junit-platform-launcher than
     // Spring Boot's BOM-managed junit-jupiter needs; without this explicit
