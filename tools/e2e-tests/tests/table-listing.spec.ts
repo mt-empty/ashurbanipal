@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, reloadApp, selectTable } from "./support/helpers";
+import { APP_PATH, gotoApp, reloadApp, selectTable, waitForIdle } from "./support/helpers";
 
 const SEEDED_TABLES = [
   "_conformance_meta",
@@ -179,6 +179,23 @@ test("a chip pulled up from the hidden part gets a divider only on a line with o
   expect(sharesLine).toBe(true);
   await page.locator('#tables [data-table="audit_log"]').click();
   await expect(page.locator("#tables li.pulled")).toHaveCount(0);
+});
+
+test("an active chip that ends the third line stays visible when the list collapses", async ({ page }) => {
+  // Widths where the active chip is the last one on line three, so "+ N more" needs its room.
+  for (const [width, table] of [
+    [600, "products"],
+    [760, "sessions"],
+    [820, "users"],
+  ] as const) {
+    await page.setViewportSize({ width, height: 800 });
+    // gotoApp waits for a visible active chip, which is what this checks.
+    await page.goto(`${APP_PATH}?table=${table}`);
+    await page.locator("#current").getByText(table, { exact: true }).waitFor();
+    await waitForIdle(page);
+    await expect(page.locator(`#tables [data-table="${table}"]`), `${table} at ${width}px`).toBeVisible();
+    await expect(page.locator("#tables-more")).toHaveText(/^\+ \d+ more$/);
+  }
 });
 
 test("a wide window shows every seeded table without expanding the list", async ({ page }) => {

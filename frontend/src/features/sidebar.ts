@@ -66,7 +66,7 @@ function updateTablesCap(): void {
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastRowTop = tops[TABLE_CAP_LINES - 1];
   const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
-  const active = beyond.find((e) => e.chip.classList.contains("active"));
+  const active = entries.find((e) => e.chip.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
   if (tablesMoreItem.hidden) return;
@@ -77,7 +77,7 @@ function updateTablesCap(): void {
   }
   for (const e of hidden) e.li.hidden = true;
   // The button has to land on the last row: give up chips from the end of the
-  // visible ones until it (and a pulled active chip) fits there.
+  // visible ones, never the active one, until it fits there.
   const shown = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
   while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {

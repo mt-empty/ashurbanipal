@@ -3494,7 +3494,7 @@ function updateTablesCap() {
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastRowTop = tops[TABLE_CAP_LINES - 1];
   const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
-  const active = beyond.find((e) => e.chip.classList.contains("active"));
+  const active = entries.find((e) => e.chip.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
   if (tablesMoreItem.hidden) return;
