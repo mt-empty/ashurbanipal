@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable, applyFilter, clearFilterViaSearchEvent } from "./support/helpers";
 
 // total_approx (the pager's "~N rows") is deliberately the whole table's

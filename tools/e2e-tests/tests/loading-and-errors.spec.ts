@@ -1,5 +1,5 @@
-import { test, expect } from "@playwright/test";
-import { gotoApp, selectTable } from "./support/helpers";
+import { test, expect } from "./support/fixtures";
+import { APP_PATH, gotoApp, selectTable } from "./support/helpers";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({
   page,
@@ -32,11 +32,10 @@ test("a slow, superseded response never overwrites a newer table's render", asyn
   // outright rather than letting it overwrite "users"'s already-current
   // grid/chrome.
   await gotoApp(page);
+  let releaseOrders!: () => void;
+  const ordersHeld = new Promise<void>((r) => (releaseOrders = r));
   await page.route("**/api/tables/data*", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get("table") === "orders") {
-      await new Promise((r) => setTimeout(r, 1000));
-    }
+    if (new URL(route.request().url()).searchParams.get("table") === "orders") await ordersHeld;
     await route.continue();
   });
 
@@ -49,6 +48,7 @@ test("a slow, superseded response never overwrites a newer table's render", asyn
   await page.locator('#tables [data-table="orders"]').click(); // slow, started first
   await page.locator('#tables [data-table="users"]').click(); // fast, resolves first
   await page.locator("#current").getByText("users", { exact: true }).waitFor();
+  releaseOrders();
 
   // Wait for the delayed "orders" response to actually land before
   // asserting nothing changed — otherwise this could pass without ever
@@ -90,9 +90,8 @@ test("no protocol warning appears against a matching backend", async ({ page }) 
 });
 
 test("errors are surfaced as a visible role=alert region, not just logged", async ({ page }) => {
-  // This table never finishes loading (invalid sort column -> 400 before
-  // updateViewChrome() ever runs), so wait on #error, not #current.
-  await gotoApp(page, "?table=orders&sort=nonexistent_col");
+  // An invalid sort column fails the first load, so no table chip ever becomes active for gotoApp to wait on.
+  await page.goto(`${APP_PATH}?table=orders&sort=nonexistent_col`);
   await expect(page.locator("#error")).not.toBeEmpty();
   await expect(page.locator("#error")).toHaveAttribute("role", "alert");
   await expect(page.locator("#error")).toBeVisible();

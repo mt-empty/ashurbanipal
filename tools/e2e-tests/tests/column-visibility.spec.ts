@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./support/fixtures";
 import { applyFilter, gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 import { gotoJoin, ORDERS_USERS } from "./support/join";
 

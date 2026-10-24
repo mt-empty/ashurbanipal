@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { applyFilter, gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 test("back/forward buttons step through table navigation history", async ({ page }) => {

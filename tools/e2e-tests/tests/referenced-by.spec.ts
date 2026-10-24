@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable, uiState, waitForIdle } from "./support/helpers";
 
 // Seed shape (conformance/seed): public.users is referenced by orders.user_id

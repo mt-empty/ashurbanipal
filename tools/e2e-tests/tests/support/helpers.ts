@@ -2,30 +2,11 @@ import { expect, type Page } from "@playwright/test";
 
 export const APP_PATH = "/__ashurbanipal";
 
-/** Waits for an in-flight loadData() fetch AND its render to fully settle.
- * aria-busy (fetchViewData's own signal) only proves the *fetch* finished
- * — dbviewer.html wraps every re-render in document.startViewTransition(),
- * which keeps animating (and can leave the clicked element's bounding box
- * "unstable," or intercept the next click via its snapshot overlay) for a
- * short window after that. document.getAnimations() covers view-transition
- * pseudo-element animations too, so waiting for it to empty out is the
- * real signal, not a guessed timeout. Skipping this under heavy parallel
- * load is what caused sporadic "element is not stable"/misfired clicks.
- *
- * Deliberately excludes .row-spinner animations: a table chip's spinner
- * used to be able to get stuck running forever (fetchViewData's finally
- * block cleared the wrong row's loading flag if state.table changed
- * mid-flight — fixed by capturing `table` into a local const, see
- * loadDataToken in dbviewer.html). Counting it here would make this
- * helper hang on an unrelated stuck spinner from an earlier action rather
- * than the settle condition this helper actually exists to check.
- *
- * Excludes .row-new (the 3s new-row wash after a manual refresh) and
- * #refresh-icon (its ~0.5s click-acknowledge spin) for the same reason:
- * both are post-settle decorations, not part of the render, and counting
- * them would add their duration to every wait after a highlighted refresh.
- * #load-bar's animations (the slow-fetch sweep and the auto-refresh
- * countdown) are excluded for the same reason: a countdown outlives the render. */
+/** Waits for the current fetch and its render to settle. aria-busy clears
+ * when the fetch's view-transition callback has run, but the fade that
+ * follows can still make a clicked element unstable, so this also waits
+ * for animations to end. Spinners, the refresh-icon spin, the new-row wash
+ * and #load-bar run past the render, so they are not counted. */
 export async function waitForIdle(page: Page) {
   await expect(page.locator("#data-table")).not.toHaveAttribute("aria-busy", "true");
   await expect
@@ -46,47 +27,24 @@ export async function waitForIdle(page: Page) {
     .toBe(0);
 }
 
-/** Navigates to the app root and waits for its own automatic initial-table
- * load to fully settle. Playwright gives each test a fresh browser context
- * by default, so localStorage/URL state is already isolated per-test
- * without any manual clearing.
- *
- * The settle-wait matters because loadData() used to have no per-request
- * staleness guard (now fixed via loadDataToken, see dbviewer.html), so if
- * a test clicks a different table (selectTable) before this page's own
- * loadTables()-triggered default-table fetch resolves, whichever
- * request's response landed last would win the render — #current could
- * end up correctly labeled while the actual rendered rows/columns were
- * the OTHER table's. Waiting here closes that race for every test, once,
- * instead of each test having to remember to guard against its own first
- * click. */
+/** Opens the app and waits for its automatic first table load to settle,
+ * so a test's first action can't race it. Expects that load to succeed; a
+ * test of a failing first load uses page.goto directly. */
 export async function gotoApp(page: Page, query = "") {
   await page.goto(APP_PATH + query);
-  // Bounded/tolerant: a deliberately-erroring initial load (e.g.
-  // loading-and-errors.spec.ts's invalid-sort-column case) never gets an
-  // .active chip at all — that's a legitimate scenario, not something
-  // to hang on, so this gives up after a few seconds rather than the
-  // default 30s if nothing shows up.
-  await page
-    .locator("#tables [data-table].active")
-    .waitFor({ timeout: 5_000 })
-    .catch(() => {});
+  await page.locator("#tables [data-table].active").waitFor();
   await waitForIdle(page);
 }
 
-/** Clicks a table chip and waits for it to actually become the
- * loaded/current table (not just clicked) — #current only updates after a
- * successful loadData() (see dbviewer.html's updateViewChrome), so
- * this also doubles as "wait for the fetch to resolve." */
+/** Clicks a table chip and waits until it is the current table; #current
+ * changes only after a successful load. */
 export async function selectTable(page: Page, table: string) {
   await page.locator(`#tables [data-table="${table}"]`).click();
   await page.locator("#current").getByText(table, { exact: true }).waitFor();
   await waitForIdle(page);
 }
 
-/** Types a filter clause into #filter and submits it via the form (Enter),
- * matching how a real user submits — the #apply button does the same
- * thing, this just picks one consistent path for tests. */
+/** Types a filter clause into #filter and submits it with Enter. */
 export async function applyFilter(page: Page, clause: string) {
   const filter = page.locator("#filter");
   await filter.fill(clause);
@@ -94,11 +52,8 @@ export async function applyFilter(page: Page, clause: string) {
   await waitForIdle(page);
 }
 
-/** Clears #filter the way a user would via the native search-input's
- * built-in clear affordance: emptying the value and firing the `search`
- * event (dbviewer.html's #filter.onsearch handler), which resubmits an
- * empty filter. Chromium's built-in clear "x" isn't a real DOM node
- * Playwright can click, so this dispatches the same event it would fire. */
+/** Clears #filter as its native clear button does. The button is not a DOM
+ * node Playwright can click, so this fires the `search` event it would. */
 export async function clearFilterViaSearchEvent(page: Page) {
   const filter = page.locator("#filter");
   await filter.fill("");

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable, applyFilter } from "./support/helpers";
 
 test.use({ permissions: ["clipboard-read", "clipboard-write"] });

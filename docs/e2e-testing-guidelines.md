@@ -22,14 +22,19 @@ an element attribute changing, `aria-busy` clearing.
 
 ## 2. A finished fetch is not a finished render
 
-`aria-busy` clearing only proves `fetchViewData()`'s network call
-resolved — `dbviewer.html` wraps every re-render in
-`document.startViewTransition()`, which keeps animating for a short window
-after that, and an action fired mid-animation can hit an unstable bounding
-box or get intercepted by the transition's snapshot overlay. `waitForIdle`
-(`support/helpers.ts`) waits for `document.getAnimations()` to empty out,
-not just for the fetch to resolve — use it (or extend it) rather than
-adding a second `waitForTimeout`-shaped workaround for a similar gap.
+`aria-busy` clearing only proves the fetch resolved and the re-render ran
+inside `document.startViewTransition()`. The fade that follows can still
+leave a clicked element unstable or route the click to the transition's
+snapshot overlay. `waitForIdle` (`support/helpers.ts`) also waits for
+`document.getAnimations()` to empty out — use it (or extend it) rather
+than adding a `waitForTimeout`-shaped workaround for a similar gap.
+
+Every spec imports `test` and `expect` from `support/fixtures.ts`, not
+`@playwright/test`. Its `page` fixture makes view-transition fades zero
+length, which cut about 30% of suite time: no app code waits on a fade,
+so only the wait shrinks. `view-switch.spec.ts` sets
+`test.use({ realFades: true })` so the real fade, and `waitForIdle`'s wait
+on it, stay exercised.
 
 ## 3. Don't assume a page's own automatic state has settled before you act
 

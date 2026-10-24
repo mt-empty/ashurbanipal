@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 test("a table keeps the sort last chosen on it when you leave and come back", async ({ page }) => {

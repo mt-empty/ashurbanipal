@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./support/fixtures";
 import { APP_PATH, gotoApp, selectTable } from "./support/helpers";
 
 // The service × label grid in Other services (story 03 §4.3). /api/siblings is

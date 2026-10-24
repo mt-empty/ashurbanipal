@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./support/fixtures";
 import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 const DATA = "**/api/tables/data*";

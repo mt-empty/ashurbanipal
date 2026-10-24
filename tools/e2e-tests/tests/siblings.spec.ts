@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { spawnDemo, freePort } from "./support/second-server";
 
 // The one spec that doesn't share the config's default webServer — sibling

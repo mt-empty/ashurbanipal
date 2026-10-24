@@ -1,5 +1,8 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./support/fixtures";
 import { gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+
+// The suite's one spec with real view-transition fades, so waitForIdle's animation wait stays exercised.
+test.use({ realFades: true });
 
 const DATA = "**/api/tables/data*";
 const param = (url: string, name: string) => new URL(url).searchParams.get(name);

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp } from "./support/helpers";
 
 test("API reference dialog opens with non-empty JSON and closes", async ({ page }) => {

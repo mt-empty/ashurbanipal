@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "./support/fixtures";
 import { gotoApp, selectTable } from "./support/helpers";
 import { gotoJoin, ORDERS_USERS } from "./support/join";
 

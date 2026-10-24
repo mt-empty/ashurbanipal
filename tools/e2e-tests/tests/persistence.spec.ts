@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable, applyFilter, uiState } from "./support/helpers";
 
 test("table/sort/order/limit round-trip through localStorage across a fresh visit", async ({

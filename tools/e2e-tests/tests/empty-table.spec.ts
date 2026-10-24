@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable } from "./support/helpers";
 
 test("an empty table renders the empty-state row and a real 0 count, not -1", async ({ page }) => {

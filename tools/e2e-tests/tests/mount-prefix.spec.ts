@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { spawnDemo, freePort } from "./support/second-server";
 
 // Mount-point agnosticism: the frontend derives its API base from

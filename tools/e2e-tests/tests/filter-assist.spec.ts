@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./support/fixtures";
 import { applyFilter, gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 const suggestions = (page: Page) => page.locator("#filter-suggest-list button");
