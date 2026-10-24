@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { gotoApp, problem, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 test("a table keeps the sort last chosen on it when you leave and come back", async ({ page }) => {
   await gotoApp(page);
@@ -48,16 +48,7 @@ test("a remembered sort column the backend rejects is dropped and the view recov
   }, tableKey("products"));
   await page.route("**/api/tables/data*", (r) => {
     if (new URL(r.request().url()).searchParams.get("sort") === "ghost_col") {
-      return r.fulfill({
-        status: 400,
-        contentType: "application/problem+json",
-        body: JSON.stringify({
-          type: "about:blank",
-          title: 'not allowed: column "ghost_col"',
-          status: 400,
-          code: "unknown_column",
-        }),
-      });
+      return r.fulfill(problem(400, 'not allowed: column "ghost_col"', "unknown_column"));
     }
     return r.continue();
   });
@@ -84,16 +75,7 @@ test("a stale remembered sort is dropped without discarding a shared link's filt
   }, tableKey("orders"));
   await page.route("**/api/tables/data*", (r) => {
     if (new URL(r.request().url()).searchParams.get("sort") === "ghost_col") {
-      return r.fulfill({
-        status: 400,
-        contentType: "application/problem+json",
-        body: JSON.stringify({
-          type: "about:blank",
-          title: 'not allowed: column "ghost_col"',
-          status: 400,
-          code: "unknown_column",
-        }),
-      });
+      return r.fulfill(problem(400, 'not allowed: column "ghost_col"', "unknown_column"));
     }
     return r.continue();
   });

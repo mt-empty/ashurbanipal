@@ -8,7 +8,8 @@ export const APP_PATH = "/__ashurbanipal";
  * for animations to end. Spinners, the refresh-icon spin, the new-row wash
  * and #load-bar run past the render, so they are not counted. */
 export async function waitForIdle(page: Page) {
-  await expect(page.locator("#data-table")).not.toHaveAttribute("aria-busy", "true");
+  // A real fetch, which can outlast expect's 5 s default on a loaded CI runner.
+  await expect(page.locator("#data-table")).not.toHaveAttribute("aria-busy", "true", { timeout: 15_000 });
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -27,11 +28,22 @@ export async function waitForIdle(page: Page) {
     .toBe(0);
 }
 
-/** Opens the app and waits for its automatic first table load to settle,
- * so a test's first action can't race it. Expects that load to succeed; a
- * test of a failing first load uses page.goto directly. */
-export async function gotoApp(page: Page, query = "") {
-  await page.goto(APP_PATH + query);
+/** Opens the app (on another server when `baseUrl` is given) and waits for
+ * its automatic first table load to settle, so a test's first action can't
+ * race it. Expects that load to succeed; a test of a failing first load uses
+ * page.goto directly. */
+export async function gotoApp(page: Page, query = "", baseUrl = "") {
+  await page.goto(baseUrl + APP_PATH + query);
+  await waitForFirstLoad(page);
+}
+
+/** Reloads a table view and waits for its first load as gotoApp does. */
+export async function reloadApp(page: Page) {
+  await page.reload();
+  await waitForFirstLoad(page);
+}
+
+async function waitForFirstLoad(page: Page) {
   await page.locator("#tables [data-table].active").waitFor();
   await waitForIdle(page);
 }
@@ -65,6 +77,15 @@ export async function clearFilterViaSearchEvent(page: Page) {
  * sortByTable): source, schema and table. The demo is single-source. */
 export function tableKey(table: string, schema = "public"): string {
   return JSON.stringify([null, schema, table]);
+}
+
+/** A route.fulfill() payload for an RFC 9457 error, with the members spec/openapi.yaml's ProblemDetails requires. */
+export function problem(status: number, title: string, code: string) {
+  return {
+    status,
+    contentType: "application/problem+json",
+    body: JSON.stringify({ type: "about:blank", title, status, code }),
+  };
 }
 
 export function uiState(page: Page) {

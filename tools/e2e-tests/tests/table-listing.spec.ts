@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, selectTable } from "./support/helpers";
+import { gotoApp, reloadApp, selectTable } from "./support/helpers";
 
 const SEEDED_TABLES = [
   "_conformance_meta",
@@ -151,32 +151,32 @@ test("an expanded table list stays expanded after a reload, and a collapsed one 
   const more = page.locator("#tables-more");
   await more.click();
   await expect(more).toHaveText("show fewer");
-  await page.reload();
+  await reloadApp(page);
   await expect(more).toHaveText("show fewer");
   await expect(more).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator("#tables li[hidden]:not(#tables-more-item)")).toHaveCount(0);
   await more.click();
   await expect(more).toHaveText(/^\+ \d+ more$/);
-  await page.reload();
+  await reloadApp(page);
   await expect(more).toHaveText(/^\+ \d+ more$/);
 });
 
 test("a chip pulled up from the hidden part gets a divider only on a line with other chips", async ({
   page,
 }) => {
-  await page.setViewportSize(NARROW);
+  // At this width users is past line three and lands beside other chips once pulled up.
+  await page.setViewportSize({ width: 480, height: 800 });
   await gotoApp(page, "?table=users");
   await expect(page.locator('#tables [data-table="users"]')).toBeVisible();
   const pulled = page.locator("#tables li.pulled");
-  expect(await pulled.count()).toBeLessThanOrEqual(1);
-  if ((await pulled.count()) === 1) {
-    const sharesLine = await pulled.evaluate((el) => {
-      let prev = el.previousElementSibling as HTMLElement | null;
-      while (prev?.hidden) prev = prev.previousElementSibling as HTMLElement | null;
-      return prev?.offsetTop === (el as HTMLElement).offsetTop;
-    });
-    expect(sharesLine).toBe(true);
-  }
+  await expect(pulled).toHaveCount(1);
+  await expect(pulled.locator('[data-table="users"]')).toBeAttached();
+  const sharesLine = await pulled.evaluate((el) => {
+    let prev = el.previousElementSibling as HTMLElement | null;
+    while (prev?.hidden) prev = prev.previousElementSibling as HTMLElement | null;
+    return prev?.offsetTop === (el as HTMLElement).offsetTop;
+  });
+  expect(sharesLine).toBe(true);
   await page.locator('#tables [data-table="audit_log"]').click();
   await expect(page.locator("#tables li.pulled")).toHaveCount(0);
 });

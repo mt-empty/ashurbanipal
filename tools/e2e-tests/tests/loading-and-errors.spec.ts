@@ -1,5 +1,5 @@
 import { test, expect, type Route } from "./support/fixtures";
-import { APP_PATH, gotoApp, selectTable } from "./support/helpers";
+import { APP_PATH, gotoApp, problem, selectTable } from "./support/helpers";
 import { freePort, spawnDemo } from "./support/second-server";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({
@@ -99,12 +99,7 @@ test("errors are surfaced as a visible role=alert region, not just logged", asyn
 });
 
 // spec/protocol.md makes /sources and /schemas mandatory; a failing one degrades to a single source or schema (R5).
-const serverError = (route: Route) =>
-  route.fulfill({
-    status: 500,
-    contentType: "application/problem+json",
-    body: JSON.stringify({ type: "about:blank", title: "Internal Server Error", status: 500 }),
-  });
+const serverError = (route: Route) => route.fulfill(problem(500, "Internal Server Error", "database_error"));
 
 test("a failing /sources hides the source picker and the tables still load", async ({ page }) => {
   const demo = await spawnDemo({ port: await freePort(), conformanceSecondSource: true });

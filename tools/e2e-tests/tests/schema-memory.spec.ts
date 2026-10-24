@@ -1,14 +1,12 @@
 import { test, expect, type Page } from "./support/fixtures";
 import { spawnDemo, freePort } from "./support/second-server";
-import { waitForIdle } from "./support/helpers";
+import { gotoApp, reloadApp, waitForIdle } from "./support/helpers";
 
 // ui-guidelines R12: the schema selected on a source is remembered, so
 // switching source away and back restores it instead of resetting to
 // `public`. Needs a multi-source demo (CONFORMANCE_SECOND_SOURCE adds an
 // `other_schema` source); the shared seed already gives the `primary`
 // source three schemas (public, other_schema, warehouse).
-
-const APP = "/__ashurbanipal";
 
 /** Picks an <option> and waits for the table-data refetch its onchange
  * kicks off to land, then for the view-transition to settle. `scopeParam`
@@ -27,9 +25,7 @@ test("schema is remembered per source across a source switch", async ({ page }) 
   const port = await freePort();
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
   try {
-    await page.goto(`${demo.baseUrl}${APP}`);
-    await page.locator("#tables [data-table].active").waitFor();
-    await waitForIdle(page);
+    await gotoApp(page, "", demo.baseUrl);
 
     // Both selectors render: two sources, and `primary` has three schemas.
     await expect(page.locator("#source-select-wrap")).toBeVisible();
@@ -57,14 +53,12 @@ test("a malformed schemaBySource is discarded, not fatal", async ({ page }) => {
   const port = await freePort();
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
   try {
-    await page.goto(`${demo.baseUrl}${APP}`);
+    await gotoApp(page, "", demo.baseUrl);
     await page.evaluate(() =>
       localStorage.setItem("ashurbanipal_ui", JSON.stringify({ schemaBySource: ["not", "an", "object"] })),
     );
-    await page.reload();
     // Still boots and loads a table (R5).
-    await page.locator("#tables [data-table].active").waitFor();
-    await waitForIdle(page);
+    await reloadApp(page);
     await expect(page.locator("#tbody tr").first()).toBeVisible();
   } finally {
     await demo.stop();

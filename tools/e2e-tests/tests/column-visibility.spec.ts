@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { applyFilter, gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { applyFilter, gotoApp, problem, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 import { gotoJoin, ORDERS_USERS } from "./support/join";
 
 const menuItem = (page: Page, name: string) => page.locator(`#columns-pop-list label[data-name="${name}"]`);
@@ -221,7 +221,7 @@ test("an empty result's row still spans the header after a column is shown again
 const failTableLoad = (page: Page, table: string) =>
   page.route("**/api/tables/data*", (r) =>
     new URL(r.request().url()).searchParams.get("table") === table
-      ? r.fulfill({ status: 500, contentType: "application/problem+json", body: '{"title":"boom","status":500}' })
+      ? r.fulfill(problem(500, "boom", "database_error"))
       : r.continue(),
   );
 

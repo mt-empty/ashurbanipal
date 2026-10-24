@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "./support/fixtures";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
 import { gotoJoin, joinParam, joinUrl, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
 
 // Story 41: the result of a join in the normal grid.
@@ -119,11 +119,7 @@ test("closing the overlay of a refused join link opens the join's start table", 
 
 test("a timeout offers Retry and Edit join", async ({ page }) => {
   await page.route("**/api/tables/join*", (route) =>
-    route.fulfill({
-      status: 500,
-      contentType: "application/problem+json",
-      body: JSON.stringify({ type: "about:blank", title: "query timed out", status: 500, code: "query_timeout" }),
-    }),
+    route.fulfill(problem(500, "query timed out", "query_timeout")),
   );
   await page.goto(joinUrl(ORDERS_USERS));
   await expect(page.locator("#join-notice")).toContainText("took longer than the time limit");
@@ -177,11 +173,7 @@ test("a filter on a column the join lacks is reported by the error line, not the
 test("a join the server rejects after it has loaded still opens the join overlay", async ({ page }) => {
   await gotoJoin(page, ORDERS_USERS);
   await page.route("**/api/tables/join*", (route) =>
-    route.fulfill({
-      status: 400,
-      contentType: "application/problem+json",
-      body: JSON.stringify({ type: "about:blank", title: "invalid join: users has no column \"id\"", status: 400, code: "invalid_join" }),
-    }),
+    route.fulfill(problem(400, 'invalid join: users has no column "id"', "invalid_join")),
   );
   await page.locator("#refresh").click();
   await expect(page.locator("#join-dialog")).toBeVisible();
@@ -189,19 +181,11 @@ test("a join the server rejects after it has loaded still opens the join overlay
   await expect(page.locator("#error")).toBeEmpty();
 });
 
-function problem(status: number, code: string, title: string) {
-  return {
-    status,
-    contentType: "application/problem+json",
-    body: JSON.stringify({ type: "about:blank", title, status, code }),
-  };
-}
-
 test("a join that times out is asked once and keeps a shared link's filter", async ({ page }) => {
   let requests = 0;
   await page.route("**/api/tables/join*", (route) => {
     requests++;
-    return route.fulfill(problem(500, "query_timeout", "query timed out"));
+    return route.fulfill(problem(500, "query timed out", "query_timeout"));
   });
   await page.goto(`${joinUrl(ORDERS_USERS)}&filter=${encodeURIComponent("o.id > 1")}`);
   await expect(page.locator("#join-notice")).toBeVisible();
@@ -214,7 +198,7 @@ test("cancelling a join the server refuses goes back to the table in view", asyn
   await gotoApp(page);
   await selectTable(page, "orders");
   await page.route("**/api/tables/join*", (route) =>
-    route.fulfill(problem(400, "invalid_join", "invalid join: these columns cannot be joined")),
+    route.fulfill(problem(400, "invalid join: these columns cannot be joined", "invalid_join")),
   );
   await page.locator("#join-btn").click();
   await writeSql(page, ORDERS_USERS);
@@ -235,7 +219,7 @@ test("cancelling a join the server refuses goes back to the table in view", asyn
 test("a new join that times out leaves the table in view as it was", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  await page.route("**/api/tables/join*", (route) => route.fulfill(problem(500, "query_timeout", "query timed out")));
+  await page.route("**/api/tables/join*", (route) => route.fulfill(problem(500, "query timed out", "query_timeout")));
   await page.locator("#join-btn").click();
   await writeSql(page, ORDERS_USERS);
   await page.locator("#join-run").click();

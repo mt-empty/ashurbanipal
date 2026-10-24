@@ -1,16 +1,11 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { gotoApp, problem, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 // The suite's one spec with real view-transition fades, so waitForIdle's animation wait stays exercised.
 test.use({ realFades: true });
 
 const DATA = "**/api/tables/data*";
 const param = (url: string, name: string) => new URL(url).searchParams.get(name);
-const problem = (status: number, title: string, code?: string) => ({
-  status,
-  contentType: "application/problem+json",
-  body: JSON.stringify({ type: "about:blank", title, status, ...(code ? { code } : {}) }),
-});
 
 /** Holds the data responses that match until the returned function is called. */
 async function holdData(page: Page, matches: (url: string) => boolean) {
@@ -25,7 +20,7 @@ async function holdData(page: Page, matches: (url: string) => boolean) {
 
 const failData = (page: Page, matches: (url: string) => boolean) =>
   page.route(DATA, (route) =>
-    matches(route.request().url()) ? route.fulfill(problem(503, "Service Unavailable")) : route.continue(),
+    matches(route.request().url()) ? route.fulfill(problem(503, "Service Unavailable", "database_error")) : route.continue(),
   );
 
 // The cursor of whatever the pointer would hit over the first data cell.

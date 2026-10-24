@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { APP_PATH, gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 import { spawnDemo, freePort } from "./support/second-server";
 
 // A name the page URL asked for that this instance lacks falls back as before
@@ -71,9 +71,7 @@ test("a missing source falls back to the first source and says so", async ({ pag
   const port = await freePort();
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
   try {
-    await page.goto(`${demo.baseUrl}${APP_PATH}?source=nosuch`);
-    await page.locator("#tables [data-table].active").waitFor();
-    await waitForIdle(page);
+    await gotoApp(page, "?source=nosuch", demo.baseUrl);
     await expect(page.locator("#view-notice-text")).toHaveText("There is no source nosuch here. Showing primary instead.");
   } finally {
     await demo.stop();

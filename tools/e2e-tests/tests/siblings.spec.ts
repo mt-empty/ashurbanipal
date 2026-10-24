@@ -1,4 +1,5 @@
 import { test, expect } from "./support/fixtures";
+import { gotoApp } from "./support/helpers";
 import { spawnDemo, freePort } from "./support/second-server";
 
 // The one spec that doesn't share the config's default webServer — sibling
@@ -12,7 +13,7 @@ test("shows a healthy sibling with its name, status dot, and link", async ({ pag
   const sibling = await spawnDemo({ port: siblingPort });
   const primary = await spawnDemo({ port: primaryPort, siblingPort });
   try {
-    await page.goto(`${primary.baseUrl}/__ashurbanipal`);
+    await gotoApp(page, "", primary.baseUrl);
     await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 up");
     await page.locator("#siblings-btn").click();
     const item = page.locator("#siblings-list > a");
@@ -35,7 +36,7 @@ test("shows an unhealthy sibling when it's down", async ({ page }) => {
   const primaryPort = await freePort();
   const primary = await spawnDemo({ port: primaryPort, siblingPort: deadPort });
   try {
-    await page.goto(`${primary.baseUrl}/__ashurbanipal`);
+    await gotoApp(page, "", primary.baseUrl);
     await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 down");
     await page.locator("#siblings-btn").click();
     const item = page.locator("#siblings-list > a");

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
 
 // The mocked /tables/data response is mutable and counted, and time is the
 // page clock's: a tick fires on fastForward, never on a real wait.
@@ -18,7 +18,7 @@ function payload(rows: Row[]) {
 }
 
 type Failure = { status: number; title: string; code: string };
-const UNAVAILABLE: Failure = { status: 503, title: "Service Unavailable", code: "unavailable" };
+const UNAVAILABLE: Failure = { status: 503, title: "Service Unavailable", code: "database_error" };
 
 async function setup(page: Page, rows: Row[] = [[1, "a"], [2, "b"]]) {
   const mock = { body: payload(rows), fail: null as Failure | null, hits: 0, gate: null as Promise<void> | null };
@@ -28,7 +28,7 @@ async function setup(page: Page, rows: Row[] = [[1, "a"], [2, "b"]]) {
     mock.hits++;
     if (mock.gate) await mock.gate;
     const { fail } = mock;
-    if (fail) await route.fulfill({ status: fail.status, json: { title: fail.title, code: fail.code } });
+    if (fail) await route.fulfill(problem(fail.status, fail.title, fail.code));
     else await route.fulfill({ json: mock.body });
   });
   await selectTable(page, "users");
