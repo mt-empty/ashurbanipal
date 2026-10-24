@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { gotoApp, selectTable } from "./support/helpers";
 import { gotoJoin, ORDERS_USERS } from "./support/join";
@@ -7,15 +8,19 @@ import { gotoJoin, ORDERS_USERS } from "./support/join";
 // regression still fails every attempt.
 test.describe.configure({ timeout: 20_000, retries: 2 });
 
+// Debian/Ubuntu paths of fonts-freefont-ttf and fonts-ipafont-gothic, which
+// `playwright install --with-deps` adds on Linux.
+const TALL_FONT = "/usr/share/fonts/truetype/freefont/FreeSerif.ttf";
+const BASE_FONT = "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf";
+test.skip(![TALL_FONT, BASE_FONT].every(existsSync), "needs the FreeSerif and IPAGothic system fonts");
+
 // Symbol glyphs (⟕, ⧉) that a system font lacks are drawn from a fallback font,
 // whose taller metrics must not resize the row they sit in. IPAGothic lacks them
 // but has ✓, so it plays the system font; both it and FreeSerif ship with
 // Playwright's deps. WebKit ignores unicode-range and the metric overrides on
 // local() faces, so the tall fallback is served as a file.
 async function tallFallback(page: Page, glyphs: string, selector: string) {
-  await page.route("**/glyph-probe.ttf", (route) =>
-    route.fulfill({ path: "/usr/share/fonts/truetype/freefont/FreeSerif.ttf", contentType: "font/ttf" }),
-  );
+  await page.route("**/glyph-probe.ttf", (route) => route.fulfill({ path: TALL_FONT, contentType: "font/ttf" }));
   const range = [...glyphs].map((g) => `U+${g.codePointAt(0)!.toString(16).toUpperCase()}`).join(", ");
   const css = `
     @font-face { font-family: GlyphProbeTall; src: url(glyph-probe.ttf); unicode-range: ${range};
