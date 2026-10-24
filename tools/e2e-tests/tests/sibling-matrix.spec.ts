@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "./support/fixtures";
 import { gotoApp, problem, selectTable } from "./support/helpers";
 
-// The service × label grid in Other services (story 03 §4.3). /api/siblings is
+// The service × label grid in Other services. /api/siblings is
 // mocked: the shape is what matters here, and spec/protocol.md §5.6's server
 // side is covered by conformance/runner/labelled_siblings.rs.
 

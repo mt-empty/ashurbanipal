@@ -27,9 +27,7 @@ const beat = (page: import("@playwright/test").Page) => page.waitForTimeout(700)
 test("showcase: browse tables, filter down to one row, inspect jsonb, view structure, join tables, switch environment, catch live rows on refresh, open API reference", async ({
   page,
 }) => {
-  // Pins dark theme before the app's own head-inline script reads
-  // localStorage on first paint (see dbviewer.html's THEME_KEY handling) —
-  // addInitScript runs ahead of any page script on every navigation.
+  // addInitScript runs before the inline <head> script that applies the stored theme.
   await page.addInitScript(() => localStorage.setItem("ashurbanipal_theme", "dark"));
 
   await gotoApp(page);

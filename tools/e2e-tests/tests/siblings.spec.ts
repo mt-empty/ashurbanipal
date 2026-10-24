@@ -2,10 +2,8 @@ import { test, expect } from "./support/fixtures";
 import { gotoApp } from "./support/helpers";
 import { spawnDemo, freePort } from "./support/second-server";
 
-// The one spec that doesn't share the config's default webServer — sibling
-// health-polling needs a second live instance, so this spawns its own pair
-// directly (mirroring `mise run rust:demo-sibling`'s PORT/SIBLING_PORT), per the
-// design doc §3.
+// Sibling health-polling needs live instances, so each test spawns its own
+// pair (as `mise run rust:demo-sibling` does) instead of using the shared server.
 
 test("shows a healthy sibling with its name, status dot, and link", async ({ page }) => {
   const siblingPort = await freePort();

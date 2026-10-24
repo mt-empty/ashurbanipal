@@ -38,7 +38,7 @@ test("schema is remembered per source across a source switch", async ({ page }) 
     await selectAndSettle(page, "#source-select", "other_schema", "source=other_schema");
     await selectAndSettle(page, "#source-select", "primary", "source=primary");
 
-    // Restored, not reset to `public` (the pre-R12 behaviour).
+    // Restored, not reset to `public`.
     await expect(page.locator("#schema-select")).toHaveValue("warehouse");
     expect(await page.evaluate(() => {
       const raw = localStorage.getItem("ashurbanipal_ui");

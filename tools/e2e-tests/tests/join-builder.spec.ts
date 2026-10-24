@@ -13,7 +13,7 @@ import {
   writeSql,
 } from "./support/join";
 
-// Story 41: the join overlay (boards O, U, V), in its Form and SQL modes.
+// The join overlay (design boards O, U, V), in its Form and SQL modes.
 // Backend: the seed's orders -> users (FK) and order_extra -> orders (FK, 1:1).
 
 const ORDERS_USERS_EXTRA = {

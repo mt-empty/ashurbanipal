@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, problem, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { gotoApp, holdRequests, problem, selectTable, tableData, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 // The suite's one spec with real view-transition fades, so waitForIdle's animation wait stays exercised.
 test.use({ realFades: true });
@@ -7,16 +7,7 @@ test.use({ realFades: true });
 const DATA = "**/api/tables/data*";
 const param = (url: string, name: string) => new URL(url).searchParams.get(name);
 
-/** Holds the data responses that match until the returned function is called. */
-async function holdData(page: Page, matches: (url: string) => boolean) {
-  let release!: () => void;
-  const gate = new Promise<void>((r) => (release = r));
-  await page.route(DATA, async (route) => {
-    if (matches(route.request().url())) await gate;
-    await route.continue();
-  });
-  return release;
-}
+const dataFor = (table: string) => (url: URL) => tableData(url) && url.searchParams.get("table") === table;
 
 const failData = (page: Page, matches: (url: string) => boolean) =>
   page.route(DATA, (route) =>
@@ -36,7 +27,7 @@ const isLocked = (page: Page) => page.evaluate(() => (document.getElementById("d
 test("while a chip's table loads, the old grid's columns menu still changes the old table", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  const release = await holdData(page, (url) => param(url, "table") === "orders");
+  const release = await holdRequests(page, dataFor("orders"));
   const sent = page.waitForRequest((r) => r.url().includes("/api/tables/data") && param(r.url(), "table") === "orders");
   await page.locator('#tables [data-table="orders"]').click();
   await sent;
@@ -136,7 +127,7 @@ test("Back locks the old grid while the earlier table loads, and unlocks once it
   await gotoApp(page);
   await selectTable(page, "users");
   await selectTable(page, "orders");
-  const release = await holdData(page, (url) => param(url, "table") === "users");
+  const release = await holdRequests(page, dataFor("users"));
   const sent = page.waitForRequest((r) => r.url().includes("/api/tables/data") && param(r.url(), "table") === "users");
   await page.locator("#nav-back").click();
   await sent;

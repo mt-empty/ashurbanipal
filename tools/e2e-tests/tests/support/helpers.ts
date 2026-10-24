@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type Route } from "@playwright/test";
 
 export const APP_PATH = "/__ashurbanipal";
 
@@ -77,6 +77,24 @@ export async function clearFilterViaSearchEvent(page: Page) {
  * sortByTable): source, schema and table. The demo is single-source. */
 export function tableKey(table: string, schema = "public"): string {
   return JSON.stringify([null, schema, table]);
+}
+
+export const tableData = (url: URL) => url.pathname.endsWith("/api/tables/data");
+
+/** Holds every request `match` accepts until the returned function is
+ * called, then answers each with `finish` (by default, sends it on). */
+export async function holdRequests(
+  page: Page,
+  match: (url: URL) => boolean,
+  finish: (route: Route) => Promise<void> = (route) => route.continue(),
+) {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route(match, async (route) => {
+    await gate;
+    await finish(route);
+  });
+  return release;
 }
 
 /** A route.fulfill() payload for an RFC 9457 error, with the members spec/openapi.yaml's ProblemDetails requires. */

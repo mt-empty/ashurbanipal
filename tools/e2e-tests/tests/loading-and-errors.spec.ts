@@ -1,5 +1,5 @@
 import { test, expect, type Route } from "./support/fixtures";
-import { APP_PATH, gotoApp, problem, selectTable } from "./support/helpers";
+import { APP_PATH, gotoApp, holdRequests, problem, selectTable, tableData } from "./support/helpers";
 import { freePort, spawnDemo } from "./support/second-server";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({
@@ -26,19 +26,10 @@ test("a failed load leaves the previous table's rows and active state untouched"
 });
 
 test("a slow, superseded response never overwrites a newer table's render", async ({ page }) => {
-  // Regression test for a real bug (fixed): forces the exact
-  // out-of-order race — an older request for "orders" is delayed so it
-  // resolves *after* a newer request for "users" has already rendered.
-  // loadData()'s token guard should discard the late "orders" response
-  // outright rather than letting it overwrite "users"'s already-current
-  // grid/chrome.
+  // The older "orders" request is held until "users" has rendered, so its
+  // late response must be discarded rather than overwrite the newer view.
   await gotoApp(page);
-  let releaseOrders!: () => void;
-  const ordersHeld = new Promise<void>((r) => (releaseOrders = r));
-  await page.route("**/api/tables/data*", async (route) => {
-    if (new URL(route.request().url()).searchParams.get("table") === "orders") await ordersHeld;
-    await route.continue();
-  });
+  const releaseOrders = await holdRequests(page, (url) => tableData(url) && url.searchParams.get("table") === "orders");
 
   // Registered before the triggering click: waitForResponse listens for the
   // next matching response event, so it has to be armed before the request

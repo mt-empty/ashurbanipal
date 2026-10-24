@@ -22,10 +22,7 @@ test("a column sorts ascending then descending, and another column starts ascend
 });
 
 test("ascending sort actually reorders rows by value", async ({ page }) => {
-  // Regression test for a real bug (fixed): db.rs's
-  // unqualified `order by` used to resolve to the ::text-cast output
-  // column instead of the real numeric column, sorting lexicographically
-  // ("107.92" < "11.18") instead of numerically.
+  // Values cross the wire as text, so a sort on the text form would put "107.92" before "11.18".
   await gotoApp(page);
   await selectTable(page, "products");
   await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
