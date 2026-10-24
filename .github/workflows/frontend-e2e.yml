@@ -43,8 +43,6 @@ jobs:
       fail-fast: false
       matrix:
         browser: [chromium, firefox, webkit]
-    env:
-      E2E_BROWSERS: ${{ matrix.browser }}
     services:
       db:
         image: postgres:18-alpine
@@ -81,13 +79,9 @@ jobs:
           shared-key: frontend-e2e
           save-if: ${{ matrix.browser == 'chromium' }}
 
-      - run: mise run frontend:test-e2e-install
+      - run: mise run frontend:test-e2e-install --browsers ${{ matrix.browser }}
 
-      # Not `mise run frontend:test-e2e`, which clears E2E_BROWSERS to always run all three.
-      - run: mise exec -- pnpm exec playwright test --reporter=line,html
-        working-directory: tools/e2e-tests
-        env:
-          PLAYWRIGHT_HTML_OPEN: never
+      - run: mise run frontend:test-e2e --browsers ${{ matrix.browser }}
 
       - uses: actions/upload-artifact@v7
         if: failure()

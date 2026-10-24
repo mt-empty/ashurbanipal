@@ -1,5 +1,5 @@
 import { test, expect, type Route } from "./support/fixtures";
-import { APP_PATH, gotoApp, holdRequests, problem, selectTable, tableData } from "./support/helpers";
+import { APP_PATH, dataWith, gotoApp, holdRequests, problem, selectTable } from "./support/helpers";
 import { freePort, spawnDemo } from "./support/second-server";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({
@@ -29,14 +29,12 @@ test("a slow, superseded response never overwrites a newer table's render", asyn
   // The older "orders" request is held until "users" has rendered, so its
   // late response must be discarded rather than overwrite the newer view.
   await gotoApp(page);
-  const releaseOrders = await holdRequests(page, (url) => tableData(url) && url.searchParams.get("table") === "orders");
+  const releaseOrders = await holdRequests(page, dataWith("table", "orders"));
 
   // Registered before the triggering click: waitForResponse listens for the
   // next matching response event, so it has to be armed before the request
   // that fires it, not polled for after the fact.
-  const staleOrdersResponse = page.waitForResponse(
-    (r) => new URL(r.url()).searchParams.get("table") === "orders",
-  );
+  const staleOrdersResponse = page.waitForResponse((r) => dataWith("table", "orders")(r.url()));
   await page.locator('#tables [data-table="orders"]').click(); // slow, started first
   await page.locator('#tables [data-table="users"]').click(); // fast, resolves first
   await page.locator("#current").getByText("users", { exact: true }).waitFor();
@@ -96,8 +94,7 @@ test("a failing /sources hides the source picker and the tables still load", asy
   const demo = await spawnDemo({ port: await freePort(), conformanceSecondSource: true });
   try {
     await page.route((url) => url.pathname.endsWith("/api/sources"), serverError);
-    await page.goto(`${demo.baseUrl}${APP_PATH}`);
-    await page.locator("#tables [data-table].active").waitFor();
+    await gotoApp(page, "", demo.baseUrl);
     await expect(page.locator("#source-select-wrap")).toBeHidden();
     await expect(page.locator("#error")).toBeEmpty();
     await expect(page.locator("#tbody tr").first()).toBeVisible();

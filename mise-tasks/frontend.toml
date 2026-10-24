@@ -68,17 +68,18 @@ run = "tools/sync-ports-frontend.sh"
 description = "verify vendored frontend copies and pins match frontend/dbviewer.html"
 run = "tools/sync-ports-frontend.sh --check"
 
-# E2E_BROWSERS (e.g. "webkit") narrows the install, as CI's one-browser shards do.
 ["frontend:test-e2e-install"]
 description = "one-time Playwright browser install (Chromium, Firefox, WebKit) for the e2e suite"
-run = 'pnpm install && pnpm exec playwright install --with-deps $(echo "${E2E_BROWSERS:-chromium,firefox,webkit}" | tr , " ")'
+usage = 'flag "--browsers <list>" default="chromium,firefox,webkit" help="comma-separated browsers to install"'
+run = 'pnpm install && pnpm exec playwright install --with-deps $(echo "${usage_browsers}" | tr , " ")'
 dir = "tools/e2e-tests"
 
 # Serves axum's vendored dbviewer.html, so run frontend:sync-ports after a build first.
-# E2E_BROWSERS is cleared so a value left in the shell can't drop a browser.
+# --browsers, not a shell E2E_BROWSERS, picks the browsers, so a value left in the shell can't drop one.
 ["frontend:test-e2e"]
 description = "run the full three-browser Playwright e2e suite against axum's vendored dbviewer.html"
-run = "E2E_BROWSERS= PLAYWRIGHT_HTML_OPEN=never pnpm exec playwright test --reporter=line,html"
+usage = 'flag "--browsers <list>" default="chromium,firefox,webkit" help="comma-separated browsers; CI runs one per shard"'
+run = 'E2E_BROWSERS="${usage_browsers}" PLAYWRIGHT_HTML_OPEN=never pnpm exec playwright test --reporter=line,html'
 dir = "tools/e2e-tests"
 
 ["frontend:test-e2e-quick"]

@@ -3,8 +3,7 @@ import { recordCoverage } from "./coverage";
 
 export * from "@playwright/test";
 
-// No app code waits on a view transition's `finished`, so a zero-length fade
-// changes only how long waitForIdle sits on each render.
+// Why fades are zero-length: docs/e2e-testing-guidelines.md §2.
 const INSTANT_FADES =
   "::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s !important; }";
 

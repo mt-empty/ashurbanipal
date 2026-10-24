@@ -54,6 +54,8 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   // Playwright's CI default is half the cores: 2 on a 4-vCPU ubuntu-latest runner.
   workers: process.env.CI ? 4 : undefined,
+  // A loaded CI runner can take longer than expect's 5 s default to answer a fetch and render it.
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
   reporter: "html",
   use: {
     trace: "on-first-retry",

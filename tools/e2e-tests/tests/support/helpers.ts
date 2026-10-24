@@ -2,14 +2,11 @@ import { expect, type Page, type Route } from "@playwright/test";
 
 export const APP_PATH = "/__ashurbanipal";
 
-/** Waits for the current fetch and its render to settle. aria-busy clears
- * when the fetch's view-transition callback has run, but the fade that
- * follows can still make a clicked element unstable, so this also waits
- * for animations to end. Spinners, the refresh-icon spin, the new-row wash
- * and #load-bar run past the render, so they are not counted. */
+/** Waits for the current fetch and its render to settle (docs/e2e-testing-guidelines.md §2).
+ * Spinners, the refresh-icon spin, the new-row wash and #load-bar outlast
+ * the render, so their animations are not waited on. */
 export async function waitForIdle(page: Page) {
-  // A real fetch, which can outlast expect's 5 s default on a loaded CI runner.
-  await expect(page.locator("#data-table")).not.toHaveAttribute("aria-busy", "true", { timeout: 15_000 });
+  await expect(page.locator("#data-table")).not.toHaveAttribute("aria-busy", "true");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -80,6 +77,22 @@ export function tableKey(table: string, schema = "public"): string {
 }
 
 export const tableData = (url: URL) => url.pathname.endsWith("/api/tables/data");
+
+/** Matches /api/tables/data requests whose `param` is `value`; takes a URL or its text. */
+export const dataWith = (param: string, value: string) => (url: URL | string) => {
+  const u = typeof url === "string" ? new URL(url) : url;
+  return tableData(u) && u.searchParams.get(param) === value;
+};
+
+/** Fails the requests `match` accepts with a 503, as an unavailable database would. */
+export const failTableData = (page: Page, match: (url: URL) => boolean) =>
+  page.route(match, (route) => route.fulfill(problem(503, "Service Unavailable", "database_error")));
+
+/** Answers data requests sorted by `col` with the backend's 400 for a column the table lacks. */
+export const rejectSort = (page: Page, col: string) =>
+  page.route(dataWith("sort", col), (route) =>
+    route.fulfill(problem(400, `not allowed: column "${col}"`, "unknown_column")),
+  );
 
 /** Holds every request `match` accepts until the returned function is
  * called, then answers each with `finish` (by default, sends it on). */

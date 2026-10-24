@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { gotoApp, problem, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { gotoApp, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 test("a table keeps the sort last chosen on it when you leave and come back", async ({ page }) => {
   await gotoApp(page);
@@ -46,12 +46,7 @@ test("a remembered sort column the backend rejects is dropped and the view recov
       JSON.stringify({ table: "products", sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }),
     );
   }, tableKey("products"));
-  await page.route("**/api/tables/data*", (r) => {
-    if (new URL(r.request().url()).searchParams.get("sort") === "ghost_col") {
-      return r.fulfill(problem(400, 'not allowed: column "ghost_col"', "unknown_column"));
-    }
-    return r.continue();
-  });
+  await rejectSort(page, "ghost_col");
 
   await gotoApp(page);
   await page.locator("#current").getByText("products", { exact: true }).waitFor();
@@ -73,12 +68,7 @@ test("a stale remembered sort is dropped without discarding a shared link's filt
   await page.addInitScript((key) => {
     localStorage.setItem("ashurbanipal_ui", JSON.stringify({ sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }));
   }, tableKey("orders"));
-  await page.route("**/api/tables/data*", (r) => {
-    if (new URL(r.request().url()).searchParams.get("sort") === "ghost_col") {
-      return r.fulfill(problem(400, 'not allowed: column "ghost_col"', "unknown_column"));
-    }
-    return r.continue();
-  });
+  await rejectSort(page, "ghost_col");
 
   await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("status = completed"));
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();

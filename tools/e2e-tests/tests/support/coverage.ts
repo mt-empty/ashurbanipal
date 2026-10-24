@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Page, TestInfo } from "@playwright/test";
 
-export const RAW_DIR = fileURLToPath(new URL("../../coverage-results/raw", import.meta.url));
+const RAW_DIR = fileURLToPath(new URL("../../coverage-results/raw", import.meta.url));
 
 // The innermost V8 block range decides an offset's count, so ranges are
 // applied outermost first. A line counts as run when its first non-blank
@@ -36,6 +36,6 @@ export async function recordCoverage(page: Page, info: TestInfo, run: () => Prom
   const id = `${info.titlePath.join(" ").replace(/[^\w.-]+/g, "_").slice(0, 180)}_${info.repeatEachIndex}`;
   writeFileSync(
     `${RAW_DIR}/${id}.json`,
-    JSON.stringify({ file: info.file.split("/").pop(), title: info.title, scripts: entries.length, covered: [...lines] }),
+    JSON.stringify({ file: info.file.split("/").pop(), covered: [...lines] }),
   );
 }

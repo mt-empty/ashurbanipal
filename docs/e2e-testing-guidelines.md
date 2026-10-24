@@ -88,7 +88,9 @@ The faster tiers set `E2E_BROWSERS=chromium,firefox`, which
 `playwright.config.ts` uses to pick both the browser projects and the
 demo servers it starts. Use it rather than `--project` to narrow a run:
 Playwright starts every configured server whichever projects `--project`
-selects.
+selects. `frontend:test-e2e` and `frontend:test-e2e-install` take
+`--browsers <list>` instead (CI passes one browser per shard), so a value
+left in the shell can't drop a browser from the final run.
 
 ## 6. Measure coverage on demand
 
