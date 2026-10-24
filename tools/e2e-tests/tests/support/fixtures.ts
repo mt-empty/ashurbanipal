@@ -1,4 +1,5 @@
 import { test as base } from "@playwright/test";
+import { recordCoverage } from "./coverage";
 
 export * from "@playwright/test";
 
@@ -10,7 +11,7 @@ const INSTANT_FADES =
 /** Every spec imports `test` from here. `realFades` keeps the 250 ms view-transition fade for a spec that opts in. */
 export const test = base.extend<{ realFades: boolean }>({
   realFades: [false, { option: true }],
-  page: async ({ page, realFades }, use) => {
+  page: async ({ page, realFades, browserName }, use, info) => {
     if (!realFades) {
       await page.addInitScript((css) => {
         document.addEventListener("DOMContentLoaded", () => {
@@ -20,6 +21,8 @@ export const test = base.extend<{ realFades: boolean }>({
         });
       }, INSTANT_FADES);
     }
-    await use(page);
+    // Set by `mise run frontend:test-e2e-coverage`; Chromium is the only browser exposing JS coverage.
+    if (process.env.E2E_COVERAGE && browserName === "chromium") await recordCoverage(page, info, () => use(page));
+    else await use(page);
   },
 });

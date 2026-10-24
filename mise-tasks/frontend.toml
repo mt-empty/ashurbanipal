@@ -92,6 +92,12 @@ run = "E2E_BROWSERS=chromium,firefox pnpm exec playwright test --reporter=line"
 dir = "tools/e2e-tests"
 depends = ["frontend:rebuild"]
 
+["frontend:test-e2e-coverage"]
+description = "rebuild and sync the frontend, run the e2e suite on Chromium with JS coverage, and print coverage per frontend/src module and per spec"
+run = "rm -rf coverage-results/raw && E2E_COVERAGE=1 E2E_BROWSERS=chromium pnpm exec playwright test --reporter=line && node coverage/report.mjs"
+dir = "tools/e2e-tests"
+depends = ["frontend:rebuild"]
+
 ["frontend:showcase"]
 description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to a Bayer-dithered tools/e2e-tests/showcase.gif"
 run = "./generate-showcase-gif.sh"

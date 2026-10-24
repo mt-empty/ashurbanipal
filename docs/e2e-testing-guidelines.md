@@ -89,3 +89,12 @@ The faster tiers set `E2E_BROWSERS=chromium,firefox`, which
 demo servers it starts. Use it rather than `--project` to narrow a run:
 Playwright starts every configured server whichever projects `--project`
 selects.
+
+## 6. Measure coverage on demand
+
+`mise run frontend:test-e2e-coverage` runs the suite on Chromium with JS
+coverage (the `E2E_COVERAGE` switch in `support/fixtures.ts`) and prints,
+per `frontend/src` module, how many runnable lines ran and how many tests
+reach it past start-up, plus, per spec, the lines no other spec runs. The
+result also lands in `tools/e2e-tests/coverage-results/summary.txt`. It is
+a review aid, not a gate: a line that ran is not a line a test checked.
