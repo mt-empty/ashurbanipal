@@ -1,27 +1,7 @@
 import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
-test("clicking an unsorted column sorts it ascending", async ({ page }) => {
-  await gotoApp(page);
-  await selectTable(page, "products");
-  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
-  await waitForIdle(page);
-  await expect(page.locator('th[data-col="price"]')).toHaveAttribute("aria-sort", "ascending");
-});
-
-test("clicking the same column again toggles to descending", async ({ page }) => {
-  await gotoApp(page);
-  await selectTable(page, "products");
-  const priceHeader = page.locator('th[data-col="price"]');
-  await priceHeader.click({ position: { x: 6, y: 6 } });
-  await waitForIdle(page);
-  await expect(priceHeader).toHaveAttribute("aria-sort", "ascending");
-  await priceHeader.click({ position: { x: 6, y: 6 } });
-  await waitForIdle(page);
-  await expect(priceHeader).toHaveAttribute("aria-sort", "descending");
-});
-
-test("switching to a different column always starts ascending, and unsorts the old column", async ({
+test("a column sorts ascending then descending, and another column starts ascending and unsorts it", async ({
   page,
 }) => {
   await gotoApp(page);

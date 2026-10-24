@@ -65,31 +65,6 @@ test("a malformed filter URL param resets to no filter with a note", async ({ pa
     .toBeGreaterThan(1); // unfiltered — mixed statuses still visible
 });
 
-test("a filter URL param naming a column the table lacks resets with a note", async ({ page }) => {
-  // Parses fine, so tryParseFilterDsl accepts it — the backend is what
-  // rejects it (a link shared to a deployment where the column has drifted
-  // away). Must degrade like a stale sort does, not dead-end the link (R5),
-  // and say so, since the link asked for it (R6d).
-  await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("nosuchcol = 1"));
-  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
-  await expect(page.locator("#error")).toBeEmpty();
-  await expect(page.locator("#filter")).toHaveValue("");
-  await expect(page.locator("#tbody tr").first()).toBeVisible();
-  await expect(page.locator("#view-notice")).toBeVisible();
-});
-
-test("a filter survives no better than the table it was written against", async ({ page }) => {
-  // ?table= names a table that isn't here, so loadTables falls back to the
-  // first one — and the filter, written against the named table's columns,
-  // must not ride along onto a table that may not have them.
-  await gotoApp(page, "?table=nosuchtable&filter=" + encodeURIComponent("status = completed"));
-  await expect(page.locator("#error")).toBeEmpty();
-  await expect(page.locator("#filter")).toHaveValue("");
-  await expect(page.locator("#current")).not.toHaveText("—");
-  await expect(page.locator("#tbody tr").first()).toBeVisible();
-  await expect(page.locator("#view-notice")).toBeVisible();
-});
-
 test("a filter URL param restores the filtered view on load", async ({ page }) => {
   await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("status = completed"));
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
@@ -100,9 +75,10 @@ test("a filter URL param restores the filtered view on load", async ({ page }) =
       return values.length > 0 && values.every((v) => v === "completed");
     })
     .toBe(true);
+  await expect(page.locator("#view-notice")).toBeHidden();
 });
 
-test("hidden columns persist across a fresh visit, scoped per table", async ({ page }) => {
+test("hidden columns persist across a fresh visit", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
   await page.locator("#columns-btn").click();

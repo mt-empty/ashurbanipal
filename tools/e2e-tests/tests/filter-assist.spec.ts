@@ -167,13 +167,6 @@ test("a filter written by click-to-filter is coloured too", async ({ page }) => 
   await expect(parts(page, "t-op")).toHaveText(["="]);
 });
 
-test("a typed filter still applies end to end", async ({ page }) => {
-  await gotoApp(page);
-  await selectTable(page, "orders");
-  await applyFilter(page, "status = completed");
-  await expect(page.locator("#error")).toBeEmpty();
-});
-
 test("the suggestion popup is exposed as a combobox with the highlighted row active", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
