@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "./support/fixtures";
 import { gotoApp, holdRequests, problem, selectTable, waitForIdle } from "./support/helpers";
-import { gotoJoin, joinParam, joinUrl, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
+import { gotoJoin, joinParam, joinQuery, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
 
 // The result of a join in the normal grid.
 
@@ -96,7 +96,7 @@ test("the record dialog groups a joined row by table, under the band's name", as
 
 test("the server's 400 for a join it refuses shows in the overlay", async ({ page }) => {
   const response = nextJoinResponse(page);
-  await page.goto(joinUrl("FROM orders o JOIN users u ON o.status = u.id"));
+  await gotoApp(page, joinQuery("FROM orders o JOIN users u ON o.status = u.id"));
   expect((await response).status()).toBe(400);
   await expect(page.locator("#join-dialog")).toBeVisible();
   await expect(page.locator("#join-error")).toContainText("cannot be joined");
@@ -104,7 +104,7 @@ test("the server's 400 for a join it refuses shows in the overlay", async ({ pag
 
 test("closing the overlay of a refused join link opens the join's start table", async ({ page }) => {
   const response = nextJoinResponse(page);
-  await page.goto(joinUrl("FROM users u JOIN orders o ON u.id = o.status"));
+  await gotoApp(page, joinQuery("FROM users u JOIN orders o ON u.id = o.status"));
   expect((await response).status()).toBe(400);
   await expect(page.locator("#join-dialog")).toBeVisible();
 
@@ -121,7 +121,7 @@ test("a timeout offers Retry and Edit join", async ({ page }) => {
   await page.route("**/api/tables/join*", (route) =>
     route.fulfill(problem(500, "query timed out", "query_timeout")),
   );
-  await page.goto(joinUrl(ORDERS_USERS));
+  await gotoApp(page, joinQuery(ORDERS_USERS));
   await expect(page.locator("#join-notice")).toContainText("took longer than the time limit");
   await expect(page.locator("#error")).toBeEmpty();
 
@@ -187,7 +187,7 @@ test("a join that times out is asked once and keeps a shared link's filter", asy
     requests++;
     return route.fulfill(problem(500, "query timed out", "query_timeout"));
   });
-  await page.goto(`${joinUrl(ORDERS_USERS)}&filter=${encodeURIComponent("o.id > 1")}`);
+  await gotoApp(page, `${joinQuery(ORDERS_USERS)}&filter=${encodeURIComponent("o.id > 1")}`);
   await expect(page.locator("#join-notice")).toBeVisible();
   await waitForIdle(page);
   expect(requests).toBe(1);

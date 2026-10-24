@@ -1407,7 +1407,7 @@ thead tr.bands + tr th { top: var(--band-h); }
 </style>
 </head>
 <body>
-<main id="main">
+<main id="main" aria-busy="true">
   <div id="chrome">
     <header id="topbar">
       <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
@@ -6921,7 +6921,13 @@ $("refresh").onclick = () => {
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });
 };
-loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(showBootFallbackNote);
+loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(() => {
+  try {
+    showBootFallbackNote();
+  } finally {
+    $("main").removeAttribute("aria-busy");
+  }
+});
 startSiblings();
 startAutoRefresh();
 </script>

@@ -26,22 +26,21 @@ export async function waitForIdle(page: Page) {
 }
 
 /** Opens the app (on another server when `baseUrl` is given) and waits for
- * its automatic first table load to settle, so a test's first action can't
- * race it. Expects that load to succeed; a test of a failing first load uses
- * page.goto directly. */
+ * its start-up to settle, failed or not, so a test's first action can't race it. */
 export async function gotoApp(page: Page, query = "", baseUrl = "") {
   await page.goto(baseUrl + APP_PATH + query);
   await waitForFirstLoad(page);
 }
 
-/** Reloads a table view and waits for its first load as gotoApp does. */
+/** Reloads the page and waits for its start-up as gotoApp does. */
 export async function reloadApp(page: Page) {
   await page.reload();
   await waitForFirstLoad(page);
 }
 
+// <main> is aria-busy from the first byte until the app's start-up chain settles.
 async function waitForFirstLoad(page: Page) {
-  await page.locator("#tables [data-table].active").waitFor();
+  await expect(page.locator("#main")).not.toHaveAttribute("aria-busy", "true");
   await waitForIdle(page);
 }
 

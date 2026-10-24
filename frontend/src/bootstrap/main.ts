@@ -81,7 +81,18 @@ $<HTMLButtonElement>("refresh").onclick = () => {
 // bootstrap-only ordering; loadSchemas/loadTables are safe to call on their
 // own after this (source/schema switching does exactly that). The fallback
 // note runs last because a URL filter can still be dropped by loadTables'
-// awaited first load.
-loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(showBootFallbackNote);
+// awaited first load. <main> starts aria-busy in the markup, so it reads as
+// loading from the first byte until this settles, whether it worked or not.
+loadSources()
+  .then(loadSchemas)
+  .then(loadTables)
+  .catch(reportError)
+  .finally(() => {
+    try {
+      showBootFallbackNote();
+    } finally {
+      $("main").removeAttribute("aria-busy");
+    }
+  });
 startSiblings();
 startAutoRefresh();

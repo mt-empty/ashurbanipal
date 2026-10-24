@@ -231,8 +231,7 @@ test("an unsaved join gets a dashed chip with Save…, and its URL reproduces it
   expect(new URL(url).searchParams.get("join")).toBe(ORDERS_USERS_CANONICAL);
   await expect(page.locator("#join-link-btn")).toBeVisible();
   await gotoApp(page);
-  await page.goto(url);
-  await waitForIdle(page);
+  await gotoApp(page, new URL(url).search);
   await expect(page.locator("th.band")).toHaveText(["orders o", "users u"]);
 });
 

@@ -1,5 +1,5 @@
 import { test, expect, type Route } from "./support/fixtures";
-import { APP_PATH, dataWith, gotoApp, holdRequests, problem, selectTable } from "./support/helpers";
+import { dataWith, gotoApp, holdRequests, problem, selectTable } from "./support/helpers";
 import { freePort, spawnDemo } from "./support/second-server";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({
@@ -80,8 +80,7 @@ test("no protocol warning appears against a matching backend", async ({ page }) 
 });
 
 test("errors are surfaced as a visible role=alert region, not just logged", async ({ page }) => {
-  // An invalid sort column fails the first load, so no table chip ever becomes active for gotoApp to wait on.
-  await page.goto(`${APP_PATH}?table=orders&sort=nonexistent_col`);
+  await gotoApp(page, "?table=orders&sort=nonexistent_col");
   await expect(page.locator("#error")).not.toBeEmpty();
   await expect(page.locator("#error")).toHaveAttribute("role", "alert");
   await expect(page.locator("#error")).toBeVisible();

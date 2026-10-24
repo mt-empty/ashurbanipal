@@ -1,4 +1,5 @@
 import { test, expect } from "./support/fixtures";
+import { gotoApp } from "./support/helpers";
 import { spawnDemo, freePort } from "./support/second-server";
 
 // Mount-point agnosticism: the frontend derives its API base from
@@ -14,7 +15,7 @@ test("UI loads tables and data when mounted under a path prefix", async ({ page 
     const dataLoaded = page.waitForResponse(
       (r) => r.url().includes("/svc/__ashurbanipal/api/tables/data") && r.ok(),
     );
-    await page.goto(`${demo.baseUrl}/svc/__ashurbanipal`);
+    await gotoApp(page, "", `${demo.baseUrl}/svc`);
     await expect(page.locator("#tables [data-table]").first()).toBeVisible();
     await expect(page.locator("#tables [data-table]").first()).toHaveJSProperty("pathname", "/svc/__ashurbanipal");
     await dataLoaded;

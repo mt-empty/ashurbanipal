@@ -39,7 +39,10 @@ on it, stay exercised.
 ## 3. Don't assume a page's own automatic state has settled before you act
 
 `gotoApp` waits for the app's own automatic initial-table load to finish
-before returning, not just for navigation to complete. Without that wait,
+before returning, not just for navigation to complete. Its signal is
+`<main aria-busy="true">`, which the page carries from the first byte until
+its start-up chain settles, so it works the same for a failed first load
+or a join link. Without that wait,
 a test's first `selectTable()` click could race the page's own default-
 table fetch — whichever response lands last wins the render, which used
 to be able to leave `#current` labeled correctly while the grid showed the

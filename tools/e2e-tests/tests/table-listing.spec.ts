@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { APP_PATH, gotoApp, reloadApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, reloadApp, selectTable } from "./support/helpers";
 
 const SEEDED_TABLES = [
   "_conformance_meta",
@@ -189,10 +189,7 @@ test("an active chip that ends the third line stays visible when the list collap
     [820, "users"],
   ] as const) {
     await page.setViewportSize({ width, height: 800 });
-    // gotoApp waits for a visible active chip, which is what this checks.
-    await page.goto(`${APP_PATH}?table=${table}`);
-    await page.locator("#current").getByText(table, { exact: true }).waitFor();
-    await waitForIdle(page);
+    await gotoApp(page, `?table=${table}`);
     await expect(page.locator(`#tables [data-table="${table}"]`), `${table} at ${width}px`).toBeVisible();
     await expect(page.locator("#tables-more")).toHaveText(/^\+ \d+ more$/);
   }
