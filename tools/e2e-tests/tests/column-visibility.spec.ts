@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { applyFilter, gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { test, expect, type Page } from "./support/fixtures";
+import { applyFilter, dataWith, failRequests, gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 import { gotoJoin, ORDERS_USERS } from "./support/join";
 
 const menuItem = (page: Page, name: string) => page.locator(`#columns-pop-list label[data-name="${name}"]`);
@@ -218,12 +218,7 @@ test("an empty result's row still spans the header after a column is shown again
 });
 
 // A table whose load fails leaves the previous grid on screen while state.view has moved on.
-const failTableLoad = (page: Page, table: string) =>
-  page.route("**/api/tables/data*", (r) =>
-    new URL(r.request().url()).searchParams.get("table") === table
-      ? r.fulfill({ status: 500, contentType: "application/problem+json", body: '{"title":"boom","status":500}' })
-      : r.continue(),
-  );
+const failTableLoad = (page: Page, table: string) => failRequests(page, dataWith("table", table));
 
 test("a toggle on a grid left by a failed load changes only that column", async ({ page }) => {
   await gotoApp(page);

@@ -1,5 +1,5 @@
-import { test, expect, type Route } from "@playwright/test";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { test, expect, type Route } from "./support/fixtures";
+import { gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
 
 // Seed shape (conformance/seed): orders has the partial index
 // orders_pending_idx and orders.user_id ON DELETE CASCADE; inventory_counts
@@ -40,11 +40,7 @@ test("a failed structure fetch is reported inside the dialog and leaves the grid
   await gotoApp(page);
   await selectTable(page, "orders");
   await page.route(STRUCTURE, (route) =>
-    route.fulfill({
-      status: 500,
-      contentType: "application/problem+json",
-      body: JSON.stringify({ type: "about:blank", title: "catalog unavailable", status: 500, code: "database_error" }),
-    }),
+    route.fulfill(problem(500, "catalog unavailable", "database_error")),
   );
   await openStructure(page);
 

@@ -28,11 +28,9 @@ export interface SpawnedDemo {
   stop: () => Promise<void>;
 }
 
-/** Spawns another `demo` example process, mirroring `mise run rust:demo-sibling`
- * (PORT/SIBLING_PORT env vars) — only siblings.spec.ts, mount-prefix.spec.ts
- * and schema-memory.spec.ts need this (a second instance, a MOUNT_PREFIX one,
- * a multi-source one); every other spec shares the one server Playwright's
- * webServer config starts (see playwright.config.ts and the design doc §3). */
+/** Spawns another `demo` example process, as `mise run rust:demo-sibling` does
+ * (PORT/SIBLING_PORT env vars), for a test that needs a configuration the
+ * shared webServer lacks: a live sibling, a MOUNT_PREFIX, or a second source. */
 export async function spawnDemo(opts: {
   port: number;
   siblingPort?: number;

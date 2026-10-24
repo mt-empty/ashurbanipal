@@ -1,27 +1,7 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
-test("clicking an unsorted column sorts it ascending", async ({ page }) => {
-  await gotoApp(page);
-  await selectTable(page, "products");
-  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
-  await waitForIdle(page);
-  await expect(page.locator('th[data-col="price"]')).toHaveAttribute("aria-sort", "ascending");
-});
-
-test("clicking the same column again toggles to descending", async ({ page }) => {
-  await gotoApp(page);
-  await selectTable(page, "products");
-  const priceHeader = page.locator('th[data-col="price"]');
-  await priceHeader.click({ position: { x: 6, y: 6 } });
-  await waitForIdle(page);
-  await expect(priceHeader).toHaveAttribute("aria-sort", "ascending");
-  await priceHeader.click({ position: { x: 6, y: 6 } });
-  await waitForIdle(page);
-  await expect(priceHeader).toHaveAttribute("aria-sort", "descending");
-});
-
-test("switching to a different column always starts ascending, and unsorts the old column", async ({
+test("a column sorts ascending then descending, and another column starts ascending and unsorts it", async ({
   page,
 }) => {
   await gotoApp(page);
@@ -42,10 +22,7 @@ test("switching to a different column always starts ascending, and unsorts the o
 });
 
 test("ascending sort actually reorders rows by value", async ({ page }) => {
-  // Regression test for a real bug (fixed): db.rs's
-  // unqualified `order by` used to resolve to the ::text-cast output
-  // column instead of the real numeric column, sorting lexicographically
-  // ("107.92" < "11.18") instead of numerically.
+  // Values cross the wire as text, so a sort on the text form would put "107.92" before "11.18".
   await gotoApp(page);
   await selectTable(page, "products");
   await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });

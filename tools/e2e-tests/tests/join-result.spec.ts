@@ -1,8 +1,8 @@
-import { expect, type Page, test } from "@playwright/test";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
-import { gotoJoin, joinParam, joinUrl, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
+import { expect, type Page, test } from "./support/fixtures";
+import { gotoApp, holdRequests, problem, selectTable, tableList, waitForIdle } from "./support/helpers";
+import { gotoJoin, joinParam, joinQuery, joinRequest, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
 
-// Story 41: the result of a join in the normal grid.
+// The result of a join in the normal grid.
 
 test("a join view labels columns by table and pages without a total", async ({ page }) => {
   await gotoJoin(page, ORDERS_USERS);
@@ -96,21 +96,32 @@ test("the record dialog groups a joined row by table, under the band's name", as
 
 test("the server's 400 for a join it refuses shows in the overlay", async ({ page }) => {
   const response = nextJoinResponse(page);
-  await page.goto(joinUrl("FROM orders o JOIN users u ON o.status = u.id"));
+  await gotoApp(page, joinQuery("FROM orders o JOIN users u ON o.status = u.id"));
   expect((await response).status()).toBe(400);
   await expect(page.locator("#join-dialog")).toBeVisible();
   await expect(page.locator("#join-error")).toContainText("cannot be joined");
 });
 
+test("closing the overlay of a refused join link opens the join's start table", async ({ page }) => {
+  const response = nextJoinResponse(page);
+  await gotoApp(page, joinQuery("FROM users u JOIN orders o ON u.id = o.status"));
+  expect((await response).status()).toBe(400);
+  await expect(page.locator("#join-dialog")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#join-dialog")).toBeHidden();
+  await page.locator("#current").getByText("users", { exact: true }).waitFor();
+  await waitForIdle(page);
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
+  await expect(page.locator("#error")).toBeEmpty();
+  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+});
+
 test("a timeout offers Retry and Edit join", async ({ page }) => {
   await page.route("**/api/tables/join*", (route) =>
-    route.fulfill({
-      status: 500,
-      contentType: "application/problem+json",
-      body: JSON.stringify({ type: "about:blank", title: "query timed out", status: 500, code: "query_timeout" }),
-    }),
+    route.fulfill(problem(500, "query timed out", "query_timeout")),
   );
-  await page.goto(joinUrl(ORDERS_USERS));
+  await gotoApp(page, joinQuery(ORDERS_USERS));
   await expect(page.locator("#join-notice")).toContainText("took longer than the time limit");
   await expect(page.locator("#error")).toBeEmpty();
 
@@ -162,11 +173,7 @@ test("a filter on a column the join lacks is reported by the error line, not the
 test("a join the server rejects after it has loaded still opens the join overlay", async ({ page }) => {
   await gotoJoin(page, ORDERS_USERS);
   await page.route("**/api/tables/join*", (route) =>
-    route.fulfill({
-      status: 400,
-      contentType: "application/problem+json",
-      body: JSON.stringify({ type: "about:blank", title: "invalid join: users has no column \"id\"", status: 400, code: "invalid_join" }),
-    }),
+    route.fulfill(problem(400, 'invalid join: users has no column "id"', "invalid_join")),
   );
   await page.locator("#refresh").click();
   await expect(page.locator("#join-dialog")).toBeVisible();
@@ -174,21 +181,13 @@ test("a join the server rejects after it has loaded still opens the join overlay
   await expect(page.locator("#error")).toBeEmpty();
 });
 
-function problem(status: number, code: string, title: string) {
-  return {
-    status,
-    contentType: "application/problem+json",
-    body: JSON.stringify({ type: "about:blank", title, status, code }),
-  };
-}
-
 test("a join that times out is asked once and keeps a shared link's filter", async ({ page }) => {
   let requests = 0;
   await page.route("**/api/tables/join*", (route) => {
     requests++;
-    return route.fulfill(problem(500, "query_timeout", "query timed out"));
+    return route.fulfill(problem(500, "query timed out", "query_timeout"));
   });
-  await page.goto(`${joinUrl(ORDERS_USERS)}&filter=${encodeURIComponent("o.id > 1")}`);
+  await gotoApp(page, `${joinQuery(ORDERS_USERS)}&filter=${encodeURIComponent("o.id > 1")}`);
   await expect(page.locator("#join-notice")).toBeVisible();
   await waitForIdle(page);
   expect(requests).toBe(1);
@@ -199,7 +198,7 @@ test("cancelling a join the server refuses goes back to the table in view", asyn
   await gotoApp(page);
   await selectTable(page, "orders");
   await page.route("**/api/tables/join*", (route) =>
-    route.fulfill(problem(400, "invalid_join", "invalid join: these columns cannot be joined")),
+    route.fulfill(problem(400, "invalid join: these columns cannot be joined", "invalid_join")),
   );
   await page.locator("#join-btn").click();
   await writeSql(page, ORDERS_USERS);
@@ -220,7 +219,7 @@ test("cancelling a join the server refuses goes back to the table in view", asyn
 test("a new join that times out leaves the table in view as it was", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  await page.route("**/api/tables/join*", (route) => route.fulfill(problem(500, "query_timeout", "query timed out")));
+  await page.route("**/api/tables/join*", (route) => route.fulfill(problem(500, "query timed out", "query_timeout")));
   await page.locator("#join-btn").click();
   await writeSql(page, ORDERS_USERS);
   await page.locator("#join-run").click();
@@ -234,29 +233,12 @@ test("a new join that times out leaves the table in view as it was", async ({ pa
   expect(new URL(page.url()).searchParams.get("join")).toBeNull();
 });
 
-// Holds matching requests until the returned function is called.
-async function hold(page: Page, match: (url: URL) => boolean): Promise<() => void> {
-  let release = () => {};
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route(match, async (route) => {
-    await held;
-    await route.continue();
-  });
-  return release;
-}
-
-const isJoin = (url: URL) => url.pathname.endsWith("/api/tables/join");
-const isTableList = (schema: string) => (url: URL) =>
-  url.pathname.endsWith("/api/tables") && url.searchParams.get("schema") === schema;
-
 // Runs ORDERS_USERS from the join dialog and returns once its request is held in flight.
 async function startHeldJoin(page: Page): Promise<() => void> {
-  const releaseJoin = await hold(page, isJoin);
+  const releaseJoin = await holdRequests(page, joinRequest);
   await page.locator("#join-btn").click();
   await writeSql(page, ORDERS_USERS);
-  const joinSent = page.waitForRequest((r) => isJoin(new URL(r.url())));
+  const joinSent = page.waitForRequest((r) => joinRequest(new URL(r.url())));
   await page.locator("#join-run").click();
   await joinSent;
   return releaseJoin;
@@ -273,8 +255,8 @@ test("a join still loading when the schema changes is dropped, not shown under t
   await gotoApp(page);
   await selectTable(page, "orders");
   const releaseJoin = await startHeldJoin(page);
-  const releaseTables = await hold(page, isTableList("warehouse"));
-  const tablesSent = page.waitForRequest((r) => isTableList("warehouse")(new URL(r.url())));
+  const releaseTables = await holdRequests(page, tableList("warehouse"));
+  const tablesSent = page.waitForRequest((r) => tableList("warehouse")(new URL(r.url())));
   await page.locator("#schema-select").selectOption("warehouse");
   await tablesSent;
 
@@ -294,10 +276,10 @@ test("a join still loading is dropped after switching schema away and back", asy
   await gotoApp(page);
   await selectTable(page, "orders");
   const releaseJoin = await startHeldJoin(page);
-  const releaseWarehouse = await hold(page, isTableList("warehouse"));
-  const releasePublic = await hold(page, isTableList("public"));
+  const releaseWarehouse = await holdRequests(page, tableList("warehouse"));
+  const releasePublic = await holdRequests(page, tableList("public"));
   await page.locator("#schema-select").selectOption("warehouse");
-  const backSent = page.waitForRequest((r) => isTableList("public")(new URL(r.url())));
+  const backSent = page.waitForRequest((r) => tableList("public")(new URL(r.url())));
   await page.locator("#schema-select").selectOption("public");
   await backSent;
 
@@ -316,8 +298,8 @@ test("a join still loading is dropped when Back restores the previous table", as
   await selectTable(page, "users");
   await selectTable(page, "orders");
   const releaseJoin = await startHeldJoin(page);
-  const releaseTables = await hold(page, isTableList("public"));
-  const tablesSent = page.waitForRequest((r) => isTableList("public")(new URL(r.url())));
+  const releaseTables = await holdRequests(page, tableList("public"));
+  const tablesSent = page.waitForRequest((r) => tableList("public")(new URL(r.url())));
   await page.locator("#nav-back").click();
   await tablesSent;
 

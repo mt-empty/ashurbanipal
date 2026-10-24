@@ -8,6 +8,9 @@ on:
       - "tools/e2e-tests/**"
       - "implementations/rust/**"
       - "conformance/seed/seed.sql"
+      - "mise.toml"
+      - "mise.lock"
+      - "mise-tasks/frontend.toml"
       - ".github/workflows/frontend-e2e.yml"
   pull_request:
     paths:
@@ -15,6 +18,9 @@ on:
       - "tools/e2e-tests/**"
       - "implementations/rust/**"
       - "conformance/seed/seed.sql"
+      - "mise.toml"
+      - "mise.lock"
+      - "mise-tasks/frontend.toml"
       - ".github/workflows/frontend-e2e.yml"
 
 concurrency:
@@ -29,9 +35,14 @@ permissions:
 
 jobs:
   test-e2e:
-    name: Playwright e2e suite against dbviewer.html
+    name: Playwright e2e suite against dbviewer.html (${{ matrix.browser }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # One browser per runner: each gets all four vCPUs and its own demo server.
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
     services:
       db:
         image: postgres:18-alpine
@@ -64,14 +75,17 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: "implementations/rust -> target"
+          # The shards build the same demo; one cache, saved by one of them.
+          shared-key: frontend-e2e
+          save-if: ${{ matrix.browser == 'chromium' }}
 
-      - run: mise run frontend:test-e2e-install
+      - run: mise run frontend:test-e2e-install --browsers ${{ matrix.browser }}
 
-      - run: mise run frontend:test-e2e
+      - run: mise run frontend:test-e2e --browsers ${{ matrix.browser }}
 
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.browser }}
           path: tools/e2e-tests/playwright-report/
           retention-days: 14

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 test("next/prev paginate and toggle button disabled state", async ({ page }) => {

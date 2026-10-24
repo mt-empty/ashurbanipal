@@ -1,29 +1,10 @@
-import { test, expect, type Page } from "@playwright/test";
-import { gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { test, expect, type Page } from "./support/fixtures";
+import { dataWith, failRequests, gotoApp, holdRequests, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
-const DATA = "**/api/tables/data*";
+// The real-fade canary: docs/e2e-testing-guidelines.md §2.
+test.use({ realFades: true });
+
 const param = (url: string, name: string) => new URL(url).searchParams.get(name);
-const problem = (status: number, title: string, code?: string) => ({
-  status,
-  contentType: "application/problem+json",
-  body: JSON.stringify({ type: "about:blank", title, status, ...(code ? { code } : {}) }),
-});
-
-/** Holds the data responses that match until the returned function is called. */
-async function holdData(page: Page, matches: (url: string) => boolean) {
-  let release!: () => void;
-  const gate = new Promise<void>((r) => (release = r));
-  await page.route(DATA, async (route) => {
-    if (matches(route.request().url())) await gate;
-    await route.continue();
-  });
-  return release;
-}
-
-const failData = (page: Page, matches: (url: string) => boolean) =>
-  page.route(DATA, (route) =>
-    matches(route.request().url()) ? route.fulfill(problem(503, "Service Unavailable")) : route.continue(),
-  );
 
 // The cursor of whatever the pointer would hit over the first data cell.
 const cursorOverCell = (page: Page) =>
@@ -38,8 +19,8 @@ const isLocked = (page: Page) => page.evaluate(() => (document.getElementById("d
 test("while a chip's table loads, the old grid's columns menu still changes the old table", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  const release = await holdData(page, (url) => param(url, "table") === "orders");
-  const sent = page.waitForRequest((r) => r.url().includes("/api/tables/data") && param(r.url(), "table") === "orders");
+  const release = await holdRequests(page, dataWith("table", "orders"));
+  const sent = page.waitForRequest((r) => dataWith("table", "orders")(r.url()));
   await page.locator('#tables [data-table="orders"]').click();
   await sent;
 
@@ -60,10 +41,10 @@ test("while a chip's table loads, the old grid's columns menu still changes the 
 test("a chip whose table fails to load leaves the view where it was and names the table", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  await failData(page, (url) => param(url, "table") === "orders");
+  await failRequests(page, dataWith("table", "orders"));
   await page.locator('#tables [data-table="orders"]').click();
 
-  await expect(page.locator("#error")).toHaveText("Couldn't open orders: Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("Couldn't open orders: database unavailable");
   await expect(page.locator("#current")).toHaveText("products");
   await expect(page.locator('#tables [data-table="products"]')).toHaveClass(/active/);
   expect(new URL(page.url()).searchParams.get("table")).toBe("products");
@@ -81,11 +62,7 @@ test("a chip's remembered sort the backend refuses is dropped and the table open
       JSON.stringify({ table: "products", sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }),
     );
   }, tableKey("orders"));
-  await page.route(DATA, (route) =>
-    param(route.request().url(), "sort") === "ghost_col"
-      ? route.fulfill(problem(400, 'not allowed: column "ghost_col"', "unknown_column"))
-      : route.continue(),
-  );
+  await rejectSort(page, "ghost_col");
   await gotoApp(page);
   await selectTable(page, "orders");
 
@@ -97,10 +74,10 @@ test("a chip's remembered sort the backend refuses is dropped and the table open
 test("an FK cell whose table fails to load leaves the view and the filter box as they were", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  await failData(page, (url) => param(url, "table") === "users");
+  await failRequests(page, dataWith("table", "users"));
   await page.locator("#tbody tr").first().locator('td[data-col="user_id"] .fk-cell').click();
 
-  await expect(page.locator("#error")).toHaveText("Couldn't open users: Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("Couldn't open users: database unavailable");
   await expect(page.locator("#current")).toHaveText("orders");
   await expect(page.locator("#filter")).toHaveValue("");
 });
@@ -108,10 +85,10 @@ test("an FK cell whose table fails to load leaves the view and the filter box as
 test("a schema switch whose first load fails leaves the old grid locked until a grid renders", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
-  await failData(page, (url) => param(url, "schema") === "warehouse");
+  await failRequests(page, dataWith("schema", "warehouse"));
   await page.locator("#schema-select").selectOption("warehouse");
 
-  await expect(page.locator("#error")).toHaveText("Couldn't open carriers: Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("Couldn't open carriers: database unavailable");
   await expect(page.locator("#data-table")).toHaveAttribute("data-stale", "");
   expect(await isLocked(page)).toBe(true);
   expect(await cursorOverCell(page)).toBe("not-allowed");
@@ -121,9 +98,9 @@ test("a schema switch whose first load fails leaves the old grid locked until a 
 
   // The grid's view is not the one in the state, so a failed chip names its table too.
   await page.locator('#tables [data-table="carriers"]').click();
-  await expect(page.locator("#error")).toHaveText("Couldn't open carriers: Service Unavailable");
+  await expect(page.locator("#error")).toHaveText("Couldn't open carriers: database unavailable");
 
-  const back = page.waitForResponse((r) => r.url().includes("/api/tables/data") && param(r.url(), "schema") === "public");
+  const back = page.waitForResponse((r) => dataWith("schema", "public")(r.url()));
   await page.locator("#schema-select").selectOption("public");
   await back;
   await waitForIdle(page);
@@ -138,8 +115,8 @@ test("Back locks the old grid while the earlier table loads, and unlocks once it
   await gotoApp(page);
   await selectTable(page, "users");
   await selectTable(page, "orders");
-  const release = await holdData(page, (url) => param(url, "table") === "users");
-  const sent = page.waitForRequest((r) => r.url().includes("/api/tables/data") && param(r.url(), "table") === "users");
+  const release = await holdRequests(page, dataWith("table", "users"));
+  const sent = page.waitForRequest((r) => dataWith("table", "users")(r.url()));
   await page.locator("#nav-back").click();
   await sent;
 
@@ -161,7 +138,7 @@ test("a locked grid's all-hidden Show all cannot change the view that replaced i
   await page.keyboard.press("Escape");
   await expect(page.locator("#all-hidden-show")).toBeEnabled();
 
-  await failData(page, (url) => param(url, "schema") === "warehouse");
+  await failRequests(page, dataWith("schema", "warehouse"));
   await page.locator("#schema-select").selectOption("warehouse");
   await expect(page.locator("#data-table")).toHaveAttribute("data-stale", "");
   await expect(page.locator("#all-hidden-show")).toBeDisabled();
@@ -170,7 +147,7 @@ test("a locked grid's all-hidden Show all cannot change the view that replaced i
 
 test("a cross-schema FK cell opens its table from the first page", async ({ page }) => {
   await gotoApp(page);
-  const schemaLoaded = page.waitForResponse((r) => r.url().includes("/api/tables/data") && param(r.url(), "schema") === "warehouse");
+  const schemaLoaded = page.waitForResponse((r) => dataWith("schema", "warehouse")(r.url()));
   await page.locator("#schema-select").selectOption("warehouse");
   await schemaLoaded;
   await waitForIdle(page);
@@ -180,7 +157,7 @@ test("a cross-schema FK cell opens its table from the first page", async ({ page
 
   const offsets: (string | null)[] = [];
   page.on("request", (r) => {
-    if (r.url().includes("/api/tables/data") && param(r.url(), "table") === "orders") offsets.push(param(r.url(), "offset"));
+    if (dataWith("table", "orders")(r.url())) offsets.push(param(r.url(), "offset"));
   });
   await page.locator("#tbody tr").first().locator('td[data-col="order_id"] .fk-cell').click();
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();

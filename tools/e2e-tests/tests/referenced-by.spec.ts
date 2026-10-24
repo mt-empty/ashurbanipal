@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/fixtures";
 import { gotoApp, selectTable, uiState, waitForIdle } from "./support/helpers";
 
 // Seed shape (conformance/seed): public.users is referenced by orders.user_id
@@ -97,14 +97,9 @@ test("a table nothing references shows an empty 'referenced by' list", async ({ 
 test("a cross-schema referrer absent from the target schema's own table list surfaces an error, not a mismatched filter", async ({
   page,
 }) => {
-  // Regression test: navigateWithSeededFilter's cross-schema branch sets
-  // state.table to the drill-in target before loadTables() resolves;
-  // loadTables()'s stale-state fallback (meant for stale localStorage)
-  // silently resets state.table and, until fixed, still applies the seeded
-  // filter — to whatever table it fell back to, not the one clicked. This
-  // is reachable whenever a referenced_by entry names a table the target
-  // schema's /api/tables doesn't list (e.g. a partitioned referrer);
-  // mocked here rather than requiring a live partitioned-table fixture.
+  // A referrer the target schema's /api/tables doesn't list (e.g. a
+  // partitioned table) must not have its seeded filter applied to whatever
+  // table the fallback lands on. Mocked: the seed has no such table.
   await gotoApp(page);
   await selectTable(page, "users");
 

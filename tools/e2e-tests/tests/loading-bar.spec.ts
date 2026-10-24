@@ -1,18 +1,5 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
-
-const DATA = "**/api/tables/data*";
-
-/** Holds every /tables/data response until the returned function is called, then finishes it. */
-async function holdData(page: Page, finish: (route: Route) => Promise<void> = (route) => route.continue()) {
-  let release!: () => void;
-  const gate = new Promise<void>((r) => (release = r));
-  await page.route(DATA, async (route) => {
-    await gate;
-    await finish(route);
-  });
-  return release;
-}
+import { test, expect, type Page } from "./support/fixtures";
+import { gotoApp, holdRequests, selectTable, tableData, waitForIdle } from "./support/helpers";
 
 const expectBarIdle = (page: Page) => expect(page.locator("#load-bar")).not.toHaveAttribute("data-state", /.*/);
 
@@ -36,7 +23,7 @@ test("a fast fetch shows no bar, no dimming and no loading text", async ({ page 
 test("a slow fetch shows the bar, dims the rows, and clears when it lands", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  const release = await holdData(page);
+  const release = await holdRequests(page, tableData);
   await page.locator('#tables [data-table="users"]').click();
 
   await expect(page.locator("#load-bar")).toHaveAttribute("data-state", "loading");
@@ -57,7 +44,7 @@ test("overlapping fetches keep the bar until the last one settles", async ({ pag
   await selectTable(page, "orders");
   let calls = 0;
   const releases: Array<() => void> = [];
-  await page.route(DATA, async (route) => {
+  await page.route(tableData, async (route) => {
     const n = calls++;
     await new Promise<void>((r) => (releases[n] = r));
     await route.continue();
@@ -80,7 +67,7 @@ test("overlapping fetches keep the bar until the last one settles", async ({ pag
 test("a failed slow fetch shows the error and clears the bar", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  const release = await holdData(page, (route) => route.abort("failed"));
+  const release = await holdRequests(page, tableData, (route) => route.abort("failed"));
   await page.locator('#tables [data-table="users"]').click();
   await expect(page.locator("#load-bar")).toHaveAttribute("data-state", "loading");
 

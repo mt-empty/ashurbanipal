@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/fixtures";
 import { gotoApp, selectTable } from "./support/helpers";
 
 // The suite serves the shared frontend against Postgres, but the same

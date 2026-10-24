@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./support/fixtures";
 import { applyFilter, gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 const suggestions = (page: Page) => page.locator("#filter-suggest-list button");
@@ -88,6 +88,26 @@ test("an arrow key highlights a row and Enter then accepts it", async ({ page })
   await expect(page.locator("#filter")).toHaveValue("status = completed ");
 });
 
+test("ArrowUp wraps from the top of the suggestions to the bottom, and ArrowDown wraps back", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const filter = page.locator("#filter");
+  const active = page.locator("#filter-suggest-list button.active");
+  await filter.fill("status ");
+  await expect(suggestions(page)).toHaveCount(10);
+
+  await filter.press("ArrowUp");
+  await expect(active).toHaveText("IS NOT NULL");
+  await expect(filter).toHaveAttribute("aria-activedescendant", (await active.getAttribute("id")) ?? "");
+  await filter.press("ArrowDown");
+  await expect(active).toHaveText("=");
+  await filter.press("ArrowUp");
+  await filter.press("ArrowUp");
+  await expect(active).toHaveText("IS NULL");
+  await filter.press("Enter");
+  await expect(filter).toHaveValue(/^status IS NULL/);
+});
+
 test("AND and OR are offered once a letter is typed after a finished condition", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
@@ -165,13 +185,6 @@ test("a filter written by click-to-filter is coloured too", async ({ page }) => 
   await waitForIdle(page);
   await expect(parts(page, "t-column")).toHaveText(["status"]);
   await expect(parts(page, "t-op")).toHaveText(["="]);
-});
-
-test("a typed filter still applies end to end", async ({ page }) => {
-  await gotoApp(page);
-  await selectTable(page, "orders");
-  await applyFilter(page, "status = completed");
-  await expect(page.locator("#error")).toBeEmpty();
 });
 
 test("the suggestion popup is exposed as a combobox with the highlighted row active", async ({ page }) => {

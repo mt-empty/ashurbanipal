@@ -1,5 +1,6 @@
-import { test, expect } from "@playwright/test";
-import { gotoApp, selectTable } from "./support/helpers";
+import { test, expect } from "./support/fixtures";
+import { dataWith, failRequests, gotoApp, holdRequests, selectTable } from "./support/helpers";
+import { freePort, spawnDemo } from "./support/second-server";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({
   page,
@@ -25,30 +26,19 @@ test("a failed load leaves the previous table's rows and active state untouched"
 });
 
 test("a slow, superseded response never overwrites a newer table's render", async ({ page }) => {
-  // Regression test for a real bug (fixed): forces the exact
-  // out-of-order race — an older request for "orders" is delayed so it
-  // resolves *after* a newer request for "users" has already rendered.
-  // loadData()'s token guard should discard the late "orders" response
-  // outright rather than letting it overwrite "users"'s already-current
-  // grid/chrome.
+  // The older "orders" request is held until "users" has rendered, so its
+  // late response must be discarded rather than overwrite the newer view.
   await gotoApp(page);
-  await page.route("**/api/tables/data*", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get("table") === "orders") {
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    await route.continue();
-  });
+  const releaseOrders = await holdRequests(page, dataWith("table", "orders"));
 
   // Registered before the triggering click: waitForResponse listens for the
   // next matching response event, so it has to be armed before the request
   // that fires it, not polled for after the fact.
-  const staleOrdersResponse = page.waitForResponse(
-    (r) => new URL(r.url()).searchParams.get("table") === "orders",
-  );
+  const staleOrdersResponse = page.waitForResponse((r) => dataWith("table", "orders")(r.url()));
   await page.locator('#tables [data-table="orders"]').click(); // slow, started first
   await page.locator('#tables [data-table="users"]').click(); // fast, resolves first
   await page.locator("#current").getByText("users", { exact: true }).waitFor();
+  releaseOrders();
 
   // Wait for the delayed "orders" response to actually land before
   // asserting nothing changed — otherwise this could pass without ever
@@ -90,10 +80,31 @@ test("no protocol warning appears against a matching backend", async ({ page }) 
 });
 
 test("errors are surfaced as a visible role=alert region, not just logged", async ({ page }) => {
-  // This table never finishes loading (invalid sort column -> 400 before
-  // updateViewChrome() ever runs), so wait on #error, not #current.
   await gotoApp(page, "?table=orders&sort=nonexistent_col");
   await expect(page.locator("#error")).not.toBeEmpty();
   await expect(page.locator("#error")).toHaveAttribute("role", "alert");
   await expect(page.locator("#error")).toBeVisible();
+});
+
+// spec/protocol.md makes /sources and /schemas mandatory; a failing one degrades to a single source or schema (R5).
+
+test("a failing /sources hides the source picker and the tables still load", async ({ page }) => {
+  const demo = await spawnDemo({ port: await freePort(), conformanceSecondSource: true });
+  try {
+    await failRequests(page, (url) => url.pathname.endsWith("/api/sources"));
+    await gotoApp(page, "", demo.baseUrl);
+    await expect(page.locator("#source-select-wrap")).toBeHidden();
+    await expect(page.locator("#error")).toBeEmpty();
+    await expect(page.locator("#tbody tr").first()).toBeVisible();
+  } finally {
+    await demo.stop();
+  }
+});
+
+test("a failing /schemas hides the schema picker and the tables still load", async ({ page }) => {
+  await failRequests(page, (url) => url.pathname.endsWith("/api/schemas"));
+  await gotoApp(page);
+  await expect(page.locator("#schema-select-wrap")).toBeHidden();
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
 });

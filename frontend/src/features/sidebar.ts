@@ -39,8 +39,8 @@ const allEntries = (): TableEntry[] => [...tableEntries, ...joinEntries];
 const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 
 // ---- three-line cap: a long table list collapses behind "+ N more", except
-// the active table, which stays visible (and is marked `pulled` when it was
-// moved up out of the hidden part) ----
+// the active table, which stays visible (and is marked `pulled` when a hidden
+// chip sits before it, so it is out of alphabetical order) ----
 const TABLE_CAP_LINES = 3;
 const tablesMore = $<HTMLButtonElement>("tables-more");
 // Last item in the list, right-aligned (see styles.css), so it follows the
@@ -66,7 +66,7 @@ function updateTablesCap(): void {
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastRowTop = tops[TABLE_CAP_LINES - 1];
   const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
-  const active = beyond.find((e) => e.chip.classList.contains("active"));
+  const active = entries.find((e) => e.chip.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
   if (tablesMoreItem.hidden) return;
@@ -76,8 +76,10 @@ function updateTablesCap(): void {
     return;
   }
   for (const e of hidden) e.li.hidden = true;
+  // Measured with the divider's margin on, since only taking it off below is safe.
+  active?.li.classList.add("pulled");
   // The button has to land on the last row: give up chips from the end of the
-  // visible ones until it (and a pulled active chip) fits there.
+  // visible ones, never the active one, until it fits there.
   const shown = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
   while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
@@ -95,8 +97,8 @@ function updateTablesCap(): void {
     .slice(0, at)
     .filter((e) => !e.li.hidden)
     .pop();
-  if (movedUp && before && before.li.offsetTop === active.li.offsetTop && !active.li.classList.contains("join-first"))
-    active.li.classList.add("pulled");
+  if (!movedUp || !before || before.li.offsetTop !== active.li.offsetTop || active.li.classList.contains("join-first"))
+    active.li.classList.remove("pulled");
 }
 tablesMore.onclick = () => {
   tablesExpanded = !tablesExpanded;

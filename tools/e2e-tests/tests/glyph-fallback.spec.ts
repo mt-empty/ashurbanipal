@@ -1,12 +1,7 @@
 import { existsSync } from "node:fs";
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "./support/fixtures";
 import { gotoApp, selectTable } from "./support/helpers";
 import { gotoJoin, ORDERS_USERS } from "./support/join";
-
-// Playwright's WebKit occasionally stops answering mid-test under load, about one run
-// in a hundred. A short cap fails such a run fast and a retry absorbs it; a real
-// regression still fails every attempt.
-test.describe.configure({ timeout: 20_000, retries: 2 });
 
 // Debian/Ubuntu paths of fonts-freefont-ttf and fonts-ipafont-gothic, which
 // `playwright install --with-deps` adds on Linux.

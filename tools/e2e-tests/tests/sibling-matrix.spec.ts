@@ -1,7 +1,7 @@
-import { test, expect, type Page } from "@playwright/test";
-import { APP_PATH, gotoApp, selectTable } from "./support/helpers";
+import { test, expect, type Page } from "./support/fixtures";
+import { gotoApp, problem, selectTable } from "./support/helpers";
 
-// The service × label grid in Other services (story 03 §4.3). /api/siblings is
+// The service × label grid in Other services. /api/siblings is
 // mocked: the shape is what matters here, and spec/protocol.md §5.6's server
 // side is covered by conformance/runner/labelled_siblings.rs.
 
@@ -106,7 +106,7 @@ test("a poll that changes only health keeps focus on the link", async ({ page })
     if (billingDev) billingDev.healthy = healthy;
     return r.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
   });
-  await page.goto(APP_PATH);
+  await gotoApp(page);
   await expect(page.locator("#siblings")).toBeVisible();
   await openMatrix(page);
   const link = cell(page, "billing", 0).locator("a");
@@ -144,7 +144,7 @@ test("a closed pop-up never polls, and reopening within 15 s reuses the last res
   page.on("request", (r) => {
     if (r.url().includes("/api/siblings")) requests++;
   });
-  await page.goto(APP_PATH);
+  await gotoApp(page);
   await expect(page.locator("#siblings")).toBeVisible();
   expect(requests).toBe(1); // the page-load fetch
 
@@ -178,11 +178,11 @@ test("a failed first fetch retries on its own", async ({ page }) => {
   let fail = true;
   await page.route("**/api/siblings", (r) =>
     fail
-      ? r.fulfill({ status: 500, contentType: "application/problem+json", body: '{"title":"boom","status":500}' })
+      ? r.fulfill(problem(500, "boom", "database_error"))
       : r.fulfill({ contentType: "application/json", body: JSON.stringify(LABELLED) }),
   );
   const failed = page.waitForResponse((r) => r.url().includes("/api/siblings"));
-  await page.goto(APP_PATH);
+  await gotoApp(page);
   await failed;
   await expect(page.locator("#siblings")).toBeHidden();
 
@@ -249,10 +249,10 @@ test("a failed refresh keeps the last good list and label", async ({ page }) => 
   let fail = false;
   await page.route("**/api/siblings", (r) =>
     fail
-      ? r.fulfill({ status: 500, contentType: "application/problem+json", body: '{"title":"boom","status":500}' })
+      ? r.fulfill(problem(500, "boom", "database_error"))
       : r.fulfill({ contentType: "application/json", body: JSON.stringify(LABELLED) }),
   );
-  await page.goto(`${APP_PATH}?table=nosuchtable`);
+  await gotoApp(page, "?table=nosuchtable");
   await expect(page.locator("#view-notice-text")).toContainText("in dev");
   await openMatrix(page);
 
@@ -273,7 +273,7 @@ test("a refresh keeps focus on an unlabelled row under the grid", async ({ page 
     body.siblings.push({ name: "legacy", base_url: base("legacy", "x"), healthy });
     return r.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
   });
-  await page.goto(APP_PATH);
+  await gotoApp(page);
   await expect(page.locator("#siblings")).toBeVisible();
   await openMatrix(page);
   const row = page.locator("#siblings-list > a");

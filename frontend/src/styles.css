@@ -124,7 +124,7 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
 #nav-history button:disabled { opacity: .3; cursor: default; }
 ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
 #tables-more-item { margin-left: auto; }
-/* A chip pulled up from the hidden part of a collapsed list (see features/sidebar.ts). */
+/* The active chip of a collapsed list when a hidden chip sits before it (see features/sidebar.ts). */
 #tables li.pulled { position: relative; margin-left: .5rem; }
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
@@ -285,6 +285,10 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 @keyframes row-new-fade { from { background: var(--row-new-bg); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) {
   tbody tr.row-new { animation: none; background: var(--row-new-bg); }
+}
+/* startViewTransition (table render, record dialog) cross-fades by default. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
 }
 
 /* ==== Controls / status ==== */

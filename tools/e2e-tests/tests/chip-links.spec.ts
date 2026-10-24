@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "./support/fixtures";
 import { APP_PATH, gotoApp, selectTable, waitForIdle } from "./support/helpers";
 import {
   expandTableChips,

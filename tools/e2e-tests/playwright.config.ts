@@ -1,13 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// The app is read-only by architecture invariant, so there's no cross-test
-// mutation to isolate against — one `demo` server per *browser project* is
-// enough (not per test/worker). Each project's tests all share their one
-// instance; three projects means three instances so a full three-browser
-// run doesn't triple the request load on a single server. `siblings.spec.ts`
-// is the one exception and spawns its own second instance directly on top
-// of whichever per-project server it's already using (see
-// tests/support/second-server.ts).
+// The app is read-only, so tests need no isolation from each other: one demo
+// server per browser project is enough, which spreads the request load of a
+// three-browser run. Tests that need another configuration (siblings, a
+// second source, a mount prefix) spawn their own through
+// tests/support/second-server.ts.
 const CRATE_ROOT = "../../implementations/rust/axum";
 const PORTS = { chromium: 4310, firefox: 4311, webkit: 4312 };
 // Playwright's per-project `testIgnore` replaces the root one rather than
@@ -55,6 +52,10 @@ export default defineConfig({
   testIgnore: SHOWCASE_IGNORE,
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
+  // Playwright's CI default is half the cores: 2 on a 4-vCPU ubuntu-latest runner.
+  workers: process.env.CI ? 4 : undefined,
+  // A loaded CI runner can take longer than expect's 5 s default to answer a fetch and render it.
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
   reporter: "html",
   use: {
     trace: "on-first-retry",

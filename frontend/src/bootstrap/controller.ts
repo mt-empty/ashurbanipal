@@ -325,5 +325,8 @@ export async function loadData({
   // pass resetScroll: false — they're in-place operations on the current
   // view, and jumping the scroll position out from under the click that
   // triggered them would be disorienting, not helpful.
-  if (resetScroll) $("main").scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  if (resetScroll) {
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "instant" : "smooth" });
+  }
 }

@@ -22,19 +22,29 @@ an element attribute changing, `aria-busy` clearing.
 
 ## 2. A finished fetch is not a finished render
 
-`aria-busy` clearing only proves `fetchViewData()`'s network call
-resolved — `dbviewer.html` wraps every re-render in
-`document.startViewTransition()`, which keeps animating for a short window
-after that, and an action fired mid-animation can hit an unstable bounding
-box or get intercepted by the transition's snapshot overlay. `waitForIdle`
-(`support/helpers.ts`) waits for `document.getAnimations()` to empty out,
-not just for the fetch to resolve — use it (or extend it) rather than
-adding a second `waitForTimeout`-shaped workaround for a similar gap.
+`aria-busy` clearing only proves the fetch resolved and the re-render ran
+inside `document.startViewTransition()`. The fade that follows can still
+leave a clicked element unstable or route the click to the transition's
+snapshot overlay. `waitForIdle` (`support/helpers.ts`) also waits for
+`document.getAnimations()` to empty out — use it (or extend it) rather
+than adding a `waitForTimeout`-shaped workaround for a similar gap.
+
+Every spec except `showcase.spec.ts` (a recording, which keeps real
+fades) imports `test` and `expect` from `support/fixtures.ts`, not
+`@playwright/test`. Its `context` fixture makes view-transition fades zero
+length in every page a test opens, which cut about 30% of suite time: no
+app code waits on a fade, so only the wait shrinks. Specs that need the
+real fade set `test.use({ realFades: true })`: `view-switch.spec.ts`, so
+`waitForIdle`'s wait on it stays exercised, and `reduced-motion.spec.ts`,
+which checks the fade is there or gone.
 
 ## 3. Don't assume a page's own automatic state has settled before you act
 
 `gotoApp` waits for the app's own automatic initial-table load to finish
-before returning, not just for navigation to complete. Without that wait,
+before returning, not just for navigation to complete. Its signal is
+`<ul id="tables" aria-busy="true">`, which the page carries from the first
+byte until its start-up chain settles, so it works the same for a failed
+first load or a join link. Without that wait,
 a test's first `selectTable()` click could race the page's own default-
 table fetch — whichever response lands last wins the render, which used
 to be able to leave `#current` labeled correctly while the grid showed the
@@ -83,4 +93,15 @@ The faster tiers set `E2E_BROWSERS=chromium,firefox`, which
 `playwright.config.ts` uses to pick both the browser projects and the
 demo servers it starts. Use it rather than `--project` to narrow a run:
 Playwright starts every configured server whichever projects `--project`
-selects.
+selects. `frontend:test-e2e` and `frontend:test-e2e-install` take
+`--browsers <list>` instead (CI passes one browser per shard), so a value
+left in the shell can't drop a browser from the final run.
+
+## 6. Measure coverage on demand
+
+`mise run frontend:test-e2e-coverage` runs the suite on Chromium with JS
+coverage (the `E2E_COVERAGE` switch in `support/fixtures.ts`) and prints,
+per `frontend/src` module, how many runnable lines ran and how many tests
+reach it past start-up, plus, per spec, the lines no other spec runs. The
+result also lands in `tools/e2e-tests/coverage-results/summary.txt`. It is
+a review aid, not a gate: a line that ran is not a line a test checked.
