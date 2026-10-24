@@ -217,6 +217,30 @@ test("unreadable saved joins are discarded, and saving a join still works", asyn
   expect(await page.evaluate(() => localStorage.getItem("ashurbanipal_joins"))).toContain("orders with users");
 });
 
+test("a join saved in another tab is kept when this tab saves one too", async ({ page, context }) => {
+  // The other tab reads the (empty) saved list before this one writes to it.
+  const other = await context.newPage();
+  await gotoApp(other);
+  await selectTable(other, "orders");
+
+  await openJoinOverlay(page);
+  await writeSql(page, ORDERS_USERS);
+  await page.locator("#join-name").fill("from this tab");
+  await showResult(page);
+
+  await other.locator("#join-btn").click();
+  await writeSql(other, "FROM orders o LEFT JOIN order_extra x ON x.order_id = o.id");
+  await other.locator("#join-name").fill("from the other tab");
+  await showResult(other);
+
+  const saved = await other.evaluate(() => localStorage.getItem("ashurbanipal_joins"));
+  expect(saved).toContain("from this tab");
+  expect(saved).toContain("from the other tab");
+  await expandTableChips(other);
+  for (const name of ["from this tab", "from the other tab"])
+    await expect(other.locator("#tables li.join-chip.saved", { hasText: name })).toBeVisible();
+});
+
 test("an unsaved join gets a dashed chip with Save…, and its URL reproduces it", async ({ page }) => {
   await openJoinOverlay(page);
   await writeSql(page, ORDERS_USERS);
@@ -316,6 +340,39 @@ test("the table menu narrows by fuzzy search as you type, and Enter picks the be
   await search.fill("users");
   await search.press("Enter");
   await expect(page.getByRole("button", { name: "join 1 table", exact: true })).toHaveText("users ▾");
+});
+
+test("in the table menu, arrows wrap through the rows, and ArrowUp or typing on a row returns to the search box", async ({ page }) => {
+  await openJoinOverlay(page);
+  await page.getByRole("button", { name: "join 1 table", exact: true }).click();
+  const search = page.locator("#dd-pop-search");
+  const rows = page.locator("#dd-pop .dd-row:not(.blocked)");
+  await expect(search).toBeFocused();
+
+  await page.keyboard.press("ArrowDown");
+  await expect(rows.first()).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(search).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(rows.last()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(rows.first()).toBeFocused();
+
+  await page.keyboard.press("u");
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue("u");
+});
+
+test("a menu without a search box wraps ArrowUp from its first row to its last", async ({ page }) => {
+  await openJoinOverlay(page);
+  await page.getByRole("button", { name: "join 1 type", exact: true }).click();
+  const rows = page.locator("#dd-pop .dd-row:not(.blocked)");
+  await expect(page.locator("#dd-pop-search")).toBeHidden();
+  await rows.first().focus();
+  await page.keyboard.press("ArrowUp");
+  await expect(rows.last()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(rows.first()).toBeFocused();
 });
 
 test("SQL opened from an unfinished form can go back to Form until its text is edited", async ({ page }) => {
