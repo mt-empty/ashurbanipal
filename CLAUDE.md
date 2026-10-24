@@ -141,7 +141,9 @@ mise run spring:demo / spring:dev        # same pair, for spring-boot-starter (p
 mise run conformance:seed-gen            # regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql
 mise run conformance:seed-check          # verify both seed files still match tools/seed-gen's output
 mise run frontend:test-e2e-install       # one-time Playwright browser install (Chromium/Firefox/WebKit)
-mise run frontend:test-e2e               # Playwright E2E suite against frontend/dbviewer.html (tools/e2e-tests)
+mise run frontend:test-e2e-spec tests/<name>.spec.ts   # one spec, Chromium + Firefox (iterating)
+mise run frontend:test-e2e-quick         # whole suite, Chromium + Firefox (before calling a change done)
+mise run frontend:test-e2e               # full three-browser suite against frontend/dbviewer.html (tools/e2e-tests)
 ```
 
 The `rust:*` tasks `cd` into `implementations/rust` (the workspace root —
@@ -152,9 +154,13 @@ when using `mise run`.
 
 `frontend:test-e2e` is a separate, standalone-dev-only suite (pnpm/Playwright,
 `tools/e2e-tests/`) that doesn't run in the Rust `cargo test` suite; run it
-explicitly for any change that touches `dbviewer.html` beyond a trivial
-edit — it is part of `mise run check` (via the `frontend` umbrella task),
-but only that layer, not `rust`. Lessons already paid for once, don't
+in tiers for any change that touches `dbviewer.html` beyond a trivial edit:
+while iterating, only the affected spec via `frontend:test-e2e-spec`; before
+calling the change done, `frontend:test-e2e-quick` once; the full
+three-browser `frontend:test-e2e` only at the end of the work, once, and
+never as a per-edit check. The two faster tiers skip WebKit, so a
+Safari-only bug first shows up in that final run. Don't run `mise run check` or the `frontend`
+umbrella task for a frontend tweak. Lessons already paid for once, don't
 relearn them: assert on DOM state/attributes/text, not screenshots
 (screenshot diffs were dropped project-wide for flakiness — see git history
 around `157fc12`); wait on the actual signal that matters

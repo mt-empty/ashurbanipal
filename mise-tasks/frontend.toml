@@ -74,11 +74,39 @@ run = "pnpm install && pnpm exec playwright install --with-deps chromium firefox
 dir = "tools/e2e-tests"
 
 ["frontend:test-e2e"]
-description = "run the Playwright e2e suite against dbviewer.html"
-run = "pnpm exec playwright test"
+description = "run the full three-browser Playwright e2e suite against dbviewer.html"
+run = "PLAYWRIGHT_HTML_OPEN=never pnpm exec playwright test --reporter=line,html"
+dir = "tools/e2e-tests"
+
+["frontend:test-e2e-quick"]
+description = "run the whole Playwright e2e suite on Chromium and Firefox only"
+run = "pnpm exec playwright test --project chromium firefox --reporter=line"
+dir = "tools/e2e-tests"
+
+["frontend:test-e2e-spec"]
+description = "run one Playwright spec on Chromium and Firefox only: mise run frontend:test-e2e-spec tests/<name>.spec.ts [-g title]"
+run = "pnpm exec playwright test --project chromium firefox --reporter=line"
 dir = "tools/e2e-tests"
 
 ["frontend:showcase"]
 description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to a Bayer-dithered tools/e2e-tests/showcase.gif"
 run = "./generate-showcase-gif.sh"
 dir = "tools/e2e-tests"
+
+# `:::` in mise watch runs its tasks in parallel, so the sync must be a
+# dependent of the build, not a sibling.
+["frontend:rebuild"]
+description = "frontend:build, then frontend:sync-ports"
+run = "tools/sync-ports-frontend.sh"
+depends = ["frontend:build"]
+
+["frontend:watch"]
+description = "rebuild and re-sync every port's vendored page whenever frontend/src/ changes"
+run = "mise watch -w frontend/src frontend:rebuild"
+
+# node:dev restarts without a compile step, unlike rust:dev's include_str! rebuild.
+# Port 4001 lets it run beside rust:dev on 4000; a task's `env` never reaches its
+# `depends`, so the port is set on the command that starts both.
+["frontend:dev"]
+description = "edit frontend/src/ live: rebuild + sync on change, with the Node demo restarting at http://localhost:4001/__ashurbanipal"
+run = "PORT=4001 mise run frontend:watch ::: node:dev"

@@ -5,6 +5,9 @@ services:
       - ..:/workspaces/ashurbanipal:cached
       - claude-config:/home/vscode/.claude
     command: sleep infinity
+    # tini as PID 1 reaps the e2e suite's orphaned browser processes, which
+    # `sleep` never does, and forwards stop signals so the container stops at once.
+    init: true
     depends_on:
       - db
       - mysql
