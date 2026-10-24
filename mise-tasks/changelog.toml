@@ -13,28 +13,28 @@ run = "tools/check-changelogs.sh"
 
 ["changelog:rust-core"]
 description = "print the unreleased CHANGELOG section for the ashurbanipal core crate"
-run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-v' --include-path 'implementations/rust/core/**' 'spec/**'"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-v' --include-path 'implementations/rust/core/**' --include-path 'spec/**'"
 
 ["changelog:rust-axum"]
 description = "print the unreleased CHANGELOG section for ashurbanipal-axum"
-run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-axum-v' --include-path 'implementations/rust/axum/**' 'implementations/rust/core/**' 'frontend/**' 'spec/**'"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-axum-v' --include-path 'implementations/rust/axum/**' --include-path 'implementations/rust/core/**' --include-path 'frontend/**' --include-path 'spec/**'"
 
 ["changelog:rust-actix-web"]
 description = "print the unreleased CHANGELOG section for ashurbanipal-actix-web"
-run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-actix-web-v' --include-path 'implementations/rust/actix-web/**' 'implementations/rust/core/**' 'frontend/**' 'spec/**'"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-actix-web-v' --include-path 'implementations/rust/actix-web/**' --include-path 'implementations/rust/core/**' --include-path 'frontend/**' --include-path 'spec/**'"
 
 ["changelog:node-express"]
 description = "print the unreleased CHANGELOG section for ashurbanipal-node-express"
-run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-node-express-v' --include-path 'implementations/node-express/**' 'frontend/**' 'spec/**'"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-node-express-v' --include-path 'implementations/node-express/**' --include-path 'frontend/**' --include-path 'spec/**'"
 
 ["changelog:flask-python"]
 description = "print the unreleased CHANGELOG section for ashurbanipal-flask"
-run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-flask-v' --include-path 'implementations/flask-python/**' 'frontend/**' 'spec/**'"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-flask-v' --include-path 'implementations/flask-python/**' --include-path 'frontend/**' --include-path 'spec/**'"
 
 ["changelog:spring-boot-starter"]
 description = "print the unreleased CHANGELOG section for the Spring Boot starter"
-run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-spring-boot-starter-v' --include-path 'implementations/spring-boot-starter/**' 'frontend/**' 'spec/**'"
+run = "git-cliff --unreleased --strip header --tag-pattern '^ashurbanipal-spring-boot-starter-v' --include-path 'implementations/spring-boot-starter/**' --include-path 'frontend/**' --include-path 'spec/**'"
 
 ["changelog:go-nethttp"]
 description = "print the unreleased CHANGELOG section for the Go/net-http port"
-run = "git-cliff --unreleased --strip header --tag-pattern '^implementations/go-nethttp/v' --include-path 'implementations/go-nethttp/**' 'frontend/**' 'spec/**'"
+run = "git-cliff --unreleased --strip header --tag-pattern '^implementations/go-nethttp/v' --include-path 'implementations/go-nethttp/**' --include-path 'frontend/**' --include-path 'spec/**'"
