@@ -4,24 +4,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
+import { pageBundleOptions } from "./bundle-options.mjs";
 
 const dir = fileURLToPath(new URL(".", import.meta.url));
 
-const result = await esbuild.build({
-  entryPoints: [`${dir}src/bootstrap/main.ts`],
-  // Pins esbuild's inline path comments to this script's own directory
-  // rather than process.cwd() (esbuild's default) — otherwise `node
-  // build.mjs` from the repo root vs. from frontend/ (what the mise task
-  // does) produces byte-different output, which is exactly what
-  // frontend:build-check exists to catch.
-  absWorkingDir: dir.replace(/\/$/, ""),
-  bundle: true,
-  write: false,
-  format: "esm",
-  target: "es2022",
-  minify: false,
-  legalComments: "inline",
-});
+const result = await esbuild.build(pageBundleOptions);
 const script = result.outputFiles[0].text.trimEnd();
 
 const style = readFileSync(`${dir}src/styles.css`, "utf8").trimEnd();
