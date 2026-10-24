@@ -23,6 +23,14 @@ const CHROMIUM_ONLY_IGNORE = [SHOWCASE_IGNORE, /inspection-affordances\.spec\.ts
 // entirely and point every project at an already-running implementation.
 const EXTERNAL_BASE_URL = process.env.PLAYWRIGHT_BASE_URL;
 
+// E2E_BROWSERS (e.g. "chromium,firefox") trims the projects *and* their demo
+// servers: Playwright starts every webServer entry whatever `--project` picks.
+// Unset or empty means all three.
+const BROWSERS = (process.env.E2E_BROWSERS || Object.keys(PORTS).join(",")).split(",");
+const unknown = BROWSERS.filter((b) => !(b in PORTS));
+if (unknown.length) throw new Error(`E2E_BROWSERS: unknown ${unknown.join(", ")}; expected ${Object.keys(PORTS).join(", ")}`);
+const selected = (browser: keyof typeof PORTS) => BROWSERS.includes(browser);
+
 function demoServer(port: number) {
   return {
     command: "cargo run -p ashurbanipal-axum --example demo",
@@ -51,7 +59,7 @@ export default defineConfig({
   use: {
     trace: "on-first-retry",
   },
-  projects: EXTERNAL_BASE_URL
+  projects: (EXTERNAL_BASE_URL
     ? [
         { name: "chromium", use: { ...devices["Desktop Chrome"], baseURL: EXTERNAL_BASE_URL } },
         {
@@ -82,6 +90,9 @@ export default defineConfig({
           use: { ...devices["Desktop Safari"], baseURL: `http://localhost:${PORTS.webkit}` },
           testIgnore: CHROMIUM_ONLY_IGNORE,
         },
-      ],
-  webServer: EXTERNAL_BASE_URL ? undefined : Object.values(PORTS).map(demoServer),
+      ]
+  ).filter((p) => selected(p.name as keyof typeof PORTS)),
+  webServer: EXTERNAL_BASE_URL
+    ? undefined
+    : (Object.keys(PORTS) as (keyof typeof PORTS)[]).filter(selected).map((b) => demoServer(PORTS[b])),
 });

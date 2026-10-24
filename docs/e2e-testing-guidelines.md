@@ -47,10 +47,40 @@ enough.
 ## 4. (Historical) Screenshot baselines were dropped for flakiness
 
 The suite has no visual-regression assertions — they were removed
-project-wide (commit `157fc12`; see `CLAUDE.md`). Kept here as the reason
+project-wide (commit `157fc12`). Kept here as the reason
 why: a baseline was once captured mid-race (before the `loadData`
 staleness guard existed) and never actually looked at after generating
 it, so it silently baked in a broken render. `--update-snapshots`
 produces a file that *matches itself* by construction; it says nothing
 about whether what it captured was correct. If screenshot tests are ever
 reintroduced, a human must eyeball each new baseline before it lands.
+
+## 5. Run the suite in tiers
+
+The suite runs every spec on Chromium, Firefox and WebKit, about 700 tests
+in all, so run the smallest tier that answers the question:
+
+| Tier | Command | When |
+| --- | --- | --- |
+| One spec | `mise run frontend:test-e2e-spec tests/<name>.spec.ts [-g title]` | while iterating |
+| Whole suite, Chromium + Firefox | `mise run frontend:test-e2e-quick` | once the change looks finished |
+| Whole suite, all three browsers | `mise run frontend:test-e2e` | once, at the end of the work |
+
+The final three-browser run, at Playwright's default parallelism, is what
+makes a frontend change done. The worst races here (stale-response
+overwrites, stuck spinners) only surfaced under real concurrency, never in
+a serial pass, and the faster tiers skip WebKit, so a Safari-only bug
+first shows up there. It is never a per-edit check, and neither is `mise
+run check` or the `frontend` umbrella task, which both include it.
+
+The suite serves axum's vendored copy of the page
+(`implementations/rust/axum/frontend/dbviewer.html`), not
+`frontend/dbviewer.html`. The two faster tiers rebuild and sync it first;
+before the full run, run `frontend:build` and then `frontend:sync-ports`,
+or it tests the old page.
+
+The faster tiers set `E2E_BROWSERS=chromium,firefox`, which
+`playwright.config.ts` uses to pick both the browser projects and the
+demo servers it starts. Use it rather than `--project` to narrow a run:
+Playwright starts every configured server whichever projects `--project`
+selects.

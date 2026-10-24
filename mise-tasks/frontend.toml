@@ -73,12 +73,42 @@ description = "one-time Playwright browser install (Chromium, Firefox, WebKit) f
 run = "pnpm install && pnpm exec playwright install --with-deps chromium firefox webkit"
 dir = "tools/e2e-tests"
 
+# Serves axum's vendored dbviewer.html, so run frontend:sync-ports after a build first.
+# E2E_BROWSERS is cleared so a value left in the shell can't drop a browser.
 ["frontend:test-e2e"]
-description = "run the Playwright e2e suite against dbviewer.html"
-run = "pnpm exec playwright test"
+description = "run the full three-browser Playwright e2e suite against axum's vendored dbviewer.html"
+run = "E2E_BROWSERS= PLAYWRIGHT_HTML_OPEN=never pnpm exec playwright test --reporter=line,html"
 dir = "tools/e2e-tests"
+
+["frontend:test-e2e-quick"]
+description = "rebuild and sync the frontend, then run the whole Playwright e2e suite on Chromium and Firefox only"
+run = "E2E_BROWSERS=chromium,firefox pnpm exec playwright test --reporter=line"
+dir = "tools/e2e-tests"
+depends = ["frontend:rebuild"]
+
+["frontend:test-e2e-spec"]
+description = "rebuild and sync the frontend, then run one Playwright spec on Chromium and Firefox only: mise run frontend:test-e2e-spec tests/<name>.spec.ts [-g title]"
+run = "E2E_BROWSERS=chromium,firefox pnpm exec playwright test --reporter=line"
+dir = "tools/e2e-tests"
+depends = ["frontend:rebuild"]
 
 ["frontend:showcase"]
 description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to a Bayer-dithered tools/e2e-tests/showcase.gif"
 run = "./generate-showcase-gif.sh"
 dir = "tools/e2e-tests"
+
+# A task's `depends` run in parallel, so the sync is this task's run, after the build.
+["frontend:rebuild"]
+description = "frontend:build, then frontend:sync-ports"
+run = "mise run frontend:sync-ports"
+depends = ["frontend:build"]
+
+["frontend:watch"]
+description = "rebuild and re-sync every port's vendored page whenever frontend/src/ changes"
+run = "mise watch -w frontend/src frontend:rebuild"
+
+# Port 4002 clears rust:dev (4000) and rust:demo-sibling (4001); a task's `env` never reaches its
+# `depends`, so the port is set on the command that starts both.
+["frontend:dev"]
+description = "edit frontend/src/ live: rebuild + sync on change, with the Node demo restarting at http://localhost:4002/__ashurbanipal"
+run = "PORT=4002 mise run frontend:watch ::: node:dev"
