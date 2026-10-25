@@ -140,7 +140,7 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
 #tables-bar { margin-top: var(--gap-lg); }
 ul#tables { display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
 #tables-more-item { margin-left: auto; }
-/* The active chip of a collapsed list when a hidden chip sits before it (see features/sidebar.ts). */
+/* The active chip of a collapsed list when a hidden chip sits before it (see features/table-chips.ts). */
 #tables li.pulled { position: relative; margin-left: .5rem; }
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
@@ -3416,278 +3416,6 @@ pop().addEventListener("toggle", (e) => {
   }
 });
 
-// src/bootstrap/table-focus.ts
-var tableEl = $("data-table");
-function captureTableFocus() {
-  const active = document.activeElement;
-  if (!active || !tableEl.contains(active)) return null;
-  const cell = active.closest("th, td");
-  const tr = active.closest("tr");
-  const section2 = tr?.parentElement;
-  if (!cell || !tr || !section2) return null;
-  return {
-    region: section2.id,
-    rowIndex: [...section2.children].indexOf(tr),
-    colIndex: [...tr.children].indexOf(cell),
-    className: active.className
-  };
-}
-function restoreTableFocus(captured) {
-  if (!captured) return;
-  const tr = $(captured.region)?.children[captured.rowIndex];
-  const cell = tr?.children[captured.colIndex];
-  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
-  const target = classSelector ? cell?.querySelector(classSelector) : null;
-  (target ?? tableEl).focus();
-}
-
-// src/features/grid-lock.ts
-var gridKey = null;
-var stateKey = () => JSON.stringify([state.source, state.schema, viewKey(state.view)]);
-function markGridDrawn() {
-  gridKey = stateKey();
-}
-function gridIsStale() {
-  return gridKey !== null && gridKey !== stateKey();
-}
-function syncGridLock() {
-  if (gridKey === null) return;
-  const locked = gridIsStale();
-  tableEl.inert = locked;
-  tableEl.toggleAttribute("data-stale", locked);
-  for (const id of ["columns-btn", "structure-btn", "sort-note-show", "all-hidden-show"]) {
-    $(id).disabled = locked;
-  }
-  if (!locked) return;
-  $("prev").disabled = true;
-  $("next").disabled = true;
-  for (const id of ["columns-pop", "cell-pop", "refby-pop", "cv-pop"]) $(id).hidePopover();
-}
-
-// src/features/sidebar.ts
-var tableEntries = [];
-var chipCounts = /* @__PURE__ */ new Map();
-var joinEntries = [];
-var joinScope = "";
-var scopeOfChips = () => `${state.source ?? ""}|${state.schema ?? ""}`;
-var allEntries = () => [...tableEntries, ...joinEntries];
-var tableChipTemplate = $("table-chip-template");
-var TABLE_CAP_LINES = 3;
-var tablesMore = $("tables-more");
-var tablesMoreItem = $("tables-more-item");
-var TABLES_EXPANDED_KEY = "ashurbanipal_tables_expanded";
-var tablesExpanded = readStored(TABLES_EXPANDED_KEY) === "true";
-var cappedActive = null;
-function updateTablesCap() {
-  const entries = allEntries();
-  cappedActive = tableEntries.find((e) => e.chip.classList.contains("active"))?.name ?? null;
-  for (const e of entries) {
-    e.li.hidden = false;
-    e.li.classList.remove("pulled");
-  }
-  const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
-  const lastLineTop = tops[TABLE_CAP_LINES - 1];
-  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastLineTop) : [];
-  const active = entries.find((e) => e.chip.classList.contains("active"));
-  const hidden = new Set(beyond.filter((e) => e !== active));
-  tablesMoreItem.hidden = hidden.size === 0;
-  if (tablesMoreItem.hidden) return;
-  tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
-  if (tablesExpanded) {
-    tablesMore.textContent = "show fewer";
-    return;
-  }
-  for (const e of hidden) e.li.hidden = true;
-  active?.li.classList.add("pulled");
-  const shown2 = entries.filter((e) => !hidden.has(e) && e !== active);
-  tablesMore.textContent = `+ ${hidden.size} more`;
-  while (tablesMoreItem.offsetTop > lastLineTop && shown2.length) {
-    const last = shown2.pop();
-    last.li.hidden = true;
-    hidden.add(last);
-    tablesMore.textContent = `+ ${hidden.size} more`;
-  }
-  if (!active) return;
-  const at = entries.indexOf(active);
-  const movedUp = [...hidden].some((e) => entries.indexOf(e) < at);
-  const before = entries.slice(0, at).filter((e) => !e.li.hidden).pop();
-  if (!movedUp || !before || before.li.offsetTop !== active.li.offsetTop || active.li.classList.contains("join-first"))
-    active.li.classList.remove("pulled");
-}
-tablesMore.onclick = () => {
-  tablesExpanded = !tablesExpanded;
-  writeStored(TABLES_EXPANDED_KEY, tablesExpanded ? "true" : null);
-  updateTablesCap();
-};
-var tablesWidth = 0;
-new ResizeObserver(([entry]) => {
-  if (entry.contentRect.width === tablesWidth) return;
-  tablesWidth = entry.contentRect.width;
-  updateTablesCap();
-}).observe($("tables"));
-async function loadSources() {
-  let sources;
-  try {
-    ({ sources } = await api("/sources"));
-  } catch (e) {
-    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    return;
-  }
-  if (sources.length <= 1) {
-    state.source = null;
-    return;
-  }
-  let source = state.source;
-  if (!source || !sources.some((s) => s.name === source)) {
-    source = sources[0].name;
-  }
-  state.source = source;
-  populateSelect(
-    $("source-select"),
-    sources.map((s) => s.name),
-    source
-  );
-  $("source-select-wrap").hidden = false;
-}
-$("source-select").onchange = () => {
-  supersedeLoads();
-  switchSource($("source-select").value);
-  loadSchemas().then(() => loadTables()).catch(reportError);
-};
-var loadSchemasToken = 0;
-async function loadSchemas() {
-  syncGridLock();
-  const token = ++loadSchemasToken;
-  let schemas;
-  try {
-    ({ schemas } = await api(`/schemas${sourceQuery()}`));
-  } catch (e) {
-    if (token !== loadSchemasToken) return;
-    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
-    state.schema = null;
-    $("schema-select-wrap").hidden = true;
-    return;
-  }
-  if (token !== loadSchemasToken) return;
-  if (schemas.length <= 1) {
-    state.schema = null;
-    $("schema-select-wrap").hidden = true;
-    return;
-  }
-  let schema = state.schema;
-  if (!schema || !schemas.includes(schema)) {
-    schema = schemas.includes("public") ? "public" : schemas[0];
-  }
-  state.schema = schema;
-  populateSelect($("schema-select"), schemas, schema);
-  $("schema-select-wrap").hidden = false;
-}
-$("schema-select").onchange = () => {
-  supersedeLoads();
-  switchSchema($("schema-select").value);
-  loadTables().catch(reportError);
-};
-var loadTablesToken = 0;
-async function loadTables({
-  replaceHistory = false,
-  next
-} = {}) {
-  syncGridLock();
-  setStatus("loading tables\u2026");
-  const token = ++loadTablesToken;
-  const [{ tables }, { counts: counts2 }] = await Promise.all([
-    api(`/tables${scopeQuery()}`),
-    api(`/table-counts${scopeQuery()}`)
-  ]);
-  if (token !== loadTablesToken) return;
-  const countMap = Object.fromEntries(counts2.map((c) => [c.table, c.approx_rows]));
-  const ul = $("tables");
-  ul.replaceChildren();
-  tableEntries = [];
-  chipCounts.clear();
-  for (const t of tables) {
-    const li = tableChipTemplate.content.cloneNode(true).firstElementChild;
-    const chip = qs(li, "a");
-    qs(li, ".chip-name").textContent = t.name;
-    const countEl = qs(li, ".count");
-    countEl.textContent = formatApproxCount(countMap[t.name]);
-    chipCounts.set(t.name, countEl.textContent);
-    countEl.title = APPROX_COUNT_TITLE;
-    chip.dataset.table = t.name;
-    chip.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
-    linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
-      loadData({ next: tableRequest(t.name) });
-    });
-    ul.appendChild(li);
-    tableEntries.push({ name: t.name, li, chip });
-  }
-  if (joinScope !== scopeOfChips()) joinEntries = [];
-  for (const e of joinEntries) ul.appendChild(e.li);
-  ul.appendChild(tablesMoreItem);
-  updateTablesCap();
-  const tableNames = tables.map((t) => t.name);
-  const fellBack = !tableNames.includes(startTable(state.view) ?? "");
-  if (fellBack) {
-    enterTable(tableNames[0] ?? null);
-    applyStoredSort(tableInView());
-    clearFilter();
-  }
-  await loadData({ replaceHistory, next: fellBack ? void 0 : next });
-}
-function listedTableNames() {
-  return tableEntries.map((e) => e.name);
-}
-function tableChipCount(name) {
-  return chipCounts.get(name) ?? "";
-}
-function linkTo(a, href, run) {
-  a.href = href;
-  a.onclick = (e) => {
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    e.preventDefault();
-    run();
-  };
-  return a;
-}
-function actionButton(run) {
-  const btn = el("button");
-  btn.type = "button";
-  btn.onclick = run;
-  return btn;
-}
-function hasJoinChips() {
-  return joinEntries.length > 0;
-}
-function setJoinChips(chips) {
-  const ul = $("tables");
-  for (const e of joinEntries) e.li.remove();
-  joinEntries = chips.map((c, i) => {
-    const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
-    const chip = c.href ? linkTo(el("a"), c.href, c.run) : actionButton(c.run);
-    chip.textContent = c.label;
-    chip.title = c.title;
-    chip.classList.toggle("active", c.active);
-    if (c.active) chip.setAttribute("aria-current", "true");
-    li.appendChild(chip);
-    ul.insertBefore(li, tablesMoreItem);
-    return { name: `join:${c.label}`, li, chip };
-  });
-  joinScope = scopeOfChips();
-  updateTablesCap();
-}
-function setTableChipLoading(name, loading2) {
-  tableEntries.find((e) => e.name === name)?.chip.classList.toggle("loading", loading2);
-}
-function setActiveTable(name) {
-  for (const e of tableEntries) {
-    const isActive = e.name === name;
-    e.chip.classList.toggle("active", isActive);
-    if (isActive) e.chip.setAttribute("aria-current", "true");
-    else e.chip.removeAttribute("aria-current");
-  }
-  if (name !== cappedActive) updateTablesCap();
-}
-
 // src/features/structure.ts
 var cache = /* @__PURE__ */ new Map();
 var cacheGeneration = 0;
@@ -3778,6 +3506,217 @@ function openStructure() {
   }).catch((e) => {
     if (token === requestToken) $("structure-body").replaceChildren(msg(e.message));
   });
+}
+
+// src/bootstrap/table-focus.ts
+var tableEl = $("data-table");
+function captureTableFocus() {
+  const active = document.activeElement;
+  if (!active || !tableEl.contains(active)) return null;
+  const cell = active.closest("th, td");
+  const tr = active.closest("tr");
+  const section2 = tr?.parentElement;
+  if (!cell || !tr || !section2) return null;
+  return {
+    region: section2.id,
+    rowIndex: [...section2.children].indexOf(tr),
+    colIndex: [...tr.children].indexOf(cell),
+    className: active.className
+  };
+}
+function restoreTableFocus(captured) {
+  if (!captured) return;
+  const tr = $(captured.region)?.children[captured.rowIndex];
+  const cell = tr?.children[captured.colIndex];
+  const classSelector = captured.className.trim().split(/\s+/).filter(Boolean).map((c) => `.${CSS.escape(c)}`).join("");
+  const target = classSelector ? cell?.querySelector(classSelector) : null;
+  (target ?? tableEl).focus();
+}
+
+// src/features/grid-lock.ts
+var gridKey = null;
+var stateKey = () => JSON.stringify([state.source, state.schema, viewKey(state.view)]);
+function markGridDrawn() {
+  gridKey = stateKey();
+}
+function gridIsStale() {
+  return gridKey !== null && gridKey !== stateKey();
+}
+function syncGridLock() {
+  if (gridKey === null) return;
+  const locked = gridIsStale();
+  tableEl.inert = locked;
+  tableEl.toggleAttribute("data-stale", locked);
+  for (const id of ["columns-btn", "structure-btn", "sort-note-show", "all-hidden-show"]) {
+    $(id).disabled = locked;
+  }
+  if (!locked) return;
+  $("prev").disabled = true;
+  $("next").disabled = true;
+  for (const id of ["columns-pop", "cell-pop", "refby-pop", "cv-pop"]) $(id).hidePopover();
+}
+
+// src/features/table-chips.ts
+var tableEntries = [];
+var chipCounts = /* @__PURE__ */ new Map();
+var joinEntries = [];
+var joinScope = "";
+var scopeOfChips = () => `${state.source ?? ""}|${state.schema ?? ""}`;
+var allEntries = () => [...tableEntries, ...joinEntries];
+var tableChipTemplate = $("table-chip-template");
+var TABLE_CAP_LINES = 3;
+var tablesMore = $("tables-more");
+var tablesMoreItem = $("tables-more-item");
+var TABLES_EXPANDED_KEY = "ashurbanipal_tables_expanded";
+var tablesExpanded = readStored(TABLES_EXPANDED_KEY) === "true";
+var cappedActive = null;
+function updateTablesCap() {
+  const entries = allEntries();
+  cappedActive = tableEntries.find((e) => e.chip.classList.contains("active"))?.name ?? null;
+  for (const e of entries) {
+    e.li.hidden = false;
+    e.li.classList.remove("pulled");
+  }
+  const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
+  const lastLineTop = tops[TABLE_CAP_LINES - 1];
+  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastLineTop) : [];
+  const active = entries.find((e) => e.chip.classList.contains("active"));
+  const hidden = new Set(beyond.filter((e) => e !== active));
+  tablesMoreItem.hidden = hidden.size === 0;
+  if (tablesMoreItem.hidden) return;
+  tablesMore.setAttribute("aria-expanded", String(tablesExpanded));
+  if (tablesExpanded) {
+    tablesMore.textContent = "show fewer";
+    return;
+  }
+  for (const e of hidden) e.li.hidden = true;
+  active?.li.classList.add("pulled");
+  const shown2 = entries.filter((e) => !hidden.has(e) && e !== active);
+  tablesMore.textContent = `+ ${hidden.size} more`;
+  while (tablesMoreItem.offsetTop > lastLineTop && shown2.length) {
+    const last = shown2.pop();
+    last.li.hidden = true;
+    hidden.add(last);
+    tablesMore.textContent = `+ ${hidden.size} more`;
+  }
+  if (!active) return;
+  const at = entries.indexOf(active);
+  const movedUp = [...hidden].some((e) => entries.indexOf(e) < at);
+  const before = entries.slice(0, at).filter((e) => !e.li.hidden).pop();
+  if (!movedUp || !before || before.li.offsetTop !== active.li.offsetTop || active.li.classList.contains("join-first"))
+    active.li.classList.remove("pulled");
+}
+tablesMore.onclick = () => {
+  tablesExpanded = !tablesExpanded;
+  writeStored(TABLES_EXPANDED_KEY, tablesExpanded ? "true" : null);
+  updateTablesCap();
+};
+var tablesWidth = 0;
+new ResizeObserver(([entry]) => {
+  if (entry.contentRect.width === tablesWidth) return;
+  tablesWidth = entry.contentRect.width;
+  updateTablesCap();
+}).observe($("tables"));
+var loadTablesToken = 0;
+async function loadTables({
+  replaceHistory = false,
+  next
+} = {}) {
+  syncGridLock();
+  setStatus("loading tables\u2026");
+  const token = ++loadTablesToken;
+  const [{ tables }, { counts: counts2 }] = await Promise.all([
+    api(`/tables${scopeQuery()}`),
+    api(`/table-counts${scopeQuery()}`)
+  ]);
+  if (token !== loadTablesToken) return "superseded";
+  const countMap = Object.fromEntries(counts2.map((c) => [c.table, c.approx_rows]));
+  const ul = $("tables");
+  ul.replaceChildren();
+  tableEntries = [];
+  chipCounts.clear();
+  for (const t of tables) {
+    const li = tableChipTemplate.content.cloneNode(true).firstElementChild;
+    const chip = qs(li, "a");
+    qs(li, ".chip-name").textContent = t.name;
+    const countEl = qs(li, ".count");
+    countEl.textContent = formatApproxCount(countMap[t.name]);
+    chipCounts.set(t.name, countEl.textContent);
+    countEl.title = APPROX_COUNT_TITLE;
+    chip.dataset.table = t.name;
+    chip.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
+    linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
+      loadData({ next: tableRequest(t.name) });
+    });
+    ul.appendChild(li);
+    tableEntries.push({ name: t.name, li, chip });
+  }
+  if (joinScope !== scopeOfChips()) joinEntries = [];
+  for (const e of joinEntries) ul.appendChild(e.li);
+  ul.appendChild(tablesMoreItem);
+  updateTablesCap();
+  const tableNames = tables.map((t) => t.name);
+  const fellBack = !tableNames.includes(startTable(next ? next.view : state.view) ?? "");
+  if (fellBack) {
+    enterTable(tableNames[0] ?? null);
+    applyStoredSort(tableInView());
+    clearFilter();
+  }
+  await loadData({ replaceHistory, next: fellBack ? void 0 : next });
+  return fellBack ? "fell-back" : "loaded";
+}
+function listedTableNames() {
+  return tableEntries.map((e) => e.name);
+}
+function tableChipCount(name) {
+  return chipCounts.get(name) ?? "";
+}
+function linkTo(a, href, run) {
+  a.href = href;
+  a.onclick = (e) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    run();
+  };
+  return a;
+}
+function actionButton(run) {
+  const btn = el("button");
+  btn.type = "button";
+  btn.onclick = run;
+  return btn;
+}
+function hasJoinChips() {
+  return joinEntries.length > 0;
+}
+function setJoinChips(chips) {
+  const ul = $("tables");
+  for (const e of joinEntries) e.li.remove();
+  joinEntries = chips.map((c, i) => {
+    const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
+    const chip = c.href ? linkTo(el("a"), c.href, c.run) : actionButton(c.run);
+    chip.textContent = c.label;
+    chip.title = c.title;
+    chip.classList.toggle("active", c.active);
+    if (c.active) chip.setAttribute("aria-current", "true");
+    li.appendChild(chip);
+    ul.insertBefore(li, tablesMoreItem);
+    return { name: `join:${c.label}`, li, chip };
+  });
+  joinScope = scopeOfChips();
+  updateTablesCap();
+}
+function setTableChipLoading(name, loading2) {
+  tableEntries.find((e) => e.name === name)?.chip.classList.toggle("loading", loading2);
+}
+function setActiveTable(name) {
+  for (const e of tableEntries) {
+    const isActive = e.name === name;
+    e.chip.classList.toggle("active", isActive);
+    if (isActive) e.chip.setAttribute("aria-current", "true");
+    else e.chip.removeAttribute("aria-current");
+  }
+  if (name !== cappedActive) updateTablesCap();
 }
 
 // src/features/join-catalog.ts
@@ -5110,75 +5049,71 @@ async function showCommonValues(e, table, column) {
   renderCommonValues(values, column);
 }
 
-// src/features/nav.ts
-function navigateWithSeededFilter(table, schema, clause) {
-  let ast;
+// src/features/scope-select.ts
+async function loadSources() {
+  let sources;
   try {
-    ast = parseFilterDsl(clause);
+    ({ sources } = await api("/sources"));
   } catch (e) {
-    reportError(e);
+    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
+    state.source = null;
     return;
   }
-  const req = {
-    ...tableRequest(table),
-    sort: null,
-    order: "asc",
-    restoredSort: false,
-    filter: clause,
-    ast
-  };
-  if (!schema || schema === state.schema) {
-    loadData({ next: req });
+  if (sources.length <= 1) {
+    state.source = null;
     return;
   }
-  enterTable(table);
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
-  setSchema(schema);
-  loadTables({ next: req }).then(() => {
-    if (tableInView() !== table) {
-      reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
-    }
-  }).catch(reportError);
-}
-var written = null;
-function noteStartupSettled() {
-  written ??= location.search;
-}
-function syncUrl(replaceHistory) {
-  const params = viewParams(state.view);
-  params.set("limit", String(state.limit));
-  params.set("offset", String(state.offset));
-  if (state.sort) {
-    params.set("sort", state.sort);
-    params.set("order", state.order);
+  let source = state.source;
+  if (!source || !sources.some((s) => s.name === source)) {
+    source = sources[0].name;
   }
-  if (state.filter) params.set("filter", state.filter);
-  const query = params.toString();
-  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
-    history.replaceState(null, "", `?${query}`);
-  } else {
-    history.pushState(null, "", `?${query}`);
-  }
-  written = location.search;
+  state.source = source;
+  populateSelect(
+    $("source-select"),
+    sources.map((s) => s.name),
+    source
+  );
+  $("source-select-wrap").hidden = false;
 }
-window.addEventListener("popstate", () => {
-  if (written === null) {
-    location.reload();
-    return;
-  }
-  if (location.search === written) return;
-  written = location.search;
+$("source-select").onchange = () => {
   supersedeLoads();
-  const params = new URLSearchParams(location.search);
-  applyUrlExact(params);
-  $("source-select").value = state.source ?? "";
-  $("schema-select").value = state.schema ?? "";
-  $("schema-select-wrap").hidden = !state.schema;
-  persist();
-  loadTables({ replaceHistory: true }).catch(reportError);
-});
+  switchSource($("source-select").value);
+  loadSchemas().then((current2) => current2 ? loadTables() : void 0).catch(reportError);
+};
+var loadSchemasToken = 0;
+async function loadSchemas() {
+  syncGridLock();
+  const token = ++loadSchemasToken;
+  let schemas;
+  try {
+    ({ schemas } = await api(`/schemas${sourceQuery()}`));
+  } catch (e) {
+    if (token !== loadSchemasToken) return false;
+    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return true;
+  }
+  if (token !== loadSchemasToken) return false;
+  if (schemas.length <= 1) {
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return true;
+  }
+  let schema = state.schema;
+  if (!schema || !schemas.includes(schema)) {
+    schema = schemas.includes("public") ? "public" : schemas[0];
+  }
+  state.schema = schema;
+  populateSelect($("schema-select"), schemas, schema);
+  $("schema-select-wrap").hidden = false;
+  return true;
+}
+$("schema-select").onchange = () => {
+  supersedeLoads();
+  switchSchema($("schema-select").value);
+  loadTables().catch(reportError);
+};
 
 // src/lib/sibling-matrix.ts
 var keyOf = (name, label) => JSON.stringify([name, label ?? null]);
@@ -5465,6 +5400,82 @@ $("siblings-pop").addEventListener("beforetoggle", (e) => {
   repaintLinks();
   refreshIfStale();
   openTimer = setInterval(refreshIfStale, FRESH_MS);
+});
+
+// src/features/view-history.ts
+function navigateWithSeededFilter(table, schema, clause) {
+  let ast;
+  try {
+    ast = parseFilterDsl(clause);
+  } catch (e) {
+    reportError(e);
+    return;
+  }
+  const req = {
+    ...tableRequest(table),
+    sort: null,
+    order: "asc",
+    restoredSort: false,
+    filter: clause,
+    ast
+  };
+  if (!schema || schema === state.schema) {
+    loadData({ next: req });
+    return;
+  }
+  supersedeLoads();
+  enterTable(table);
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
+  setSchema(schema);
+  loadTables({ next: req }).then((outcome) => {
+    if (outcome === "fell-back") {
+      reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
+    }
+  }).catch(reportError);
+}
+var written = null;
+function noteStartupSettled() {
+  written ??= location.search;
+}
+function syncUrl(replaceHistory) {
+  const params = viewParams(state.view);
+  params.set("limit", String(state.limit));
+  params.set("offset", String(state.offset));
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
+  if (state.filter) params.set("filter", state.filter);
+  const query = params.toString();
+  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
+    history.replaceState(null, "", `?${query}`);
+  } else {
+    history.pushState(null, "", `?${query}`);
+  }
+  written = location.search;
+}
+window.addEventListener("popstate", () => {
+  if (written === null) {
+    location.reload();
+    return;
+  }
+  if (location.search === written) return;
+  written = location.search;
+  supersedeLoads();
+  const params = new URLSearchParams(location.search);
+  const previousSource = state.source;
+  applyUrlExact(params);
+  $("source-select").value = state.source ?? "";
+  $("schema-select").value = state.schema ?? "";
+  $("schema-select-wrap").hidden = !state.schema;
+  persist();
+  if (state.source === previousSource) {
+    loadTables({ replaceHistory: true }).catch(reportError);
+    return;
+  }
+  loadSchemas().then((current2) => current2 ? loadTables({ replaceHistory: true }) : void 0).catch(reportError);
 });
 
 // src/features/sticky-header.ts
@@ -6318,7 +6329,8 @@ $("refresh").onclick = () => {
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });
 };
-loadSources().then(loadSchemas).then(() => {
+loadSources().then(loadSchemas).then((current2) => {
+  if (!current2) return;
   const navType = performance.getEntriesByType("navigation")[0]?.type;
   if (state.sort === null && navType !== "reload" && navType !== "back_forward") applyStoredSort(tableInView());
   return loadTables({ replaceHistory: true });

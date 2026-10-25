@@ -1,23 +1,20 @@
-import { loadData, supersedeLoads } from "../bootstrap/reload.js";
+import { loadData } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
-import { $, el, populateSelect, qs, reportError, setStatus } from "../core/dom.js";
+import { $, el, qs, setStatus } from "../core/dom.js";
 import {
   applyStoredSort,
   clearFilter,
   enterTable,
   scopeQuery,
-  sourceQuery,
   startTable,
   state,
-  switchSchema,
-  switchSource,
   tableInView,
   tableRequest,
   type ViewRequest,
   viewHref,
 } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
-import type { SourceEntry, TableListEntry } from "../core/types.js";
+import type { TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
 import { syncGridLock } from "./grid-lock.js";
 
@@ -115,92 +112,6 @@ new ResizeObserver(([entry]) => {
   updateTablesCap();
 }).observe($("tables"));
 
-// ==== Source selector ====
-// Hidden when the host has one source. A source switch resets the table,
-// sort and filter: another source has its own schemas and tables.
-export async function loadSources(): Promise<void> {
-  let sources: SourceEntry[];
-  try {
-    ({ sources } = await api<{ sources: SourceEntry[] }>("/sources"));
-  } catch (e) {
-    // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
-    // single-source but leave a trace.
-    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    return;
-  }
-  if (sources.length <= 1) {
-    state.source = null;
-    return;
-  }
-  let source = state.source;
-  if (!source || !sources.some((s) => s.name === source)) {
-    source = sources[0].name;
-  }
-  state.source = source;
-  populateSelect(
-    $<HTMLSelectElement>("source-select"),
-    sources.map((s) => s.name),
-    source,
-  );
-  $("source-select-wrap").hidden = false;
-}
-$<HTMLSelectElement>("source-select").onchange = () => {
-  // switchSource restores the schema last used on this source rather than
-  // resetting; loadSchemas() still validates it and falls back (R5/R12).
-  supersedeLoads();
-  switchSource($<HTMLSelectElement>("source-select").value);
-  loadSchemas()
-    .then(() => loadTables())
-    .catch(reportError);
-};
-
-// ==== Schema selector ====
-// Hidden for a single-schema deployment, which then sends no `schema` param.
-// With two or more, state.schema is pinned to a concrete name so every
-// request names its schema.
-// Same supersession guard as loadTables: a slow /schemas from an earlier
-// source switch must not overwrite a later one's schema and selector.
-let loadSchemasToken = 0;
-
-export async function loadSchemas(): Promise<void> {
-  syncGridLock();
-  const token = ++loadSchemasToken;
-  let schemas: string[];
-  try {
-    ({ schemas } = await api<{ schemas: string[] }>(`/schemas${sourceQuery()}`));
-  } catch (e) {
-    if (token !== loadSchemasToken) return;
-    // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
-    // single-schema but leave a trace.
-    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
-    state.schema = null;
-    $("schema-select-wrap").hidden = true;
-    return;
-  }
-  if (token !== loadSchemasToken) return; // superseded by a newer source switch
-  // Explicitly re-hides even though the element starts hidden in markup:
-  // switching source can re-run this against a source with fewer schemas
-  // than the previously selected one, and without this the wrap would keep
-  // showing the prior source's stale multi-schema dropdown.
-  if (schemas.length <= 1) {
-    state.schema = null;
-    $("schema-select-wrap").hidden = true;
-    return;
-  }
-  let schema = state.schema;
-  if (!schema || !schemas.includes(schema)) {
-    schema = schemas.includes("public") ? "public" : schemas[0];
-  }
-  state.schema = schema;
-  populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
-  $("schema-select-wrap").hidden = false;
-}
-$<HTMLSelectElement>("schema-select").onchange = () => {
-  supersedeLoads();
-  switchSchema($<HTMLSelectElement>("schema-select").value);
-  loadTables().catch(reportError);
-};
-
 // A slower earlier loadTables() (e.g. from a schema switch quickly
 // followed by another) must not replace the chips with the wrong schema's
 // table list — same guard as reload.ts's load token and cvRequestToken.
@@ -208,13 +119,17 @@ let loadTablesToken = 0;
 
 // `next`: a view in this table list to open instead of the current one; the
 // stale-state fallback below drops it.
+/** What a loadTables call did: a newer call superseded it, it fell back to
+ * another table because the wanted one isn't listed (R5), or it loaded. */
+export type TablesOutcome = "superseded" | "fell-back" | "loaded";
+
 export async function loadTables({
   replaceHistory = false,
   next,
 }: {
   replaceHistory?: boolean;
   next?: ViewRequest;
-} = {}): Promise<void> {
+} = {}): Promise<TablesOutcome> {
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
@@ -222,7 +137,7 @@ export async function loadTables({
     api<{ tables: TableListEntry[] }>(`/tables${scopeQuery()}`),
     api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery()}`),
   ]);
-  if (token !== loadTablesToken) return; // superseded by a newer call
+  if (token !== loadTablesToken) return "superseded";
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
   ul.replaceChildren();
@@ -252,7 +167,7 @@ export async function loadTables({
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back (R5).
-  const fellBack = !tableNames.includes(startTable(state.view) ?? "");
+  const fellBack = !tableNames.includes(startTable(next ? next.view : state.view) ?? "");
   if (fellBack) {
     enterTable(tableNames[0] ?? null);
     applyStoredSort(tableInView());
@@ -262,6 +177,7 @@ export async function loadTables({
     clearFilter();
   }
   await loadData({ replaceHistory, next: fellBack ? undefined : next });
+  return fellBack ? "fell-back" : "loaded";
 }
 
 export function listedTableNames(): string[] {

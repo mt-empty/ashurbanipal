@@ -13,8 +13,8 @@ import {
   tableColumns,
 } from "./join-catalog.js";
 import { attachOverlayHighlight, tokenSpans } from "./overlay-highlight.js";
-import { listedTableNames, tableChipCount } from "./sidebar.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
+import { listedTableNames, tableChipCount } from "./table-chips.js";
 
 // The SQL half of the join overlay (boards U and V): a text field coloured like
 // the filter box, with suggestions for what the grammar allows next. The text is

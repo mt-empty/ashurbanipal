@@ -8,9 +8,10 @@ import "../features/filter-highlight.js";
 import "../features/join-dialog.js";
 import { clearCommonValueCache } from "../features/filter-ui.js";
 import { clearJoinCatalog } from "../features/join-catalog.js";
-import { noteStartupSettled } from "../features/nav.js";
+import { loadSchemas, loadSources } from "../features/scope-select.js";
 import { startSiblings } from "../features/siblings.js";
-import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
+import { loadTables } from "../features/table-chips.js";
+import { noteStartupSettled } from "../features/view-history.js";
 import "../features/sticky-header.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";
 import { showBootFallbackNote } from "../features/view-notice.js";
@@ -81,7 +82,9 @@ $<HTMLButtonElement>("refresh").onclick = () => {
 // not <main>, so live regions still announce) clears once all of it settles.
 loadSources()
   .then(loadSchemas)
-  .then(() => {
+  .then((current) => {
+    // A source switch during start-up runs its own table load.
+    if (!current) return;
     // A fresh link without ?sort= opens with the table's remembered one (R11),
     // once the scope it is keyed by is pinned; a reload or a history step
     // reopens its entry exactly (R16).

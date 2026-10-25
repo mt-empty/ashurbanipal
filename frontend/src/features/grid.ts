@@ -19,9 +19,9 @@ import { applyFilterClause, showCommonValues } from "./filter-ui.js";
 import { markGridDrawn } from "./grid-lock.js";
 import { switchToLeftJoin } from "./join-dialog.js";
 import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands } from "./join-view.js";
-import { navigateWithSeededFilter } from "./nav.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
+import { navigateWithSeededFilter } from "./view-history.js";
 
 // A focusable control nested in the sortable th — stopPropagation so
 // opening it doesn't also toggle sort.

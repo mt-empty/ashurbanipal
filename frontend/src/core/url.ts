@@ -9,8 +9,8 @@ import {
 import type { View } from "./types.js";
 import { recordUrlIntent } from "./url-intent.js";
 
-// URL <-> state, read side (nav.ts owns the write side, syncUrl). There are
-// two readers and they differ on purpose:
+// URL <-> state, read side (view-history.ts owns the write side, syncUrl).
+// There are two readers and they differ on purpose:
 //
 //   applyUrlOverlay  — load time. Only fields the URL actually names are
 //                      touched; the rest keep whatever restoreFromStorage()

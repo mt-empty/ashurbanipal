@@ -3,7 +3,7 @@ import { $, el } from "../core/dom.js";
 import { applyScopeParams, scopeTableKey, tableInView } from "../core/state.js";
 import type { ReferencedByEntry, Row } from "../core/types.js";
 import { filterClauses } from "../lib/filter-dsl.js";
-import { navigateWithSeededFilter } from "./nav.js";
+import { navigateWithSeededFilter } from "./view-history.js";
 
 // ---- "referenced by": the incoming FKs that target the viewed table
 // (spec/protocol.md §5.9, the reverse of a column's `references`). One

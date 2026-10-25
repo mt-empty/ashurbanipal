@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { dataWith, failRequests, gotoApp, holdRequests, selectTable } from "./support/helpers";
+import { dataWith, failRequests, gotoApp, holdRequests, reloadApp, selectTable } from "./support/helpers";
 import { freePort, spawnDemo } from "./support/second-server";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({
@@ -107,4 +107,17 @@ test("a failing /schemas hides the schema picker and the tables still load", asy
   await expect(page.locator("#schema-select-wrap")).toBeHidden();
   await expect(page.locator("#error")).toBeEmpty();
   await expect(page.locator("#tbody tr").first()).toBeVisible();
+});
+
+test("a failed /sources call drops a remembered source instead of sending it", async ({ page }) => {
+  await gotoApp(page);
+  await page.evaluate(() => localStorage.setItem("ashurbanipal_ui", JSON.stringify({ source: "gone" })));
+  await failRequests(page, (url) => url.pathname.endsWith("/api/sources"));
+  const withSource: string[] = [];
+  page.on("request", (r) => {
+    if (new URL(r.url()).searchParams.has("source")) withSource.push(r.url());
+  });
+  await reloadApp(page);
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
+  expect(withSource).toEqual([]);
 });

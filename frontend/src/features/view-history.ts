@@ -7,14 +7,14 @@ import {
   persist,
   setSchema,
   state,
-  tableInView,
   tableRequest,
   type ViewRequest,
   viewParams,
 } from "../core/state.js";
 import type { FilterCondition } from "../core/types.js";
 import { parseFilterDsl } from "../lib/filter-dsl.js";
-import { loadTables } from "./sidebar.js";
+import { loadSchemas } from "./scope-select.js";
+import { loadTables } from "./table-chips.js";
 
 // FK-cell nav and the referenced-by drill-in: `table` filtered by `clause`,
 // with no sort (a stale stored one would defeat loadData's drop-and-retry
@@ -41,18 +41,19 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
   }
   // The other schema's table list replaces this one first, so this switch
   // cannot wait for its rows (ui-guidelines R14).
+  supersedeLoads();
   enterTable(table);
   state.sort = null;
   state.offset = 0;
   clearFilter();
   setSchema(schema);
   loadTables({ next: req })
-    .then(() => {
-      // loadTables()'s stale-state fallback (sidebar.ts) drops `req` and
+    .then((outcome) => {
+      // loadTables()'s stale-state fallback (table-chips.ts) drops `req` and
       // opens another table when `table` isn't in this schema's own
       // /api/tables listing (e.g. a partitioned referrer, which list_tables
       // excludes).
-      if (tableInView() !== table) {
+      if (outcome === "fell-back") {
         reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
       }
     })
@@ -100,6 +101,7 @@ window.addEventListener("popstate", () => {
   written = location.search;
   supersedeLoads();
   const params = new URLSearchParams(location.search);
+  const previousSource = state.source;
   // Exact reader: reproduce this history entry verbatim, absences included
   // (contrast url.ts's load-time overlay). Keep it separate from that overlay
   // reader — the header comment in url.ts says why.
@@ -112,5 +114,12 @@ window.addEventListener("popstate", () => {
   // this restored source's schema count, without a live re-fetch.
   $("schema-select-wrap").hidden = !state.schema;
   persist();
-  loadTables({ replaceHistory: true }).catch(reportError);
+  if (state.source === previousSource) {
+    loadTables({ replaceHistory: true }).catch(reportError);
+    return;
+  }
+  // Another source has its own schema list, so the selector's options must be re-fetched too.
+  loadSchemas()
+    .then((current) => (current ? loadTables({ replaceHistory: true }) : undefined))
+    .catch(reportError);
 });
