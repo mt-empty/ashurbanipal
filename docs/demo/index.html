@@ -4201,68 +4201,6 @@ new ResizeObserver(([entry]) => {
   tablesWidth = entry.contentRect.width;
   updateTablesCap();
 }).observe($("tables"));
-async function loadSources() {
-  let sources;
-  try {
-    ({ sources } = await api("/sources"));
-  } catch (e) {
-    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    return;
-  }
-  if (sources.length <= 1) {
-    state.source = null;
-    return;
-  }
-  let source = state.source;
-  if (!source || !sources.some((s) => s.name === source)) {
-    source = sources[0].name;
-  }
-  state.source = source;
-  populateSelect(
-    $("source-select"),
-    sources.map((s) => s.name),
-    source
-  );
-  $("source-select-wrap").hidden = false;
-}
-$("source-select").onchange = () => {
-  supersedeLoads();
-  switchSource($("source-select").value);
-  loadSchemas().then(() => loadTables()).catch(reportError);
-};
-var loadSchemasToken = 0;
-async function loadSchemas() {
-  syncGridLock();
-  const token = ++loadSchemasToken;
-  let schemas;
-  try {
-    ({ schemas } = await api(`/schemas${sourceQuery()}`));
-  } catch (e) {
-    if (token !== loadSchemasToken) return;
-    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
-    state.schema = null;
-    $("schema-select-wrap").hidden = true;
-    return;
-  }
-  if (token !== loadSchemasToken) return;
-  if (schemas.length <= 1) {
-    state.schema = null;
-    $("schema-select-wrap").hidden = true;
-    return;
-  }
-  let schema = state.schema;
-  if (!schema || !schemas.includes(schema)) {
-    schema = schemas.includes("public") ? "public" : schemas[0];
-  }
-  state.schema = schema;
-  populateSelect($("schema-select"), schemas, schema);
-  $("schema-select-wrap").hidden = false;
-}
-$("schema-select").onchange = () => {
-  supersedeLoads();
-  switchSchema($("schema-select").value);
-  loadTables().catch(reportError);
-};
 var loadTablesToken = 0;
 async function loadTables({
   replaceHistory = false,
@@ -5763,6 +5701,70 @@ window.addEventListener("popstate", () => {
   persist();
   loadTables({ replaceHistory: true }).catch(reportError);
 });
+
+// src/features/scope-select.ts
+async function loadSources() {
+  let sources;
+  try {
+    ({ sources } = await api("/sources"));
+  } catch (e) {
+    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
+    return;
+  }
+  if (sources.length <= 1) {
+    state.source = null;
+    return;
+  }
+  let source = state.source;
+  if (!source || !sources.some((s) => s.name === source)) {
+    source = sources[0].name;
+  }
+  state.source = source;
+  populateSelect(
+    $("source-select"),
+    sources.map((s) => s.name),
+    source
+  );
+  $("source-select-wrap").hidden = false;
+}
+$("source-select").onchange = () => {
+  supersedeLoads();
+  switchSource($("source-select").value);
+  loadSchemas().then(() => loadTables()).catch(reportError);
+};
+var loadSchemasToken = 0;
+async function loadSchemas() {
+  syncGridLock();
+  const token = ++loadSchemasToken;
+  let schemas;
+  try {
+    ({ schemas } = await api(`/schemas${sourceQuery()}`));
+  } catch (e) {
+    if (token !== loadSchemasToken) return;
+    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return;
+  }
+  if (token !== loadSchemasToken) return;
+  if (schemas.length <= 1) {
+    state.schema = null;
+    $("schema-select-wrap").hidden = true;
+    return;
+  }
+  let schema = state.schema;
+  if (!schema || !schemas.includes(schema)) {
+    schema = schemas.includes("public") ? "public" : schemas[0];
+  }
+  state.schema = schema;
+  populateSelect($("schema-select"), schemas, schema);
+  $("schema-select-wrap").hidden = false;
+}
+$("schema-select").onchange = () => {
+  supersedeLoads();
+  switchSchema($("schema-select").value);
+  loadTables().catch(reportError);
+};
 
 // src/lib/sibling-matrix.ts
 var keyOf = (name, label) => JSON.stringify([name, label ?? null]);

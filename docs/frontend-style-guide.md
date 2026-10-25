@@ -29,7 +29,7 @@ src/
   index.html   styles.css
   bootstrap/   main, controller, reload, table-focus
   features/    grid, column-widths, sticky-header, filter-ui, filter-highlight,
-               sidebar (source/schema selectors + table chips), nav, record-view,
+               scope-select (source/schema selectors), table-chips, nav, record-view,
                referenced-by, structure, siblings, auto-refresh, load-bar, view-notice,
                api-reference, theme,
                join-dialog / join-form / join-sql / join-view / join-saved /
