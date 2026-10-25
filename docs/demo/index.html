@@ -737,20 +737,20 @@ ul { list-style: none; margin: 0; padding: 0; }
 #tables li :is(a, button).active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
 /* min-width:0 plus the cap lets one very long name ellipsize instead of
    widening the row; the full name is in `title` (see loadTables()). */
-.row-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
+.chip-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
             overflow: hidden; text-overflow: ellipsis; }
-.row-right { position: relative; display: flex; align-items: center; flex: none; }
+.chip-right { position: relative; display: flex; align-items: center; flex: none; }
 .count { font-size: .7rem; opacity: .6; }
 /* Overlays the count while loading (absolutely positioned, so it adds no
-   width and the chip row never reflows). */
-.row-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
+   width and the chip list never reflows). */
+.chip-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
                border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent;
                visibility: hidden; }
 #tables li :is(a, button).loading .count { visibility: hidden; }
-#tables li :is(a, button).loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
+#tables li :is(a, button).loading .chip-spinner { visibility: visible; animation: spin .6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  #tables li :is(a, button).loading .row-spinner { animation: none; border-top-color: currentColor; }
+  #tables li :is(a, button).loading .chip-spinner { animation: none; border-top-color: currentColor; }
 }
 #tables-more { flex: none; background: none; border: none; font: inherit; font-size: .8rem;
                color: var(--text-muted); height: var(--chip-h); padding: 0 .5rem;
@@ -1240,7 +1240,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 
 /* ==== Join: saved chips, bands, notices ==== */
-/* Saved joins are chips at the end of the table row, after a divider. */
+/* Saved joins are chips after the table chips, past a divider. */
 #tables li.join-first { position: relative; margin-left: .5rem; }
 #tables li.join-first::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                                 width: 1px; background: var(--border-strong); }
@@ -1433,7 +1433,7 @@ thead tr.bands + tr th { top: var(--band-h); }
     </div>
     <nav id="tables-bar" aria-label="tables">
       <ul id="tables" aria-busy="true"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
-      <template id="table-row-template"><li><a><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
+      <template id="table-chip-template"><li><a><span class="chip-name"></span><span class="chip-right"><span class="chip-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
     </nav>
     <div id="toolbar">
       <search id="controls">
@@ -4055,7 +4055,7 @@ var joinEntries = [];
 var joinScope = "";
 var scopeOfChips = () => `${state.source ?? ""}|${state.schema ?? ""}`;
 var allEntries = () => [...tableEntries, ...joinEntries];
-var tableRowTemplate = $("table-row-template");
+var tableChipTemplate = $("table-chip-template");
 var TABLE_CAP_LINES = 3;
 var tablesMore = $("tables-more");
 var tablesMoreItem = $("tables-more-item");
@@ -4070,8 +4070,8 @@ function updateTablesCap() {
     e.li.classList.remove("pulled");
   }
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
-  const lastRowTop = tops[TABLE_CAP_LINES - 1];
-  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const lastLineTop = tops[TABLE_CAP_LINES - 1];
+  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastLineTop) : [];
   const active = entries.find((e) => e.chip.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
@@ -4085,7 +4085,7 @@ function updateTablesCap() {
   active?.li.classList.add("pulled");
   const shown2 = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
-  while (tablesMoreItem.offsetTop > lastRowTop && shown2.length) {
+  while (tablesMoreItem.offsetTop > lastLineTop && shown2.length) {
     const last = shown2.pop();
     last.li.hidden = true;
     hidden.add(last);
@@ -4190,9 +4190,9 @@ async function loadTables({
   tableEntries = [];
   chipCounts.clear();
   for (const t of tables) {
-    const li = tableRowTemplate.content.cloneNode(true).firstElementChild;
+    const li = tableChipTemplate.content.cloneNode(true).firstElementChild;
     const chip = qs(li, "a");
-    qs(li, ".row-name").textContent = t.name;
+    qs(li, ".chip-name").textContent = t.name;
     const countEl = qs(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     chipCounts.set(t.name, countEl.textContent);
@@ -4259,7 +4259,7 @@ function setJoinChips(chips) {
   joinScope = scopeOfChips();
   updateTablesCap();
 }
-function setRowLoading(name, loading2) {
+function setTableChipLoading(name, loading2) {
   tableEntries.find((e) => e.name === name)?.chip.classList.toggle("loading", loading2);
 }
 function setActiveTable(name) {
@@ -6724,11 +6724,11 @@ async function fetchViewData(req, auto) {
     setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true, !auto), LOADING_DELAY_MS);
   }
-  setRowLoading(table, true);
+  setTableChipLoading(table, true);
   try {
     return await api(await dataPath(view, params));
   } finally {
-    setRowLoading(table, false);
+    setTableChipLoading(table, false);
     if (--inFlightFetches === 0) {
       clearTimeout(slowTimer);
       setSlow(false);

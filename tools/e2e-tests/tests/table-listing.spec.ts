@@ -35,7 +35,7 @@ test("title tooltip includes the comment when present, and is just the name othe
 }) => {
   await gotoApp(page);
   // Every button gets a title (name is the R8 truncation escape hatch for
-  // a long table name, see .row-name's CSS) — commented tables get the
+  // a long table name, see .chip-name's CSS) — commented tables get the
   // comment appended, uncommented ones just the bare name.
   await expect(page.locator('#tables [data-table="users"]')).toHaveAttribute(
     "title",
@@ -49,7 +49,7 @@ test("title tooltip includes the comment when present, and is just the name othe
 
 test("a long table name truncates instead of pushing the row count out", async ({ page }) => {
   await gotoApp(page);
-  const nameSpan = page.locator('#tables [data-table="support_tickets"] .row-name');
+  const nameSpan = page.locator('#tables [data-table="support_tickets"] .chip-name');
   const overflow = await nameSpan.evaluate((el) => getComputedStyle(el).overflow);
   const textOverflow = await nameSpan.evaluate((el) => getComputedStyle(el).textOverflow);
   const minWidth = await nameSpan.evaluate((el) => getComputedStyle(el).minWidth);

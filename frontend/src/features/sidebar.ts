@@ -37,7 +37,7 @@ let joinEntries: TableEntry[] = [];
 let joinScope = "";
 const scopeOfChips = (): string => `${state.source ?? ""}|${state.schema ?? ""}`;
 const allEntries = (): TableEntry[] => [...tableEntries, ...joinEntries];
-const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
+const tableChipTemplate = $<HTMLTemplateElement>("table-chip-template");
 
 // ---- three-line cap: a long table list collapses behind "+ N more", except
 // the active table, which stays visible (and is marked `pulled` when a hidden
@@ -45,7 +45,7 @@ const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 const TABLE_CAP_LINES = 3;
 const tablesMore = $<HTMLButtonElement>("tables-more");
 // Last item in the list, right-aligned (see styles.css), so it follows the
-// final chip instead of taking width from the rows above it.
+// final chip instead of taking width from the lines above it.
 const tablesMoreItem = $("tables-more-item");
 // A display preference like the theme, so its own key rather than the view
 // blob that mirrors to the URL.
@@ -65,8 +65,8 @@ function updateTablesCap(): void {
     e.li.classList.remove("pulled");
   }
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
-  const lastRowTop = tops[TABLE_CAP_LINES - 1];
-  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const lastLineTop = tops[TABLE_CAP_LINES - 1];
+  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastLineTop) : [];
   const active = entries.find((e) => e.chip.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
@@ -79,11 +79,11 @@ function updateTablesCap(): void {
   for (const e of hidden) e.li.hidden = true;
   // Measured with the divider's margin on, since only taking it off below is safe.
   active?.li.classList.add("pulled");
-  // The button has to land on the last row: give up chips from the end of the
+  // The button has to land on the last line: give up chips from the end of the
   // visible ones, never the active one, until it fits there.
   const shown = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
-  while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
+  while (tablesMoreItem.offsetTop > lastLineTop && shown.length) {
     const last = shown.pop() as TableEntry;
     last.li.hidden = true;
     hidden.add(last);
@@ -212,7 +212,7 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 
 // A slower earlier loadTables() (e.g. from a schema switch quickly
 // followed by another) resolving after a faster later one would otherwise
-// clobber the chip row with the wrong schema's table list — same shape of
+// clobber the chip list with the wrong schema's table list — same shape of
 // guard as loadDataToken/cvRequestToken.
 let loadTablesToken = 0;
 
@@ -239,16 +239,16 @@ export async function loadTables({
   tableEntries = [];
   chipCounts.clear();
   for (const t of tables) {
-    const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
+    const li = (tableChipTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
     const chip = qs<HTMLAnchorElement>(li, "a");
-    qs<HTMLElement>(li, ".row-name").textContent = t.name;
+    qs<HTMLElement>(li, ".chip-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     chipCounts.set(t.name, countEl.textContent);
     countEl.title = APPROX_COUNT_TITLE;
     chip.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
-    // (see .row-name), so the title tooltip is the escape hatch.
+    // (see .chip-name), so the title tooltip is the escape hatch.
     chip.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
     linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
       loadData({ next: tableRequest(t.name) });
@@ -335,13 +335,13 @@ export function setJoinChips(chips: JoinChip[]): void {
   updateTablesCap();
 }
 
-// Keyed by table name rather than "whichever row is .active" so it's
+// Keyed by table name rather than "whichever chip is .active" so it's
 // still correct if tableEntries is ever rebuilt mid-fetch.
-export function setRowLoading(name: string, loading: boolean): void {
+export function setTableChipLoading(name: string, loading: boolean): void {
   tableEntries.find((e) => e.name === name)?.chip.classList.toggle("loading", loading);
 }
 
-// Same tableEntries lookup as setRowLoading, so "find the row for table X"
+// Same tableEntries lookup as setTableChipLoading, so "find the chip for table X"
 // stays one idiom — a re-scan on every call rather than a cached reference,
 // so this self-heals if tableEntries is rebuilt (schema/source switch)
 // between calls instead of toggling a detached button.
