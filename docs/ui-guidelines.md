@@ -211,8 +211,8 @@ should block on.
   *(Derives from: aesthetic and minimalist design, visibility of system
   status.)*
 - **R16 — Back undoes the last applied change.** Each applied change to
-  the view — table, join, schema, source, filter, sort, page, page size —
-  is one browser-history entry, so Back steps through them in order and
+  the view — table, join, schema, source, filter, sort, page — is one
+  browser-history entry, so Back steps through them in order and
   Forward redoes them. A load that changes nothing (refresh, re-applying
   the same filter) adds none, and a restore or stale-state fallback (R5)
   replaces the current entry rather than adding one. *(Derives from: user

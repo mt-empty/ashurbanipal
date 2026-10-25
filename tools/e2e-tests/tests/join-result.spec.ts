@@ -107,6 +107,7 @@ test("closing the overlay of a refused join link opens the join's start table", 
   await gotoApp(page, joinQuery("FROM users u JOIN orders o ON u.id = o.status"));
   expect((await response).status()).toBe(400);
   await expect(page.locator("#join-dialog")).toBeVisible();
+  const entries = await page.evaluate(() => history.length);
 
   await page.keyboard.press("Escape");
   await expect(page.locator("#join-dialog")).toBeHidden();
@@ -115,6 +116,8 @@ test("closing the overlay of a refused join link opens the join's start table", 
   await expect(page.locator("#tbody tr").first()).toBeVisible();
   await expect(page.locator("#error")).toBeEmpty();
   expect(urlParam(page, "join")).toBeNull();
+  // The start table corrects the refused link's entry rather than adding one (R16).
+  expect(await page.evaluate(() => history.length)).toBe(entries);
 });
 
 test("a timeout offers Retry and Edit join", async ({ page }) => {

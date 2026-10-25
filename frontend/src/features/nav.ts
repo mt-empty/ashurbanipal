@@ -46,19 +46,15 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
   state.offset = 0;
   clearFilter();
   setSchema(schema);
-  loadTables()
+  loadTables({ next: req })
     .then(() => {
-      // loadTables()'s stale-state fallback (sidebar.ts) silently resets
-      // the view when `table` isn't in this schema's own /api/tables
-      // listing (e.g. a partitioned referrer, which list_tables excludes)
-      // — applying the filter here would seed it onto whatever table that
-      // fallback landed on instead.
+      // loadTables()'s stale-state fallback (sidebar.ts) drops `req` and
+      // opens another table when `table` isn't in this schema's own
+      // /api/tables listing (e.g. a partitioned referrer, which list_tables
+      // excludes).
       if (tableInView() !== table) {
         reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
-        return;
       }
-      // One click, one entry: the filtered view replaces the table load above.
-      loadData({ next: req, replaceHistory: true });
     })
     .catch(reportError);
 }
@@ -67,6 +63,12 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
 // R16); a load that writes the same query replaces. `written` is the search
 // last written or restored, null until the first load commits.
 let written: string | null = null;
+
+// Start-up settled without a load committing (an empty schema, a failed
+// first load): later history steps restore rather than reload.
+export function noteStartupSettled(): void {
+  written ??= location.search;
+}
 
 export function syncUrl(replaceHistory: boolean): void {
   const params = viewParams(state.view);

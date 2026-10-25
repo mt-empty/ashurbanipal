@@ -3588,7 +3588,10 @@ $("schema-select").onchange = () => {
   loadTables().catch(reportError);
 };
 var loadTablesToken = 0;
-async function loadTables({ replaceHistory = false } = {}) {
+async function loadTables({
+  replaceHistory = false,
+  next
+} = {}) {
   syncGridLock();
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
@@ -3623,12 +3626,13 @@ async function loadTables({ replaceHistory = false } = {}) {
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
-  if (!tableNames.includes(startTable(state.view) ?? "")) {
+  const fellBack = !tableNames.includes(startTable(state.view) ?? "");
+  if (fellBack) {
     enterTable(tableNames[0] ?? null);
     applyStoredSort(tableInView());
     clearFilter();
   }
-  await loadData({ replaceHistory });
+  await loadData({ replaceHistory, next: fellBack ? void 0 : next });
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
@@ -4767,7 +4771,7 @@ dialog.addEventListener("close", () => {
   else if (joinInView() && !viewIsShown()) {
     clearJoin();
     persist();
-    loadData();
+    loadData({ replaceHistory: true });
   }
 });
 $("join-delete").onclick = () => {
@@ -5105,6 +5109,76 @@ async function showCommonValues(e, table, column) {
   if (token !== cvRequestToken) return;
   renderCommonValues(values, column);
 }
+
+// src/features/nav.ts
+function navigateWithSeededFilter(table, schema, clause) {
+  let ast;
+  try {
+    ast = parseFilterDsl(clause);
+  } catch (e) {
+    reportError(e);
+    return;
+  }
+  const req = {
+    ...tableRequest(table),
+    sort: null,
+    order: "asc",
+    restoredSort: false,
+    filter: clause,
+    ast
+  };
+  if (!schema || schema === state.schema) {
+    loadData({ next: req });
+    return;
+  }
+  enterTable(table);
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
+  setSchema(schema);
+  loadTables({ next: req }).then(() => {
+    if (tableInView() !== table) {
+      reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
+    }
+  }).catch(reportError);
+}
+var written = null;
+function noteStartupSettled() {
+  written ??= location.search;
+}
+function syncUrl(replaceHistory) {
+  const params = viewParams(state.view);
+  params.set("limit", String(state.limit));
+  params.set("offset", String(state.offset));
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
+  if (state.filter) params.set("filter", state.filter);
+  const query = params.toString();
+  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
+    history.replaceState(null, "", `?${query}`);
+  } else {
+    history.pushState(null, "", `?${query}`);
+  }
+  written = location.search;
+}
+window.addEventListener("popstate", () => {
+  if (written === null) {
+    location.reload();
+    return;
+  }
+  if (location.search === written) return;
+  written = location.search;
+  supersedeLoads();
+  const params = new URLSearchParams(location.search);
+  applyUrlExact(params);
+  $("source-select").value = state.source ?? "";
+  $("schema-select").value = state.schema ?? "";
+  $("schema-select-wrap").hidden = !state.schema;
+  persist();
+  loadTables({ replaceHistory: true }).catch(reportError);
+});
 
 // src/lib/sibling-matrix.ts
 var keyOf = (name, label) => JSON.stringify([name, label ?? null]);
@@ -5503,75 +5577,6 @@ function scalarSpan(node) {
   span.textContent = node.text;
   return span;
 }
-
-// src/features/nav.ts
-function navigateWithSeededFilter(table, schema, clause) {
-  let ast;
-  try {
-    ast = parseFilterDsl(clause);
-  } catch (e) {
-    reportError(e);
-    return;
-  }
-  const req = {
-    ...tableRequest(table),
-    sort: null,
-    order: "asc",
-    restoredSort: false,
-    filter: clause,
-    ast
-  };
-  if (!schema || schema === state.schema) {
-    loadData({ next: req });
-    return;
-  }
-  enterTable(table);
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
-  setSchema(schema);
-  loadTables().then(() => {
-    if (tableInView() !== table) {
-      reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
-      return;
-    }
-    loadData({ next: req, replaceHistory: true });
-  }).catch(reportError);
-}
-var written = null;
-function syncUrl(replaceHistory) {
-  const params = viewParams(state.view);
-  params.set("limit", String(state.limit));
-  params.set("offset", String(state.offset));
-  if (state.sort) {
-    params.set("sort", state.sort);
-    params.set("order", state.order);
-  }
-  if (state.filter) params.set("filter", state.filter);
-  const query = params.toString();
-  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
-    history.replaceState(null, "", `?${query}`);
-  } else {
-    history.pushState(null, "", `?${query}`);
-  }
-  written = location.search;
-}
-window.addEventListener("popstate", () => {
-  if (written === null) {
-    location.reload();
-    return;
-  }
-  if (location.search === written) return;
-  written = location.search;
-  supersedeLoads();
-  const params = new URLSearchParams(location.search);
-  applyUrlExact(params);
-  $("source-select").value = state.source ?? "";
-  $("schema-select").value = state.schema ?? "";
-  $("schema-select-wrap").hidden = !state.schema;
-  persist();
-  loadTables({ replaceHistory: true }).catch(reportError);
-});
 
 // src/features/referenced-by.ts
 var cache3 = /* @__PURE__ */ new Map();
@@ -6083,12 +6088,12 @@ async function joinPath(def, params) {
   params.set("join", wire);
   return `/tables/join?${params}`;
 }
-function reportJoinFailure(e, def, next) {
+function reportJoinFailure(e, def, next, replaceHistory) {
   if (e.code === "query_timeout") {
     showJoinNotice(
       "This join took longer than the time limit and was stopped. Add a filter, remove a table, or join on key columns.",
       [
-        { label: "Retry", run: () => loadData2({ next }) },
+        { label: "Retry", run: () => loadData2({ next, replaceHistory }) },
         { label: "Edit join", run: () => openJoinDialog({ def }) }
       ]
     );
@@ -6210,7 +6215,7 @@ async function loadData2({
     if (!next && dropOneStaleInput(code)) return loadData2({ resetScroll, highlightNew, replaceHistory });
     const retry = next && dropStaleSort(next, code);
     if (retry) return loadData2({ next: retry, resetScroll, highlightNew, replaceHistory });
-    if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
+    if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
     reportError(failedLoadError(e, view, next));
     return;
   }
@@ -6228,7 +6233,7 @@ async function loadData2({
   $("refresh-menu-btn").disabled = false;
   updateJoinChrome();
   refreshSavedChips();
-  syncUrl(replaceHistory);
+  syncUrl(replaceHistory || auto);
   const renderTable = () => {
     if (superseded()) return;
     useWidthScope(widthScope);
@@ -6314,9 +6319,11 @@ $("refresh").onclick = () => {
   loadData2({ resetScroll: false, highlightNew: true });
 };
 loadSources().then(loadSchemas).then(() => {
-  if (state.sort === null) applyStoredSort(tableInView());
+  const navType = performance.getEntriesByType("navigation")[0]?.type;
+  if (state.sort === null && navType !== "reload" && navType !== "back_forward") applyStoredSort(tableInView());
   return loadTables({ replaceHistory: true });
 }).catch(reportError).finally(() => {
+  noteStartupSettled();
   try {
     showBootFallbackNote();
   } finally {

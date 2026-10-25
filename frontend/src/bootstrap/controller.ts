@@ -101,12 +101,12 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
 // error line; on this route `not_readable` can only name one of the join's
 // tables. Any other 400 (filter, sort) is the plain error line's. `next` is
 // the join not yet in view, if this load was trying one.
-function reportJoinFailure(e: ApiError, def: JoinDef, next: ViewRequest | undefined): boolean {
+function reportJoinFailure(e: ApiError, def: JoinDef, next: ViewRequest | undefined, replaceHistory: boolean): boolean {
   if (e.code === "query_timeout") {
     showJoinNotice(
       "This join took longer than the time limit and was stopped. Add a filter, remove a table, or join on key columns.",
       [
-        { label: "Retry", run: () => loadData({ next }) },
+        { label: "Retry", run: () => loadData({ next, replaceHistory }) },
         { label: "Edit join", run: () => openJoinDialog({ def }) },
       ],
     );
@@ -260,7 +260,7 @@ export async function loadData({
     if (!next && dropOneStaleInput(code)) return loadData({ resetScroll, highlightNew, replaceHistory });
     const retry = next && dropStaleSort(next, code);
     if (retry) return loadData({ next: retry, resetScroll, highlightNew, replaceHistory });
-    if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
+    if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
     reportError(failedLoadError(e, view, next));
     return;
   }
@@ -281,7 +281,8 @@ export async function loadData({
   $<HTMLButtonElement>("refresh-menu-btn").disabled = false;
   updateJoinChrome();
   refreshSavedChips();
-  syncUrl(replaceHistory);
+  // An auto-refresh tick is never a step of the user's own.
+  syncUrl(replaceHistory || auto);
   const renderTable = () => {
     // The transition can wait for a frame; a view switch meanwhile owns the grid, and this data is not its join's.
     if (superseded()) return;

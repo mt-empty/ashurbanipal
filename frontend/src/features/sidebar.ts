@@ -13,6 +13,7 @@ import {
   switchSource,
   tableInView,
   tableRequest,
+  type ViewRequest,
   viewHref,
 } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
@@ -215,7 +216,15 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 // guard as loadDataToken/cvRequestToken.
 let loadTablesToken = 0;
 
-export async function loadTables({ replaceHistory = false } = {}): Promise<void> {
+// `next`: a view in this table list to open instead of the current one; the
+// stale-state fallback below drops it.
+export async function loadTables({
+  replaceHistory = false,
+  next,
+}: {
+  replaceHistory?: boolean;
+  next?: ViewRequest;
+} = {}): Promise<void> {
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
@@ -253,7 +262,8 @@ export async function loadTables({ replaceHistory = false } = {}): Promise<void>
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back (R5).
-  if (!tableNames.includes(startTable(state.view) ?? "")) {
+  const fellBack = !tableNames.includes(startTable(state.view) ?? "");
+  if (fellBack) {
     enterTable(tableNames[0] ?? null);
     applyStoredSort(tableInView());
     // A ?filter= was written against the table the URL named; that table
@@ -261,7 +271,7 @@ export async function loadTables({ replaceHistory = false } = {}): Promise<void>
     // over would 400 and dead-end the very load meant to recover (R5).
     clearFilter();
   }
-  await loadData({ replaceHistory });
+  await loadData({ replaceHistory, next: fellBack ? undefined : next });
 }
 
 export function listedTableNames(): string[] {

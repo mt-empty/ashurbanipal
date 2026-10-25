@@ -144,7 +144,7 @@ dialog.addEventListener("close", () => {
   else if (joinInView() && !viewIsShown()) {
     clearJoin();
     persist();
-    loadData();
+    loadData({ replaceHistory: true });
   }
 });
 $("join-delete").onclick = () => {

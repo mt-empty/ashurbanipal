@@ -219,8 +219,13 @@ test("a cross-schema FK click adds one entry, and back returns to the referring 
   await expectParam(page, "schema", "warehouse");
   await selectTable(page, "shipments");
   const entries = await historyLength(page);
+  const unfiltered: string[] = [];
+  page.on("request", (r) => {
+    if (dataWith("table", "orders")(r.url()) && !new URL(r.url()).searchParams.has("filter")) unfiltered.push(r.url());
+  });
   await page.locator("#tbody tr").first().locator('td[data-col="order_id"] .fk-cell').click();
   await waitForTable(page, "orders");
+  expect(unfiltered).toEqual([]);
   await expectParam(page, "schema", "public");
   expect(urlParam(page, "filter")).not.toBeNull();
   expect(await historyLength(page)).toBe(entries + 1);
@@ -228,4 +233,20 @@ test("a cross-schema FK click adds one entry, and back returns to the referring 
   await goBack(page);
   await expectTable(page, "shipments");
   expect(urlParam(page, "schema")).toBe("warehouse");
+});
+
+test("a reload reopens an unsorted entry unsorted, though the table has a remembered sort", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
+  await waitForIdle(page);
+  const sort = urlParam(page, "sort");
+  expect(sort).not.toBeNull();
+  await goBack(page);
+  await expectParam(page, "sort", null);
+
+  await reloadApp(page);
+  expect(urlParam(page, "sort")).toBeNull();
+  await goForward(page);
+  await expectParam(page, "sort", sort);
 });

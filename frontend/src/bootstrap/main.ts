@@ -8,6 +8,7 @@ import "../features/filter-highlight.js";
 import "../features/join-dialog.js";
 import { clearCommonValueCache } from "../features/filter-ui.js";
 import { clearJoinCatalog } from "../features/join-catalog.js";
+import { noteStartupSettled } from "../features/nav.js";
 import { startSiblings } from "../features/siblings.js";
 import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
 import "../features/sticky-header.js";
@@ -81,12 +82,16 @@ $<HTMLButtonElement>("refresh").onclick = () => {
 loadSources()
   .then(loadSchemas)
   .then(() => {
-    // A link without ?sort= opens with the table's remembered one (R11), once the scope it is keyed by is pinned.
-    if (state.sort === null) applyStoredSort(tableInView());
+    // A fresh link without ?sort= opens with the table's remembered one (R11),
+    // once the scope it is keyed by is pinned; a reload or a history step
+    // reopens its entry exactly (R16).
+    const navType = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
+    if (state.sort === null && navType !== "reload" && navType !== "back_forward") applyStoredSort(tableInView());
     return loadTables({ replaceHistory: true });
   })
   .catch(reportError)
   .finally(() => {
+    noteStartupSettled();
     try {
       showBootFallbackNote();
     } finally {
