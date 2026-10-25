@@ -17,8 +17,8 @@ noticed, same as table/sort/page today).
 
 A filter should survive a reload, and a URL should carry it so a teammate
 opening the link lands on the same filtered view. Today `syncUrl()`
-(`frontend/src/nav.ts:28-48`) deliberately omits the filter, and the
-`popstate` handler (`frontend/src/nav.ts:50-64`) hard-clears it on every
+(`frontend/src/features/nav.ts`) deliberately omits the filter, and the
+`popstate` handler (`frontend/src/features/nav.ts`) hard-clears it on every
 history navigation.
 
 ## 2. Why the current rule blocks it
@@ -28,7 +28,7 @@ history navigation.
   blanket rule "so each future feature doesn't re-litigate it case by case."
 - **`frontend-style-guide.md:164` (§6)** — same boundary, names
   `history.replaceState()` alongside `localStorage`.
-- **`frontend/src/nav.ts:26`** — code comment pointing at R6 as the reason
+- **`frontend/src/features/nav.ts`** — code comment pointing at R6 as the reason
   the filter is left out of `syncUrl()`.
 
 ## 3. The case for changing it
@@ -63,7 +63,7 @@ Not the whole rule, but a narrower core:
   persist. A value the UI read back out of a result row — a cell value, or
   a primary key lifted from a row to build a link — is data the user never
   entered, and persisting it in a URL or `localStorage` is surprising.
-  `frontend/src/state.ts:165` already guards the PK case; keep it.
+  `frontend/src/core/store.ts` already guards the PK case; keep it.
 - **Safe default + recovery.** A filter that no longer parses on restore
   resets silently to no filter (the existing R5 stale-state behaviour),
   never wedges or errors.
@@ -115,16 +115,16 @@ a row set is row data.
 
 ## 6. Implementation touchpoints
 
-- `frontend/src/nav.ts:28-48` `syncUrl()` — add the filter to the params.
-- `frontend/src/nav.ts:50-64` `popstate` handler — currently sets
+- `frontend/src/features/nav.ts` `syncUrl()` — add the filter to the params.
+- `frontend/src/features/nav.ts` `popstate` handler — currently sets
   `state.filter = ""` and `setAppliedFilterAst([])` unconditionally;
   restore both from the URL instead.
-- `frontend/src/nav.ts:26` — delete or rewrite the "filter is never
+- `frontend/src/features/nav.ts` — delete or rewrite the "filter is never
   included" comment.
-- `frontend/src/state.ts:62` initial load, and `applyScopeParams` /
-  `buildScopeParams` (`frontend/src/state.ts:126`, `:132`) — carry the
+- `initState` (initial load) and `applyScopeParams` /
+  `buildScopeParams` (`frontend/src/core/url.ts`) — carry the
   filter through the scope-param round trip.
-- `frontend/src/main.ts:30`, `frontend/src/filter-ui.ts:224` — filter text
+- `frontend/src/bootstrap/main.ts`, `frontend/src/features/filter-ui.ts` — filter text
   already serialises to a query param here; reuse that encoding, don't
   invent a second one.
 - Restore path re-runs the normal parse/apply chain; a parse failure is a

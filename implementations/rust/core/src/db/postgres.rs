@@ -626,7 +626,7 @@ impl DbSource for PgPoolSource {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
         // Same `has_table_privilege` filter as `list_tables`, so the count
-        // column never names a table the sidebar won't show.
+        // column never names a table the table list won't show.
         let rows = sqlx::query_as::<_, (String, i64)>(
             "select c.relname::text, c.reltuples::bigint \
              from pg_class c \

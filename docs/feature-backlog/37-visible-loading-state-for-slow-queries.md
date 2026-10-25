@@ -21,8 +21,8 @@ The loading signals are real but none is visible where the user acts.
 - `frontend/src/styles.css` — no rule reads `aria-busy`, so the table
   gives no visual cue.
 - `frontend/src/styles.css:118-125` — the only visible cue is the
-  per-row spinner in the sidebar (`setRowLoading`,
-  `controller.ts:135`). It sits on the table list, far from the sort
+  per-chip spinner on the table chips (`setTableChipLoading`,
+  `controller.ts`). It sits on the table list, far from the sort
   headers and pager the user just clicked.
 
 So `docs/ui-guidelines.md` R9 (line 144) is only true for assistive

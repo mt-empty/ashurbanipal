@@ -472,7 +472,7 @@ func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]Cou
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	// Same has_table_privilege filter as ListTables, so the count column
-	// never names a table the sidebar won't show.
+	// never names a table the table list won't show.
 	rows, err := tx.QueryContext(ctx,
 		`select c.relname::text, c.reltuples::bigint
 		 from pg_class c

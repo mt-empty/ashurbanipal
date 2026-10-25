@@ -1,7 +1,7 @@
 //! Regression test for the table listing / allow-list privilege gate
 //! (spec/protocol.md §5.2): `/api/tables`, `/api/table-counts`, and the
 //! `table`-parameter allow-list must all exclude tables the connected role
-//! cannot `SELECT`, so the sidebar never offers a table a data request
+//! cannot `SELECT`, so the table list never offers a table a data request
 //! would then reject — and an `INSERT`-only table must come back as
 //! `NotAllowed` (→ 400), never a raw `permission denied` 500.
 //!

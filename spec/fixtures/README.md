@@ -36,7 +36,8 @@ Exactly one of `expect`/`expect_error` is present.
 
 ## `join-parser-tests.json` — frontend join parser (join text → `JoinDef`)
 
-Consumed only by `frontend/test/join-parser.test.ts`. Not part of backend
+Consumed only by `frontend/test/join-dsl.test.ts` and
+`frontend/test/join-tokens.test.ts`. Not part of backend
 conformance. Top-level `catalog` maps seed-schema table names to their
 column names; cases run against it unless `no_catalog` is `true`.
 

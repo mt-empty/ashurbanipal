@@ -9,7 +9,7 @@ Read-only — a view read is the same code path as a table read.
 `GET {mount}/api/tables` lists base tables only (`BASE TABLE` on Postgres
 / MySQL, `relkind = 'r'`; `spec/protocol.md` §5.2). Services expose plenty
 of their model through views and materialized views, and a dev verifying a
-feature often needs to read one. Include them in the sidebar, visually
+feature often needs to read one. Include them in the table chips, visually
 distinguished, browsable and filterable exactly like a table.
 
 ## 2. Touchpoints
@@ -25,7 +25,7 @@ distinguished, browsable and filterable exactly like a table.
   - **MySQL/MariaDB** — `information_schema.tables` `TABLE_TYPE = 'VIEW'`
     (no materialized views in either engine).
   - **SQLite** — `sqlite_master.type = 'view'`.
-- Frontend — a kind badge / icon in the sidebar list; everything else
+- Frontend — a kind badge / icon on the table chip; everything else
   (browse, sort, filter, record view) already works because the row-fetch
   path is unchanged.
 - `conformance/seed` — add a view and (Postgres) a materialized view to the

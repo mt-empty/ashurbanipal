@@ -32,7 +32,7 @@ and every port.
   tab (`frontend/src/features/siblings.ts`, `frontend/src/index.html:174`).
 - The page URL already holds source, schema, table, filter and sort
   (`frontend/src/core/url.ts:18`). An unknown table in the URL already falls
-  back to the first table and drops the filter (`frontend/src/features/sidebar.ts:244`).
+  back to the first table and drops the filter (`loadTables` in `frontend/src/features/sidebar.ts`).
 
 ## 3. The "no environment" rule
 
@@ -212,8 +212,8 @@ same canvas.
 
 A link names a source, schema, table and filter. When the instance it opens
 lacks one of them, the page already falls back to a safe choice
-(`frontend/src/features/sidebar.ts:129`, `:191`, `:244`, and the filter drop
-in `frontend/src/core/store.ts:395`). It does this silently, so the user can
+(`loadSources`, `loadSchemas` and `loadTables` in `frontend/src/features/sidebar.ts`,
+and `dropOneStaleInput` in `frontend/src/core/store.ts`). It does this silently, so the user can
 look at `audit_log` and believe it is `orders`.
 
 ### 5.2 Behavior
@@ -330,9 +330,9 @@ Frontend:
 - **Settled: same view when the other instance differs.** The frontend
   checks the URL against the other instance's own lists before it asks for
   data, so no request uses a missing name:
-  - unknown source → first source (`frontend/src/features/sidebar.ts:129`);
-  - unknown schema → `public`, else the first schema (`sidebar.ts:191`);
-  - unknown table → first table, and the filter is dropped (`sidebar.ts:244`).
+  - unknown source → first source (`loadSources`, `frontend/src/features/sidebar.ts`);
+  - unknown schema → `public`, else the first schema (`loadSchemas`);
+  - unknown table → first table, and the filter is dropped (`loadTables`).
   The e2e spec should cover one same-view link whose table is missing.
 - **Decided: tell the user about the fallback**, with a note and no Back
   button (§5).
