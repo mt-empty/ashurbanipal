@@ -1,4 +1,4 @@
-// Runtime-import-free seam. Feature modules (grid, sidebar, filter-ui) need to
+// Runtime-import-free seam. Feature modules (grid, table-chips, filter-ui) need to
 // trigger a full reload but must not import controller.ts, which imports
 // them — that back-edge is what a cycle is made of. main.ts registers the
 // real implementation at bootstrap; a call before then is a no-op.

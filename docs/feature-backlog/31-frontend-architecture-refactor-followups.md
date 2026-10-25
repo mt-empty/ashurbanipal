@@ -63,7 +63,7 @@ raw keys, nesting, and the inherited large-integer precision loss.
 Its own PR. Phase 4's `Column` discriminated union and the index-access guards
 did some of the same nullability work incidentally, but turning the flag on
 will surface real sites that rely on the current (flag-off) default — the cell
-and row builders in `sidebar.ts` / `filter-ui.ts` / `grid.ts`, and the demo
+and row builders in `table-chips.ts` / `filter-ui.ts` / `grid.ts`, and the demo
 fixtures. Land it after 1–3 so the type surface is settled.
 
 ## 5. A normative home for `max_json_bytes` — moved to story 43
@@ -100,7 +100,8 @@ Landed: `frontend/src/` is grouped into four role-based layers —
 `bootstrap/` (main, controller, reload, table-focus), `core/` (api, dom,
 types, state, store, url, row-diff), `features/` (grid, filter-ui, sidebar,
 nav, record-view, siblings, api-reference, theme; the sidebar's resize and
-bounds modules went with the chip redesign, #147), and
+bounds modules went with the chip redesign, #147, and sidebar and nav were
+later renamed table-chips, scope-select and view-history), and
 `lib/` (filter-dsl, json-tree, format). `demo/` is unchanged. Role-based was
 chosen over feature-based so the shared renderers (`lib/format.ts`,
 `lib/json-tree.ts`) have one home rather than a `shared/` catch-all.

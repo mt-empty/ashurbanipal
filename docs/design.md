@@ -327,7 +327,7 @@ designed or scheduled.
 
 A single-source deployment still returns exactly one entry — same
 degrade-gracefully shape as `/schemas`, and the frontend's source
-selector (`frontend/src/features/sidebar.ts`'s `loadSources`) hides itself
+selector (`frontend/src/features/scope-select.ts`'s `loadSources`) hides itself
 entirely in that case, byte-identical wire behavior to before this
 feature existed.
 
@@ -347,7 +347,7 @@ Excludes Postgres's own system/internal namespaces (`pg_catalog`,
 `information_schema`, `pg_toast`/`pg_temp`) and any schema the connected
 role lacks access to. A single-schema deployment still returns exactly
 one entry — the frontend treats a one-element list the same as "no schema
-selector needed" (see `frontend/src/features/sidebar.ts`'s `loadSchemas`).
+selector needed" (see `frontend/src/features/scope-select.ts`'s `loadSchemas`).
 
 ### `GET /tables`
 

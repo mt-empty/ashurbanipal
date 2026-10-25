@@ -13,7 +13,7 @@ kept as history.
 
 Switching source resets the schema every time. `#source-select`'s
 `onchange` sets `state.schema = null` unconditionally
-(`frontend/src/features/sidebar.ts`), then `loadSchemas()` runs against the new
+(`frontend/src/features/scope-select.ts`), then `loadSchemas()` runs against the new
 source and, finding `state.schema` empty, pins it to `public` (or the
 first schema) — `loadSchemas` in the same file. So a dev who was
 working in `reporting` on source A, flips to source B and back, lands in
@@ -29,7 +29,7 @@ Mirror the `sortByTable` pattern (`frontend/src/core/store.ts`):
   `persist()` payload and hydrated with the same "object, not array,
   discard-if-malformed" guard the other keyed maps use.
 - On `#schema-select` change and on the FK-navigation schema switch
-  (`frontend/src/features/nav.ts`), record
+  (`frontend/src/features/view-history.ts`), record
   `schemaBySource[state.source ?? ""] = state.schema`.
 - In `#source-select`'s `onchange`, instead of `state.schema = null`, set
   `state.schema = state.schemaBySource[newSource] ?? null`.
