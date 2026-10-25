@@ -10,21 +10,21 @@ import {
   reloadApp,
   selectTable,
   tableList,
+  urlParam,
   waitForIdle,
+  waitForTable,
 } from "./support/helpers";
 
 const historyLength = (page: Page) => page.evaluate(() => history.length);
-const param = (page: Page, name: string) => new URL(page.url()).searchParams.get(name);
 
 async function expectParam(page: Page, name: string, value: string | null) {
-  await expect.poll(() => param(page, name)).toBe(value);
+  await expect.poll(() => urlParam(page, name)).toBe(value);
   await waitForIdle(page);
 }
 
 async function expectTable(page: Page, table: string) {
-  await page.locator("#current").getByText(table, { exact: true }).waitFor();
-  await waitForIdle(page);
-  expect(param(page, "table")).toBe(table);
+  await waitForTable(page, table);
+  expect(urlParam(page, "table")).toBe(table);
 }
 
 test("browser back/forward steps through table navigation history", async ({ page }) => {
@@ -151,17 +151,17 @@ test("filter, sort and page each add an entry that back steps through", async ({
   await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   expect(await historyLength(page)).toBe(entries + 2);
-  const sort = param(page, "sort");
+  const sort = urlParam(page, "sort");
   expect(sort).not.toBeNull();
   await page.locator("#next").click();
   await waitForIdle(page);
   expect(await historyLength(page)).toBe(entries + 3);
-  const offset = param(page, "offset");
+  const offset = urlParam(page, "offset");
   expect(offset).not.toBe("0");
 
   await goBack(page);
   await expectParam(page, "offset", "0");
-  expect(param(page, "sort")).toBe(sort);
+  expect(urlParam(page, "sort")).toBe(sort);
   await goBack(page);
   await expectParam(page, "sort", null);
   await expect(page.locator("#filter")).toHaveValue("status = completed");
@@ -173,7 +173,7 @@ test("filter, sort and page each add an entry that back steps through", async ({
   await goForward(page);
   await goForward(page);
   await expectParam(page, "offset", offset);
-  expect(param(page, "sort")).toBe(sort);
+  expect(urlParam(page, "sort")).toBe(sort);
   await expect(page.locator("#filter")).toHaveValue("status = completed");
 });
 
@@ -184,7 +184,7 @@ test("clearing a filter adds an entry, and back brings the filter back", async (
   const entries = await historyLength(page);
   await clearFilterViaSearchEvent(page);
   expect(await historyLength(page)).toBe(entries + 1);
-  expect(param(page, "filter")).toBeNull();
+  expect(urlParam(page, "filter")).toBeNull();
 
   await goBack(page);
   await expectParam(page, "filter", "status = completed");
@@ -208,7 +208,24 @@ test("sorting the initially-loaded table adds an entry, and back unsorts it", as
   await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   expect(await historyLength(page)).toBe(start + 1);
-  expect(param(page, "sort")).not.toBeNull();
+  expect(urlParam(page, "sort")).not.toBeNull();
   await goBack(page);
   await expectParam(page, "sort", null);
+});
+
+test("a cross-schema FK click adds one entry, and back returns to the referring table", async ({ page }) => {
+  await gotoApp(page);
+  await page.locator("#schema-select").selectOption("warehouse");
+  await expectParam(page, "schema", "warehouse");
+  await selectTable(page, "shipments");
+  const entries = await historyLength(page);
+  await page.locator("#tbody tr").first().locator('td[data-col="order_id"] .fk-cell').click();
+  await waitForTable(page, "orders");
+  await expectParam(page, "schema", "public");
+  expect(urlParam(page, "filter")).not.toBeNull();
+  expect(await historyLength(page)).toBe(entries + 1);
+
+  await goBack(page);
+  await expectTable(page, "shipments");
+  expect(urlParam(page, "schema")).toBe("warehouse");
 });

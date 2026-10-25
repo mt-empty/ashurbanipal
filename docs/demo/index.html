@@ -4172,7 +4172,7 @@ $("schema-select").onchange = () => {
   loadTables().catch(reportError);
 };
 var loadTablesToken = 0;
-async function loadTables(exactView = false) {
+async function loadTables({ replaceHistory = false } = {}) {
   syncGridLock();
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
@@ -4209,12 +4209,10 @@ async function loadTables(exactView = false) {
   const tableNames = tables.map((t) => t.name);
   if (!tableNames.includes(startTable(state.view) ?? "")) {
     enterTable(tableNames[0] ?? null);
-    exactView = false;
+    applyStoredSort(tableInView());
     clearFilter();
   }
-  const table = tableInView();
-  if (table && state.sort === null && !exactView) applyStoredSort(table);
-  await loadData();
+  await loadData({ replaceHistory });
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
@@ -6121,12 +6119,11 @@ function navigateWithSeededFilter(table, schema, clause) {
       reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
       return;
     }
-    loadData({ next: req });
+    loadData({ next: req, replaceHistory: true });
   }).catch(reportError);
 }
 var written = null;
-var restoringFromHistory = false;
-function syncUrl() {
+function syncUrl(replaceHistory) {
   const params = viewParams(state.view);
   params.set("limit", String(state.limit));
   params.set("offset", String(state.offset));
@@ -6135,12 +6132,11 @@ function syncUrl() {
     params.set("order", state.order);
   }
   if (state.filter) params.set("filter", state.filter);
-  const qs2 = `?${params}`;
-  const same = params.toString() === new URLSearchParams(location.search).toString();
-  if (restoringFromHistory || written === null || same) {
-    history.replaceState(null, "", qs2);
+  const query = params.toString();
+  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
+    history.replaceState(null, "", `?${query}`);
   } else {
-    history.pushState(null, "", qs2);
+    history.pushState(null, "", `?${query}`);
   }
   written = location.search;
 }
@@ -6158,10 +6154,7 @@ window.addEventListener("popstate", () => {
   $("schema-select").value = state.schema ?? "";
   $("schema-select-wrap").hidden = !state.schema;
   persist();
-  restoringFromHistory = true;
-  loadTables(true).catch(reportError).finally(() => {
-    restoringFromHistory = false;
-  });
+  loadTables({ replaceHistory: true }).catch(reportError);
 });
 
 // src/features/referenced-by.ts
@@ -6768,7 +6761,8 @@ async function loadData2({
   resetScroll = true,
   highlightNew = false,
   auto = false,
-  next
+  next,
+  replaceHistory = false
 } = {}) {
   if (!auto) {
     clearError();
@@ -6797,9 +6791,9 @@ async function loadData2({
       return;
     }
     const code = e instanceof ApiError ? e.code : void 0;
-    if (!next && dropOneStaleInput(code)) return loadData2({ resetScroll, highlightNew });
+    if (!next && dropOneStaleInput(code)) return loadData2({ resetScroll, highlightNew, replaceHistory });
     const retry = next && dropStaleSort(next, code);
-    if (retry) return loadData2({ next: retry, resetScroll, highlightNew });
+    if (retry) return loadData2({ next: retry, resetScroll, highlightNew, replaceHistory });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
     reportError(failedLoadError(e, view, next));
     return;
@@ -6818,7 +6812,7 @@ async function loadData2({
   $("refresh-menu-btn").disabled = false;
   updateJoinChrome();
   refreshSavedChips();
-  syncUrl();
+  syncUrl(replaceHistory);
   const renderTable = () => {
     if (superseded()) return;
     useWidthScope(widthScope);
@@ -6903,7 +6897,10 @@ $("refresh").onclick = () => {
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });
 };
-loadSources().then(loadSchemas).then(() => loadTables()).catch(reportError).finally(() => {
+loadSources().then(loadSchemas).then(() => {
+  if (state.sort === null) applyStoredSort(tableInView());
+  return loadTables({ replaceHistory: true });
+}).catch(reportError).finally(() => {
   try {
     showBootFallbackNote();
   } finally {

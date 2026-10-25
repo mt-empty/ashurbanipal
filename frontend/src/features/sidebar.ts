@@ -215,9 +215,7 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 // guard as loadDataToken/cvRequestToken.
 let loadTablesToken = 0;
 
-// `exactView`: the view came from a history entry, whose missing sort means
-// unsorted, not "use the remembered one" (ui-guidelines R16).
-export async function loadTables(exactView = false): Promise<void> {
+export async function loadTables({ replaceHistory = false } = {}): Promise<void> {
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
@@ -257,21 +255,13 @@ export async function loadTables(exactView = false): Promise<void> {
   // Stale persisted state must never wedge the UI: fall back (R5).
   if (!tableNames.includes(startTable(state.view) ?? "")) {
     enterTable(tableNames[0] ?? null);
-    exactView = false;
+    applyStoredSort(tableInView());
     // A ?filter= was written against the table the URL named; that table
     // isn't here, so its columns can't apply to the fallback — carrying it
     // over would 400 and dead-end the very load meant to recover (R5).
     clearFilter();
   }
-  // Restore this table's remembered sort unless one is already set — a
-  // shared link's ?sort= or a history entry takes precedence.
-  const table = tableInView();
-  if (table && state.sort === null && !exactView) applyStoredSort(table);
-  // Awaited (not fire-and-forget): callers like nav.ts's popstate handler
-  // reset restoringFromHistory once this promise settles, and that flag
-  // must still be true when loadData()'s syncUrl() call runs, or a
-  // history restoration would push a new entry instead of replacing it.
-  await loadData();
+  await loadData({ replaceHistory });
 }
 
 export function listedTableNames(): string[] {

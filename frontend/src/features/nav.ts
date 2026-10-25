@@ -57,19 +57,18 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
         reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
         return;
       }
-      loadData({ next: req });
+      // One click, one entry: the filtered view replaces the table load above.
+      loadData({ next: req, replaceHistory: true });
     })
     .catch(reportError);
 }
 
 // Every applied change to the URL is its own history entry (ui-guidelines
 // R16); a load that writes the same query replaces. `written` is the search
-// last written or restored; it stays null until the first load commits, which
-// always replaces, since a deep link may name its view partially or fall back.
+// last written or restored, null until the first load commits.
 let written: string | null = null;
-let restoringFromHistory = false; // true while a popstate-triggered reload is in flight
 
-export function syncUrl(): void {
+export function syncUrl(replaceHistory: boolean): void {
   const params = viewParams(state.view);
   params.set("limit", String(state.limit));
   params.set("offset", String(state.offset));
@@ -78,13 +77,12 @@ export function syncUrl(): void {
     params.set("order", state.order);
   }
   if (state.filter) params.set("filter", state.filter);
-  const qs = `?${params}`;
+  const query = params.toString();
   // Both sides through one serializer, so a browser's own encoding can't fake a change.
-  const same = params.toString() === new URLSearchParams(location.search).toString();
-  if (restoringFromHistory || written === null || same) {
-    history.replaceState(null, "", qs);
+  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
+    history.replaceState(null, "", `?${query}`);
   } else {
-    history.pushState(null, "", qs);
+    history.pushState(null, "", `?${query}`);
   }
   written = location.search;
 }
@@ -112,10 +110,5 @@ window.addEventListener("popstate", () => {
   // this restored source's schema count, without a live re-fetch.
   $("schema-select-wrap").hidden = !state.schema;
   persist();
-  restoringFromHistory = true;
-  loadTables(true)
-    .catch(reportError)
-    .finally(() => {
-      restoringFromHistory = false;
-    });
+  loadTables({ replaceHistory: true }).catch(reportError);
 });

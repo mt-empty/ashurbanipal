@@ -213,6 +213,7 @@ export async function loadData({
   highlightNew = false,
   auto = false,
   next,
+  replaceHistory = false,
 }: {
   resetScroll?: boolean;
   highlightNew?: boolean;
@@ -221,6 +222,8 @@ export async function loadData({
   auto?: boolean;
   // A view to try; it replaces the state only if its data arrives.
   next?: ViewRequest;
+  // Start-up and history restores correct the current entry rather than add one (ui-guidelines R16).
+  replaceHistory?: boolean;
 } = {}): Promise<void> {
   if (!auto) {
     clearError();
@@ -254,9 +257,9 @@ export async function loadData({
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
     // A view not yet in view can only have restored its sort; its failure leaves the state alone.
-    if (!next && dropOneStaleInput(code)) return loadData({ resetScroll, highlightNew });
+    if (!next && dropOneStaleInput(code)) return loadData({ resetScroll, highlightNew, replaceHistory });
     const retry = next && dropStaleSort(next, code);
-    if (retry) return loadData({ next: retry, resetScroll, highlightNew });
+    if (retry) return loadData({ next: retry, resetScroll, highlightNew, replaceHistory });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
     reportError(failedLoadError(e, view, next));
     return;
@@ -278,7 +281,7 @@ export async function loadData({
   $<HTMLButtonElement>("refresh-menu-btn").disabled = false;
   updateJoinChrome();
   refreshSavedChips();
-  syncUrl();
+  syncUrl(replaceHistory);
   const renderTable = () => {
     // The transition can wait for a frame; a view switch meanwhile owns the grid, and this data is not its join's.
     if (superseded()) return;

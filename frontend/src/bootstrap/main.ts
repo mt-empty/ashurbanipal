@@ -1,7 +1,7 @@
 import { onProtocolSkew } from "../core/api.js";
 import "../features/api-reference.js";
 import { $, reportError } from "../core/dom.js";
-import { getLastPayload, initState, state } from "../core/state.js";
+import { applyStoredSort, getLastPayload, initState, state, tableInView } from "../core/state.js";
 import { startAutoRefresh } from "../features/auto-refresh.js";
 import { resetColumnWidths } from "../features/column-widths.js";
 import "../features/filter-highlight.js";
@@ -80,7 +80,11 @@ $<HTMLButtonElement>("refresh").onclick = () => {
 // not <main>, so live regions still announce) clears once all of it settles.
 loadSources()
   .then(loadSchemas)
-  .then(() => loadTables())
+  .then(() => {
+    // A link without ?sort= opens with the table's remembered one (R11), once the scope it is keyed by is pinned.
+    if (state.sort === null) applyStoredSort(tableInView());
+    return loadTables({ replaceHistory: true });
+  })
   .catch(reportError)
   .finally(() => {
     try {

@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "./support/fixtures";
-import { goBack, goForward, gotoApp, holdRequests, problem, selectTable, tableList, waitForIdle } from "./support/helpers";
+import { goBack, goForward, gotoApp, holdRequests, problem, selectTable, tableList, urlParam, waitForIdle } from "./support/helpers";
 import { gotoJoin, joinParam, joinQuery, joinRequest, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
 
 // The result of a join in the normal grid.
@@ -114,7 +114,7 @@ test("closing the overlay of a refused join link opens the join's start table", 
   await waitForIdle(page);
   await expect(page.locator("#tbody tr").first()).toBeVisible();
   await expect(page.locator("#error")).toBeEmpty();
-  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+  expect(urlParam(page, "join")).toBeNull();
 });
 
 test("a timeout offers Retry and Edit join", async ({ page }) => {
@@ -213,7 +213,7 @@ test("cancelling a join the server refuses goes back to the table in view", asyn
   expect((await response).status()).toBe(200);
   await waitForIdle(page);
   await expect(page.locator("#join-dialog")).toBeHidden();
-  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+  expect(urlParam(page, "join")).toBeNull();
 });
 
 test("a new join that times out leaves the table in view as it was", async ({ page }) => {
@@ -230,7 +230,7 @@ test("a new join that times out leaves the table in view as it was", async ({ pa
   await page.locator('th[data-col="id"]').click();
   expect((await response).status()).toBe(200);
   await waitForIdle(page);
-  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+  expect(urlParam(page, "join")).toBeNull();
 });
 
 // Runs ORDERS_USERS from the join dialog and returns once its request is held in flight.
@@ -265,11 +265,11 @@ test("a join still loading when the schema changes is dropped, not shown under t
   releaseTables();
   await loaded;
   await waitForIdle(page);
-  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+  expect(urlParam(page, "join")).toBeNull();
   // One step back is the table before the switch, with no join under the new schema in between.
   await goBack(page);
   await expect(page.locator("#current")).toHaveText("orders");
-  expect(new URL(page.url()).searchParams.get("schema")).toBe("public");
+  expect(urlParam(page, "schema")).toBe("public");
 });
 
 test("a join still loading is dropped after switching schema away and back", async ({ page }) => {
@@ -289,7 +289,7 @@ test("a join still loading is dropped after switching schema away and back", asy
   releasePublic();
   await loaded;
   await waitForIdle(page);
-  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
+  expect(urlParam(page, "join")).toBeNull();
   await expect(page.locator("th.band")).toHaveCount(0);
 });
 
@@ -309,8 +309,8 @@ test("a join still loading is dropped when Back restores the previous table", as
   await loaded;
   await waitForIdle(page);
   await expect(page.locator("#current")).toHaveText("users");
-  expect(new URL(page.url()).searchParams.get("join")).toBeNull();
-  expect(new URL(page.url()).searchParams.get("table")).toBe("users");
+  expect(urlParam(page, "join")).toBeNull();
+  expect(urlParam(page, "table")).toBe("users");
   // The entry ahead is still the table the join started from, not the join.
   await goForward(page);
   await expect(page.locator("#current")).toHaveText("orders");

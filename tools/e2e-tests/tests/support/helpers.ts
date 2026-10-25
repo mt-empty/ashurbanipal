@@ -55,12 +55,22 @@ async function waitForFirstLoad(page: Page) {
   await waitForIdle(page);
 }
 
-/** Clicks a table chip and waits until it is the current table; #current
- * changes only after a successful load. */
-export async function selectTable(page: Page, table: string) {
-  await page.locator(`#tables [data-table="${table}"]`).click();
+/** Waits until `table` is the current table and its load has settled;
+ * #current changes only after a successful load. */
+export async function waitForTable(page: Page, table: string) {
   await page.locator("#current").getByText(table, { exact: true }).waitFor();
   await waitForIdle(page);
+}
+
+/** Clicks a table chip and waits until it is the current table. */
+export async function selectTable(page: Page, table: string) {
+  await page.locator(`#tables [data-table="${table}"]`).click();
+  await waitForTable(page, table);
+}
+
+/** Reads one query param from the page's current URL. */
+export function urlParam(page: Page, name: string): string | null {
+  return new URL(page.url()).searchParams.get(name);
 }
 
 /** Types a filter clause into #filter and submits it with Enter. */
