@@ -44,7 +44,7 @@ src/
 - `bootstrap/` wires the app and owns render orchestration. `main.ts` is
   *wiring only*: side-effect imports, `registerLoadData(loadData)`, the
   toolbar/dialog event wiring, and the bootstrap calls at the bottom
-  (`loadSources().then(loadSchemas).then(loadTables)`, then
+  (`loadSources` → `loadSchemas` → `loadTables`, then
   `showBootFallbackNote`, `startSiblings()` and `startAutoRefresh()`; the
   siblings poll lives in `features/siblings.ts` and the grid's opt-in
   auto-refresh timer in `features/auto-refresh.ts`, unrelated to each other). `controller.ts` owns `loadData` /
@@ -54,7 +54,7 @@ src/
 - `features/` — one module per feature or chrome unit, each holding that
   feature's render logic *and* its event wiring together (locality of
   behavior). May import `core/` and `lib/`, never `bootstrap/` (except
-  `loadData` via `reload.ts`).
+  `loadData` and `supersedeLoads` via `reload.ts`).
 - `core/` — shared infrastructure. `dom.ts` is generic feature-agnostic
   helpers (`$`, `setStatus`, `copyText`, `reportError`/`clearError`,
   `populateSelect`, `flashIcon`). The client state is behind one
@@ -135,8 +135,8 @@ misplaced import shows up as a wrong-looking path.
   variable — a slower earlier request resolving after a faster later one
   is a real, observed failure mode here (stuck loading spinners, and a
   table's chrome/label disagreeing with the rows actually rendered), not a
-  hypothetical. `cvRequestToken` (`showCommonValues`), `loadDataToken`
-  (`loadData`), `loadTablesToken`
+  hypothetical. `cvRequestToken` (`showCommonValues`), the load token in
+  `bootstrap/reload.ts` (`nextLoadToken`/`isCurrentLoad`, used by `loadData`), `loadTablesToken`
   (`loadTables`), and `loadSchemasToken` (`loadSchemas`) are the existing
   instances of this pattern — copy their shape for the next one rather
   than reinventing it.

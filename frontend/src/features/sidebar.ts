@@ -116,11 +116,8 @@ new ResizeObserver(([entry]) => {
 }).observe($("tables"));
 
 // ==== Source selector ====
-// Same hide-when-singular shape as the schema selector below it (and drawn
-// above it — source is the outer scope, schema resolves within a source).
-// Switching source resets schema/table/sort/filter too: a different source
-// can have a completely different schema list and table set, so nothing
-// about the previous source's view carries over.
+// Hidden when the host has one source. A source switch resets the table,
+// sort and filter: another source has its own schemas and tables.
 export async function loadSources(): Promise<void> {
   let sources: SourceEntry[];
   try {
@@ -158,17 +155,11 @@ $<HTMLSelectElement>("source-select").onchange = () => {
 };
 
 // ==== Schema selector ====
-// Hidden entirely for a single-schema deployment (the overwhelming common
-// case) — no dropdown clutter, and no `schema` param on any request, byte-
-// for-byte the same wire shape as before schema selection existed. Once a
-// second schema is confirmed, state.schema is pinned to a concrete name
-// (never left as "no explicit choice") so every subsequent request is
-// unambiguous about which schema it means.
+// Hidden for a single-schema deployment, which then sends no `schema` param.
+// With two or more, state.schema is pinned to a concrete name so every
+// request names its schema.
 // Same supersession guard as loadTables: a slow /schemas from an earlier
-// source switch resolving after a faster later one would otherwise clobber
-// state.schema (and the selector) with the wrong source's schema set —
-// worse now that #source-select restores a remembered schema rather than
-// always resetting to a safe null.
+// source switch must not overwrite a later one's schema and selector.
 let loadSchemasToken = 0;
 
 export async function loadSchemas(): Promise<void> {
@@ -211,9 +202,8 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 };
 
 // A slower earlier loadTables() (e.g. from a schema switch quickly
-// followed by another) resolving after a faster later one would otherwise
-// clobber the chip list with the wrong schema's table list — same shape of
-// guard as loadDataToken/cvRequestToken.
+// followed by another) must not replace the chips with the wrong schema's
+// table list — same guard as reload.ts's load token and cvRequestToken.
 let loadTablesToken = 0;
 
 // `next`: a view in this table list to open instead of the current one; the
@@ -312,11 +302,11 @@ function actionButton(run: () => void): HTMLButtonElement {
   return btn;
 }
 
-// Replaces the chips after the divider; called whenever the join in view or the saved list changes.
 export function hasJoinChips(): boolean {
   return joinEntries.length > 0;
 }
 
+// Replaces the chips after the divider; called whenever the join in view or the saved list changes.
 export function setJoinChips(chips: JoinChip[]): void {
   const ul = $("tables");
   for (const e of joinEntries) e.li.remove();

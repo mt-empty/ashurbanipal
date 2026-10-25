@@ -52,7 +52,7 @@ tech. Its "loading is a visible state" claim does not hold for the grid.
   matching the pattern in `styles.css:118-125`.
 
 Sort and page clicks stay enabled during a load. The existing
-`loadDataToken` guard already drops stale responses.
+load-token guard (`bootstrap/reload.ts`) already drops stale responses.
 
 ## 4. Touchpoints
 
