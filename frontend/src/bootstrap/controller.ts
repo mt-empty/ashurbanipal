@@ -27,7 +27,7 @@ import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
 import { setLoadingBar } from "../features/load-bar.js";
 import { syncUrl } from "../features/nav.js";
-import { setActiveTable, setRowLoading } from "../features/sidebar.js";
+import { setActiveTable, setTableChipLoading } from "../features/sidebar.js";
 import { syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
@@ -161,11 +161,11 @@ async function fetchViewData(req: ViewRequest, auto: boolean): Promise<ViewData>
     setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true, !auto), LOADING_DELAY_MS);
   }
-  setRowLoading(table, true);
+  setTableChipLoading(table, true);
   try {
     return await api<ViewData>(await dataPath(view, params));
   } finally {
-    setRowLoading(table, false);
+    setTableChipLoading(table, false);
     if (--inFlightFetches === 0) {
       clearTimeout(slowTimer);
       setSlow(false);

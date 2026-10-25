@@ -8,7 +8,7 @@ DDL. Split out of
 
 ## 1. The ask
 
-A button on a table or view (sidebar entry, or the metadata surface of
+A button on a table or view (its table chip, or the metadata surface of
 stories 23 / 26) that shows the `CREATE …` statement for that object,
 rebuilt from the catalog: columns, types, defaults, PK / FK / unique /
 check constraints, indexes, and — for a view — its `SELECT` body. Shown in

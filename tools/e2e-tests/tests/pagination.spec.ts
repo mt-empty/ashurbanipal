@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, selectTable, waitForIdle, waitForTable } from "./support/helpers";
 
 test("next/prev paginate and toggle button disabled state", async ({ page }) => {
   await gotoApp(page);
@@ -32,8 +32,7 @@ test("next/prev paginate and toggle button disabled state", async ({ page }) => 
 
 test("limit is clamped server-side to 100 even if the URL requests more", async ({ page }) => {
   await gotoApp(page, "?table=orders&limit=999");
-  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "orders");
   await expect(page.locator("#tbody tr")).toHaveCount(100);
 });
 
@@ -59,8 +58,7 @@ test("paging works at scale against a 13.6k-row table (reviews)", async ({ page 
 test("the last partial page of a 30k-row table (audit_log) disables next", async ({ page }) => {
   // 30,000 rows, limit 50 (default) -> offset 29,975 leaves exactly 25.
   await gotoApp(page, "?table=audit_log&offset=29975");
-  await page.locator("#current").getByText("audit_log", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "audit_log");
   await expect(page.locator("#tbody tr")).toHaveCount(25);
   await expect(page.locator("#next")).toBeDisabled();
   await expect(page.locator("#prev")).toBeEnabled();

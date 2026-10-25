@@ -37,7 +37,7 @@ let joinEntries: TableEntry[] = [];
 let joinScope = "";
 const scopeOfChips = (): string => `${state.source ?? ""}|${state.schema ?? ""}`;
 const allEntries = (): TableEntry[] => [...tableEntries, ...joinEntries];
-const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
+const tableChipTemplate = $<HTMLTemplateElement>("table-chip-template");
 
 // ---- three-line cap: a long table list collapses behind "+ N more", except
 // the active table, which stays visible (and is marked `pulled` when a hidden
@@ -45,7 +45,7 @@ const tableRowTemplate = $<HTMLTemplateElement>("table-row-template");
 const TABLE_CAP_LINES = 3;
 const tablesMore = $<HTMLButtonElement>("tables-more");
 // Last item in the list, right-aligned (see styles.css), so it follows the
-// final chip instead of taking width from the rows above it.
+// final chip instead of taking width from the lines above it.
 const tablesMoreItem = $("tables-more-item");
 // A display preference like the theme, so its own key rather than the view
 // blob that mirrors to the URL.
@@ -65,8 +65,8 @@ function updateTablesCap(): void {
     e.li.classList.remove("pulled");
   }
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
-  const lastRowTop = tops[TABLE_CAP_LINES - 1];
-  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastRowTop) : [];
+  const lastLineTop = tops[TABLE_CAP_LINES - 1];
+  const beyond = tops.length > TABLE_CAP_LINES ? entries.filter((e) => e.li.offsetTop > lastLineTop) : [];
   const active = entries.find((e) => e.chip.classList.contains("active"));
   const hidden = new Set(beyond.filter((e) => e !== active));
   tablesMoreItem.hidden = hidden.size === 0;
@@ -79,11 +79,11 @@ function updateTablesCap(): void {
   for (const e of hidden) e.li.hidden = true;
   // Measured with the divider's margin on, since only taking it off below is safe.
   active?.li.classList.add("pulled");
-  // The button has to land on the last row: give up chips from the end of the
+  // The button has to land on the last line: give up chips from the end of the
   // visible ones, never the active one, until it fits there.
   const shown = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
-  while (tablesMoreItem.offsetTop > lastRowTop && shown.length) {
+  while (tablesMoreItem.offsetTop > lastLineTop && shown.length) {
     const last = shown.pop() as TableEntry;
     last.li.hidden = true;
     hidden.add(last);
@@ -116,11 +116,8 @@ new ResizeObserver(([entry]) => {
 }).observe($("tables"));
 
 // ==== Source selector ====
-// Same hide-when-singular shape as the schema selector below it (and drawn
-// above it — source is the outer scope, schema resolves within a source).
-// Switching source resets schema/table/sort/filter too: a different source
-// can have a completely different schema list and table set, so nothing
-// about the previous source's view carries over.
+// Hidden when the host has one source. A source switch resets the table,
+// sort and filter: another source has its own schemas and tables.
 export async function loadSources(): Promise<void> {
   let sources: SourceEntry[];
   try {
@@ -158,17 +155,11 @@ $<HTMLSelectElement>("source-select").onchange = () => {
 };
 
 // ==== Schema selector ====
-// Hidden entirely for a single-schema deployment (the overwhelming common
-// case) — no dropdown clutter, and no `schema` param on any request, byte-
-// for-byte the same wire shape as before schema selection existed. Once a
-// second schema is confirmed, state.schema is pinned to a concrete name
-// (never left as "no explicit choice") so every subsequent request is
-// unambiguous about which schema it means.
+// Hidden for a single-schema deployment, which then sends no `schema` param.
+// With two or more, state.schema is pinned to a concrete name so every
+// request names its schema.
 // Same supersession guard as loadTables: a slow /schemas from an earlier
-// source switch resolving after a faster later one would otherwise clobber
-// state.schema (and the selector) with the wrong source's schema set —
-// worse now that #source-select restores a remembered schema rather than
-// always resetting to a safe null.
+// source switch must not overwrite a later one's schema and selector.
 let loadSchemasToken = 0;
 
 export async function loadSchemas(): Promise<void> {
@@ -211,9 +202,8 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 };
 
 // A slower earlier loadTables() (e.g. from a schema switch quickly
-// followed by another) resolving after a faster later one would otherwise
-// clobber the chip row with the wrong schema's table list — same shape of
-// guard as loadDataToken/cvRequestToken.
+// followed by another) must not replace the chips with the wrong schema's
+// table list — same guard as reload.ts's load token and cvRequestToken.
 let loadTablesToken = 0;
 
 // `next`: a view in this table list to open instead of the current one; the
@@ -239,16 +229,16 @@ export async function loadTables({
   tableEntries = [];
   chipCounts.clear();
   for (const t of tables) {
-    const li = (tableRowTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
+    const li = (tableChipTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLLIElement;
     const chip = qs<HTMLAnchorElement>(li, "a");
-    qs<HTMLElement>(li, ".row-name").textContent = t.name;
+    qs<HTMLElement>(li, ".chip-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
     countEl.textContent = formatApproxCount(countMap[t.name]);
     chipCounts.set(t.name, countEl.textContent);
     countEl.title = APPROX_COUNT_TITLE;
     chip.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
-    // (see .row-name), so the title tooltip is the escape hatch.
+    // (see .chip-name), so the title tooltip is the escape hatch.
     chip.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
     linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
       loadData({ next: tableRequest(t.name) });
@@ -312,11 +302,11 @@ function actionButton(run: () => void): HTMLButtonElement {
   return btn;
 }
 
-// Replaces the chips after the divider; called whenever the join in view or the saved list changes.
 export function hasJoinChips(): boolean {
   return joinEntries.length > 0;
 }
 
+// Replaces the chips after the divider; called whenever the join in view or the saved list changes.
 export function setJoinChips(chips: JoinChip[]): void {
   const ul = $("tables");
   for (const e of joinEntries) e.li.remove();
@@ -335,13 +325,13 @@ export function setJoinChips(chips: JoinChip[]): void {
   updateTablesCap();
 }
 
-// Keyed by table name rather than "whichever row is .active" so it's
+// Keyed by table name rather than "whichever chip is .active" so it's
 // still correct if tableEntries is ever rebuilt mid-fetch.
-export function setRowLoading(name: string, loading: boolean): void {
+export function setTableChipLoading(name: string, loading: boolean): void {
   tableEntries.find((e) => e.name === name)?.chip.classList.toggle("loading", loading);
 }
 
-// Same tableEntries lookup as setRowLoading, so "find the row for table X"
+// Same tableEntries lookup as setTableChipLoading, so "find the chip for table X"
 // stays one idiom — a re-scan on every call rather than a cached reference,
 // so this self-heals if tableEntries is rebuilt (schema/source switch)
 // between calls instead of toggling a detached button.

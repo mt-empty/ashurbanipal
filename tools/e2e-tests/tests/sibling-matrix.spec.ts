@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, problem, selectTable } from "./support/helpers";
+import { gotoApp, problem, selectTable, urlParam } from "./support/helpers";
 
 // The service × label grid in Other services. /api/siblings is
 // mocked: the shape is what matters here, and spec/protocol.md §5.6's server
@@ -93,7 +93,7 @@ test("the same-view link carries the current view and follows it", async ({ page
   await page.keyboard.press("Escape");
   await selectTable(page, "products");
   await openMatrix(page);
-  expect(new URL(page.url()).searchParams.get("table")).toBe("products");
+  expect(urlParam(page, "table")).toBe("products");
   await expect(sameView).toHaveAttribute("href", base("orders", "int") + new URL(page.url()).search);
 });
 

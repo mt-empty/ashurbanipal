@@ -33,7 +33,7 @@ VALUES (42, 7, 'pending', 1999, '2026-08-01T10:15:00Z');
 The frontend only ever sees `col.type` as the connected engine reports it,
 and the three diverge (Postgres `integer`/`boolean`, MySQL
 `int`/`tinyint`, SQLite `INTEGER`/`BOOLEAN` or `""`), so `sqlLiteral`
-(`frontend/src/record-view.ts`) does not key off exact type names:
+(`frontend/src/features/record-view.ts`) does not key off exact type names:
 
 - A value is emitted **bare** only when its column type loosely matches a
   numeric pattern *and* the text-cast value is a clean number

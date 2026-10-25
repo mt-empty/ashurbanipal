@@ -131,20 +131,20 @@ ul { list-style: none; margin: 0; padding: 0; }
 #tables li :is(a, button).active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
 /* min-width:0 plus the cap lets one very long name ellipsize instead of
    widening the row; the full name is in `title` (see loadTables()). */
-.row-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
+.chip-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
             overflow: hidden; text-overflow: ellipsis; }
-.row-right { position: relative; display: flex; align-items: center; flex: none; }
+.chip-right { position: relative; display: flex; align-items: center; flex: none; }
 .count { font-size: .7rem; opacity: .6; }
 /* Overlays the count while loading (absolutely positioned, so it adds no
-   width and the chip row never reflows). */
-.row-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
+   width and the chip list never reflows). */
+.chip-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
                border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent;
                visibility: hidden; }
 #tables li :is(a, button).loading .count { visibility: hidden; }
-#tables li :is(a, button).loading .row-spinner { visibility: visible; animation: spin .6s linear infinite; }
+#tables li :is(a, button).loading .chip-spinner { visibility: visible; animation: spin .6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  #tables li :is(a, button).loading .row-spinner { animation: none; border-top-color: currentColor; }
+  #tables li :is(a, button).loading .chip-spinner { animation: none; border-top-color: currentColor; }
 }
 #tables-more { flex: none; background: none; border: none; font: inherit; font-size: .8rem;
                color: var(--text-muted); height: var(--chip-h); padding: 0 .5rem;
@@ -634,7 +634,7 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 
 /* ==== Join: saved chips, bands, notices ==== */
-/* Saved joins are chips at the end of the table row, after a divider. */
+/* Saved joins are chips after the table chips, past a divider. */
 #tables li.join-first { position: relative; margin-left: .5rem; }
 #tables li.join-first::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                                 width: 1px; background: var(--border-strong); }

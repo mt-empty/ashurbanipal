@@ -23,7 +23,7 @@ relationship is real and would normally be surfaced.
 the primary key?" first and returns early, so it never also checks the
 FK map for the same column:
 
-- `implementations/rust/src/db/postgres.rs:412-418` (the origin — same
+- `implementations/rust/core/src/db/postgres.rs` (the origin — same
   shape almost certainly exists in `sqlite.rs`/`mysql.rs` too, not
   independently confirmed at the time of writing)
 - `implementations/go-nethttp/postgres.go:457-458`, `sqlite.go:361-362`,

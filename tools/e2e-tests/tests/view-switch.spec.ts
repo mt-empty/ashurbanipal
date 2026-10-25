@@ -1,5 +1,18 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { dataWith, failRequests, goBack, gotoApp, holdRequests, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import {
+  dataWith,
+  failRequests,
+  goBack,
+  gotoApp,
+  holdRequests,
+  rejectSort,
+  selectTable,
+  tableKey,
+  uiState,
+  urlParam,
+  waitForIdle,
+  waitForTable,
+} from "./support/helpers";
 
 // The real-fade canary: docs/e2e-testing-guidelines.md §2.
 test.use({ realFades: true });
@@ -33,8 +46,7 @@ test("while a chip's table loads, the old grid's columns menu still changes the 
   await page.keyboard.press("Escape");
 
   release();
-  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "orders");
   await expect(page.locator('th[data-col="status"]')).toBeVisible();
 });
 
@@ -47,7 +59,7 @@ test("a chip whose table fails to load leaves the view where it was and names th
   await expect(page.locator("#error")).toHaveText("Couldn't open orders: database unavailable");
   await expect(page.locator("#current")).toHaveText("products");
   await expect(page.locator('#tables [data-table="products"]')).toHaveClass(/active/);
-  expect(new URL(page.url()).searchParams.get("table")).toBe("products");
+  expect(urlParam(page, "table")).toBe("products");
   expect(await isLocked(page)).toBe(false);
 
   const retried = page.waitForRequest((r) => r.url().includes("/api/tables/data"));
@@ -124,8 +136,7 @@ test("Back locks the old grid while the earlier table loads, and unlocks once it
   await expect(page.locator("#columns-btn")).toBeDisabled();
 
   release();
-  await page.locator("#current").getByText("users", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "users");
   await expect(page.locator("#data-table")).not.toHaveAttribute("data-stale");
   await expect(page.locator("#columns-btn")).toBeEnabled();
 });
@@ -160,8 +171,7 @@ test("a cross-schema FK cell opens its table from the first page", async ({ page
     if (dataWith("table", "orders")(r.url())) offsets.push(param(r.url(), "offset"));
   });
   await page.locator("#tbody tr").first().locator('td[data-col="order_id"] .fk-cell').click();
-  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "orders");
   expect(offsets.length).toBeGreaterThan(0);
   expect(offsets.every((o) => o === "0")).toBe(true);
 });

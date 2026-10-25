@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, selectTable, waitForIdle, waitForTable } from "./support/helpers";
 
 test("clicking an FK cell switches table and filters to the matching row", async ({ page }) => {
   await gotoApp(page);
@@ -68,8 +68,7 @@ test("clicking a cross-schema FK cell switches schema, table, and filters to the
   const orderId = await firstFkCell.textContent();
   await firstFkCell.click();
 
-  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "orders");
   await expect(page.locator("#schema-select")).toHaveValue("public");
   await expect(page.locator("#filter")).toHaveValue(`id = ${orderId}`);
   const idCells = page.locator('#tbody td[data-col="id"] .cell-text');

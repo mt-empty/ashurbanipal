@@ -3,9 +3,9 @@
 > **Status:** DONE · **Area:** frontend · **Ref:** PR #90 (2026-09-05)
 
 Shipped in PR #90, matching the shape proposed below: `schemaBySource` on
-`State` (`frontend/src/state.ts`), recorded on `#schema-select` change and
+`State` (`frontend/src/core/store.ts`), recorded on `#schema-select` change and
 on the FK-navigation schema switch via `setSchema()`
-(`frontend/src/sidebar.ts`), consulted in `#source-select`'s `onchange`.
+(`frontend/src/core/store.ts`), consulted in `#source-select`'s `onchange`.
 §4's "remember table per (source, schema)" question remains open. Rest
 kept as history.
 
@@ -13,9 +13,9 @@ kept as history.
 
 Switching source resets the schema every time. `#source-select`'s
 `onchange` sets `state.schema = null` unconditionally
-(`frontend/src/sidebar.ts:78`), then `loadSchemas()` runs against the new
+(`frontend/src/features/sidebar.ts`), then `loadSchemas()` runs against the new
 source and, finding `state.schema` empty, pins it to `public` (or the
-first schema) — `frontend/src/sidebar.ts:104-105`. So a dev who was
+first schema) — `loadSchemas` in the same file. So a dev who was
 working in `reporting` on source A, flips to source B and back, lands in
 `public` on A again and has to re-pick `reporting` from the dropdown.
 `sort` and hidden columns are already remembered per table (R11); schema
@@ -23,20 +23,19 @@ is the one piece of scope that isn't remembered per anything.
 
 ## 2. Shape
 
-Mirror the `sortByTable` pattern (`frontend/src/state.ts:17`, `:49-56`,
-`:94-110`):
+Mirror the `sortByTable` pattern (`frontend/src/core/store.ts`):
 
 - Add `schemaBySource: Record<string, string>` to `State`, included in the
   `persist()` payload and hydrated with the same "object, not array,
   discard-if-malformed" guard the other keyed maps use.
-- On `#schema-select` change (`sidebar.ts:116`) and on the FK-navigation
-  schema switch (`frontend/src/grid.ts:188`), record
+- On `#schema-select` change and on the FK-navigation schema switch
+  (`frontend/src/features/nav.ts`), record
   `schemaBySource[state.source ?? ""] = state.schema`.
 - In `#source-select`'s `onchange`, instead of `state.schema = null`, set
   `state.schema = state.schemaBySource[newSource] ?? null`.
 - `loadSchemas()` already validates: `if (!state.schema ||
   !schemas.includes(state.schema))` falls back to `public`/first
-  (`sidebar.ts:104`). So a remembered schema that no longer exists on that
+  (`loadSchemas`). So a remembered schema that no longer exists on that
   source degrades silently to the default — no extra validation needed
   (R5).
 

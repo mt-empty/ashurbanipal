@@ -48,7 +48,7 @@ first load or a join link. Without that wait,
 a test's first `selectTable()` click could race the page's own default-
 table fetch — whichever response lands last wins the render, which used
 to be able to leave `#current` labeled correctly while the grid showed the
-other table's rows (a real app bug, since fixed via `loadDataToken`; see
+other table's rows (a real app bug, since fixed by the load token in `bootstrap/reload.ts`; see
 `frontend-style-guide.md` §3's request-token rule). The general lesson
 outlives that specific bug: any page with its own async bootstrapping
 needs a helper that waits for it, not an assumption that `goto()` was

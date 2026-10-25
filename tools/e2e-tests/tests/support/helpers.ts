@@ -16,7 +16,7 @@ export async function waitForIdle(page: Page) {
           return (
             target?.id !== "refresh-icon" &&
             !target?.closest("#load-bar") &&
-            !cls?.contains("row-spinner") &&
+            !cls?.contains("chip-spinner") &&
             !cls?.contains("row-new")
           );
         }).length,

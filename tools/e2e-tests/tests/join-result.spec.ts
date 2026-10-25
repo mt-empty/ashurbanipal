@@ -1,5 +1,16 @@
 import { expect, type Page, test } from "./support/fixtures";
-import { goBack, goForward, gotoApp, holdRequests, problem, selectTable, tableList, urlParam, waitForIdle } from "./support/helpers";
+import {
+  goBack,
+  goForward,
+  gotoApp,
+  holdRequests,
+  problem,
+  selectTable,
+  tableList,
+  urlParam,
+  waitForIdle,
+  waitForTable,
+} from "./support/helpers";
 import { gotoJoin, joinParam, joinQuery, joinRequest, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
 
 // The result of a join in the normal grid.
@@ -111,8 +122,7 @@ test("closing the overlay of a refused join link opens the join's start table", 
 
   await page.keyboard.press("Escape");
   await expect(page.locator("#join-dialog")).toBeHidden();
-  await page.locator("#current").getByText("users", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "users");
   await expect(page.locator("#tbody tr").first()).toBeVisible();
   await expect(page.locator("#error")).toBeEmpty();
   expect(urlParam(page, "join")).toBeNull();
