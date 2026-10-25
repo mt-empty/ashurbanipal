@@ -12,7 +12,7 @@ import {
   withoutSaved,
   withSaved,
 } from "../lib/join-saved.js";
-import { hasJoinChips, type JoinChip, setJoinChips } from "./sidebar.js";
+import { hasJoinChips, type JoinChip, setJoinChips } from "./table-chips.js";
 
 // Saved joins live in their own localStorage key, outside the view blob: they
 // are the user's own list, grouped by source and schema, and the server never

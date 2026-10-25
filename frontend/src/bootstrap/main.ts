@@ -10,7 +10,7 @@ import { clearCommonValueCache } from "../features/filter-ui.js";
 import { clearJoinCatalog } from "../features/join-catalog.js";
 import { noteStartupSettled } from "../features/nav.js";
 import { startSiblings } from "../features/siblings.js";
-import { loadSchemas, loadSources, loadTables } from "../features/sidebar.js";
+import { loadSchemas, loadSources, loadTables } from "../features/table-chips.js";
 import "../features/sticky-header.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";
 import { showBootFallbackNote } from "../features/view-notice.js";
