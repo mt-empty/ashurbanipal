@@ -29,7 +29,7 @@ src/
   index.html   styles.css
   bootstrap/   main, controller, reload, table-focus
   features/    grid, column-widths, sticky-header, filter-ui, filter-highlight,
-               scope-select (source/schema selectors), table-chips, nav, record-view,
+               scope-select (source/schema selectors), table-chips, view-history, record-view,
                referenced-by, structure, siblings, auto-refresh, load-bar, view-notice,
                api-reference, theme,
                join-dialog / join-form / join-sql / join-view / join-saved /
@@ -69,7 +69,7 @@ src/
   `joinRequest`) whose result `loadData({ next })` commits only once its
   data arrives (`ui-guidelines.md` R14); feature modules use those rather
   than assigning scope fields ad hoc, and a site that deliberately diverges
-  (nav.ts's FK navigation, which seeds a filter instead of clearing one)
+  (view-history.ts's FK navigation, which seeds a filter instead of clearing one)
   says why inline. A value a
   plain `let` export can't expose (the applied filter AST) stays behind a
   getter/setter pair.

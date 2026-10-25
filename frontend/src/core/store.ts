@@ -41,7 +41,7 @@ export interface State {
 // Feature modules mutate scope through the named transitions below
 // (switchSource / switchSchema / clearJoin), or build a request (tableRequest,
 // joinRequest) that commitRequest applies once its data arrives; never by
-// assigning fields ad hoc. nav.ts's navigateWithSeededFilter builds its own
+// assigning fields ad hoc. view-history.ts's navigateWithSeededFilter builds its own
 // request, seeding a filter rather than clearing one.
 export const state: State = {
   source: null,

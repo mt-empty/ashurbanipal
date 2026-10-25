@@ -29,7 +29,7 @@ Mirror the `sortByTable` pattern (`frontend/src/core/store.ts`):
   `persist()` payload and hydrated with the same "object, not array,
   discard-if-malformed" guard the other keyed maps use.
 - On `#schema-select` change and on the FK-navigation schema switch
-  (`frontend/src/features/nav.ts`), record
+  (`frontend/src/features/view-history.ts`), record
   `schemaBySource[state.source ?? ""] = state.schema`.
 - In `#source-select`'s `onchange`, instead of `state.schema = null`, set
   `state.schema = state.schemaBySource[newSource] ?? null`.
