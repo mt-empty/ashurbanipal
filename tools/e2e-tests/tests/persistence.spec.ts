@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { gotoApp, selectTable, applyFilter, uiState } from "./support/helpers";
+import { applyFilter, gotoApp, selectTable, uiState, urlParam } from "./support/helpers";
 
 test("table/sort/order/limit round-trip through localStorage across a fresh visit", async ({
   page,
@@ -44,7 +44,7 @@ test("the applied filter persists to the URL, never localStorage", async ({ page
 
   const state = await uiState(page);
   expect(state).not.toHaveProperty("filter");
-  expect(new URL(page.url()).searchParams.get("filter")).toBe("status = completed");
+  expect(urlParam(page, "filter")).toBe("status = completed");
 
   await gotoApp(page); // bare URL — no filter param, restore-from-localStorage only
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();

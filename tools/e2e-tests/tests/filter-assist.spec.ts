@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./support/fixtures";
-import { applyFilter, gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { applyFilter, gotoApp, selectTable, urlParam, waitForIdle } from "./support/helpers";
 
 const suggestions = (page: Page) => page.locator("#filter-suggest-list button");
 
@@ -47,7 +47,7 @@ test("Enter submits what is typed even while a value list is open", async ({ pag
   await expect(suggestions(page)).toHaveCount(1);
   await page.locator("#filter").press("Enter");
   await waitForIdle(page);
-  expect(new URL(page.url()).searchParams.get("filter")).toBe("status = comp");
+  expect(urlParam(page, "filter")).toBe("status = comp");
   await expect(page.locator("#filter-suggest")).toBeHidden();
 });
 
@@ -61,7 +61,7 @@ test("Enter on a cleared filter resets the view instead of completing a column",
   await input.press("Enter");
   await waitForIdle(page);
   await expect(input).toHaveValue("");
-  expect(new URL(page.url()).searchParams.get("filter")).toBeNull();
+  expect(urlParam(page, "filter")).toBeNull();
   await expect(page.locator("#filter-suggest")).toBeHidden();
 });
 

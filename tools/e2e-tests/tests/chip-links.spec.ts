@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page, test } from "./support/fixtures";
-import { APP_PATH, gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { APP_PATH, gotoApp, selectTable, urlParam, waitForIdle, waitForTable } from "./support/helpers";
 import {
   expandTableChips,
   ORDERS_USERS,
@@ -60,12 +60,11 @@ test("a plain click and Enter switch the table without reloading the page", asyn
   await markDocument(page);
   await selectTable(page, "users");
   expect(await documentKept(page)).toBe(true);
-  expect(new URL(page.url()).searchParams.get("table")).toBe("users");
+  expect(urlParam(page, "table")).toBe("users");
 
   await page.locator('#tables [data-table="orders"]').focus();
   await page.keyboard.press("Enter");
-  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "orders");
   expect(await documentKept(page)).toBe(true);
 });
 
@@ -82,7 +81,7 @@ for (const [gesture, options] of NEW_TAB_GESTURES) {
     await openInNewTab(page, page.locator('#tables [data-table="users"]'), options, "users");
 
     expect(await activeTable(page)).toBe(before);
-    expect(new URL(page.url()).searchParams.get("table")).not.toBe("users");
+    expect(urlParam(page, "table")).not.toBe("users");
   });
 }
 

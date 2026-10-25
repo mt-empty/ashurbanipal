@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, holdRequests, selectTable, tableData, waitForIdle } from "./support/helpers";
+import { gotoApp, holdRequests, selectTable, tableData, waitForIdle, waitForTable } from "./support/helpers";
 
 const expectBarIdle = (page: Page) => expect(page.locator("#load-bar")).not.toHaveAttribute("data-state", /.*/);
 
@@ -32,8 +32,7 @@ test("a slow fetch shows the bar, dims the rows, and clears when it lands", asyn
   await expect(page.locator("#status")).toHaveText("loading…");
 
   release();
-  await page.locator("#current").getByText("users", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "users");
   await expectBarIdle(page);
   await expect(page.locator("#data-table")).not.toHaveAttribute("data-slow", "");
   await expect(page.locator("#status")).toHaveText("");
@@ -59,8 +58,7 @@ test("overlapping fetches keep the bar until the last one settles", async ({ pag
   await expect(page.locator("#load-bar")).toHaveAttribute("data-state", "loading");
 
   releases[1]();
-  await page.locator("#current").getByText("products", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "products");
   await expectBarIdle(page);
 });
 

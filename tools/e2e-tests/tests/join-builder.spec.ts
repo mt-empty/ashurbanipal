@@ -1,5 +1,5 @@
 import { expect, test } from "./support/fixtures";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, selectTable, urlParam, waitForIdle } from "./support/helpers";
 import {
   expandTableChips,
   gotoJoin,
@@ -446,6 +446,6 @@ test("showing a join again from the form keeps its written column order and its 
       { join: 0, column: "id" },
     ],
   });
-  expect(new URL(page.url()).searchParams.get("join")).toBe(text);
+  expect(urlParam(page, "join")).toBe(text);
   await expect(page.locator("#filter")).toHaveValue("o.id > 1");
 });

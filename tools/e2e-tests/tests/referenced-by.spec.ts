@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { gotoApp, selectTable, uiState, waitForIdle } from "./support/helpers";
+import { gotoApp, selectTable, uiState, waitForTable } from "./support/helpers";
 
 // Seed shape (conformance/seed): public.users is referenced by orders.user_id
 // and support_tickets.(user_id, assigned_admin_id); public.inventory_locations
@@ -20,8 +20,7 @@ test("PK-cell popover lists incoming FKs and drills into a referrer filtered to 
 
   await pop.getByRole("button", { name: /^→ orders \(user_id\)/ }).click();
 
-  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "orders");
   await expect(pop).toBeHidden();
   await expect(page.locator("#filter")).toHaveValue(`user_id = ${userId}`);
   // The filter rides the URL (shareable view) but never localStorage (R6).
@@ -50,8 +49,7 @@ test("the record dialog's 'referenced by' section drills in and closes the dialo
   await dialog.locator("#record-referenced-by").getByRole("button", { name: /^→ orders \(user_id\)/ }).click();
 
   await expect(dialog).toBeHidden();
-  await page.locator("#current").getByText("orders", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "orders");
   await expect(page.locator("#filter")).toHaveValue(`user_id = ${userId}`);
 });
 
@@ -68,8 +66,7 @@ test("a composite-key referrer drills in with an AND filter over both columns", 
   await expect(pop).toBeVisible();
   await pop.getByRole("button", { name: /^→ inventory_counts \(warehouse_code, bin_code\)/ }).click();
 
-  await page.locator("#current").getByText("inventory_counts", { exact: true }).waitFor();
-  await waitForIdle(page);
+  await waitForTable(page, "inventory_counts");
   await expect(page.locator("#filter")).toHaveValue(/^warehouse_code = .+ AND bin_code = .+$/);
 
   const rows = page.locator("#tbody tr");
