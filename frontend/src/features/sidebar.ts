@@ -151,7 +151,9 @@ $<HTMLSelectElement>("source-select").onchange = () => {
   // resetting; loadSchemas() still validates it and falls back (R5/R12).
   supersedeLoads();
   switchSource($<HTMLSelectElement>("source-select").value);
-  loadSchemas().then(loadTables).catch(reportError);
+  loadSchemas()
+    .then(() => loadTables())
+    .catch(reportError);
 };
 
 // ==== Schema selector ====
@@ -213,7 +215,9 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 // guard as loadDataToken/cvRequestToken.
 let loadTablesToken = 0;
 
-export async function loadTables(): Promise<void> {
+// `exactView`: the view came from a history entry, whose missing sort means
+// unsorted, not "use the remembered one" (ui-guidelines R16).
+export async function loadTables(exactView = false): Promise<void> {
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
@@ -253,6 +257,7 @@ export async function loadTables(): Promise<void> {
   // Stale persisted state must never wedge the UI: fall back (R5).
   if (!tableNames.includes(startTable(state.view) ?? "")) {
     enterTable(tableNames[0] ?? null);
+    exactView = false;
     // A ?filter= was written against the table the URL named; that table
     // isn't here, so its columns can't apply to the fallback — carrying it
     // over would 400 and dead-end the very load meant to recover (R5).
@@ -261,7 +266,7 @@ export async function loadTables(): Promise<void> {
   // Restore this table's remembered sort unless one is already set — a
   // shared link's ?sort= or a history entry takes precedence.
   const table = tableInView();
-  if (table && state.sort === null) applyStoredSort(table);
+  if (table && state.sort === null && !exactView) applyStoredSort(table);
   // Awaited (not fire-and-forget): callers like nav.ts's popstate handler
   // reset restoringFromHistory once this promise settles, and that flag
   // must still be true when loadData()'s syncUrl() call runs, or a

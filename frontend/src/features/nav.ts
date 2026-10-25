@@ -5,7 +5,6 @@ import {
   clearFilter,
   enterTable,
   persist,
-  sameView,
   setSchema,
   state,
   tableInView,
@@ -63,17 +62,15 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
     .catch(reportError);
 }
 
-// A history entry is a view (url.ts sameView); sort, page and filter replace
-// the current entry, so Back returns to the previous view, not the previous
-// page of rows. `written` is the search last written or restored; it stays
-// null until the first load commits, which always replaces, since a deep link
-// may name its view partially or fall back.
+// Every applied change to the URL is its own history entry (ui-guidelines
+// R16); a load that writes the same query replaces. `written` is the search
+// last written or restored; it stays null until the first load commits, which
+// always replaces, since a deep link may name its view partially or fall back.
 let written: string | null = null;
 let restoringFromHistory = false; // true while a popstate-triggered reload is in flight
 
 export function syncUrl(): void {
   const params = viewParams(state.view);
-  const same = sameView(params, new URLSearchParams(location.search));
   params.set("limit", String(state.limit));
   params.set("offset", String(state.offset));
   if (state.sort) {
@@ -82,6 +79,8 @@ export function syncUrl(): void {
   }
   if (state.filter) params.set("filter", state.filter);
   const qs = `?${params}`;
+  // Both sides through one serializer, so a browser's own encoding can't fake a change.
+  const same = params.toString() === new URLSearchParams(location.search).toString();
   if (restoringFromHistory || written === null || same) {
     history.replaceState(null, "", qs);
   } else {
@@ -114,7 +113,7 @@ window.addEventListener("popstate", () => {
   $("schema-select-wrap").hidden = !state.schema;
   persist();
   restoringFromHistory = true;
-  loadTables()
+  loadTables(true)
     .catch(reportError)
     .finally(() => {
       restoringFromHistory = false;

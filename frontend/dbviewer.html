@@ -2345,10 +2345,6 @@ function viewParams(view) {
   if (view?.kind === "join") params.set("join", view.text);
   return params;
 }
-var VIEW_PARAMS = ["table", "source", "schema", "join"];
-function sameView(a, b) {
-  return VIEW_PARAMS.every((k) => (a.get(k) ?? "") === (b.get(k) ?? ""));
-}
 function viewHref(view) {
   return `?${viewParams(view)}`;
 }
@@ -3556,7 +3552,7 @@ async function loadSources() {
 $("source-select").onchange = () => {
   supersedeLoads();
   switchSource($("source-select").value);
-  loadSchemas().then(loadTables).catch(reportError);
+  loadSchemas().then(() => loadTables()).catch(reportError);
 };
 var loadSchemasToken = 0;
 async function loadSchemas() {
@@ -3592,7 +3588,7 @@ $("schema-select").onchange = () => {
   loadTables().catch(reportError);
 };
 var loadTablesToken = 0;
-async function loadTables() {
+async function loadTables(exactView = false) {
   syncGridLock();
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
@@ -3629,10 +3625,11 @@ async function loadTables() {
   const tableNames = tables.map((t) => t.name);
   if (!tableNames.includes(startTable(state.view) ?? "")) {
     enterTable(tableNames[0] ?? null);
+    exactView = false;
     clearFilter();
   }
   const table = tableInView();
-  if (table && state.sort === null) applyStoredSort(table);
+  if (table && state.sort === null && !exactView) applyStoredSort(table);
   await loadData();
 }
 function listedTableNames() {
@@ -5326,12 +5323,12 @@ function paintRow(ref, { sibling: s, note }, newTab) {
 function shapeOf(m) {
   return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
 }
-function paintLink(ref, name, label, { sibling, sameView: sameView2 }) {
-  const state2 = sameView2 ? `same view \xB7 ${health(sibling.healthy)}` : health(sibling.healthy);
+function paintLink(ref, name, label, { sibling, sameView }) {
+  const state2 = sameView ? `same view \xB7 ${health(sibling.healthy)}` : health(sibling.healthy);
   ref.dot.className = dotClass(sibling.healthy);
   ref.state.textContent = state2;
   ref.a.setAttribute("aria-label", `${name} in ${label}: ${state2}`);
-  ref.a.href = sameView2 ? sameViewHref(sibling.base_url, location.search) : sibling.base_url;
+  ref.a.href = sameView ? sameViewHref(sibling.base_url, location.search) : sibling.base_url;
 }
 function renderCell(cell) {
   const td = el("td");
@@ -5547,7 +5544,6 @@ var written = null;
 var restoringFromHistory = false;
 function syncUrl() {
   const params = viewParams(state.view);
-  const same = sameView(params, new URLSearchParams(location.search));
   params.set("limit", String(state.limit));
   params.set("offset", String(state.offset));
   if (state.sort) {
@@ -5556,6 +5552,7 @@ function syncUrl() {
   }
   if (state.filter) params.set("filter", state.filter);
   const qs2 = `?${params}`;
+  const same = params.toString() === new URLSearchParams(location.search).toString();
   if (restoringFromHistory || written === null || same) {
     history.replaceState(null, "", qs2);
   } else {
@@ -5578,7 +5575,7 @@ window.addEventListener("popstate", () => {
   $("schema-select-wrap").hidden = !state.schema;
   persist();
   restoringFromHistory = true;
-  loadTables().catch(reportError).finally(() => {
+  loadTables(true).catch(reportError).finally(() => {
     restoringFromHistory = false;
   });
 });
@@ -6322,7 +6319,7 @@ $("refresh").onclick = () => {
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });
 };
-loadSources().then(loadSchemas).then(loadTables).catch(reportError).finally(() => {
+loadSources().then(loadSchemas).then(() => loadTables()).catch(reportError).finally(() => {
   try {
     showBootFallbackNote();
   } finally {

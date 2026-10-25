@@ -80,7 +80,7 @@ $<HTMLButtonElement>("refresh").onclick = () => {
 // not <main>, so live regions still announce) clears once all of it settles.
 loadSources()
   .then(loadSchemas)
-  .then(loadTables)
+  .then(() => loadTables())
   .catch(reportError)
   .finally(() => {
     try {

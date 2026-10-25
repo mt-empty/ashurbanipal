@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "./support/fixtures";
 import {
   applyFilter,
+  clearFilterViaSearchEvent,
   dataWith,
   goBack,
   goForward,
@@ -14,6 +15,11 @@ import {
 
 const historyLength = (page: Page) => page.evaluate(() => history.length);
 const param = (page: Page, name: string) => new URL(page.url()).searchParams.get(name);
+
+async function expectParam(page: Page, name: string, value: string | null) {
+  await expect.poll(() => param(page, name)).toBe(value);
+  await waitForIdle(page);
+}
 
 async function expectTable(page: Page, table: string) {
   await page.locator("#current").getByText(table, { exact: true }).waitFor();
@@ -120,43 +126,89 @@ test("navigating to a different table from a back-stepped position truncates the
   await expectTable(page, "sessions");
 });
 
-test("back/forward restores the filter, sort and page along with table navigation", async ({ page }) => {
+test("back returns to the unfiltered table after filtering and switching away", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  const entries = await historyLength(page);
-  // Filter, sort and page each replace the orders entry; none adds one.
   await applyFilter(page, "status = completed");
-  expect(await historyLength(page)).toBe(entries);
-  await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
-  await waitForIdle(page);
-  expect(await historyLength(page)).toBe(entries);
-  await page.locator("#next").click();
-  await waitForIdle(page);
-  expect(await historyLength(page)).toBe(entries);
-  const sort = param(page, "sort");
-  const offset = param(page, "offset");
-  expect(sort).not.toBeNull();
-  expect(offset).not.toBe("0");
-
-  await selectTable(page, "products"); // its own back-stop; clears the filter
+  await selectTable(page, "products");
 
   await goBack(page);
   await expectTable(page, "orders");
   await expect(page.locator("#filter")).toHaveValue("status = completed");
-  expect(param(page, "sort")).toBe(sort);
-  expect(param(page, "offset")).toBe(offset);
 
-  await goForward(page);
-  await expectTable(page, "products");
+  await goBack(page);
+  await expectParam(page, "filter", null);
+  await expectTable(page, "orders");
   await expect(page.locator("#filter")).toHaveValue("");
 });
 
-test("sorting within the initially-loaded table does not create a back-stop", async ({ page }) => {
+test("filter, sort and page each add an entry that back steps through", async ({ page }) => {
   await gotoApp(page);
-  const start = await historyLength(page);
-  // Whatever table auto-loaded first — sorting it is a same-table
-  // refinement, not a navigation, so it must not add a history entry.
+  await selectTable(page, "orders");
+  const entries = await historyLength(page);
+  await applyFilter(page, "status = completed");
+  expect(await historyLength(page)).toBe(entries + 1);
   await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
-  expect(await historyLength(page)).toBe(start);
+  expect(await historyLength(page)).toBe(entries + 2);
+  const sort = param(page, "sort");
+  expect(sort).not.toBeNull();
+  await page.locator("#next").click();
+  await waitForIdle(page);
+  expect(await historyLength(page)).toBe(entries + 3);
+  const offset = param(page, "offset");
+  expect(offset).not.toBe("0");
+
+  await goBack(page);
+  await expectParam(page, "offset", "0");
+  expect(param(page, "sort")).toBe(sort);
+  await goBack(page);
+  await expectParam(page, "sort", null);
+  await expect(page.locator("#filter")).toHaveValue("status = completed");
+  await goBack(page);
+  await expectParam(page, "filter", null);
+  await expect(page.locator("#filter")).toHaveValue("");
+
+  await goForward(page);
+  await goForward(page);
+  await goForward(page);
+  await expectParam(page, "offset", offset);
+  expect(param(page, "sort")).toBe(sort);
+  await expect(page.locator("#filter")).toHaveValue("status = completed");
+});
+
+test("clearing a filter adds an entry, and back brings the filter back", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await applyFilter(page, "status = completed");
+  const entries = await historyLength(page);
+  await clearFilterViaSearchEvent(page);
+  expect(await historyLength(page)).toBe(entries + 1);
+  expect(param(page, "filter")).toBeNull();
+
+  await goBack(page);
+  await expectParam(page, "filter", "status = completed");
+  await expect(page.locator("#filter")).toHaveValue("status = completed");
+});
+
+test("a load that changes nothing adds no entry", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await applyFilter(page, "status = completed");
+  const entries = await historyLength(page);
+  await applyFilter(page, "status = completed");
+  await page.locator("#refresh").click();
+  await waitForIdle(page);
+  expect(await historyLength(page)).toBe(entries);
+});
+
+test("sorting the initially-loaded table adds an entry, and back unsorts it", async ({ page }) => {
+  await gotoApp(page);
+  const start = await historyLength(page);
+  await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
+  await waitForIdle(page);
+  expect(await historyLength(page)).toBe(start + 1);
+  expect(param(page, "sort")).not.toBeNull();
+  await goBack(page);
+  await expectParam(page, "sort", null);
 });

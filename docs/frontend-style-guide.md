@@ -220,7 +220,8 @@ a broken page.
 
 ## 6. State and URLs
 
-- `localStorage` and the URL (`history.replaceState()`) persist the user's
+- `localStorage` and the URL (one history entry per applied change,
+  ui-guidelines R16) persist the user's
   own view intent — table, sort, order, limit, offset — never values read
   back out of result rows (cell contents, PKs lifted from a row). The
   applied filter is the one exception to "both mechanisms": it is
