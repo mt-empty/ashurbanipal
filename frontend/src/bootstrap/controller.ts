@@ -27,7 +27,7 @@ import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
 import { setLoadingBar } from "../features/load-bar.js";
 import { syncUrl } from "../features/nav.js";
-import { setActiveTable, setTableChipLoading } from "../features/sidebar.js";
+import { setActiveTable, setTableChipLoading } from "../features/table-chips.js";
 import { syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";

@@ -14,7 +14,7 @@ import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
 import { findForeignKey, joinMismatch, pairNote } from "../lib/join-types.js";
 import { createDropdown, lastDropdownLabel } from "./dropdown.js";
 import { cachedColumns, tableColumns } from "./join-catalog.js";
-import { listedTableNames, tableChipCount } from "./sidebar.js";
+import { listedTableNames, tableChipCount } from "./table-chips.js";
 
 // The Form half of the join overlay (board O): edits a Draft in place and tells
 // the dialog when it changed. Menus and buttons re-render the form; typing in an

@@ -118,7 +118,7 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
 #tables-bar { margin-top: var(--gap-lg); }
 ul#tables { display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
 #tables-more-item { margin-left: auto; }
-/* The active chip of a collapsed list when a hidden chip sits before it (see features/sidebar.ts). */
+/* The active chip of a collapsed list when a hidden chip sits before it (see features/table-chips.ts). */
 #tables li.pulled { position: relative; margin-left: .5rem; }
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }

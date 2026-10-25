@@ -5,7 +5,7 @@ import type { Column } from "../core/types.js";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Value-rendering helpers shared across feature modules. A leaf (type-only
-// imports) so grid.ts / sidebar.ts / record-view.ts can share them without
+// imports) so grid.ts / table-chips.ts / record-view.ts can share them without
 // importing each other.
 
 export function formatClock(at: Date): string {

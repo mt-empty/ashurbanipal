@@ -14,7 +14,7 @@ import {
 } from "../core/state.js";
 import type { FilterCondition } from "../core/types.js";
 import { parseFilterDsl } from "../lib/filter-dsl.js";
-import { loadTables } from "./sidebar.js";
+import { loadTables } from "./table-chips.js";
 
 // FK-cell nav and the referenced-by drill-in: `table` filtered by `clause`,
 // with no sort (a stale stored one would defeat loadData's drop-and-retry
@@ -48,7 +48,7 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
   setSchema(schema);
   loadTables({ next: req })
     .then(() => {
-      // loadTables()'s stale-state fallback (sidebar.ts) drops `req` and
+      // loadTables()'s stale-state fallback (table-chips.ts) drops `req` and
       // opens another table when `table` isn't in this schema's own
       // /api/tables listing (e.g. a partitioned referrer, which list_tables
       // excludes).

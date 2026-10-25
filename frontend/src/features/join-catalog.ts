@@ -2,8 +2,8 @@ import { ApiError, api } from "../core/api.js";
 import { applyScopeParams, scopeTableKey } from "../core/state.js";
 import type { Column, ViewData } from "../core/types.js";
 import type { JoinCatalog } from "../lib/join-dsl.js";
-import { listedTableNames } from "./sidebar.js";
 import { tableStructure } from "./structure.js";
+import { listedTableNames } from "./table-chips.js";
 
 // The page learns a table's columns (names, types, keys) from the first row of
 // its data; the table listing carries only names. Cached per scope, failures
