@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "./support/fixtures";
-import { gotoApp, holdRequests, problem, selectTable, tableList, waitForIdle } from "./support/helpers";
+import { goBack, goForward, gotoApp, holdRequests, problem, selectTable, tableList, waitForIdle } from "./support/helpers";
 import { gotoJoin, joinParam, joinQuery, joinRequest, nextJoinResponse, ORDERS_USERS, writeSql } from "./support/join";
 
 // The result of a join in the normal grid.
@@ -154,7 +154,7 @@ test("leaving a join view for a table chip drops the join, back returns to it", 
   await waitForIdle(page);
   await expect(page.locator("th.band")).toHaveCount(0);
   await expect(page.locator("#join-btn")).toBeVisible();
-  await page.locator("#nav-back").click();
+  await goBack(page);
   await expect(page.locator("#current")).toHaveText("orders o ⟕ users u");
   await waitForIdle(page);
   await expect(page.locator("th.band")).toHaveCount(2);
@@ -267,7 +267,7 @@ test("a join still loading when the schema changes is dropped, not shown under t
   await waitForIdle(page);
   expect(new URL(page.url()).searchParams.get("join")).toBeNull();
   // One step back is the table before the switch, with no join under the new schema in between.
-  await page.locator("#nav-back").click();
+  await goBack(page);
   await expect(page.locator("#current")).toHaveText("orders");
   expect(new URL(page.url()).searchParams.get("schema")).toBe("public");
 });
@@ -300,7 +300,7 @@ test("a join still loading is dropped when Back restores the previous table", as
   const releaseJoin = await startHeldJoin(page);
   const releaseTables = await holdRequests(page, tableList("public"));
   const tablesSent = page.waitForRequest((r) => tableList("public")(new URL(r.url())));
-  await page.locator("#nav-back").click();
+  await goBack(page);
   await tablesSent;
 
   await answerJoin(page, releaseJoin);
@@ -312,6 +312,6 @@ test("a join still loading is dropped when Back restores the previous table", as
   expect(new URL(page.url()).searchParams.get("join")).toBeNull();
   expect(new URL(page.url()).searchParams.get("table")).toBe("users");
   // The entry ahead is still the table the join started from, not the join.
-  await page.locator("#nav-forward").click();
+  await goForward(page);
   await expect(page.locator("#current")).toHaveText("orders");
 });

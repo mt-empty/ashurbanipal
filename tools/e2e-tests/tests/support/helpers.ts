@@ -38,6 +38,17 @@ export async function reloadApp(page: Page) {
   await waitForFirstLoad(page);
 }
 
+/** Presses the browser's Back. A same-document entry never fires `load`,
+ * so this waits only for the commit; callers wait for the view themselves. */
+export async function goBack(page: Page) {
+  await page.goBack({ waitUntil: "commit" });
+}
+
+/** Presses the browser's Forward; waits as goBack does. */
+export async function goForward(page: Page) {
+  await page.goForward({ waitUntil: "commit" });
+}
+
 // The table list is aria-busy from the first byte until the app's start-up chain settles.
 async function waitForFirstLoad(page: Page) {
   await expect(page.locator("#tables")).not.toHaveAttribute("aria-busy", "true");

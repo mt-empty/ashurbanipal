@@ -59,8 +59,6 @@ $<HTMLButtonElement>("next").onclick = () => {
   state.offset += state.limit;
   loadData({ resetScroll: false });
 };
-$<HTMLButtonElement>("nav-back").onclick = () => history.back();
-$<HTMLButtonElement>("nav-forward").onclick = () => history.forward();
 // resetScroll: false — an in-place re-fetch of the current view; highlightNew
 // tints any row that wasn't in the previous result.
 $<HTMLButtonElement>("refresh").onclick = () => {

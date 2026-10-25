@@ -115,14 +115,8 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
                                  max-width: 12rem; text-overflow: ellipsis; }
 
 /* ==== Table chips ==== */
-#tables-bar { display: flex; align-items: flex-start; gap: var(--gap); margin-top: var(--gap-lg); }
-#nav-history { display: flex; flex: none; }
-#nav-history button { background: none; border: none; font: inherit; font-size: 1.25rem;
-                      height: var(--chip-h); line-height: 1; color: inherit; cursor: pointer;
-                      padding: 0 .35rem; border-radius: 6px; }
-#nav-history button:not(:disabled):hover { background: var(--hover); }
-#nav-history button:disabled { opacity: .3; cursor: default; }
-ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
+#tables-bar { margin-top: var(--gap-lg); }
+ul#tables { display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
 #tables-more-item { margin-left: auto; }
 /* The active chip of a collapsed list when a hidden chip sits before it (see features/sidebar.ts). */
 #tables li.pulled { position: relative; margin-left: .5rem; }

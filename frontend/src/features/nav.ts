@@ -5,12 +5,12 @@ import {
   clearFilter,
   enterTable,
   persist,
+  sameView,
   setSchema,
   state,
   tableInView,
   tableRequest,
   type ViewRequest,
-  viewKey,
   viewParams,
 } from "../core/state.js";
 import type { FilterCondition } from "../core/types.js";
@@ -63,33 +63,17 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
     .catch(reportError);
 }
 
-// Back/forward navigation stops at table/schema/source switches, not every
-// sort/page tweak within the same table — otherwise "back" would undo
-// pagination one row-page at a time instead of returning to the previously
-// viewed table.
-// navStack mirrors the browser's own session-history entries we've pushed
-// (their order, not their content) so the in-app buttons know when they're
-// at either end; the entries themselves live in the URL/history.state, never
-// duplicated into a JS-held array of visited data.
-let navStack: string[] = [];
-let navIndex = -1;
+// A history entry is a view (url.ts sameView); sort, page and filter replace
+// the current entry, so Back returns to the previous view, not the previous
+// page of rows. `written` is the search last written or restored; it stays
+// null until the first load commits, which always replaces, since a deep link
+// may name its view partially or fall back.
+let written: string | null = null;
 let restoringFromHistory = false; // true while a popstate-triggered reload is in flight
 
-function navViewKey(): string {
-  return `${state.source ?? ""} ${state.schema ?? ""} ${viewKey(state.view)}`;
-}
-
-function updateNavButtons(): void {
-  $<HTMLButtonElement>("nav-back").disabled = navIndex <= 0;
-  $<HTMLButtonElement>("nav-forward").disabled = navIndex >= navStack.length - 1;
-}
-
-// filter rides in the URL (ui-guidelines.md R6) but is deliberately excluded
-// from navViewKey() below — a filter change replaces the current history
-// entry like a sort click or a page turn, never pushing a new back-stack stop.
-// The join is part of the key: entering or leaving a join view is a new stop.
 export function syncUrl(): void {
   const params = viewParams(state.view);
+  const same = sameView(params, new URLSearchParams(location.search));
   params.set("limit", String(state.limit));
   params.set("offset", String(state.offset));
   if (state.sort) {
@@ -98,28 +82,23 @@ export function syncUrl(): void {
   }
   if (state.filter) params.set("filter", state.filter);
   const qs = `?${params}`;
-  const key = navViewKey();
-  const samePlace = navIndex >= 0 && navStack[navIndex] === key;
-  if (restoringFromHistory || navStack.length === 0 || samePlace) {
-    if (navStack.length === 0) {
-      navStack = [key];
-      navIndex = 0;
-    }
-    history.replaceState({ navIndex }, "", qs);
+  if (restoringFromHistory || written === null || same) {
+    history.replaceState(null, "", qs);
   } else {
-    navStack = navStack.slice(0, navIndex + 1);
-    navStack.push(key);
-    navIndex = navStack.length - 1;
-    history.pushState({ navIndex }, "", qs);
+    history.pushState(null, "", qs);
   }
-  updateNavButtons();
+  written = location.search;
 }
 
-window.addEventListener("popstate", (ev) => {
-  const navState = ev.state as { navIndex?: number } | null;
-  if (!navState || typeof navState.navIndex !== "number") return;
-  if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
-  navIndex = navState.navIndex;
+window.addEventListener("popstate", () => {
+  // Start-up's own load chain would race a restore; reloading this entry is the clean one.
+  if (written === null) {
+    location.reload();
+    return;
+  }
+  // A fragment-only step leaves the view as it is.
+  if (location.search === written) return;
+  written = location.search;
   supersedeLoads();
   const params = new URLSearchParams(location.search);
   // Exact reader: reproduce this history entry verbatim, absences included
@@ -134,7 +113,6 @@ window.addEventListener("popstate", (ev) => {
   // this restored source's schema count, without a live re-fetch.
   $("schema-select-wrap").hidden = !state.schema;
   persist();
-  updateNavButtons();
   restoringFromHistory = true;
   loadTables()
     .catch(reportError)

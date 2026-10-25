@@ -137,14 +137,8 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
                                  max-width: 12rem; text-overflow: ellipsis; }
 
 /* ==== Table chips ==== */
-#tables-bar { display: flex; align-items: flex-start; gap: var(--gap); margin-top: var(--gap-lg); }
-#nav-history { display: flex; flex: none; }
-#nav-history button { background: none; border: none; font: inherit; font-size: 1.25rem;
-                      height: var(--chip-h); line-height: 1; color: inherit; cursor: pointer;
-                      padding: 0 .35rem; border-radius: 6px; }
-#nav-history button:not(:disabled):hover { background: var(--hover); }
-#nav-history button:disabled { opacity: .3; cursor: default; }
-ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
+#tables-bar { margin-top: var(--gap-lg); }
+ul#tables { display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
 #tables-more-item { margin-left: auto; }
 /* The active chip of a collapsed list when a hidden chip sits before it (see features/sidebar.ts). */
 #tables li.pulled { position: relative; margin-left: .5rem; }
@@ -854,10 +848,6 @@ thead tr.bands + tr th { top: var(--band-h); }
       <button id="protocol-warning-dismiss" type="button" aria-label="dismiss warning">✕</button>
     </div>
     <nav id="tables-bar" aria-label="tables">
-      <span id="nav-history">
-        <button id="nav-back" type="button" disabled title="back to previous table view" aria-label="back">‹</button>
-        <button id="nav-forward" type="button" disabled title="forward to next table view" aria-label="forward">›</button>
-      </span>
       <ul id="tables" aria-busy="true"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
       <template id="table-row-template"><li><a><span class="row-name"></span><span class="row-right"><span class="row-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
     </nav>
@@ -2354,6 +2344,10 @@ function viewParams(view) {
   applyScopeParams(params);
   if (view?.kind === "join") params.set("join", view.text);
   return params;
+}
+var VIEW_PARAMS = ["table", "source", "schema", "join"];
+function sameView(a, b) {
+  return VIEW_PARAMS.every((k) => (a.get(k) ?? "") === (b.get(k) ?? ""));
 }
 function viewHref(view) {
   return `?${viewParams(view)}`;
@@ -5332,12 +5326,12 @@ function paintRow(ref, { sibling: s, note }, newTab) {
 function shapeOf(m) {
   return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
 }
-function paintLink(ref, name, label, { sibling, sameView }) {
-  const state2 = sameView ? `same view \xB7 ${health(sibling.healthy)}` : health(sibling.healthy);
+function paintLink(ref, name, label, { sibling, sameView: sameView2 }) {
+  const state2 = sameView2 ? `same view \xB7 ${health(sibling.healthy)}` : health(sibling.healthy);
   ref.dot.className = dotClass(sibling.healthy);
   ref.state.textContent = state2;
   ref.a.setAttribute("aria-label", `${name} in ${label}: ${state2}`);
-  ref.a.href = sameView ? sameViewHref(sibling.base_url, location.search) : sibling.base_url;
+  ref.a.href = sameView2 ? sameViewHref(sibling.base_url, location.search) : sibling.base_url;
 }
 function renderCell(cell) {
   const td = el("td");
@@ -5549,18 +5543,11 @@ function navigateWithSeededFilter(table, schema, clause) {
     loadData({ next: req });
   }).catch(reportError);
 }
-var navStack = [];
-var navIndex = -1;
+var written = null;
 var restoringFromHistory = false;
-function navViewKey() {
-  return `${state.source ?? ""} ${state.schema ?? ""} ${viewKey(state.view)}`;
-}
-function updateNavButtons() {
-  $("nav-back").disabled = navIndex <= 0;
-  $("nav-forward").disabled = navIndex >= navStack.length - 1;
-}
 function syncUrl() {
   const params = viewParams(state.view);
+  const same = sameView(params, new URLSearchParams(location.search));
   params.set("limit", String(state.limit));
   params.set("offset", String(state.offset));
   if (state.sort) {
@@ -5569,27 +5556,20 @@ function syncUrl() {
   }
   if (state.filter) params.set("filter", state.filter);
   const qs2 = `?${params}`;
-  const key = navViewKey();
-  const samePlace = navIndex >= 0 && navStack[navIndex] === key;
-  if (restoringFromHistory || navStack.length === 0 || samePlace) {
-    if (navStack.length === 0) {
-      navStack = [key];
-      navIndex = 0;
-    }
-    history.replaceState({ navIndex }, "", qs2);
+  if (restoringFromHistory || written === null || same) {
+    history.replaceState(null, "", qs2);
   } else {
-    navStack = navStack.slice(0, navIndex + 1);
-    navStack.push(key);
-    navIndex = navStack.length - 1;
-    history.pushState({ navIndex }, "", qs2);
+    history.pushState(null, "", qs2);
   }
-  updateNavButtons();
+  written = location.search;
 }
-window.addEventListener("popstate", (ev) => {
-  const navState = ev.state;
-  if (!navState || typeof navState.navIndex !== "number") return;
-  if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
-  navIndex = navState.navIndex;
+window.addEventListener("popstate", () => {
+  if (written === null) {
+    location.reload();
+    return;
+  }
+  if (location.search === written) return;
+  written = location.search;
   supersedeLoads();
   const params = new URLSearchParams(location.search);
   applyUrlExact(params);
@@ -5597,7 +5577,6 @@ window.addEventListener("popstate", (ev) => {
   $("schema-select").value = state.schema ?? "";
   $("schema-select-wrap").hidden = !state.schema;
   persist();
-  updateNavButtons();
   restoringFromHistory = true;
   loadTables().catch(reportError).finally(() => {
     restoringFromHistory = false;
@@ -6333,8 +6312,6 @@ $("next").onclick = () => {
   state.offset += state.limit;
   loadData2({ resetScroll: false });
 };
-$("nav-back").onclick = () => history.back();
-$("nav-forward").onclick = () => history.forward();
 $("refresh").onclick = () => {
   const btn = $("refresh");
   clearStructureCache();

@@ -71,6 +71,14 @@ export function viewParams(view: View | null): URLSearchParams {
   return params;
 }
 
+// Every param viewParams may write. Compare all of them, not only the ones
+// one side sets: leaving a join drops `join`.
+const VIEW_PARAMS = ["table", "source", "schema", "join"] as const;
+
+export function sameView(a: URLSearchParams, b: URLSearchParams): boolean {
+  return VIEW_PARAMS.every((k) => (a.get(k) ?? "") === (b.get(k) ?? ""));
+}
+
 // A chip's href. Paging, sort and filter are left out: a fresh tab takes them
 // from stored prefs, the same way an in-place switch does.
 export function viewHref(view: View): string {
