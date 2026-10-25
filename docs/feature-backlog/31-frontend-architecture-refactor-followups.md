@@ -100,7 +100,8 @@ Landed: `frontend/src/` is grouped into four role-based layers —
 `bootstrap/` (main, controller, reload, table-focus), `core/` (api, dom,
 types, state, store, url, row-diff), `features/` (grid, filter-ui, sidebar,
 nav, record-view, siblings, api-reference, theme; the sidebar's resize and
-bounds modules went with the chip redesign, #147), and
+bounds modules went with the chip redesign, #147, and sidebar and nav were
+later renamed table-chips, scope-select and view-history), and
 `lib/` (filter-dsl, json-tree, format). `demo/` is unchanged. Role-based was
 chosen over feature-based so the shared renderers (`lib/format.ts`,
 `lib/json-tree.ts`) have one home rather than a `shared/` catch-all.

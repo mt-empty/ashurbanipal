@@ -17,8 +17,8 @@ noticed, same as table/sort/page today).
 
 A filter should survive a reload, and a URL should carry it so a teammate
 opening the link lands on the same filtered view. Today `syncUrl()`
-(`frontend/src/features/nav.ts`) deliberately omits the filter, and the
-`popstate` handler (`frontend/src/features/nav.ts`) hard-clears it on every
+(`frontend/src/features/view-history.ts`) deliberately omits the filter, and the
+`popstate` handler (`frontend/src/features/view-history.ts`) hard-clears it on every
 history navigation.
 
 ## 2. Why the current rule blocks it
@@ -28,7 +28,7 @@ history navigation.
   blanket rule "so each future feature doesn't re-litigate it case by case."
 - **`frontend-style-guide.md:164` (§6)** — same boundary, names
   `history.replaceState()` alongside `localStorage`.
-- **`frontend/src/features/nav.ts`** — code comment pointing at R6 as the reason
+- **`frontend/src/features/view-history.ts`** — code comment pointing at R6 as the reason
   the filter is left out of `syncUrl()`.
 
 ## 3. The case for changing it
@@ -115,11 +115,11 @@ a row set is row data.
 
 ## 6. Implementation touchpoints
 
-- `frontend/src/features/nav.ts` `syncUrl()` — add the filter to the params.
-- `frontend/src/features/nav.ts` `popstate` handler — currently sets
+- `frontend/src/features/view-history.ts` `syncUrl()` — add the filter to the params.
+- `frontend/src/features/view-history.ts` `popstate` handler — currently sets
   `state.filter = ""` and `setAppliedFilterAst([])` unconditionally;
   restore both from the URL instead.
-- `frontend/src/features/nav.ts` — delete or rewrite the "filter is never
+- `frontend/src/features/view-history.ts` — delete or rewrite the "filter is never
   included" comment.
 - `initState` (initial load) and `applyScopeParams` /
   `buildScopeParams` (`frontend/src/core/url.ts`) — carry the

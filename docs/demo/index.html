@@ -5632,76 +5632,6 @@ async function showCommonValues(e, table, column) {
   renderCommonValues(values, column);
 }
 
-// src/features/nav.ts
-function navigateWithSeededFilter(table, schema, clause) {
-  let ast;
-  try {
-    ast = parseFilterDsl(clause);
-  } catch (e) {
-    reportError(e);
-    return;
-  }
-  const req = {
-    ...tableRequest(table),
-    sort: null,
-    order: "asc",
-    restoredSort: false,
-    filter: clause,
-    ast
-  };
-  if (!schema || schema === state.schema) {
-    loadData({ next: req });
-    return;
-  }
-  enterTable(table);
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
-  setSchema(schema);
-  loadTables({ next: req }).then(() => {
-    if (tableInView() !== table) {
-      reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
-    }
-  }).catch(reportError);
-}
-var written = null;
-function noteStartupSettled() {
-  written ??= location.search;
-}
-function syncUrl(replaceHistory) {
-  const params = viewParams(state.view);
-  params.set("limit", String(state.limit));
-  params.set("offset", String(state.offset));
-  if (state.sort) {
-    params.set("sort", state.sort);
-    params.set("order", state.order);
-  }
-  if (state.filter) params.set("filter", state.filter);
-  const query = params.toString();
-  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
-    history.replaceState(null, "", `?${query}`);
-  } else {
-    history.pushState(null, "", `?${query}`);
-  }
-  written = location.search;
-}
-window.addEventListener("popstate", () => {
-  if (written === null) {
-    location.reload();
-    return;
-  }
-  if (location.search === written) return;
-  written = location.search;
-  supersedeLoads();
-  const params = new URLSearchParams(location.search);
-  applyUrlExact(params);
-  $("source-select").value = state.source ?? "";
-  $("schema-select").value = state.schema ?? "";
-  $("schema-select-wrap").hidden = !state.schema;
-  persist();
-  loadTables({ replaceHistory: true }).catch(reportError);
-});
-
 // src/features/scope-select.ts
 async function loadSources() {
   let sources;
@@ -6051,6 +5981,76 @@ $("siblings-pop").addEventListener("beforetoggle", (e) => {
   repaintLinks();
   refreshIfStale();
   openTimer = setInterval(refreshIfStale, FRESH_MS);
+});
+
+// src/features/view-history.ts
+function navigateWithSeededFilter(table, schema, clause) {
+  let ast;
+  try {
+    ast = parseFilterDsl(clause);
+  } catch (e) {
+    reportError(e);
+    return;
+  }
+  const req = {
+    ...tableRequest(table),
+    sort: null,
+    order: "asc",
+    restoredSort: false,
+    filter: clause,
+    ast
+  };
+  if (!schema || schema === state.schema) {
+    loadData({ next: req });
+    return;
+  }
+  enterTable(table);
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
+  setSchema(schema);
+  loadTables({ next: req }).then(() => {
+    if (tableInView() !== table) {
+      reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
+    }
+  }).catch(reportError);
+}
+var written = null;
+function noteStartupSettled() {
+  written ??= location.search;
+}
+function syncUrl(replaceHistory) {
+  const params = viewParams(state.view);
+  params.set("limit", String(state.limit));
+  params.set("offset", String(state.offset));
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
+  if (state.filter) params.set("filter", state.filter);
+  const query = params.toString();
+  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
+    history.replaceState(null, "", `?${query}`);
+  } else {
+    history.pushState(null, "", `?${query}`);
+  }
+  written = location.search;
+}
+window.addEventListener("popstate", () => {
+  if (written === null) {
+    location.reload();
+    return;
+  }
+  if (location.search === written) return;
+  written = location.search;
+  supersedeLoads();
+  const params = new URLSearchParams(location.search);
+  applyUrlExact(params);
+  $("source-select").value = state.source ?? "";
+  $("schema-select").value = state.schema ?? "";
+  $("schema-select-wrap").hidden = !state.schema;
+  persist();
+  loadTables({ replaceHistory: true }).catch(reportError);
 });
 
 // src/features/sticky-header.ts
