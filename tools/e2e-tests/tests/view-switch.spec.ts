@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { dataWith, failRequests, gotoApp, holdRequests, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { dataWith, failRequests, goBack, gotoApp, holdRequests, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 // The real-fade canary: docs/e2e-testing-guidelines.md §2.
 test.use({ realFades: true });
@@ -117,7 +117,7 @@ test("Back locks the old grid while the earlier table loads, and unlocks once it
   await selectTable(page, "orders");
   const release = await holdRequests(page, dataWith("table", "users"));
   const sent = page.waitForRequest((r) => dataWith("table", "users")(r.url()));
-  await page.locator("#nav-back").click();
+  await goBack(page);
   await sent;
 
   await expect(page.locator("#data-table")).toHaveAttribute("data-stale", "");

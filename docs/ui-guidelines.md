@@ -105,7 +105,7 @@ should block on.
   frontend's remaining duty is only that it never persists a value the user
   did not enter.)*
   - **R6a — What may persist.** Every persistence mechanism — `localStorage`
-    and the URL (`history.replaceState()`) alike — may carry the view the
+    and the URL (its browser-history entries, R16) alike — may carry the view the
     user built: selected table, sort, order, page size, offset, the
     filter the user authored, and the join the user built — in the URL as
     its canonical text, and by name in its own `localStorage` key (saved
@@ -210,3 +210,11 @@ should block on.
   view switch jumps to the top instead of scrolling there smoothly.
   *(Derives from: aesthetic and minimalist design, visibility of system
   status.)*
+- **R16 — Back undoes the last applied change.** Each applied change to
+  the view — table, join, schema, source, filter, sort, page — is one
+  browser-history entry, so Back steps through them in order and
+  Forward redoes them. A load that changes nothing (refresh, re-applying
+  the same filter) adds none, and a restore or stale-state fallback (R5)
+  replaces the current entry rather than adding one. *(Derives from: user
+  control and freedom; Baymard's back-button study, where users treat each
+  filter and sort state as a page of its own.)*

@@ -13,6 +13,7 @@ import {
   switchSource,
   tableInView,
   tableRequest,
+  type ViewRequest,
   viewHref,
 } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
@@ -151,7 +152,9 @@ $<HTMLSelectElement>("source-select").onchange = () => {
   // resetting; loadSchemas() still validates it and falls back (R5/R12).
   supersedeLoads();
   switchSource($<HTMLSelectElement>("source-select").value);
-  loadSchemas().then(loadTables).catch(reportError);
+  loadSchemas()
+    .then(() => loadTables())
+    .catch(reportError);
 };
 
 // ==== Schema selector ====
@@ -213,7 +216,15 @@ $<HTMLSelectElement>("schema-select").onchange = () => {
 // guard as loadDataToken/cvRequestToken.
 let loadTablesToken = 0;
 
-export async function loadTables(): Promise<void> {
+// `next`: a view in this table list to open instead of the current one; the
+// stale-state fallback below drops it.
+export async function loadTables({
+  replaceHistory = false,
+  next,
+}: {
+  replaceHistory?: boolean;
+  next?: ViewRequest;
+} = {}): Promise<void> {
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
@@ -251,22 +262,16 @@ export async function loadTables(): Promise<void> {
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back (R5).
-  if (!tableNames.includes(startTable(state.view) ?? "")) {
+  const fellBack = !tableNames.includes(startTable(state.view) ?? "");
+  if (fellBack) {
     enterTable(tableNames[0] ?? null);
+    applyStoredSort(tableInView());
     // A ?filter= was written against the table the URL named; that table
     // isn't here, so its columns can't apply to the fallback — carrying it
     // over would 400 and dead-end the very load meant to recover (R5).
     clearFilter();
   }
-  // Restore this table's remembered sort unless one is already set — a
-  // shared link's ?sort= or a history entry takes precedence.
-  const table = tableInView();
-  if (table && state.sort === null) applyStoredSort(table);
-  // Awaited (not fire-and-forget): callers like nav.ts's popstate handler
-  // reset restoringFromHistory once this promise settles, and that flag
-  // must still be true when loadData()'s syncUrl() call runs, or a
-  // history restoration would push a new entry instead of replacing it.
-  await loadData();
+  await loadData({ replaceHistory, next: fellBack ? undefined : next });
 }
 
 export function listedTableNames(): string[] {

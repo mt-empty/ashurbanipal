@@ -2,9 +2,11 @@
 
 <img src="docs/media/icon.svg" alt="Ashurbanipal logo" width="66" height="66" align="right">
 
-No-bullshit database browser for schemaful databases; self-contained, embeddable, read-only. No separate DB client, no extra credentials, no build step.
+No-bullshit database browser for schemaful databases; self-contained, embeddable, read-only. No separate DB client, no extra credentials, no extra infrastructure, no build step.
 
 ![Ashurbanipal demo](tools/e2e-tests/showcase.gif)
+
+The library is named after [Ashurbanipal Library](https://en.wikipedia.org/wiki/Library_of_Ashurbanipal).
 
 **[Try it live](https://mt-empty.github.io/ashurbanipal/demo/)**: synthetic data, no backend.
 

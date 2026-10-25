@@ -10,7 +10,6 @@ import {
   tableInView,
   tableRequest,
   type ViewRequest,
-  viewKey,
   viewParams,
 } from "../core/state.js";
 import type { FilterCondition } from "../core/types.js";
@@ -47,48 +46,31 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
   state.offset = 0;
   clearFilter();
   setSchema(schema);
-  loadTables()
+  loadTables({ next: req })
     .then(() => {
-      // loadTables()'s stale-state fallback (sidebar.ts) silently resets
-      // the view when `table` isn't in this schema's own /api/tables
-      // listing (e.g. a partitioned referrer, which list_tables excludes)
-      // — applying the filter here would seed it onto whatever table that
-      // fallback landed on instead.
+      // loadTables()'s stale-state fallback (sidebar.ts) drops `req` and
+      // opens another table when `table` isn't in this schema's own
+      // /api/tables listing (e.g. a partitioned referrer, which list_tables
+      // excludes).
       if (tableInView() !== table) {
         reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
-        return;
       }
-      loadData({ next: req });
     })
     .catch(reportError);
 }
 
-// Back/forward navigation stops at table/schema/source switches, not every
-// sort/page tweak within the same table — otherwise "back" would undo
-// pagination one row-page at a time instead of returning to the previously
-// viewed table.
-// navStack mirrors the browser's own session-history entries we've pushed
-// (their order, not their content) so the in-app buttons know when they're
-// at either end; the entries themselves live in the URL/history.state, never
-// duplicated into a JS-held array of visited data.
-let navStack: string[] = [];
-let navIndex = -1;
-let restoringFromHistory = false; // true while a popstate-triggered reload is in flight
+// Every applied change to the URL is its own history entry (ui-guidelines
+// R16); a load that writes the same query replaces. `written` is the search
+// last written or restored, null until the first load commits.
+let written: string | null = null;
 
-function navViewKey(): string {
-  return `${state.source ?? ""} ${state.schema ?? ""} ${viewKey(state.view)}`;
+// Start-up settled without a load committing (an empty schema, a failed
+// first load): later history steps restore rather than reload.
+export function noteStartupSettled(): void {
+  written ??= location.search;
 }
 
-function updateNavButtons(): void {
-  $<HTMLButtonElement>("nav-back").disabled = navIndex <= 0;
-  $<HTMLButtonElement>("nav-forward").disabled = navIndex >= navStack.length - 1;
-}
-
-// filter rides in the URL (ui-guidelines.md R6) but is deliberately excluded
-// from navViewKey() below — a filter change replaces the current history
-// entry like a sort click or a page turn, never pushing a new back-stack stop.
-// The join is part of the key: entering or leaving a join view is a new stop.
-export function syncUrl(): void {
+export function syncUrl(replaceHistory: boolean): void {
   const params = viewParams(state.view);
   params.set("limit", String(state.limit));
   params.set("offset", String(state.offset));
@@ -97,29 +79,25 @@ export function syncUrl(): void {
     params.set("order", state.order);
   }
   if (state.filter) params.set("filter", state.filter);
-  const qs = `?${params}`;
-  const key = navViewKey();
-  const samePlace = navIndex >= 0 && navStack[navIndex] === key;
-  if (restoringFromHistory || navStack.length === 0 || samePlace) {
-    if (navStack.length === 0) {
-      navStack = [key];
-      navIndex = 0;
-    }
-    history.replaceState({ navIndex }, "", qs);
+  const query = params.toString();
+  // Both sides through one serializer, so a browser's own encoding can't fake a change.
+  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
+    history.replaceState(null, "", `?${query}`);
   } else {
-    navStack = navStack.slice(0, navIndex + 1);
-    navStack.push(key);
-    navIndex = navStack.length - 1;
-    history.pushState({ navIndex }, "", qs);
+    history.pushState(null, "", `?${query}`);
   }
-  updateNavButtons();
+  written = location.search;
 }
 
-window.addEventListener("popstate", (ev) => {
-  const navState = ev.state as { navIndex?: number } | null;
-  if (!navState || typeof navState.navIndex !== "number") return;
-  if (navState.navIndex < 0 || navState.navIndex >= navStack.length) return;
-  navIndex = navState.navIndex;
+window.addEventListener("popstate", () => {
+  // Start-up's own load chain would race a restore; reloading this entry is the clean one.
+  if (written === null) {
+    location.reload();
+    return;
+  }
+  // A fragment-only step leaves the view as it is.
+  if (location.search === written) return;
+  written = location.search;
   supersedeLoads();
   const params = new URLSearchParams(location.search);
   // Exact reader: reproduce this history entry verbatim, absences included
@@ -134,11 +112,5 @@ window.addEventListener("popstate", (ev) => {
   // this restored source's schema count, without a live re-fetch.
   $("schema-select-wrap").hidden = !state.schema;
   persist();
-  updateNavButtons();
-  restoringFromHistory = true;
-  loadTables()
-    .catch(reportError)
-    .finally(() => {
-      restoringFromHistory = false;
-    });
+  loadTables({ replaceHistory: true }).catch(reportError);
 });

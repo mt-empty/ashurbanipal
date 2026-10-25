@@ -209,7 +209,8 @@ Two components, same as the original concept:
   hidden columns), page size, and per-table hidden-column sets, both
   keyed by source, schema and table — and the
   same state (except hidden columns and the filter) is mirrored into the
-  URL's query params via `history.replaceState`, so the address bar is
+  URL's query params, one browser-history entry per applied change
+  (ui-guidelines R16), so the address bar is
   always a shareable link for the current view. Properties:
   - The view state is one `localStorage` key, `ashurbanipal_ui`, value a
     small JSON object. Saved joins (`ashurbanipal_joins`) and the display

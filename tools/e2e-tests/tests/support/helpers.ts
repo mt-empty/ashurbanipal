@@ -38,18 +38,39 @@ export async function reloadApp(page: Page) {
   await waitForFirstLoad(page);
 }
 
+/** Presses the browser's Back. A same-document entry never fires `load`,
+ * so this waits only for the commit; callers wait for the view themselves. */
+export async function goBack(page: Page) {
+  await page.goBack({ waitUntil: "commit" });
+}
+
+/** Presses the browser's Forward; waits as goBack does. */
+export async function goForward(page: Page) {
+  await page.goForward({ waitUntil: "commit" });
+}
+
 // The table list is aria-busy from the first byte until the app's start-up chain settles.
 async function waitForFirstLoad(page: Page) {
   await expect(page.locator("#tables")).not.toHaveAttribute("aria-busy", "true");
   await waitForIdle(page);
 }
 
-/** Clicks a table chip and waits until it is the current table; #current
- * changes only after a successful load. */
-export async function selectTable(page: Page, table: string) {
-  await page.locator(`#tables [data-table="${table}"]`).click();
+/** Waits until `table` is the current table and its load has settled;
+ * #current changes only after a successful load. */
+export async function waitForTable(page: Page, table: string) {
   await page.locator("#current").getByText(table, { exact: true }).waitFor();
   await waitForIdle(page);
+}
+
+/** Clicks a table chip and waits until it is the current table. */
+export async function selectTable(page: Page, table: string) {
+  await page.locator(`#tables [data-table="${table}"]`).click();
+  await waitForTable(page, table);
+}
+
+/** Reads one query param from the page's current URL. */
+export function urlParam(page: Page, name: string): string | null {
+  return new URL(page.url()).searchParams.get(name);
 }
 
 /** Types a filter clause into #filter and submits it with Enter. */

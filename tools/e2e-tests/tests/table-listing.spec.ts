@@ -184,9 +184,9 @@ test("a chip pulled up from the hidden part gets a divider only on a line with o
 test("an active chip that ends the third line stays visible when the list collapses", async ({ page }) => {
   // Widths where the active chip is the last one on line three, so "+ N more" needs its room.
   for (const [width, table] of [
-    [600, "products"],
-    [760, "sessions"],
-    [820, "users"],
+    [554, "products"],
+    [714, "sessions"],
+    [774, "users"],
   ] as const) {
     await page.setViewportSize({ width, height: 800 });
     await gotoApp(page, `?table=${table}`);

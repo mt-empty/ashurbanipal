@@ -101,12 +101,12 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
 // error line; on this route `not_readable` can only name one of the join's
 // tables. Any other 400 (filter, sort) is the plain error line's. `next` is
 // the join not yet in view, if this load was trying one.
-function reportJoinFailure(e: ApiError, def: JoinDef, next: ViewRequest | undefined): boolean {
+function reportJoinFailure(e: ApiError, def: JoinDef, next: ViewRequest | undefined, replaceHistory: boolean): boolean {
   if (e.code === "query_timeout") {
     showJoinNotice(
       "This join took longer than the time limit and was stopped. Add a filter, remove a table, or join on key columns.",
       [
-        { label: "Retry", run: () => loadData({ next }) },
+        { label: "Retry", run: () => loadData({ next, replaceHistory }) },
         { label: "Edit join", run: () => openJoinDialog({ def }) },
       ],
     );
@@ -213,6 +213,7 @@ export async function loadData({
   highlightNew = false,
   auto = false,
   next,
+  replaceHistory = false,
 }: {
   resetScroll?: boolean;
   highlightNew?: boolean;
@@ -221,6 +222,8 @@ export async function loadData({
   auto?: boolean;
   // A view to try; it replaces the state only if its data arrives.
   next?: ViewRequest;
+  // Start-up and history restores correct the current entry rather than add one (ui-guidelines R16).
+  replaceHistory?: boolean;
 } = {}): Promise<void> {
   if (!auto) {
     clearError();
@@ -254,10 +257,10 @@ export async function loadData({
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
     // A view not yet in view can only have restored its sort; its failure leaves the state alone.
-    if (!next && dropOneStaleInput(code)) return loadData({ resetScroll, highlightNew });
+    if (!next && dropOneStaleInput(code)) return loadData({ resetScroll, highlightNew, replaceHistory });
     const retry = next && dropStaleSort(next, code);
-    if (retry) return loadData({ next: retry, resetScroll, highlightNew });
-    if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next)) return;
+    if (retry) return loadData({ next: retry, resetScroll, highlightNew, replaceHistory });
+    if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
     reportError(failedLoadError(e, view, next));
     return;
   }
@@ -278,7 +281,8 @@ export async function loadData({
   $<HTMLButtonElement>("refresh-menu-btn").disabled = false;
   updateJoinChrome();
   refreshSavedChips();
-  syncUrl();
+  // An auto-refresh tick is never a step of the user's own.
+  syncUrl(replaceHistory || auto);
   const renderTable = () => {
     // The transition can wait for a frame; a view switch meanwhile owns the grid, and this data is not its join's.
     if (superseded()) return;
