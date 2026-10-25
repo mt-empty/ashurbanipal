@@ -13,7 +13,7 @@ kept as history.
 
 Switching source resets the schema every time. `#source-select`'s
 `onchange` sets `state.schema = null` unconditionally
-(`frontend/src/features/sidebar.ts`), then `loadSchemas()` runs against the new
+(`frontend/src/features/scope-select.ts`), then `loadSchemas()` runs against the new
 source and, finding `state.schema` empty, pins it to `public` (or the
 first schema) — `loadSchemas` in the same file. So a dev who was
 working in `reporting` on source A, flips to source B and back, lands in

@@ -32,7 +32,7 @@ and every port.
   tab (`frontend/src/features/siblings.ts`, `frontend/src/index.html:174`).
 - The page URL already holds source, schema, table, filter and sort
   (`frontend/src/core/url.ts:18`). An unknown table in the URL already falls
-  back to the first table and drops the filter (`loadTables` in `frontend/src/features/sidebar.ts`).
+  back to the first table and drops the filter (`loadTables` in `frontend/src/features/table-chips.ts`).
 
 ## 3. The "no environment" rule
 
@@ -212,7 +212,8 @@ same canvas.
 
 A link names a source, schema, table and filter. When the instance it opens
 lacks one of them, the page already falls back to a safe choice
-(`loadSources`, `loadSchemas` and `loadTables` in `frontend/src/features/sidebar.ts`,
+(`loadSources` and `loadSchemas` in `frontend/src/features/scope-select.ts`,
+`loadTables` in `frontend/src/features/table-chips.ts`,
 and `dropOneStaleInput` in `frontend/src/core/store.ts`). It does this silently, so the user can
 look at `audit_log` and believe it is `orders`.
 
@@ -273,7 +274,8 @@ backend, spec or port change.
 
 ### 5.4 Touchpoints
 
-- `frontend/src/core/url.ts`, `frontend/src/features/sidebar.ts`,
+- `frontend/src/core/url.ts`, `frontend/src/features/scope-select.ts`,
+  `frontend/src/features/table-chips.ts`,
   `frontend/src/core/store.ts` — N1, the swap records.
 - `frontend/src/index.html`, `frontend/src/styles.css` — `#view-notice`.
 - `docs/ui-guidelines.md` R6d — change "resets silently" to: silent for
@@ -330,9 +332,9 @@ Frontend:
 - **Settled: same view when the other instance differs.** The frontend
   checks the URL against the other instance's own lists before it asks for
   data, so no request uses a missing name:
-  - unknown source → first source (`loadSources`, `frontend/src/features/sidebar.ts`);
+  - unknown source → first source (`loadSources`, `frontend/src/features/scope-select.ts`);
   - unknown schema → `public`, else the first schema (`loadSchemas`);
-  - unknown table → first table, and the filter is dropped (`loadTables`).
+  - unknown table → first table, and the filter is dropped (`loadTables`, `frontend/src/features/table-chips.ts`).
   The e2e spec should cover one same-view link whose table is missing.
 - **Decided: tell the user about the fallback**, with a note and no Back
   button (§5).

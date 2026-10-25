@@ -65,7 +65,7 @@ discussion into a concrete semantic:
 - **FK-cell navigation stays replace-only, unconditionally**, regardless of
   whatever gets built here — it also switches tables, and a filter's
   columns don't carry over across tables (already fixed as a bug, see
-  the table-switch reset in `frontend/src/features/sidebar.ts`).
+  the table-switch reset in `frontend/src/features/table-chips.ts`).
 - **Common-values dropdown scope is undecided under every approach.** It
   uses the same `applyFilterClause()` helper as the per-cell buttons — does
   it get the same compose behavior, or stay replace-only? Not discussed in

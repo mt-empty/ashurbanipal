@@ -63,7 +63,7 @@ raw keys, nesting, and the inherited large-integer precision loss.
 Its own PR. Phase 4's `Column` discriminated union and the index-access guards
 did some of the same nullability work incidentally, but turning the flag on
 will surface real sites that rely on the current (flag-off) default — the cell
-and row builders in `sidebar.ts` / `filter-ui.ts` / `grid.ts`, and the demo
+and row builders in `table-chips.ts` / `filter-ui.ts` / `grid.ts`, and the demo
 fixtures. Land it after 1–3 so the type surface is settled.
 
 ## 5. A normative home for `max_json_bytes` — moved to story 43
