@@ -82,7 +82,9 @@ $<HTMLButtonElement>("refresh").onclick = () => {
 // not <main>, so live regions still announce) clears once all of it settles.
 loadSources()
   .then(loadSchemas)
-  .then(() => {
+  .then((current) => {
+    // A source switch during start-up runs its own table load.
+    if (!current) return;
     // A fresh link without ?sort= opens with the table's remembered one (R11),
     // once the scope it is keyed by is pinned; a reload or a history step
     // reopens its entry exactly (R16).

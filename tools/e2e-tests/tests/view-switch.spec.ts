@@ -8,6 +8,7 @@ import {
   rejectSort,
   selectTable,
   tableKey,
+  tableList,
   uiState,
   urlParam,
   waitForIdle,
@@ -174,4 +175,58 @@ test("a cross-schema FK cell opens its table from the first page", async ({ page
   await waitForTable(page, "orders");
   expect(offsets.length).toBeGreaterThan(0);
   expect(offsets.every((o) => o === "0")).toBe(true);
+});
+
+async function openShipments(page: Page) {
+  await gotoApp(page);
+  await page.locator("#schema-select").selectOption("warehouse");
+  await expect.poll(() => urlParam(page, "schema")).toBe("warehouse");
+  await waitForIdle(page);
+  await selectTable(page, "shipments");
+}
+
+const fkCell = (page: Page) => page.locator("#tbody tr").first().locator('td[data-col="order_id"] .fk-cell');
+
+test("a cross-schema FK click supersedes a chip's table still loading", async ({ page }) => {
+  await openShipments(page);
+  const releaseCarriers = await holdRequests(page, dataWith("table", "carriers"));
+  const carriersSent = page.waitForRequest((r) => dataWith("table", "carriers")(r.url()));
+  await page.locator('#tables [data-table="carriers"]').click();
+  await carriersSent;
+
+  const releaseTables = await holdRequests(page, tableList("public"));
+  const tablesSent = page.waitForRequest((r) => tableList("public")(new URL(r.url())));
+  await fkCell(page).click();
+  await tablesSent;
+  // The chip's rows land while the FK target's table list is still on its way.
+  const carriersLanded = page.waitForResponse((r) => dataWith("table", "carriers")(r.url()));
+  releaseCarriers();
+  await carriersLanded;
+  releaseTables();
+
+  await waitForTable(page, "orders");
+  expect(urlParam(page, "schema")).toBe("public");
+  expect(urlParam(page, "filter")).not.toBeNull();
+  await expect(page.locator("#error")).toBeEmpty();
+  await goBack(page);
+  await waitForTable(page, "shipments");
+});
+
+test("a cross-schema FK click superseded by a schema switch reports no error", async ({ page }) => {
+  await openShipments(page);
+  const releaseTables = await holdRequests(page, tableList("public"));
+  const tablesSent = page.waitForRequest((r) => tableList("public")(new URL(r.url())));
+  await fkCell(page).click();
+  await tablesSent;
+
+  const otherLoaded = page.waitForResponse((r) => dataWith("schema", "other_schema")(r.url()));
+  await page.locator("#schema-select").selectOption("other_schema");
+  await otherLoaded;
+  const staleLanded = page.waitForResponse((r) => tableList("public")(new URL(r.url())));
+  releaseTables();
+  await staleLanded;
+  await waitForIdle(page);
+
+  expect(urlParam(page, "schema")).toBe("other_schema");
+  await expect(page.locator("#error")).toBeEmpty();
 });

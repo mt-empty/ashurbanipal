@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "./support/fixtures";
 import { spawnDemo, freePort } from "./support/second-server";
-import { gotoApp, reloadApp, waitForIdle } from "./support/helpers";
+import { goBack, gotoApp, reloadApp, urlParam, waitForIdle } from "./support/helpers";
 
 // ui-guidelines R12: the schema selected on a source is remembered, so
 // switching source away and back restores it instead of resetting to
@@ -60,6 +60,64 @@ test("a malformed schemaBySource is discarded, not fatal", async ({ page }) => {
     // Still boots and loads a table (R5).
     await reloadApp(page);
     await expect(page.locator("#tbody tr").first()).toBeVisible();
+  } finally {
+    await demo.stop();
+  }
+});
+
+test("Back across a source switch restores that source's schema list", async ({ page }) => {
+  const port = await freePort();
+  const demo = await spawnDemo({ port, conformanceSecondSource: true });
+  try {
+    await gotoApp(page, "", demo.baseUrl);
+    await selectAndSettle(page, "#schema-select", "warehouse", "schema=warehouse");
+    // The second source lists other schemas, so the first source's list must come back with it.
+    await page.route(
+      (url) => url.pathname.endsWith("/api/schemas") && url.searchParams.get("source") === "other_schema",
+      (route) => route.fulfill({ json: { schemas: ["other_schema", "public"] } }),
+    );
+    await selectAndSettle(page, "#source-select", "other_schema", "source=other_schema");
+    await expect(page.locator('#schema-select option[value="warehouse"]')).toHaveCount(0);
+
+    await goBack(page);
+    await expect.poll(() => urlParam(page, "source")).toBe("primary");
+    await waitForIdle(page);
+    await expect(page.locator('#schema-select option[value="warehouse"]')).toHaveCount(1);
+    await expect(page.locator("#schema-select")).toHaveValue("warehouse");
+  } finally {
+    await demo.stop();
+  }
+});
+
+test("a superseded schema load does not reload the table list", async ({ page }) => {
+  const port = await freePort();
+  const demo = await spawnDemo({ port, conformanceSecondSource: true });
+  try {
+    await gotoApp(page, "", demo.baseUrl);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    await page.route(
+      (url) => url.pathname.endsWith("/api/schemas") && url.searchParams.get("source") === "other_schema",
+      async (route) => {
+        await gate;
+        await route.continue().catch(() => {});
+      },
+    );
+    const schemasSent = page.waitForRequest((r) => new URL(r.url()).searchParams.get("source") === "other_schema");
+    await page.locator("#source-select").selectOption("other_schema");
+    await schemasSent;
+    await selectAndSettle(page, "#source-select", "primary", "source=primary");
+
+    const tableLists: string[] = [];
+    page.on("request", (r) => {
+      if (new URL(r.url()).pathname.endsWith("/api/tables")) tableLists.push(r.url());
+    });
+    const staleLanded = page.waitForResponse((r) => new URL(r.url()).searchParams.get("source") === "other_schema");
+    release();
+    await staleLanded;
+    await waitForIdle(page);
+    expect(tableLists).toEqual([]);
+    expect(urlParam(page, "source")).toBe("primary");
   } finally {
     await demo.stop();
   }

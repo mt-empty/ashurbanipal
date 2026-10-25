@@ -18,8 +18,9 @@ export async function loadSources(): Promise<void> {
     ({ sources } = await api<{ sources: SourceEntry[] }>("/sources"));
   } catch (e) {
     // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
-    // single-source but leave a trace.
+    // single-source, with no `source` param, but leave a trace.
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
+    state.source = null;
     return;
   }
   if (sources.length <= 1) {
@@ -44,7 +45,7 @@ $<HTMLSelectElement>("source-select").onchange = () => {
   supersedeLoads();
   switchSource($<HTMLSelectElement>("source-select").value);
   loadSchemas()
-    .then(() => loadTables())
+    .then((current) => (current ? loadTables() : undefined))
     .catch(reportError);
 };
 
@@ -56,22 +57,24 @@ $<HTMLSelectElement>("source-select").onchange = () => {
 // source switch must not overwrite a later one's schema and selector.
 let loadSchemasToken = 0;
 
-export async function loadSchemas(): Promise<void> {
+/** Fetches the source's schemas and pins state.schema; resolves false when
+ * a newer source switch superseded it, so the caller stops there. */
+export async function loadSchemas(): Promise<boolean> {
   syncGridLock();
   const token = ++loadSchemasToken;
   let schemas: string[];
   try {
     ({ schemas } = await api<{ schemas: string[] }>(`/schemas${sourceQuery()}`));
   } catch (e) {
-    if (token !== loadSchemasToken) return;
+    if (token !== loadSchemasToken) return false;
     // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
     // single-schema but leave a trace.
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
     state.schema = null;
     $("schema-select-wrap").hidden = true;
-    return;
+    return true;
   }
-  if (token !== loadSchemasToken) return; // superseded by a newer source switch
+  if (token !== loadSchemasToken) return false;
   // Explicitly re-hides even though the element starts hidden in markup:
   // switching source can re-run this against a source with fewer schemas
   // than the previously selected one, and without this the wrap would keep
@@ -79,7 +82,7 @@ export async function loadSchemas(): Promise<void> {
   if (schemas.length <= 1) {
     state.schema = null;
     $("schema-select-wrap").hidden = true;
-    return;
+    return true;
   }
   let schema = state.schema;
   if (!schema || !schemas.includes(schema)) {
@@ -88,6 +91,7 @@ export async function loadSchemas(): Promise<void> {
   state.schema = schema;
   populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
   $("schema-select-wrap").hidden = false;
+  return true;
 }
 $<HTMLSelectElement>("schema-select").onchange = () => {
   supersedeLoads();

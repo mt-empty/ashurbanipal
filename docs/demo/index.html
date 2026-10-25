@@ -4213,7 +4213,7 @@ async function loadTables({
     api(`/tables${scopeQuery()}`),
     api(`/table-counts${scopeQuery()}`)
   ]);
-  if (token !== loadTablesToken) return;
+  if (token !== loadTablesToken) return "superseded";
   const countMap = Object.fromEntries(counts2.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
   ul.replaceChildren();
@@ -4240,13 +4240,14 @@ async function loadTables({
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
-  const fellBack = !tableNames.includes(startTable(state.view) ?? "");
+  const fellBack = !tableNames.includes(startTable(next ? next.view : state.view) ?? "");
   if (fellBack) {
     enterTable(tableNames[0] ?? null);
     applyStoredSort(tableInView());
     clearFilter();
   }
   await loadData({ replaceHistory, next: fellBack ? void 0 : next });
+  return fellBack ? "fell-back" : "loaded";
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
@@ -5639,6 +5640,7 @@ async function loadSources() {
     ({ sources } = await api("/sources"));
   } catch (e) {
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
+    state.source = null;
     return;
   }
   if (sources.length <= 1) {
@@ -5660,7 +5662,7 @@ async function loadSources() {
 $("source-select").onchange = () => {
   supersedeLoads();
   switchSource($("source-select").value);
-  loadSchemas().then(() => loadTables()).catch(reportError);
+  loadSchemas().then((current2) => current2 ? loadTables() : void 0).catch(reportError);
 };
 var loadSchemasToken = 0;
 async function loadSchemas() {
@@ -5670,17 +5672,17 @@ async function loadSchemas() {
   try {
     ({ schemas } = await api(`/schemas${sourceQuery()}`));
   } catch (e) {
-    if (token !== loadSchemasToken) return;
+    if (token !== loadSchemasToken) return false;
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
     state.schema = null;
     $("schema-select-wrap").hidden = true;
-    return;
+    return true;
   }
-  if (token !== loadSchemasToken) return;
+  if (token !== loadSchemasToken) return false;
   if (schemas.length <= 1) {
     state.schema = null;
     $("schema-select-wrap").hidden = true;
-    return;
+    return true;
   }
   let schema = state.schema;
   if (!schema || !schemas.includes(schema)) {
@@ -5689,6 +5691,7 @@ async function loadSchemas() {
   state.schema = schema;
   populateSelect($("schema-select"), schemas, schema);
   $("schema-select-wrap").hidden = false;
+  return true;
 }
 $("schema-select").onchange = () => {
   supersedeLoads();
@@ -6004,13 +6007,14 @@ function navigateWithSeededFilter(table, schema, clause) {
     loadData({ next: req });
     return;
   }
+  supersedeLoads();
   enterTable(table);
   state.sort = null;
   state.offset = 0;
   clearFilter();
   setSchema(schema);
-  loadTables({ next: req }).then(() => {
-    if (tableInView() !== table) {
+  loadTables({ next: req }).then((outcome) => {
+    if (outcome === "fell-back") {
       reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
     }
   }).catch(reportError);
@@ -6045,12 +6049,17 @@ window.addEventListener("popstate", () => {
   written = location.search;
   supersedeLoads();
   const params = new URLSearchParams(location.search);
+  const previousSource = state.source;
   applyUrlExact(params);
   $("source-select").value = state.source ?? "";
   $("schema-select").value = state.schema ?? "";
   $("schema-select-wrap").hidden = !state.schema;
   persist();
-  loadTables({ replaceHistory: true }).catch(reportError);
+  if (state.source === previousSource) {
+    loadTables({ replaceHistory: true }).catch(reportError);
+    return;
+  }
+  loadSchemas().then((current2) => current2 ? loadTables({ replaceHistory: true }) : void 0).catch(reportError);
 });
 
 // src/features/sticky-header.ts
@@ -6904,7 +6913,8 @@ $("refresh").onclick = () => {
   setTimeout(() => btn.classList.remove("spinning"), 500);
   loadData2({ resetScroll: false, highlightNew: true });
 };
-loadSources().then(loadSchemas).then(() => {
+loadSources().then(loadSchemas).then((current2) => {
+  if (!current2) return;
   const navType = performance.getEntriesByType("navigation")[0]?.type;
   if (state.sort === null && navType !== "reload" && navType !== "back_forward") applyStoredSort(tableInView());
   return loadTables({ replaceHistory: true });

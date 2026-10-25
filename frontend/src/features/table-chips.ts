@@ -119,13 +119,17 @@ let loadTablesToken = 0;
 
 // `next`: a view in this table list to open instead of the current one; the
 // stale-state fallback below drops it.
+/** What a loadTables call did: a newer call superseded it, it fell back to
+ * another table because the wanted one isn't listed (R5), or it loaded. */
+export type TablesOutcome = "superseded" | "fell-back" | "loaded";
+
 export async function loadTables({
   replaceHistory = false,
   next,
 }: {
   replaceHistory?: boolean;
   next?: ViewRequest;
-} = {}): Promise<void> {
+} = {}): Promise<TablesOutcome> {
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
@@ -133,7 +137,7 @@ export async function loadTables({
     api<{ tables: TableListEntry[] }>(`/tables${scopeQuery()}`),
     api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery()}`),
   ]);
-  if (token !== loadTablesToken) return; // superseded by a newer call
+  if (token !== loadTablesToken) return "superseded";
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
   ul.replaceChildren();
@@ -163,7 +167,7 @@ export async function loadTables({
   updateTablesCap();
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back (R5).
-  const fellBack = !tableNames.includes(startTable(state.view) ?? "");
+  const fellBack = !tableNames.includes(startTable(next ? next.view : state.view) ?? "");
   if (fellBack) {
     enterTable(tableNames[0] ?? null);
     applyStoredSort(tableInView());
@@ -173,6 +177,7 @@ export async function loadTables({
     clearFilter();
   }
   await loadData({ replaceHistory, next: fellBack ? undefined : next });
+  return fellBack ? "fell-back" : "loaded";
 }
 
 export function listedTableNames(): string[] {
