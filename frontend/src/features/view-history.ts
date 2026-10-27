@@ -108,11 +108,10 @@ window.addEventListener("popstate", () => {
   applyUrlExact(params);
   $<HTMLSelectElement>("source-select").value = state.source ?? "";
   $<HTMLSelectElement>("schema-select").value = state.schema ?? "";
-  // syncUrl() only ever writes `schema` when the source at that history
-  // point had more than one (loadSchemas pins state.schema to a concrete
-  // name only then) — its presence/absence here is a reliable proxy for
-  // this restored source's schema count, without a live re-fetch.
-  $("schema-select-wrap").hidden = !state.schema;
+  // syncUrl() writes `schema` only when loadSchemas pinned one: for two or
+  // more schemas, or a lone schema the server has no default for. The second
+  // keeps a one-option selector, so both checks stand in for a re-fetch.
+  $("schema-select-wrap").hidden = !state.schema || $<HTMLSelectElement>("schema-select").options.length <= 1;
   persist();
   if (state.source === previousSource) {
     loadTables({ replaceHistory: true }).catch(reportError);

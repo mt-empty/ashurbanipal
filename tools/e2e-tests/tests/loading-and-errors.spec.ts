@@ -119,6 +119,7 @@ test("a lone schema with no server default is still sent by name", async ({ page
   await gotoApp(page);
   expect(new URL((await dataRequest).url()).searchParams.get("schema")).toBe("public");
   await expect(page.locator("#tbody tr").first()).toBeVisible();
+  await expect(page.locator("#schema-select-wrap")).toBeHidden();
 });
 
 test("a failed /sources call drops a remembered source instead of sending it", async ({ page }) => {

@@ -51,9 +51,10 @@ $<HTMLSelectElement>("source-select").onchange = () => {
 };
 
 // ==== Schema selector ====
-// Hidden for a single-schema deployment, which then sends no `schema` param.
-// With two or more, state.schema is pinned to a concrete name so every
-// request names its schema.
+// Hidden for a single-schema deployment, which then sends no `schema` param,
+// unless the server reports no default: an absent `schema` would 400 there,
+// so its one schema is pinned with the selector still hidden. With two or
+// more, state.schema is pinned to a concrete name so every request names it.
 // Same supersession guard as loadTables: a slow /schemas from an earlier
 // source switch must not overwrite a later one's schema and selector.
 let loadSchemasToken = 0;
@@ -68,7 +69,8 @@ export async function loadSchemas(): Promise<boolean> {
   try {
     const listing = await api<SchemasResponse>(`/schemas${sourceQuery()}`);
     schemas = listing.schemas.map((s) => s.name);
-    defaultSchema = listing.default;
+    // A host's JSON settings may drop a null field.
+    defaultSchema = listing.default ?? null;
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
@@ -82,10 +84,10 @@ export async function loadSchemas(): Promise<boolean> {
   // Explicitly re-hides even though the element starts hidden in markup:
   // switching source can re-run this against a source with fewer schemas
   // than the previously selected one, and without this the wrap would keep
-  // showing the prior source's stale multi-schema dropdown. A lone schema
-  // with no server default is pinned below instead: an absent `schema` would 400.
-  if (schemas.length === 0 || (schemas.length === 1 && defaultSchema !== null)) {
-    state.schema = null;
+  // showing the prior source's stale multi-schema dropdown.
+  if (schemas.length <= 1) {
+    state.schema = defaultSchema === null ? (schemas[0] ?? null) : null;
+    if (state.schema) populateSelect($<HTMLSelectElement>("schema-select"), schemas, state.schema);
     $("schema-select-wrap").hidden = true;
     return true;
   }

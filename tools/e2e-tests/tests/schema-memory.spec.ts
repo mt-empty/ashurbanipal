@@ -54,7 +54,16 @@ test("a source with no remembered schema opens the schema the server reports as 
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
   try {
     await gotoApp(page, "", demo.baseUrl);
-    // The `other_schema` source's connection is pinned to other_schema, though it lists public first.
+    // The `other_schema` source's connection is pinned to other_schema, which it also lists first;
+    // list public first so the first entry and the server's default differ.
+    await page.route(
+      (url) => url.pathname.endsWith("/api/schemas") && url.searchParams.get("source") === "other_schema",
+      async (route) => {
+        const body = await (await route.fetch()).json();
+        body.schemas.sort((a: { name: string }, b: { name: string }) => (a.name === "public" ? -1 : b.name === "public" ? 1 : 0));
+        await route.fulfill({ json: body });
+      },
+    );
     await selectAndSettle(page, "#source-select", "other_schema", "source=other_schema");
     await expect(page.locator("#schema-select")).toHaveValue("other_schema");
     expect(urlParam(page, "schema")).toBe("other_schema");

@@ -5675,7 +5675,7 @@ async function loadSchemas() {
   try {
     const listing = await api(`/schemas${sourceQuery()}`);
     schemas = listing.schemas.map((s) => s.name);
-    defaultSchema = listing.default;
+    defaultSchema = listing.default ?? null;
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
@@ -5684,8 +5684,9 @@ async function loadSchemas() {
     return true;
   }
   if (token !== loadSchemasToken) return false;
-  if (schemas.length === 0 || schemas.length === 1 && defaultSchema !== null) {
-    state.schema = null;
+  if (schemas.length <= 1) {
+    state.schema = defaultSchema === null ? schemas[0] ?? null : null;
+    if (state.schema) populateSelect($("schema-select"), schemas, state.schema);
     $("schema-select-wrap").hidden = true;
     return true;
   }
@@ -6058,7 +6059,7 @@ window.addEventListener("popstate", () => {
   applyUrlExact(params);
   $("source-select").value = state.source ?? "";
   $("schema-select").value = state.schema ?? "";
-  $("schema-select-wrap").hidden = !state.schema;
+  $("schema-select-wrap").hidden = !state.schema || $("schema-select").options.length <= 1;
   persist();
   if (state.source === previousSource) {
     loadTables({ replaceHistory: true }).catch(reportError);

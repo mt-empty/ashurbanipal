@@ -33,7 +33,8 @@ internal const val NOSNIFF_HEADER = "X-Content-Type-Options"
 data class SourceEntry(val name: String)
 data class SourcesResponse(val sources: List<SourceEntry>, val default: String)
 data class SchemaEntry(val name: String)
-data class SchemasResponse(val schemas: List<SchemaEntry>, val default: String?)
+// ALWAYS: spec §5.7 requires `default` even when null, whatever the host's Jackson inclusion setting.
+data class SchemasResponse(val schemas: List<SchemaEntry>, @JsonInclude(JsonInclude.Include.ALWAYS) val default: String?)
 data class TablesResponse(val tables: List<TableInfo>)
 data class CountsResponse(val counts: List<CountEntry>)
 data class TableDataResponse(
