@@ -50,6 +50,30 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # The MySQL/MariaDB tests skip without these URLs; each creates its own database.
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: ashurbanipal
+          MYSQL_DATABASE: ashurbanipal
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pashurbanipal"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: ashurbanipal
+          MARIADB_DATABASE: ashurbanipal
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    env:
+      MYSQL_TEST_URL: mysql://root:ashurbanipal@127.0.0.1:3306/ashurbanipal
+      MARIADB_TEST_URL: mysql://root:ashurbanipal@127.0.0.1:3307/ashurbanipal
     steps:
       - uses: actions/checkout@v7
 
