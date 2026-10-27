@@ -381,10 +381,10 @@ fn build_where_clause(
 
 impl DbSource for SqliteSource {
     async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
-        Ok(SchemaListing {
-            schemas: vec![ONLY_SCHEMA.to_string()],
-            default: Some(ONLY_SCHEMA.to_string()),
-        })
+        Ok(SchemaListing::new(
+            vec![ONLY_SCHEMA.to_string()],
+            Some(ONLY_SCHEMA.to_string()),
+        ))
     }
 
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {

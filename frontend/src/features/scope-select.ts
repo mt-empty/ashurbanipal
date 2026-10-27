@@ -82,8 +82,9 @@ export async function loadSchemas(): Promise<boolean> {
   // Explicitly re-hides even though the element starts hidden in markup:
   // switching source can re-run this against a source with fewer schemas
   // than the previously selected one, and without this the wrap would keep
-  // showing the prior source's stale multi-schema dropdown.
-  if (schemas.length <= 1) {
+  // showing the prior source's stale multi-schema dropdown. A lone schema
+  // with no server default is pinned below instead: an absent `schema` would 400.
+  if (schemas.length === 0 || (schemas.length === 1 && defaultSchema !== null)) {
     state.schema = null;
     $("schema-select-wrap").hidden = true;
     return true;

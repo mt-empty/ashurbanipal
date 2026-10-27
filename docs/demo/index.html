@@ -5684,7 +5684,7 @@ async function loadSchemas() {
     return true;
   }
   if (token !== loadSchemasToken) return false;
-  if (schemas.length <= 1) {
+  if (schemas.length === 0 || schemas.length === 1 && defaultSchema !== null) {
     state.schema = null;
     $("schema-select-wrap").hidden = true;
     return true;

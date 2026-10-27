@@ -181,8 +181,8 @@ should block on.
   source and back restores the schema last used there instead of resetting
   to that source's default. A remembered schema that no longer exists on
   that source degrades silently to the server-reported default
-  (`/schemas`' `default`) via the same validation `loadSchemas()` already
-  does (R5); a single-schema source never records an entry. Not
+  (`/schemas`' `default`), or the first listed schema when the server has
+  none, via the same validation `loadSchemas()` already does (R5); a single-schema source never records an entry. Not
   mirrored to the URL — a shared link's explicit `?schema=` still wins on
   load; the per-source memory only fills in on an in-app source switch.
   *(Derives from: recognition rather than recall.)*

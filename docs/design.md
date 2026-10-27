@@ -345,11 +345,9 @@ diverge on what counts as valid.
 { "schemas": [{ "name": "public" }, { "name": "reporting" }], "default": "public" }
 ```
 
-`default` is the schema an absent `schema` param resolves to on that
-source — `current_schema()` on Postgres, `database()` on MySQL, `main` on
-SQLite — so the UI opens the server's own default instead of guessing. It
-is `null` when the connection has none (no schema on the `search_path`
-exists, or no database is selected); an absent `schema` is then a 400.
+`default` (`spec/protocol.md` §5.7) lets the UI open the server's own
+default schema instead of guessing one; `docs/adapter-decisions.md` §1
+has where each engine reads it from.
 
 Excludes Postgres's own system/internal namespaces (`pg_catalog`,
 `information_schema`, `pg_toast`/`pg_temp`) and any schema the connected
@@ -610,8 +608,7 @@ over `S: DbSource` (no `dyn`), one concrete `DbSource` per `router()` call.
   `docs/adapter-decisions.md` records where each diverges from Postgres. A
   `deadpool-postgres`/`tokio-postgres` adapter could be added the same way
   without touching route handlers.
-- On Postgres, `schema: None` resolves to `current_schema()` (a 400 when
-  that is NULL); an explicit value is
+- On Postgres, `schema: None` resolves to `current_schema()`; an explicit value is
   checked against the same live `pg_namespace` allow-list (excluding
   catalog/toast/temp schemas and anything the connected role lacks `USAGE`
   on) that the implicit path is also checked against, so neither path can
