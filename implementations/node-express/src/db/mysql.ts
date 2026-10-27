@@ -30,7 +30,9 @@ import {
   opTakesValue,
   type QueryOpts,
   type ReferencedByEntry,
+  type SchemaListing,
   type Structure,
+  schemaListing,
   type TableData,
   type TableInfo,
 } from "./types.js";
@@ -213,6 +215,12 @@ export class MySqlSource implements DbSource {
     return rows.map((r) => r.schema_name as string);
   }
 
+  // Null when the connection names no database.
+  private async defaultSchemaInTx(conn: PoolConnection, variant: Variant, timeoutMs: number): Promise<string | null> {
+    const rows = await queryRows(conn, timedSelect(variant, timeoutMs, "database() as db"));
+    return (rows[0]?.db as string | null | undefined) ?? null;
+  }
+
   // Read MySQL's default database in the operation transaction (`spec/protocol.md` §5).
   private async resolveSchemaInTx(
     conn: PoolConnection,
@@ -225,10 +233,8 @@ export class MySqlSource implements DbSource {
     if (requested !== undefined) {
       resolved = requested;
     } else {
-      const rows = await queryRows(conn, timedSelect(variant, timeoutMs, "database() as db"));
-      // Reject a missing default database instead of casting it to "null".
-      const defaultDatabase = rows[0]?.db as string | null | undefined;
-      if (defaultDatabase === null || defaultDatabase === undefined) {
+      const defaultDatabase = await this.defaultSchemaInTx(conn, variant, timeoutMs);
+      if (defaultDatabase === null) {
         throw new NotAllowedError("no schema requested and this connection has no default database", "schema");
       }
       resolved = defaultDatabase;
@@ -337,8 +343,13 @@ export class MySqlSource implements DbSource {
     return { pkColumns, fkColumns };
   }
 
-  async listSchemas(timeoutMs: number): Promise<string[]> {
-    return this.withTx((conn, variant) => this.listSchemasInTx(conn, variant, timeoutMs));
+  async listSchemas(timeoutMs: number): Promise<SchemaListing> {
+    return this.withTx(async (conn, variant) =>
+      schemaListing(
+        await this.listSchemasInTx(conn, variant, timeoutMs),
+        await this.defaultSchemaInTx(conn, variant, timeoutMs),
+      ),
+    );
   }
 
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {

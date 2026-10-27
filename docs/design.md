@@ -307,10 +307,12 @@ a `Config` field — see `implementations/rust/axum/src/routes.rs`'s
 `AppState`), never inferred from the database itself.
 
 ```json
-{ "sources": [{ "name": "primary" }, { "name": "reporting" }] }
+{ "sources": [{ "name": "primary" }, { "name": "reporting" }], "default": "primary" }
 ```
 
-Deliberately just `{ "name": ... }` — no `backend` field. This round of
+`default` is the source an absent `source` param resolves to, so a client
+never infers it from list order. Each entry is deliberately just
+`{ "name": ... }` — no `backend` field. This round of
 the feature is homogeneous-backend-only: every source registered with one
 `router()` call must be the same concrete `DbSource` implementation,
 because the Rust reference's router stays generic over one type
@@ -340,8 +342,12 @@ default-resolution case could ever resolve to, so the two paths never
 diverge on what counts as valid.
 
 ```json
-{ "schemas": ["public", "reporting"] }
+{ "schemas": [{ "name": "public" }, { "name": "reporting" }], "default": "public" }
 ```
+
+`default` (`spec/protocol.md` §5.7) lets the UI open the server's own
+default schema instead of guessing one; `docs/adapter-decisions.md` §1
+has where each engine reads it from.
 
 Excludes Postgres's own system/internal namespaces (`pg_catalog`,
 `information_schema`, `pg_toast`/`pg_temp`) and any schema the connected

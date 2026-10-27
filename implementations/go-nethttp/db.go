@@ -164,7 +164,7 @@ type QueryOpts struct {
 // Every query is timeout-bounded, with enforcement varying by engine
 // (spec/protocol.md §1; docs/adapter-decisions.md §6).
 type DbSource interface {
-	ListSchemas(ctx context.Context) ([]string, error)
+	ListSchemas(ctx context.Context) (SchemaListing, error)
 	ListTables(ctx context.Context, schema *string) ([]TableInfo, error)
 	TableCounts(ctx context.Context, schema *string) ([]CountEntry, error)
 	QueryTable(ctx context.Context, schema *string, table string, opts QueryOpts) (TableData, error)
@@ -185,6 +185,32 @@ type DbSource interface {
 type queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// SchemaListing is a source's browsable schemas plus the one an absent
+// schema param resolves to: nil when the connection has no default schema,
+// or its default is not listed (spec/protocol.md §5.7).
+type SchemaListing struct {
+	Schemas []string
+	Default *string
+}
+
+func newSchemaListing(schemas []string, def *string) SchemaListing {
+	if schemas == nil {
+		schemas = []string{}
+	}
+	if def != nil {
+		if _, ok := findExact(schemas, *def); !ok {
+			def = nil
+		}
+	}
+	return SchemaListing{Schemas: schemas, Default: def}
+}
+
+// errNoDefaultSchema rejects an absent schema param on a connection with no
+// default schema (spec/protocol.md §1).
+func errNoDefaultSchema() error {
+	return &NotAllowedError{Kind: NotAllowedSchema, What: "no schema given, and this connection has no default schema"}
 }
 
 func findExact(haystack []string, needle string) (string, bool) {

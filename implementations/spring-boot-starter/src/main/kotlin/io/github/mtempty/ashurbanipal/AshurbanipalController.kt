@@ -31,8 +31,10 @@ internal const val PROTOCOL_VERSION = "1"
 internal const val NOSNIFF_HEADER = "X-Content-Type-Options"
 
 data class SourceEntry(val name: String)
-data class SourcesResponse(val sources: List<SourceEntry>)
-data class SchemasResponse(val schemas: List<String>)
+data class SourcesResponse(val sources: List<SourceEntry>, val default: String)
+data class SchemaEntry(val name: String)
+// ALWAYS: spec §5.7 requires `default` even when null, whatever the host's Jackson inclusion setting.
+data class SchemasResponse(val schemas: List<SchemaEntry>, @JsonInclude(JsonInclude.Include.ALWAYS) val default: String?)
 data class TablesResponse(val tables: List<TableInfo>)
 data class CountsResponse(val counts: List<CountEntry>)
 data class TableDataResponse(
@@ -77,9 +79,12 @@ class AshurbanipalController(
         ClassPathResource("ashurbanipal/dbviewer.html").inputStream.use { it.readBytes() }
     }
 
+    /** What an absent `source` resolves to; `/api/sources` reports it as `default`. */
+    private fun defaultSourceName(): String = dbSources.keys.first()
+
     /** Absent means the first-registered default; present requires an exact match (spec/protocol.md §1). */
     private fun resolveSource(name: String?): DbSource =
-        if (name == null) dbSources.values.first()
+        if (name == null) dbSources.getValue(defaultSourceName())
         else dbSources[name] ?: throw NotAllowedException("source \"$name\"", NotAllowedKind.SOURCE)
 
     @GetMapping(produces = [MediaType.TEXT_HTML_VALUE])
@@ -88,11 +93,13 @@ class AshurbanipalController(
 
     @GetMapping("/api/sources")
     fun listSources(): ResponseEntity<SourcesResponse> =
-        apiOk(SourcesResponse(dbSources.keys.map { SourceEntry(it) }))
+        apiOk(SourcesResponse(dbSources.keys.map { SourceEntry(it) }, defaultSourceName()))
 
     @GetMapping("/api/schemas")
     fun listSchemas(@RequestParam(required = false) source: String?): ResponseEntity<SchemasResponse> =
-        apiOk(SchemasResponse(resolveSource(source).listSchemas()))
+        resolveSource(source).listSchemas().let { listing ->
+            apiOk(SchemasResponse(listing.schemas.map { SchemaEntry(it) }, listing.default))
+        }
 
     @GetMapping("/api/tables")
     fun listTables(

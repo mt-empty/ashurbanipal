@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts, QueryTimeout, wrap_driver_errors
+from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts, QueryTimeout, SchemaListing, wrap_driver_errors
 from ashurbanipal.db.sqlite import SqliteSource, partial_index_predicate
 
 
@@ -47,7 +47,7 @@ def test_list_tables_and_query_table_round_trip(seeded_path) -> None:
     assert [t.name for t in tables] == ["order_extra", "orders", "users"]
     assert all(t.comment is None for t in tables)
 
-    assert source.list_schemas() == ["main"]
+    assert source.list_schemas() == SchemaListing(["main"], "main")
     with pytest.raises(NotAllowed):
         source.list_tables("other")
 

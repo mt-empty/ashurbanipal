@@ -134,6 +134,20 @@ class TableInfo:
 
 
 @dataclass
+class SchemaListing:
+    """A source's browsable schemas plus the one an absent `schema` param
+    resolves to: None when the connection has no default schema, or its
+    default is not listed (spec/protocol.md §5.7)."""
+
+    schemas: list[str]
+    default: str | None
+
+    def __post_init__(self) -> None:
+        if self.default not in self.schemas:
+            self.default = None
+
+
+@dataclass
 class TableData:
     columns: list[ColumnInfo]
     rows: list[dict[str, str | None]]
@@ -176,6 +190,15 @@ class NotAllowed(DbError):
     def __init__(self, message: str, kind: NotAllowedKind):
         super().__init__(message)
         self.kind = kind
+
+
+def no_default_schema() -> NotAllowed:
+    """Rejects an absent `schema` param on a connection with no default
+    schema (spec/protocol.md §1)."""
+    return NotAllowed(
+        "no schema given, and this connection has no default schema",
+        kind=NotAllowedKind.SCHEMA,
+    )
 
 
 class FilterParseError(DbError):
@@ -239,7 +262,7 @@ class DbSource(abc.ABC):
     """
 
     @abc.abstractmethod
-    def list_schemas(self) -> list[str]: ...
+    def list_schemas(self) -> SchemaListing: ...
 
     @abc.abstractmethod
     def list_tables(self, schema: str | None) -> list[TableInfo]: ...

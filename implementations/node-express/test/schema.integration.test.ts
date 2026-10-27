@@ -36,9 +36,14 @@ maybeDescribe("multi-schema support (live db)", () => {
   it("lists the seed's schemas, excluding system namespaces", async () => {
     const { status, body } = await getJson("/__ashurbanipal/api/schemas");
     expect(status).toBe(200);
-    const schemas = (body as { schemas: string[] }).schemas;
+    const schemas = (body as { schemas: { name: string }[] }).schemas.map((s) => s.name);
     expect(schemas).toEqual(expect.arrayContaining(["public", "other_schema", "warehouse"]));
     expect(schemas.some((s) => s === "pg_catalog" || s === "information_schema" || s.startsWith("pg_"))).toBe(false);
+  });
+
+  it("reports the connection's default schema", async () => {
+    const { body } = await getJson("/__ashurbanipal/api/schemas");
+    expect((body as { default: string | null }).default).toBe("public");
   });
 
   it("an explicit schema=public matches the implicit default", async () => {
@@ -423,4 +428,32 @@ maybeDescribe("multi-schema support (live db)", () => {
       await setupPool.end();
     }
   }, 20000);
+});
+
+maybeDescribe("a connection with no default schema (live db)", () => {
+  let pool: Pool;
+  let testServer: TestServer;
+
+  beforeAll(async () => {
+    // A search_path naming no existing schema makes current_schema() NULL.
+    pool = new Pool({ connectionString: databaseUrl, max: 1, options: "-c search_path=ashb_test_no_such_schema" });
+    testServer = await startServer(
+      createRouter({ enabled: true }, [{ name: "bare", source: new PostgresSource(pool) }]),
+    );
+  });
+
+  afterAll(async () => {
+    await testServer.close();
+    await pool.end();
+  });
+
+  it("reports a null default and rejects an absent schema with 400", async () => {
+    const schemas = await sharedGetJson(testServer.baseUrl, "/__ashurbanipal/api/schemas");
+    expect(schemas.status).toBe(200);
+    expect((schemas.body as { default: string | null }).default).toBeNull();
+
+    const tables = await sharedGetJson(testServer.baseUrl, "/__ashurbanipal/api/tables");
+    expect(tables.status).toBe(400);
+    expect(JSON.parse(tables.body as string).code).toBe("unknown_schema");
+  });
 });

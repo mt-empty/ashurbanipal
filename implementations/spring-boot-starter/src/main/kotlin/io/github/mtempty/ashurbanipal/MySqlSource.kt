@@ -151,14 +151,18 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             ),
         ) { rs -> rs.getString(1) }
 
-    /** Reads MySQL's default database (`spec/protocol.md` §5). */
-    private fun resolveSchema(variant: Variant, requested: String?): String {
-        val schemas = listAllowedSchemas(variant)
-        // Preserve null from database() for a clear rejection.
-        val resolved = requested ?: query<String?>(
+    /** Null when the connection names no database. */
+    private fun defaultSchema(variant: Variant): String? =
+        query<String?>(
             dataSource,
             timedSelect(variant, queryTimeoutSecs, "database()"),
         ) { rs -> rs.getString(1) }.first()
+
+    /** Reads MySQL's default database (`spec/protocol.md` §5). */
+    private fun resolveSchema(variant: Variant, requested: String?): String {
+        val schemas = listAllowedSchemas(variant)
+        val resolved = requested
+            ?: defaultSchema(variant)
             ?: throw NotAllowedException("no schema requested and this connection has no default database", NotAllowedKind.SCHEMA)
         return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved", NotAllowedKind.SCHEMA)
     }
@@ -242,7 +246,10 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         return pkColumns to fkColumns
     }
 
-    override fun listSchemas(): List<String> = inReadOnlyTransaction { listAllowedSchemas(variant()) }
+    override fun listSchemas(): SchemaListing = inReadOnlyTransaction {
+        val variant = variant()
+        SchemaListing.of(listAllowedSchemas(variant), defaultSchema(variant))
+    }
 
     override fun listTables(schema: String?): List<TableInfo> = inReadOnlyTransaction {
         val variant = variant()

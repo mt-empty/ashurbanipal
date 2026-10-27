@@ -42,10 +42,12 @@ from . import (
     NotAllowedKind,
     QueryOpts,
     ReferencedBy,
+    SchemaListing,
     Structure,
     TableData,
     TableInfo,
     group_referenced_by,
+    no_default_schema,
     quote_ident,
     wrap_driver_errors,
 )
@@ -155,13 +157,19 @@ class PgSource(DbSource):
         )
         return [row[0] for row in cur.fetchall()]
 
+    def _default_schema(self, cur: psycopg.Cursor) -> str | None:
+        # None when no schema on the session's search_path exists.
+        cur.execute("select current_schema()")
+        return cur.fetchone()[0]
+
     def _resolve_schema(self, cur: psycopg.Cursor, requested: str | None) -> str:
         schemas = self._list_schemas(cur)
         if requested is not None:
             resolved = requested
         else:
-            cur.execute("select current_schema()")
-            resolved = cur.fetchone()[0]
+            resolved = self._default_schema(cur)
+            if resolved is None:
+                raise no_default_schema()
         if resolved not in schemas:
             raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
         return resolved
@@ -249,10 +257,10 @@ class PgSource(DbSource):
         return pk_columns, fk_columns
 
     @wrap_driver_errors(psycopg.Error)
-    def list_schemas(self) -> list[str]:
+    def list_schemas(self) -> SchemaListing:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
-            return self._list_schemas(cur)
+            return SchemaListing(self._list_schemas(cur), self._default_schema(cur))
 
     @wrap_driver_errors(psycopg.Error)
     def list_tables(self, schema: str | None) -> list[TableInfo]:

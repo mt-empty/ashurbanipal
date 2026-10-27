@@ -45,6 +45,7 @@ from . import (
     NotAllowedKind,
     QueryOpts,
     ReferencedBy,
+    SchemaListing,
     Structure,
     TableData,
     TableInfo,
@@ -239,8 +240,8 @@ class SqliteSource(DbSource):
             fk_columns[from_col] = ColumnRef(table=ref_table, column=to_col, schema=None)
         return pk_columns, fk_columns
 
-    def list_schemas(self) -> list[str]:
-        return [ONLY_SCHEMA]
+    def list_schemas(self) -> SchemaListing:
+        return SchemaListing([ONLY_SCHEMA], ONLY_SCHEMA)
 
     @wrap_driver_errors(sqlite3.Error)
     def list_tables(self, schema: str | None) -> list[TableInfo]:

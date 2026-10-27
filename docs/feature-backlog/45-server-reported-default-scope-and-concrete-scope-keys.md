@@ -1,6 +1,10 @@
 # Server-reported default source and schema, and concrete scope keys
 
-> **Status:** OPEN · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** found in the 2026-10-25 architecture review of source/schema/table use; do before story 44
+> **Status:** PARTIAL · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** found in the 2026-10-25 architecture review of source/schema/table use; do before story 44
+
+**Done:** §4, the wire change, on every port and in conformance; the UI
+opens the server's `default`. **Left:** §5's scope state, scope keys and
+storage rename.
 
 The server is the only party that knows which source and schema an absent
 parameter resolves to. Have it say so, and have the UI use those concrete

@@ -3,7 +3,15 @@
 
 import type { FilterCondition, FilterOp } from "../core/types.js";
 import { columnTypeClass } from "../lib/format.js";
-import { type CellValue, SCHEMAS, SIBLINGS, SIBLINGS_INSTANCE, TABLES, type TableDef } from "./demo-fixtures.js";
+import {
+  type CellValue,
+  DEFAULT_SCHEMA,
+  SCHEMAS,
+  SIBLINGS,
+  SIBLINGS_INSTANCE,
+  TABLES,
+  type TableDef,
+} from "./demo-fixtures.js";
 
 function toWire(v: CellValue): string | null {
   if (v === null || v === undefined) return null;
@@ -31,7 +39,7 @@ function tablesFor(schema: string): TableDef[] {
 }
 function resolveSchema(params: URLSearchParams): { schema: string } | { error: string } {
   const requested = params.get("schema");
-  if (requested === null) return { schema: "public" };
+  if (requested === null) return { schema: DEFAULT_SCHEMA };
   if (!SCHEMAS.includes(requested)) return { error: `unknown schema: ${requested}` };
   return { schema: requested };
 }
@@ -132,10 +140,10 @@ function allRows(table: TableDef): Record<string, CellValue>[] {
 // #source-select-wrap stays hidden the same way it would for any real
 // single-source host — see loadSources.
 function handleSources(): Response {
-  return jsonResponse({ sources: [{ name: "demo" }] });
+  return jsonResponse({ sources: [{ name: "demo" }], default: "demo" });
 }
 function handleSchemas(): Response {
-  return jsonResponse({ schemas: SCHEMAS });
+  return jsonResponse({ schemas: SCHEMAS.map((name) => ({ name })), default: DEFAULT_SCHEMA });
 }
 function handleTables(params: URLSearchParams): Response {
   const s = resolveSchema(params);

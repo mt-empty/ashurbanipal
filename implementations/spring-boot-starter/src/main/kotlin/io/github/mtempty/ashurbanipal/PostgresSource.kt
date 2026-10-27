@@ -45,7 +45,8 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         transactionTemplate.execute { action() }
             ?: throw IllegalStateException("read-only transaction did not produce a result")
 
-    override fun listSchemas(): List<String> = listAllowedSchemas()
+    override fun listSchemas(): SchemaListing =
+        inReadOnlyTransaction { SchemaListing.of(listAllowedSchemas(), defaultSchema()) }
 
     private fun listAllowedSchemas(): List<String> =
         jdbcTemplate.queryForList(
@@ -58,11 +59,16 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             String::class.java,
         ).filterNotNull()
 
+    /** Null when no schema on the session's search_path exists. */
+    private fun defaultSchema(): String? =
+        jdbcTemplate.queryForObject("select current_schema()", String::class.java)
+
     /** Resolve inside the operation transaction to prevent pool-session drift (`spec/protocol.md` §5). */
     private fun resolveSchema(requested: String?): String {
         val schemas = listAllowedSchemas()
         val resolved = requested
-            ?: jdbcTemplate.queryForObject("select current_schema()", String::class.java)!!
+            ?: defaultSchema()
+            ?: throw NotAllowedException("no schema requested and this connection has no default schema", NotAllowedKind.SCHEMA)
         return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved", NotAllowedKind.SCHEMA)
     }
 

@@ -42,10 +42,12 @@ from . import (
     NotAllowedKind,
     QueryOpts,
     ReferencedBy,
+    SchemaListing,
     Structure,
     TableData,
     TableInfo,
     group_referenced_by,
+    no_default_schema,
     wrap_driver_errors,
 )
 
@@ -182,13 +184,20 @@ class MySqlSource(DbSource):
         )
         return [row[0] for row in cur.fetchall()]
 
+    def _default_schema(self, cur, variant: str, timeout_secs: int) -> str | None:
+        # None when the connection names no database.
+        cur.execute(_timed_select(variant, timeout_secs, "database()"))
+        (name,) = cur.fetchone()
+        return name
+
     def _resolve_schema(self, cur, variant: str, requested: str | None, timeout_secs: int) -> str:
         schemas = self._list_schemas(cur, variant, timeout_secs)
         if requested is not None:
             resolved = requested
         else:
-            cur.execute(_timed_select(variant, timeout_secs, "database()"))
-            (resolved,) = cur.fetchone()
+            resolved = self._default_schema(cur, variant, timeout_secs)
+            if resolved is None:
+                raise no_default_schema()
         if resolved not in schemas:
             raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
         return resolved
@@ -265,14 +274,17 @@ class MySqlSource(DbSource):
         return pk_columns, fk_columns
 
     @wrap_driver_errors(pymysql.Error)
-    def list_schemas(self) -> list[str]:
+    def list_schemas(self) -> SchemaListing:
         conn = self._connect()
         try:
             variant = self._variant_of(conn)
             with conn.cursor() as cur:
-                schemas = self._list_schemas(cur, variant, CATALOG_TIMEOUT_SECS)
+                listing = SchemaListing(
+                    self._list_schemas(cur, variant, CATALOG_TIMEOUT_SECS),
+                    self._default_schema(cur, variant, CATALOG_TIMEOUT_SECS),
+                )
             conn.commit()
-            return schemas
+            return listing
         finally:
             conn.close()
 

@@ -58,11 +58,15 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
             response.headers["X-Content-Type-Options"] = "nosniff"
         return response
 
+    def default_source() -> tuple[str, DbSource]:
+        # What an absent `source` resolves to; /api/sources reports it as `default`.
+        return sources[0]
+
     def resolve_source(name: str | None) -> DbSource:
         # Absent -> first-registered default; present -> exact match or
         # rejection, never a fallback guess (spec/protocol.md §1).
         if name is None:
-            return sources[0][1]
+            return default_source()[1]
         for n, s in sources:
             if n == name:
                 return s
@@ -101,12 +105,13 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("/api/sources")
     def list_sources() -> Response:
-        return jsonify({"sources": [{"name": n} for n, _ in sources]})
+        return jsonify({"sources": [{"name": n} for n, _ in sources], "default": default_source()[0]})
 
     @bp.get("/api/schemas")
     def list_schemas() -> Response:
         source = resolve_source(request.args.get("source"))
-        return jsonify({"schemas": source.list_schemas()})
+        listing = source.list_schemas()
+        return jsonify({"schemas": [{"name": n} for n in listing.schemas], "default": listing.default})
 
     @bp.get("/api/tables")
     def list_tables() -> Response:

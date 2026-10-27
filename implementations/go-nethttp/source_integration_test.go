@@ -95,6 +95,16 @@ func TestSourcesEndpointListsRegisteredNamesInOrder(t *testing.T) {
 			t.Errorf("source[%d].name = %v, want %q", i, name, want[i])
 		}
 	}
+	if body["default"] != "primary" {
+		t.Errorf("default = %v, want primary", body["default"])
+	}
+}
+
+func TestSchemasReportsEachSourcesOwnDefault(t *testing.T) {
+	body := getJSON(t, sourceTestServer(t), "/api/schemas?source=secondary")
+	if body["default"] != "other_schema" {
+		t.Errorf("source=secondary default = %v, want other_schema", body["default"])
+	}
 }
 
 func TestOmittedSourceResolvesToFirstRegistered(t *testing.T) {

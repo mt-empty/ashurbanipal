@@ -62,7 +62,7 @@ class SqliteSourceTest {
             assertEquals(listOf("order_extra", "orders", "users"), tables.map { it.name })
             assertTrue(tables.all { it.comment == null })
 
-            assertEquals(listOf("main"), source.listSchemas())
+            assertEquals(SchemaListing(listOf("main"), "main"), source.listSchemas())
             assertThrows(NotAllowedException::class.java) { source.listTables("other") }
 
             val data = source.queryTable(null, "users", QueryOpts(10, 0, "age", false, null))

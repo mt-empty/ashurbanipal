@@ -241,7 +241,7 @@ async fn explicit_schema_selects_that_schema_and_rejects_unknown_ones() {
         "an unknown schema must be rejected before touching SQL text, not passed through"
     );
 
-    let schemas = source.list_schemas().await.unwrap();
+    let schemas = source.list_schemas().await.unwrap().schemas;
     assert!(schemas.contains(&SCHEMA_C.to_string()));
     assert!(schemas.contains(&SCHEMA_D.to_string()));
     assert!(

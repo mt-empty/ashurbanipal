@@ -280,6 +280,7 @@
   };
   var TABLES = [users, orders, orderItems, products, userProfiles, dailySummary, signupFunnel];
   var SCHEMAS = ["public", "reporting"];
+  var DEFAULT_SCHEMA = "public";
   var SIBLINGS_INSTANCE = { name: "shop (demo)", label: "dev" };
   var SIBLINGS = [
     { name: "shop (demo)", label: "dev", base_url: "https://shop-dev.example.com/__ashurbanipal", healthy: true },
@@ -327,7 +328,7 @@
   }
   function resolveSchema(params) {
     const requested = params.get("schema");
-    if (requested === null) return { schema: "public" };
+    if (requested === null) return { schema: DEFAULT_SCHEMA };
     if (!SCHEMAS.includes(requested)) return { error: `unknown schema: ${requested}` };
     return { schema: requested };
   }
@@ -414,10 +415,10 @@
     return Array.from({ length: table.rowCount }, (_, i) => table.row(i));
   }
   function handleSources() {
-    return jsonResponse({ sources: [{ name: "demo" }] });
+    return jsonResponse({ sources: [{ name: "demo" }], default: "demo" });
   }
   function handleSchemas() {
-    return jsonResponse({ schemas: SCHEMAS });
+    return jsonResponse({ schemas: SCHEMAS.map((name) => ({ name })), default: DEFAULT_SCHEMA });
   }
   function handleTables(params) {
     const s = resolveSchema(params);
@@ -1705,14 +1706,14 @@ function buildApiReference() {
       {
         method: "GET",
         path: `${base}/sources`,
-        summary: "Source names selectable as the `source` param on the routes below, for a host that has registered more than one. A single-source deployment still returns exactly one entry; the first is the default used when `source` is omitted.",
+        summary: "Source names selectable as the `source` param on the routes below, for a host that has registered more than one. A single-source deployment still returns exactly one entry. `default` is the source used when `source` is omitted.",
         params: [],
-        example_response: { sources: [{ name: "primary" }, { name: "reporting" }] }
+        example_response: { sources: [{ name: "primary" }, { name: "reporting" }], default: "primary" }
       },
       {
         method: "GET",
         path: `${base}/schemas`,
-        summary: "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry.",
+        summary: "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry. `default` is the schema used when `schema` is omitted, or null when the connection has none.",
         params: [
           {
             name: "source",
@@ -1720,7 +1721,7 @@ function buildApiReference() {
             notes: "must be a name returned by GET /sources; omit to use the default source"
           }
         ],
-        example_response: { schemas: ["public"] }
+        example_response: { schemas: [{ name: "public" }], default: "public" }
       },
       {
         method: "GET",
@@ -5636,8 +5637,9 @@ async function showCommonValues(e, table, column) {
 // src/features/scope-select.ts
 async function loadSources() {
   let sources;
+  let defaultSource;
   try {
-    ({ sources } = await api("/sources"));
+    ({ sources, default: defaultSource } = await api("/sources"));
   } catch (e) {
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
     state.source = null;
@@ -5649,7 +5651,7 @@ async function loadSources() {
   }
   let source = state.source;
   if (!source || !sources.some((s) => s.name === source)) {
-    source = sources[0].name;
+    source = defaultSource;
   }
   state.source = source;
   populateSelect(
@@ -5669,8 +5671,11 @@ async function loadSchemas() {
   syncGridLock();
   const token = ++loadSchemasToken;
   let schemas;
+  let defaultSchema;
   try {
-    ({ schemas } = await api(`/schemas${sourceQuery()}`));
+    const listing = await api(`/schemas${sourceQuery()}`);
+    schemas = listing.schemas.map((s) => s.name);
+    defaultSchema = listing.default ?? null;
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
@@ -5680,13 +5685,14 @@ async function loadSchemas() {
   }
   if (token !== loadSchemasToken) return false;
   if (schemas.length <= 1) {
-    state.schema = null;
+    state.schema = defaultSchema === null ? schemas[0] ?? null : null;
+    if (state.schema) populateSelect($("schema-select"), schemas, state.schema);
     $("schema-select-wrap").hidden = true;
     return true;
   }
   let schema = state.schema;
   if (!schema || !schemas.includes(schema)) {
-    schema = schemas.includes("public") ? "public" : schemas[0];
+    schema = defaultSchema ?? schemas[0];
   }
   state.schema = schema;
   populateSelect($("schema-select"), schemas, schema);
@@ -6053,7 +6059,7 @@ window.addEventListener("popstate", () => {
   applyUrlExact(params);
   $("source-select").value = state.source ?? "";
   $("schema-select").value = state.schema ?? "";
-  $("schema-select-wrap").hidden = !state.schema;
+  $("schema-select-wrap").hidden = !state.schema || $("schema-select").options.length <= 1;
   persist();
   if (state.source === previousSource) {
     loadTables({ replaceHistory: true }).catch(reportError);

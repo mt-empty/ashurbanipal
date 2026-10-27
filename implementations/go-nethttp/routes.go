@@ -70,13 +70,19 @@ func Router(cfg Config, sources []NamedSource) http.Handler {
 	return mux
 }
 
+// defaultSource is what an absent source param resolves to, which
+// /api/sources reports as "default".
+func defaultSource(sources []NamedSource) NamedSource {
+	return sources[0]
+}
+
 // resolveSource resolves the "source" query param against sources the same
 // way a schema name resolves against a live catalog list (spec/protocol.md
 // §1/§6): absent means the first-registered default, present means an
 // exact match or a *NotAllowedError — never a fallback guess.
 func resolveSource(sources []NamedSource, requested *string) (DbSource, error) {
 	if requested == nil {
-		return sources[0].Source, nil
+		return defaultSource(sources).Source, nil
 	}
 	for _, s := range sources {
 		if s.Name == *requested {
@@ -100,6 +106,10 @@ type SourceEntry struct {
 	Name string `json:"name"`
 }
 
+type SchemaEntry struct {
+	Name string `json:"name"`
+}
+
 func listSourcesHandler(sources []NamedSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entries := make([]SourceEntry, len(sources))
@@ -108,7 +118,8 @@ func listSourcesHandler(sources []NamedSource) http.HandlerFunc {
 		}
 		writeJSON(w, struct {
 			Sources []SourceEntry `json:"sources"`
-		}{entries})
+			Default string        `json:"default"`
+		}{entries, defaultSource(sources).Name})
 	}
 }
 
@@ -202,14 +213,20 @@ func listSchemasHandler(sources []NamedSource) http.HandlerFunc {
 			writeError(w, err)
 			return
 		}
-		schemas, err := c.ListSchemas(r.Context())
+		listing, err := c.ListSchemas(r.Context())
 		if err != nil {
 			writeError(w, err)
 			return
 		}
+		entries := make([]SchemaEntry, len(listing.Schemas))
+		for i, name := range listing.Schemas {
+			entries[i].Name = name
+		}
+		// Default is always present, as null when there is none (spec/protocol.md §5.7).
 		writeJSON(w, struct {
-			Schemas []string `json:"schemas"`
-		}{schemas})
+			Schemas []SchemaEntry `json:"schemas"`
+			Default *string       `json:"default"`
+		}{entries, listing.Default})
 	}
 }
 

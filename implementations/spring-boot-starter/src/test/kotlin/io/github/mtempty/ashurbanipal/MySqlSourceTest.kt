@@ -136,6 +136,7 @@ class MySqlSourceTest {
                 ex.message?.contains("no default database") == true,
                 "[$envVar] expected a clear no-default-database message, got: ${ex.message}",
             )
+            assertNull(source.listSchemas().default, "[$envVar] no default database must list a null default")
         } finally {
             ds.close()
         }

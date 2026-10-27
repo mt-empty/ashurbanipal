@@ -23,7 +23,7 @@ export interface State {
   // without re-sorting each visit — ui-guidelines R10/R11).
   sortByTable: Record<string, { col: string; order: "asc" | "desc" }>;
   // Schema is query scope like sort is, remembered per source so flipping
-  // sources and back doesn't drop you into `public` again (ui-guidelines R12).
+  // sources and back doesn't drop you into the source's default again (ui-guidelines R12).
   schemaBySource: Record<string, string>;
   filter: string;
 }
@@ -454,8 +454,8 @@ export function dropStaleSort(req: ViewRequest, code: string | undefined): ViewR
 const FILTER_FAULTS = new Set(["unknown_column", "invalid_filter", "invalid_parameter"]);
 
 // Records the active schema against the current source (ui-guidelines R12),
-// so #source-select's onchange can restore it instead of resetting to
-// `public`. Only keyed when there's a source to switch between — a
+// so #source-select's onchange can restore it instead of resetting to the
+// source's default. Only keyed when there's a source to switch between — a
 // single-source deployment still persists state.schema via persist(), it
 // just has no per-source map to populate.
 export function rememberSchema(): void {

@@ -179,7 +179,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         return pkColumns to fkColumns
     }
 
-    override fun listSchemas(): List<String> = listOf(ONLY_SCHEMA)
+    override fun listSchemas(): SchemaListing = SchemaListing.of(listOf(ONLY_SCHEMA), ONLY_SCHEMA)
 
     override fun listTables(schema: String?): List<TableInfo> {
         checkSchema(schema)

@@ -109,6 +109,19 @@ test("a failing /schemas hides the schema picker and the tables still load", asy
   await expect(page.locator("#tbody tr").first()).toBeVisible();
 });
 
+test("a lone schema with no server default is still sent by name", async ({ page }) => {
+  // A connection with no default schema rejects any request that omits `schema` (spec/protocol.md §1).
+  await page.route(
+    (url) => url.pathname.endsWith("/api/schemas"),
+    (route) => route.fulfill({ json: { schemas: [{ name: "public" }], default: null } }),
+  );
+  const dataRequest = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith("/api/tables/data"));
+  await gotoApp(page);
+  expect(new URL((await dataRequest).url()).searchParams.get("schema")).toBe("public");
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
+  await expect(page.locator("#schema-select-wrap")).toBeHidden();
+});
+
 test("a failed /sources call drops a remembered source instead of sending it", async ({ page }) => {
   await gotoApp(page);
   await page.evaluate(() => localStorage.setItem("ashurbanipal_ui", JSON.stringify({ source: "gone" })));

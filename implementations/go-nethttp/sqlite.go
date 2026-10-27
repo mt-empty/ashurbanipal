@@ -381,8 +381,9 @@ func sqliteBuildWhereClause(conditions []Condition, columnNames []string) (strin
 	return " where " + string(clause), values, nil
 }
 
-func (c *SQLiteSource) ListSchemas(ctx context.Context) ([]string, error) {
-	return []string{onlySchema}, nil
+func (c *SQLiteSource) ListSchemas(ctx context.Context) (SchemaListing, error) {
+	def := onlySchema
+	return newSchemaListing([]string{onlySchema}, &def), nil
 }
 
 func (c *SQLiteSource) ListTables(ctx context.Context, schema *string) ([]TableInfo, error) {

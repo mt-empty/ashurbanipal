@@ -4,9 +4,10 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use super::{
-    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck,
-    ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, IndexInfo,
-    KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, Structure, TableData, TableInfo,
+    group_referenced_by, no_default_schema, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef,
+    ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
+    IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
+    TableData, TableInfo,
 };
 use crate::filter::{Condition, Logic};
 use crate::join::{
@@ -151,6 +152,18 @@ impl PgPoolSource {
         Ok(rows)
     }
 
+    /// `None` when no schema on the session's `search_path` exists.
+    async fn default_schema_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+    ) -> Result<Option<String>, DbError> {
+        Ok(
+            sqlx::query_scalar::<_, Option<String>>("select current_schema()")
+                .fetch_one(&mut **tx)
+                .await?,
+        )
+    }
+
     /// Resolve inside the operation transaction to prevent pool-session drift
     /// (`spec/protocol.md` §5).
     async fn resolve_schema_in_tx(
@@ -161,11 +174,10 @@ impl PgPoolSource {
         let schemas = self.list_schemas_in_tx(tx).await?;
         let resolved = match requested {
             Some(name) => name.to_string(),
-            None => {
-                sqlx::query_scalar::<_, String>("select current_schema()")
-                    .fetch_one(&mut **tx)
-                    .await?
-            }
+            None => self
+                .default_schema_in_tx(tx)
+                .await?
+                .ok_or_else(no_default_schema)?,
         };
         schemas.into_iter().find(|s| s == &resolved).ok_or_else(|| {
             DbError::not_allowed(NotAllowedKind::Schema, format!("schema {resolved:?}"))
@@ -591,11 +603,12 @@ fn row_to_json<'a>(
 }
 
 impl DbSource for PgPoolSource {
-    async fn list_schemas(&self) -> Result<Vec<String>, DbError> {
+    async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schemas = self.list_schemas_in_tx(&mut tx).await?;
+        let default = self.default_schema_in_tx(&mut tx).await?;
         tx.commit().await?;
-        Ok(schemas)
+        Ok(SchemaListing::new(schemas, default))
     }
 
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {

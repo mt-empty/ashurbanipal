@@ -3,6 +3,9 @@ package io.github.mtempty.ashurbanipal
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.Test
 import java.net.URI
@@ -133,6 +136,29 @@ class SchemaIsolationTest {
                     }
                 }
             }
+        }
+    }
+
+    /** A search_path naming no existing schema makes current_schema() NULL. */
+    @Test
+    fun `a connection with no default schema lists a null default and rejects an absent schema`() {
+        val (jdbcUrl, user, password) = jdbcCredentials()
+        HikariDataSource(
+            HikariConfig().apply {
+                this.jdbcUrl = jdbcUrl
+                username = user
+                this.password = password
+                maximumPoolSize = 1
+                connectionInitSql = "set search_path = ashb_test_no_such_schema"
+                poolName = "no-default-schema-under-test"
+            },
+        ).use { ds ->
+            val source = PostgresSource(ds, 5, FilterValidator())
+            val listing = source.listSchemas()
+            assertNull(listing.default)
+            assertTrue(listing.schemas.isNotEmpty())
+            val ex = assertThrows(NotAllowedException::class.java) { source.listTables(null) }
+            assertEquals(NotAllowedKind.SCHEMA, ex.kind)
         }
     }
 }

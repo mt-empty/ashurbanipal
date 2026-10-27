@@ -2,7 +2,7 @@ import { supersedeLoads } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
 import { $, populateSelect, reportError } from "../core/dom.js";
 import { sourceQuery, state, switchSchema, switchSource } from "../core/state.js";
-import type { SourceEntry } from "../core/types.js";
+import type { SchemasResponse, SourceEntry, SourcesResponse } from "../core/types.js";
 import { syncGridLock } from "./grid-lock.js";
 import { loadTables } from "./table-chips.js";
 
@@ -14,8 +14,9 @@ import { loadTables } from "./table-chips.js";
 // sort and filter: another source has its own schemas and tables.
 export async function loadSources(): Promise<void> {
   let sources: SourceEntry[];
+  let defaultSource: string;
   try {
-    ({ sources } = await api<{ sources: SourceEntry[] }>("/sources"));
+    ({ sources, default: defaultSource } = await api<SourcesResponse>("/sources"));
   } catch (e) {
     // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
     // single-source, with no `source` param, but leave a trace.
@@ -29,7 +30,7 @@ export async function loadSources(): Promise<void> {
   }
   let source = state.source;
   if (!source || !sources.some((s) => s.name === source)) {
-    source = sources[0].name;
+    source = defaultSource;
   }
   state.source = source;
   populateSelect(
@@ -50,9 +51,10 @@ $<HTMLSelectElement>("source-select").onchange = () => {
 };
 
 // ==== Schema selector ====
-// Hidden for a single-schema deployment, which then sends no `schema` param.
-// With two or more, state.schema is pinned to a concrete name so every
-// request names its schema.
+// Hidden for a single-schema deployment, which then sends no `schema` param,
+// unless the server reports no default: an absent `schema` would 400 there,
+// so its one schema is pinned with the selector still hidden. With two or
+// more, state.schema is pinned to a concrete name so every request names it.
 // Same supersession guard as loadTables: a slow /schemas from an earlier
 // source switch must not overwrite a later one's schema and selector.
 let loadSchemasToken = 0;
@@ -63,8 +65,12 @@ export async function loadSchemas(): Promise<boolean> {
   syncGridLock();
   const token = ++loadSchemasToken;
   let schemas: string[];
+  let defaultSchema: string | null;
   try {
-    ({ schemas } = await api<{ schemas: string[] }>(`/schemas${sourceQuery()}`));
+    const listing = await api<SchemasResponse>(`/schemas${sourceQuery()}`);
+    schemas = listing.schemas.map((s) => s.name);
+    // A host's JSON settings may drop a null field.
+    defaultSchema = listing.default ?? null;
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
@@ -80,13 +86,15 @@ export async function loadSchemas(): Promise<boolean> {
   // than the previously selected one, and without this the wrap would keep
   // showing the prior source's stale multi-schema dropdown.
   if (schemas.length <= 1) {
-    state.schema = null;
+    state.schema = defaultSchema === null ? (schemas[0] ?? null) : null;
+    if (state.schema) populateSelect($<HTMLSelectElement>("schema-select"), schemas, state.schema);
     $("schema-select-wrap").hidden = true;
     return true;
   }
   let schema = state.schema;
   if (!schema || !schemas.includes(schema)) {
-    schema = schemas.includes("public") ? "public" : schemas[0];
+    // The server's default can be null (no default schema on that connection).
+    schema = defaultSchema ?? schemas[0];
   }
   state.schema = schema;
   populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);

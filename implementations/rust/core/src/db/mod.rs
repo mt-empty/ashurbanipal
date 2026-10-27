@@ -66,6 +66,32 @@ pub struct TableInfo {
     pub comment: Option<String>,
 }
 
+/// A source's browsable schemas, plus the one an absent `schema` param
+/// resolves to: `None` when the connection has no default schema, or its
+/// default is not in `schemas`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaListing {
+    pub schemas: Vec<String>,
+    pub default: Option<String>,
+}
+
+impl SchemaListing {
+    /// Keeps `default` only when it is listed (`spec/protocol.md` §5.7).
+    pub fn new(schemas: Vec<String>, default: Option<String>) -> Self {
+        let default = default.filter(|d| schemas.contains(d));
+        Self { schemas, default }
+    }
+}
+
+/// The not-allowed error for an absent `schema` on a connection with no
+/// default schema (`spec/protocol.md` §1).
+pub fn no_default_schema() -> DbError {
+    DbError::not_allowed(
+        NotAllowedKind::Schema,
+        "no schema given, and this connection has no default schema",
+    )
+}
+
 #[derive(Debug, Serialize)]
 pub struct TableData {
     pub columns: Vec<ColumnInfo>,
@@ -317,7 +343,7 @@ impl ProblemDetails {
 pub trait DbSource: Send + Sync + 'static {
     fn list_schemas(
         &self,
-    ) -> impl std::future::Future<Output = Result<Vec<String>, DbError>> + Send;
+    ) -> impl std::future::Future<Output = Result<SchemaListing, DbError>> + Send;
     fn list_tables(
         &self,
         schema: Option<&str>,
@@ -360,6 +386,12 @@ pub trait DbSource: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = Result<Structure, DbError>> + Send;
 }
 
+/// The source an absent `source` param resolves to, which `/api/sources`
+/// reports as `default`. `sources` must be non-empty, as `router()` asserts.
+pub fn default_source<S>(sources: &[(String, S)]) -> &(String, S) {
+    &sources[0]
+}
+
 /// Resolves the `source` query param against a host's registered sources
 /// the same way a schema name resolves against a live catalog list
 /// (`spec/protocol.md` §1/§6): absent means the first-registered default,
@@ -372,7 +404,7 @@ pub fn resolve_source<'a, S>(
     requested: Option<&str>,
 ) -> Result<&'a S, DbError> {
     match requested {
-        None => Ok(&sources[0].1),
+        None => Ok(&default_source(sources).1),
         Some(name) => sources
             .iter()
             .find(|(n, _)| n == name)

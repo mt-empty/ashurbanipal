@@ -39,6 +39,17 @@ internal fun quoteIdent(ident: String): String = "\"" + ident.replace("\"", "\"\
 // present as JSON null — optional metadata fields and row nulls need opposite
 // treatment, so the mapper's default (include nulls) stays the baseline.
 data class TableInfo(val name: String, @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null)
+
+/**
+ * A source's browsable schemas plus the one an absent `schema` param resolves
+ * to: null when the connection has no default schema, or its default is not
+ * listed (`spec/protocol.md` §5.7).
+ */
+data class SchemaListing(val schemas: List<String>, val default: String?) {
+    companion object {
+        fun of(schemas: List<String>, default: String?) = SchemaListing(schemas, default?.takeIf { it in schemas })
+    }
+}
 data class CountEntry(val table: String, @JsonProperty("approx_rows") val approxRows: Long)
 data class ColumnRef(
     val table: String,
@@ -164,7 +175,7 @@ data class QueryOpts(
 
 /** Backend-selection seam; route handlers never access a concrete driver. */
 interface DbSource {
-    fun listSchemas(): List<String>
+    fun listSchemas(): SchemaListing
     fun listTables(schema: String?): List<TableInfo>
     fun tableCounts(schema: String?): List<CountEntry>
     fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData

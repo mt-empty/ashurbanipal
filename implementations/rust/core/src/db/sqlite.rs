@@ -7,7 +7,7 @@ use sqlx::{Row, SqlitePool};
 use super::{
     group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, ConstraintFk,
     ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, IndexInfo, KeyKind,
-    NotAllowedKind, QueryOpts, ReferencedBy, Structure, TableData, TableInfo,
+    NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
@@ -380,8 +380,11 @@ fn build_where_clause(
 }
 
 impl DbSource for SqliteSource {
-    async fn list_schemas(&self) -> Result<Vec<String>, DbError> {
-        Ok(vec![ONLY_SCHEMA.to_string()])
+    async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
+        Ok(SchemaListing::new(
+            vec![ONLY_SCHEMA.to_string()],
+            Some(ONLY_SCHEMA.to_string()),
+        ))
     }
 
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
@@ -870,7 +873,9 @@ mod tests {
         assert_eq!(names, vec!["order_extra", "orders", "users"]);
         assert!(tables.iter().all(|t| t.comment.is_none()));
 
-        assert_eq!(source.list_schemas().await.unwrap(), vec!["main"]);
+        let listing = source.list_schemas().await.unwrap();
+        assert_eq!(listing.schemas, vec!["main"]);
+        assert_eq!(listing.default.as_deref(), Some("main"));
         assert!(matches!(
             source.list_tables(Some("other")).await,
             Err(DbError::NotAllowed(_))

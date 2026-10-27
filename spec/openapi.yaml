@@ -527,7 +527,8 @@ components:
       description: >
         Selects which registered DbSource this operation targets
         (spec/protocol.md §1). Absent resolves to the first-registered
-        source. Present must exactly match (case-sensitive) an entry
+        source, which GET /sources reports as `default`. Present must
+        exactly match (case-sensitive) an entry
         from GET /sources; otherwise 400.
       schema:
         type: string
@@ -538,9 +539,10 @@ components:
       required: false
       description: >
         Selects which schema this operation is scoped to (spec/protocol.md
-        §1). Absent resolves to the connection's own default. Present
-        must exactly match (case-sensitive) an entry from GET /schemas;
-        otherwise 400.
+        §1). Absent resolves to the connection's own default, which GET
+        /schemas reports as `default`; with no default (`default: null`)
+        an absent schema is a 400. Present must exactly match
+        (case-sensitive) an entry from GET /schemas; otherwise 400.
       schema:
         type: string
 
@@ -595,34 +597,52 @@ components:
           type: string
           description: >
             Opaque, implementation-defined identifier. No other field is
-            defined — a source's backend engine has no wire
+            defined on an entry — a source's backend engine has no wire
             representation, it's a host-side configuration detail only.
 
     SourcesResponse:
       type: object
-      required: [sources]
+      required: [sources, default]
       properties:
         sources:
           type: array
           items:
             $ref: "#/components/schemas/SourceEntry"
           description: >
-            Selectable sources, in the same order the `source` param's
-            absent case resolves against (first entry is the default).
-            Exactly one entry for a single-source deployment.
+            Selectable sources, in the host's registration order. Exactly
+            one entry for a single-source deployment.
+        default:
+          type: string
+          description: >
+            The source an absent `source` param resolves to; always an
+            entry of `sources`.
+
+    SchemaEntry:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: The schema's name, exactly as the `schema` param takes it.
 
     SchemasResponse:
       type: object
-      required: [schemas]
+      required: [schemas, default]
       properties:
         schemas:
           type: array
           items:
-            type: string
+            $ref: "#/components/schemas/SchemaEntry"
           description: >
-            Selectable schema names, excluding the engine's own
-            system/internal namespaces. Exactly one entry on engines with
-            no schema concept above a single database.
+            Selectable schemas, excluding the engine's own system/internal
+            namespaces. Exactly one entry on engines with no schema concept
+            above a single database.
+        default:
+          type: ["string", "null"]
+          description: >
+            The schema an absent `schema` param resolves to, always an
+            entry of `schemas`; null when the connection has no default
+            or its default is not listed.
 
     TableInfo:
       type: object

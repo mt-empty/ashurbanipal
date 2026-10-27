@@ -108,6 +108,18 @@ export interface SourceEntry {
   name: string;
 }
 
+/** `default` is the source an absent `source` param resolves to (spec/protocol.md §5.8). */
+export interface SourcesResponse {
+  sources: SourceEntry[];
+  default: string;
+}
+
+/** `default` is what an absent `schema` param resolves to; null when the connection has none (spec/protocol.md §5.7). */
+export interface SchemasResponse {
+  schemas: { name: string }[];
+  default: string | null;
+}
+
 export interface Sibling {
   name: string;
   label?: string;

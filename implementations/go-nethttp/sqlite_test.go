@@ -80,9 +80,9 @@ func TestSQLiteListTablesAndQueryTableRoundTrip(t *testing.T) {
 		}
 	}
 
-	schemas, err := source.ListSchemas(ctx)
-	if err != nil || len(schemas) != 1 || schemas[0] != "main" {
-		t.Fatalf("ListSchemas = %v, %v, want [main]", schemas, err)
+	listing, err := source.ListSchemas(ctx)
+	if err != nil || len(listing.Schemas) != 1 || listing.Schemas[0] != "main" || listing.Default == nil || *listing.Default != "main" {
+		t.Fatalf("ListSchemas = %+v, %v, want [main] with default main", listing, err)
 	}
 
 	other := "other"
@@ -561,8 +561,8 @@ func TestSQLiteJoinFilterSortAndRejections(t *testing.T) {
 		"on":[{"left":{"join":0,"column":"id"},"right":"user_id"}]}]}`)
 	if _, err := source.QueryJoin(ctx, nil, hostile, JoinOpts{Limit: 10}); err == nil {
 		t.Error("hostile table name must be rejected")
-	} else if na, ok := err.(*NotAllowedError); !ok || na.Kind != NotAllowedTable {
-		t.Errorf("want NotAllowedTable, got %v", err)
+	} else if _, ok := err.(*BadJoinError); !ok {
+		t.Errorf("want *BadJoinError, got %v", err)
 	}
 	mismatch := sqliteJoin(t, `{"table":"users","joins":[{"type":"left","table":"orders",
 		"on":[{"left":{"join":0,"column":"email"},"right":"user_id"}]}]}`)
