@@ -208,6 +208,18 @@ func (c *MySQLSource) allowedSchemasInTx(ctx context.Context, tx queryer, varian
 	return out, rows.Err()
 }
 
+// defaultSchemaInTx is nil when the connection names no database.
+func (c *MySQLSource) defaultSchemaInTx(ctx context.Context, tx queryer, variant mysqlVariant) (*string, error) {
+	ctx, cancel := c.bounded(ctx)
+	defer cancel()
+	// database/sql scans NULL into a nil *string.
+	var name *string
+	if err := tx.QueryRowContext(ctx, timedSelect(variant, c.timeoutSec, "database()")).Scan(&name); err != nil {
+		return nil, err
+	}
+	return name, nil
+}
+
 // resolveSchemaInTx reads the connection's default database (`spec/protocol.md` §5).
 func (c *MySQLSource) resolveSchemaInTx(ctx context.Context, tx queryer, variant mysqlVariant, requested *string) (string, error) {
 	schemas, err := c.allowedSchemasInTx(ctx, tx, variant)
@@ -218,11 +230,14 @@ func (c *MySQLSource) resolveSchemaInTx(ctx context.Context, tx queryer, variant
 	if requested != nil {
 		resolved = *requested
 	} else {
-		ctx, cancel := c.bounded(ctx)
-		defer cancel()
-		if err := tx.QueryRowContext(ctx, timedSelect(variant, c.timeoutSec, "database()")).Scan(&resolved); err != nil {
+		def, err := c.defaultSchemaInTx(ctx, tx, variant)
+		if err != nil {
 			return "", err
 		}
+		if def == nil {
+			return "", errNoDefaultSchema()
+		}
+		resolved = *def
 	}
 	real, ok := findExact(schemas, resolved)
 	if !ok {
@@ -456,24 +471,25 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 	return JoinData{Columns: plan.columnInfos(), Rows: out, HasMore: hasMore}, nil
 }
 
-func (c *MySQLSource) ListSchemas(ctx context.Context) ([]string, error) {
+func (c *MySQLSource) ListSchemas(ctx context.Context) (SchemaListing, error) {
 	variant, err := c.variantOf(ctx)
 	if err != nil {
-		return nil, err
+		return SchemaListing{}, err
 	}
 	tx, err := c.pinnedTx(ctx)
 	if err != nil {
-		return nil, err
+		return SchemaListing{}, err
 	}
 	defer tx.Rollback()
 	schemas, err := c.allowedSchemasInTx(ctx, tx, variant)
 	if err != nil {
-		return nil, err
+		return SchemaListing{}, err
 	}
-	if schemas == nil {
-		schemas = []string{}
+	def, err := c.defaultSchemaInTx(ctx, tx, variant)
+	if err != nil {
+		return SchemaListing{}, err
 	}
-	return schemas, tx.Commit()
+	return newSchemaListing(schemas, def), tx.Commit()
 }
 
 func (c *MySQLSource) ListTables(ctx context.Context, schema *string) ([]TableInfo, error) {

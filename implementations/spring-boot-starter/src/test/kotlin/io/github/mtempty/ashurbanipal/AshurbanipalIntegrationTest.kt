@@ -206,7 +206,8 @@ class AshurbanipalIntegrationTest : AshurbanipalHttpTestBase() {
     @Test
     fun `api schemas lists the seed's schemas excluding system namespaces`() {
         val body = getJson("/api/schemas")
-        val names = (body["schemas"] as Iterable<JsonNode>).map { it.asText() }
+        val names = (body["schemas"] as Iterable<JsonNode>).map { it["name"].asText() }
+        assertEquals("public", body["default"].asText())
         assertTrue(names.contains("public") && names.contains("other_schema") && names.contains("warehouse"))
         assertFalse(names.any { it == "pg_catalog" || it == "information_schema" || it.startsWith("pg_") })
     }

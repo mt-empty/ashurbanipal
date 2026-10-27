@@ -105,7 +105,7 @@ export interface QueryOpts {
 
 /** Database seam; every call is timeout-bounded (`spec/protocol.md` §1, §6). */
 export interface DbSource {
-  listSchemas(timeoutMs: number): Promise<string[]>;
+  listSchemas(timeoutMs: number): Promise<SchemaListing>;
   listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]>;
   tableCounts(schema: string | undefined, timeoutMs: number): Promise<CountEntry[]>;
   queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData>;
@@ -125,6 +125,21 @@ export interface DbSource {
 
 export function findExact(haystack: string[], needle: string): string | undefined {
   return haystack.find((s) => s === needle);
+}
+
+/**
+ * A source's browsable schemas plus the one an absent `schema` param resolves
+ * to: null when the connection has no default schema, or its default is not
+ * listed (`spec/protocol.md` §5.7).
+ */
+export interface SchemaListing {
+  schemas: string[];
+  default: string | null;
+}
+
+export function schemaListing(schemas: string[], defaultSchema: string | null): SchemaListing {
+  const listed = defaultSchema === null ? undefined : findExact(schemas, defaultSchema);
+  return { schemas, default: listed ?? null };
 }
 
 // Merges single-pair ReferencedByEntry rows into one entry per

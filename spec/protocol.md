@@ -26,8 +26,8 @@ interpreted as described in RFC 2119.
   for implementations that register more than one (§5.8). Every route
   that takes a `source` parameter (§5.2–§5.5, §5.7, §5.9–§5.11) resolves it the same
   way:
-  - **Absent** — resolves to the first-registered source, the same order
-    §5.8's list returns.
+  - **Absent** — resolves to the first-registered source, which §5.8
+    reports as `default`.
   - **Present** — MUST match an entry from §5.8's live list exactly
     (case-sensitive); otherwise 400. An implementation MUST NOT accept a
     source name that hasn't been validated against that same live list.
@@ -43,7 +43,9 @@ interpreted as described in RFC 2119.
   schema concept above a single database. Every route that takes a
   `schema` parameter (§5.2–§5.5, §5.9–§5.11) resolves it the same way:
   - **Absent** — resolves to the connection's own default (on Postgres:
-    `current_schema()`).
+    `current_schema()`), which §5.7 reports as `default`. When the
+    connection has no default (§5.7's `default` is `null`), the request
+    fails with 400 `unknown_schema`.
   - **Present** — MUST match an entry from §5.7's live list exactly
     (case-sensitive); otherwise 400. An implementation MUST NOT accept a
     schema name that hasn't been validated against that same live list,
@@ -478,9 +480,15 @@ This is the live allow-list §1's "present" case validates against.
 Response:
 
 ```json
-{ "schemas": ["public", "reporting"] }
+{ "schemas": [{ "name": "public" }, { "name": "reporting" }], "default": "public" }
 ```
 
+- `name` — the schema's name, exactly as the `schema` parameter takes it.
+- `default` — the schema an absent `schema` parameter resolves to on this
+  source (§1), or `null` when the connection has no default or its
+  default is not in `schemas`. When not `null`, it MUST be an entry of
+  `schemas`. Clients use it to pick the initial schema rather than
+  guessing.
 - MUST list every schema §1's default-resolution case could ever resolve
   to for this source, so the implicit and explicit paths never diverge on
   what counts as valid — an implementation MUST NOT accept, via either
@@ -506,13 +514,16 @@ validates against.
 Response:
 
 ```json
-{ "sources": [{ "name": "primary" }, { "name": "reporting" }] }
+{ "sources": [{ "name": "primary" }, { "name": "reporting" }], "default": "primary" }
 ```
 
 - `name` — the source's opaque, implementation-defined identifier. No
-  other field is defined — in particular, responses MUST NOT include
-  which backend engine a source uses; that stays purely a host-side
-  configuration detail with no wire representation.
+  other field is defined on an entry — in particular, responses MUST NOT
+  include which backend engine a source uses; that stays purely a
+  host-side configuration detail with no wire representation.
+- `default` — the source an absent `source` parameter resolves to (§1).
+  MUST be an entry of `sources`. Clients use it, not list order, to pick
+  the initial source.
 - MUST list every source §1's default-resolution case could ever resolve
   to, so the implicit and explicit paths never diverge on what counts as
   valid — an implementation MUST NOT accept, via either path, a source
@@ -520,9 +531,8 @@ Response:
 - Implementations that register exactly one source MUST still return
   exactly one entry here (mirrors §5.7's single-schema-engine rule) — a
   single-source deployment is the common case, not a degenerate one.
-- Sources SHOULD be returned in a stable order, and that order MUST be
-  the same order §1's "absent" case resolves against (the first entry is
-  the default).
+- Sources SHOULD be returned in a stable order (the host's registration
+  order).
 
 ### 5.9 `GET {mount}/api/tables/referenced-by`
 
@@ -883,8 +893,12 @@ These hold across all routes:
   serialization change, and would bump the version under the rule above —
   but it landed before any external consumer existed, so this document
   treats it as an in-place v1 correction rather than a v2 bump (no client
-  could observe the difference; see `spec/CHANGELOG.md`). Not a precedent:
-  a serialization change after a real consumer exists bumps the version.
+  could observe the difference; see `spec/CHANGELOG.md`).
+- **Alpha exception**: while every port is pre-1.0, a non-additive change
+  MAY land in place within v1, provided every port, the conformance
+  runner, and the bundled UI change together in the same release. Each
+  such change is listed in `spec/CHANGELOG.md`. Once any port reaches 1.0,
+  the versioning policy above applies without exception.
 - **v1 baseline**: v1 is the first protocol version ever emitted; nothing
   shipped a `x-ashurbanipal-protocol` header before it. The pre-spec
   reference's DSL-text `filter` parameter was an implementation detail,

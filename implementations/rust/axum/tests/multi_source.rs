@@ -19,6 +19,8 @@ use tower::ServiceExt;
 
 const SOURCE_SCHEMA_ALPHA: &str = "ashb_test_multi_source_alpha";
 const SOURCE_SCHEMA_BETA: &str = "ashb_test_multi_source_beta";
+// Its own schema: cargo runs this file's tests concurrently.
+const SOURCE_SCHEMA_ALPHA_DEFAULT: &str = "ashb_test_multi_source_alpha_default";
 
 async fn build_pinned_source(
     database_url: &str,
@@ -88,15 +90,21 @@ async fn get_status(app: &axum::Router, path: &str) -> StatusCode {
     response.status()
 }
 
-async fn get_json(app: &axum::Router, path: &str) -> serde_json::Value {
+async fn get_any(app: &axum::Router, path: &str) -> (StatusCode, serde_json::Value) {
     let response = app
         .clone()
         .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK, "GET {path}");
+    let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    serde_json::from_slice(&bytes).unwrap()
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+async fn get_json(app: &axum::Router, path: &str) -> serde_json::Value {
+    let (status, body) = get_any(app, path).await;
+    assert_eq!(status, StatusCode::OK, "GET {path}");
+    body
 }
 
 #[tokio::test]
@@ -196,6 +204,61 @@ async fn api_sources_lists_registered_names_in_registration_order_with_no_backen
     let body = get_json(&app, "/__ashurbanipal/api/sources").await;
     assert_eq!(
         body,
-        serde_json::json!({"sources": [{"name": "second"}, {"name": "first"}]})
+        serde_json::json!({
+            "sources": [{"name": "second"}, {"name": "first"}],
+            "default": "second"
+        })
     );
+}
+
+#[tokio::test]
+async fn schemas_reports_each_sources_own_default_schema() {
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
+
+    let alpha = build_pinned_source(&database_url, SOURCE_SCHEMA_ALPHA_DEFAULT, "ALPHA").await;
+    let config = Config::from_toml("enabled = true").unwrap();
+    let app = router(config, vec![("alpha".to_string(), alpha)]);
+
+    let body = get_json(&app, "/__ashurbanipal/api/schemas").await;
+    assert_eq!(body["default"], SOURCE_SCHEMA_ALPHA_DEFAULT);
+    assert!(body["schemas"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!({ "name": SOURCE_SCHEMA_ALPHA_DEFAULT })));
+
+    teardown_schemas(&database_url, &[SOURCE_SCHEMA_ALPHA_DEFAULT]).await;
+}
+
+#[tokio::test]
+async fn a_connection_with_no_default_schema_reports_null_and_rejects_an_absent_schema() {
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
+
+    // A search_path naming no existing schema makes current_schema() NULL.
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                conn.execute("set search_path = ashb_test_no_such_schema")
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&database_url)
+        .await
+        .expect("connect source with no default schema");
+    let config = Config::from_toml("enabled = true").unwrap();
+    let app = router(config, vec![("bare".to_string(), PgPoolSource::new(pool))]);
+
+    let body = get_json(&app, "/__ashurbanipal/api/schemas").await;
+    assert!(
+        body.get("default").is_some_and(|d| d.is_null()),
+        "`default` must be present and null: {body}"
+    );
+    assert!(!body["schemas"].as_array().unwrap().is_empty());
+
+    let (status, problem) = get_any(&app, "/__ashurbanipal/api/tables").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(problem["code"], "unknown_schema");
 }

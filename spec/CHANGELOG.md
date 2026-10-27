@@ -5,7 +5,9 @@ per published port live in each port's own `implementations/<port>/CHANGELOG.md`
 
 Versioning policy (`PORTING.md`'s Governance section): additive-optional
 changes keep the same major version; anything behavioral or
-shape-changing bumps the version and gets an entry here.
+shape-changing bumps the version and gets an entry here, except under
+`spec/protocol.md` §7's alpha exception (every port pre-1.0, all changed
+together), which lands in place and is still listed here.
 
 ## 1 (current)
 
@@ -38,3 +40,12 @@ normally bump the version, but it landed before any external consumer
 existed — treated as an in-place v1 correction (see `spec/protocol.md`
 §7). Implementation rollout across the reference and every port is
 tracked in `docs/feature-backlog/34-rfc9457-problem-details.md`.
+
+`/api/schemas` (§5.7) entries changed from strings to `{ "name": … }`
+objects, matching `/api/sources`, and both routes gained a required
+`default`: the source or schema an absent parameter resolves to (`null`
+for a schema when the connection has none). List order no longer marks the
+default source. An absent `schema` on a connection with no default is now a
+400 `unknown_schema` on every port. The entry-shape change is not additive;
+it lands in place under §7's alpha exception, with every port, the
+conformance runner, and the bundled UI changed together.

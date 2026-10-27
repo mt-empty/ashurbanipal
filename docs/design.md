@@ -307,10 +307,12 @@ a `Config` field — see `implementations/rust/axum/src/routes.rs`'s
 `AppState`), never inferred from the database itself.
 
 ```json
-{ "sources": [{ "name": "primary" }, { "name": "reporting" }] }
+{ "sources": [{ "name": "primary" }, { "name": "reporting" }], "default": "primary" }
 ```
 
-Deliberately just `{ "name": ... }` — no `backend` field. This round of
+`default` is the source an absent `source` param resolves to, so a client
+never infers it from list order. Each entry is deliberately just
+`{ "name": ... }` — no `backend` field. This round of
 the feature is homogeneous-backend-only: every source registered with one
 `router()` call must be the same concrete `DbSource` implementation,
 because the Rust reference's router stays generic over one type
@@ -340,8 +342,14 @@ default-resolution case could ever resolve to, so the two paths never
 diverge on what counts as valid.
 
 ```json
-{ "schemas": ["public", "reporting"] }
+{ "schemas": [{ "name": "public" }, { "name": "reporting" }], "default": "public" }
 ```
+
+`default` is the schema an absent `schema` param resolves to on that
+source — `current_schema()` on Postgres, `database()` on MySQL, `main` on
+SQLite — so the UI opens the server's own default instead of guessing. It
+is `null` when the connection has none (no schema on the `search_path`
+exists, or no database is selected); an absent `schema` is then a 400.
 
 Excludes Postgres's own system/internal namespaces (`pg_catalog`,
 `information_schema`, `pg_toast`/`pg_temp`) and any schema the connected
@@ -602,7 +610,8 @@ over `S: DbSource` (no `dyn`), one concrete `DbSource` per `router()` call.
   `docs/adapter-decisions.md` records where each diverges from Postgres. A
   `deadpool-postgres`/`tokio-postgres` adapter could be added the same way
   without touching route handlers.
-- On Postgres, `schema: None` resolves to `current_schema()`; an explicit value is
+- On Postgres, `schema: None` resolves to `current_schema()` (a 400 when
+  that is NULL); an explicit value is
   checked against the same live `pg_namespace` allow-list (excluding
   catalog/toast/temp schemas and anything the connected role lacks `USAGE`
   on) that the implicit path is also checked against, so neither path can

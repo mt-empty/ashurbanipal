@@ -347,7 +347,8 @@ following are true — green CI is necessary, not sufficient:
 - **Protocol versioning.** Additive-optional changes (a new optional
   field, a new allow-listed value) keep the same major version. Anything
   behavioral or shape-changing bumps the version and gets a migration
-  note in `spec/CHANGELOG.md`.
+  note in `spec/CHANGELOG.md`, except under `spec/protocol.md` §7's alpha
+  exception (every port pre-1.0, all changed together).
 - **Second framework, same language.** A port that adds a second web
   framework first splits into a framework-agnostic core package plus one
   thin adapter package per framework, as Rust's `core/` + `axum/` +

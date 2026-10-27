@@ -78,6 +78,11 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   return router;
 }
 
+/** What an absent `source` param resolves to, which `/api/sources` reports as `default`. */
+function defaultSource(sources: NamedSource[]): NamedSource {
+  return sources[0];
+}
+
 /**
  * Resolves the `source` query param against `sources` the same way
  * `schema` resolves against a live catalog list (spec/protocol.md §1):
@@ -85,7 +90,7 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
  * case-sensitive match or a rejection — never a fallback guess.
  */
 function resolveSource(sources: NamedSource[], requested: string | undefined): DbSource {
-  if (requested === undefined) return sources[0].source;
+  if (requested === undefined) return defaultSource(sources).source;
   const found = sources.find((s) => s.name === requested);
   if (found === undefined) {
     throw new NotAllowedError(`source ${JSON.stringify(requested)}`, "source");
@@ -165,15 +170,15 @@ function writeError(res: Response, err: unknown): void {
 
 function listSourcesHandler(sources: NamedSource[]) {
   return async (_req: Request, res: Response): Promise<void> => {
-    res.json({ sources: sources.map(({ name }) => ({ name })) });
+    res.json({ sources: sources.map(({ name }) => ({ name })), default: defaultSource(sources).name });
   };
 }
 
 function listSchemasHandler(sources: NamedSource[], timeoutMs: number) {
   return async (req: Request, res: Response): Promise<void> => {
     const source = resolveSource(sources, firstQueryValue(req, "source"));
-    const schemas = await source.listSchemas(timeoutMs);
-    res.json({ schemas });
+    const listing = await source.listSchemas(timeoutMs);
+    res.json({ schemas: listing.schemas.map((name) => ({ name })), default: listing.default });
   };
 }
 

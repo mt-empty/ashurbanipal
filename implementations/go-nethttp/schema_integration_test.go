@@ -27,7 +27,7 @@ func TestListSchemasExcludesSystemNamespaces(t *testing.T) {
 	want := map[string]bool{"public": true, "other_schema": true, "warehouse": true}
 	seen := map[string]bool{}
 	for _, s := range schemas {
-		name := s.(string)
+		name := s.(map[string]interface{})["name"].(string)
 		seen[name] = true
 		if name == "pg_catalog" || name == "information_schema" || len(name) >= 3 && name[:3] == "pg_" {
 			t.Errorf("system namespace %q leaked into /api/schemas", name)
@@ -37,6 +37,48 @@ func TestListSchemasExcludesSystemNamespaces(t *testing.T) {
 		if !seen[name] {
 			t.Errorf("expected schema %q not found in %v", name, schemas)
 		}
+	}
+}
+
+func TestListSchemasReportsTheConnectionDefault(t *testing.T) {
+	body := getJSON(t, testServer(t), "/api/schemas")
+	if body["default"] != "public" {
+		t.Errorf("default = %v, want public", body["default"])
+	}
+}
+
+func TestNoDefaultSchemaReportsNullAndRejectsAnAbsentSchema(t *testing.T) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("DATABASE_URL not set (the devcontainer sets it automatically)")
+	}
+	// A search_path naming no existing schema makes current_schema() NULL.
+	connConfig, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatalf("parsing DATABASE_URL: %v", err)
+	}
+	connConfig.AfterConnect = func(ctx context.Context, pc *pgconn.PgConn) error {
+		_, err := pc.Exec(ctx, "set search_path = ashb_test_no_such_schema").ReadAll()
+		return err
+	}
+	db, err := sql.Open("pgx", stdlib.RegisterConnConfig(connConfig))
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	defer db.Close()
+	cfg := Config{Enabled: true}
+	router := Router(cfg, []NamedSource{
+		{Name: "bare", Source: NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)},
+	})
+
+	_, body := get(t, router, "/__ashurbanipal/api/schemas")
+	if def, ok := body["default"]; !ok || def != nil {
+		t.Errorf("default = %v (present %v), want null", def, ok)
+	}
+
+	status, problem := get(t, router, "/__ashurbanipal/api/tables")
+	if status != http.StatusBadRequest || problem["code"] != "unknown_schema" {
+		t.Errorf("GET /api/tables = %d %v, want 400 unknown_schema", status, problem)
 	}
 }
 

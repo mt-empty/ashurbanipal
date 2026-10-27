@@ -5,6 +5,7 @@ import type {
   DbSource,
   QueryOpts,
   ReferencedByEntry,
+  SchemaListing,
   Structure,
   TableData,
   TableInfo,
@@ -22,8 +23,8 @@ import { getJson as sharedGetJson, startServer, type TestServer } from "./helper
 class FakeDbSource implements DbSource {
   constructor(private readonly label: string) {}
 
-  async listSchemas(): Promise<string[]> {
-    return [`${this.label}-schema`];
+  async listSchemas(): Promise<SchemaListing> {
+    return { schemas: [`${this.label}-schema`], default: `${this.label}-schema` };
   }
 
   async listTables(): Promise<TableInfo[]> {
@@ -74,7 +75,7 @@ describe("multi-source support", () => {
   it("lists registered source names in registration order", async () => {
     const { status, body } = await getJson("/__ashurbanipal/api/sources");
     expect(status).toBe(200);
-    expect(body).toEqual({ sources: [{ name: "alpha" }, { name: "beta" }] });
+    expect(body).toEqual({ sources: [{ name: "alpha" }, { name: "beta" }], default: "alpha" });
   });
 
   it("rejects an unrecognized source value on every source-aware route", async () => {
@@ -94,13 +95,13 @@ describe("multi-source support", () => {
   it("omitting source resolves to the first-registered source", async () => {
     const implicit = await getJson("/__ashurbanipal/api/schemas");
     const explicitAlpha = await getJson("/__ashurbanipal/api/schemas?source=alpha");
-    expect(implicit.body).toEqual({ schemas: ["alpha-schema"] });
+    expect(implicit.body).toEqual({ schemas: [{ name: "alpha-schema" }], default: "alpha-schema" });
     expect(implicit.body).toEqual(explicitAlpha.body);
   });
 
   it("an explicit non-default source selects its own data", async () => {
     const { status, body } = await getJson("/__ashurbanipal/api/schemas?source=beta");
     expect(status).toBe(200);
-    expect(body).toEqual({ schemas: ["beta-schema"] });
+    expect(body).toEqual({ schemas: [{ name: "beta-schema" }], default: "beta-schema" });
   });
 });

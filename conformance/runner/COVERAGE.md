@@ -16,9 +16,10 @@ output exactly.
 
 | ID | Requirement | Test |
 |---|---|---|
-| `P1-SOURCE-DEFAULT` | Absent `source` resolves to the first-registered source | `sources::explicit_default_source_matches_the_implicit_default` |
+| `P1-SOURCE-DEFAULT` | Absent `source` resolves to the first-registered source, which §5.8 reports as `default` | `sources::explicit_default_source_matches_the_implicit_default` |
 | `P1-SOURCE-VALIDATED` | Present `source` MUST match a live §5.8 entry exactly; else 400 | `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |
 | `P1-SCHEMA-DEFAULT` | Absent `schema` resolves to the connection's own default | `schemas::explicit_default_schema_matches_the_implicit_default` |
+| `P1-SCHEMA-NO-DEFAULT` | Absent `schema` on a connection with no default → 400 `unknown_schema` | not reachable with the seeded demos (each has a default schema) — covered by each port's own integration test against a `search_path` naming no existing schema |
 | `P1-SCHEMA-VALIDATED` | Present `schema` MUST match a live §5.7 entry exactly; else 400 | `schemas::unrecognized_schema_values_are_rejected_cleanly_on_every_route` |
 | `P1-SCHEMA-RESOLVED-ONCE` | One operation resolves the schema once, reuses it for every query in that operation | not independently observable over black-box HTTP beyond internal consistency of one response's shape — covered at the implementation level by `implementations/rust/axum/tests/schema_isolation.rs` (Postgres-specific: pool sessions with divergent `search_path`) |
 
@@ -157,6 +158,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 |---|---|---|
 | `P5.7-LISTS-LIVE-SCHEMAS` | Lists every schema §1's default-resolution case could resolve to | `schemas::lists_the_default_schema_and_the_seed_s_second_one_excluding_system_namespaces`, `schemas::explicit_default_schema_matches_the_implicit_default` |
 | `P5.7-EXCLUDES-SYSTEM-NAMESPACES` | Excludes engine system/internal namespaces | `schemas::lists_the_default_schema_and_the_seed_s_second_one_excluding_system_namespaces` |
+| `P5.7-REPORTS-DEFAULT` | `default` is what an absent `schema` resolves to, and is listed | `schemas::reports_the_connection_default_schema`; `two_source::second_source_reports_its_pinned_schema_as_default` (self-skips without a second source) |
 | `P5.7-HEADER` | Carries the protocol version header | `schemas::every_schemas_response_carries_the_protocol_version_header` |
 | `P5.7-SOURCE-PARAM` | `source` selects which source's schemas are listed; unrecognized → 400 | `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |
 
@@ -166,7 +168,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 |---|---|---|
 | `P5.8-LISTS-REGISTERED-SOURCES` | Lists every source §1's default-resolution case could resolve to; exactly one entry for a single-source deployment | `sources::lists_exactly_the_one_registered_source` (single-source); `two_source::second_source_is_scoped_to_other_schema_and_differs_from_the_default` (>1-source, self-skips otherwise) |
 | `P5.8-NO-BACKEND-FIELD` | MUST NOT disclose which backend engine a source uses | `sources::lists_exactly_the_one_registered_source` |
-| `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER` | Stable order, same order the absent-`source` case resolves against | `two_source::api_sources_order_matches_default_resolution_order` (self-skips without a second source) |
+| `P5.8-REPORTS-DEFAULT` | `default` is listed and is the source an absent `source` resolves to | `sources::explicit_default_source_matches_the_implicit_default`; `two_source::api_sources_default_matches_default_resolution` (self-skips without a second source) |
 | `P5.8-HEADER` | Carries the protocol version header | `sources::every_sources_response_carries_the_protocol_version_header` |
 
 ## §5.9 `GET /api/tables/referenced-by`
@@ -279,7 +281,7 @@ to trigger deterministically):
 - **§1 a source is resolved once per operation, never drifting mid-request
   across a multi-query response (`P1-SOURCE-RESOLVED-ONCE`).** `two_source.rs`
   closed `P5.8-LISTS-REGISTERED-SOURCES` beyond the single-entry case and
-  `P5.8-STABLE-ORDER-IS-DEFAULT-ORDER`, run against each port's own
+  `P5.8-REPORTS-DEFAULT`, run against each port's own
   two-source CI job (`docs/feature-backlog/19-two-source-conformance-round-trip.md`).
   Still open: the drift property itself — a single response never mixing
   data from two sources under concurrent load, the way `schema_isolation.rs`

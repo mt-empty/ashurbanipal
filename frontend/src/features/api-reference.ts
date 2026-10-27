@@ -17,15 +17,15 @@ function buildApiReference() {
         method: "GET",
         path: `${base}/sources`,
         summary:
-          "Source names selectable as the `source` param on the routes below, for a host that has registered more than one. A single-source deployment still returns exactly one entry; the first is the default used when `source` is omitted.",
+          "Source names selectable as the `source` param on the routes below, for a host that has registered more than one. A single-source deployment still returns exactly one entry. `default` is the source used when `source` is omitted.",
         params: [],
-        example_response: { sources: [{ name: "primary" }, { name: "reporting" }] },
+        example_response: { sources: [{ name: "primary" }, { name: "reporting" }], default: "primary" },
       },
       {
         method: "GET",
         path: `${base}/schemas`,
         summary:
-          "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry.",
+          "Schema names selectable as the `schema` param on the routes below (on Postgres: excludes catalog/toast/temp schemas and anything the connected role lacks USAGE on). An engine with no schema concept returns a single entry. `default` is the schema used when `schema` is omitted, or null when the connection has none.",
         params: [
           {
             name: "source",
@@ -33,7 +33,7 @@ function buildApiReference() {
             notes: "must be a name returned by GET /sources; omit to use the default source",
           },
         ],
-        example_response: { schemas: ["public"] },
+        example_response: { schemas: [{ name: "public" }], default: "public" },
       },
       {
         method: "GET",

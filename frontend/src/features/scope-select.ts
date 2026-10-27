@@ -2,7 +2,7 @@ import { supersedeLoads } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
 import { $, populateSelect, reportError } from "../core/dom.js";
 import { sourceQuery, state, switchSchema, switchSource } from "../core/state.js";
-import type { SourceEntry } from "../core/types.js";
+import type { SchemasResponse, SourceEntry, SourcesResponse } from "../core/types.js";
 import { syncGridLock } from "./grid-lock.js";
 import { loadTables } from "./table-chips.js";
 
@@ -14,8 +14,9 @@ import { loadTables } from "./table-chips.js";
 // sort and filter: another source has its own schemas and tables.
 export async function loadSources(): Promise<void> {
   let sources: SourceEntry[];
+  let defaultSource: string;
   try {
-    ({ sources } = await api<{ sources: SourceEntry[] }>("/sources"));
+    ({ sources, default: defaultSource } = await api<SourcesResponse>("/sources"));
   } catch (e) {
     // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
     // single-source, with no `source` param, but leave a trace.
@@ -29,7 +30,7 @@ export async function loadSources(): Promise<void> {
   }
   let source = state.source;
   if (!source || !sources.some((s) => s.name === source)) {
-    source = sources[0].name;
+    source = defaultSource;
   }
   state.source = source;
   populateSelect(
@@ -63,8 +64,11 @@ export async function loadSchemas(): Promise<boolean> {
   syncGridLock();
   const token = ++loadSchemasToken;
   let schemas: string[];
+  let defaultSchema: string | null;
   try {
-    ({ schemas } = await api<{ schemas: string[] }>(`/schemas${sourceQuery()}`));
+    const listing = await api<SchemasResponse>(`/schemas${sourceQuery()}`);
+    schemas = listing.schemas.map((s) => s.name);
+    defaultSchema = listing.default;
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
@@ -86,7 +90,8 @@ export async function loadSchemas(): Promise<boolean> {
   }
   let schema = state.schema;
   if (!schema || !schemas.includes(schema)) {
-    schema = schemas.includes("public") ? "public" : schemas[0];
+    // The server's default can be null (no default schema on that connection).
+    schema = defaultSchema ?? schemas[0];
   }
   state.schema = schema;
   populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);

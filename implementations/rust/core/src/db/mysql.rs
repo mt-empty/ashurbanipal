@@ -5,9 +5,10 @@ use sqlx::mysql::MySqlRow;
 use sqlx::{MySql, MySqlPool, Row, Transaction};
 
 use super::{
-    group_referenced_by, op_sql, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck, ConstraintFk,
-    ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, IndexInfo, KeyKind,
-    NotAllowedKind, QueryOpts, ReferencedBy, Structure, TableData, TableInfo,
+    group_referenced_by, no_default_schema, op_sql, ColumnInfo, ColumnPair, ColumnRef,
+    ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
+    IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
+    TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
@@ -189,6 +190,24 @@ impl MySqlSource {
         Ok(rows)
     }
 
+    /// `None` when the connection names no database.
+    async fn default_schema_in_tx(
+        &self,
+        tx: &mut Transaction<'_, MySql>,
+        variant: Variant,
+        timeout_secs: u32,
+    ) -> Result<Option<String>, DbError> {
+        Ok(
+            sqlx::query_scalar::<_, Option<String>>(sqlx::AssertSqlSafe(timed_select(
+                variant,
+                timeout_secs,
+                "database()",
+            )))
+            .fetch_one(&mut **tx)
+            .await?,
+        )
+    }
+
     /// Resolve schema in the operation transaction (`spec/protocol.md` §5).
     async fn resolve_schema_in_tx(
         &self,
@@ -200,15 +219,10 @@ impl MySqlSource {
         let schemas = self.list_schemas_in_tx(tx, variant, timeout_secs).await?;
         let resolved = match requested {
             Some(name) => name.to_string(),
-            None => {
-                sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(timed_select(
-                    variant,
-                    timeout_secs,
-                    "database()",
-                )))
-                .fetch_one(&mut **tx)
+            None => self
+                .default_schema_in_tx(tx, variant, timeout_secs)
                 .await?
-            }
+                .ok_or_else(no_default_schema)?,
         };
         schemas.into_iter().find(|s| s == &resolved).ok_or_else(|| {
             DbError::not_allowed(NotAllowedKind::Schema, format!("schema {resolved:?}"))
@@ -430,14 +444,17 @@ fn row_to_json<'a>(
 }
 
 impl DbSource for MySqlSource {
-    async fn list_schemas(&self) -> Result<Vec<String>, DbError> {
+    async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
         let variant = self.variant().await?;
         let mut tx = self.pinned_tx().await?;
         let schemas = self
             .list_schemas_in_tx(&mut tx, variant, CATALOG_TIMEOUT_SECS)
             .await?;
+        let default = self
+            .default_schema_in_tx(&mut tx, variant, CATALOG_TIMEOUT_SECS)
+            .await?;
         tx.commit().await?;
-        Ok(schemas)
+        Ok(SchemaListing::new(schemas, default))
     }
 
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {

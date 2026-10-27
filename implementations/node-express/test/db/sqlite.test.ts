@@ -61,7 +61,7 @@ describe("SqliteSource", () => {
     expect(tables.map((t) => t.name)).toEqual(["order_extra", "orders", "users"]);
     expect(tables.every((t) => t.comment === undefined)).toBe(true);
 
-    expect(await source.listSchemas()).toEqual(["main"]);
+    expect(await source.listSchemas()).toEqual({ schemas: ["main"], default: "main" });
     await expect(source.listTables("other", 5000)).rejects.toBeInstanceOf(NotAllowedError);
 
     const data = await source.queryTable(undefined, "users", { ...baseOpts, sort: "age" }, 5000);

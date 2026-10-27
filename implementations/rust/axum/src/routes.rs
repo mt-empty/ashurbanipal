@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
 use ashurbanipal::{
-    resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec, ProblemDetails,
-    QueryOpts, ReferencedBy, SiblingChecker, Structure, TableInfo,
+    default_source, resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec,
+    ProblemDetails, QueryOpts, ReferencedBy, SiblingChecker, Structure, TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -159,6 +159,7 @@ struct SourceEntry {
 #[derive(Serialize)]
 struct SourcesResponse {
     sources: Vec<SourceEntry>,
+    default: String,
 }
 
 /// Never fails: `sources` is always non-empty (`router()` asserts it), so
@@ -169,12 +170,21 @@ async fn list_sources<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Res
         .iter()
         .map(|(name, _)| SourceEntry { name: name.clone() })
         .collect();
-    Json(SourcesResponse { sources }).into_response()
+    let default = default_source(&state.sources).0.clone();
+    Json(SourcesResponse { sources, default }).into_response()
 }
 
 #[derive(Serialize)]
+struct SchemaEntry {
+    name: String,
+}
+
+/// `default` serializes as `null` when absent: the field is always present
+/// (`spec/protocol.md` §5.7).
+#[derive(Serialize)]
 struct SchemasResponse {
-    schemas: Vec<String>,
+    schemas: Vec<SchemaEntry>,
+    default: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -187,8 +197,16 @@ async fn list_schemas<S: DbSource>(
     Query(params): Query<SourceParams>,
 ) -> Result<Json<SchemasResponse>, ApiError> {
     let source = resolve_source(&state.sources, params.source.as_deref())?;
-    let schemas = source.list_schemas().await?;
-    Ok(Json(SchemasResponse { schemas }))
+    let listing = source.list_schemas().await?;
+    let schemas = listing
+        .schemas
+        .into_iter()
+        .map(|name| SchemaEntry { name })
+        .collect();
+    Ok(Json(SchemasResponse {
+        schemas,
+        default: listing.default,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -471,6 +489,7 @@ async fn siblings<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Respons
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ashurbanipal::SchemaListing;
 
     // resolve_source itself now lives in ashurbanipal-core (see its own
     // tests there) — only the router()-specific behavior below is
@@ -478,7 +497,7 @@ mod tests {
     struct NeverQueriedSource;
 
     impl DbSource for NeverQueriedSource {
-        async fn list_schemas(&self) -> Result<Vec<String>, DbError> {
+        async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
             unreachable!("router() must panic on empty sources before any query runs")
         }
         async fn list_tables(&self, _schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {

@@ -3,8 +3,8 @@ import { spawnDemo, freePort } from "./support/second-server";
 import { goBack, gotoApp, reloadApp, urlParam, waitForIdle } from "./support/helpers";
 
 // ui-guidelines R12: the schema selected on a source is remembered, so
-// switching source away and back restores it instead of resetting to
-// `public`. Needs a multi-source demo (CONFORMANCE_SECOND_SOURCE adds an
+// switching source away and back restores it instead of resetting to the
+// source's default. Needs a multi-source demo (CONFORMANCE_SECOND_SOURCE adds an
 // `other_schema` source); the shared seed already gives the `primary`
 // source three schemas (public, other_schema, warehouse).
 
@@ -49,6 +49,20 @@ test("schema is remembered per source across a source switch", async ({ page }) 
   }
 });
 
+test("a source with no remembered schema opens the schema the server reports as its default", async ({ page }) => {
+  const port = await freePort();
+  const demo = await spawnDemo({ port, conformanceSecondSource: true });
+  try {
+    await gotoApp(page, "", demo.baseUrl);
+    // The `other_schema` source's connection is pinned to other_schema, though it lists public first.
+    await selectAndSettle(page, "#source-select", "other_schema", "source=other_schema");
+    await expect(page.locator("#schema-select")).toHaveValue("other_schema");
+    expect(urlParam(page, "schema")).toBe("other_schema");
+  } finally {
+    await demo.stop();
+  }
+});
+
 test("a malformed schemaBySource is discarded, not fatal", async ({ page }) => {
   const port = await freePort();
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
@@ -74,7 +88,7 @@ test("Back across a source switch restores that source's schema list", async ({ 
     // The second source lists other schemas, so the first source's list must come back with it.
     await page.route(
       (url) => url.pathname.endsWith("/api/schemas") && url.searchParams.get("source") === "other_schema",
-      (route) => route.fulfill({ json: { schemas: ["other_schema", "public"] } }),
+      (route) => route.fulfill({ json: { schemas: [{ name: "other_schema" }, { name: "public" }], default: "other_schema" } }),
     );
     await selectAndSettle(page, "#source-select", "other_schema", "source=other_schema");
     await expect(page.locator('#schema-select option[value="warehouse"]')).toHaveCount(0);

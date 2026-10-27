@@ -30,6 +30,7 @@ import {
   opTakesValue,
   type QueryOpts,
   type ReferencedByEntry,
+  type SchemaListing,
   type Structure,
   type TableData,
   type TableInfo,
@@ -250,8 +251,8 @@ export class SqliteSource implements DbSource {
 
   // timeoutMs is part of DbSource's signature but unused here — no
   // catalog to query, SQLite always has exactly one schema.
-  async listSchemas(): Promise<string[]> {
-    return [ONLY_SCHEMA];
+  async listSchemas(): Promise<SchemaListing> {
+    return { schemas: [ONLY_SCHEMA], default: ONLY_SCHEMA };
   }
 
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {

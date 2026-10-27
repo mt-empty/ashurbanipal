@@ -16,10 +16,10 @@ use crate::assert::assert_exact;
 use crate::common::TestServer;
 
 /// `None` when the target wasn't started with a second source — every
-/// test below uses this to skip itself rather than fail. Returns the
-/// whole array, not just the second name, so a caller needing the first
-/// entry too doesn't issue its own separate `GET /api/sources`.
-async fn sources_if_two_or_more(srv: &TestServer) -> Option<Vec<serde_json::Value>> {
+/// test below uses this to skip itself rather than fail. Returns the whole
+/// `api/sources` body, so a caller needing `default` too doesn't issue its
+/// own separate request.
+async fn sources_if_two_or_more(srv: &TestServer) -> Option<serde_json::Value> {
     let body: serde_json::Value = srv
         .client()
         .get(srv.url("/api/sources"))
@@ -29,7 +29,7 @@ async fn sources_if_two_or_more(srv: &TestServer) -> Option<Vec<serde_json::Valu
         .json()
         .await
         .unwrap();
-    let sources = body["sources"].as_array().unwrap().clone();
+    let sources = body["sources"].as_array().unwrap();
     if sources.len() < 2 {
         eprintln!(
             "two_source: skipping — target registered {} source(s), need >= 2 \
@@ -38,7 +38,16 @@ async fn sources_if_two_or_more(srv: &TestServer) -> Option<Vec<serde_json::Valu
         );
         return None;
     }
-    Some(sources)
+    Some(body)
+}
+
+/// The pinned second source's name. `.last()`, not `[1]`: a local run
+/// stacking SECOND_SOURCE and CONFORMANCE_SECOND_SOURCE together registers
+/// 3 sources, pushing this one to `[2]`.
+fn second_source_name(body: &serde_json::Value) -> &str {
+    body["sources"].as_array().unwrap().last().unwrap()["name"]
+        .as_str()
+        .unwrap()
 }
 
 /// `source: None` omits the query param entirely (the default-resolution
@@ -63,13 +72,10 @@ async fn table_names(srv: &TestServer, source: Option<&str>) -> Vec<String> {
 #[tokio::test]
 async fn second_source_is_scoped_to_other_schema_and_differs_from_the_default() {
     let srv = TestServer::spawn().await;
-    let Some(sources) = sources_if_two_or_more(&srv).await else {
+    let Some(body) = sources_if_two_or_more(&srv).await else {
         return;
     };
-    // .last(), not [1]: a local run stacking SECOND_SOURCE and
-    // CONFORMANCE_SECOND_SOURCE together registers 3 sources, pushing this
-    // one to [2].
-    let second = sources.last().unwrap()["name"].as_str().unwrap();
+    let second = second_source_name(&body);
 
     let (default_tables, second_tables) =
         tokio::join!(table_names(&srv, None), table_names(&srv, Some(second)));
@@ -86,20 +92,42 @@ async fn second_source_is_scoped_to_other_schema_and_differs_from_the_default() 
 }
 
 #[tokio::test]
-async fn api_sources_order_matches_default_resolution_order() {
+async fn api_sources_default_matches_default_resolution() {
     let srv = TestServer::spawn().await;
-    let Some(sources) = sources_if_two_or_more(&srv).await else {
+    let Some(body) = sources_if_two_or_more(&srv).await else {
         return;
     };
-    let first_listed = sources[0]["name"].as_str().unwrap();
+    let default = body["default"].as_str().unwrap();
 
-    let (default_tables, explicit_first_tables) = tokio::join!(
-        fetch_tables(&srv, None),
-        fetch_tables(&srv, Some(first_listed))
-    );
+    let (default_tables, explicit_default_tables) =
+        tokio::join!(fetch_tables(&srv, None), fetch_tables(&srv, Some(default)));
     assert_exact(
-        explicit_first_tables,
+        explicit_default_tables,
         default_tables,
-        "api/sources' first entry must be the same source an absent `source` param resolves to (spec/protocol.md §1, §5.8)",
+        "api/sources' `default` must be the source an absent `source` param resolves to (spec/protocol.md §1, §5.8)",
+    );
+}
+
+#[tokio::test]
+async fn second_source_reports_its_pinned_schema_as_default() {
+    let srv = TestServer::spawn().await;
+    let Some(body) = sources_if_two_or_more(&srv).await else {
+        return;
+    };
+    let second = second_source_name(&body);
+    let schemas: serde_json::Value = srv
+        .client()
+        .get(srv.url("/api/schemas"))
+        .query(&[("source", second)])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_exact(
+        schemas["default"].as_str(),
+        Some("other_schema"),
+        "a source pinned to other_schema must report it as its default schema (spec/protocol.md §5.7)",
     );
 }

@@ -8,7 +8,10 @@ from contextlib import contextmanager
 
 import psycopg
 import pytest
+from flask import Flask
+from psycopg.conninfo import make_conninfo
 
+from ashurbanipal import Config, router
 from ashurbanipal.db import BadJoin, FilterParseError, KeyKind, NotAllowed, QueryOpts, QueryTimeout
 from ashurbanipal.db.postgres import PgSource
 from ashurbanipal.filter import Condition
@@ -27,10 +30,24 @@ def source():
 
 
 def test_list_schemas_excludes_system_namespaces(source) -> None:
-    schemas = source.list_schemas()
+    listing = source.list_schemas()
+    schemas = listing.schemas
+    assert listing.default == "public"
     assert "public" in schemas
     assert "pg_catalog" not in schemas
     assert "information_schema" not in schemas
+
+
+def test_no_default_schema_reports_none_and_rejects_an_absent_schema() -> None:
+    # A search_path naming no existing schema makes current_schema() NULL.
+    bare = PgSource(make_conninfo(DATABASE_URL, options="-c search_path=ashb_test_no_such_schema"))
+    assert bare.list_schemas().default is None
+
+    app = Flask(__name__)
+    app.register_blueprint(router(Config(enabled=True), [("bare", bare)]))
+    resp = app.test_client().get("/__ashurbanipal/api/tables")
+    assert resp.status_code == 400
+    assert json.loads(resp.data)["code"] == "unknown_schema"
 
 
 def test_schema_scoping_hides_other_schemas_tables(source) -> None:

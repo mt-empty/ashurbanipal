@@ -273,6 +273,8 @@ const signupFunnel: TableDef = {
 export const TABLES: TableDef[] = [users, orders, orderItems, products, userProfiles, dailySummary, signupFunnel];
 
 export const SCHEMAS = ["public", "reporting"];
+// What an absent `schema` resolves to, and what /schemas reports as `default`.
+export const DEFAULT_SCHEMA = "public";
 
 // Labelled, so the demo shows the service × label grid (spec/protocol.md §5.6).
 export const SIBLINGS_INSTANCE = { name: "shop (demo)", label: "dev" };

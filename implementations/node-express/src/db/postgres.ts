@@ -28,7 +28,9 @@ import {
   groupReferencedBy,
   type QueryOpts,
   type ReferencedByEntry,
+  type SchemaListing,
   type Structure,
+  schemaListing,
   type TableData,
   type TableInfo,
 } from "./types.js";
@@ -129,6 +131,12 @@ export class PostgresSource implements DbSource {
     return rows.map((r) => r.nspname);
   }
 
+  // Null when no schema on the session's search_path exists.
+  private async defaultSchema(client: PoolClient): Promise<string | null> {
+    const { rows } = await client.query<{ current_schema: string | null }>("select current_schema()");
+    return rows[0].current_schema;
+  }
+
   // Resolve inside the operation transaction to prevent pool-session drift
   // (spec/protocol.md §5).
   private async resolveSchema(client: PoolClient, requested: string | undefined): Promise<string> {
@@ -137,8 +145,11 @@ export class PostgresSource implements DbSource {
     if (requested !== undefined) {
       resolved = requested;
     } else {
-      const { rows } = await client.query<{ current_schema: string }>("select current_schema()");
-      resolved = rows[0].current_schema;
+      const defaultSchema = await this.defaultSchema(client);
+      if (defaultSchema === null) {
+        throw new NotAllowedError("no schema requested and this connection has no default schema", "schema");
+      }
+      resolved = defaultSchema;
     }
     const real = findExact(schemas, resolved);
     if (!real) {
@@ -252,8 +263,10 @@ export class PostgresSource implements DbSource {
     return { pkColumns, fkColumns };
   }
 
-  async listSchemas(timeoutMs: number): Promise<string[]> {
-    return this.withTimeout(timeoutMs, (client) => this.allowedSchemas(client));
+  async listSchemas(timeoutMs: number): Promise<SchemaListing> {
+    return this.withTimeout(timeoutMs, async (client) =>
+      schemaListing(await this.allowedSchemas(client), await this.defaultSchema(client)),
+    );
   }
 
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {

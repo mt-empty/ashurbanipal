@@ -1,11 +1,9 @@
 //! `spec/protocol.md` §5.8 and the `source` param on §5.2–§5.5, §5.7 —
 //! coverage that only needs a single-source demo (the default `TestServer::
-//! spawn()` target): the wire shape is additive and doesn't disturb the
-//! existing single-source behavior, which is the regression this feature
-//! must never break. The true two-source round-trip (does an explicit
-//! `source` actually reach different data, does `api/sources`' order match
-//! default resolution) lives in `two_source.rs` instead, since it needs a
-//! target started with a second source registered.
+//! spawn()` target). The true two-source round-trip (does an explicit
+//! `source` actually reach different data, does `api/sources`' `default`
+//! match default resolution) lives in `two_source.rs` instead, since it
+//! needs a target started with a second source registered.
 
 use crate::assert::{assert_exact, assert_problem_code, assert_status};
 use crate::common::TestServer;
@@ -63,7 +61,14 @@ async fn explicit_default_source_matches_the_implicit_default() {
         .json()
         .await
         .unwrap();
-    let name = sources["sources"][0]["name"].as_str().unwrap().to_string();
+    let name = sources["default"].as_str().unwrap().to_string();
+    assert!(
+        sources["sources"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!({ "name": name })),
+        "`default` must be one of the listed sources (spec/protocol.md §5.8): {sources}"
+    );
 
     let implicit: serde_json::Value = srv
         .client()

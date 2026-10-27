@@ -101,6 +101,18 @@ func (c *PostgresSource) allowedSchemas(ctx context.Context, db queryer) ([]stri
 	return out, rows.Err()
 }
 
+// defaultSchema is nil when no schema on the session's search_path exists.
+func (c *PostgresSource) defaultSchema(ctx context.Context, db queryer) (*string, error) {
+	ctx, cancel := c.bounded(ctx)
+	defer cancel()
+	// database/sql scans NULL into a nil *string.
+	var name *string
+	if err := db.QueryRowContext(ctx, "select current_schema()").Scan(&name); err != nil {
+		return nil, err
+	}
+	return name, nil
+}
+
 // resolveSchema runs in the operation transaction to prevent pool-session drift
 // (`spec/protocol.md` §5).
 func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requested *string) (string, error) {
@@ -112,11 +124,14 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 	if requested != nil {
 		resolved = *requested
 	} else {
-		ctx, cancel := c.bounded(ctx)
-		defer cancel()
-		if err := db.QueryRowContext(ctx, "select current_schema()").Scan(&resolved); err != nil {
+		def, err := c.defaultSchema(ctx, db)
+		if err != nil {
 			return "", err
 		}
+		if def == nil {
+			return "", errNoDefaultSchema()
+		}
+		resolved = *def
 	}
 	real, ok := findExact(schemas, resolved)
 	if !ok {
@@ -396,15 +411,21 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 	return JoinData{Columns: plan.columnInfos(), Rows: out, HasMore: hasMore}, nil
 }
 
-func (c *PostgresSource) ListSchemas(ctx context.Context) ([]string, error) {
-	schemas, err := c.allowedSchemas(ctx, c.db)
+func (c *PostgresSource) ListSchemas(ctx context.Context) (SchemaListing, error) {
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, err
+		return SchemaListing{}, err
 	}
-	if schemas == nil {
-		schemas = []string{}
+	defer tx.Rollback()
+	schemas, err := c.allowedSchemas(ctx, tx)
+	if err != nil {
+		return SchemaListing{}, err
 	}
-	return schemas, nil
+	def, err := c.defaultSchema(ctx, tx)
+	if err != nil {
+		return SchemaListing{}, err
+	}
+	return newSchemaListing(schemas, def), tx.Commit()
 }
 
 func (c *PostgresSource) ListTables(ctx context.Context, schema *string) ([]TableInfo, error) {

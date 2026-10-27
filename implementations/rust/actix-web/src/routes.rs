@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use ashurbanipal::filter;
 use ashurbanipal::{
-    resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec, ProblemDetails,
-    QueryOpts, ReferencedBy, SiblingChecker, TableInfo,
+    default_source, resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec,
+    ProblemDetails, QueryOpts, ReferencedBy, SiblingChecker, TableInfo,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -181,6 +181,7 @@ struct SourceEntry {
 #[derive(Serialize)]
 struct SourcesResponse {
     sources: Vec<SourceEntry>,
+    default: String,
 }
 
 /// Never fails: `sources` is always non-empty (`app_state()` asserts it), so
@@ -191,12 +192,21 @@ async fn list_sources<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
         .iter()
         .map(|(name, _)| SourceEntry { name: name.clone() })
         .collect();
-    HttpResponse::Ok().json(SourcesResponse { sources })
+    let default = default_source(&state.sources).0.clone();
+    HttpResponse::Ok().json(SourcesResponse { sources, default })
 }
 
 #[derive(Serialize)]
+struct SchemaEntry {
+    name: String,
+}
+
+/// `default` serializes as `null` when absent: the field is always present
+/// (`spec/protocol.md` §5.7).
+#[derive(Serialize)]
 struct SchemasResponse {
-    schemas: Vec<String>,
+    schemas: Vec<SchemaEntry>,
+    default: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -209,8 +219,16 @@ async fn list_schemas<S: DbSource>(
     params: web::Query<SourceParams>,
 ) -> Result<HttpResponse, ApiError> {
     let source = resolve_source(&state.sources, params.source.as_deref())?;
-    let schemas = source.list_schemas().await?;
-    Ok(HttpResponse::Ok().json(SchemasResponse { schemas }))
+    let listing = source.list_schemas().await?;
+    let schemas = listing
+        .schemas
+        .into_iter()
+        .map(|name| SchemaEntry { name })
+        .collect();
+    Ok(HttpResponse::Ok().json(SchemasResponse {
+        schemas,
+        default: listing.default,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -496,7 +514,7 @@ mod kill_switch_tests {
     use actix_web::{test, App};
 
     use super::*;
-    use ashurbanipal::{Structure, TableData};
+    use ashurbanipal::{SchemaListing, Structure, TableData};
 
     /// Routing-only double — the disabled-config kill switch must reject
     /// every request before any handler runs, so none of these bodies are
@@ -504,7 +522,7 @@ mod kill_switch_tests {
     struct NeverQueried;
 
     impl DbSource for NeverQueried {
-        async fn list_schemas(&self) -> Result<Vec<String>, DbError> {
+        async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
             unreachable!("kill switch must 404 before reaching the handler")
         }
         async fn list_tables(&self, _schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {

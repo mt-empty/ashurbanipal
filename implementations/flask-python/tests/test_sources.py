@@ -53,7 +53,7 @@ def test_list_sources_returns_registered_names_in_order(two_sources) -> None:
     client = _client(two_sources)
     resp = client.get("/__ashurbanipal/api/sources")
     assert resp.status_code == 200
-    assert resp.get_json() == {"sources": [{"name": "primary"}, {"name": "reporting"}]}
+    assert resp.get_json() == {"sources": [{"name": "primary"}, {"name": "reporting"}], "default": "primary"}
 
 
 def test_unrecognized_source_is_rejected(two_sources) -> None:

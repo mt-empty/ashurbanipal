@@ -82,9 +82,9 @@ async fn sqlite_source_round_trips_tables_data_and_schemas_through_the_router() 
 
     let schemas = get_json(&app, "/__ashurbanipal/api/schemas").await;
     assert_eq!(
-        schemas["schemas"],
-        serde_json::json!(["main"]),
-        "sqlite exposes exactly one schema"
+        schemas,
+        serde_json::json!({"schemas": [{"name": "main"}], "default": "main"}),
+        "sqlite exposes exactly one schema, which is the default"
     );
 
     let data = get_json(&app, "/__ashurbanipal/api/tables/data?table=probe").await;

@@ -23,7 +23,7 @@ async fn lists_the_default_schema_and_the_seed_s_second_one_excluding_system_nam
         .as_array()
         .unwrap()
         .iter()
-        .map(|s| s.as_str().unwrap())
+        .map(|s| s["name"].as_str().unwrap())
         .collect();
     let default_schema = Backend::current().default_schema();
     match Backend::current().schema_model() {
@@ -47,6 +47,33 @@ async fn lists_the_default_schema_and_the_seed_s_second_one_excluding_system_nam
                 )
         }),
         "GET /api/schemas must never list system/internal namespaces: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn reports_the_connection_default_schema() {
+    let srv = TestServer::spawn().await;
+    let body: serde_json::Value = srv
+        .client()
+        .get(srv.url("/api/schemas"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let default_schema = Backend::current().default_schema();
+    assert_exact(
+        body["default"].as_str(),
+        Some(default_schema.as_str()),
+        "GET /api/schemas must report what an absent `schema` resolves to as `default` (spec/protocol.md §5.7)",
+    );
+    assert!(
+        body["schemas"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!({ "name": default_schema })),
+        "`default` must be one of the listed schemas: {body}"
     );
 }
 
