@@ -111,6 +111,13 @@ const JOIN_DIALECT: JoinDialect = {
 };
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
+// Matches the column check MariaDB adds to every JSON column exactly, so a
+// user's own json_valid check on another column doesn't count.
+const MARIADB_JSON_COLUMNS_SQL =
+  "constraint_name as constraint_name from information_schema.check_constraints " +
+  "where constraint_schema = ? and table_name = ? and level = 'Column' " +
+  "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
+
 export function mysqlTypeClass(dataType: string, columnType: string): TypeClass | undefined {
   switch (dataType.toLowerCase()) {
     case "tinyint":
@@ -209,7 +216,7 @@ export class MySqlSource implements DbSource {
       timeoutMs,
       "schema_name as schema_name from information_schema.schemata " +
         "where schema_name not in ('mysql', 'information_schema', 'performance_schema', 'sys') " +
-        "order by schema_name",
+        "order by cast(schema_name as binary)",
     );
     const rows = await queryRows(conn, sql);
     return rows.map((r) => r.schema_name as string);
@@ -256,7 +263,7 @@ export class MySqlSource implements DbSource {
       variant,
       timeoutMs,
       "table_name as table_name from information_schema.tables " +
-        "where table_schema = ? and table_type = 'BASE TABLE' order by table_name",
+        "where table_schema = ? and table_type = 'BASE TABLE' order by cast(table_name as binary)",
     );
     const rows = await queryRows(conn, sql, [schema]);
     return rows.map((r) => r.table_name as string);
@@ -355,11 +362,12 @@ export class MySqlSource implements DbSource {
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {
     return this.withTx(async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
+      // Byte order: MariaDB's catalog collation ignores `_` when sorting.
       const sql = timedSelect(
         variant,
         timeoutMs,
         "table_name as table_name, table_comment as table_comment from information_schema.tables " +
-          "where table_schema = ? and table_type = 'BASE TABLE' order by table_name",
+          "where table_schema = ? and table_type = 'BASE TABLE' order by cast(table_name as binary)",
       );
       const rows = await queryRows(conn, sql, [realSchema]);
       return rows.map((r) => {
@@ -380,7 +388,7 @@ export class MySqlSource implements DbSource {
         variant,
         timeoutMs,
         "table_name as table_name, cast(table_rows as signed) as table_rows from information_schema.tables " +
-          "where table_schema = ? and table_type = 'BASE TABLE' order by table_name",
+          "where table_schema = ? and table_type = 'BASE TABLE' order by cast(table_name as binary)",
       );
       const rows = await queryRows(conn, sql, [realSchema]);
       // NULL means no estimate yet: emit -1 (`spec/protocol.md` §5.3).
@@ -389,6 +397,19 @@ export class MySqlSource implements DbSource {
         approx_rows: r.table_rows === null ? -1 : Number(r.table_rows),
       }));
     });
+  }
+
+  // MariaDB has no JSON type: a JSON column is longtext guarded by a json_valid column check.
+  private async mariadbJsonColumns(
+    conn: PoolConnection,
+    variant: Variant,
+    schema: string,
+    table: string,
+    timeoutMs: number,
+  ): Promise<Set<string>> {
+    if (variant !== "mariadb") return new Set();
+    const rows = await queryRows(conn, timedSelect(variant, timeoutMs, MARIADB_JSON_COLUMNS_SQL), [schema, table]);
+    return new Set(rows.map((r) => r.constraint_name as string));
   }
 
   private async joinTableMeta(
@@ -410,13 +431,12 @@ export class MySqlSource implements DbSource {
       [schema, table],
     );
     const { pkColumns, fkColumns } = await this.keyMetadataInTx(conn, variant, schema, table, timeoutMs);
+    const jsonColumns = await this.mariadbJsonColumns(conn, variant, schema, table, timeoutMs);
     const columns = rows.map((r): JoinColMeta => {
       const name = r.column_name as string;
-      const col: JoinColMeta = {
-        name,
-        type: r.data_type as string,
-        class: mysqlTypeClass(r.data_type as string, String(r.column_type)),
-      };
+      const col: JoinColMeta = jsonColumns.has(name)
+        ? { name, type: "json", class: undefined }
+        : { name, type: r.data_type as string, class: mysqlTypeClass(r.data_type as string, String(r.column_type)) };
       if (r.collation_name) col.collation = r.collation_name as string;
       if (pkColumns.has(name)) {
         col.key = "pk";
