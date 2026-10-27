@@ -28,7 +28,7 @@ dependencyLocking {
 dependencies {
     implementation(platform("org.springframework.boot:spring-boot-dependencies:4.1.2"))
     // Newer than Spring Boot 4.1.2's managed Jackson; the higher platform wins.
-    implementation(platform("tools.jackson:jackson-bom:3.1.8"))
+    implementation(platform("tools.jackson:jackson-bom:3.2.4"))
 
     implementation(project(":"))
     implementation("org.springframework.boot:spring-boot-starter-web")

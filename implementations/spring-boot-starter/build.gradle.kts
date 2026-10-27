@@ -43,7 +43,7 @@ dependencies {
     implementation(springBootBom)
     compileOnly(springBootBom)
     // Newer than Spring Boot 4.1.2's managed Jackson; the higher platform wins.
-    implementation(platform("tools.jackson:jackson-bom:3.1.8"))
+    implementation(platform("tools.jackson:jackson-bom:3.2.4"))
     // The Kotlin Gradle plugin's build-time BouncyCastle (never shipped) resolves a
     // version affected by GHSA-9pwp-9qqc-pr26; the four bc* artifacts must stay aligned.
     constraints {
