@@ -1,6 +1,6 @@
 # `AnySource` enum for cross-backend source mixing (Postgres + SQLite in one process)
 
-> **Status:** OPEN · **Area:** rust, spec
+> **Status:** OPEN · **Area:** rust, docs · **Ref:** re-checked in the 2026-10-25 architecture review of source/schema/table use
 
 Deliberately deferred during the multi-source support rollout
 (`spec/protocol.md` §1 "Resolved source", new `GET api/sources` route,
@@ -15,6 +15,14 @@ side by side, but not a Postgres database alongside a SQLite one, in the
 same process. Lift that restriction so a single host can mix backends
 across its registered sources, matching what the other four ports already
 get for free.
+
+| Port | Sources held as | Mixed engines |
+|---|---|---|
+| Go | `[]NamedSource`, each holding a `DbSource` interface (`routes.go`) | yes |
+| Node | `NamedSource[]` over a `DbSource` interface (`routes.ts`) | yes |
+| Flask | `Sequence[tuple[str, DbSource]]` (`routes.py`) | yes |
+| Spring | `Map<String, DbSource>`, engine picked per configured source (`AshurbanipalAutoConfiguration.kt`) | yes |
+| Rust | `Vec<(String, S)>` for one `S: DbSource` (`axum/src/routes.rs`) | **no** |
 
 **Why Rust alone needs new code for this, and the other ports don't:**
 `implementations/rust/core/src/db/mod.rs`'s `DbSource` trait is native
@@ -47,23 +55,34 @@ working unchanged for the (overwhelmingly common) homogeneous case while
 host to pay an extra match-dispatch indirection just because the
 heterogeneous case exists somewhere in the codebase.
 
-**Constraints / open questions:**
-- Where does `AnySource` live — `core/` (shared by axum and actix-web, so
-  both adapters get it for free) or duplicated per-adapter? `core/` is
-  almost certainly right, mirroring how `PgPoolSource`/`SqliteSource`/
-  `MySqlSource` already live there.
-- Does `GET api/sources`' response gain a `backend` field once mixing is
-  real? The wire contract was deliberately left open to this
-  (`spec/protocol.md` §5.8: "no other field is defined" today, not "no
-  other field ever will be") — a host mixing Postgres and SQLite sources
-  in one process is exactly the case where knowing which is which
-  actually matters to someone browsing the UI, unlike the homogeneous
-  case where it's redundant. If added, needs the same field on the other
-  four ports' `api/sources` responses too, for one consistent wire shape
-  across all five.
-- Whether this is worth building at all before a real host asks for it —
-  the original ask that motivated multi-source support (a Spring Boot
-  host with multiple Spring `DataSource` beans) never needed cross-backend
-  mixing; treat this as speculative until a concrete use case shows up,
-  consistent with how [[15-core-lib-plus-per-framework-adapter-per-port]]
-  was scoped ("don't do this preemptively").
+**Decisions so far:**
+- `AnySource` lives in `core/`, next to `PgPoolSource`/`SqliteSource`/
+  `MySqlSource`, so both adapters get it for free.
+- No `backend` field on `GET api/sources`: `spec/protocol.md` §5.8 says
+  responses MUST NOT include which engine a source uses.
+
+**Plan:**
+1. **Now:** record the gap as accepted in `docs/adapter-decisions.md`
+   (a Rust host is single-engine), linked from the Rust README.
+2. **When a host asks** (none has; the Spring host that motivated
+   multi-source support never needed mixing — consistent with how
+   [[15-core-lib-plus-per-framework-adapter-per-port]] was scoped, "don't
+   do this preemptively"): build `AnySource`.
+
+**Check before building `AnySource`:**
+- No per-engine behaviour leaks above `DbSource`: config, pool setup, the
+  demo's `SECOND_SOURCE` wiring. `AnySource` must not need engine checks
+  outside `core`.
+- The enum adds no dependency when only one engine feature is on.
+
+**What "done" means:**
+- Now: the `docs/adapter-decisions.md` entry, linked from the Rust README.
+- Later:
+  - a test registers a Postgres and a SQLite source in one router and
+    reads tables from both;
+  - `rust:lint` passes with every feature combination CI builds;
+  - `implementations/rust/README.md` shows the mixed setup, and the
+    accepted-gap entry is removed.
+
+**Out of scope:** mixed engines inside one join (a join never crosses a
+source; story 44), and changing the other ports.
