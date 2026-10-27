@@ -6,8 +6,8 @@ run = "go build ./..."
 dir = "implementations/go-nethttp"
 
 ["go:vet"]
-description = "go vet ./..."
-run = "go vet ./..."
+description = "go vet ./..., with the sqlite and mysql build tags so their test files are vetted too"
+run = "go vet -tags sqlite,mysql ./..."
 dir = "implementations/go-nethttp"
 
 ["go:fmt"]
@@ -20,8 +20,8 @@ description = "gofmt -l . (fails if any file needs reformatting)"
 run = "sh tools/check-go-fmt.sh"
 
 ["go:test"]
-description = "go test -race ./... (integration_test.go needs DATABASE_URL + the conformance seed applied)"
-run = "go test -race ./..."
+description = "go test -race with the sqlite and mysql build tags (integration_test.go needs DATABASE_URL + the conformance seed; mysql tests skip without MYSQL_TEST_URL)"
+run = "go test -race -tags sqlite,mysql ./..."
 dir = "implementations/go-nethttp"
 
 ["go:demo"]

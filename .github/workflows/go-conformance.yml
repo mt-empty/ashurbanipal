@@ -79,7 +79,7 @@ jobs:
 
       - name: go vet
         working-directory: implementations/go-nethttp
-        run: go vet ./...
+        run: go vet -tags sqlite,mysql ./...
 
       # Both version inputs stay empty so the action reuses the Go installed
       # above: its pinned setup-go ignores go.mod's toolchain line and would
@@ -91,12 +91,12 @@ jobs:
           cache-dependency-path: implementations/go-nethttp/go.sum
           work-dir: implementations/go-nethttp
 
-      # Fixture tests (filter_fixture_test.go) and kill-switch tests always
-      # run; integration_test.go needs DATABASE_URL (set above) and the
-      # conformance seed applied to actually hit Postgres.
+      # The sqlite and mysql test files only compile with their build tags.
+      # integration_test.go needs DATABASE_URL (set above) and the
+      # conformance seed; the mysql tests skip without MYSQL_TEST_URL.
       - name: Test
         working-directory: implementations/go-nethttp
-        run: go test -race ./...
+        run: go test -race -tags sqlite,mysql ./...
 
   conformance:
     name: Go — conformance kit (external-URL path)
