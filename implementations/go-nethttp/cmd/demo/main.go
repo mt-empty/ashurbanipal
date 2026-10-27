@@ -9,8 +9,12 @@
 //
 //	PORT=4001 SIBLING_PORT=4000 go run ./cmd/demo
 //
-// CONFORMANCE_SECOND_SOURCE=1 registers a second source, pinned to the
-// other_schema schema via an AfterConnect hook, for
+// DB_BACKEND picks the source: postgres (default, DATABASE_URL), mysql
+// (MYSQL_URL, a mysql:// URL; MariaDB too) or sqlite (SQLITE_PATH). The last
+// two need their build tag: go run -tags sqlite,mysql ./cmd/demo
+//
+// CONFORMANCE_SECOND_SOURCE=1 (postgres only) registers a second source,
+// pinned to the other_schema schema via an AfterConnect hook, for
 // conformance/runner/two_source.rs — see that file's module doc.
 package main
 
@@ -30,19 +34,20 @@ import (
 	ashurbanipal "github.com/mt-empty/ashurbanipal/implementations/go-nethttp"
 )
 
-func main() {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("DATABASE_URL must be set (the devcontainer sets it automatically)")
-	}
-	port := envInt("PORT", 4000)
+// backends maps DB_BACKEND to an opener; the tagged backend_*.go files add theirs.
+var backends = map[string]func(timeout int) (ashurbanipal.DbSource, *sql.DB){
+	"postgres": func(timeout int) (ashurbanipal.DbSource, *sql.DB) {
+		db := openDB("pgx", requireEnv("DATABASE_URL", "postgres"))
+		return ashurbanipal.NewPostgresSource(db, timeout), db
+	},
+}
 
-	db, err := sql.Open("pgx", databaseURL)
-	if err != nil {
-		log.Fatalf("opening database: %v", err)
+func main() {
+	port := envInt("PORT", 4000)
+	backend := os.Getenv("DB_BACKEND")
+	if backend == "" {
+		backend = "postgres"
 	}
-	defer db.Close()
-	db.SetMaxOpenConns(5)
 
 	cfg := ashurbanipal.Config{
 		Enabled: true,
@@ -59,11 +64,12 @@ func main() {
 	}
 
 	timeout := cfg.Limits.WithDefaults().QueryTimeoutSecs
-	source := ashurbanipal.NewPostgresSource(db, timeout)
+	source, db := openSource(backend, timeout)
+	defer db.Close()
 	sources := []ashurbanipal.NamedSource{{Name: "primary", Source: source}}
 
-	if os.Getenv("CONFORMANCE_SECOND_SOURCE") != "" {
-		connConfig, err := pgx.ParseConfig(databaseURL)
+	if os.Getenv("CONFORMANCE_SECOND_SOURCE") != "" && backend == "postgres" {
+		connConfig, err := pgx.ParseConfig(requireEnv("DATABASE_URL", backend))
 		if err != nil {
 			log.Fatalf("parsing DATABASE_URL: %v", err)
 		}
@@ -99,6 +105,32 @@ func main() {
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	log.Printf("demo host on http://localhost:%d — browser at http://localhost:%d%s", port, port, uiPath)
 	log.Fatal(http.ListenAndServe(addr, mux))
+}
+
+// openSource opens the database DB_BACKEND names; the caller closes it.
+func openSource(backend string, timeout int) (ashurbanipal.DbSource, *sql.DB) {
+	open, ok := backends[backend]
+	if !ok {
+		log.Fatalf("DB_BACKEND %q is not built in (postgres always; mysql and sqlite need -tags mysql,sqlite)", backend)
+	}
+	return open(timeout)
+}
+
+func openDB(driver, dsn string) *sql.DB {
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		log.Fatalf("opening %s database: %v", driver, err)
+	}
+	db.SetMaxOpenConns(5)
+	return db
+}
+
+func requireEnv(name, backend string) string {
+	value := os.Getenv(name)
+	if value == "" {
+		log.Fatalf("%s must be set for DB_BACKEND=%s", name, backend)
+	}
+	return value
 }
 
 func envInt(name string, def int) int {

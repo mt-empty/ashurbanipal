@@ -60,6 +60,26 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: node-express-conformance-two-source-report
 
+  # The same suite against the demo on MySQL, MariaDB and SQLite, so each
+  # port's other backends meet the protocol too.
+  other-backend-conformance:
+    name: Node/Express — conformance kit (${{ matrix.backend }} backend)
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [mysql, mariadb, sqlite]
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      backend: ${{ matrix.backend }}
+      toolchain: node
+      node-version: "26"
+      start-command: "cd implementations/node-express && pnpm install --frozen-lockfile && pnpm run demo"
+      start-env: ${{ matrix.backend == 'sqlite' && 'DB_BACKEND=sqlite SQLITE_PATH=$CONFORMANCE_SQLITE_PATH' || 'DB_BACKEND=mysql MYSQL_URL=$CONFORMANCE_MYSQL_URL' }}
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: node-express-conformance-${{ matrix.backend }}-report
+
   schema-conformance:
     name: Node/Express — schema conformance
     needs: build-and-test

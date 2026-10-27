@@ -68,6 +68,30 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: flask-python-conformance-two-source-report
 
+  # The same suite against the demo on MySQL, MariaDB and SQLite, so each
+  # port's other backends meet the protocol too.
+  other-backend-conformance:
+    name: Flask — conformance kit (${{ matrix.backend }} backend)
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [mysql, mariadb, sqlite]
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      backend: ${{ matrix.backend }}
+      toolchain: python
+      python-version: "3.12"
+      start-command: >-
+        tools/sync-ports-frontend.sh &&
+        cd implementations/flask-python &&
+        uv sync --extra mysql &&
+        PORT=4000 uv run python demo/app.py
+      start-env: ${{ matrix.backend == 'sqlite' && 'ASHURBANIPAL_BACKEND=sqlite ASHURBANIPAL_SQLITE_PATH=$CONFORMANCE_SQLITE_PATH' || 'ASHURBANIPAL_BACKEND=mysql MYSQL_TEST_URL=$CONFORMANCE_MYSQL_URL' }}
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: flask-python-conformance-${{ matrix.backend }}-report
+
   schema-conformance:
     name: Flask — schema conformance
     needs: build-and-test

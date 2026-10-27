@@ -35,4 +35,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     runtimeOnly("org.postgresql:postgresql")
+    // For the backend-mysql and backend-sqlite profiles.
+    runtimeOnly("com.mysql:mysql-connector-j")
+    runtimeOnly("org.xerial:sqlite-jdbc")
 }

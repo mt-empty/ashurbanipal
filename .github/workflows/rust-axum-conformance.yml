@@ -145,6 +145,19 @@ jobs:
           workspaces: "implementations/rust -> target"
       - run: mise run rust:backends
 
+  mariadb-conformance:
+    name: Rust — conformance kit (MariaDB backend)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      backend: mariadb
+      toolchain: rust
+      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/axum/Cargo.toml --features mysql --example demo"
+      start-env: "DB_BACKEND=mysql DATABASE_URL=$CONFORMANCE_MYSQL_URL"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: conformance-mariadb-report
+
   mysql-conformance:
     name: Rust — conformance kit (MySQL backend)
     needs: build-and-test

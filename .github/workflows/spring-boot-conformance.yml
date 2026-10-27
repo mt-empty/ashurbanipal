@@ -85,6 +85,25 @@ jobs:
       conformance-url: "http://localhost:4100/__ashurbanipal"
       report-name: spring-boot-two-source-conformance-report
 
+  # The same suite against the demo on MySQL, MariaDB and SQLite, so each
+  # port's other backends meet the protocol too.
+  other-backend-conformance:
+    name: Spring Boot — conformance kit (${{ matrix.backend }} backend)
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [mysql, mariadb, sqlite]
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      backend: ${{ matrix.backend }}
+      toolchain: java
+      start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
+      start-env: ${{ format('SPRING_PROFILES_ACTIVE=backend-{0} SPRING_DATASOURCE_URL=$CONFORMANCE_JDBC_URL SPRING_DATASOURCE_USERNAME=root SPRING_DATASOURCE_PASSWORD=ashurbanipal PORT=4100 ASHURBANIPAL_ENABLED=true', matrix.backend == 'sqlite' && 'sqlite' || 'mysql') }}
+      health-url: "http://localhost:4100/__ashurbanipal/api/tables"
+      conformance-url: "http://localhost:4100/__ashurbanipal"
+      report-name: spring-boot-conformance-${{ matrix.backend }}-report
+
   schema-conformance:
     name: Spring Boot — schema conformance
     needs: build-and-test
