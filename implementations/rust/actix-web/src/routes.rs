@@ -4,12 +4,14 @@ use actix_web::http::header::{HeaderName, HeaderValue, X_CONTENT_TYPE_OPTIONS};
 use actix_web::middleware::{from_fn, Next};
 use actix_web::web::{self, Data};
 use actix_web::{Error, HttpResponse, Scope};
-use serde::{Deserialize, Serialize};
 
-use ashurbanipal::filter;
+use ashurbanipal::protocol_wire::{
+    CommonValuesParams, CommonValuesResponse, CountsResponse, DataParams, JoinParams,
+    ReferencedByResponse, SchemaParams, SchemasResponse, SourceParams, SourcesResponse,
+    TableParams, TablesResponse,
+};
 use ashurbanipal::{
-    default_source, resolve_source, Config, DbError, DbSource, JoinData, JoinOpts, JoinSpec,
-    ProblemDetails, QueryOpts, ReferencedBy, SiblingChecker, TableInfo,
+    resolve_source, Config, DbError, DbSource, JoinData, ProblemDetails, SiblingChecker,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -173,45 +175,10 @@ async fn serve_html() -> HttpResponse {
         .body(DBVIEWER_HTML)
 }
 
-#[derive(Serialize)]
-struct SourceEntry {
-    name: String,
-}
-
-#[derive(Serialize)]
-struct SourcesResponse {
-    sources: Vec<SourceEntry>,
-    default: String,
-}
-
 /// Never fails: `sources` is always non-empty (`app_state()` asserts it), so
 /// there's no allow-list to check against — this route *is* the allow-list.
 async fn list_sources<S: DbSource>(state: Data<AppState<S>>) -> HttpResponse {
-    let sources = state
-        .sources
-        .iter()
-        .map(|(name, _)| SourceEntry { name: name.clone() })
-        .collect();
-    let default = default_source(&state.sources).0.clone();
-    HttpResponse::Ok().json(SourcesResponse { sources, default })
-}
-
-#[derive(Serialize)]
-struct SchemaEntry {
-    name: String,
-}
-
-/// `default` serializes as `null` when absent: the field is always present
-/// (`spec/protocol.md` §5.7).
-#[derive(Serialize)]
-struct SchemasResponse {
-    schemas: Vec<SchemaEntry>,
-    default: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct SourceParams {
-    source: Option<String>,
+    HttpResponse::Ok().json(SourcesResponse::from_sources(&state.sources))
 }
 
 async fn list_schemas<S: DbSource>(
@@ -219,27 +186,8 @@ async fn list_schemas<S: DbSource>(
     params: web::Query<SourceParams>,
 ) -> Result<HttpResponse, ApiError> {
     let source = resolve_source(&state.sources, params.source.as_deref())?;
-    let listing = source.list_schemas().await?;
-    let schemas = listing
-        .schemas
-        .into_iter()
-        .map(|name| SchemaEntry { name })
-        .collect();
-    Ok(HttpResponse::Ok().json(SchemasResponse {
-        schemas,
-        default: listing.default,
-    }))
-}
-
-#[derive(Deserialize)]
-struct SchemaParams {
-    schema: Option<String>,
-    source: Option<String>,
-}
-
-#[derive(Serialize)]
-struct TablesResponse {
-    tables: Vec<TableInfo>,
+    let schemas: SchemasResponse = source.list_schemas().await?.into();
+    Ok(HttpResponse::Ok().json(schemas))
 }
 
 async fn list_tables<S: DbSource>(
@@ -251,201 +199,37 @@ async fn list_tables<S: DbSource>(
     Ok(HttpResponse::Ok().json(TablesResponse { tables }))
 }
 
-#[derive(Serialize)]
-struct CountEntry {
-    table: String,
-    approx_rows: i64,
-}
-
-#[derive(Serialize)]
-struct CountsResponse {
-    counts: Vec<CountEntry>,
-}
-
 async fn table_counts<S: DbSource>(
     state: Data<AppState<S>>,
     params: web::Query<SchemaParams>,
 ) -> Result<HttpResponse, ApiError> {
     let source = resolve_source(&state.sources, params.source.as_deref())?;
-    let counts = source.table_counts(params.schema.as_deref()).await?;
-    Ok(HttpResponse::Ok().json(CountsResponse {
-        counts: counts
-            .into_iter()
-            .map(|(table, approx_rows)| CountEntry { table, approx_rows })
-            .collect(),
-    }))
-}
-
-#[derive(Deserialize)]
-struct DataParams {
-    schema: Option<String>,
-    source: Option<String>,
-    table: String,
-    filter: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_saturating_u32")]
-    limit: Option<u32>,
-    #[serde(default, deserialize_with = "deserialize_saturating_u32")]
-    offset: Option<u32>,
-    sort: Option<String>,
-    order: Option<String>,
-}
-
-/// `spec/protocol.md` §5.4 requires `limit`/`offset` to be clamped, never
-/// rejected, for out-of-range values — saturating via `i128` (not `u32`)
-/// keeps serde/Actix's `Query` extractor from 400ing before the real
-/// clamp/`OFFSET` handling runs; non-numeric input still 400s. Mirrors
-/// `ashurbanipal-axum`'s `routes.rs`, same helper duplicated per adapter.
-fn deserialize_saturating_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let raw = String::deserialize(deserializer)?;
-    match raw.parse::<u32>() {
-        Ok(v) => Ok(Some(v)),
-        Err(_) => match raw.parse::<i128>() {
-            Ok(v) => Ok(Some(v.clamp(0, u32::MAX as i128) as u32)),
-            Err(e) => Err(serde::de::Error::custom(e)),
-        },
-    }
+    let counts: CountsResponse = source.table_counts(params.schema.as_deref()).await?.into();
+    Ok(HttpResponse::Ok().json(counts))
 }
 
 async fn table_data<S: DbSource>(
     state: Data<AppState<S>>,
     params: web::Query<DataParams>,
 ) -> Result<HttpResponse, ApiError> {
-    let params = params.into_inner();
     let source = resolve_source(&state.sources, params.source.as_deref())?;
-    // An empty (or whitespace-only) filter param means "no filter", not a
-    // deserialization target; a valid-but-empty JSON array means the same
-    // (spec/protocol.md §5.4.2).
-    let parsed_filter = match params.filter.as_deref() {
-        Some(raw) if !raw.trim().is_empty() => match filter::parse(raw) {
-            Ok(conditions) if conditions.is_empty() => None,
-            Ok(conditions) => Some(conditions),
-            Err(e) => return Err(DbError::FilterParse(e.to_string()).into()),
-        },
-        _ => None,
-    };
-
-    let limits = &state.config.limits;
-    let limit = params
-        .limit
-        .unwrap_or(limits.default_page_size)
-        .clamp(1, limits.max_page_size);
-    let descending = match params.order.as_deref() {
-        None | Some("asc") => false,
-        Some("desc") => true,
-        Some(other) => {
-            return Err(ApiError::BadRequest(format!(
-                "invalid order {other:?} (expected \"asc\" or \"desc\")"
-            )))
-        }
-    };
-
-    let opts = QueryOpts {
-        limit,
-        offset: params.offset.unwrap_or(0),
-        sort: params.sort,
-        descending,
-        timeout_secs: limits.query_timeout_secs,
-        filter: parsed_filter,
-    };
+    let opts = params.query_opts(&state.config.limits)?;
     let data = source
         .query_table(params.schema.as_deref(), &params.table, opts)
         .await?;
     Ok(HttpResponse::Ok().json(data))
 }
 
-#[derive(Deserialize)]
-struct JoinParams {
-    schema: Option<String>,
-    source: Option<String>,
-    join: String,
-    filter: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_saturating_u32")]
-    limit: Option<u32>,
-    #[serde(default, deserialize_with = "deserialize_saturating_u32")]
-    offset: Option<u32>,
-    sort: Option<String>,
-    sort_join: Option<String>,
-    order: Option<String>,
-}
-
-fn join_request(
-    params: &JoinParams,
-    limits: &ashurbanipal::Limits,
-) -> Result<(JoinSpec, JoinOpts), ApiError> {
-    let spec = JoinSpec::parse(&params.join).map_err(|e| ApiError::from(DbError::BadJoin(e.0)))?;
-    let filter = match params.filter.as_deref() {
-        Some(raw) if !raw.trim().is_empty() => match filter::parse_for_join(raw) {
-            Ok(conditions) if conditions.is_empty() => None,
-            Ok(conditions) => Some(conditions),
-            Err(e) => return Err(DbError::FilterParse(e.to_string()).into()),
-        },
-        _ => None,
-    };
-    let descending = match params.order.as_deref() {
-        None | Some("asc") => false,
-        Some("desc") => true,
-        Some(other) => {
-            return Err(ApiError::BadRequest(format!(
-                "invalid order {other:?} (expected \"asc\" or \"desc\")"
-            )))
-        }
-    };
-    let sort_join = match params.sort_join.as_deref() {
-        None => None,
-        Some(raw) => Some(raw.parse::<usize>().map_err(|_| {
-            ApiError::BadRequest(format!(
-                "invalid sort_join {raw:?} (expected a table position)"
-            ))
-        })?),
-    };
-    let opts = JoinOpts {
-        limit: params
-            .limit
-            .unwrap_or(limits.default_page_size)
-            .clamp(1, limits.max_page_size),
-        offset: params.offset.unwrap_or(0),
-        sort: params.sort.clone(),
-        sort_join,
-        descending,
-        timeout_secs: limits.query_timeout_secs,
-        filter,
-    };
-    Ok((spec, opts))
-}
-
 async fn table_join<S: DbSource>(
     state: Data<AppState<S>>,
     params: web::Query<JoinParams>,
 ) -> Result<HttpResponse, ApiError> {
-    let params = params.into_inner();
     let source = resolve_source(&state.sources, params.source.as_deref())?;
-    let (spec, opts) = join_request(&params, &state.config.limits)?;
+    let (spec, opts) = params.join_request(&state.config.limits)?;
     let data: JoinData = source
         .query_join(params.schema.as_deref(), &spec, opts)
         .await?;
     Ok(HttpResponse::Ok().json(data))
-}
-
-#[derive(Deserialize)]
-struct CommonValuesParams {
-    schema: Option<String>,
-    source: Option<String>,
-    table: String,
-    column: String,
-}
-
-#[derive(Serialize)]
-struct CommonValueEntry {
-    value: String,
-    freq: f32,
-}
-
-#[derive(Serialize)]
-struct CommonValuesResponse {
-    values: Vec<CommonValueEntry>,
 }
 
 async fn common_values<S: DbSource>(
@@ -453,32 +237,16 @@ async fn common_values<S: DbSource>(
     params: web::Query<CommonValuesParams>,
 ) -> Result<HttpResponse, ApiError> {
     let source = resolve_source(&state.sources, params.source.as_deref())?;
-    let values = source
+    let values: CommonValuesResponse = source
         .common_values(params.schema.as_deref(), &params.table, &params.column)
-        .await?;
-    Ok(HttpResponse::Ok().json(CommonValuesResponse {
-        values: values
-            .into_iter()
-            .map(|(value, freq)| CommonValueEntry { value, freq })
-            .collect(),
-    }))
-}
-
-#[derive(Deserialize)]
-struct ReferencedByParams {
-    schema: Option<String>,
-    source: Option<String>,
-    table: String,
-}
-
-#[derive(Serialize)]
-struct ReferencedByResponse {
-    referenced_by: Vec<ReferencedBy>,
+        .await?
+        .into();
+    Ok(HttpResponse::Ok().json(values))
 }
 
 async fn referenced_by<S: DbSource>(
     state: Data<AppState<S>>,
-    params: web::Query<ReferencedByParams>,
+    params: web::Query<TableParams>,
 ) -> Result<HttpResponse, ApiError> {
     let source = resolve_source(&state.sources, params.source.as_deref())?;
     let referenced_by = source
@@ -487,16 +255,9 @@ async fn referenced_by<S: DbSource>(
     Ok(HttpResponse::Ok().json(ReferencedByResponse { referenced_by }))
 }
 
-#[derive(Deserialize)]
-struct StructureParams {
-    schema: Option<String>,
-    source: Option<String>,
-    table: String,
-}
-
 async fn structure<S: DbSource>(
     state: Data<AppState<S>>,
-    params: web::Query<StructureParams>,
+    params: web::Query<TableParams>,
 ) -> Result<HttpResponse, ApiError> {
     let source = resolve_source(&state.sources, params.source.as_deref())?;
     let structure = source
@@ -514,7 +275,9 @@ mod kill_switch_tests {
     use actix_web::{test, App};
 
     use super::*;
-    use ashurbanipal::{SchemaListing, Structure, TableData};
+    use ashurbanipal::{
+        JoinOpts, JoinSpec, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo,
+    };
 
     /// Routing-only double — the disabled-config kill switch must reject
     /// every request before any handler runs, so none of these bodies are

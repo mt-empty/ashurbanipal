@@ -64,7 +64,8 @@ Two kinds of component — `docs/design.md` §3 has the full architecture:
   `spec/protocol.md`. Rust's is a three-crate Cargo workspace at
   `implementations/rust/`: `core/` (framework-agnostic — config,
   `DbSource` and its Postgres/SQLite/MySQL implementations, the filter
-  AST, the `/api/siblings` health checks), `axum/` (`ashurbanipal-axum`),
+  AST, the `/api/siblings` health checks, the routes' request/response
+  shapes), `axum/` (`ashurbanipal-axum`),
   and `actix-web/`. `docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`
   has why.
 
