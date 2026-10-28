@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, problem, selectTable, urlParam } from "./support/helpers";
+import { apiCall, gotoApp, problem, selectTable, urlParam } from "./support/helpers";
 
 // The service × label grid in Other services. /api/siblings is
 // mocked: the shape is what matters here, and spec/protocol.md §5.6's server
@@ -113,7 +113,7 @@ test("a poll that changes only health keeps focus on the link", async ({ page })
   await link.focus();
 
   healthy = false;
-  const polled = page.waitForResponse((r) => r.url().includes("/api/siblings"));
+  const polled = page.waitForResponse(apiCall("/siblings"));
   await page.clock.runFor(15_000);
   await polled;
   await expect(link).toHaveText("down");
@@ -142,7 +142,7 @@ test("a closed pop-up never polls, and reopening within 15 s reuses the last res
   await mockSiblings(page, LABELLED);
   let requests = 0;
   page.on("request", (r) => {
-    if (r.url().includes("/api/siblings")) requests++;
+    if (apiCall("/siblings")(r)) requests++;
   });
   await gotoApp(page);
   await expect(page.locator("#siblings")).toBeVisible();
@@ -158,7 +158,7 @@ test("a closed pop-up never polls, and reopening within 15 s reuses the last res
   await page.clock.runFor(60_000);
   expect(requests).toBe(1);
 
-  const refreshed = page.waitForResponse((r) => r.url().includes("/api/siblings"));
+  const refreshed = page.waitForResponse(apiCall("/siblings"));
   await openMatrix(page);
   await refreshed;
   expect(requests).toBe(2);
@@ -181,13 +181,13 @@ test("a failed first fetch retries on its own", async ({ page }) => {
       ? r.fulfill(problem(500, "boom", "database_error"))
       : r.fulfill({ contentType: "application/json", body: JSON.stringify(LABELLED) }),
   );
-  const failed = page.waitForResponse((r) => r.url().includes("/api/siblings"));
+  const failed = page.waitForResponse(apiCall("/siblings"));
   await gotoApp(page);
   await failed;
   await expect(page.locator("#siblings")).toBeHidden();
 
   fail = false;
-  const retried = page.waitForResponse((r) => r.url().includes("/api/siblings") && r.ok());
+  const retried = page.waitForResponse((r) => apiCall("/siblings")(r) && r.ok());
   await page.clock.runFor(15_000);
   await retried;
   await expect(page.locator("#siblings-summary")).toHaveText("Other services · 1 down");
@@ -257,7 +257,7 @@ test("a failed refresh keeps the last good list and label", async ({ page }) => 
   await openMatrix(page);
 
   fail = true;
-  const failed = page.waitForResponse((r) => r.url().includes("/api/siblings") && !r.ok());
+  const failed = page.waitForResponse((r) => apiCall("/siblings")(r) && !r.ok());
   await page.clock.runFor(15_000);
   await failed;
   await expect(page.locator("#siblings-matrix-body th[scope=row]")).toHaveCount(3);
@@ -281,7 +281,7 @@ test("a refresh keeps focus on an unlabelled row under the grid", async ({ page 
   await row.focus();
 
   healthy = false;
-  const polled = page.waitForResponse((r) => r.url().includes("/api/siblings"));
+  const polled = page.waitForResponse(apiCall("/siblings"));
   await page.clock.runFor(15_000);
   await polled;
   await expect(row.locator(".sibling-state")).toHaveText("down");

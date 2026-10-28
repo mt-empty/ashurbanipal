@@ -1,11 +1,11 @@
 import { expect, type Page, type Response } from "@playwright/test";
-import { gotoApp, selectTable, waitForIdle } from "./helpers";
+import { apiCall, gotoApp, selectTable, waitForIdle } from "./helpers";
 
 export const ORDERS_USERS = "FROM orders o LEFT JOIN users u ON o.user_id = u.id";
 /** ORDERS_USERS as the page prints it, and as it rides in `?join=`. */
 export const ORDERS_USERS_CANONICAL = "SELECT *\nFROM orders o\nLEFT JOIN users u ON o.user_id = u.id";
 
-export const joinRequest = (url: URL) => url.pathname.endsWith("/api/tables/join");
+export const joinRequest = apiCall("/tables/join");
 
 /** The saved-joins store as the page wrote it to localStorage, or null. */
 export const storedSavedJoins = (page: Page) => page.evaluate(() => localStorage.getItem("ashurbanipal_saved_joins"));

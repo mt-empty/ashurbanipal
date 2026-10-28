@@ -1,11 +1,13 @@
 import { expect, type Page, test } from "./support/fixtures";
 import {
+  dataWith,
   goBack,
   goForward,
   gotoApp,
   holdRequests,
   problem,
   selectTable,
+  tableData,
   tableList,
   urlParam,
   waitForIdle,
@@ -221,7 +223,7 @@ test("cancelling a join the server refuses goes back to the table in view", asyn
   await expect(page.locator("#current")).toHaveText("orders");
 
   // Later actions ask for the table again, not the refused join.
-  const response = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  const response = page.waitForResponse(tableData);
   await page.locator('th[data-col="id"]').click();
   expect((await response).status()).toBe(200);
   await waitForIdle(page);
@@ -239,7 +241,7 @@ test("a new join that times out leaves the table in view as it was", async ({ pa
   await expect(page.locator("#join-notice")).toBeVisible();
   await expect(page.locator("#current")).toHaveText("orders");
 
-  const response = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  const response = page.waitForResponse(tableData);
   await page.locator('th[data-col="id"]').click();
   expect((await response).status()).toBe(200);
   await waitForIdle(page);
@@ -274,7 +276,7 @@ test("a join still loading when the schema changes is dropped, not shown under t
   await tablesSent;
 
   await answerJoin(page, releaseJoin);
-  const loaded = page.waitForResponse((r) => r.url().includes("/api/tables/data") && r.url().includes("warehouse"));
+  const loaded = page.waitForResponse(dataWith("schema", "warehouse"));
   releaseTables();
   await loaded;
   await waitForIdle(page);
@@ -297,7 +299,7 @@ test("a join still loading is dropped after switching schema away and back", asy
   await backSent;
 
   await answerJoin(page, releaseJoin);
-  const loaded = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  const loaded = page.waitForResponse(tableData);
   releaseWarehouse();
   releasePublic();
   await loaded;
@@ -317,7 +319,7 @@ test("a join still loading is dropped when Back restores the previous table", as
   await tablesSent;
 
   await answerJoin(page, releaseJoin);
-  const loaded = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  const loaded = page.waitForResponse(tableData);
   releaseTables();
   await loaded;
   await waitForIdle(page);

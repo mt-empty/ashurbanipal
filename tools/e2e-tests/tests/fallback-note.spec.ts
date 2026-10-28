@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, selectTable, tableData, tableList, waitForIdle } from "./support/helpers";
 import { spawnDemo, freePort } from "./support/second-server";
 
 // A name the page URL asked for that this instance lacks falls back as before
@@ -64,7 +64,7 @@ test("a refresh keeps the note and a table switch hides it", async ({ page }) =>
   await gotoApp(page, "?table=nosuchtable");
   await expect(note(page)).toBeVisible();
 
-  const refreshed = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  const refreshed = page.waitForResponse(tableData);
   await page.locator("#refresh").click();
   await refreshed;
   await waitForIdle(page);
@@ -93,7 +93,7 @@ test("switching to a schema with no tables hides the note", async ({ page }) => 
   });
   await gotoApp(page, "?table=nosuchtable");
   await expect(note(page)).toBeVisible();
-  const listed = page.waitForResponse((r) => r.url().includes("/api/tables?") && r.url().includes("schema=warehouse"));
+  const listed = page.waitForResponse(tableList("warehouse"));
   await page.locator("#schema-select").selectOption("warehouse");
   await listed;
   await expect(note(page)).toBeHidden();

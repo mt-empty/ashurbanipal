@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { gotoApp, selectTable, waitForIdle, waitForTable } from "./support/helpers";
+import { dataWith, gotoApp, selectTable, waitForIdle, waitForTable } from "./support/helpers";
 
 test("clicking an FK cell switches table and filters to the matching row", async ({ page }) => {
   await gotoApp(page);
@@ -57,7 +57,7 @@ test("clicking a cross-schema FK cell switches schema, table, and filters to the
   await expect(page.locator("#schema-select-wrap")).toBeVisible();
 
   const schemaLoaded = page.waitForResponse(
-    (r) => r.url().includes("/api/tables/data") && r.url().includes("schema=warehouse") && r.ok(),
+    (r) => dataWith("schema", "warehouse")(r) && r.ok(),
   );
   await page.locator("#schema-select").selectOption("warehouse");
   await schemaLoaded;
