@@ -73,7 +73,7 @@ test("an auto-refresh tick keeps focus on the columns menu checkbox", async ({ p
 test("a stored hidden column the table no longer has is not counted and is dropped", async ({ page }) => {
   const key = tableKey("orders");
   await page.addInitScript((k) => {
-    localStorage.setItem("ashurbanipal_ui", JSON.stringify({ table: "orders", hiddenColumns: { [k]: ["ghost_col", "status"] } }));
+    localStorage.setItem("ashurbanipal_view", JSON.stringify({ table: "orders", hiddenColumns: { [k]: ["ghost_col", "status"] } }));
   }, key);
   await gotoApp(page);
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();

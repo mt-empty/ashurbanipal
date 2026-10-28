@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "./support/fixtures";
 import { spawnDemo, freePort } from "./support/second-server";
-import { goBack, gotoApp, reloadApp, urlParam, waitForIdle } from "./support/helpers";
+import { failRequests, goBack, gotoApp, reloadApp, urlParam, waitForIdle } from "./support/helpers";
 
 // ui-guidelines R12: the schema selected on a source is remembered, so
 // switching source away and back restores it instead of resetting to the
@@ -41,7 +41,7 @@ test("schema is remembered per source across a source switch", async ({ page }) 
     // Restored, not reset to `public`.
     await expect(page.locator("#schema-select")).toHaveValue("warehouse");
     expect(await page.evaluate(() => {
-      const raw = localStorage.getItem("ashurbanipal_ui");
+      const raw = localStorage.getItem("ashurbanipal_view");
       return raw ? JSON.parse(raw).schemaBySource : null;
     })).toMatchObject({ primary: "warehouse" });
   } finally {
@@ -72,13 +72,52 @@ test("a source with no remembered schema opens the schema the server reports as 
   }
 });
 
+test("a fresh visit to a source opens the schema its connection is pinned to", async ({ page }) => {
+  const port = await freePort();
+  const demo = await spawnDemo({ port, conformanceSecondSource: true });
+  try {
+    // The first visit stores `primary` and `public`; `public` is listed on the other source too.
+    await gotoApp(page, "", demo.baseUrl);
+    await expect(page.locator("#schema-select")).toHaveValue("public");
+    const tablesListed = page.waitForRequest(
+      (r) => new URL(r.url()).pathname.endsWith("/api/tables") && new URL(r.url()).searchParams.get("source") === "other_schema",
+    );
+    await gotoApp(page, "?source=other_schema", demo.baseUrl);
+    expect(new URL((await tablesListed).url()).searchParams.get("schema")).toBe("other_schema");
+    await expect(page.locator("#schema-select")).toHaveValue("other_schema");
+  } finally {
+    await demo.stop();
+  }
+});
+
+test("a source whose schema list fails is still named on every request", async ({ page }) => {
+  const port = await freePort();
+  const demo = await spawnDemo({ port, conformanceSecondSource: true });
+  try {
+    await gotoApp(page, "", demo.baseUrl);
+    await failRequests(
+      page,
+      (url) => url.pathname.endsWith("/api/schemas") && url.searchParams.get("source") === "other_schema",
+    );
+    const tablesListed = page.waitForRequest(
+      (r) => new URL(r.url()).pathname.endsWith("/api/tables") && new URL(r.url()).searchParams.get("source") === "other_schema",
+    );
+    await page.locator("#source-select").selectOption("other_schema");
+    expect(new URL((await tablesListed).url()).searchParams.get("schema")).toBeNull();
+    await waitForIdle(page);
+    await expect(page.locator("#schema-select-wrap")).toBeHidden();
+  } finally {
+    await demo.stop();
+  }
+});
+
 test("a malformed schemaBySource is discarded, not fatal", async ({ page }) => {
   const port = await freePort();
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
   try {
     await gotoApp(page, "", demo.baseUrl);
     await page.evaluate(() =>
-      localStorage.setItem("ashurbanipal_ui", JSON.stringify({ schemaBySource: ["not", "an", "object"] })),
+      localStorage.setItem("ashurbanipal_view", JSON.stringify({ schemaBySource: ["not", "an", "object"] })),
     );
     // Still boots and loads a table (R5).
     await reloadApp(page);

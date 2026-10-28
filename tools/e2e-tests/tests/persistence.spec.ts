@@ -27,13 +27,13 @@ test("a URL query param wins over a conflicting localStorage value", async ({ pa
 
 test("corrupted localStorage is discarded and falls back to the default view", async ({ page }) => {
   await gotoApp(page);
-  await page.evaluate(() => localStorage.setItem("ashurbanipal_ui", "not valid json{"));
+  await page.evaluate(() => localStorage.setItem("ashurbanipal_view", "not valid json{"));
 
   await gotoApp(page); // reload with the corrupted value already in place
   // Falls back silently rather than wedging — some table still loads.
   await expect(page.locator("#current")).not.toHaveText("—");
   await expect(page.locator("#error")).toBeEmpty();
-  const stored = await page.evaluate(() => localStorage.getItem("ashurbanipal_ui"));
+  const stored = await page.evaluate(() => localStorage.getItem("ashurbanipal_view"));
   expect(stored).not.toBe("not valid json{");
 });
 

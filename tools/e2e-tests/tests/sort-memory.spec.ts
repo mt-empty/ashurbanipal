@@ -18,7 +18,7 @@ test("a table keeps the sort last chosen on it when you leave and come back", as
 test("a sort stored under a bare table name, from before keys were scoped, is dropped", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem(
-      "ashurbanipal_ui",
+      "ashurbanipal_view",
       JSON.stringify({ table: "products", sortByTable: { products: { col: "price", order: "desc" } } }),
     );
   });
@@ -42,7 +42,7 @@ test("a remembered sort column the backend rejects is dropped and the view recov
   // the first fetch 400s and loadData must retry unsorted (Option A / R11).
   await page.addInitScript((key) => {
     localStorage.setItem(
-      "ashurbanipal_ui",
+      "ashurbanipal_view",
       JSON.stringify({ table: "products", sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }),
     );
   }, tableKey("products"));
@@ -66,7 +66,7 @@ test("a stale remembered sort is dropped without discarding a shared link's filt
   // this visitor's incidental state, the filter is the link's whole point —
   // so the sort is dropped first and the filtered view still renders.
   await page.addInitScript((key) => {
-    localStorage.setItem("ashurbanipal_ui", JSON.stringify({ sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }));
+    localStorage.setItem("ashurbanipal_view", JSON.stringify({ sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }));
   }, tableKey("orders"));
   await rejectSort(page, "ghost_col");
 

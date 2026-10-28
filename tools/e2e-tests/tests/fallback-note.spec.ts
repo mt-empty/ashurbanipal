@@ -28,6 +28,13 @@ test("a missing schema falls back to public and says so", async ({ page }) => {
   await expect(page.locator("#view-notice-text")).toHaveText("There is no schema nosuch here. Showing public instead.");
 });
 
+test("a source name on a host with one source is not a swap", async ({ page }) => {
+  await gotoApp(page, "?source=nosuch&table=nosuchtable");
+  const shown = (await page.locator("#current").textContent()) ?? "";
+  // The source selector is hidden, so only the table is named.
+  await expect(page.locator("#view-notice-text")).toHaveText(`There is no table nosuchtable here. Showing ${shown} instead.`);
+});
+
 test("a URL filter naming a missing column is removed with a note", async ({ page }) => {
   await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("nosuchcol = 1"));
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
@@ -39,7 +46,7 @@ test("a URL filter naming a missing column is removed with a note", async ({ pag
 
 test("a stale table restored from localStorage resets without a note", async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem("ashurbanipal_ui", JSON.stringify({ table: "nosuchtable" }));
+    localStorage.setItem("ashurbanipal_view", JSON.stringify({ table: "nosuchtable" }));
   });
   await gotoApp(page);
   await expect(page.locator("#current")).not.toHaveText("—");

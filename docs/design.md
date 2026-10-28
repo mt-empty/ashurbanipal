@@ -212,8 +212,8 @@ Two components, same as the original concept:
   URL's query params, one browser-history entry per applied change
   (ui-guidelines R16), so the address bar is
   always a shareable link for the current view. Properties:
-  - The view state is one `localStorage` key, `ashurbanipal_ui`, value a
-    small JSON object. Saved joins (`ashurbanipal_joins`) and the display
+  - The view state is one `localStorage` key, `ashurbanipal_view`, value a
+    small JSON object. Saved joins (`ashurbanipal_saved_joins`) and the display
     preferences — theme (`ashurbanipal_theme`) and the expanded table list
     (`ashurbanipal_tables_expanded`) — each have their own key, outside
     the URL mirror. Nothing sensitive ever goes in any of them — table/column names only,

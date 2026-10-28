@@ -37,7 +37,7 @@ src/
   core/        api, dom, types, state (+ store, url), url-intent
   lib/         filter-dsl, filter-tokens, fuzzy, join-dsl, join-def, join-draft,
                join-tokens, join-types, join-saved, json-tree, format, row-diff,
-               fallback-note, sibling-matrix
+               scope-key, fallback-note, sibling-matrix
   demo/        demo-shim, demo-fixtures — offline demo backend only
 ```
 
@@ -60,7 +60,7 @@ src/
   `populateSelect`, `flashIcon`). The client state is behind one
   `./state.js` entry point re-exporting `store.ts` (the `state` object, its
   localStorage persistence, the named scope transitions, and the
-  new-rows-since-refresh bookkeeping — `scopeKey` and the last-payload
+  new-rows-since-refresh bookkeeping — `rowDiffKey` and the last-payload
   cache, delegating the actual diff to the pure `lib/row-diff.ts`) and
   `url.ts` (URL params ⇄ state, read side — two readers that differ on
   purpose, see the header comment there). `store.ts` exposes named
@@ -73,7 +73,9 @@ src/
   says why inline. A value a
   plain `let` export can't expose (the applied filter AST) stays behind a
   getter/setter pair.
-- `lib/` — pure leaves: import only `core/types.ts`, or nothing.
+- `lib/` — pure leaves: import only `core/types.ts`, or nothing. Their
+  unit tests load them unbundled under `node --test`, where a `.js` import
+  of another `lib/` file does not resolve to its `.ts` source.
 - `index.html` — head meta/favicon/pre-paint theme bootstrap script and
   body structural markup only. No inline `style=` or `onclick=`-style
   attributes — every behavior wire-up happens in a module, so there's

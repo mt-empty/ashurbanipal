@@ -5,6 +5,7 @@ import {
   applyStoredSort,
   clearFilter,
   enterTable,
+  scopeIdentity,
   scopeQuery,
   startTable,
   state,
@@ -32,7 +33,6 @@ const chipCounts = new Map<string, string>();
 let joinEntries: TableEntry[] = [];
 // The source and schema the join chips were built for; a table list for another scope drops them.
 let joinScope = "";
-const scopeOfChips = (): string => `${state.source ?? ""}|${state.schema ?? ""}`;
 const allEntries = (): TableEntry[] => [...tableEntries, ...joinEntries];
 const tableChipTemplate = $<HTMLTemplateElement>("table-chip-template");
 
@@ -161,7 +161,7 @@ export async function loadTables({
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
   }
-  if (joinScope !== scopeOfChips()) joinEntries = [];
+  if (joinScope !== scopeIdentity()) joinEntries = [];
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
@@ -237,7 +237,7 @@ export function setJoinChips(chips: JoinChip[]): void {
     ul.insertBefore(li, tablesMoreItem);
     return { name: `join:${c.label}`, li, chip };
   });
-  joinScope = scopeOfChips();
+  joinScope = scopeIdentity();
   updateTablesCap();
 }
 

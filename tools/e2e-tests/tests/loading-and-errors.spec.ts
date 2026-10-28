@@ -120,11 +120,14 @@ test("a lone schema with no server default is still sent by name", async ({ page
   expect(new URL((await dataRequest).url()).searchParams.get("schema")).toBe("public");
   await expect(page.locator("#tbody tr").first()).toBeVisible();
   await expect(page.locator("#schema-select-wrap")).toBeHidden();
+  // A bare table name would not resolve there, so the structure title keeps the schema.
+  await page.locator("#structure-btn").click();
+  await expect(page.locator("#structure-title")).toHaveText(/^structure — public\./);
 });
 
 test("a failed /sources call drops a remembered source instead of sending it", async ({ page }) => {
   await gotoApp(page);
-  await page.evaluate(() => localStorage.setItem("ashurbanipal_ui", JSON.stringify({ source: "gone" })));
+  await page.evaluate(() => localStorage.setItem("ashurbanipal_view", JSON.stringify({ source: "gone" })));
   await failRequests(page, (url) => url.pathname.endsWith("/api/sources"));
   const withSource: string[] = [];
   page.on("request", (r) => {

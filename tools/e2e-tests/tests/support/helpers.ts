@@ -91,9 +91,9 @@ export async function clearFilterViaSearchEvent(page: Page) {
 }
 
 /** The key of a table's entry in uiState's per-table maps (hiddenColumns,
- * sortByTable): source, schema and table. The demo is single-source. */
-export function tableKey(table: string, schema = "public"): string {
-  return JSON.stringify([null, schema, table]);
+ * sortByTable): source, schema and table. The shared demo's one source is `primary`. */
+export function tableKey(table: string, schema = "public", source = "primary"): string {
+  return JSON.stringify([source, schema, table]);
 }
 
 export const tableData = (url: URL) => url.pathname.endsWith("/api/tables/data");
@@ -143,7 +143,7 @@ export function problem(status: number, title: string, code: string) {
 
 export function uiState(page: Page) {
   return page.evaluate(() => {
-    const raw = localStorage.getItem("ashurbanipal_ui");
+    const raw = localStorage.getItem("ashurbanipal_view");
     return raw ? JSON.parse(raw) : null;
   });
 }

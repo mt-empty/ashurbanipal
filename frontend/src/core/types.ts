@@ -201,3 +201,12 @@ export interface WireJoin {
   joins: { type: JoinType; table: string; on: JoinPair[] }[];
   columns?: { join: number; column: string }[];
 }
+
+// The source and schema every scoped request runs in. Per-scope memory (sort,
+// hidden columns, widths, saved joins) is keyed by the `known` names only.
+export type Scope =
+  // Names to try, from storage, the URL or a switch; not yet checked against the lists.
+  | { readonly kind: "loading"; readonly source: string | null; readonly schema: string | null }
+  | { readonly kind: "known"; readonly source: string; readonly schema: string }
+  // A list lookup failed; requests send only the names that did resolve.
+  | { readonly kind: "failed"; readonly source: string | null; readonly schema: string | null };

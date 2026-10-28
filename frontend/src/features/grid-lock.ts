@@ -1,10 +1,10 @@
 import { tableEl } from "../bootstrap/table-focus.js";
 import { $ } from "../core/dom.js";
-import { state, viewKey } from "../core/state.js";
+import { scopeIdentity, state, viewKey } from "../core/state.js";
 
 // The scope and view the grid was drawn for; null before the first render.
 let gridKey: string | null = null;
-const stateKey = (): string => JSON.stringify([state.source, state.schema, viewKey(state.view)]);
+const stateKey = (): string => JSON.stringify([scopeIdentity(), viewKey(state.view)]);
 
 export function markGridDrawn(): void {
   gridKey = stateKey();

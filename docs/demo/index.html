@@ -2518,6 +2518,22 @@ function collectNewRowKeys(prev, next, opts) {
   return { newRowKeys, pkNames };
 }
 
+// src/lib/scope-key.ts
+function scopeKey(source, schema, ...rest) {
+  return visitKey(source, schema, ...rest);
+}
+function visitKey(source, schema, ...rest) {
+  return JSON.stringify([source, schema, ...rest]);
+}
+function isScopeKey(key, parts) {
+  try {
+    const v = JSON.parse(key);
+    return Array.isArray(v) && v.length === parts && v.every((s) => typeof s === "string");
+  } catch {
+    return false;
+  }
+}
+
 // src/core/storage.ts
 function readStored(key) {
   try {
@@ -2536,12 +2552,18 @@ function writeStored(key, value, failure) {
     return false;
   }
 }
+var RETIRED_KEYS = ["ashurbanipal_ui", "ashurbanipal_joins"];
+function dropRetiredKeys() {
+  for (const key of RETIRED_KEYS) writeStored(key, null);
+}
 
 // src/core/store.ts
-var UI_KEY = "ashurbanipal_ui";
+var UI_KEY = "ashurbanipal_view";
 var state = {
-  source: null,
-  schema: null,
+  scope: { kind: "loading", source: null, schema: null },
+  manySources: false,
+  manySchemas: false,
+  noDefaultSchema: false,
   view: null,
   sort: null,
   order: "asc",
@@ -2639,7 +2661,7 @@ function joinRequest(def) {
   return { view, sort: null, order: "asc", offset: 0, filter: "", ast: [] };
 }
 function tableRequest(name) {
-  const stored2 = state.sortByTable[scopeTableKey(name)];
+  const stored2 = storedSort(name);
   return {
     view: { kind: "table", table: name },
     sort: stored2?.col ?? null,
@@ -2690,34 +2712,44 @@ function restoreFilterFromParams(params) {
 function isPlainObject(v) {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
-function scopeTableKey(table) {
-  return JSON.stringify([state.source, state.schema, table]);
+function knownScope() {
+  return state.scope.kind === "known" ? state.scope : null;
 }
-function isScopeTableKey(key) {
-  try {
-    const v = JSON.parse(key);
-    return Array.isArray(v) && v.length === 3 && v.slice(0, 2).every((s) => s === null || typeof s === "string") && typeof v[2] === "string";
-  } catch {
-    return false;
-  }
+function scopeIdentity() {
+  return visitKey(state.scope.source, state.scope.schema);
+}
+function scopeTableKey(table) {
+  const known = knownScope();
+  return known && scopeKey(known.source, known.schema, table);
+}
+function requestTableKey(table) {
+  return visitKey(state.scope.source, state.scope.schema, table);
+}
+function qualifiedTable(table) {
+  const { schema } = state.scope;
+  return schema && (state.manySchemas || state.noDefaultSchema) ? `${schema}.${table}` : table;
+}
+function storedSort(table) {
+  const key = scopeTableKey(table);
+  return key === null ? void 0 : state.sortByTable[key];
 }
 function restoreFromStorage() {
   try {
     const saved = JSON.parse(readStored(UI_KEY) || "{}");
-    if (typeof saved.source === "string") state.source = saved.source;
-    if (typeof saved.schema === "string") state.schema = saved.schema;
+    const name = (v) => typeof v === "string" && v !== "" ? v : null;
+    state.scope = { kind: "loading", source: name(saved.source), schema: name(saved.schema) };
     if (typeof saved.table === "string") state.view = tableView(saved.table);
     if (typeof saved.limit === "number" && Number.isFinite(saved.limit)) state.limit = saved.limit;
     if (isPlainObject(saved.hiddenColumns)) {
       for (const [key, cols] of Object.entries(saved.hiddenColumns)) {
-        if (!isScopeTableKey(key) || !Array.isArray(cols)) continue;
+        if (!isScopeKey(key, 3) || !Array.isArray(cols)) continue;
         const clean = cols.filter((c) => typeof c === "string");
         if (clean.length) state.hiddenColumns[key] = clean;
       }
     }
     if (isPlainObject(saved.sortByTable)) {
       for (const [key, v] of Object.entries(saved.sortByTable)) {
-        if (isScopeTableKey(key) && isPlainObject(v) && typeof v.col === "string") {
+        if (isScopeKey(key, 3) && isPlainObject(v) && typeof v.col === "string") {
           state.sortByTable[key] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
         }
       }
@@ -2733,7 +2765,8 @@ function restoreFromStorage() {
   }
 }
 function persist() {
-  const { source, schema, limit, hiddenColumns: hiddenColumns2, sortByTable, schemaBySource } = state;
+  const { limit, hiddenColumns: hiddenColumns2, sortByTable, schemaBySource } = state;
+  const { source, schema } = state.scope;
   const table = startTable(state.view);
   writeStored(
     UI_KEY,
@@ -2745,8 +2778,10 @@ function hiddenColumns() {
   const view = state.view;
   if (view === null) return [];
   switch (view.kind) {
-    case "table":
-      return state.hiddenColumns[scopeTableKey(view.table)] ?? [];
+    case "table": {
+      const key = scopeTableKey(view.table);
+      return key !== null && state.hiddenColumns[key] || [];
+    }
     case "join":
       return view.hidden;
     default: {
@@ -2761,6 +2796,7 @@ function setHiddenColumns(next) {
   switch (view.kind) {
     case "table": {
       const key = scopeTableKey(view.table);
+      if (key === null) return;
       if (next.length) state.hiddenColumns[key] = [...next];
       else delete state.hiddenColumns[key];
       persist();
@@ -2783,20 +2819,22 @@ function pruneHiddenColumns(live) {
 function rememberSort() {
   const table = tableInView();
   if (!table) return;
+  sortRisk.set(false);
   const key = scopeTableKey(table);
+  if (key === null) return;
   if (state.sort) state.sortByTable[key] = { col: state.sort, order: state.order };
   else delete state.sortByTable[key];
-  sortRisk.set(false);
   persist();
 }
 function applyStoredSort(table) {
-  const stored2 = table ? state.sortByTable[scopeTableKey(table)] : void 0;
+  const stored2 = table ? storedSort(table) : void 0;
   state.sort = stored2?.col ?? null;
   state.order = stored2?.order ?? "asc";
   sortRisk.set(state.sort !== null);
 }
 function dropStoredSort(table) {
-  if (table) delete state.sortByTable[scopeTableKey(table)];
+  const key = table && scopeTableKey(table);
+  if (key) delete state.sortByTable[key];
   state.sort = null;
   state.order = "asc";
   sortRisk.set(false);
@@ -2817,24 +2855,41 @@ function dropOneStaleInput(code) {
 var NOT_THE_INPUTS = /* @__PURE__ */ new Set(["query_timeout", "invalid_join", "not_readable"]);
 function dropStaleSort(req, code) {
   if (!req.restoredSort || NOT_THE_INPUTS.has(code ?? "")) return null;
-  const table = startTable(req.view);
-  delete state.sortByTable[scopeTableKey(table)];
+  const key = scopeTableKey(startTable(req.view));
+  if (key !== null) delete state.sortByTable[key];
   persist();
   return { ...req, sort: null, order: "asc", restoredSort: false };
 }
 var FILTER_FAULTS = /* @__PURE__ */ new Set(["unknown_column", "invalid_filter", "invalid_parameter"]);
 function rememberSchema() {
-  if (state.source && state.schema) state.schemaBySource[state.source] = state.schema;
+  const known = knownScope();
+  if (known) state.schemaBySource[known.source] = known.schema;
   persist();
 }
+function rememberedSchema(source) {
+  return Object.hasOwn(state.schemaBySource, source) ? state.schemaBySource[source] : null;
+}
+function withSchema(scope2, schema) {
+  return scope2.source === null ? { kind: "failed", source: null, schema } : { kind: "known", source: scope2.source, schema };
+}
+function settleSource(source, many) {
+  const { schema } = state.scope;
+  state.scope = source === null ? { kind: "failed", source, schema } : { kind: "loading", source, schema };
+  state.manySources = many;
+}
+function settleSchema(schema, many, noDefault) {
+  const { source } = state.scope;
+  state.scope = source !== null && schema !== null ? { kind: "known", source, schema } : { kind: "failed", source, schema };
+  state.manySchemas = many;
+  state.noDefaultSchema = noDefault;
+}
 function setSchema(name) {
-  state.schema = name;
+  state.scope = withSchema(state.scope, name);
   $("schema-select").value = name;
   rememberSchema();
 }
 function switchSource(name) {
-  state.source = name;
-  state.schema = state.schemaBySource[name] ?? null;
+  state.scope = { kind: "loading", source: name, schema: rememberedSchema(name) };
   enterTable(null);
   state.sort = null;
   state.offset = 0;
@@ -2848,10 +2903,9 @@ function switchSchema(name) {
   state.offset = 0;
   clearFilter();
 }
-function scopeKey() {
+function rowDiffKey() {
   return JSON.stringify([
-    state.source,
-    state.schema,
+    scopeIdentity(),
     viewKey(state.view),
     state.sort,
     state.order,
@@ -2864,15 +2918,15 @@ var lastPayload = null;
 function getLastPayload() {
   return lastPayload;
 }
-var lastScopeKey = null;
+var lastRowDiffKey = null;
 function diffNewRows(data, highlightNew) {
-  const nowScope = scopeKey();
+  const nowScope = rowDiffKey();
   const result = collectNewRowKeys(lastPayload, data, {
     highlightNew,
-    sameScope: lastScopeKey === nowScope
+    sameScope: lastRowDiffKey === nowScope
   });
   lastPayload = data;
-  lastScopeKey = nowScope;
+  lastRowDiffKey = nowScope;
   return result;
 }
 
@@ -2894,8 +2948,11 @@ function takeUrlIntent() {
 
 // src/core/url.ts
 function applyUrlOverlay(params) {
-  if (params.has("source")) state.source = params.get("source");
-  if (params.has("schema")) state.schema = params.get("schema");
+  const stored2 = state.scope;
+  const source = params.has("source") ? params.get("source") || null : stored2.source;
+  const sameSource = source === stored2.source;
+  const schema = params.has("schema") ? params.get("schema") || null : sameSource ? stored2.schema : source && rememberedSchema(source);
+  state.scope = { kind: "loading", source, schema };
   if (params.has("table")) state.view = tableView(params.get("table"));
   if (params.has("sort")) state.sort = params.get("sort");
   if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
@@ -2905,8 +2962,14 @@ function applyUrlOverlay(params) {
   restoreFilterFromParams(params);
 }
 function applyUrlExact(params) {
-  state.source = params.get("source") || null;
-  state.schema = params.get("schema") || null;
+  const current2 = state.scope.source;
+  const source = params.get("source") || current2;
+  const schema = params.get("schema");
+  if (source === current2) {
+    if (schema) state.scope = withSchema(state.scope, schema);
+  } else {
+    state.scope = { kind: "loading", source, schema: schema || source && rememberedSchema(source) };
+  }
   state.view = tableView(params.get("table"));
   state.sort = params.get("sort") || null;
   state.order = params.get("order") === "desc" ? "desc" : "asc";
@@ -2916,8 +2979,14 @@ function applyUrlExact(params) {
   restoreFilterFromParams(params);
 }
 function applyScopeParams(params) {
-  if (state.source) params.set("source", state.source);
-  if (state.schema) params.set("schema", state.schema);
+  const { source, schema } = state.scope;
+  if (source) params.set("source", source);
+  if (schema) params.set("schema", schema);
+}
+function applyUrlScope(params) {
+  const { source, schema } = state.scope;
+  if (source && state.manySources) params.set("source", source);
+  if (schema && state.manySchemas) params.set("schema", schema);
 }
 function scopeQuery() {
   const params = new URLSearchParams();
@@ -2926,7 +2995,7 @@ function scopeQuery() {
 }
 function viewParams(view) {
   const params = new URLSearchParams({ table: startTable(view) ?? "" });
-  applyScopeParams(params);
+  applyUrlScope(params);
   if (view?.kind === "join") params.set("join", view.text);
   return params;
 }
@@ -2934,10 +3003,12 @@ function viewHref(view) {
   return `?${viewParams(view)}`;
 }
 function sourceQuery() {
-  return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
+  const { source } = state.scope;
+  return source ? `?${new URLSearchParams({ source })}` : "";
 }
 function initState() {
   const params = new URLSearchParams(location.search);
+  dropRetiredKeys();
   restoreFromStorage();
   recordUrlIntent(params);
   applyUrlOverlay(params);
@@ -3119,7 +3190,7 @@ var shownSwaps = [];
 var placeLabel = null;
 var customText = null;
 function noticeKey(view, filter) {
-  return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
+  return JSON.stringify([scopeIdentity(), viewKey(view), filter]);
 }
 function render2(segment) {
   if ("code" in segment) return el("code", void 0, segment.code);
@@ -3144,8 +3215,9 @@ function showViewNotice(text) {
 }
 function showBootFallbackNote() {
   shownSwaps = swapsFrom(takeUrlIntent(), {
-    source: state.source,
-    schema: state.schema,
+    // Where there was nothing to choose, the selector is hidden and no name is a swap.
+    source: state.manySources ? state.scope.source : null,
+    schema: state.manySchemas ? state.scope.schema : null,
     table: startTable(state.view),
     filter: state.filter || null
   });
@@ -3328,13 +3400,14 @@ function startAutoRefresh() {
 }
 
 // src/features/column-widths.ts
-var scope = "";
+var scope = null;
 var widths = /* @__PURE__ */ new Map();
 function widthScopeOf(view) {
-  return `${state.source}|${state.schema}|${viewKey(view)}`;
+  const known = knownScope();
+  return known && scopeKey(known.source, known.schema, viewKey(view));
 }
 function useWidthScope(next) {
-  if (next === scope) return;
+  if (next !== null && next === scope) return;
   scope = next;
   widths.clear();
 }
@@ -3342,6 +3415,7 @@ function columnMinWidth(name) {
   return widths.get(name);
 }
 function rememberColumnWidths() {
+  if (scope === null) return;
   for (const th of $("thead").querySelectorAll("th[data-col]:not(.col-hidden)")) {
     const name = th.dataset.col;
     widths.set(name, Math.max(widths.get(name) ?? 0, th.getBoundingClientRect().width));
@@ -4063,7 +4137,7 @@ function renderStructure(data) {
   );
 }
 function tableStructure(table) {
-  const key = scopeTableKey(table);
+  const key = requestTableKey(table);
   const generation2 = cacheGeneration;
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
@@ -4078,9 +4152,9 @@ function openStructure() {
   const table = tableInView();
   if (table === null) return;
   const token = ++requestToken;
-  $("structure-title").textContent = `structure \u2014 ${state.schema ? `${state.schema}.${table}` : table}`;
+  $("structure-title").textContent = `structure \u2014 ${qualifiedTable(table)}`;
   $("structure-dialog").showModal();
-  const hit = cache.get(scopeTableKey(table));
+  const hit = cache.get(requestTableKey(table));
   if (hit) {
     renderStructure(hit);
     return;
@@ -4120,7 +4194,7 @@ function restoreTableFocus(captured) {
 
 // src/features/grid-lock.ts
 var gridKey = null;
-var stateKey = () => JSON.stringify([state.source, state.schema, viewKey(state.view)]);
+var stateKey = () => JSON.stringify([scopeIdentity(), viewKey(state.view)]);
 function markGridDrawn() {
   gridKey = stateKey();
 }
@@ -4146,7 +4220,6 @@ var tableEntries = [];
 var chipCounts = /* @__PURE__ */ new Map();
 var joinEntries = [];
 var joinScope = "";
-var scopeOfChips = () => `${state.source ?? ""}|${state.schema ?? ""}`;
 var allEntries = () => [...tableEntries, ...joinEntries];
 var tableChipTemplate = $("table-chip-template");
 var TABLE_CAP_LINES = 3;
@@ -4236,7 +4309,7 @@ async function loadTables({
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
   }
-  if (joinScope !== scopeOfChips()) joinEntries = [];
+  if (joinScope !== scopeIdentity()) joinEntries = [];
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
@@ -4288,7 +4361,7 @@ function setJoinChips(chips) {
     ul.insertBefore(li, tablesMoreItem);
     return { name: `join:${c.label}`, li, chip };
   });
-  joinScope = scopeOfChips();
+  joinScope = scopeIdentity();
   updateTablesCap();
 }
 function setTableChipLoading(name, loading2) {
@@ -4323,14 +4396,14 @@ function catalogVersion() {
   return version;
 }
 function seedColumns(table, columns) {
-  const key = scopeTableKey(table);
+  const key = requestTableKey(table);
   if (resolved.has(key)) return;
   resolved.set(key, columns);
   version++;
   cache2.set(key, Promise.resolve(columns));
 }
 function tableColumns(table) {
-  const key = scopeTableKey(table);
+  const key = requestTableKey(table);
   let columns = cache2.get(key);
   if (!columns) {
     const params = new URLSearchParams({ table, limit: "1", offset: "0" });
@@ -4353,13 +4426,13 @@ function tableColumns(table) {
   return columns;
 }
 function cachedColumns(table) {
-  return resolved.get(scopeTableKey(table));
+  return resolved.get(requestTableKey(table));
 }
 function knownCatalog() {
   return Object.fromEntries(listedTableNames().map((t) => [t, cachedColumns(t)?.map((c) => c.name) ?? null]));
 }
 function indexedColumns(table) {
-  const key = scopeTableKey(table);
+  const key = requestTableKey(table);
   let found = indexes.get(key);
   if (!found) {
     const asked2 = generation;
@@ -4375,7 +4448,7 @@ function indexedColumns(table) {
   return found;
 }
 function readIndexedColumns(table) {
-  return indexesRead.get(scopeTableKey(table));
+  return indexesRead.get(requestTableKey(table));
 }
 
 // src/features/join-form.ts
@@ -4754,53 +4827,45 @@ function sanitizeEntries(raw) {
 function sanitizeSaved(raw) {
   const store = dict();
   if (!isPlainObject2(raw)) return store;
-  for (const [source, schemas] of Object.entries(raw)) {
-    if (!isPlainObject2(schemas)) continue;
-    for (const [schema, entries] of Object.entries(schemas)) {
-      const clean = sanitizeEntries(entries);
-      if (clean.length === 0) continue;
-      store[source] ??= dict();
-      store[source][schema] = clean;
-    }
+  for (const [scope2, entries] of Object.entries(raw)) {
+    const clean = sanitizeEntries(entries);
+    if (clean.length) store[scope2] = clean;
   }
   return store;
 }
-function scopeEntries(store, source, schema) {
-  return own(own(store, source ?? ""), schema ?? "") ?? [];
+function scopeEntries(store, scope2) {
+  return own(store, scope2) ?? [];
 }
-function withEntries(store, source, schema, entries) {
+function withEntries(store, scope2, entries) {
   const next = dict(store);
-  const schemas = dict(own(store, source ?? ""));
-  next[source ?? ""] = schemas;
-  if (entries.length) schemas[schema ?? ""] = entries;
-  else delete schemas[schema ?? ""];
+  if (entries.length) next[scope2] = entries;
+  else delete next[scope2];
   return next;
 }
-function withSaved(store, source, schema, entry, replacing) {
+function withSaved(store, scope2, entry, replacing) {
   const name = entry.name.trim();
   if (name === "") return { error: "Give the join a name to save it." };
   if (name.length > MAX_SAVED_NAME) return { error: `A name can be at most ${MAX_SAVED_NAME} characters.` };
   if (entry.text.length > MAX_SAVED_TEXT) return { error: "This join is too long to save." };
-  const entries = scopeEntries(store, source, schema);
+  const entries = scopeEntries(store, scope2);
   const same = (e) => e.name === name || e.name === replacing || e.text === entry.text;
   const kept = entries.filter((e) => !same(e));
   if (kept.length >= MAX_SAVED_PER_SCOPE)
     return { error: `You can save at most ${MAX_SAVED_PER_SCOPE} joins here; delete one first.` };
   const at = entries.findIndex(same);
   kept.splice(at < 0 ? kept.length : at, 0, { name, text: entry.text });
-  return { store: withEntries(store, source, schema, kept) };
+  return { store: withEntries(store, scope2, kept) };
 }
-function withoutSaved(store, source, schema, name) {
+function withoutSaved(store, scope2, name) {
   return withEntries(
     store,
-    source,
-    schema,
-    scopeEntries(store, source, schema).filter((e) => e.name !== name)
+    scope2,
+    scopeEntries(store, scope2).filter((e) => e.name !== name)
   );
 }
 
 // src/features/join-saved.ts
-var SAVED_KEY = "ashurbanipal_joins";
+var SAVED_KEY = "ashurbanipal_saved_joins";
 var stored = null;
 window.addEventListener("storage", (e) => {
   if (e.key === SAVED_KEY || e.key === null) stored = null;
@@ -4808,7 +4873,9 @@ window.addEventListener("storage", (e) => {
 function read() {
   if (stored) return stored;
   try {
-    stored = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"));
+    const clean = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"));
+    for (const key of Object.keys(clean)) if (!isScopeKey(key, 2)) delete clean[key];
+    stored = clean;
   } catch (e) {
     console.warn("ashurbanipal: discarding unreadable saved joins", e);
     stored = {};
@@ -4820,25 +4887,33 @@ function write(store) {
   stored = store;
   return true;
 }
+function savedScope() {
+  const known = knownScope();
+  return known && scopeKey(known.source, known.schema);
+}
 function savedJoins() {
-  return scopeEntries(read(), state.source, state.schema);
+  const scope2 = savedScope();
+  return scope2 === null ? [] : scopeEntries(read(), scope2);
 }
 function savedJoinFor(text) {
   return savedJoins().find((s) => s.text === text);
 }
 function saveJoin(name, text, replacing) {
-  const result = withSaved(read(), state.source, state.schema, { name, text }, replacing);
+  const scope2 = savedScope();
+  if (scope2 === null) return "Saved joins need the source and schema, which didn't load.";
+  const result = withSaved(read(), scope2, { name, text }, replacing);
   if ("error" in result) return result.error;
   return write(result.store) ? null : "This browser would not store the join.";
 }
 function deleteSavedJoin(name) {
-  write(withoutSaved(read(), state.source, state.schema, name));
+  const scope2 = savedScope();
+  if (scope2 !== null) write(withoutSaved(read(), scope2, name));
 }
 var lastRendered = "";
 function renderSavedChips(actions) {
   const saved = savedJoins();
   const current2 = joinInView();
-  const key = JSON.stringify([state.source, state.schema, current2?.text, saved]);
+  const key = JSON.stringify([scopeIdentity(), current2?.text, saved]);
   if (key === lastRendered && hasJoinChips()) return;
   lastRendered = key;
   const inSaved = saved.some((s) => s.text === current2?.text);
@@ -5636,29 +5711,23 @@ async function showCommonValues(e, table, column) {
 
 // src/features/scope-select.ts
 async function loadSources() {
-  let sources;
+  let names;
   let defaultSource;
   try {
+    let sources;
     ({ sources, default: defaultSource } = await api("/sources"));
+    names = sources.map((s) => s.name);
   } catch (e) {
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    state.source = null;
+    settleSource(null, false);
     return;
   }
-  if (sources.length <= 1) {
-    state.source = null;
-    return;
-  }
-  let source = state.source;
-  if (!source || !sources.some((s) => s.name === source)) {
-    source = defaultSource;
-  }
-  state.source = source;
-  populateSelect(
-    $("source-select"),
-    sources.map((s) => s.name),
-    source
-  );
+  const wanted = state.scope.source;
+  const fallback = names.includes(defaultSource) ? defaultSource : names[0] ?? null;
+  const source = wanted !== null && names.includes(wanted) ? wanted : fallback;
+  settleSource(source, names.length > 1);
+  if (!state.manySources) return;
+  populateSelect($("source-select"), names, source);
   $("source-select-wrap").hidden = false;
 }
 $("source-select").onchange = () => {
@@ -5679,24 +5748,16 @@ async function loadSchemas() {
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
-    state.schema = null;
+    settleSchema(null, false, false);
     $("schema-select-wrap").hidden = true;
     return true;
   }
   if (token !== loadSchemasToken) return false;
-  if (schemas.length <= 1) {
-    state.schema = defaultSchema === null ? schemas[0] ?? null : null;
-    if (state.schema) populateSelect($("schema-select"), schemas, state.schema);
-    $("schema-select-wrap").hidden = true;
-    return true;
-  }
-  let schema = state.schema;
-  if (!schema || !schemas.includes(schema)) {
-    schema = defaultSchema ?? schemas[0];
-  }
-  state.schema = schema;
-  populateSelect($("schema-select"), schemas, schema);
-  $("schema-select-wrap").hidden = false;
+  const wanted = state.scope.schema;
+  const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema ?? schemas[0] ?? null;
+  settleSchema(schema, schemas.length > 1, defaultSchema === null);
+  if (schema !== null) populateSelect($("schema-select"), schemas, schema);
+  $("schema-select-wrap").hidden = !state.manySchemas;
   return true;
 }
 $("schema-select").onchange = () => {
@@ -6009,7 +6070,7 @@ function navigateWithSeededFilter(table, schema, clause) {
     filter: clause,
     ast
   };
-  if (!schema || schema === state.schema) {
+  if (!schema || schema === state.scope.schema) {
     loadData({ next: req });
     return;
   }
@@ -6055,13 +6116,12 @@ window.addEventListener("popstate", () => {
   written = location.search;
   supersedeLoads();
   const params = new URLSearchParams(location.search);
-  const previousSource = state.source;
+  const previousSource = state.scope.source;
   applyUrlExact(params);
-  $("source-select").value = state.source ?? "";
-  $("schema-select").value = state.schema ?? "";
-  $("schema-select-wrap").hidden = !state.schema || $("schema-select").options.length <= 1;
+  $("source-select").value = state.scope.source ?? "";
+  $("schema-select").value = state.scope.schema ?? "";
   persist();
-  if (state.source === previousSource) {
+  if (state.scope.source === previousSource) {
     loadTables({ replaceHistory: true }).catch(reportError);
     return;
   }
@@ -6220,7 +6280,7 @@ function renderReferencedBy(container, row2, dismiss) {
   renderTokens.set(container, token);
   const table = tableInView();
   if (table === null) return;
-  const key = scopeTableKey(table);
+  const key = requestTableKey(table);
   const hit = cache3.get(key);
   if (hit) {
     renderList2(container, hit, row2, dismiss);
@@ -6302,7 +6362,7 @@ function recordAsJson(columns, row2) {
   return JSON.stringify(obj, null, 2);
 }
 function recordAsInsert(table, columns, row2) {
-  const target = state.schema ? `${state.schema}.${table}` : table;
+  const target = qualifiedTable(table);
   const cols = columns.map((c) => c.name).join(", ");
   const vals = columns.map((c) => sqlLiteral(c, row2[c.name])).join(", ");
   return `INSERT INTO ${target} (${cols})

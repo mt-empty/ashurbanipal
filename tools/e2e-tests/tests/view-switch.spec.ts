@@ -71,7 +71,7 @@ test("a chip whose table fails to load leaves the view where it was and names th
 test("a chip's remembered sort the backend refuses is dropped and the table opens unsorted", async ({ page }) => {
   await page.addInitScript((key) => {
     localStorage.setItem(
-      "ashurbanipal_ui",
+      "ashurbanipal_view",
       JSON.stringify({ table: "products", sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }),
     );
   }, tableKey("orders"));
