@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
 
 // The app is read-only, so tests need no isolation from each other: one demo
@@ -7,11 +9,20 @@ import { defineConfig, devices } from "@playwright/test";
 // tests/support/second-server.ts.
 const CRATE_ROOT = "../../implementations/rust/axum";
 const PORTS = { chromium: 4310, firefox: 4311, webkit: 4312 };
+const SHOWCASE_IGNORE = /showcase\.spec\.ts/;
+
+// E2E_BACKEND picks the engine the demo browses; the suite is written for the Postgres seed, so on
+// SQLite or MySQL only the default-scope smoke runs (docs/e2e-testing-guidelines.md §5).
+const BACKEND = process.env.E2E_BACKEND || "postgres";
+if (!["postgres", "sqlite", "mysql"].includes(BACKEND))
+  throw new Error(`E2E_BACKEND: unknown ${BACKEND}; expected postgres, sqlite or mysql`);
+const SMOKE_SPEC = /default-scope\.spec\.ts/;
 // Playwright's per-project `testIgnore` replaces the root one rather than
 // merging with it, so every project-level `testIgnore` below must include
-// this or showcase.spec.ts leaks back into that project's run.
-const SHOWCASE_IGNORE = /showcase\.spec\.ts/;
-const CHROMIUM_ONLY_IGNORE = [SHOWCASE_IGNORE, /inspection-affordances\.spec\.ts/];
+// ALWAYS_IGNORE or showcase.spec.ts leaks back into that project's run.
+const ALWAYS_IGNORE = BACKEND === "postgres" ? [SHOWCASE_IGNORE, SMOKE_SPEC] : [SHOWCASE_IGNORE];
+const CHROMIUM_ONLY_IGNORE = [...ALWAYS_IGNORE, /inspection-affordances\.spec\.ts/];
+const SQLITE_SEED = fileURLToPath(new URL("../../conformance/seed/seed.sqlite.sql", import.meta.url));
 
 // This suite is a frontend UI-regression suite, not
 // part of the protocol conformance kit (conformance/runner) — but it's
@@ -29,15 +40,37 @@ if (unknown.length)
   throw new Error(`E2E_BROWSERS: unknown ${unknown.join(", ")}; expected ${Object.keys(PORTS).join(", ")}`);
 const selected = (browser: keyof typeof PORTS) => BROWSERS.includes(browser);
 
+// SQLite gets a fresh seeded file per server; MySQL needs a database already loaded from
+// conformance/seed/seed.mysql.sql (E2E_MYSQL_URL, default MYSQL_TEST_URL).
+function backendSetup(port: number): { prepare: string; features: string; env: Record<string, string> } {
+  if (BACKEND === "sqlite") {
+    const file = `${tmpdir()}/ashurbanipal-e2e-${port}.sqlite`;
+    return {
+      prepare: `rm -f "${file}" && sqlite3 "${file}" < "${SQLITE_SEED}" && `,
+      features: "--features sqlite",
+      env: { DB_BACKEND: "sqlite", SQLITE_PATH: `sqlite://${file}` },
+    };
+  }
+  if (BACKEND === "mysql") {
+    const url = process.env.E2E_MYSQL_URL || process.env.MYSQL_TEST_URL;
+    if (!url) throw new Error("E2E_BACKEND=mysql needs E2E_MYSQL_URL or MYSQL_TEST_URL");
+    return { prepare: "", features: "--features mysql", env: { DB_BACKEND: "mysql", DATABASE_URL: url } };
+  }
+  return { prepare: "", features: "", env: {} };
+}
+
 function demoServer(port: number) {
+  const { prepare, features, env } = backendSetup(port);
   return {
-    command: "cargo run -p ashurbanipal-axum --example demo",
+    command: `${prepare}exec cargo run -p ashurbanipal-axum ${features} --example demo`,
     cwd: CRATE_ROOT,
     url: `http://localhost:${port}/health`,
-    reuseExistingServer: !process.env.CI,
+    // A leftover Postgres demo on the port would silently answer for another engine.
+    reuseExistingServer: !process.env.CI && BACKEND === "postgres",
     timeout: 120_000,
     env: {
       ...process.env,
+      ...env,
       PORT: String(port),
       SIBLING_PORT: "",
       MOUNT_PREFIX: "",
@@ -50,7 +83,8 @@ export default defineConfig({
   // Not a correctness test — a scripted walkthrough recorded to video for
   // a showcase clip. Run via `mise run frontend:showcase` (playwright.showcase.config.ts),
   // never as part of this suite.
-  testIgnore: SHOWCASE_IGNORE,
+  testIgnore: ALWAYS_IGNORE,
+  testMatch: BACKEND === "postgres" ? undefined : SMOKE_SPEC,
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
   // Playwright's CI default is half the cores: 2 on a 4-vCPU ubuntu-latest runner.

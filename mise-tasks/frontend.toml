@@ -103,6 +103,13 @@ arg "[args]..." help="passed on to playwright test, e.g. --last-failed or -g tit
 run = 'E2E_BROWSERS="${usage_browsers}" PLAYWRIGHT_HTML_OPEN=never pnpm exec playwright test --reporter=line,html {{arg(name="args", var=true, default="")}}'
 dir = "tools/e2e-tests"
 
+# Serves axum's vendored dbviewer.html, so run frontend:sync-ports after a build first.
+["frontend:test-e2e-backend"]
+description = "run the default-scope smoke on Chromium against an axum demo on SQLite or MySQL: mise run frontend:test-e2e-backend sqlite|mysql (mysql reads E2E_MYSQL_URL, default MYSQL_TEST_URL)"
+usage = 'arg "<backend>" help="sqlite or mysql"'
+run = 'E2E_BACKEND="${usage_backend}" E2E_BROWSERS=chromium PLAYWRIGHT_HTML_OPEN=never pnpm exec playwright test --reporter=line,html'
+dir = "tools/e2e-tests"
+
 ["frontend:test-e2e-quick"]
 description = "rebuild and sync the frontend, then run the whole Playwright e2e suite on Chromium and Firefox only"
 run = "E2E_BROWSERS=chromium,firefox pnpm exec playwright test --reporter=line"

@@ -8,6 +8,8 @@ on:
       - "tools/e2e-tests/**"
       - "implementations/rust/**"
       - "conformance/seed/seed.sql"
+      - "conformance/seed/seed.mysql.sql"
+      - "conformance/seed/seed.sqlite.sql"
       - "mise.toml"
       - "mise.lock"
       - "mise-tasks/frontend.toml"
@@ -18,6 +20,8 @@ on:
       - "tools/e2e-tests/**"
       - "implementations/rust/**"
       - "conformance/seed/seed.sql"
+      - "conformance/seed/seed.mysql.sql"
+      - "conformance/seed/seed.sqlite.sql"
       - "mise.toml"
       - "mise.lock"
       - "mise-tasks/frontend.toml"
@@ -87,5 +91,61 @@ jobs:
         if: failure()
         with:
           name: playwright-report-${{ matrix.browser }}
+          path: tools/e2e-tests/playwright-report/
+          retention-days: 14
+
+  # Where the UI opens on engines the suite above doesn't run on: SQLite's `main`, MySQL's database().
+  test-e2e-backend:
+    name: Playwright default-scope smoke on ${{ matrix.backend }} (chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [sqlite, mysql]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start MySQL and apply the MySQL conformance seed
+        if: matrix.backend == 'mysql'
+        run: |
+          docker run -d --name e2e-db -p 3306:3306 \
+            -e MYSQL_ROOT_PASSWORD=ashurbanipal -e MYSQL_DATABASE=ashurbanipal mysql:8
+          sudo apt-get update && sudo apt-get install -y default-mysql-client
+          for _ in $(seq 1 60); do
+            mysql --host=127.0.0.1 --user=root --password=ashurbanipal -e 'select 1' ashurbanipal >/dev/null 2>&1 && break
+            sleep 2
+          done
+          mysql --host=127.0.0.1 --user=root --password=ashurbanipal ashurbanipal < conformance/seed/seed.mysql.sql
+          echo "E2E_MYSQL_URL=mysql://root:ashurbanipal@127.0.0.1:3306/ashurbanipal" >> "$GITHUB_ENV"
+
+      - name: Install the sqlite3 CLI
+        if: matrix.backend == 'sqlite'
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          version: 2026.7.13
+          install: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2
+        with:
+          workspaces: "implementations/rust -> target"
+          shared-key: frontend-e2e-backend
+
+      # Built here so Playwright's 120 s server start-up doesn't include a cold compile.
+      - run: cargo build -p ashurbanipal-axum --features ${{ matrix.backend }} --example demo
+        working-directory: implementations/rust/axum
+
+      - run: mise run frontend:test-e2e-install --browsers chromium
+
+      - run: mise run frontend:test-e2e-backend ${{ matrix.backend }}
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report-${{ matrix.backend }}
           path: tools/e2e-tests/playwright-report/
           retention-days: 14
