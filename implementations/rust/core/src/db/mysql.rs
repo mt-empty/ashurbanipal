@@ -114,6 +114,12 @@ const JOIN_DIALECT: Dialect = Dialect {
     ilike: IlikeStyle::LoweredLike,
 };
 
+/// A column-level check MariaDB adds to every JSON column, matched exactly so a
+/// user's own `json_valid` check on another column doesn't count.
+const MARIADB_JSON_COLUMNS_SQL: &str = "constraint_name from information_schema.check_constraints \
+     where constraint_schema = ? and table_name = ? \
+       and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
+
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
 fn type_class(data_type: &str, column_type: &str) -> Option<TypeClass> {
     match data_type.to_ascii_lowercase().as_str() {
@@ -183,7 +189,7 @@ impl MySqlSource {
             timeout_secs,
             "schema_name from information_schema.schemata \
              where schema_name not in ('mysql', 'information_schema', 'performance_schema', 'sys') \
-             order by schema_name",
+             order by cast(schema_name as binary)",
         )))
         .fetch_all(&mut **tx)
         .await?;
@@ -241,7 +247,7 @@ impl MySqlSource {
             timeout_secs,
             "table_name from information_schema.tables \
              where table_schema = ? and table_type = 'BASE TABLE' \
-             order by table_name",
+             order by cast(table_name as binary)",
         )))
         .bind(schema)
         .fetch_all(&mut **tx)
@@ -271,7 +277,7 @@ impl MySqlSource {
         Ok(rows)
     }
 
-    async fn join_table_meta_in_tx(
+    async fn table_meta_in_tx(
         &self,
         tx: &mut Transaction<'_, MySql>,
         variant: Variant,
@@ -296,11 +302,20 @@ impl MySqlSource {
         let (pk_columns, fk_columns) = self
             .key_metadata_in_tx(tx, variant, schema, table, timeout_secs)
             .await?;
+        let json_columns = self
+            .mariadb_json_columns_in_tx(tx, variant, schema, table, timeout_secs)
+            .await?;
         Ok(TableMeta {
             name: table.to_string(),
             columns: columns
                 .into_iter()
                 .map(|(name, type_name, comment, collation, column_type)| {
+                    let (type_name, class) = if json_columns.contains(&name) {
+                        ("json".to_string(), None)
+                    } else {
+                        let class = type_class(&type_name, &column_type);
+                        (type_name, class)
+                    };
                     let (key, references) = if pk_columns.contains(&name) {
                         (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
                     } else if let Some(r) = fk_columns.get(&name) {
@@ -309,7 +324,7 @@ impl MySqlSource {
                         (None, None)
                     };
                     ColMeta {
-                        class: type_class(&type_name, &column_type),
+                        class,
                         collation,
                         comment: (!comment.is_empty()).then_some(comment),
                         key,
@@ -320,6 +335,31 @@ impl MySqlSource {
                 })
                 .collect(),
         })
+    }
+
+    /// MariaDB has no JSON type: a JSON column is `longtext` guarded by a
+    /// `json_valid` column check, so this names the columns that are JSON.
+    async fn mariadb_json_columns_in_tx(
+        &self,
+        tx: &mut Transaction<'_, MySql>,
+        variant: Variant,
+        schema: &str,
+        table: &str,
+        timeout_secs: u32,
+    ) -> Result<HashSet<String>, DbError> {
+        if variant != Variant::MariaDb {
+            return Ok(HashSet::new());
+        }
+        let names = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(timed_select(
+            variant,
+            timeout_secs,
+            MARIADB_JSON_COLUMNS_SQL,
+        )))
+        .bind(schema)
+        .bind(table)
+        .fetch_all(&mut **tx)
+        .await?;
+        Ok(names.into_iter().collect())
     }
 
     /// MySQL's `PRIMARY` name repeats, so join on table name; omit composite
@@ -466,9 +506,10 @@ impl DbSource for MySqlSource {
         let rows = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(timed_select(
             variant,
             CATALOG_TIMEOUT_SECS,
+            // Byte order: MariaDB's catalog collation folds case, so `_` sorts after letters.
             "table_name, table_comment from information_schema.tables \
              where table_schema = ? and table_type = 'BASE TABLE' \
-             order by table_name",
+             order by cast(table_name as binary)",
         )))
         .bind(&schema)
         .fetch_all(&mut *tx)
@@ -496,7 +537,7 @@ impl DbSource for MySqlSource {
             CATALOG_TIMEOUT_SECS,
             "table_name, cast(table_rows as signed) from information_schema.tables \
              where table_schema = ? and table_type = 'BASE TABLE' \
-             order by table_name",
+             order by cast(table_name as binary)",
         )))
         .bind(&schema)
         .fetch_all(&mut *tx)
@@ -554,44 +595,18 @@ impl DbSource for MySqlSource {
             None => (String::new(), Vec::new()),
         };
 
-        // DATA_TYPE and COLUMN_COMMENT both sit as plain columns on
-        // information_schema.columns — unlike Postgres, no separate
-        // pg_attribute join is needed to get comments, and no ordinal-
-        // position-vs-attnum drift is possible.
-        let column_meta =
-            sqlx::query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(timed_select(
-                variant,
-                timeout,
-                "column_name, data_type, column_comment \
-                 from information_schema.columns \
-                 where table_schema = ? and table_name = ? \
-                 order by ordinal_position",
-            )))
-            .bind(&schema)
-            .bind(&table)
-            .fetch_all(&mut *tx)
-            .await?;
-
-        let (pk_columns, fk_columns) = self
-            .key_metadata_in_tx(&mut tx, variant, &schema, &table, timeout)
-            .await?;
-        let columns: Vec<ColumnInfo> = column_meta
+        // The join route's lookup, so both routes report the same column types.
+        let columns: Vec<ColumnInfo> = self
+            .table_meta_in_tx(&mut tx, variant, &schema, &table, timeout)
+            .await?
+            .columns
             .into_iter()
-            .map(|(name, type_name, comment)| {
-                let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                } else if let Some(r) = fk_columns.get(&name) {
-                    (Some(KeyKind::Fk), Some(r.clone()))
-                } else {
-                    (None, None)
-                };
-                ColumnInfo {
-                    name,
-                    type_name,
-                    key,
-                    references,
-                    comment: (!comment.is_empty()).then_some(comment),
-                }
+            .map(|c| ColumnInfo {
+                name: c.name,
+                type_name: c.type_name,
+                key: c.key,
+                references: c.references,
+                comment: c.comment,
             })
             .collect();
 
@@ -684,7 +699,7 @@ impl DbSource for MySqlSource {
                 return Err(DbError::BadJoin(format!("unknown table {name:?}")));
             }
             let meta = self
-                .join_table_meta_in_tx(&mut tx, variant, &schema, name, timeout)
+                .table_meta_in_tx(&mut tx, variant, &schema, name, timeout)
                 .await?;
             metas.insert(name, meta);
         }

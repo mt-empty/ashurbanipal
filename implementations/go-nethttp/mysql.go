@@ -192,7 +192,7 @@ func (c *MySQLSource) allowedSchemasInTx(ctx context.Context, tx queryer, varian
 	rows, err := tx.QueryContext(ctx, timedSelect(variant, c.timeoutSec,
 		`schema_name from information_schema.schemata
 		 where schema_name not in ('mysql', 'information_schema', 'performance_schema', 'sys')
-		 order by schema_name`))
+		 order by cast(schema_name as binary)`))
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +252,7 @@ func (c *MySQLSource) allowedTablesInTx(ctx context.Context, tx queryer, variant
 	rows, err := tx.QueryContext(ctx, timedSelect(variant, c.timeoutSec,
 		`table_name from information_schema.tables
 		 where table_schema = ? and table_type = 'BASE TABLE'
-		 order by table_name`), schema)
+		 order by cast(table_name as binary)`), schema)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +358,42 @@ func (c *MySQLSource) keyMetadataInTx(ctx context.Context, tx queryer, variant m
 	return pkColumns, fkColumns, nil
 }
 
-func (c *MySQLSource) joinTableMeta(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (joinTableMeta, error) {
+// mariadbJSONColumnsSQL matches the column-level check MariaDB adds to every
+// JSON column exactly, so a user's own json_valid check on another column
+// doesn't count.
+const mariadbJSONColumnsSQL = "constraint_name from information_schema.check_constraints " +
+	"where constraint_schema = ? and table_name = ? " +
+	"and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
+
+// mariadbJSONColumns names the JSON columns of table: MariaDB has no JSON
+// type, so a JSON column is longtext guarded by a json_valid column check.
+func (c *MySQLSource) mariadbJSONColumns(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if variant != variantMariaDB {
+		return out, nil
+	}
+	ctx, cancel := c.bounded(ctx)
+	defer cancel()
+	rows, err := tx.QueryContext(ctx, timedSelect(variant, c.timeoutSec, mariadbJSONColumnsSQL), schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
+}
+
+func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (joinTableMeta, error) {
+	jsonColumns, err := c.mariadbJSONColumns(ctx, tx, variant, schema, table)
+	if err != nil {
+		return joinTableMeta{}, err
+	}
 	metaCtx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := tx.QueryContext(metaCtx, timedSelect(variant, c.timeoutSec,
@@ -378,6 +413,9 @@ func (c *MySQLSource) joinTableMeta(ctx context.Context, tx queryer, variant mys
 			return joinTableMeta{}, err
 		}
 		col := joinColMeta{name: name, typeName: dataType, class: mysqlTypeClass(dataType, columnType), comment: comment}
+		if jsonColumns[name] {
+			col.typeName, col.class = "json", nil
+		}
 		if collation.Valid {
 			cl := collation.String
 			col.collation = &cl
@@ -430,7 +468,7 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 		if _, ok := findExact(allowed, name); !ok {
 			return JoinData{}, badJoin("unknown table %q", name)
 		}
-		meta, err := c.joinTableMeta(ctx, tx, variant, realSchema, name)
+		meta, err := c.tableMeta(ctx, tx, variant, realSchema, name)
 		if err != nil {
 			return JoinData{}, err
 		}
@@ -510,9 +548,10 @@ func (c *MySQLSource) ListTables(ctx context.Context, schema *string) ([]TableIn
 	qctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
+		// Byte order: MariaDB's catalog collation folds case, so _ sorts after letters.
 		`table_name, table_comment from information_schema.tables
 		 where table_schema = ? and table_type = 'BASE TABLE'
-		 order by table_name`), realSchema)
+		 order by cast(table_name as binary)`), realSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -562,7 +601,7 @@ func (c *MySQLSource) TableCounts(ctx context.Context, schema *string) ([]CountE
 	rows, err := tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
 		`table_name, cast(table_rows as signed) from information_schema.tables
 		 where table_schema = ? and table_type = 'BASE TABLE'
-		 order by table_name`), realSchema)
+		 order by cast(table_name as binary)`), realSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -648,61 +687,14 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 		}
 	}
 
-	metaCtx, metaCancel := c.bounded(ctx)
-	// data_type and column_comment both sit as plain columns on
-	// information_schema.columns — unlike Postgres, no separate
-	// pg_attribute join is needed to get comments, and no
-	// ordinal-position-vs-attnum drift is possible.
-	metaRows, err := tx.QueryContext(metaCtx, timedSelect(variant, c.timeoutSec,
-		`column_name, data_type, column_comment
-		 from information_schema.columns
-		 where table_schema = ? and table_name = ?
-		 order by ordinal_position`), realSchema, realTable)
-	if err != nil {
-		metaCancel()
-		return TableData{}, err
-	}
-	type colMeta struct{ name, typ, comment string }
-	var columnMeta []colMeta
-	for metaRows.Next() {
-		var cm colMeta
-		if err := metaRows.Scan(&cm.name, &cm.typ, &cm.comment); err != nil {
-			metaRows.Close()
-			metaCancel()
-			return TableData{}, err
-		}
-		columnMeta = append(columnMeta, cm)
-	}
-	if err := metaRows.Err(); err != nil {
-		metaRows.Close()
-		metaCancel()
-		return TableData{}, err
-	}
-	metaRows.Close()
-	metaCancel()
-
-	pkColumns, fkColumns, err := c.keyMetadataInTx(ctx, tx, variant, realSchema, realTable)
+	// The join route's lookup, so both routes report the same column types.
+	meta, err := c.tableMeta(ctx, tx, variant, realSchema, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
-
-	columns := make([]ColumnInfo, 0, len(columnMeta))
-	for _, cm := range columnMeta {
-		col := ColumnInfo{Name: cm.name, Type: cm.typ}
-		if ref, ok := fkColumns[cm.name]; ok {
-			r := ref
-			col.References = &r
-		}
-		switch {
-		case pkColumns[cm.name]:
-			col.Key = KeyPK
-		case col.References != nil:
-			col.Key = KeyFK
-		}
-		if cm.comment != "" {
-			col.Comment = cm.comment
-		}
-		columns = append(columns, col)
+	columns := make([]ColumnInfo, 0, len(meta.columns))
+	for _, cm := range meta.columns {
+		columns = append(columns, ColumnInfo{Name: cm.name, Type: cm.typeName, Key: cm.key, References: cm.references, Comment: cm.comment})
 	}
 
 	selectParts := make([]string, len(columns))

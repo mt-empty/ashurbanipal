@@ -98,11 +98,11 @@ jobs:
 
       - name: go vet
         working-directory: implementations/go-nethttp
-        run: go vet ./...
+        run: go vet -tags sqlite,mysql ./...
 
       - name: Test
         working-directory: implementations/go-nethttp
-        run: go test -race ./...
+        run: go test -race -tags sqlite,mysql ./...
 
   conformance:
     name: Go — conformance kit (external-URL path)

@@ -62,3 +62,28 @@ ashurbanipal:
       label: a
       base-url: http://127.0.0.1:9/__ashurbanipal
       health-path: /health
+
+---
+# Single-source demo on MySQL/MariaDB or SQLite, for the conformance kit's
+# other seeds. SPRING_DATASOURCE_URL names the database (jdbc:mysql://… or
+# jdbc:sqlite:…).
+spring:
+  config:
+    activate:
+      on-profile: backend-mysql
+
+ashurbanipal:
+  sources:
+    - name: default
+      backend: mysql
+
+---
+spring:
+  config:
+    activate:
+      on-profile: backend-sqlite
+
+ashurbanipal:
+  sources:
+    - name: default
+      backend: sqlite

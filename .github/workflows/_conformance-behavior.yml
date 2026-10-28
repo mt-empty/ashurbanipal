@@ -49,6 +49,14 @@ on:
         description: "Artifact name for the uploaded conformance-report.json"
         required: true
         type: string
+      backend:
+        description: >-
+          Database the demo browses: postgres | mysql | mariadb | sqlite.
+          Exports CONFORMANCE_MYSQL_URL (mysql:// URL), CONFORMANCE_JDBC_URL
+          and CONFORMANCE_SQLITE_PATH for start-env to pass on.
+        required: false
+        type: string
+        default: postgres
 
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
@@ -79,9 +87,41 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Apply the conformance seed
+        if: inputs.backend == 'postgres'
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
+
+      - name: Start ${{ inputs.backend }} and apply the MySQL conformance seed
+        if: inputs.backend == 'mysql' || inputs.backend == 'mariadb'
+        run: |
+          if [ "${{ inputs.backend }}" = mysql ]; then
+            docker run -d --name conformance-db -p 3306:3306 \
+              -e MYSQL_ROOT_PASSWORD=ashurbanipal -e MYSQL_DATABASE=ashurbanipal mysql:8
+          else
+            docker run -d --name conformance-db -p 3306:3306 \
+              -e MARIADB_ROOT_PASSWORD=ashurbanipal -e MARIADB_DATABASE=ashurbanipal mariadb:11
+          fi
+          sudo apt-get update && sudo apt-get install -y default-mysql-client
+          for _ in $(seq 1 60); do
+            mysql --host=127.0.0.1 --user=root --password=ashurbanipal -e 'select 1' ashurbanipal >/dev/null 2>&1 && break
+            sleep 2
+          done
+          mysql --host=127.0.0.1 --user=root --password=ashurbanipal ashurbanipal < conformance/seed/seed.mysql.sql
+          {
+            echo "CONFORMANCE_MYSQL_URL=mysql://root:ashurbanipal@127.0.0.1:3306/ashurbanipal"
+            echo "CONFORMANCE_JDBC_URL=jdbc:mysql://127.0.0.1:3306/ashurbanipal?allowPublicKeyRetrieval=true&useSSL=false"
+          } >> "$GITHUB_ENV"
+
+      - name: Apply the SQLite conformance seed
+        if: inputs.backend == 'sqlite'
+        run: |
+          sudo apt-get update && sudo apt-get install -y sqlite3
+          sqlite3 "$RUNNER_TEMP/conformance.sqlite" < conformance/seed/seed.sqlite.sql
+          {
+            echo "CONFORMANCE_SQLITE_PATH=$RUNNER_TEMP/conformance.sqlite"
+            echo "CONFORMANCE_JDBC_URL=jdbc:sqlite:$RUNNER_TEMP/conformance.sqlite"
+          } >> "$GITHUB_ENV"
 
       - name: Set up Java toolchain
         if: inputs.toolchain == 'java'

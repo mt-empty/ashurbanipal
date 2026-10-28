@@ -56,6 +56,14 @@ CATALOG_TIMEOUT_SECS = 5
 _MYSQL = "mysql"
 _MARIADB = "mariadb"
 
+# Matches the column check MariaDB adds to every JSON column exactly, so a
+# user's own json_valid check on another column doesn't count.
+_MARIADB_JSON_COLUMNS_SQL = (
+    "constraint_name from information_schema.check_constraints "
+    "where constraint_schema = %s and table_name = %s "
+    "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
+)
+
 
 def connect_kwargs_from_url(url: str) -> dict:
     """Parses a `mysql://user:pass@host:port/dbname` URL (the same shape
@@ -179,7 +187,7 @@ class MySqlSource(DbSource):
                 timeout_secs,
                 "schema_name from information_schema.schemata "
                 "where schema_name not in ('mysql', 'information_schema', 'performance_schema', 'sys') "
-                "order by schema_name",
+                "order by cast(schema_name as binary)",
             )
         )
         return [row[0] for row in cur.fetchall()]
@@ -209,7 +217,7 @@ class MySqlSource(DbSource):
                 timeout_secs,
                 "table_name from information_schema.tables "
                 "where table_schema = %s and table_type = 'BASE TABLE' "
-                "order by table_name",
+                "order by cast(table_name as binary)",
             ),
             (schema,),
         )
@@ -299,9 +307,10 @@ class MySqlSource(DbSource):
                     _timed_select(
                         variant,
                         CATALOG_TIMEOUT_SECS,
+                        # Byte order: MariaDB's catalog collation folds case, so `_` sorts after letters.
                         "table_name, table_comment from information_schema.tables "
                         "where table_schema = %s and table_type = 'BASE TABLE' "
-                        "order by table_name",
+                        "order by cast(table_name as binary)",
                     ),
                     (resolved,),
                 )
@@ -326,7 +335,7 @@ class MySqlSource(DbSource):
                         CATALOG_TIMEOUT_SECS,
                         "table_name, cast(table_rows as signed) from information_schema.tables "
                         "where table_schema = %s and table_type = 'BASE TABLE' "
-                        "order by table_name",
+                        "order by cast(table_name as binary)",
                     ),
                     (resolved,),
                 )
@@ -358,29 +367,17 @@ class MySqlSource(DbSource):
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
-                cur.execute(
-                    _timed_select(
-                        variant,
-                        timeout,
-                        "column_name, data_type, column_comment "
-                        "from information_schema.columns "
-                        "where table_schema = %s and table_name = %s "
-                        "order by ordinal_position",
-                    ),
-                    (resolved_schema, table),
-                )
-                column_meta = cur.fetchall()
-
-                pk_columns, fk_columns = self._key_metadata(cur, variant, resolved_schema, table, timeout)
+                # The join route's lookup, so both routes report the same column types.
+                meta = self._table_meta(cur, variant, resolved_schema, table, timeout)
                 columns = [
                     ColumnInfo(
-                        name=name,
-                        type_name=type_name,
-                        key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
-                        references=fk_columns.get(name),
-                        comment=(comment or None),
+                        name=c.name,
+                        type_name=c.type_name,
+                        key=c.key,
+                        references=c.references,
+                        comment=c.comment,
                     )
-                    for name, type_name, comment in column_meta
+                    for c in meta.columns
                 ]
 
                 select_list = ", ".join(f"CAST({_quote_ident(c.name)} AS CHAR)" for c in columns)
@@ -429,7 +426,14 @@ class MySqlSource(DbSource):
         finally:
             conn.close()
 
-    def _join_table_meta(self, cur, variant: str, schema: str, table: str, timeout_secs: int) -> TableMeta:
+    def _mariadb_json_columns(self, cur, variant: str, schema: str, table: str, timeout_secs: int) -> set[str]:
+        # MariaDB has no JSON type: a JSON column is longtext guarded by a json_valid column check.
+        if variant != _MARIADB:
+            return set()
+        cur.execute(_timed_select(variant, timeout_secs, _MARIADB_JSON_COLUMNS_SQL), (schema, table))
+        return {name for (name,) in cur.fetchall()}
+
+    def _table_meta(self, cur, variant: str, schema: str, table: str, timeout_secs: int) -> TableMeta:
         cur.execute(
             _timed_select(
                 variant,
@@ -443,13 +447,14 @@ class MySqlSource(DbSource):
         )
         column_rows = cur.fetchall()
         pk_columns, fk_columns = self._key_metadata(cur, variant, schema, table, timeout_secs)
+        json_columns = self._mariadb_json_columns(cur, variant, schema, table, timeout_secs)
         return TableMeta(
             name=table,
             columns=[
                 ColMeta(
                     name=name,
-                    type_name=data_type,
-                    cls=type_class(data_type, column_type),
+                    type_name="json" if name in json_columns else data_type,
+                    cls=None if name in json_columns else type_class(data_type, column_type),
                     collation=collation or None,
                     key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                     references=fk_columns.get(name),
@@ -475,7 +480,7 @@ class MySqlSource(DbSource):
                         continue
                     if name not in allowed:
                         raise BadJoin(f"unknown table {name!r}")
-                    metas[name] = self._join_table_meta(cur, variant, resolved_schema, name, timeout)
+                    metas[name] = self._table_meta(cur, variant, resolved_schema, name, timeout)
                 plan = plan_join(spec, [metas[n] for n in names], opts)
 
                 # The statement is built from catalog names and generated

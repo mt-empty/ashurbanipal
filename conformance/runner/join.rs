@@ -143,7 +143,8 @@ async fn response_shape_has_join_metadata_and_no_total() {
     }
 }
 
-/// P5.11-COLUMN-METADATA: §5.4.1 `key`/`references` apply per table.
+/// P5.11-COLUMN-METADATA: §5.4.1 `type`/`key`/`references`/`comment` apply
+/// per table, exactly as `/api/tables/data` reports them.
 #[tokio::test]
 async fn column_metadata_is_carried_per_table() {
     let srv = TestServer::spawn().await;
@@ -165,6 +166,23 @@ async fn column_metadata_is_carried_per_table() {
         .unwrap();
     assert_exact(pk["key"].clone(), json!("pk"), "users.id key");
     assert_exact(pk["table"].clone(), json!("users"), "users.id table");
+
+    for (pos, table) in [(0, "orders"), (1, "users")] {
+        let data = table_data(&srv, table, &[("limit", "1".into())]).await;
+        for col in data["columns"].as_array().unwrap() {
+            let joined = columns
+                .iter()
+                .find(|c| c["join"] == pos && c["column"] == col["name"])
+                .unwrap();
+            for field in ["type", "key", "references", "comment"] {
+                assert_exact(
+                    joined.get(field),
+                    col.get(field),
+                    &format!("{table}.{} {field}", col["name"]),
+                );
+            }
+        }
+    }
 }
 
 /// P5.11-LEFT-INNER: `left` keeps base rows with no match, as nulls;

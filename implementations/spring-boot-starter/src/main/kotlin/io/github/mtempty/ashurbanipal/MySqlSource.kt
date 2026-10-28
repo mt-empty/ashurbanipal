@@ -107,6 +107,12 @@ private val JOIN_DIALECT = JoinDialect(
     ilike = "lowered-like",
 )
 
+/** Matches the column check MariaDB adds to every JSON column exactly, so a user's own json_valid check on another column doesn't count. */
+private const val MARIADB_JSON_COLUMNS_SQL =
+    "constraint_name from information_schema.check_constraints " +
+        "where constraint_schema = ? and table_name = ? " +
+        "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
+
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
 internal fun mysqlTypeClass(dataType: String, columnType: String): TypeClass? = when (dataType.lowercase()) {
     "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> TypeClass.NUMBER
@@ -147,7 +153,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
                 queryTimeoutSecs,
                 "schema_name from information_schema.schemata " +
                     "where schema_name not in ('mysql', 'information_schema', 'performance_schema', 'sys') " +
-                    "order by schema_name",
+                    "order by cast(schema_name as binary)",
             ),
         ) { rs -> rs.getString(1) }
 
@@ -175,7 +181,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
                 queryTimeoutSecs,
                 "table_name from information_schema.tables " +
                     "where table_schema = ? and table_type = 'BASE TABLE' " +
-                    "order by table_name",
+                    "order by cast(table_name as binary)",
             ),
             listOf(schema),
         ) { rs -> rs.getString(1) }
@@ -259,9 +265,10 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             timedSelect(
                 variant,
                 queryTimeoutSecs,
+                // Byte order: MariaDB's catalog collation folds case, so `_` sorts after letters.
                 "table_name, table_comment from information_schema.tables " +
                     "where table_schema = ? and table_type = 'BASE TABLE' " +
-                    "order by table_name",
+                    "order by cast(table_name as binary)",
             ),
             listOf(realSchema),
         ) { rs -> TableInfo(rs.getString(1), rs.getString(2)?.takeIf { it.isNotEmpty() }) }
@@ -278,7 +285,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
                 queryTimeoutSecs,
                 "table_name, cast(table_rows as signed) from information_schema.tables " +
                     "where table_schema = ? and table_type = 'BASE TABLE' " +
-                    "order by table_name",
+                    "order by cast(table_name as binary)",
             ),
             listOf(realSchema),
         ) { rs ->
@@ -290,7 +297,19 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         }
     }
 
-    private fun joinTableMeta(variant: Variant, schema: String, table: String): JoinTableMeta {
+    /** MariaDB has no JSON type: a JSON column is longtext guarded by a json_valid column check. */
+    private fun mariadbJsonColumns(variant: Variant, schema: String, table: String): Set<String> =
+        if (variant != Variant.MARIADB) {
+            emptySet()
+        } else {
+            query(
+                dataSource,
+                timedSelect(variant, queryTimeoutSecs, MARIADB_JSON_COLUMNS_SQL),
+                listOf(schema, table),
+            ) { rs -> rs.getString(1) }.toSet()
+        }
+
+    private fun tableMeta(variant: Variant, schema: String, table: String): JoinTableMeta {
         data class Col(val name: String, val type: String, val comment: String?, val collation: String?, val columnType: String)
         val columns = query(
             dataSource,
@@ -303,13 +322,15 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             listOf(schema, table),
         ) { rs -> Col(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)) }
         val (pkColumns, fkColumns) = keyMetadata(variant, schema, table)
+        val jsonColumns = mariadbJsonColumns(variant, schema, table)
         return JoinTableMeta(
             table,
             columns.map { c ->
+                val isJson = c.name in jsonColumns
                 JoinColMeta(
                     name = c.name,
-                    type = c.type,
-                    cls = mysqlTypeClass(c.type, c.columnType),
+                    type = if (isJson) "json" else c.type,
+                    cls = if (isJson) null else mysqlTypeClass(c.type, c.columnType),
                     collation = c.collation?.takeIf { it.isNotEmpty() },
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],
@@ -328,7 +349,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         for (name in names) {
             if (name in metas) continue
             if (name !in allowed) throw BadJoinException("unknown table \"$name\"")
-            metas[name] = joinTableMeta(variant, realSchema, name)
+            metas[name] = tableMeta(variant, realSchema, name)
         }
         val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
 
@@ -362,27 +383,9 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
 
         val whereClause = opts.filter?.let { buildWhereClauseMysql(it, columnNames) } ?: WhereClause("", emptyList())
 
-        val columnMeta = query(
-            dataSource,
-            timedSelect(
-                variant,
-                queryTimeoutSecs,
-                "column_name, data_type, column_comment from information_schema.columns " +
-                    "where table_schema = ? and table_name = ? order by ordinal_position",
-            ),
-            listOf(realSchema, realTable),
-        ) { rs -> Triple(rs.getString(1), rs.getString(2), rs.getString(3)) }
-
-        val (pkColumns, fkColumns) = keyMetadata(variant, realSchema, realTable)
-        val columns = columnMeta.map { (name, typeName, comment) ->
-            val key: String?
-            val references: ColumnRef?
-            when {
-                pkColumns.contains(name) -> { key = "pk"; references = fkColumns[name] }
-                fkColumns.containsKey(name) -> { key = "fk"; references = fkColumns[name] }
-                else -> { key = null; references = null }
-            }
-            ColumnInfo(name, typeName, key, references, comment?.takeIf { it.isNotEmpty() })
+        // The join route's lookup, so both routes report the same column types.
+        val columns = tableMeta(variant, realSchema, realTable).columns.map {
+            ColumnInfo(it.name, it.type, it.key, it.references, it.comment)
         }
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdentMysql(it.name)} AS CHAR)" }

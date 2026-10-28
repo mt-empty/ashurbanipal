@@ -110,6 +110,13 @@ const JOIN_DIALECT: JoinDialect = {
   ilike: "lowered-like",
 };
 
+// Matches the column check MariaDB adds to every JSON column exactly, so a
+// user's own json_valid check on another column doesn't count.
+const MARIADB_JSON_COLUMNS_SQL =
+  "constraint_name as constraint_name from information_schema.check_constraints " +
+  "where constraint_schema = ? and table_name = ? " +
+  "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
+
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
 export function mysqlTypeClass(dataType: string, columnType: string): TypeClass | undefined {
   switch (dataType.toLowerCase()) {
@@ -209,7 +216,7 @@ export class MySqlSource implements DbSource {
       timeoutMs,
       "schema_name as schema_name from information_schema.schemata " +
         "where schema_name not in ('mysql', 'information_schema', 'performance_schema', 'sys') " +
-        "order by schema_name",
+        "order by cast(schema_name as binary)",
     );
     const rows = await queryRows(conn, sql);
     return rows.map((r) => r.schema_name as string);
@@ -256,7 +263,7 @@ export class MySqlSource implements DbSource {
       variant,
       timeoutMs,
       "table_name as table_name from information_schema.tables " +
-        "where table_schema = ? and table_type = 'BASE TABLE' order by table_name",
+        "where table_schema = ? and table_type = 'BASE TABLE' order by cast(table_name as binary)",
     );
     const rows = await queryRows(conn, sql, [schema]);
     return rows.map((r) => r.table_name as string);
@@ -355,11 +362,12 @@ export class MySqlSource implements DbSource {
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {
     return this.withTx(async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
+      // Byte order: MariaDB's catalog collation folds case, so `_` sorts after letters.
       const sql = timedSelect(
         variant,
         timeoutMs,
         "table_name as table_name, table_comment as table_comment from information_schema.tables " +
-          "where table_schema = ? and table_type = 'BASE TABLE' order by table_name",
+          "where table_schema = ? and table_type = 'BASE TABLE' order by cast(table_name as binary)",
       );
       const rows = await queryRows(conn, sql, [realSchema]);
       return rows.map((r) => {
@@ -380,7 +388,7 @@ export class MySqlSource implements DbSource {
         variant,
         timeoutMs,
         "table_name as table_name, cast(table_rows as signed) as table_rows from information_schema.tables " +
-          "where table_schema = ? and table_type = 'BASE TABLE' order by table_name",
+          "where table_schema = ? and table_type = 'BASE TABLE' order by cast(table_name as binary)",
       );
       const rows = await queryRows(conn, sql, [realSchema]);
       // NULL means no estimate yet: emit -1 (`spec/protocol.md` §5.3).
@@ -391,7 +399,20 @@ export class MySqlSource implements DbSource {
     });
   }
 
-  private async joinTableMeta(
+  // MariaDB has no JSON type: a JSON column is longtext guarded by a json_valid column check.
+  private async mariadbJsonColumns(
+    conn: PoolConnection,
+    variant: Variant,
+    schema: string,
+    table: string,
+    timeoutMs: number,
+  ): Promise<Set<string>> {
+    if (variant !== "mariadb") return new Set();
+    const rows = await queryRows(conn, timedSelect(variant, timeoutMs, MARIADB_JSON_COLUMNS_SQL), [schema, table]);
+    return new Set(rows.map((r) => r.constraint_name as string));
+  }
+
+  private async tableMeta(
     conn: PoolConnection,
     variant: Variant,
     schema: string,
@@ -410,13 +431,12 @@ export class MySqlSource implements DbSource {
       [schema, table],
     );
     const { pkColumns, fkColumns } = await this.keyMetadataInTx(conn, variant, schema, table, timeoutMs);
+    const jsonColumns = await this.mariadbJsonColumns(conn, variant, schema, table, timeoutMs);
     const columns = rows.map((r): JoinColMeta => {
       const name = r.column_name as string;
-      const col: JoinColMeta = {
-        name,
-        type: r.data_type as string,
-        class: mysqlTypeClass(r.data_type as string, String(r.column_type)),
-      };
+      const col: JoinColMeta = jsonColumns.has(name)
+        ? { name, type: "json", class: undefined }
+        : { name, type: r.data_type as string, class: mysqlTypeClass(r.data_type as string, String(r.column_type)) };
       if (r.collation_name) col.collation = r.collation_name as string;
       if (pkColumns.has(name)) {
         col.key = "pk";
@@ -441,7 +461,7 @@ export class MySqlSource implements DbSource {
       for (const name of names) {
         if (metas.has(name)) continue;
         if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
-        metas.set(name, await this.joinTableMeta(conn, variant, realSchema, name, timeoutMs));
+        metas.set(name, await this.tableMeta(conn, variant, realSchema, name, timeoutMs));
       }
       const plan = planJoin(
         spec,
@@ -484,28 +504,13 @@ export class MySqlSource implements DbSource {
 
       const { where: whereClause, values: filterValues } = buildWhereClauseMysql(opts.filter, columnNames);
 
-      const metaSql = timedSelect(
-        variant,
-        timeoutMs,
-        "column_name as column_name, data_type as data_type, column_comment as column_comment " +
-          "from information_schema.columns where table_schema = ? and table_name = ? order by ordinal_position",
-      );
-      const columnMetaRows = await queryRows(conn, metaSql, [realSchema, realTable]);
-
-      const { pkColumns, fkColumns } = await this.keyMetadataInTx(conn, variant, realSchema, realTable, timeoutMs);
-
-      const columns: ColumnInfo[] = columnMetaRows.map((r) => {
-        const name = r.column_name as string;
-        const col: ColumnInfo = { name, type: r.data_type as string };
-        if (pkColumns.has(name)) {
-          col.key = "pk";
-          if (fkColumns.has(name)) col.references = fkColumns.get(name);
-        } else if (fkColumns.has(name)) {
-          col.key = "fk";
-          col.references = fkColumns.get(name);
-        }
-        const comment = r.column_comment as string;
-        if (comment.length > 0) col.comment = comment;
+      // The join route's lookup, so both routes report the same column types.
+      const meta = await this.tableMeta(conn, variant, realSchema, realTable, timeoutMs);
+      const columns: ColumnInfo[] = meta.columns.map(({ name, type, key, references, comment }) => {
+        const col: ColumnInfo = { name, type };
+        if (key) col.key = key;
+        if (references) col.references = references;
+        if (comment) col.comment = comment;
         return col;
       });
 

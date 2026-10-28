@@ -223,8 +223,9 @@ engine from that seed's `_conformance_meta.dialect` column and asserts
 that engine's flavor of the spec's documented relaxations
 (`conformance/runner/backend.rs`); `ASHURBANIPAL_CONFORMANCE_BACKEND` is a
 fallback for a seed predating the column, cross-checked against it when
-both are present. `rust-axum-conformance.yml`'s `mysql-conformance` /
-`sqlite-conformance` jobs are the concrete pattern.
+both are present. In CI, `_conformance-behavior.yml`'s `backend` input
+starts the engine and applies its seed; each port's
+`other-backend-conformance` job is the concrete pattern.
 
 Shape conformance — Python + schemathesis, no Rust toolchain needed:
 

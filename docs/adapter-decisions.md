@@ -179,16 +179,14 @@ omitted (never emitted as `null` or `""`) when the table/column has none.
 ## §5.2 — table listing order
 
 Protocol property: tables SHOULD be returned in a stable order (`sort by
-name` in the reference implementation) — a SHOULD, not a MUST, and "by
-name" doesn't pin a specific collation. Discovered while adding the
-`order_extra` fixture (docs/feature-backlog/13-pk-that-is-also-fk-loses-references.md):
-MariaDB's default collation sorts `order_extra` *after* `orders`
-(underscore outweighs letters), while MySQL, Postgres, and SQLite all
-sort it before — each backend's `order by table_name`/equivalent defers
-to that engine's own default collation, so exact cross-backend ordering
-of two names sharing a prefix isn't guaranteed. Port-level tests that
-assert on table order should treat this as backend-specific rather than
-assume ASCII/byte ordering universally.
+name` in the reference implementation). Every backend sorts by byte order,
+so `_conformance_meta` comes first and `order_extra` before `orders`:
+
+| Backend  | Mechanism |
+|----------|-----------|
+| Postgres | `order by relname`: `name` compares bytewise |
+| MySQL/MariaDB | `order by cast(table_name as binary)`, and the same for schema names. MariaDB's catalog collation (`utf8mb3_general_ci`) folds case, so `_` sorts after every letter and a plain `order by` would put `orders` before `order_extra` and `_conformance_meta` last |
+| SQLite   | `order by name`: `BINARY` is the default collation |
 
 ## §5.4.1 — forward FK/PK column metadata (`key_metadata`)
 
@@ -249,7 +247,7 @@ joinable.
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
 | Postgres | `information_schema.columns.data_type`, plus `udt_name`/`udt_schema` for `USER-DEFINED`. `number`: `smallint`, `integer`, `bigint`, `numeric`. `text`: `character varying`, `character`, `text`, and the `citext` extension type. `uuid`, `boolean`, `bytea` map to their own classes. `temporal`: `date`, `timestamp without time zone`, `timestamp with time zone`. `time`: `time without time zone`, `time with time zone`. `enum`: a `USER-DEFINED` type whose `pg_type.typtype` is `e`; two enum columns pair only when `(udt_schema, udt_name)` match | `ARRAY`, `json`, `jsonb`, `real`, `double precision`, `money`, `interval` and every other type have no class. Tables are gated by `readable_table_oid_in_tx`, as §5.4. |
-| MySQL/MariaDB | `information_schema.columns.data_type` and `column_type`. `number`: `tinyint`, `smallint`, `mediumint`, `int`, `bigint`, `decimal`. `text`: `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`. `temporal`: `date`, `datetime`, `timestamp`. `time`: `time`. `binary`: `binary`, `varbinary`, and the `*blob` types. `uuid`: MariaDB's native `uuid` type. `enum`: `enum` columns pair only when `column_type` is identical | No `boolean` class: `boolean` is `tinyint(1)` and is a `number`. `json`, `set`, `bit`, `float`, `double`, `year`, geometry types have no class. Two `text` columns with different `collation_name` are rejected with a 400 naming the pair, before the statement runs, because the engine would raise "illegal mix of collations"; error 1267 maps to the same 400 as a fallback. |
+| MySQL/MariaDB | `information_schema.columns.data_type` and `column_type`. `number`: `tinyint`, `smallint`, `mediumint`, `int`, `bigint`, `decimal`. `text`: `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`. `temporal`: `date`, `datetime`, `timestamp`. `time`: `time`. `binary`: `binary`, `varbinary`, and the `*blob` types. `uuid`: MariaDB's native `uuid` type. `enum`: `enum` columns pair only when `column_type` is identical | No `boolean` class: `boolean` is `tinyint(1)` and is a `number`. `json`, `set`, `bit`, `float`, `double`, `year`, geometry types have no class. MariaDB has no JSON type: a JSON column is `longtext` with a column check `json_valid(\`col\`)`, so a column with exactly that check reports type `json` and has no class. Two `text` columns with different `collation_name` are rejected with a 400 naming the pair, before the statement runs, because the engine would raise "illegal mix of collations"; error 1267 maps to the same 400 as a fallback. |
 | SQLite   | The declared type, matched case-insensitively. Recognised names first: `uuid` → `uuid`; `boolean`, `bool` → `boolean`; `date`, `datetime`, `timestamp` → `temporal`; `time` → `time`; `json` → no class. Then SQLite's own affinity rules: contains `INT` → `number`; contains `CHAR`, `CLOB` or `TEXT` → `text`; contains `BLOB` → `binary`; contains `REAL`, `FLOA` or `DOUB` → no class; any other non-empty type (`NUMERIC`, `DECIMAL`) → `number`. An empty declared type has no affinity and pairs only with another empty declared type | Types are affinities, not enforced: a pair that passes the check can still hold mismatched values, which simply match no rows. This is a weaker guarantee than on the other engines and an accepted gap. |
 
 **Statement shape.** `ON` compares the columns' native types, not the text
@@ -324,11 +322,11 @@ language/framework port under `PORTING.md`. `MySqlSource` targets one
 but the two forks diverge on the query-timeout mechanism (§6 above); it
 detects which one it's talking to at runtime rather than requiring the
 host to declare it. Both adapters now run through `conformance/runner`:
-`rust-axum-conformance.yml`'s `mysql-conformance` and `sqlite-conformance`
-jobs boot a `DB_BACKEND=mysql` / `DB_BACKEND=sqlite` demo against a
+each port's `other-backend-conformance` job (MySQL, MariaDB and SQLite,
+via `_conformance-behavior.yml`'s `backend` input) boots a demo against a
 hand-authored dialect seed (`conformance/seed/seed.mysql.sql` /
 `seed.sqlite.sql`, the sqlx-style split — the Postgres seed's generator
-emits Postgres-only SQL) and point the kit at it; the runner learns which
+emits Postgres-only SQL) and points the kit at it; the runner learns which
 engine's expectations to hold from the seed's `_conformance_meta.dialect`
 column (`conformance/runner/backend.rs`). A `non-default-backend-tests`
 job runs the feature lint plus the `sqlite`/`mysql` unit and integration
