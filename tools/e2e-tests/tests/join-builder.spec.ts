@@ -10,6 +10,7 @@ import {
   ORDERS_USERS_CANONICAL,
   pick,
   showResult,
+  storedSavedJoins,
   writeSql,
 } from "./support/join";
 
@@ -204,7 +205,7 @@ test("a saved join becomes a chip after the table chips that survives a reload a
 });
 
 test("unreadable saved joins are discarded, and saving a join still works", async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem("ashurbanipal_joins", "{not json"));
+  await page.addInitScript(() => localStorage.setItem("ashurbanipal_saved_joins", "{not json"));
   await openJoinOverlay(page);
   await expect(page.locator("#error")).toBeEmpty();
   await expect(page.locator("#tables li.join-chip.saved")).toHaveCount(0);
@@ -214,7 +215,22 @@ test("unreadable saved joins are discarded, and saving a join still works", asyn
   await showResult(page);
   await expandTableChips(page);
   await expect(page.locator("#tables li.join-chip :is(a, button)", { hasText: "orders with users" })).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem("ashurbanipal_joins"))).toContain("orders with users");
+  expect(await storedSavedJoins(page)).toContain("orders with users");
+});
+
+test("a saved-joins entry not keyed by source and schema is dropped on the next save", async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      "ashurbanipal_saved_joins",
+      JSON.stringify({ junk: [{ name: "stray", text: "FROM orders o LEFT JOIN users u ON o.user_id = u.id" }] }),
+    ),
+  );
+  await openJoinOverlay(page);
+  await writeSql(page, ORDERS_USERS);
+  await page.locator("#join-name").fill("orders with users");
+  await showResult(page);
+  const saved = JSON.parse((await storedSavedJoins(page)) ?? "{}");
+  expect(Object.keys(saved)).toEqual([JSON.stringify(["primary", "public"])]);
 });
 
 test("a join saved in another tab is kept when this tab saves one too", async ({ page, context }) => {
@@ -233,7 +249,7 @@ test("a join saved in another tab is kept when this tab saves one too", async ({
   await other.locator("#join-name").fill("from the other tab");
   await showResult(other);
 
-  const saved = await other.evaluate(() => localStorage.getItem("ashurbanipal_joins"));
+  const saved = await storedSavedJoins(other);
   expect(saved).toContain("from this tab");
   expect(saved).toContain("from the other tab");
   await expandTableChips(other);

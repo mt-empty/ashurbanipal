@@ -1,7 +1,7 @@
 import { supersedeLoads } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
 import { $, populateSelect, reportError } from "../core/dom.js";
-import { sourceQuery, state, switchSchema, switchSource } from "../core/state.js";
+import { settleSchema, settleSource, sourceQuery, state, switchSchema, switchSource } from "../core/state.js";
 import type { SchemasResponse, SourceEntry, SourcesResponse } from "../core/types.js";
 import { syncGridLock } from "./grid-lock.js";
 import { loadTables } from "./table-chips.js";
@@ -13,31 +13,26 @@ import { loadTables } from "./table-chips.js";
 // Hidden when the host has one source. A source switch resets the table,
 // sort and filter: another source has its own schemas and tables.
 export async function loadSources(): Promise<void> {
-  let sources: SourceEntry[];
+  let names: string[];
   let defaultSource: string;
   try {
+    let sources: SourceEntry[];
     ({ sources, default: defaultSource } = await api<SourcesResponse>("/sources"));
+    names = sources.map((s) => s.name);
   } catch (e) {
     // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
     // single-source, with no `source` param, but leave a trace.
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    state.source = null;
+    settleSource(null, false);
     return;
   }
-  if (sources.length <= 1) {
-    state.source = null;
-    return;
-  }
-  let source = state.source;
-  if (!source || !sources.some((s) => s.name === source)) {
-    source = defaultSource;
-  }
-  state.source = source;
-  populateSelect(
-    $<HTMLSelectElement>("source-select"),
-    sources.map((s) => s.name),
-    source,
-  );
+  const wanted = state.scope.source;
+  // `default` must be listed (spec/protocol.md §5.8); a lone source is its own default either way.
+  const fallback = names.includes(defaultSource) ? defaultSource : (names[0] ?? null);
+  const source = wanted !== null && names.includes(wanted) ? wanted : fallback;
+  settleSource(source, names.length > 1);
+  if (!state.manySources) return;
+  populateSelect($<HTMLSelectElement>("source-select"), names, source);
   $("source-select-wrap").hidden = false;
 }
 $<HTMLSelectElement>("source-select").onchange = () => {
@@ -51,15 +46,12 @@ $<HTMLSelectElement>("source-select").onchange = () => {
 };
 
 // ==== Schema selector ====
-// Hidden for a single-schema deployment, which then sends no `schema` param,
-// unless the server reports no default: an absent `schema` would 400 there,
-// so its one schema is pinned with the selector still hidden. With two or
-// more, state.schema is pinned to a concrete name so every request names it.
+// Hidden for a single-schema source; every request still names its schema.
 // Same supersession guard as loadTables: a slow /schemas from an earlier
 // source switch must not overwrite a later one's schema and selector.
 let loadSchemasToken = 0;
 
-/** Fetches the source's schemas and pins state.schema; resolves false when
+/** Fetches the source's schemas and settles the scope; resolves false when
  * a newer source switch superseded it, so the caller stops there. */
 export async function loadSchemas(): Promise<boolean> {
   syncGridLock();
@@ -76,29 +68,19 @@ export async function loadSchemas(): Promise<boolean> {
     // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
     // single-schema but leave a trace.
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
-    state.schema = null;
+    settleSchema(null, false, false);
     $("schema-select-wrap").hidden = true;
     return true;
   }
   if (token !== loadSchemasToken) return false;
-  // Explicitly re-hides even though the element starts hidden in markup:
-  // switching source can re-run this against a source with fewer schemas
-  // than the previously selected one, and without this the wrap would keep
-  // showing the prior source's stale multi-schema dropdown.
-  if (schemas.length <= 1) {
-    state.schema = defaultSchema === null ? (schemas[0] ?? null) : null;
-    if (state.schema) populateSelect($<HTMLSelectElement>("schema-select"), schemas, state.schema);
-    $("schema-select-wrap").hidden = true;
-    return true;
-  }
-  let schema = state.schema;
-  if (!schema || !schemas.includes(schema)) {
-    // The server's default can be null (no default schema on that connection).
-    schema = defaultSchema ?? schemas[0];
-  }
-  state.schema = schema;
-  populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
-  $("schema-select-wrap").hidden = false;
+  const wanted = state.scope.schema;
+  // The server's default can be null (no default schema on that connection).
+  const schema = wanted !== null && schemas.includes(wanted) ? wanted : (defaultSchema ?? schemas[0] ?? null);
+  settleSchema(schema, schemas.length > 1, defaultSchema === null);
+  if (schema !== null) populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
+  // Re-hidden explicitly: a source switch can land on a source with fewer
+  // schemas than the last one, whose selector would otherwise stay up.
+  $("schema-select-wrap").hidden = !state.manySchemas;
   return true;
 }
 $<HTMLSelectElement>("schema-select").onchange = () => {

@@ -1,14 +1,14 @@
 // ==== Saved joins ====
 // A named join is its canonical text, kept in the browser per source and
 // schema (the same table names mean different tables in another schema). The
-// server never sees them.
+// server never sees them. A `scope` is lib/scope-key.ts's key, opaque here.
 
 export interface SavedJoin {
   name: string;
   text: string;
 }
 
-export type SavedStore = Record<string, Record<string, SavedJoin[]>>;
+export type SavedStore = Record<string, SavedJoin[]>;
 
 export const MAX_SAVED_PER_SCOPE = 30;
 export const MAX_SAVED_NAME = 60;
@@ -41,36 +41,26 @@ function sanitizeEntries(raw: unknown): SavedJoin[] {
 }
 
 // Anything that is not the expected shape is dropped, never repaired (ui-guidelines R5).
-export function sanitizeSaved(raw: unknown): SavedStore {
+// `isScope` checks a key; lib/ modules don't import each other, so the caller passes it.
+export function sanitizeSaved(raw: unknown, isScope: (key: string) => boolean): SavedStore {
   const store: SavedStore = dict();
   if (!isPlainObject(raw)) return store;
-  for (const [source, schemas] of Object.entries(raw)) {
-    if (!isPlainObject(schemas)) continue;
-    for (const [schema, entries] of Object.entries(schemas)) {
-      const clean = sanitizeEntries(entries);
-      if (clean.length === 0) continue;
-      store[source] ??= dict();
-      store[source][schema] = clean;
-    }
+  for (const [scope, entries] of Object.entries(raw)) {
+    if (!isScope(scope)) continue;
+    const clean = sanitizeEntries(entries);
+    if (clean.length) store[scope] = clean;
   }
   return store;
 }
 
-export function scopeEntries(store: SavedStore, source: string | null, schema: string | null): SavedJoin[] {
-  return own(own(store, source ?? ""), schema ?? "") ?? [];
+export function scopeEntries(store: SavedStore, scope: string): SavedJoin[] {
+  return own(store, scope) ?? [];
 }
 
-function withEntries(
-  store: SavedStore,
-  source: string | null,
-  schema: string | null,
-  entries: SavedJoin[],
-): SavedStore {
+function withEntries(store: SavedStore, scope: string, entries: SavedJoin[]): SavedStore {
   const next = dict(store);
-  const schemas = dict(own(store, source ?? ""));
-  next[source ?? ""] = schemas;
-  if (entries.length) schemas[schema ?? ""] = entries;
-  else delete schemas[schema ?? ""];
+  if (entries.length) next[scope] = entries;
+  else delete next[scope];
   return next;
 }
 
@@ -78,8 +68,7 @@ function withEntries(
 // and saving a join already saved, or `replacing`, renames that entry in place.
 export function withSaved(
   store: SavedStore,
-  source: string | null,
-  schema: string | null,
+  scope: string,
   entry: SavedJoin,
   replacing?: string,
 ): { store: SavedStore } | { error: string } {
@@ -87,7 +76,7 @@ export function withSaved(
   if (name === "") return { error: "Give the join a name to save it." };
   if (name.length > MAX_SAVED_NAME) return { error: `A name can be at most ${MAX_SAVED_NAME} characters.` };
   if (entry.text.length > MAX_SAVED_TEXT) return { error: "This join is too long to save." };
-  const entries = scopeEntries(store, source, schema);
+  const entries = scopeEntries(store, scope);
   const same = (e: SavedJoin): boolean => e.name === name || e.name === replacing || e.text === entry.text;
   const kept = entries.filter((e) => !same(e));
   if (kept.length >= MAX_SAVED_PER_SCOPE)
@@ -95,19 +84,13 @@ export function withSaved(
   // Every entry before the first one replaced is kept, so its index is the place in `kept` too.
   const at = entries.findIndex(same);
   kept.splice(at < 0 ? kept.length : at, 0, { name, text: entry.text });
-  return { store: withEntries(store, source, schema, kept) };
+  return { store: withEntries(store, scope, kept) };
 }
 
-export function withoutSaved(
-  store: SavedStore,
-  source: string | null,
-  schema: string | null,
-  name: string,
-): SavedStore {
+export function withoutSaved(store: SavedStore, scope: string, name: string): SavedStore {
   return withEntries(
     store,
-    source,
-    schema,
-    scopeEntries(store, source, schema).filter((e) => e.name !== name),
+    scope,
+    scopeEntries(store, scope).filter((e) => e.name !== name),
   );
 }

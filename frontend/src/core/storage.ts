@@ -21,3 +21,11 @@ export function writeStored(key: string, value: string | null, failure?: string)
     return false;
   }
 }
+
+// Keys whose entries were written under an older scope shape. They are
+// dropped, never migrated.
+const RETIRED_KEYS = ["ashurbanipal_ui", "ashurbanipal_joins"];
+
+export function dropRetiredKeys(): void {
+  for (const key of RETIRED_KEYS) writeStored(key, null);
+}

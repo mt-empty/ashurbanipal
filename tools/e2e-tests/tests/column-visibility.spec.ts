@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { applyFilter, dataWith, failRequests, gotoApp, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { applyFilter, dataWith, failRequests, gotoApp, selectTable, tableKey, tableList, uiState, waitForIdle } from "./support/helpers";
 import { gotoJoin, ORDERS_USERS } from "./support/join";
 
 const menuItem = (page: Page, name: string) => page.locator(`#columns-pop-list label[data-name="${name}"]`);
@@ -73,7 +73,7 @@ test("an auto-refresh tick keeps focus on the columns menu checkbox", async ({ p
 test("a stored hidden column the table no longer has is not counted and is dropped", async ({ page }) => {
   const key = tableKey("orders");
   await page.addInitScript((k) => {
-    localStorage.setItem("ashurbanipal_ui", JSON.stringify({ table: "orders", hiddenColumns: { [k]: ["ghost_col", "status"] } }));
+    localStorage.setItem("ashurbanipal_view", JSON.stringify({ table: "orders", hiddenColumns: { [k]: ["ghost_col", "status"] } }));
   }, key);
   await gotoApp(page);
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
@@ -86,7 +86,7 @@ test("hidden columns stay with their schema: a same-named table elsewhere is una
   // The seed has no table name in two schemas, so `warehouse` is given a
   // `users` that serves public.users' rows; the keying is the frontend's alone.
   await page.route(
-    (url) => url.pathname.endsWith("/api/tables") && url.searchParams.get("schema") === "warehouse",
+    tableList("warehouse"),
     async (route) => {
       const response = await route.fetch();
       const json = await response.json();
@@ -108,7 +108,7 @@ test("hidden columns stay with their schema: a same-named table elsewhere is una
   await menuItem(page, "id").locator("input").uncheck();
   await page.keyboard.press("Escape");
 
-  const other = page.waitForResponse((r) => r.url().includes("/api/tables/data") && r.url().includes("schema=warehouse") && r.ok());
+  const other = page.waitForResponse((r) => dataWith("schema", "warehouse")(r) && r.ok());
   await page.locator("#schema-select").selectOption("warehouse");
   await other;
   await waitForIdle(page);
@@ -116,7 +116,7 @@ test("hidden columns stay with their schema: a same-named table elsewhere is una
   await expect(page.locator('th[data-col="id"]')).not.toHaveClass(/col-hidden/);
   await expect(page.locator("#columns-btn")).toHaveText("columns");
 
-  const back = page.waitForResponse((r) => r.url().includes("/api/tables/data") && r.url().includes("schema=public") && r.ok());
+  const back = page.waitForResponse((r) => dataWith("schema", "public")(r) && r.ok());
   await page.locator("#schema-select").selectOption("public");
   await back;
   await waitForIdle(page);
@@ -265,7 +265,7 @@ test("a schema with no tables clears the sort note and the all-hidden message", 
   await expect(page.locator("#sort-note")).toBeVisible();
   await expect(page.locator("#all-hidden")).toBeVisible();
 
-  const listed = page.waitForResponse((r) => r.url().includes("/api/tables?") && r.url().includes("schema=warehouse"));
+  const listed = page.waitForResponse(tableList("warehouse"));
   await page.locator("#schema-select").selectOption("warehouse");
   await listed;
   await expect(page.locator("#current")).toHaveText("—");

@@ -1,5 +1,5 @@
 import { $, copyText, el } from "../core/dom.js";
-import { state, tableInView } from "../core/state.js";
+import { qualifiedTable, tableInView } from "../core/state.js";
 import type { Column, JoinDef, Row } from "../core/types.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
 import { tableLabel } from "../lib/join-def.js";
@@ -76,7 +76,7 @@ function recordAsJson(columns: Column[], row: Row): string {
 
 function recordAsInsert(table: string, columns: Column[], row: Row): string {
   // Identifiers left unquoted — no quote char is portable across all three engines.
-  const target = state.schema ? `${state.schema}.${table}` : table;
+  const target = qualifiedTable(table);
   const cols = columns.map((c) => c.name).join(", ");
   const vals = columns.map((c) => sqlLiteral(c, row[c.name])).join(", ");
   return `INSERT INTO ${target} (${cols})\nVALUES (${vals});`;

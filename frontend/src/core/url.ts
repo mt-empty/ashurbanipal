@@ -1,10 +1,14 @@
+import { dropRetiredKeys } from "./storage.js";
 import {
+  chosenScope,
   restoreFilterFromParams,
   restoreFromStorage,
   restoreJoinFromParams,
+  scopeOnSource,
   startTable,
   state,
   tableView,
+  withSchema,
 } from "./store.js";
 import type { View } from "./types.js";
 import { recordUrlIntent } from "./url-intent.js";
@@ -19,14 +23,22 @@ import { recordUrlIntent } from "./url-intent.js";
 //   applyUrlExact    — popstate. Every field is set from this history
 //                      entry, reproducing it verbatim — an absent param
 //                      means "was not set here", i.e. cleared, not kept.
+//                      Except source and schema: the URL leaves one out only
+//                      when there is no other to choose (applyUrlScope), so
+//                      an absent one keeps the current name.
 //
 // Do not merge them into one pass: an absent param means opposite things to
 // each (keep vs. clear), and collapsing that silently breaks back/forward
 // with no test failing.
 
 export function applyUrlOverlay(params: URLSearchParams): void {
-  if (params.has("source")) state.source = params.get("source");
-  if (params.has("schema")) state.schema = params.get("schema");
+  // Names to try; an empty `?source=` asks for nothing in particular. A link
+  // to another source without a schema tries that source's own last schema.
+  const stored = state.scope;
+  const source = params.has("source") ? params.get("source") || null : stored.source;
+  if (params.has("schema")) state.scope = { kind: "loading", source, schema: params.get("schema") || null };
+  else if (source !== stored.source) state.scope = scopeOnSource(source);
+  else state.scope = { kind: "loading", source, schema: stored.schema };
   if (params.has("table")) state.view = tableView(params.get("table"));
   if (params.has("sort")) state.sort = params.get("sort");
   if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
@@ -37,8 +49,15 @@ export function applyUrlOverlay(params: URLSearchParams): void {
 }
 
 export function applyUrlExact(params: URLSearchParams): void {
-  state.source = params.get("source") || null;
-  state.schema = params.get("schema") || null;
+  const current = state.scope.source;
+  const source = params.get("source") || current;
+  const schema = params.get("schema");
+  if (source === current) {
+    if (schema) state.scope = withSchema(state.scope, schema);
+  } else {
+    // Another source is checked by loadSchemas, as on a switch; never with this source's schema.
+    state.scope = scopeOnSource(source, schema || null);
+  }
   state.view = tableView(params.get("table"));
   state.sort = params.get("sort") || null;
   state.order = params.get("order") === "desc" ? "desc" : "asc";
@@ -48,13 +67,18 @@ export function applyUrlExact(params: URLSearchParams): void {
   restoreFilterFromParams(params);
 }
 
-// Only set once a multi-source/multi-schema deployment is confirmed
-// (loadSources/loadSchemas) — a single-source, single-schema deployment
-// never sends either param at all, identical to the wire shape before
-// source/schema selection existed.
+// Every name the scope holds: both once start-up has resolved them, so no
+// request depends on the server's default.
 export function applyScopeParams(params: URLSearchParams): void {
-  if (state.source) params.set("source", state.source);
-  if (state.schema) params.set("schema", state.schema);
+  const { source, schema } = state.scope;
+  if (source) params.set("source", source);
+  if (schema) params.set("schema", schema);
+}
+
+function applyUrlScope(params: URLSearchParams): void {
+  const { source, schema } = chosenScope();
+  if (source) params.set("source", source);
+  if (schema) params.set("schema", schema);
 }
 
 export function scopeQuery(): string {
@@ -66,7 +90,7 @@ export function scopeQuery(): string {
 // The params that name a view, shared by syncUrl and chip links.
 export function viewParams(view: View | null): URLSearchParams {
   const params = new URLSearchParams({ table: startTable(view) ?? "" });
-  applyScopeParams(params);
+  applyUrlScope(params);
   if (view?.kind === "join") params.set("join", view.text);
   return params;
 }
@@ -81,13 +105,15 @@ export function viewHref(view: View): string {
 // it's what resolves schema in the first place — so it gets its own query
 // builder rather than scopeQuery()'s combined source+schema.
 export function sourceQuery(): string {
-  return state.source ? `?${new URLSearchParams({ source: state.source })}` : "";
+  const { source } = state.scope;
+  return source ? `?${new URLSearchParams({ source })}` : "";
 }
 
 // Called once, first thing in main.ts's bootstrap: stored prefs, then the
 // URL layered over them.
 export function initState(): void {
   const params = new URLSearchParams(location.search);
+  dropRetiredKeys();
   restoreFromStorage();
   recordUrlIntent(params);
   applyUrlOverlay(params);

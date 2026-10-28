@@ -1,10 +1,6 @@
 # Server-reported default source and schema, and concrete scope keys
 
-> **Status:** PARTIAL · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** found in the 2026-10-25 architecture review of source/schema/table use; do before story 44
-
-**Done:** §4, the wire change, on every port and in conformance; the UI
-opens the server's `default`. **Left:** §5's scope state, scope keys and
-storage rename.
+> **Status:** DONE · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** found in the 2026-10-25 architecture review of source/schema/table use; do before story 44
 
 The server is the only party that knows which source and schema an absent
 parameter resolves to. Have it say so, and have the UI use those concrete
@@ -118,12 +114,17 @@ names no database.
 
 ## 5. Frontend
 
-- **Scope state is a union type**, not nullable fields:
-  `{ kind: "loading" } | { kind: "known", source, schema } | { kind: "failed" }`.
-  - Per-scope memory (sort, hidden columns, widths, saved joins, chip list)
-    takes the `known` variant only, so the compiler enforces that nothing
+- **Scope state is a union type** (`Scope` in `core/types.ts`), not
+  nullable fields: `loading`, `known` and `failed`.
+  - `loading` carries the names to try (stored, linked or picked), and
+    `failed` the names that did resolve. Only `known` has both as strings.
+  - Per-scope memory (sort, hidden columns, widths, saved joins) is keyed
+    from the `known` variant only, so the compiler enforces that nothing
     is read or written while the scope is unknown.
-  - On `failed`, requests send no parameter, as today.
+  - On `failed`, requests send only the names that resolved. When
+    `/schemas` fails on a multi-source host, `source` is still sent;
+    dropping it would show the default source's data under another
+    source's selector.
 - **Resolve at start-up.**
   - `loadSources` keeps the remembered source when it is still listed, else
     `default`.
@@ -133,8 +134,9 @@ names no database.
 - **Send both on every request.** `applyScopeParams` builds request
   parameters from the concrete names. URL writing (`syncUrl`) still omits a
   name when its list has one entry, so it needs its own rule.
-- **One key helper** in `core/store.ts`, `scopeKey(source, schema)`. These
-  use it today with their own spellings:
+- **One key helper**, `scopeKey(source, schema, ...rest)` in
+  `lib/scope-key.ts` (a pure leaf, so it can have a unit test). It replaces
+  these spellings:
   - `scopeTableKey`: sort, hidden columns, structure cache
     (`JSON.stringify([source, schema, table])`)
   - saved joins (`lib/join-saved.ts`): `source ?? ""`, `schema ?? ""`
@@ -143,10 +145,13 @@ names no database.
   - chip list (`features/table-chips.ts` `scopeOfChips`):
     `` `${source ?? ""}|${schema ?? ""}` ``, which can collide because a
     quoted Postgres name may contain `|`
-  - `schemaBySource`: `source ?? ""`
-- **Discard old stored settings.** Rename the per-scope storage keys
-  (`ashurbanipal_ui` in `core/store.ts`, `ashurbanipal_joins` in
-  `features/join-saved.ts`) and remove the old keys at start-up. Theme and
+  - `schemaBySource`: `source ?? ""`; now keyed by the concrete source name
+  - The chip list and the per-visit caches (structure, join catalog,
+    referenced-by) are not stored, so they key by the names each request
+    sends, resolved or not.
+- **Discard old stored settings.** The per-scope storage keys are now
+  `ashurbanipal_view` and `ashurbanipal_saved_joins` (a flat map by scope
+  key); start-up removes the old `ashurbanipal_ui` and `ashurbanipal_joins`. Theme and
   the chip-list expanded flag are not per-scope and keep their keys.
 - **Normalize `""` to unknown** when reading the URL.
 

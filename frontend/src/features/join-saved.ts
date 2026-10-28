@@ -1,5 +1,5 @@
 import { reportError } from "../core/dom.js";
-import { joinInView, state, viewHref } from "../core/state.js";
+import { joinInView, knownScopeKey, scopeIdentity, viewHref } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
 import type { JoinDef } from "../core/types.js";
 import { joinLabel } from "../lib/join-def.js";
@@ -12,12 +12,13 @@ import {
   withoutSaved,
   withSaved,
 } from "../lib/join-saved.js";
+import { isScopeKey } from "../lib/scope-key.js";
 import { hasJoinChips, type JoinChip, setJoinChips } from "./table-chips.js";
 
 // Saved joins live in their own localStorage key, outside the view blob: they
 // are the user's own list, grouped by source and schema, and the server never
 // sees them. Text is canonical, so equal joins compare equal as strings.
-const SAVED_KEY = "ashurbanipal_joins";
+const SAVED_KEY = "ashurbanipal_saved_joins";
 
 // Read once and kept until this page writes or another tab does.
 let stored: SavedStore | null = null;
@@ -28,7 +29,8 @@ window.addEventListener("storage", (e) => {
 function read(): SavedStore {
   if (stored) return stored;
   try {
-    stored = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"));
+    // A key not shaped [source, schema] is never looked up, so drop it rather than write it forward.
+    stored = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"), (key) => isScopeKey(key, 2));
   } catch (e) {
     console.warn("ashurbanipal: discarding unreadable saved joins", e);
     stored = {};
@@ -43,7 +45,8 @@ function write(store: SavedStore): boolean {
 }
 
 export function savedJoins(): SavedJoin[] {
-  return scopeEntries(read(), state.source, state.schema);
+  const scope = knownScopeKey();
+  return scope === null ? [] : scopeEntries(read(), scope);
 }
 
 export function savedJoinFor(text: string): SavedJoin | undefined {
@@ -51,13 +54,16 @@ export function savedJoinFor(text: string): SavedJoin | undefined {
 }
 
 export function saveJoin(name: string, text: string, replacing?: string): string | null {
-  const result = withSaved(read(), state.source, state.schema, { name, text }, replacing);
+  const scope = knownScopeKey();
+  if (scope === null) return "Saved joins need the source and schema, which didn't load.";
+  const result = withSaved(read(), scope, { name, text }, replacing);
   if ("error" in result) return result.error;
   return write(result.store) ? null : "This browser would not store the join.";
 }
 
 export function deleteSavedJoin(name: string): void {
-  write(withoutSaved(read(), state.source, state.schema, name));
+  const scope = knownScopeKey();
+  if (scope !== null) write(withoutSaved(read(), scope, name));
 }
 
 interface ChipActions {
@@ -74,7 +80,7 @@ let lastRendered = "";
 export function renderSavedChips(actions: ChipActions): void {
   const saved = savedJoins();
   const current = joinInView();
-  const key = JSON.stringify([state.source, state.schema, current?.text, saved]);
+  const key = JSON.stringify([scopeIdentity(), current?.text, saved]);
   // The table list drops chips built for another scope, so a match with none shown still rebuilds.
   if (key === lastRendered && hasJoinChips()) return;
   lastRendered = key;

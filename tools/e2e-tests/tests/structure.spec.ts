@@ -1,5 +1,5 @@
 import { test, expect, type Route } from "./support/fixtures";
-import { gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
+import { apiCall, gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
 
 // Seed shape (conformance/seed): orders has the partial index
 // orders_pending_idx and orders.user_id ON DELETE CASCADE; inventory_counts
@@ -8,7 +8,7 @@ import { gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
 const STRUCTURE = "**/api/tables/structure*";
 
 async function openStructure(page: import("@playwright/test").Page) {
-  const response = page.waitForResponse((r) => r.url().includes("/api/tables/structure"));
+  const response = page.waitForResponse(apiCall("/tables/structure"));
   await page.locator("#structure-btn").click();
   await response;
 }

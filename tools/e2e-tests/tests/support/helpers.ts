@@ -91,20 +91,27 @@ export async function clearFilterViaSearchEvent(page: Page) {
 }
 
 /** The key of a table's entry in uiState's per-table maps (hiddenColumns,
- * sortByTable): source, schema and table. The demo is single-source. */
-export function tableKey(table: string, schema = "public"): string {
-  return JSON.stringify([null, schema, table]);
+ * sortByTable): source, schema and table, in the shared demo's `primary`/`public`. */
+export function tableKey(table: string): string {
+  return JSON.stringify(["primary", "public", table]);
 }
 
-export const tableData = (url: URL) => url.pathname.endsWith("/api/tables/data");
-export const tableList = (schema: string) => (url: URL) =>
-  url.pathname.endsWith("/api/tables") && url.searchParams.get("schema") === schema;
+/** Matches calls to the API `route` (e.g. "/tables/data") carrying every one
+ * of `params`. Takes what page.route, waitForRequest and waitForResponse hand a
+ * predicate: a URL, its text, or the request or response itself. */
+export const apiCall =
+  (route: string, params: Record<string, string> = {}) =>
+  (target: URL | string | { url(): string }): boolean => {
+    const u = target instanceof URL ? target : new URL(typeof target === "string" ? target : target.url());
+    return u.pathname.endsWith(`/api${route}`) && Object.entries(params).every(([k, v]) => u.searchParams.get(k) === v);
+  };
 
-/** Matches /api/tables/data requests whose `param` is `value`; takes a URL or its text. */
-export const dataWith = (param: string, value: string) => (url: URL | string) => {
-  const u = typeof url === "string" ? new URL(url) : url;
-  return tableData(u) && u.searchParams.get(param) === value;
-};
+export const tableData = apiCall("/tables/data");
+export const tableList = (schema: string) => apiCall("/tables", { schema });
+/** /api/tables requests whose `param` is `value`. */
+export const tablesWith = (param: string, value: string) => apiCall("/tables", { [param]: value });
+/** /api/tables/data requests whose `param` is `value`. */
+export const dataWith = (param: string, value: string) => apiCall("/tables/data", { [param]: value });
 
 /** Fails the requests `match` accepts with spec/protocol.md §2's 500 for a database error. */
 export const failRequests = (page: Page, match: (url: URL) => boolean) =>
@@ -143,7 +150,7 @@ export function problem(status: number, title: string, code: string) {
 
 export function uiState(page: Page) {
   return page.evaluate(() => {
-    const raw = localStorage.getItem("ashurbanipal_ui");
+    const raw = localStorage.getItem("ashurbanipal_view");
     return raw ? JSON.parse(raw) : null;
   });
 }

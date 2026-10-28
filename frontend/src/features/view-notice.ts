@@ -1,5 +1,13 @@
 import { $, el } from "../core/dom.js";
-import { startTable, state, tableInView, type ViewRequest, viewKey } from "../core/state.js";
+import {
+  chosenScope,
+  scopeIdentity,
+  startTable,
+  state,
+  tableInView,
+  type ViewRequest,
+  viewKey,
+} from "../core/state.js";
 import type { Swap } from "../core/types.js";
 import { takeUrlIntent } from "../core/url-intent.js";
 import { buildFallbackNote, type NoteSegment, swapsFrom } from "../lib/fallback-note.js";
@@ -13,7 +21,7 @@ let placeLabel: string | null = null;
 let customText: string | null = null;
 
 function noticeKey(view: ViewRequest["view"] | null, filter: string): string {
-  return JSON.stringify([state.source, state.schema, viewKey(view), filter]);
+  return JSON.stringify([scopeIdentity(), viewKey(view), filter]);
 }
 
 function render(segment: NoteSegment): Node {
@@ -48,8 +56,8 @@ export function showViewNotice(text: string): void {
 // did not end up on gets the note. Ends the URL-intent window either way.
 export function showBootFallbackNote(): void {
   shownSwaps = swapsFrom(takeUrlIntent(), {
-    source: state.source,
-    schema: state.schema,
+    // A name with nothing to choose from (not in the URL either) is no swap.
+    ...chosenScope(),
     table: startTable(state.view),
     filter: state.filter || null,
   });

@@ -1,6 +1,6 @@
 import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
-import { applyScopeParams, scopeTableKey, state, tableInView } from "../core/state.js";
+import { applyScopeParams, qualifiedTable, scopeIdentity, tableInView } from "../core/state.js";
 import type { ConstraintFk, StructureResponse } from "../core/types.js";
 
 // ---- structure dialog: a table's indexes and constraints (spec/protocol.md
@@ -80,7 +80,7 @@ function renderStructure(data: StructureResponse): void {
 
 // One table's structure through the same cache the dialog uses; errors are not cached.
 export function tableStructure(table: string): Promise<StructureResponse> {
-  const key = scopeTableKey(table);
+  const key = scopeIdentity(table);
   const generation = cacheGeneration;
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
@@ -96,10 +96,10 @@ export function openStructure(): void {
   const table = tableInView();
   if (table === null) return;
   const token = ++requestToken;
-  $("structure-title").textContent = `structure — ${state.schema ? `${state.schema}.${table}` : table}`;
+  $("structure-title").textContent = `structure — ${qualifiedTable(table)}`;
   $<HTMLDialogElement>("structure-dialog").showModal();
 
-  const hit = cache.get(scopeTableKey(table));
+  const hit = cache.get(scopeIdentity(table));
   if (hit) {
     renderStructure(hit);
     return;

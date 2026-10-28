@@ -1,5 +1,5 @@
 import { test, expect } from "./support/fixtures";
-import { dataWith, failRequests, gotoApp, holdRequests, reloadApp, selectTable } from "./support/helpers";
+import { apiCall, dataWith, failRequests, gotoApp, holdRequests, reloadApp, selectTable, tableData } from "./support/helpers";
 import { freePort, spawnDemo } from "./support/second-server";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({
@@ -59,7 +59,7 @@ test("a missing protocol header warns non-blockingly and is dismissible", async 
   // plain "**/api/tables" glob (no trailing wildcard) stops matching a
   // querystring'd URL — this matches on pathname alone, same as the other
   // routes' "**/api/tables/data*" wildcard already does for their query.
-  await page.route((url) => url.pathname.endsWith("/api/tables"), async (route) => {
+  await page.route(apiCall("/tables"), async (route) => {
     const response = await route.fetch();
     const headers = { ...response.headers() };
     delete headers["x-ashurbanipal-protocol"];
@@ -91,7 +91,7 @@ test("errors are surfaced as a visible role=alert region, not just logged", asyn
 test("a failing /sources hides the source picker and the tables still load", async ({ page }) => {
   const demo = await spawnDemo({ port: await freePort(), conformanceSecondSource: true });
   try {
-    await failRequests(page, (url) => url.pathname.endsWith("/api/sources"));
+    await failRequests(page, apiCall("/sources"));
     await gotoApp(page, "", demo.baseUrl);
     await expect(page.locator("#source-select-wrap")).toBeHidden();
     await expect(page.locator("#error")).toBeEmpty();
@@ -102,7 +102,7 @@ test("a failing /sources hides the source picker and the tables still load", asy
 });
 
 test("a failing /schemas hides the schema picker and the tables still load", async ({ page }) => {
-  await failRequests(page, (url) => url.pathname.endsWith("/api/schemas"));
+  await failRequests(page, apiCall("/schemas"));
   await gotoApp(page);
   await expect(page.locator("#schema-select-wrap")).toBeHidden();
   await expect(page.locator("#error")).toBeEmpty();
@@ -112,20 +112,23 @@ test("a failing /schemas hides the schema picker and the tables still load", asy
 test("a lone schema with no server default is still sent by name", async ({ page }) => {
   // A connection with no default schema rejects any request that omits `schema` (spec/protocol.md §1).
   await page.route(
-    (url) => url.pathname.endsWith("/api/schemas"),
+    apiCall("/schemas"),
     (route) => route.fulfill({ json: { schemas: [{ name: "public" }], default: null } }),
   );
-  const dataRequest = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith("/api/tables/data"));
+  const dataRequest = page.waitForRequest(tableData);
   await gotoApp(page);
   expect(new URL((await dataRequest).url()).searchParams.get("schema")).toBe("public");
   await expect(page.locator("#tbody tr").first()).toBeVisible();
   await expect(page.locator("#schema-select-wrap")).toBeHidden();
+  // A bare table name would not resolve there, so the structure title keeps the schema.
+  await page.locator("#structure-btn").click();
+  await expect(page.locator("#structure-title")).toHaveText(/^structure — public\./);
 });
 
 test("a failed /sources call drops a remembered source instead of sending it", async ({ page }) => {
   await gotoApp(page);
-  await page.evaluate(() => localStorage.setItem("ashurbanipal_ui", JSON.stringify({ source: "gone" })));
-  await failRequests(page, (url) => url.pathname.endsWith("/api/sources"));
+  await page.evaluate(() => localStorage.setItem("ashurbanipal_view", JSON.stringify({ source: "gone" })));
+  await failRequests(page, apiCall("/sources"));
   const withSource: string[] = [];
   page.on("request", (r) => {
     if (new URL(r.url()).searchParams.has("source")) withSource.push(r.url());

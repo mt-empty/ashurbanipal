@@ -7,6 +7,7 @@ import {
   holdRequests,
   rejectSort,
   selectTable,
+  tableData,
   tableKey,
   tableList,
   uiState,
@@ -63,7 +64,7 @@ test("a chip whose table fails to load leaves the view where it was and names th
   expect(urlParam(page, "table")).toBe("products");
   expect(await isLocked(page)).toBe(false);
 
-  const retried = page.waitForRequest((r) => r.url().includes("/api/tables/data"));
+  const retried = page.waitForRequest(tableData);
   await page.locator("#refresh").click();
   expect(param((await retried).url(), "table")).toBe("products");
 });
@@ -71,7 +72,7 @@ test("a chip whose table fails to load leaves the view where it was and names th
 test("a chip's remembered sort the backend refuses is dropped and the table opens unsorted", async ({ page }) => {
   await page.addInitScript((key) => {
     localStorage.setItem(
-      "ashurbanipal_ui",
+      "ashurbanipal_view",
       JSON.stringify({ table: "products", sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }),
     );
   }, tableKey("orders"));

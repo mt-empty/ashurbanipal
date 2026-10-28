@@ -1,22 +1,28 @@
 import { tryParseFilterDsl } from "../lib/filter-dsl.js";
 import { effectiveName, parseJoin, printJoin } from "../lib/join-dsl.js";
 import { collectNewRowKeys } from "../lib/row-diff.js";
+import { isScopeKey, scopeKey, visitKey } from "../lib/scope-key.js";
 import { $ } from "./dom.js";
 import { readStored, writeStored } from "./storage.js";
-import type { FilterCondition, JoinDef, JoinView, TableView, View, ViewData } from "./types.js";
+import type { FilterCondition, JoinDef, JoinView, Scope, TableView, View, ViewData } from "./types.js";
 
-const UI_KEY = "ashurbanipal_ui";
+const UI_KEY = "ashurbanipal_view";
 
 export interface State {
-  source: string | null;
-  schema: string | null;
+  scope: Scope;
+  // Whether /sources and /schemas list more than one name: the URL names only
+  // a choice there was (url.ts applyUrlScope).
+  manySources: boolean;
+  manySchemas: boolean;
+  // /schemas reported no default, so a table name only resolves with its schema.
+  noDefaultSchema: boolean;
   // null until a table is chosen. Changed through the transitions below.
   view: View | null;
   sort: string | null;
   order: "asc" | "desc";
   limit: number;
   offset: number;
-  // Keyed by scopeTableKey, like sortByTable.
+  // Keyed by knownScopeKey(table), like sortByTable.
   hiddenColumns: Record<string, string[]>;
   // sort/order remembered per table, so returning to a table restores the
   // sort last chosen there (what lets the refresh button surface new rows
@@ -44,8 +50,10 @@ export interface State {
 // assigning fields ad hoc. view-history.ts's navigateWithSeededFilter builds its own
 // request, seeding a filter rather than clearing one.
 export const state: State = {
-  source: null,
-  schema: null,
+  scope: { kind: "loading", source: null, schema: null },
+  manySources: false,
+  manySchemas: false,
+  noDefaultSchema: false,
   view: null,
   sort: null,
   order: "asc",
@@ -197,7 +205,7 @@ export function joinRequest(def: JoinDef): ViewRequest {
 // Table chip click: the filter was written against the previous table's
 // columns so it clears; the sort is the one last used on this table.
 export function tableRequest(name: string): ViewRequest {
-  const stored = state.sortByTable[scopeTableKey(name)];
+  const stored = tableEntry(state.sortByTable, name);
   return {
     view: { kind: "table", table: name },
     sort: stored?.col ?? null,
@@ -264,26 +272,49 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-// A table's name only means one table within its source and schema, so the
-// per-table maps are keyed by all three.
-export function scopeTableKey(table: string): string {
-  return JSON.stringify([state.source, state.schema, table]);
+// The key for anything remembered per scope: null until start-up has checked
+// both names against the lists, or after a lookup failed, so nothing is
+// remembered under a guessed scope.
+export function knownScopeKey(...rest: string[]): string | null {
+  return state.scope.kind === "known" ? scopeKey(state.scope.source, state.scope.schema, ...rest) : null;
 }
 
-// A stored key not shaped [source, schema, table] is dropped, so the next
-// persist() removes it.
-function isScopeTableKey(key: string): boolean {
-  try {
-    const v: unknown = JSON.parse(key);
-    return (
-      Array.isArray(v) &&
-      v.length === 3 &&
-      v.slice(0, 2).every((s) => s === null || typeof s === "string") &&
-      typeof v[2] === "string"
-    );
-  } catch {
-    return false;
-  }
+// Tells one scope (and, with `rest`, a table in it) from another within this
+// visit, resolved or not; for per-visit caches, never stored.
+export function scopeIdentity(...rest: string[]): string {
+  return visitKey(state.scope.source, state.scope.schema, ...rest);
+}
+
+// The names the page URL carries: only where there was a choice, so a link
+// stays short and opens on a sibling whose one source has another name.
+export function chosenScope(): { source: string | null; schema: string | null } {
+  return {
+    source: state.manySources ? state.scope.source : null,
+    schema: state.manySchemas ? state.scope.schema : null,
+  };
+}
+
+// A table name as the user would type it in SQL: schema-qualified only where
+// the bare name could mean another schema's table, or none.
+export function qualifiedTable(table: string): string {
+  const { schema } = state.scope;
+  return schema && (state.manySchemas || state.noDefaultSchema) ? `${schema}.${table}` : table;
+}
+
+// A table's name only means one table within its source and schema, so the
+// per-table maps are keyed by all three, and stay untouched while the scope
+// is not known.
+function tableEntry<T>(map: Record<string, T>, table: string): T | undefined {
+  const key = knownScopeKey(table);
+  return key === null ? undefined : map[key];
+}
+
+// `undefined` deletes the entry.
+function setTableEntry<T>(map: Record<string, T>, table: string, value: T | undefined): void {
+  const key = knownScopeKey(table);
+  if (key === null) return;
+  if (value === undefined) delete map[key];
+  else map[key] = value;
 }
 
 // Restores the persisted view (never the filter — ui-guidelines R6). A
@@ -293,24 +324,25 @@ function isScopeTableKey(key: string): boolean {
 export function restoreFromStorage(): void {
   try {
     const saved = JSON.parse(readStored(UI_KEY) || "{}");
-    if (typeof saved.source === "string") state.source = saved.source;
-    if (typeof saved.schema === "string") state.schema = saved.schema;
+    const name = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+    state.scope = { kind: "loading", source: name(saved.source), schema: name(saved.schema) };
     if (typeof saved.table === "string") state.view = tableView(saved.table);
     // isFinite, not just typeof: a corrupted NaN/Infinity is still type
     // "number" but breaks the pager arithmetic in grid.ts that divides by it.
     if (typeof saved.limit === "number" && Number.isFinite(saved.limit)) state.limit = saved.limit;
     // Keyed per table so hiding a column on one table never hides a
-    // same-named column on another.
+    // same-named column on another. A key not shaped [source, schema, table]
+    // is dropped, so the next persist() removes it.
     if (isPlainObject(saved.hiddenColumns)) {
       for (const [key, cols] of Object.entries(saved.hiddenColumns)) {
-        if (!isScopeTableKey(key) || !Array.isArray(cols)) continue;
+        if (!isScopeKey(key, 3) || !Array.isArray(cols)) continue;
         const clean = cols.filter((c) => typeof c === "string");
         if (clean.length) state.hiddenColumns[key] = clean;
       }
     }
     if (isPlainObject(saved.sortByTable)) {
       for (const [key, v] of Object.entries(saved.sortByTable)) {
-        if (isScopeTableKey(key) && isPlainObject(v) && typeof v.col === "string") {
+        if (isScopeKey(key, 3) && isPlainObject(v) && typeof v.col === "string") {
           state.sortByTable[key] = { col: v.col, order: v.order === "desc" ? "desc" : "asc" };
         }
       }
@@ -330,7 +362,8 @@ export function restoreFromStorage(): void {
 }
 
 export function persist(): void {
-  const { source, schema, limit, hiddenColumns, sortByTable, schemaBySource } = state;
+  const { limit, hiddenColumns, sortByTable, schemaBySource } = state;
+  const { source, schema } = state.scope;
   const table = startTable(state.view);
   // The caller almost always follows persist() with a loadData()/loadTables()
   // the user still needs. This blob grows per table/source touched, so a quota
@@ -349,7 +382,7 @@ export function hiddenColumns(): readonly string[] {
   if (view === null) return [];
   switch (view.kind) {
     case "table":
-      return state.hiddenColumns[scopeTableKey(view.table)] ?? [];
+      return tableEntry(state.hiddenColumns, view.table) ?? [];
     case "join":
       return view.hidden;
     default: {
@@ -364,13 +397,10 @@ export function setHiddenColumns(next: readonly string[]): void {
   const view = state.view;
   if (view === null) return;
   switch (view.kind) {
-    case "table": {
-      const key = scopeTableKey(view.table);
-      if (next.length) state.hiddenColumns[key] = [...next];
-      else delete state.hiddenColumns[key];
+    case "table":
+      setTableEntry(state.hiddenColumns, view.table, next.length ? [...next] : undefined);
       persist();
       return;
-    }
     case "join":
       state.view = { ...view, hidden: next };
       return;
@@ -394,16 +424,14 @@ export function pruneHiddenColumns(live: readonly string[]): void {
 export function rememberSort(): void {
   const table = tableInView();
   if (!table) return;
-  const key = scopeTableKey(table);
-  if (state.sort) state.sortByTable[key] = { col: state.sort, order: state.order };
-  else delete state.sortByTable[key];
+  setTableEntry(state.sortByTable, table, state.sort ? { col: state.sort, order: state.order } : undefined);
   sortRisk.set(false); // came from a click on a live header
   persist();
 }
 
 // Sets the active sort from what's stored for `table` (or clears it).
 export function applyStoredSort(table: string | null): void {
-  const stored = table ? state.sortByTable[scopeTableKey(table)] : undefined;
+  const stored = table ? tableEntry(state.sortByTable, table) : undefined;
   state.sort = stored?.col ?? null;
   state.order = stored?.order ?? "asc";
   sortRisk.set(state.sort !== null);
@@ -412,7 +440,7 @@ export function applyStoredSort(table: string | null): void {
 // The backend rejected a restored sort column (400). Drop it so the caller
 // can retry unsorted (ui-guidelines R5).
 function dropStoredSort(table: string | null): void {
-  if (table) delete state.sortByTable[scopeTableKey(table)];
+  if (table) setTableEntry(state.sortByTable, table, undefined);
   state.sort = null;
   state.order = "asc";
   sortRisk.set(false);
@@ -446,8 +474,7 @@ const NOT_THE_INPUTS = new Set(["query_timeout", "invalid_join", "not_readable"]
 // is forgotten and the request retried without it.
 export function dropStaleSort(req: ViewRequest, code: string | undefined): ViewRequest | null {
   if (!req.restoredSort || NOT_THE_INPUTS.has(code ?? "")) return null;
-  const table = startTable(req.view);
-  delete state.sortByTable[scopeTableKey(table)];
+  setTableEntry(state.sortByTable, startTable(req.view), undefined);
   persist();
   return { ...req, sort: null, order: "asc", restoredSort: false };
 }
@@ -455,24 +482,55 @@ const FILTER_FAULTS = new Set(["unknown_column", "invalid_filter", "invalid_para
 
 // Records the active schema against the current source (ui-guidelines R12),
 // so #source-select's onchange can restore it instead of resetting to the
-// source's default. Only keyed when there's a source to switch between — a
-// single-source deployment still persists state.schema via persist(), it
-// just has no per-source map to populate.
+// source's default. Only a schema switch records one, so a single-schema
+// source never gets an entry.
 export function rememberSchema(): void {
-  if (state.source && state.schema) state.schemaBySource[state.source] = state.schema;
+  if (state.scope.kind === "known") state.schemaBySource[state.scope.source] = state.scope.schema;
   persist();
+}
+
+// The scope to try on `source`: `schema` when one is named, else the schema
+// last used there (R12), which loadSchemas still checks. Source names are host
+// data, so an inherited key like `constructor` must not read as one.
+export function scopeOnSource(source: string | null, schema: string | null = null): Scope {
+  const remembered = source !== null && Object.hasOwn(state.schemaBySource, source);
+  return { kind: "loading", source, schema: schema ?? (remembered ? state.schemaBySource[source] : null) };
+}
+
+// The scope with its schema replaced by a concrete name; a known source makes it known.
+export function withSchema(scope: Scope, schema: string): Scope {
+  return scope.source === null
+    ? { kind: "failed", source: null, schema }
+    : { kind: "known", source: scope.source, schema };
+}
+
+// loadSources' result: the listed source to use, or null when /sources failed.
+// The schema stays a name to try until loadSchemas checks it.
+export function settleSource(source: string | null, many: boolean): void {
+  const { schema } = state.scope;
+  state.scope = source === null ? { kind: "failed", source, schema } : { kind: "loading", source, schema };
+  state.manySources = many;
+}
+
+// loadSchemas' result: the listed schema to use, or null when /schemas failed
+// or listed none.
+export function settleSchema(schema: string | null, many: boolean, noDefault: boolean): void {
+  state.scope =
+    schema === null ? { kind: "failed", source: state.scope.source, schema } : withSchema(state.scope, schema);
+  state.manySchemas = many;
+  state.noDefaultSchema = noDefault;
 }
 
 // ---- named scope transitions ----
 // Each scope switch (source, schema) has exactly one caller, so they take
 // no options.
 
-// Pins state.schema to a concrete name and syncs the #schema-select value +
+// Pins the scope's schema to a concrete name and syncs the #schema-select value +
 // the per-source memory (R12). The step shared by an explicit schema switch
 // and navigateWithSeededFilter's cross-schema path, which then diverge on
 // what resets afterward.
 export function setSchema(name: string): void {
-  state.schema = name;
+  state.scope = withSchema(state.scope, name);
   $<HTMLSelectElement>("schema-select").value = name;
   rememberSchema();
 }
@@ -482,8 +540,7 @@ export function setSchema(name: string): void {
 // source's view carries over — except the schema last used on this source,
 // which loadSchemas() still validates and falls back from if it's gone.
 export function switchSource(name: string): void {
-  state.source = name;
-  state.schema = state.schemaBySource[name] ?? null;
+  state.scope = scopeOnSource(name);
   enterTable(null);
   state.sort = null;
   state.offset = 0;
@@ -502,15 +559,14 @@ export function switchSchema(name: string): void {
 }
 
 // ---- new-rows-since-refresh bookkeeping ----
-// scopeKey identifies "the same view" between two fetches: a sort/filter/page/
+// rowDiffKey identifies "the same view" between two fetches: a sort/filter/page/
 // scope change makes every row look new, so the highlight only fires when this
 // is unchanged from the fetch being diffed against. The last payload and its
-// scope key are held here because they are per-session mutable state, like the
+// key are held here because they are per-session mutable state, like the
 // rest of this module; the diff itself is pure (lib/row-diff.ts).
-export function scopeKey(): string {
+function rowDiffKey(): string {
   return JSON.stringify([
-    state.source,
-    state.schema,
+    scopeIdentity(),
     viewKey(state.view),
     state.sort,
     state.order,
@@ -525,17 +581,17 @@ export function getLastPayload(): ViewData | null {
   return lastPayload;
 }
 
-let lastScopeKey: string | null = null;
+let lastRowDiffKey: string | null = null;
 
-// Advances the lastPayload/lastScopeKey bookkeeping, since it only ever happens
+// Advances the lastPayload/lastRowDiffKey bookkeeping, since it only ever happens
 // alongside this diff.
 export function diffNewRows(data: ViewData, highlightNew: boolean): { newRowKeys?: Set<string>; pkNames: string[] } {
-  const nowScope = scopeKey();
+  const nowScope = rowDiffKey();
   const result = collectNewRowKeys(lastPayload, data, {
     highlightNew,
-    sameScope: lastScopeKey === nowScope,
+    sameScope: lastRowDiffKey === nowScope,
   });
   lastPayload = data;
-  lastScopeKey = nowScope;
+  lastRowDiffKey = nowScope;
   return result;
 }

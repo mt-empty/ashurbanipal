@@ -35,7 +35,7 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
     filter: clause,
     ast,
   };
-  if (!schema || schema === state.schema) {
+  if (!schema || schema === state.scope.schema) {
     loadData({ next: req });
     return;
   }
@@ -101,19 +101,15 @@ window.addEventListener("popstate", () => {
   written = location.search;
   supersedeLoads();
   const params = new URLSearchParams(location.search);
-  const previousSource = state.source;
+  const previousSource = state.scope.source;
   // Exact reader: reproduce this history entry verbatim, absences included
   // (contrast url.ts's load-time overlay). Keep it separate from that overlay
   // reader — the header comment in url.ts says why.
   applyUrlExact(params);
-  $<HTMLSelectElement>("source-select").value = state.source ?? "";
-  $<HTMLSelectElement>("schema-select").value = state.schema ?? "";
-  // syncUrl() writes `schema` only when loadSchemas pinned one: for two or
-  // more schemas, or a lone schema the server has no default for. The second
-  // keeps a one-option selector, so both checks stand in for a re-fetch.
-  $("schema-select-wrap").hidden = !state.schema || $<HTMLSelectElement>("schema-select").options.length <= 1;
+  $<HTMLSelectElement>("source-select").value = state.scope.source ?? "";
+  $<HTMLSelectElement>("schema-select").value = state.scope.schema ?? "";
   persist();
-  if (state.source === previousSource) {
+  if (state.scope.source === previousSource) {
     loadTables({ replaceHistory: true }).catch(reportError);
     return;
   }

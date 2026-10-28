@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/fixtures";
-import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { gotoApp, selectTable, tableData, tableList, waitForIdle } from "./support/helpers";
 import { spawnDemo, freePort } from "./support/second-server";
 
 // A name the page URL asked for that this instance lacks falls back as before
@@ -28,6 +28,13 @@ test("a missing schema falls back to public and says so", async ({ page }) => {
   await expect(page.locator("#view-notice-text")).toHaveText("There is no schema nosuch here. Showing public instead.");
 });
 
+test("a source name on a host with one source is not a swap", async ({ page }) => {
+  await gotoApp(page, "?source=nosuch&table=nosuchtable");
+  const shown = (await page.locator("#current").textContent()) ?? "";
+  // The source selector is hidden, so only the table is named.
+  await expect(page.locator("#view-notice-text")).toHaveText(`There is no table nosuchtable here. Showing ${shown} instead.`);
+});
+
 test("a URL filter naming a missing column is removed with a note", async ({ page }) => {
   await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("nosuchcol = 1"));
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
@@ -39,7 +46,7 @@ test("a URL filter naming a missing column is removed with a note", async ({ pag
 
 test("a stale table restored from localStorage resets without a note", async ({ page }) => {
   await page.addInitScript(() => {
-    localStorage.setItem("ashurbanipal_ui", JSON.stringify({ table: "nosuchtable" }));
+    localStorage.setItem("ashurbanipal_view", JSON.stringify({ table: "nosuchtable" }));
   });
   await gotoApp(page);
   await expect(page.locator("#current")).not.toHaveText("—");
@@ -57,7 +64,7 @@ test("a refresh keeps the note and a table switch hides it", async ({ page }) =>
   await gotoApp(page, "?table=nosuchtable");
   await expect(note(page)).toBeVisible();
 
-  const refreshed = page.waitForResponse((r) => r.url().includes("/api/tables/data"));
+  const refreshed = page.waitForResponse(tableData);
   await page.locator("#refresh").click();
   await refreshed;
   await waitForIdle(page);
@@ -86,7 +93,7 @@ test("switching to a schema with no tables hides the note", async ({ page }) => 
   });
   await gotoApp(page, "?table=nosuchtable");
   await expect(note(page)).toBeVisible();
-  const listed = page.waitForResponse((r) => r.url().includes("/api/tables?") && r.url().includes("schema=warehouse"));
+  const listed = page.waitForResponse(tableList("warehouse"));
   await page.locator("#schema-select").selectOption("warehouse");
   await listed;
   await expect(note(page)).toBeHidden();
