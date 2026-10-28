@@ -78,7 +78,9 @@ test("a record copy button keeps its size while ⧉ flashes to a tick", async ({
     return { before, during };
   };
 
-  const statusCopy = page.locator("#record-dl dt", { hasText: /^status$/ }).locator("xpath=following-sibling::button[1]");
+  const statusCopy = page
+    .locator("#record-dl dt", { hasText: /^status$/ })
+    .locator("xpath=following-sibling::button[1]");
   for (const btn of [page.locator("#record-copy-row"), statusCopy]) {
     const { before, during } = await flash(btn);
     expect(during).toEqual(before);

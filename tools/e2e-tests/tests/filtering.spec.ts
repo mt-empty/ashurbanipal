@@ -1,12 +1,11 @@
-import { test, expect } from "./support/fixtures";
-import { gotoApp, selectTable, applyFilter, clearFilterViaSearchEvent } from "./support/helpers";
+import { expect, test } from "./support/fixtures";
+import { applyFilter, clearFilterViaSearchEvent, gotoApp, selectTable } from "./support/helpers";
 
 // total_approx (the pager's "~N rows") is deliberately the whole table's
 // pg_class.reltuples estimate regardless of any applied filter — same
 // "cheap over exact" philosophy as /table-counts (see docs/design.md §4) —
 // so these assert on actual row content, not that summary count.
-const statusCells = (page: import("@playwright/test").Page) =>
-  page.locator('#tbody td[data-col="status"] .cell-text');
+const statusCells = (page: import("@playwright/test").Page) => page.locator('#tbody td[data-col="status"] .cell-text');
 
 // Under full test parallelism, several workers hit the one shared demo
 // server/browser-CPU budget at once, which can widen the gap between "the
@@ -34,14 +33,10 @@ test("clearing the filter via the search event resets to unfiltered", async ({ p
   await gotoApp(page);
   await selectTable(page, "orders");
   await applyFilter(page, "status = completed");
-  await expect
-    .poll(async () => new Set(await statusCells(page).allTextContents()).size)
-    .toBe(1);
+  await expect.poll(async () => new Set(await statusCells(page).allTextContents()).size).toBe(1);
 
   await clearFilterViaSearchEvent(page);
-  await expect
-    .poll(async () => new Set(await statusCells(page).allTextContents()).size)
-    .toBeGreaterThan(1);
+  await expect.poll(async () => new Set(await statusCells(page).allTextContents()).size).toBeGreaterThan(1);
 });
 
 test("an invalid filter surfaces the backend's rejection text verbatim", async ({ page }) => {
@@ -66,9 +61,7 @@ test("a grammar-invalid filter errors client-side and sends no request", async (
 test("the filter crosses the wire as a JSON AST, not DSL text", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  const requestPromise = page.waitForRequest(
-    (r) => r.url().includes("/tables/data") && r.url().includes("filter="),
-  );
+  const requestPromise = page.waitForRequest((r) => r.url().includes("/tables/data") && r.url().includes("filter="));
   const filter = page.locator("#filter");
   await filter.fill("status = completed");
   await filter.press("Enter");
@@ -105,9 +98,7 @@ test("IS NOT NULL excludes null-valued rows", async ({ page }) => {
     .toBe(true);
 });
 
-test("column autocomplete suggests all columns at an empty/condition-start boundary", async ({
-  page,
-}) => {
+test("column autocomplete suggests all columns at an empty/condition-start boundary", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "users");
   await page.locator("#filter").click();
@@ -126,9 +117,7 @@ test("column autocomplete suggests all columns at an empty/condition-start bound
   ]);
 });
 
-test("column names are not offered mid-condition (past a column the next word is an operator)", async ({
-  page,
-}) => {
+test("column names are not offered mid-condition (past a column the next word is an operator)", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "users");
   const filter = page.locator("#filter");

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
 
 const CRATE_ROOT = new URL("../../../../implementations/rust/axum", import.meta.url).pathname;
@@ -41,23 +41,19 @@ export async function spawnDemo(opts: {
   conformanceSecondSource?: boolean;
 }): Promise<SpawnedDemo> {
   const baseUrl = `http://localhost:${opts.port}`;
-  const child: ChildProcess = spawn(
-    "cargo",
-    ["run", "-p", "ashurbanipal-axum", "--example", "demo"],
-    {
-      cwd: CRATE_ROOT,
-      env: {
-        ...process.env,
-        PORT: String(opts.port),
-        SIBLING_PORT: opts.siblingPort ? String(opts.siblingPort) : "",
-        MOUNT_PREFIX: opts.mountPrefix ?? "",
-        // demo.rs gates on var().is_ok(), so an empty string would still
-        // enable it — only pass the key when actually wanted.
-        ...(opts.conformanceSecondSource ? { CONFORMANCE_SECOND_SOURCE: "1" } : {}),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
+  const child: ChildProcess = spawn("cargo", ["run", "-p", "ashurbanipal-axum", "--example", "demo"], {
+    cwd: CRATE_ROOT,
+    env: {
+      ...process.env,
+      PORT: String(opts.port),
+      SIBLING_PORT: opts.siblingPort ? String(opts.siblingPort) : "",
+      MOUNT_PREFIX: opts.mountPrefix ?? "",
+      // demo.rs gates on var().is_ok(), so an empty string would still
+      // enable it — only pass the key when actually wanted.
+      ...(opts.conformanceSecondSource ? { CONFORMANCE_SECOND_SOURCE: "1" } : {}),
     },
-  );
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 
   let stdout = "";
   let stderr = "";

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import { gotoApp, holdRequests, selectTable, tableData, waitForIdle, waitForTable } from "./support/helpers";
 
 const expectBarIdle = (page: Page) => expect(page.locator("#load-bar")).not.toHaveAttribute("data-state", /.*/);

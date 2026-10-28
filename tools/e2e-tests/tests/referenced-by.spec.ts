@@ -1,4 +1,4 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { gotoApp, selectTable, uiState, waitForTable } from "./support/helpers";
 
 // Seed shape (conformance/seed): public.users is referenced by orders.user_id
@@ -46,7 +46,10 @@ test("the record dialog's 'referenced by' section drills in and closes the dialo
 
   const dialog = page.locator("#record-dialog");
   await expect(dialog).toBeVisible();
-  await dialog.locator("#record-referenced-by").getByRole("button", { name: /^→ orders \(user_id\)/ }).click();
+  await dialog
+    .locator("#record-referenced-by")
+    .getByRole("button", { name: /^→ orders \(user_id\)/ })
+    .click();
 
   await expect(dialog).toBeHidden();
   await waitForTable(page, "orders");
@@ -104,7 +107,12 @@ test("a cross-schema referrer absent from the target schema's own table list sur
     route.fulfill({
       json: {
         referenced_by: [
-          { schema: "warehouse", table: "ghost_events", constraint: "fk_ghost", columns: [{ from: "user_id", to: "id" }] },
+          {
+            schema: "warehouse",
+            table: "ghost_events",
+            constraint: "fk_ghost",
+            columns: [{ from: "user_id", to: "id" }],
+          },
         ],
       },
     }),

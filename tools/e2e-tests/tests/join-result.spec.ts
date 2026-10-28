@@ -45,7 +45,10 @@ test("a band's pill spans all its columns, and a long alias widens them only up 
   for (const gap of await fill()) expect(gap).toBeLessThan(16);
 
   const alias = "customers_who_placed_the_order_and_signed_up_during_the_spring";
-  await gotoJoin(page, `SELECT o.status, "${alias}".age FROM orders o LEFT JOIN users "${alias}" ON o.user_id = "${alias}".id`);
+  await gotoJoin(
+    page,
+    `SELECT o.status, "${alias}".age FROM orders o LEFT JOIN users "${alias}" ON o.user_id = "${alias}".id`,
+  );
   const band = page.locator('th.band[data-band="1"]');
   await expect(band.locator(".band-pill")).toHaveAttribute("title", `users ${alias}`);
   expect((await band.boundingBox())!.width).toBeLessThan(320);
@@ -82,7 +85,7 @@ test("sorting and filtering on a joined column send its table position", async (
 
 test("filter by this value on a joined cell writes alias.column", async ({ page }) => {
   await gotoJoin(page, ORDERS_USERS);
-  const cell = page.locator('#tbody tr').first().locator('td[data-col="email"]');
+  const cell = page.locator("#tbody tr").first().locator('td[data-col="email"]');
   await cell.hover();
   const response = nextJoinResponse(page);
   await cell.locator(".filter-eq").click();
@@ -133,9 +136,7 @@ test("closing the overlay of a refused join link opens the join's start table", 
 });
 
 test("a timeout offers Retry and Edit join", async ({ page }) => {
-  await page.route("**/api/tables/join*", (route) =>
-    route.fulfill(problem(500, "query timed out", "query_timeout")),
-  );
+  await page.route("**/api/tables/join*", (route) => route.fulfill(problem(500, "query timed out", "query_timeout")));
   await gotoApp(page, joinQuery(ORDERS_USERS));
   await expect(page.locator("#join-notice")).toContainText("took longer than the time limit");
   await expect(page.locator("#error")).toBeEmpty();

@@ -1,4 +1,4 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { gotoApp, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 test("a table keeps the sort last chosen on it when you leave and come back", async ({ page }) => {
@@ -58,19 +58,20 @@ test("a remembered sort column the backend rejects is dropped and the view recov
   expect((await uiState(page)).sortByTable[tableKey("products")]).toBeUndefined();
 });
 
-test("a stale remembered sort is dropped without discarding a shared link's filter", async ({
-  page,
-}) => {
+test("a stale remembered sort is dropped without discarding a shared link's filter", async ({ page }) => {
   // Two stale-risk inputs at once: the visitor's own stored sort names a
   // dead column, while the link's ?filter= is perfectly valid. The sort is
   // this visitor's incidental state, the filter is the link's whole point —
   // so the sort is dropped first and the filtered view still renders.
   await page.addInitScript((key) => {
-    localStorage.setItem("ashurbanipal_view", JSON.stringify({ sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }));
+    localStorage.setItem(
+      "ashurbanipal_view",
+      JSON.stringify({ sortByTable: { [key]: { col: "ghost_col", order: "asc" } } }),
+    );
   }, tableKey("orders"));
   await rejectSort(page, "ghost_col");
 
-  await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("status = completed"));
+  await gotoApp(page, `?table=orders&filter=${encodeURIComponent("status = completed")}`);
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
 
   await expect(page.locator("#error")).toBeEmpty();

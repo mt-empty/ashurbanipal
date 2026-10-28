@@ -18,7 +18,9 @@ function withSourceMap<T extends { source?: string }>(entry: T) {
   const at = entry.source?.indexOf(js) ?? -1;
   const prefix = at > 0 ? (entry.source ?? "").slice(0, at) : "";
   if (at < 0 || !/^\s*$/.test(prefix) || (prefix && !prefix.endsWith("\n"))) {
-    throw new Error("the served script is not the side-built bundle: run frontend:rebuild, then coverage/build-map.mjs");
+    throw new Error(
+      "the served script is not the side-built bundle: run frontend:rebuild, then coverage/build-map.mjs",
+    );
   }
   return { ...entry, sourceMap: { ...map, mappings: ";".repeat(prefix.split("\n").length - 1) + map.mappings } };
 }

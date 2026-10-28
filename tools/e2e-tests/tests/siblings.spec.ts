@@ -1,6 +1,6 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { gotoApp } from "./support/helpers";
-import { spawnDemo, freePort } from "./support/second-server";
+import { freePort, spawnDemo } from "./support/second-server";
 
 // Sibling health-polling needs live instances, so each test spawns its own
 // pair (as `mise run rust:demo-sibling` does) instead of using the shared server.
@@ -19,10 +19,7 @@ test("shows a healthy sibling with its name, status dot, and link", async ({ pag
     await expect(item.locator(".dot")).toHaveClass(/up/);
     await expect(item.locator(".dot")).toHaveAttribute("aria-label", "healthy");
     await expect(item.locator(".sibling-name")).toHaveText(`demo-${siblingPort}`);
-    await expect(item).toHaveAttribute(
-      "href",
-      `http://localhost:${siblingPort}/__ashurbanipal`,
-    );
+    await expect(item).toHaveAttribute("href", `http://localhost:${siblingPort}/__ashurbanipal`);
   } finally {
     await primary.stop();
     await sibling.stop();

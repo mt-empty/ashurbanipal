@@ -9,17 +9,18 @@ export async function waitForIdle(page: Page) {
   await expect(page.locator("#data-table")).not.toHaveAttribute("aria-busy", "true");
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        document.getAnimations().filter((a) => {
-          const target = (a.effect as KeyframeEffect)?.target as Element | undefined;
-          const cls = target?.classList;
-          return (
-            target?.id !== "refresh-icon" &&
-            !target?.closest("#load-bar") &&
-            !cls?.contains("chip-spinner") &&
-            !cls?.contains("row-new")
-          );
-        }).length,
+      page.evaluate(
+        () =>
+          document.getAnimations().filter((a) => {
+            const target = (a.effect as KeyframeEffect)?.target as Element | undefined;
+            const cls = target?.classList;
+            return (
+              target?.id !== "refresh-icon" &&
+              !target?.closest("#load-bar") &&
+              !cls?.contains("chip-spinner") &&
+              !cls?.contains("row-new")
+            );
+          }).length,
       ),
     )
     .toBe(0);

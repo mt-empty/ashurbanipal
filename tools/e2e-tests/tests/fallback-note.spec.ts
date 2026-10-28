@@ -1,6 +1,6 @@
-import { test, expect, type Page } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import { gotoApp, selectTable, tableData, tableList, waitForIdle } from "./support/helpers";
-import { spawnDemo, freePort } from "./support/second-server";
+import { freePort, spawnDemo } from "./support/second-server";
 
 // A name the page URL asked for that this instance lacks falls back as before
 // (R5), and now says so in #view-notice. A name restored from localStorage
@@ -9,7 +9,7 @@ import { spawnDemo, freePort } from "./support/second-server";
 const note = (page: Page) => page.locator("#view-notice");
 
 test("a missing table and its filter are both named in the note", async ({ page }) => {
-  await gotoApp(page, "?table=nosuchtable&filter=" + encodeURIComponent("status = completed"));
+  await gotoApp(page, `?table=nosuchtable&filter=${encodeURIComponent("status = completed")}`);
   const shown = (await page.locator("#current").textContent()) ?? "";
   // The filter was written against the missing table's columns, so it must not ride along.
   await expect(page.locator("#filter")).toHaveValue("");
@@ -32,11 +32,13 @@ test("a source name on a host with one source is not a swap", async ({ page }) =
   await gotoApp(page, "?source=nosuch&table=nosuchtable");
   const shown = (await page.locator("#current").textContent()) ?? "";
   // The source selector is hidden, so only the table is named.
-  await expect(page.locator("#view-notice-text")).toHaveText(`There is no table nosuchtable here. Showing ${shown} instead.`);
+  await expect(page.locator("#view-notice-text")).toHaveText(
+    `There is no table nosuchtable here. Showing ${shown} instead.`,
+  );
 });
 
 test("a URL filter naming a missing column is removed with a note", async ({ page }) => {
-  await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("nosuchcol = 1"));
+  await gotoApp(page, `?table=orders&filter=${encodeURIComponent("nosuchcol = 1")}`);
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
   await expect(page.locator("#filter")).toHaveValue("");
   await expect(page.locator("#view-notice-text")).toHaveText("Your filter doesn't fit orders here, so it was removed.");
@@ -79,7 +81,9 @@ test("a missing source falls back to the first source and says so", async ({ pag
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
   try {
     await gotoApp(page, "?source=nosuch", demo.baseUrl);
-    await expect(page.locator("#view-notice-text")).toHaveText("There is no source nosuch here. Showing primary instead.");
+    await expect(page.locator("#view-notice-text")).toHaveText(
+      "There is no source nosuch here. Showing primary instead.",
+    );
   } finally {
     await demo.stop();
   }

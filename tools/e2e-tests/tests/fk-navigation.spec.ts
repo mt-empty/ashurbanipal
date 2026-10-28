@@ -1,10 +1,10 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { dataWith, gotoApp, selectTable, waitForIdle, waitForTable } from "./support/helpers";
 
 test("clicking an FK cell switches table and filters to the matching row", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  const firstFkCell = page.locator('#tbody tr').first().locator('td[data-col="user_id"] .fk-cell');
+  const firstFkCell = page.locator("#tbody tr").first().locator('td[data-col="user_id"] .fk-cell');
   const userId = await firstFkCell.textContent();
   await firstFkCell.click();
 
@@ -56,9 +56,7 @@ test("clicking a cross-schema FK cell switches schema, table, and filters to the
   await gotoApp(page);
   await expect(page.locator("#schema-select-wrap")).toBeVisible();
 
-  const schemaLoaded = page.waitForResponse(
-    (r) => dataWith("schema", "warehouse")(r) && r.ok(),
-  );
+  const schemaLoaded = page.waitForResponse((r) => dataWith("schema", "warehouse")(r) && r.ok());
   await page.locator("#schema-select").selectOption("warehouse");
   await schemaLoaded;
   await waitForIdle(page);

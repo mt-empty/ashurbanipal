@@ -1,6 +1,6 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { gotoApp } from "./support/helpers";
-import { spawnDemo, freePort } from "./support/second-server";
+import { freePort, spawnDemo } from "./support/second-server";
 
 // Mount-point agnosticism: the frontend derives its API base from
 // location.pathname, so the whole UI must keep working when the router is
@@ -12,9 +12,7 @@ test("UI loads tables and data when mounted under a path prefix", async ({ page 
   const port = await freePort();
   const demo = await spawnDemo({ port, mountPrefix: "/svc" });
   try {
-    const dataLoaded = page.waitForResponse(
-      (r) => r.url().includes("/svc/__ashurbanipal/api/tables/data") && r.ok(),
-    );
+    const dataLoaded = page.waitForResponse((r) => r.url().includes("/svc/__ashurbanipal/api/tables/data") && r.ok());
     await gotoApp(page, "", `${demo.baseUrl}/svc`);
     await expect(page.locator("#tables [data-table]").first()).toBeVisible();
     await expect(page.locator("#tables [data-table]").first()).toHaveJSProperty("pathname", "/svc/__ashurbanipal");

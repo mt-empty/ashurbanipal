@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import {
   applyFilter,
   clearFilterViaSearchEvent,
@@ -104,9 +104,7 @@ test("back from a deep link's next table returns to the linked table", async ({ 
   await expectTable(page, "orders");
 });
 
-test("navigating to a different table from a back-stepped position truncates the forward stack", async ({
-  page,
-}) => {
+test("navigating to a different table from a back-stepped position truncates the forward stack", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "users");
   await selectTable(page, "orders");
@@ -148,7 +146,10 @@ test("filter, sort and page each add an entry that back steps through", async ({
   const entries = await historyLength(page);
   await applyFilter(page, "status = completed");
   expect(await historyLength(page)).toBe(entries + 1);
-  await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
+  await page
+    .locator("thead th[data-col]")
+    .first()
+    .click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   expect(await historyLength(page)).toBe(entries + 2);
   const sort = urlParam(page, "sort");
@@ -205,7 +206,10 @@ test("a load that changes nothing adds no entry", async ({ page }) => {
 test("sorting the initially-loaded table adds an entry, and back unsorts it", async ({ page }) => {
   await gotoApp(page);
   const start = await historyLength(page);
-  await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
+  await page
+    .locator("thead th[data-col]")
+    .first()
+    .click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   expect(await historyLength(page)).toBe(start + 1);
   expect(urlParam(page, "sort")).not.toBeNull();
@@ -238,7 +242,10 @@ test("a cross-schema FK click adds one entry, and back returns to the referring 
 test("a reload reopens an unsorted entry unsorted, though the table has a remembered sort", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  await page.locator("thead th[data-col]").first().click({ position: { x: 6, y: 6 } });
+  await page
+    .locator("thead th[data-col]")
+    .first()
+    .click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
   const sort = urlParam(page, "sort");
   expect(sort).not.toBeNull();

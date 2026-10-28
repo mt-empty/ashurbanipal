@@ -1,4 +1,4 @@
-import { test, expect, type Route } from "./support/fixtures";
+import { expect, type Route, test } from "./support/fixtures";
 import { apiCall, gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
 
 // Seed shape (conformance/seed): orders has the partial index
@@ -32,16 +32,18 @@ test("structure shows a composite FK as one entry with both column pairs", async
   await openStructure(page);
 
   await expect(
-    page.locator("#structure-body").getByText("warehouse_code, bin_code → inventory_locations(warehouse_code, bin_code)"),
+    page
+      .locator("#structure-body")
+      .getByText("warehouse_code, bin_code → inventory_locations(warehouse_code, bin_code)"),
   ).toBeVisible();
 });
 
-test("a failed structure fetch is reported inside the dialog and leaves the grid and banner alone", async ({ page }) => {
+test("a failed structure fetch is reported inside the dialog and leaves the grid and banner alone", async ({
+  page,
+}) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  await page.route(STRUCTURE, (route) =>
-    route.fulfill(problem(500, "catalog unavailable", "database_error")),
-  );
+  await page.route(STRUCTURE, (route) => route.fulfill(problem(500, "catalog unavailable", "database_error")));
   await openStructure(page);
 
   await expect(page.locator("#structure-body")).toContainText("catalog unavailable");

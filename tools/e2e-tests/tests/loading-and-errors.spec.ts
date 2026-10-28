@@ -1,15 +1,20 @@
-import { test, expect } from "./support/fixtures";
-import { apiCall, dataWith, failRequests, gotoApp, holdRequests, reloadApp, selectTable, tableData } from "./support/helpers";
+import { expect, test } from "./support/fixtures";
+import {
+  apiCall,
+  dataWith,
+  failRequests,
+  gotoApp,
+  holdRequests,
+  reloadApp,
+  selectTable,
+  tableData,
+} from "./support/helpers";
 import { freePort, spawnDemo } from "./support/second-server";
 
-test("a failed load leaves the previous table's rows and active state untouched", async ({
-  page,
-}) => {
+test("a failed load leaves the previous table's rows and active state untouched", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
-  const firstIdBefore = await page
-    .locator('#tbody tr').first().locator('td[data-col="id"] .cell-text')
-    .textContent();
+  const firstIdBefore = await page.locator("#tbody tr").first().locator('td[data-col="id"] .cell-text').textContent();
 
   await page.route("**/api/tables/data*", (route) => route.abort("failed"));
   await page.locator('#tables [data-table="users"]').click();
@@ -19,9 +24,7 @@ test("a failed load leaves the previous table's rows and active state untouched"
   await expect(page.locator("#current")).toHaveText("orders");
   await expect(page.locator('#tables [data-table="orders"]')).toHaveClass(/active/);
   await expect(page.locator('#tables [data-table="users"]')).not.toHaveClass(/active/);
-  const firstIdAfter = await page
-    .locator('#tbody tr').first().locator('td[data-col="id"] .cell-text')
-    .textContent();
+  const firstIdAfter = await page.locator("#tbody tr").first().locator('td[data-col="id"] .cell-text').textContent();
   expect(firstIdAfter).toBe(firstIdBefore);
 });
 
@@ -111,9 +114,8 @@ test("a failing /schemas hides the schema picker and the tables still load", asy
 
 test("a lone schema with no server default is still sent by name", async ({ page }) => {
   // A connection with no default schema rejects any request that omits `schema` (spec/protocol.md §1).
-  await page.route(
-    apiCall("/schemas"),
-    (route) => route.fulfill({ json: { schemas: [{ name: "public" }], default: null } }),
+  await page.route(apiCall("/schemas"), (route) =>
+    route.fulfill({ json: { schemas: [{ name: "public" }], default: null } }),
   );
   const dataRequest = page.waitForRequest(tableData);
   await gotoApp(page);

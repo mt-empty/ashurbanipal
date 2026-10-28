@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import { apiCall, gotoApp, problem, selectTable, urlParam } from "./support/helpers";
 
 // The service × label grid in Other services. /api/siblings is
@@ -30,7 +30,11 @@ async function openMatrix(page: Page) {
 }
 
 const cell = (page: Page, row: string, col: number) =>
-  page.locator("#siblings-matrix-body tr").filter({ has: page.locator(`th:has-text("${row}")`) }).locator("td").nth(col);
+  page
+    .locator("#siblings-matrix-body tr")
+    .filter({ has: page.locator(`th:has-text("${row}")`) })
+    .locator("td")
+    .nth(col);
 
 test("rows and columns follow the list, and this instance is marked", async ({ page }) => {
   await mockSiblings(page, LABELLED);
@@ -293,11 +297,18 @@ test("the grid does not inherit the data table's styles", async ({ page }) => {
   await gotoApp(page);
   await openMatrix(page);
   const style = (selector: string) =>
-    page.locator(selector).first().evaluate((e) => {
-      const s = getComputedStyle(e);
-      return { cursor: s.cursor, userSelect: s.userSelect, position: s.position };
-    });
-  expect(await style("#data-table thead th[data-col]")).toMatchObject({ cursor: "pointer", userSelect: "none", position: "sticky" });
+    page
+      .locator(selector)
+      .first()
+      .evaluate((e) => {
+        const s = getComputedStyle(e);
+        return { cursor: s.cursor, userSelect: s.userSelect, position: s.position };
+      });
+  expect(await style("#data-table thead th[data-col]")).toMatchObject({
+    cursor: "pointer",
+    userSelect: "none",
+    position: "sticky",
+  });
   expect(await style("#siblings-matrix thead th")).toMatchObject({ cursor: "auto", position: "static" });
   expect((await style("#siblings-matrix thead th")).userSelect).not.toBe("none");
 });

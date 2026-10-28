@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import { gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
 
 // The mocked /tables/data response is mutable and counted, and time is the
@@ -20,7 +20,13 @@ function payload(rows: Row[]) {
 type Failure = { status: number; title: string; code: string };
 const UNAVAILABLE: Failure = { status: 500, title: "database unavailable", code: "database_error" };
 
-async function setup(page: Page, rows: Row[] = [[1, "a"], [2, "b"]]) {
+async function setup(
+  page: Page,
+  rows: Row[] = [
+    [1, "a"],
+    [2, "b"],
+  ],
+) {
   const mock = { body: payload(rows), fail: null as Failure | null, hits: 0, gate: null as Promise<void> | null };
   await page.clock.install();
   await gotoApp(page);
@@ -155,7 +161,9 @@ test("30 minutes without input turns it off and says so", async ({ page }) => {
   await page.clock.fastForward(31 * 60_000);
 
   await expect(page.locator("#view-notice")).toBeVisible();
-  await expect(page.locator("#view-notice-text")).toHaveText("Auto-refresh turned off after 30 minutes without activity.");
+  await expect(page.locator("#view-notice-text")).toHaveText(
+    "Auto-refresh turned off after 30 minutes without activity.",
+  );
   await expect(page.locator("#refresh-interval")).toBeHidden();
   expect(mock.hits).toBe(before);
 });
@@ -163,7 +171,12 @@ test("30 minutes without input turns it off and says so", async ({ page }) => {
 test("a tick tints new rows, shows the +N chip and the updated time", async ({ page }) => {
   const mock = await setup(page);
   await choose(page, "5 s");
-  mock.body = payload([[1, "a"], [2, "b"], [3, "c"], [4, "d"]]);
+  mock.body = payload([
+    [1, "a"],
+    [2, "b"],
+    [3, "c"],
+    [4, "d"],
+  ]);
   await tick(page, mock);
 
   await expect(page.locator("#tbody tr.row-new")).toHaveCount(2);
