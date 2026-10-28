@@ -9,7 +9,6 @@ import {
   selectTable,
   tableData,
 } from "./support/helpers";
-import { freePort, spawnDemo } from "./support/second-server";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({ page }) => {
   await gotoApp(page);
@@ -91,17 +90,12 @@ test("errors are surfaced as a visible role=alert region, not just logged", asyn
 
 // spec/protocol.md makes /sources and /schemas mandatory; a failing one degrades to a single source or schema (R5).
 
-test("a failing /sources hides the source picker and the tables still load", async ({ page }) => {
-  const demo = await spawnDemo({ port: await freePort(), conformanceSecondSource: true });
-  try {
-    await failRequests(page, apiCall("/sources"));
-    await gotoApp(page, "", demo.baseUrl);
-    await expect(page.locator("#source-select-wrap")).toBeHidden();
-    await expect(page.locator("#error")).toBeEmpty();
-    await expect(page.locator("#tbody tr").first()).toBeVisible();
-  } finally {
-    await demo.stop();
-  }
+test("a failing /sources hides the source picker and the tables still load", async ({ page, secondSourceDemo }) => {
+  await failRequests(page, apiCall("/sources"));
+  await gotoApp(page, "", secondSourceDemo.baseUrl);
+  await expect(page.locator("#source-select-wrap")).toBeHidden();
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
 });
 
 test("a failing /schemas hides the schema picker and the tables still load", async ({ page }) => {

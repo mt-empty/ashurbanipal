@@ -1,6 +1,5 @@
 import { expect, type Page, test } from "./support/fixtures";
 import { gotoApp, selectTable, tableData, tableList, waitForIdle } from "./support/helpers";
-import { freePort, spawnDemo } from "./support/second-server";
 
 // A name the page URL asked for that this instance lacks falls back as before
 // (R5), and now says so in #view-notice. A name restored from localStorage
@@ -76,17 +75,11 @@ test("a refresh keeps the note and a table switch hides it", async ({ page }) =>
   await expect(note(page)).toBeHidden();
 });
 
-test("a missing source falls back to the first source and says so", async ({ page }) => {
-  const port = await freePort();
-  const demo = await spawnDemo({ port, conformanceSecondSource: true });
-  try {
-    await gotoApp(page, "?source=nosuch", demo.baseUrl);
-    await expect(page.locator("#view-notice-text")).toHaveText(
-      "There is no source nosuch here. Showing primary instead.",
-    );
-  } finally {
-    await demo.stop();
-  }
+test("a missing source falls back to the first source and says so", async ({ page, secondSourceDemo }) => {
+  await gotoApp(page, "?source=nosuch", secondSourceDemo.baseUrl);
+  await expect(page.locator("#view-notice-text")).toHaveText(
+    "There is no source nosuch here. Showing primary instead.",
+  );
 });
 
 test("switching to a schema with no tables hides the note", async ({ page }) => {
