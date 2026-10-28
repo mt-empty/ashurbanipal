@@ -7,6 +7,9 @@ export const ORDERS_USERS_CANONICAL = "SELECT *\nFROM orders o\nLEFT JOIN users 
 
 export const joinRequest = (url: URL) => url.pathname.endsWith("/api/tables/join");
 
+/** The saved-joins store as the page wrote it to localStorage, or null. */
+export const storedSavedJoins = (page: Page) => page.evaluate(() => localStorage.getItem("ashurbanipal_saved_joins"));
+
 /** Resolves with the next /api/tables/join response; arm it before the action. */
 export function nextJoinResponse(page: Page): Promise<Response> {
   return page.waitForResponse((r) => joinRequest(new URL(r.url())));

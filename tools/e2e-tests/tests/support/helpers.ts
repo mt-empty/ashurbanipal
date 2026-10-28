@@ -91,14 +91,20 @@ export async function clearFilterViaSearchEvent(page: Page) {
 }
 
 /** The key of a table's entry in uiState's per-table maps (hiddenColumns,
- * sortByTable): source, schema and table. The shared demo's one source is `primary`. */
-export function tableKey(table: string, schema = "public", source = "primary"): string {
-  return JSON.stringify([source, schema, table]);
+ * sortByTable): source, schema and table, in the shared demo's `primary`/`public`. */
+export function tableKey(table: string): string {
+  return JSON.stringify(["primary", "public", table]);
 }
 
 export const tableData = (url: URL) => url.pathname.endsWith("/api/tables/data");
 export const tableList = (schema: string) => (url: URL) =>
   url.pathname.endsWith("/api/tables") && url.searchParams.get("schema") === schema;
+
+/** Matches /api/tables requests whose `param` is `value`; takes a URL or its text. */
+export const tablesWith = (param: string, value: string) => (url: URL | string) => {
+  const u = typeof url === "string" ? new URL(url) : url;
+  return u.pathname.endsWith("/api/tables") && u.searchParams.get(param) === value;
+};
 
 /** Matches /api/tables/data requests whose `param` is `value`; takes a URL or its text. */
 export const dataWith = (param: string, value: string) => (url: URL | string) => {

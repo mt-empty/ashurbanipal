@@ -2661,7 +2661,7 @@ function joinRequest(def) {
   return { view, sort: null, order: "asc", offset: 0, filter: "", ast: [] };
 }
 function tableRequest(name) {
-  const stored2 = storedSort(name);
+  const stored2 = tableEntry(state.sortByTable, name);
   return {
     view: { kind: "table", table: name },
     sort: stored2?.col ?? null,
@@ -2712,26 +2712,31 @@ function restoreFilterFromParams(params) {
 function isPlainObject(v) {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
-function knownScope() {
-  return state.scope.kind === "known" ? state.scope : null;
+function knownScopeKey(...rest) {
+  return state.scope.kind === "known" ? scopeKey(state.scope.source, state.scope.schema, ...rest) : null;
 }
-function scopeIdentity() {
-  return visitKey(state.scope.source, state.scope.schema);
+function scopeIdentity(...rest) {
+  return visitKey(state.scope.source, state.scope.schema, ...rest);
 }
-function scopeTableKey(table) {
-  const known = knownScope();
-  return known && scopeKey(known.source, known.schema, table);
-}
-function requestTableKey(table) {
-  return visitKey(state.scope.source, state.scope.schema, table);
+function chosenScope() {
+  return {
+    source: state.manySources ? state.scope.source : null,
+    schema: state.manySchemas ? state.scope.schema : null
+  };
 }
 function qualifiedTable(table) {
   const { schema } = state.scope;
   return schema && (state.manySchemas || state.noDefaultSchema) ? `${schema}.${table}` : table;
 }
-function storedSort(table) {
-  const key = scopeTableKey(table);
-  return key === null ? void 0 : state.sortByTable[key];
+function tableEntry(map, table) {
+  const key = knownScopeKey(table);
+  return key === null ? void 0 : map[key];
+}
+function setTableEntry(map, table, value) {
+  const key = knownScopeKey(table);
+  if (key === null) return;
+  if (value === void 0) delete map[key];
+  else map[key] = value;
 }
 function restoreFromStorage() {
   try {
@@ -2778,10 +2783,8 @@ function hiddenColumns() {
   const view = state.view;
   if (view === null) return [];
   switch (view.kind) {
-    case "table": {
-      const key = scopeTableKey(view.table);
-      return key !== null && state.hiddenColumns[key] || [];
-    }
+    case "table":
+      return tableEntry(state.hiddenColumns, view.table) ?? [];
     case "join":
       return view.hidden;
     default: {
@@ -2794,14 +2797,10 @@ function setHiddenColumns(next) {
   const view = state.view;
   if (view === null) return;
   switch (view.kind) {
-    case "table": {
-      const key = scopeTableKey(view.table);
-      if (key === null) return;
-      if (next.length) state.hiddenColumns[key] = [...next];
-      else delete state.hiddenColumns[key];
+    case "table":
+      setTableEntry(state.hiddenColumns, view.table, next.length ? [...next] : void 0);
       persist();
       return;
-    }
     case "join":
       state.view = { ...view, hidden: next };
       return;
@@ -2819,22 +2818,18 @@ function pruneHiddenColumns(live) {
 function rememberSort() {
   const table = tableInView();
   if (!table) return;
+  setTableEntry(state.sortByTable, table, state.sort ? { col: state.sort, order: state.order } : void 0);
   sortRisk.set(false);
-  const key = scopeTableKey(table);
-  if (key === null) return;
-  if (state.sort) state.sortByTable[key] = { col: state.sort, order: state.order };
-  else delete state.sortByTable[key];
   persist();
 }
 function applyStoredSort(table) {
-  const stored2 = table ? storedSort(table) : void 0;
+  const stored2 = table ? tableEntry(state.sortByTable, table) : void 0;
   state.sort = stored2?.col ?? null;
   state.order = stored2?.order ?? "asc";
   sortRisk.set(state.sort !== null);
 }
 function dropStoredSort(table) {
-  const key = table && scopeTableKey(table);
-  if (key) delete state.sortByTable[key];
+  if (table) setTableEntry(state.sortByTable, table, void 0);
   state.sort = null;
   state.order = "asc";
   sortRisk.set(false);
@@ -2855,19 +2850,18 @@ function dropOneStaleInput(code) {
 var NOT_THE_INPUTS = /* @__PURE__ */ new Set(["query_timeout", "invalid_join", "not_readable"]);
 function dropStaleSort(req, code) {
   if (!req.restoredSort || NOT_THE_INPUTS.has(code ?? "")) return null;
-  const key = scopeTableKey(startTable(req.view));
-  if (key !== null) delete state.sortByTable[key];
+  setTableEntry(state.sortByTable, startTable(req.view), void 0);
   persist();
   return { ...req, sort: null, order: "asc", restoredSort: false };
 }
 var FILTER_FAULTS = /* @__PURE__ */ new Set(["unknown_column", "invalid_filter", "invalid_parameter"]);
 function rememberSchema() {
-  const known = knownScope();
-  if (known) state.schemaBySource[known.source] = known.schema;
+  if (state.scope.kind === "known") state.schemaBySource[state.scope.source] = state.scope.schema;
   persist();
 }
-function rememberedSchema(source) {
-  return Object.hasOwn(state.schemaBySource, source) ? state.schemaBySource[source] : null;
+function scopeOnSource(source, schema = null) {
+  const remembered = source !== null && Object.hasOwn(state.schemaBySource, source);
+  return { kind: "loading", source, schema: schema ?? (remembered ? state.schemaBySource[source] : null) };
 }
 function withSchema(scope2, schema) {
   return scope2.source === null ? { kind: "failed", source: null, schema } : { kind: "known", source: scope2.source, schema };
@@ -2878,8 +2872,7 @@ function settleSource(source, many) {
   state.manySources = many;
 }
 function settleSchema(schema, many, noDefault) {
-  const { source } = state.scope;
-  state.scope = source !== null && schema !== null ? { kind: "known", source, schema } : { kind: "failed", source, schema };
+  state.scope = schema === null ? { kind: "failed", source: state.scope.source, schema } : withSchema(state.scope, schema);
   state.manySchemas = many;
   state.noDefaultSchema = noDefault;
 }
@@ -2889,7 +2882,7 @@ function setSchema(name) {
   rememberSchema();
 }
 function switchSource(name) {
-  state.scope = { kind: "loading", source: name, schema: rememberedSchema(name) };
+  state.scope = scopeOnSource(name);
   enterTable(null);
   state.sort = null;
   state.offset = 0;
@@ -2950,9 +2943,9 @@ function takeUrlIntent() {
 function applyUrlOverlay(params) {
   const stored2 = state.scope;
   const source = params.has("source") ? params.get("source") || null : stored2.source;
-  const sameSource = source === stored2.source;
-  const schema = params.has("schema") ? params.get("schema") || null : sameSource ? stored2.schema : source && rememberedSchema(source);
-  state.scope = { kind: "loading", source, schema };
+  if (params.has("schema")) state.scope = { kind: "loading", source, schema: params.get("schema") || null };
+  else if (source !== stored2.source) state.scope = scopeOnSource(source);
+  else state.scope = { kind: "loading", source, schema: stored2.schema };
   if (params.has("table")) state.view = tableView(params.get("table"));
   if (params.has("sort")) state.sort = params.get("sort");
   if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
@@ -2968,7 +2961,7 @@ function applyUrlExact(params) {
   if (source === current2) {
     if (schema) state.scope = withSchema(state.scope, schema);
   } else {
-    state.scope = { kind: "loading", source, schema: schema || source && rememberedSchema(source) };
+    state.scope = scopeOnSource(source, schema || null);
   }
   state.view = tableView(params.get("table"));
   state.sort = params.get("sort") || null;
@@ -2984,9 +2977,9 @@ function applyScopeParams(params) {
   if (schema) params.set("schema", schema);
 }
 function applyUrlScope(params) {
-  const { source, schema } = state.scope;
-  if (source && state.manySources) params.set("source", source);
-  if (schema && state.manySchemas) params.set("schema", schema);
+  const { source, schema } = chosenScope();
+  if (source) params.set("source", source);
+  if (schema) params.set("schema", schema);
 }
 function scopeQuery() {
   const params = new URLSearchParams();
@@ -3215,9 +3208,8 @@ function showViewNotice(text) {
 }
 function showBootFallbackNote() {
   shownSwaps = swapsFrom(takeUrlIntent(), {
-    // Where there was nothing to choose, the selector is hidden and no name is a swap.
-    source: state.manySources ? state.scope.source : null,
-    schema: state.manySchemas ? state.scope.schema : null,
+    // A name with nothing to choose from (not in the URL either) is no swap.
+    ...chosenScope(),
     table: startTable(state.view),
     filter: state.filter || null
   });
@@ -3403,11 +3395,10 @@ function startAutoRefresh() {
 var scope = null;
 var widths = /* @__PURE__ */ new Map();
 function widthScopeOf(view) {
-  const known = knownScope();
-  return known && scopeKey(known.source, known.schema, viewKey(view));
+  return knownScopeKey(viewKey(view));
 }
 function useWidthScope(next) {
-  if (next !== null && next === scope) return;
+  if (next === scope) return;
   scope = next;
   widths.clear();
 }
@@ -4137,7 +4128,7 @@ function renderStructure(data) {
   );
 }
 function tableStructure(table) {
-  const key = requestTableKey(table);
+  const key = scopeIdentity(table);
   const generation2 = cacheGeneration;
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
@@ -4154,7 +4145,7 @@ function openStructure() {
   const token = ++requestToken;
   $("structure-title").textContent = `structure \u2014 ${qualifiedTable(table)}`;
   $("structure-dialog").showModal();
-  const hit = cache.get(requestTableKey(table));
+  const hit = cache.get(scopeIdentity(table));
   if (hit) {
     renderStructure(hit);
     return;
@@ -4396,14 +4387,14 @@ function catalogVersion() {
   return version;
 }
 function seedColumns(table, columns) {
-  const key = requestTableKey(table);
+  const key = scopeIdentity(table);
   if (resolved.has(key)) return;
   resolved.set(key, columns);
   version++;
   cache2.set(key, Promise.resolve(columns));
 }
 function tableColumns(table) {
-  const key = requestTableKey(table);
+  const key = scopeIdentity(table);
   let columns = cache2.get(key);
   if (!columns) {
     const params = new URLSearchParams({ table, limit: "1", offset: "0" });
@@ -4426,13 +4417,13 @@ function tableColumns(table) {
   return columns;
 }
 function cachedColumns(table) {
-  return resolved.get(requestTableKey(table));
+  return resolved.get(scopeIdentity(table));
 }
 function knownCatalog() {
   return Object.fromEntries(listedTableNames().map((t) => [t, cachedColumns(t)?.map((c) => c.name) ?? null]));
 }
 function indexedColumns(table) {
-  const key = requestTableKey(table);
+  const key = scopeIdentity(table);
   let found = indexes.get(key);
   if (!found) {
     const asked2 = generation;
@@ -4448,7 +4439,7 @@ function indexedColumns(table) {
   return found;
 }
 function readIndexedColumns(table) {
-  return indexesRead.get(requestTableKey(table));
+  return indexesRead.get(scopeIdentity(table));
 }
 
 // src/features/join-form.ts
@@ -4824,10 +4815,11 @@ function sanitizeEntries(raw) {
   }
   return out;
 }
-function sanitizeSaved(raw) {
+function sanitizeSaved(raw, isScope) {
   const store = dict();
   if (!isPlainObject2(raw)) return store;
   for (const [scope2, entries] of Object.entries(raw)) {
+    if (!isScope(scope2)) continue;
     const clean = sanitizeEntries(entries);
     if (clean.length) store[scope2] = clean;
   }
@@ -4873,9 +4865,7 @@ window.addEventListener("storage", (e) => {
 function read() {
   if (stored) return stored;
   try {
-    const clean = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"));
-    for (const key of Object.keys(clean)) if (!isScopeKey(key, 2)) delete clean[key];
-    stored = clean;
+    stored = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"), (key) => isScopeKey(key, 2));
   } catch (e) {
     console.warn("ashurbanipal: discarding unreadable saved joins", e);
     stored = {};
@@ -4887,26 +4877,22 @@ function write(store) {
   stored = store;
   return true;
 }
-function savedScope() {
-  const known = knownScope();
-  return known && scopeKey(known.source, known.schema);
-}
 function savedJoins() {
-  const scope2 = savedScope();
+  const scope2 = knownScopeKey();
   return scope2 === null ? [] : scopeEntries(read(), scope2);
 }
 function savedJoinFor(text) {
   return savedJoins().find((s) => s.text === text);
 }
 function saveJoin(name, text, replacing) {
-  const scope2 = savedScope();
+  const scope2 = knownScopeKey();
   if (scope2 === null) return "Saved joins need the source and schema, which didn't load.";
   const result = withSaved(read(), scope2, { name, text }, replacing);
   if ("error" in result) return result.error;
   return write(result.store) ? null : "This browser would not store the join.";
 }
 function deleteSavedJoin(name) {
-  const scope2 = savedScope();
+  const scope2 = knownScopeKey();
   if (scope2 !== null) write(withoutSaved(read(), scope2, name));
 }
 var lastRendered = "";
@@ -6280,7 +6266,7 @@ function renderReferencedBy(container, row2, dismiss) {
   renderTokens.set(container, token);
   const table = tableInView();
   if (table === null) return;
-  const key = requestTableKey(table);
+  const key = scopeIdentity(table);
   const hit = cache3.get(key);
   if (hit) {
     renderList2(container, hit, row2, dismiss);

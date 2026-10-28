@@ -1,6 +1,6 @@
 import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
-import { applyScopeParams, requestTableKey, tableInView } from "../core/state.js";
+import { applyScopeParams, scopeIdentity, tableInView } from "../core/state.js";
 import type { ReferencedByEntry, Row } from "../core/types.js";
 import { filterClauses } from "../lib/filter-dsl.js";
 import { navigateWithSeededFilter } from "./view-history.js";
@@ -83,7 +83,7 @@ export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: ()
   if (table === null) return;
   // Key captured now, alongside applyScopeParams' read of the same scope,
   // so a mid-flight scope switch can't file the result under the wrong key.
-  const key = requestTableKey(table);
+  const key = scopeIdentity(table);
   const hit = cache.get(key);
   if (hit) {
     renderList(container, hit, row, dismiss);

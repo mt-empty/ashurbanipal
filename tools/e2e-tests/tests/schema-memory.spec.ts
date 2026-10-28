@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "./support/fixtures";
 import { spawnDemo, freePort } from "./support/second-server";
-import { failRequests, goBack, gotoApp, reloadApp, urlParam, waitForIdle } from "./support/helpers";
+import { failRequests, goBack, gotoApp, reloadApp, tablesWith, uiState, urlParam, waitForIdle } from "./support/helpers";
 
 // ui-guidelines R12: the schema selected on a source is remembered, so
 // switching source away and back restores it instead of resetting to the
@@ -40,10 +40,7 @@ test("schema is remembered per source across a source switch", async ({ page }) 
 
     // Restored, not reset to `public`.
     await expect(page.locator("#schema-select")).toHaveValue("warehouse");
-    expect(await page.evaluate(() => {
-      const raw = localStorage.getItem("ashurbanipal_view");
-      return raw ? JSON.parse(raw).schemaBySource : null;
-    })).toMatchObject({ primary: "warehouse" });
+    expect((await uiState(page))?.schemaBySource).toMatchObject({ primary: "warehouse" });
   } finally {
     await demo.stop();
   }
@@ -79,9 +76,7 @@ test("a fresh visit to a source opens the schema its connection is pinned to", a
     // The first visit stores `primary` and `public`; `public` is listed on the other source too.
     await gotoApp(page, "", demo.baseUrl);
     await expect(page.locator("#schema-select")).toHaveValue("public");
-    const tablesListed = page.waitForRequest(
-      (r) => new URL(r.url()).pathname.endsWith("/api/tables") && new URL(r.url()).searchParams.get("source") === "other_schema",
-    );
+    const tablesListed = page.waitForRequest((r) => tablesWith("source", "other_schema")(r.url()));
     await gotoApp(page, "?source=other_schema", demo.baseUrl);
     expect(new URL((await tablesListed).url()).searchParams.get("schema")).toBe("other_schema");
     await expect(page.locator("#schema-select")).toHaveValue("other_schema");
@@ -99,9 +94,7 @@ test("a source whose schema list fails is still named on every request", async (
       page,
       (url) => url.pathname.endsWith("/api/schemas") && url.searchParams.get("source") === "other_schema",
     );
-    const tablesListed = page.waitForRequest(
-      (r) => new URL(r.url()).pathname.endsWith("/api/tables") && new URL(r.url()).searchParams.get("source") === "other_schema",
-    );
+    const tablesListed = page.waitForRequest((r) => tablesWith("source", "other_schema")(r.url()));
     await page.locator("#source-select").selectOption("other_schema");
     expect(new URL((await tablesListed).url()).searchParams.get("schema")).toBeNull();
     await waitForIdle(page);

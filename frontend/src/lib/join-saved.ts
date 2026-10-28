@@ -41,10 +41,12 @@ function sanitizeEntries(raw: unknown): SavedJoin[] {
 }
 
 // Anything that is not the expected shape is dropped, never repaired (ui-guidelines R5).
-export function sanitizeSaved(raw: unknown): SavedStore {
+// `isScope` checks a key; lib/ modules don't import each other, so the caller passes it.
+export function sanitizeSaved(raw: unknown, isScope: (key: string) => boolean): SavedStore {
   const store: SavedStore = dict();
   if (!isPlainObject(raw)) return store;
   for (const [scope, entries] of Object.entries(raw)) {
+    if (!isScope(scope)) continue;
     const clean = sanitizeEntries(entries);
     if (clean.length) store[scope] = clean;
   }

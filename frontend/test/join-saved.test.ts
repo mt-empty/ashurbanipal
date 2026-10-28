@@ -1,19 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { MAX_SAVED_PER_SCOPE, sanitizeSaved, scopeEntries, withoutSaved, withSaved } from "../src/lib/join-saved.ts";
-import { scopeKey } from "../src/lib/scope-key.ts";
+import { isScopeKey, scopeKey } from "../src/lib/scope-key.ts";
 
 const entry = (name: string, text = `FROM a JOIN b ON a.x = b.${name}`) => ({ name, text });
 // The store uses null-prototype objects, which deepStrictEqual tells apart from literals.
 const plain = (v: unknown): unknown => JSON.parse(JSON.stringify(v));
 const S = scopeKey("primary", "public");
+const sanitize = (raw: unknown) => sanitizeSaved(raw, () => true);
 
 test("anything that is not the saved shape is dropped", () => {
-  assert.deepEqual(plain(sanitizeSaved("x")), {});
-  assert.deepEqual(plain(sanitizeSaved([])), {});
+  assert.deepEqual(plain(sanitize("x")), {});
+  assert.deepEqual(plain(sanitize([])), {});
   assert.deepEqual(
     plain(
-      sanitizeSaved({
+      sanitize({
         [S]: [entry("ok"), { name: 1, text: "x" }, "y", { name: " ", text: "x" }, entry("ok")],
       }),
     ),
@@ -21,12 +22,17 @@ test("anything that is not the saved shape is dropped", () => {
       [S]: [entry("ok")],
     },
   );
-  assert.deepEqual(plain(sanitizeSaved({ [S]: "no", t: 3, u: { public: [entry("ok")] } })), {});
+  assert.deepEqual(plain(sanitize({ [S]: "no", t: 3, u: { public: [entry("ok")] } })), {});
+});
+
+test("a key the caller does not accept is dropped", () => {
+  const raw = { junk: [entry("a")], [scopeKey("a", "b", "c")]: [entry("b")], [S]: [entry("c")] };
+  assert.deepEqual(plain(sanitizeSaved(raw, (key) => isScopeKey(key, 2))), { [S]: [entry("c")] });
 });
 
 test("a scope key named like an Object.prototype key stays an ordinary key", () => {
   const raw = JSON.parse(`{"__proto__":[${JSON.stringify(entry("a"))}],"constructor":[${JSON.stringify(entry("b"))}]}`);
-  const store = sanitizeSaved(raw);
+  const store = sanitize(raw);
   assert.deepEqual(scopeEntries(store, "__proto__"), [entry("a")]);
   assert.deepEqual(scopeEntries(store, "constructor"), [entry("b")]);
   assert.deepEqual(scopeEntries({}, "toString"), []);

@@ -22,7 +22,7 @@ export interface State {
   order: "asc" | "desc";
   limit: number;
   offset: number;
-  // Keyed by scopeTableKey, like sortByTable.
+  // Keyed by knownScopeKey(table), like sortByTable.
   hiddenColumns: Record<string, string[]>;
   // sort/order remembered per table, so returning to a table restores the
   // sort last chosen there (what lets the refresh button surface new rows
@@ -205,7 +205,7 @@ export function joinRequest(def: JoinDef): ViewRequest {
 // Table chip click: the filter was written against the previous table's
 // columns so it clears; the sort is the one last used on this table.
 export function tableRequest(name: string): ViewRequest {
-  const stored = storedSort(name);
+  const stored = tableEntry(state.sortByTable, name);
   return {
     view: { kind: "table", table: name },
     sort: stored?.col ?? null,
@@ -272,29 +272,26 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-// Both names once start-up has checked them against the lists; null before
-// that, or after a lookup failed.
-export function knownScope(): { source: string; schema: string } | null {
-  return state.scope.kind === "known" ? state.scope : null;
+// The key for anything remembered per scope: null until start-up has checked
+// both names against the lists, or after a lookup failed, so nothing is
+// remembered under a guessed scope.
+export function knownScopeKey(...rest: string[]): string | null {
+  return state.scope.kind === "known" ? scopeKey(state.scope.source, state.scope.schema, ...rest) : null;
 }
 
-// Tells one scope from another within this visit, resolved or not; never stored.
-export function scopeIdentity(): string {
-  return visitKey(state.scope.source, state.scope.schema);
+// Tells one scope (and, with `rest`, a table in it) from another within this
+// visit, resolved or not; for per-visit caches, never stored.
+export function scopeIdentity(...rest: string[]): string {
+  return visitKey(state.scope.source, state.scope.schema, ...rest);
 }
 
-// A table's name only means one table within its source and schema, so the
-// per-table maps are keyed by all three. Null while the scope is not known:
-// nothing is remembered under a guessed scope.
-export function scopeTableKey(table: string): string | null {
-  const known = knownScope();
-  return known && scopeKey(known.source, known.schema, table);
-}
-
-// Keys a per-visit cache by the names its request sends, resolved or not;
-// never stored.
-export function requestTableKey(table: string): string {
-  return visitKey(state.scope.source, state.scope.schema, table);
+// The names the page URL carries: only where there was a choice, so a link
+// stays short and opens on a sibling whose one source has another name.
+export function chosenScope(): { source: string | null; schema: string | null } {
+  return {
+    source: state.manySources ? state.scope.source : null,
+    schema: state.manySchemas ? state.scope.schema : null,
+  };
 }
 
 // A table name as the user would type it in SQL: schema-qualified only where
@@ -304,9 +301,20 @@ export function qualifiedTable(table: string): string {
   return schema && (state.manySchemas || state.noDefaultSchema) ? `${schema}.${table}` : table;
 }
 
-function storedSort(table: string): { col: string; order: "asc" | "desc" } | undefined {
-  const key = scopeTableKey(table);
-  return key === null ? undefined : state.sortByTable[key];
+// A table's name only means one table within its source and schema, so the
+// per-table maps are keyed by all three, and stay untouched while the scope
+// is not known.
+function tableEntry<T>(map: Record<string, T>, table: string): T | undefined {
+  const key = knownScopeKey(table);
+  return key === null ? undefined : map[key];
+}
+
+// `undefined` deletes the entry.
+function setTableEntry<T>(map: Record<string, T>, table: string, value: T | undefined): void {
+  const key = knownScopeKey(table);
+  if (key === null) return;
+  if (value === undefined) delete map[key];
+  else map[key] = value;
 }
 
 // Restores the persisted view (never the filter — ui-guidelines R6). A
@@ -373,10 +381,8 @@ export function hiddenColumns(): readonly string[] {
   const view = state.view;
   if (view === null) return [];
   switch (view.kind) {
-    case "table": {
-      const key = scopeTableKey(view.table);
-      return (key !== null && state.hiddenColumns[key]) || [];
-    }
+    case "table":
+      return tableEntry(state.hiddenColumns, view.table) ?? [];
     case "join":
       return view.hidden;
     default: {
@@ -391,14 +397,10 @@ export function setHiddenColumns(next: readonly string[]): void {
   const view = state.view;
   if (view === null) return;
   switch (view.kind) {
-    case "table": {
-      const key = scopeTableKey(view.table);
-      if (key === null) return;
-      if (next.length) state.hiddenColumns[key] = [...next];
-      else delete state.hiddenColumns[key];
+    case "table":
+      setTableEntry(state.hiddenColumns, view.table, next.length ? [...next] : undefined);
       persist();
       return;
-    }
     case "join":
       state.view = { ...view, hidden: next };
       return;
@@ -422,17 +424,14 @@ export function pruneHiddenColumns(live: readonly string[]): void {
 export function rememberSort(): void {
   const table = tableInView();
   if (!table) return;
+  setTableEntry(state.sortByTable, table, state.sort ? { col: state.sort, order: state.order } : undefined);
   sortRisk.set(false); // came from a click on a live header
-  const key = scopeTableKey(table);
-  if (key === null) return;
-  if (state.sort) state.sortByTable[key] = { col: state.sort, order: state.order };
-  else delete state.sortByTable[key];
   persist();
 }
 
 // Sets the active sort from what's stored for `table` (or clears it).
 export function applyStoredSort(table: string | null): void {
-  const stored = table ? storedSort(table) : undefined;
+  const stored = table ? tableEntry(state.sortByTable, table) : undefined;
   state.sort = stored?.col ?? null;
   state.order = stored?.order ?? "asc";
   sortRisk.set(state.sort !== null);
@@ -441,8 +440,7 @@ export function applyStoredSort(table: string | null): void {
 // The backend rejected a restored sort column (400). Drop it so the caller
 // can retry unsorted (ui-guidelines R5).
 function dropStoredSort(table: string | null): void {
-  const key = table && scopeTableKey(table);
-  if (key) delete state.sortByTable[key];
+  if (table) setTableEntry(state.sortByTable, table, undefined);
   state.sort = null;
   state.order = "asc";
   sortRisk.set(false);
@@ -476,8 +474,7 @@ const NOT_THE_INPUTS = new Set(["query_timeout", "invalid_join", "not_readable"]
 // is forgotten and the request retried without it.
 export function dropStaleSort(req: ViewRequest, code: string | undefined): ViewRequest | null {
   if (!req.restoredSort || NOT_THE_INPUTS.has(code ?? "")) return null;
-  const key = scopeTableKey(startTable(req.view));
-  if (key !== null) delete state.sortByTable[key];
+  setTableEntry(state.sortByTable, startTable(req.view), undefined);
   persist();
   return { ...req, sort: null, order: "asc", restoredSort: false };
 }
@@ -488,15 +485,16 @@ const FILTER_FAULTS = new Set(["unknown_column", "invalid_filter", "invalid_para
 // source's default. Only a schema switch records one, so a single-schema
 // source never gets an entry.
 export function rememberSchema(): void {
-  const known = knownScope();
-  if (known) state.schemaBySource[known.source] = known.schema;
+  if (state.scope.kind === "known") state.schemaBySource[state.scope.source] = state.scope.schema;
   persist();
 }
 
-// The schema last used on `source`. Source names are host data, so an
-// inherited key like `constructor` must not read as one.
-export function rememberedSchema(source: string): string | null {
-  return Object.hasOwn(state.schemaBySource, source) ? state.schemaBySource[source] : null;
+// The scope to try on `source`: `schema` when one is named, else the schema
+// last used there (R12), which loadSchemas still checks. Source names are host
+// data, so an inherited key like `constructor` must not read as one.
+export function scopeOnSource(source: string | null, schema: string | null = null): Scope {
+  const remembered = source !== null && Object.hasOwn(state.schemaBySource, source);
+  return { kind: "loading", source, schema: schema ?? (remembered ? state.schemaBySource[source] : null) };
 }
 
 // The scope with its schema replaced by a concrete name; a known source makes it known.
@@ -517,9 +515,8 @@ export function settleSource(source: string | null, many: boolean): void {
 // loadSchemas' result: the listed schema to use, or null when /schemas failed
 // or listed none.
 export function settleSchema(schema: string | null, many: boolean, noDefault: boolean): void {
-  const { source } = state.scope;
   state.scope =
-    source !== null && schema !== null ? { kind: "known", source, schema } : { kind: "failed", source, schema };
+    schema === null ? { kind: "failed", source: state.scope.source, schema } : withSchema(state.scope, schema);
   state.manySchemas = many;
   state.noDefaultSchema = noDefault;
 }
@@ -543,7 +540,7 @@ export function setSchema(name: string): void {
 // source's view carries over — except the schema last used on this source,
 // which loadSchemas() still validates and falls back from if it's gone.
 export function switchSource(name: string): void {
-  state.scope = { kind: "loading", source: name, schema: rememberedSchema(name) };
+  state.scope = scopeOnSource(name);
   enterTable(null);
   state.sort = null;
   state.offset = 0;

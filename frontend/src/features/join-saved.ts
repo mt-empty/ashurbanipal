@@ -1,5 +1,5 @@
 import { reportError } from "../core/dom.js";
-import { joinInView, knownScope, scopeIdentity, viewHref } from "../core/state.js";
+import { joinInView, knownScopeKey, scopeIdentity, viewHref } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
 import type { JoinDef } from "../core/types.js";
 import { joinLabel } from "../lib/join-def.js";
@@ -12,7 +12,7 @@ import {
   withoutSaved,
   withSaved,
 } from "../lib/join-saved.js";
-import { isScopeKey, scopeKey } from "../lib/scope-key.js";
+import { isScopeKey } from "../lib/scope-key.js";
 import { hasJoinChips, type JoinChip, setJoinChips } from "./table-chips.js";
 
 // Saved joins live in their own localStorage key, outside the view blob: they
@@ -29,10 +29,8 @@ window.addEventListener("storage", (e) => {
 function read(): SavedStore {
   if (stored) return stored;
   try {
-    const clean = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"));
     // A key not shaped [source, schema] is never looked up, so drop it rather than write it forward.
-    for (const key of Object.keys(clean)) if (!isScopeKey(key, 2)) delete clean[key];
-    stored = clean;
+    stored = sanitizeSaved(JSON.parse(readStored(SAVED_KEY) || "{}"), (key) => isScopeKey(key, 2));
   } catch (e) {
     console.warn("ashurbanipal: discarding unreadable saved joins", e);
     stored = {};
@@ -46,14 +44,8 @@ function write(store: SavedStore): boolean {
   return true;
 }
 
-// Saved joins are kept only under a known scope, never a guessed one.
-function savedScope(): string | null {
-  const known = knownScope();
-  return known && scopeKey(known.source, known.schema);
-}
-
 export function savedJoins(): SavedJoin[] {
-  const scope = savedScope();
+  const scope = knownScopeKey();
   return scope === null ? [] : scopeEntries(read(), scope);
 }
 
@@ -62,7 +54,7 @@ export function savedJoinFor(text: string): SavedJoin | undefined {
 }
 
 export function saveJoin(name: string, text: string, replacing?: string): string | null {
-  const scope = savedScope();
+  const scope = knownScopeKey();
   if (scope === null) return "Saved joins need the source and schema, which didn't load.";
   const result = withSaved(read(), scope, { name, text }, replacing);
   if ("error" in result) return result.error;
@@ -70,7 +62,7 @@ export function saveJoin(name: string, text: string, replacing?: string): string
 }
 
 export function deleteSavedJoin(name: string): void {
-  const scope = savedScope();
+  const scope = knownScopeKey();
   if (scope !== null) write(withoutSaved(read(), scope, name));
 }
 

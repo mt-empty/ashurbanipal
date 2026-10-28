@@ -10,6 +10,7 @@ import {
   ORDERS_USERS_CANONICAL,
   pick,
   showResult,
+  storedSavedJoins,
   writeSql,
 } from "./support/join";
 
@@ -214,7 +215,7 @@ test("unreadable saved joins are discarded, and saving a join still works", asyn
   await showResult(page);
   await expandTableChips(page);
   await expect(page.locator("#tables li.join-chip :is(a, button)", { hasText: "orders with users" })).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem("ashurbanipal_saved_joins"))).toContain("orders with users");
+  expect(await storedSavedJoins(page)).toContain("orders with users");
 });
 
 test("a saved-joins entry not keyed by source and schema is dropped on the next save", async ({ page }) => {
@@ -228,7 +229,7 @@ test("a saved-joins entry not keyed by source and schema is dropped on the next 
   await writeSql(page, ORDERS_USERS);
   await page.locator("#join-name").fill("orders with users");
   await showResult(page);
-  const saved = JSON.parse((await page.evaluate(() => localStorage.getItem("ashurbanipal_saved_joins"))) ?? "{}");
+  const saved = JSON.parse((await storedSavedJoins(page)) ?? "{}");
   expect(Object.keys(saved)).toEqual([JSON.stringify(["primary", "public"])]);
 });
 
@@ -248,7 +249,7 @@ test("a join saved in another tab is kept when this tab saves one too", async ({
   await other.locator("#join-name").fill("from the other tab");
   await showResult(other);
 
-  const saved = await other.evaluate(() => localStorage.getItem("ashurbanipal_saved_joins"));
+  const saved = await storedSavedJoins(other);
   expect(saved).toContain("from this tab");
   expect(saved).toContain("from the other tab");
   await expandTableChips(other);

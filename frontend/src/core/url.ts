@@ -1,9 +1,10 @@
 import { dropRetiredKeys } from "./storage.js";
 import {
-  rememberedSchema,
+  chosenScope,
   restoreFilterFromParams,
   restoreFromStorage,
   restoreJoinFromParams,
+  scopeOnSource,
   startTable,
   state,
   tableView,
@@ -35,13 +36,9 @@ export function applyUrlOverlay(params: URLSearchParams): void {
   // to another source without a schema tries that source's own last schema.
   const stored = state.scope;
   const source = params.has("source") ? params.get("source") || null : stored.source;
-  const sameSource = source === stored.source;
-  const schema = params.has("schema")
-    ? params.get("schema") || null
-    : sameSource
-      ? stored.schema
-      : source && rememberedSchema(source);
-  state.scope = { kind: "loading", source, schema };
+  if (params.has("schema")) state.scope = { kind: "loading", source, schema: params.get("schema") || null };
+  else if (source !== stored.source) state.scope = scopeOnSource(source);
+  else state.scope = { kind: "loading", source, schema: stored.schema };
   if (params.has("table")) state.view = tableView(params.get("table"));
   if (params.has("sort")) state.sort = params.get("sort");
   if (params.has("order")) state.order = params.get("order") === "desc" ? "desc" : "asc";
@@ -59,7 +56,7 @@ export function applyUrlExact(params: URLSearchParams): void {
     if (schema) state.scope = withSchema(state.scope, schema);
   } else {
     // Another source is checked by loadSchemas, as on a switch; never with this source's schema.
-    state.scope = { kind: "loading", source, schema: schema || (source && rememberedSchema(source)) };
+    state.scope = scopeOnSource(source, schema || null);
   }
   state.view = tableView(params.get("table"));
   state.sort = params.get("sort") || null;
@@ -78,12 +75,10 @@ export function applyScopeParams(params: URLSearchParams): void {
   if (schema) params.set("schema", schema);
 }
 
-// The page URL names a source or schema only where there was a choice, so a
-// link stays short and opens on a sibling whose one source has another name.
 function applyUrlScope(params: URLSearchParams): void {
-  const { source, schema } = state.scope;
-  if (source && state.manySources) params.set("source", source);
-  if (schema && state.manySchemas) params.set("schema", schema);
+  const { source, schema } = chosenScope();
+  if (source) params.set("source", source);
+  if (schema) params.set("schema", schema);
 }
 
 export function scopeQuery(): string {
