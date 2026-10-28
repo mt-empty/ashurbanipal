@@ -50,21 +50,27 @@ test("under reduced motion the record dialog opens without its cross-fade (R15)"
   await gotoApp(page);
   test.skip(!(await page.evaluate(() => "startViewTransition" in document)), "no view transitions in this browser");
   await selectTable(page, "orders");
-  const openRecord = async () => {
+  // The dialog opens inside startViewTransition, so its fade starts a frame or two after it is visible; closing
+  // sooner can cancel the fade before it is ever seen.
+  const openRecord = async (settled: () => Promise<unknown>) => {
     await page.locator("#tbody tr").first().locator(".record-btn").click();
     await expect(page.locator("#record-dialog")).toBeVisible();
+    await settled();
     await page.keyboard.press("Escape");
     await expect(page.locator("#record-dialog")).toBeHidden();
   };
 
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await startCountingFades(page);
-  await openRecord();
-  expect(await fadesSeen(page), "the cross-fade runs with normal motion").toBeGreaterThan(0);
+  await openRecord(() =>
+    expect.poll(() => fadesSeen(page), "the cross-fade runs with normal motion").toBeGreaterThan(0),
+  );
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await startCountingFades(page);
-  await openRecord();
+  await openRecord(() =>
+    page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))),
+  );
   expect(await fadesSeen(page)).toBe(0);
 });
 
