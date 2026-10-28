@@ -322,11 +322,11 @@ language/framework port under `PORTING.md`. `MySqlSource` targets one
 but the two forks diverge on the query-timeout mechanism (§6 above); it
 detects which one it's talking to at runtime rather than requiring the
 host to declare it. Both adapters now run through `conformance/runner`:
-`rust-axum-conformance.yml`'s `mysql-conformance` and `sqlite-conformance`
-jobs boot a `DB_BACKEND=mysql` / `DB_BACKEND=sqlite` demo against a
+each port's `other-backend-conformance` job (MySQL, MariaDB and SQLite,
+via `_conformance-behavior.yml`'s `backend` input) boots a demo against a
 hand-authored dialect seed (`conformance/seed/seed.mysql.sql` /
 `seed.sqlite.sql`, the sqlx-style split — the Postgres seed's generator
-emits Postgres-only SQL) and point the kit at it; the runner learns which
+emits Postgres-only SQL) and points the kit at it; the runner learns which
 engine's expectations to hold from the seed's `_conformance_meta.dialect`
 column (`conformance/runner/backend.rs`). A `non-default-backend-tests`
 job runs the feature lint plus the `sqlite`/`mysql` unit and integration
