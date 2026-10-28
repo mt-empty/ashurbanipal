@@ -58,8 +58,8 @@ description = "flask-python implementation checks: lint, fmt-check, test"
 depends = ["flask:lint", "flask:fmt-check", "flask:test"]
 
 [tasks.frontend]
-description = "frontend checks: lint, cycle check, api-reference drift, typecheck, unit tests, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
-depends = ["frontend:lint", "frontend:check-cycles", "frontend:check-api-reference", "frontend:typecheck", "frontend:test-unit", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
+description = "frontend checks: lint, cycle check, api-reference drift, typecheck, e2e lint + typecheck, unit tests, build-check, vendored-copy sync, demo sync, Playwright e2e suite"
+depends = ["frontend:lint", "frontend:check-cycles", "frontend:check-api-reference", "frontend:typecheck", "frontend:e2e-lint", "frontend:e2e-typecheck", "frontend:test-unit", "frontend:build-check", "frontend:check-ports-sync", "frontend:build-demo-check", "frontend:test-e2e"]
 
 [tasks.docs]
 description = "docs checks: version strings vs. publishing-checklist ledger; feature-backlog index vs. entry headers"

@@ -24,6 +24,24 @@ run = ["pnpm exec tsc --noEmit", "pnpm exec tsc --noEmit -p tsconfig.test.json"]
 dir = "frontend"
 depends = ["frontend:install"]
 
+["frontend:e2e-install"]
+description = "pnpm install --frozen-lockfile for tools/e2e-tests"
+hide = true
+run = "pnpm install --frozen-lockfile"
+dir = "tools/e2e-tests"
+
+["frontend:e2e-typecheck"]
+description = "tsc --noEmit over tools/e2e-tests (specs, support, Playwright configs)"
+run = "pnpm run typecheck"
+dir = "tools/e2e-tests"
+depends = ["frontend:e2e-install"]
+
+["frontend:e2e-lint"]
+description = "biome check over tools/e2e-tests (format + recommended lint; see tools/e2e-tests/biome.json)"
+run = "pnpm run lint"
+dir = "tools/e2e-tests"
+depends = ["frontend:e2e-install"]
+
 ["frontend:test-unit"]
 description = "node --test over frontend/test/ — pure-logic units (the DSL parser); no browser"
 run = "pnpm run test"
