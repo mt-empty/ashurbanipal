@@ -117,7 +117,7 @@ const JOIN_DIALECT: Dialect = Dialect {
 /// A column-level check MariaDB adds to every JSON column, matched exactly so a
 /// user's own `json_valid` check on another column doesn't count.
 const MARIADB_JSON_COLUMNS_SQL: &str = "constraint_name from information_schema.check_constraints \
-     where constraint_schema = ? and table_name = ? and level = 'Column' \
+     where constraint_schema = ? and table_name = ? \
        and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
@@ -506,7 +506,7 @@ impl DbSource for MySqlSource {
         let rows = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(timed_select(
             variant,
             CATALOG_TIMEOUT_SECS,
-            // Byte order: MariaDB's catalog collation ignores `_` when sorting.
+            // Byte order: MariaDB's catalog collation folds case, so `_` sorts after letters.
             "table_name, table_comment from information_schema.tables \
              where table_schema = ? and table_type = 'BASE TABLE' \
              order by cast(table_name as binary)",

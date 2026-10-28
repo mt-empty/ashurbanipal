@@ -362,7 +362,7 @@ func (c *MySQLSource) keyMetadataInTx(ctx context.Context, tx queryer, variant m
 // JSON column exactly, so a user's own json_valid check on another column
 // doesn't count.
 const mariadbJSONColumnsSQL = "constraint_name from information_schema.check_constraints " +
-	"where constraint_schema = ? and table_name = ? and level = 'Column' " +
+	"where constraint_schema = ? and table_name = ? " +
 	"and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
 
 // mariadbJSONColumns names the JSON columns of table: MariaDB has no JSON
@@ -548,7 +548,7 @@ func (c *MySQLSource) ListTables(ctx context.Context, schema *string) ([]TableIn
 	qctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
-		// Byte order: MariaDB's catalog collation ignores _ when sorting.
+		// Byte order: MariaDB's catalog collation folds case, so _ sorts after letters.
 		`table_name, table_comment from information_schema.tables
 		 where table_schema = ? and table_type = 'BASE TABLE'
 		 order by cast(table_name as binary)`), realSchema)

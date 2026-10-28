@@ -110,14 +110,14 @@ const JOIN_DIALECT: JoinDialect = {
   ilike: "lowered-like",
 };
 
-/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
 // Matches the column check MariaDB adds to every JSON column exactly, so a
 // user's own json_valid check on another column doesn't count.
 const MARIADB_JSON_COLUMNS_SQL =
   "constraint_name as constraint_name from information_schema.check_constraints " +
-  "where constraint_schema = ? and table_name = ? and level = 'Column' " +
+  "where constraint_schema = ? and table_name = ? " +
   "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
+/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
 export function mysqlTypeClass(dataType: string, columnType: string): TypeClass | undefined {
   switch (dataType.toLowerCase()) {
     case "tinyint":
@@ -362,7 +362,7 @@ export class MySqlSource implements DbSource {
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {
     return this.withTx(async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
-      // Byte order: MariaDB's catalog collation ignores `_` when sorting.
+      // Byte order: MariaDB's catalog collation folds case, so `_` sorts after letters.
       const sql = timedSelect(
         variant,
         timeoutMs,

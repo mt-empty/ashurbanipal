@@ -60,7 +60,7 @@ _MARIADB = "mariadb"
 # user's own json_valid check on another column doesn't count.
 _MARIADB_JSON_COLUMNS_SQL = (
     "constraint_name from information_schema.check_constraints "
-    "where constraint_schema = %s and table_name = %s and level = 'Column' "
+    "where constraint_schema = %s and table_name = %s "
     "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
 )
 
@@ -307,7 +307,7 @@ class MySqlSource(DbSource):
                     _timed_select(
                         variant,
                         CATALOG_TIMEOUT_SECS,
-                        # Byte order: MariaDB's catalog collation ignores `_` when sorting.
+                        # Byte order: MariaDB's catalog collation folds case, so `_` sorts after letters.
                         "table_name, table_comment from information_schema.tables "
                         "where table_schema = %s and table_type = 'BASE TABLE' "
                         "order by cast(table_name as binary)",

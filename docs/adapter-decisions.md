@@ -185,7 +185,7 @@ so `_conformance_meta` comes first and `order_extra` before `orders`:
 | Backend  | Mechanism |
 |----------|-----------|
 | Postgres | `order by relname`: `name` compares bytewise |
-| MySQL/MariaDB | `order by cast(table_name as binary)`, and the same for schema names. MariaDB's catalog collation (`utf8mb3_general_ci`) ignores case and `_`, so a plain `order by` would put `orders` before `order_extra` and `_conformance_meta` last |
+| MySQL/MariaDB | `order by cast(table_name as binary)`, and the same for schema names. MariaDB's catalog collation (`utf8mb3_general_ci`) folds case, so `_` sorts after every letter and a plain `order by` would put `orders` before `order_extra` and `_conformance_meta` last |
 | SQLite   | `order by name`: `BINARY` is the default collation |
 
 ## §5.4.1 — forward FK/PK column metadata (`key_metadata`)
