@@ -97,6 +97,18 @@ selects. `frontend:test-e2e` and `frontend:test-e2e-install` take
 `--browsers <list>` instead (CI passes one browser per shard), so a value
 left in the shell can't drop a browser from the final run.
 
+### Other engines
+
+The suite above runs on Postgres. `E2E_BACKEND=sqlite|mysql` points the same
+`playwright.config.ts` at a demo on that engine and runs only
+`tests/default-scope.spec.ts`, which checks what the UI opens there (SQLite's
+`main`; MySQL's `database()`) and that every request names it.
+`mise run frontend:test-e2e-backend sqlite|mysql` sets it for Chromium; the
+`test-e2e-backend` job in `frontend-e2e.yml` runs both. SQLite needs the
+`sqlite3` CLI, which seeds a fresh file per server. MySQL needs a database
+loaded from `conformance/seed/seed.mysql.sql`, named `ashurbanipal`, at
+`E2E_MYSQL_URL` (default `MYSQL_TEST_URL`).
+
 ## 6. Measure coverage on demand
 
 `mise run frontend:test-e2e-coverage [spec or -g title…]` runs the suite on
