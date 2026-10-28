@@ -5,11 +5,15 @@
   "description": "Playwright E2E suite for frontend/dbviewer.html. Standalone dev-only tooling, not part of the published crate — see docs/e2e-testing-guidelines.md.",
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.3",
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
-    "monocart-coverage-reports": "3.0.0"
+    "monocart-coverage-reports": "3.0.0",
+    "typescript": "^7.0.2"
   }
 }
