@@ -277,7 +277,7 @@ impl MySqlSource {
         Ok(rows)
     }
 
-    async fn join_table_meta_in_tx(
+    async fn table_meta_in_tx(
         &self,
         tx: &mut Transaction<'_, MySql>,
         variant: Variant,
@@ -595,44 +595,18 @@ impl DbSource for MySqlSource {
             None => (String::new(), Vec::new()),
         };
 
-        // DATA_TYPE and COLUMN_COMMENT both sit as plain columns on
-        // information_schema.columns — unlike Postgres, no separate
-        // pg_attribute join is needed to get comments, and no ordinal-
-        // position-vs-attnum drift is possible.
-        let column_meta =
-            sqlx::query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(timed_select(
-                variant,
-                timeout,
-                "column_name, data_type, column_comment \
-                 from information_schema.columns \
-                 where table_schema = ? and table_name = ? \
-                 order by ordinal_position",
-            )))
-            .bind(&schema)
-            .bind(&table)
-            .fetch_all(&mut *tx)
-            .await?;
-
-        let (pk_columns, fk_columns) = self
-            .key_metadata_in_tx(&mut tx, variant, &schema, &table, timeout)
-            .await?;
-        let columns: Vec<ColumnInfo> = column_meta
+        // The join route's lookup, so both routes report the same column types.
+        let columns: Vec<ColumnInfo> = self
+            .table_meta_in_tx(&mut tx, variant, &schema, &table, timeout)
+            .await?
+            .columns
             .into_iter()
-            .map(|(name, type_name, comment)| {
-                let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                } else if let Some(r) = fk_columns.get(&name) {
-                    (Some(KeyKind::Fk), Some(r.clone()))
-                } else {
-                    (None, None)
-                };
-                ColumnInfo {
-                    name,
-                    type_name,
-                    key,
-                    references,
-                    comment: (!comment.is_empty()).then_some(comment),
-                }
+            .map(|c| ColumnInfo {
+                name: c.name,
+                type_name: c.type_name,
+                key: c.key,
+                references: c.references,
+                comment: c.comment,
             })
             .collect();
 
@@ -725,7 +699,7 @@ impl DbSource for MySqlSource {
                 return Err(DbError::BadJoin(format!("unknown table {name:?}")));
             }
             let meta = self
-                .join_table_meta_in_tx(&mut tx, variant, &schema, name, timeout)
+                .table_meta_in_tx(&mut tx, variant, &schema, name, timeout)
                 .await?;
             metas.insert(name, meta);
         }

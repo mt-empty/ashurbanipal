@@ -367,29 +367,17 @@ class MySqlSource(DbSource):
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
-                cur.execute(
-                    _timed_select(
-                        variant,
-                        timeout,
-                        "column_name, data_type, column_comment "
-                        "from information_schema.columns "
-                        "where table_schema = %s and table_name = %s "
-                        "order by ordinal_position",
-                    ),
-                    (resolved_schema, table),
-                )
-                column_meta = cur.fetchall()
-
-                pk_columns, fk_columns = self._key_metadata(cur, variant, resolved_schema, table, timeout)
+                # The join route's lookup, so both routes report the same column types.
+                meta = self._table_meta(cur, variant, resolved_schema, table, timeout)
                 columns = [
                     ColumnInfo(
-                        name=name,
-                        type_name=type_name,
-                        key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
-                        references=fk_columns.get(name),
-                        comment=(comment or None),
+                        name=c.name,
+                        type_name=c.type_name,
+                        key=c.key,
+                        references=c.references,
+                        comment=c.comment,
                     )
-                    for name, type_name, comment in column_meta
+                    for c in meta.columns
                 ]
 
                 select_list = ", ".join(f"CAST({_quote_ident(c.name)} AS CHAR)" for c in columns)
@@ -445,7 +433,7 @@ class MySqlSource(DbSource):
         cur.execute(_timed_select(variant, timeout_secs, _MARIADB_JSON_COLUMNS_SQL), (schema, table))
         return {name for (name,) in cur.fetchall()}
 
-    def _join_table_meta(self, cur, variant: str, schema: str, table: str, timeout_secs: int) -> TableMeta:
+    def _table_meta(self, cur, variant: str, schema: str, table: str, timeout_secs: int) -> TableMeta:
         cur.execute(
             _timed_select(
                 variant,
@@ -492,7 +480,7 @@ class MySqlSource(DbSource):
                         continue
                     if name not in allowed:
                         raise BadJoin(f"unknown table {name!r}")
-                    metas[name] = self._join_table_meta(cur, variant, resolved_schema, name, timeout)
+                    metas[name] = self._table_meta(cur, variant, resolved_schema, name, timeout)
                 plan = plan_join(spec, [metas[n] for n in names], opts)
 
                 # The statement is built from catalog names and generated

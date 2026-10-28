@@ -309,7 +309,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             ) { rs -> rs.getString(1) }.toSet()
         }
 
-    private fun joinTableMeta(variant: Variant, schema: String, table: String): JoinTableMeta {
+    private fun tableMeta(variant: Variant, schema: String, table: String): JoinTableMeta {
         data class Col(val name: String, val type: String, val comment: String?, val collation: String?, val columnType: String)
         val columns = query(
             dataSource,
@@ -349,7 +349,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         for (name in names) {
             if (name in metas) continue
             if (name !in allowed) throw BadJoinException("unknown table \"$name\"")
-            metas[name] = joinTableMeta(variant, realSchema, name)
+            metas[name] = tableMeta(variant, realSchema, name)
         }
         val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
 
@@ -383,27 +383,9 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
 
         val whereClause = opts.filter?.let { buildWhereClauseMysql(it, columnNames) } ?: WhereClause("", emptyList())
 
-        val columnMeta = query(
-            dataSource,
-            timedSelect(
-                variant,
-                queryTimeoutSecs,
-                "column_name, data_type, column_comment from information_schema.columns " +
-                    "where table_schema = ? and table_name = ? order by ordinal_position",
-            ),
-            listOf(realSchema, realTable),
-        ) { rs -> Triple(rs.getString(1), rs.getString(2), rs.getString(3)) }
-
-        val (pkColumns, fkColumns) = keyMetadata(variant, realSchema, realTable)
-        val columns = columnMeta.map { (name, typeName, comment) ->
-            val key: String?
-            val references: ColumnRef?
-            when {
-                pkColumns.contains(name) -> { key = "pk"; references = fkColumns[name] }
-                fkColumns.containsKey(name) -> { key = "fk"; references = fkColumns[name] }
-                else -> { key = null; references = null }
-            }
-            ColumnInfo(name, typeName, key, references, comment?.takeIf { it.isNotEmpty() })
+        // The join route's lookup, so both routes report the same column types.
+        val columns = tableMeta(variant, realSchema, realTable).columns.map {
+            ColumnInfo(it.name, it.type, it.key, it.references, it.comment)
         }
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdentMysql(it.name)} AS CHAR)" }

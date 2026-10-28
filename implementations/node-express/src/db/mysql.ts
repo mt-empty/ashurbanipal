@@ -412,7 +412,7 @@ export class MySqlSource implements DbSource {
     return new Set(rows.map((r) => r.constraint_name as string));
   }
 
-  private async joinTableMeta(
+  private async tableMeta(
     conn: PoolConnection,
     variant: Variant,
     schema: string,
@@ -461,7 +461,7 @@ export class MySqlSource implements DbSource {
       for (const name of names) {
         if (metas.has(name)) continue;
         if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
-        metas.set(name, await this.joinTableMeta(conn, variant, realSchema, name, timeoutMs));
+        metas.set(name, await this.tableMeta(conn, variant, realSchema, name, timeoutMs));
       }
       const plan = planJoin(
         spec,
@@ -504,28 +504,13 @@ export class MySqlSource implements DbSource {
 
       const { where: whereClause, values: filterValues } = buildWhereClauseMysql(opts.filter, columnNames);
 
-      const metaSql = timedSelect(
-        variant,
-        timeoutMs,
-        "column_name as column_name, data_type as data_type, column_comment as column_comment " +
-          "from information_schema.columns where table_schema = ? and table_name = ? order by ordinal_position",
-      );
-      const columnMetaRows = await queryRows(conn, metaSql, [realSchema, realTable]);
-
-      const { pkColumns, fkColumns } = await this.keyMetadataInTx(conn, variant, realSchema, realTable, timeoutMs);
-
-      const columns: ColumnInfo[] = columnMetaRows.map((r) => {
-        const name = r.column_name as string;
-        const col: ColumnInfo = { name, type: r.data_type as string };
-        if (pkColumns.has(name)) {
-          col.key = "pk";
-          if (fkColumns.has(name)) col.references = fkColumns.get(name);
-        } else if (fkColumns.has(name)) {
-          col.key = "fk";
-          col.references = fkColumns.get(name);
-        }
-        const comment = r.column_comment as string;
-        if (comment.length > 0) col.comment = comment;
+      // The join route's lookup, so both routes report the same column types.
+      const meta = await this.tableMeta(conn, variant, realSchema, realTable, timeoutMs);
+      const columns: ColumnInfo[] = meta.columns.map(({ name, type, key, references, comment }) => {
+        const col: ColumnInfo = { name, type };
+        if (key) col.key = key;
+        if (references) col.references = references;
+        if (comment) col.comment = comment;
         return col;
       });
 

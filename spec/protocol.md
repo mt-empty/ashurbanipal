@@ -808,7 +808,8 @@ the columns' native types, not the text cast of §5.4.2.
 
 - Each `columns` entry carries `name`, `type`, `join`, `table` and
   `column`, plus the optional §5.4.1 fields `key`, `references`, `comment`
-  as they apply to that column in its own table. `name` is a **label**
+  as they apply to that column in its own table. `type` and those fields
+  MUST equal what §5.4.1 reports for the column. `name` is a **label**
   unique within the response: the column's own name when that is unique
   among the returned columns, otherwise `{column}_{join}`, with a numeric
   suffix appended if that still collides. Clients MUST NOT parse labels.

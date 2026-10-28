@@ -389,7 +389,7 @@ func (c *MySQLSource) mariadbJSONColumns(ctx context.Context, tx queryer, varian
 	return out, rows.Err()
 }
 
-func (c *MySQLSource) joinTableMeta(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (joinTableMeta, error) {
+func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (joinTableMeta, error) {
 	jsonColumns, err := c.mariadbJSONColumns(ctx, tx, variant, schema, table)
 	if err != nil {
 		return joinTableMeta{}, err
@@ -468,7 +468,7 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 		if _, ok := findExact(allowed, name); !ok {
 			return JoinData{}, badJoin("unknown table %q", name)
 		}
-		meta, err := c.joinTableMeta(ctx, tx, variant, realSchema, name)
+		meta, err := c.tableMeta(ctx, tx, variant, realSchema, name)
 		if err != nil {
 			return JoinData{}, err
 		}
@@ -687,61 +687,14 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 		}
 	}
 
-	metaCtx, metaCancel := c.bounded(ctx)
-	// data_type and column_comment both sit as plain columns on
-	// information_schema.columns — unlike Postgres, no separate
-	// pg_attribute join is needed to get comments, and no
-	// ordinal-position-vs-attnum drift is possible.
-	metaRows, err := tx.QueryContext(metaCtx, timedSelect(variant, c.timeoutSec,
-		`column_name, data_type, column_comment
-		 from information_schema.columns
-		 where table_schema = ? and table_name = ?
-		 order by ordinal_position`), realSchema, realTable)
-	if err != nil {
-		metaCancel()
-		return TableData{}, err
-	}
-	type colMeta struct{ name, typ, comment string }
-	var columnMeta []colMeta
-	for metaRows.Next() {
-		var cm colMeta
-		if err := metaRows.Scan(&cm.name, &cm.typ, &cm.comment); err != nil {
-			metaRows.Close()
-			metaCancel()
-			return TableData{}, err
-		}
-		columnMeta = append(columnMeta, cm)
-	}
-	if err := metaRows.Err(); err != nil {
-		metaRows.Close()
-		metaCancel()
-		return TableData{}, err
-	}
-	metaRows.Close()
-	metaCancel()
-
-	pkColumns, fkColumns, err := c.keyMetadataInTx(ctx, tx, variant, realSchema, realTable)
+	// The join route's lookup, so both routes report the same column types.
+	meta, err := c.tableMeta(ctx, tx, variant, realSchema, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
-
-	columns := make([]ColumnInfo, 0, len(columnMeta))
-	for _, cm := range columnMeta {
-		col := ColumnInfo{Name: cm.name, Type: cm.typ}
-		if ref, ok := fkColumns[cm.name]; ok {
-			r := ref
-			col.References = &r
-		}
-		switch {
-		case pkColumns[cm.name]:
-			col.Key = KeyPK
-		case col.References != nil:
-			col.Key = KeyFK
-		}
-		if cm.comment != "" {
-			col.Comment = cm.comment
-		}
-		columns = append(columns, col)
+	columns := make([]ColumnInfo, 0, len(meta.columns))
+	for _, cm := range meta.columns {
+		columns = append(columns, ColumnInfo{Name: cm.name, Type: cm.typeName, Key: cm.key, References: cm.references, Comment: cm.comment})
 	}
 
 	selectParts := make([]string, len(columns))
