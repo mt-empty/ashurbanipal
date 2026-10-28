@@ -5,6 +5,21 @@ Notable changes to the `ashurbanipal` core crate (framework-agnostic config, `Db
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.11.0] - 2026-10-28
+
+### Features
+
+- *(protocol)* [**breaking**] Report the default source and schema (#210)
+
+### Bug Fixes
+
+- *(mysql)* Sort catalog lists by byte order and keep MariaDB JSON unjoinable (#213)
+
+### Refactor
+
+- *(frontend)* Retire sidebar-era names for the table chips (#197)
+- *(rust)* Move route request and response shapes into core (#211)
+
 ## [0.10.0] - 2026-10-24
 
 ### Changed

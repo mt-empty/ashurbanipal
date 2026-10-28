@@ -5,6 +5,23 @@ Notable changes to the Python/Flask port. Format follows
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.11.0] - 2026-10-28
+
+### Features
+
+- *(protocol)* [**breaking**] Report the default source and schema (#210)
+
+### Bug Fixes
+
+- *(frontend)* Rely on the browser's back/forward and add a history entry per applied change (#196)
+- *(mysql)* Sort catalog lists by byte order and keep MariaDB JSON unjoinable (#213)
+- *(frontend)* Key remembered settings by concrete source and schema (#214)
+
+### Refactor
+
+- *(frontend)* Retire sidebar-era names for the table chips (#197)
+- *(frontend)* Rename sidebar.ts and nav.ts after what they hold (#201)
+
 ## [0.10.0] - 2026-10-24
 
 ### Features
