@@ -1,4 +1,4 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 // The highlight diffs against the *previous* /tables/data response, so
@@ -20,10 +20,13 @@ function payload(rows: Cell[][]) {
 }
 
 function payloadNoPk(rows: Cell[][]) {
-  return { ...payload(rows), columns: [
-    { name: "id", type: "integer" },
-    { name: "label", type: "text" },
-  ] };
+  return {
+    ...payload(rows),
+    columns: [
+      { name: "id", type: "integer" },
+      { name: "label", type: "text" },
+    ],
+  };
 }
 
 const rowFor = (page: import("@playwright/test").Page, id: string) =>
@@ -33,12 +36,19 @@ const rowFor = (page: import("@playwright/test").Page, id: string) =>
 
 test("refresh tints a row that appeared since the last fetch, leaving the rest untouched", async ({ page }) => {
   await gotoApp(page);
-  let body: unknown = payload([[1, "a"], [2, "b"]]);
+  let body: unknown = payload([
+    [1, "a"],
+    [2, "b"],
+  ]);
   await page.route("**/api/tables/data*", (r) => r.fulfill({ json: body }));
   await selectTable(page, "users");
   await expect(page.locator("#tbody tr")).toHaveCount(2);
 
-  body = payload([[1, "a"], [2, "b"], [3, "c"]]);
+  body = payload([
+    [1, "a"],
+    [2, "b"],
+    [3, "c"],
+  ]);
   await page.locator("#refresh").click();
   await waitForIdle(page);
 
@@ -52,7 +62,10 @@ test("refresh tints a row that appeared since the last fetch, leaving the rest u
 
 test("refresh with no change highlights nothing", async ({ page }) => {
   await gotoApp(page);
-  const body = payload([[1, "a"], [2, "b"]]);
+  const body = payload([
+    [1, "a"],
+    [2, "b"],
+  ]);
   await page.route("**/api/tables/data*", (r) => r.fulfill({ json: body }));
   await selectTable(page, "users");
 
@@ -67,11 +80,18 @@ test("refresh with no change highlights nothing", async ({ page }) => {
 
 test("a table with no primary key gets no highlight on refresh", async ({ page }) => {
   await gotoApp(page);
-  let body: unknown = payloadNoPk([[1, "a"], [2, "b"]]);
+  let body: unknown = payloadNoPk([
+    [1, "a"],
+    [2, "b"],
+  ]);
   await page.route("**/api/tables/data*", (r) => r.fulfill({ json: body }));
   await selectTable(page, "users");
 
-  body = payloadNoPk([[1, "a"], [2, "b"], [3, "c"]]);
+  body = payloadNoPk([
+    [1, "a"],
+    [2, "b"],
+    [3, "c"],
+  ]);
   await page.locator("#refresh").click();
   await waitForIdle(page);
 
@@ -81,13 +101,20 @@ test("a table with no primary key gets no highlight on refresh", async ({ page }
 
 test("a sort change is not treated as new rows", async ({ page }) => {
   await gotoApp(page);
-  let body: unknown = payload([[1, "a"], [2, "b"]]);
+  let body: unknown = payload([
+    [1, "a"],
+    [2, "b"],
+  ]);
   await page.route("**/api/tables/data*", (r) => r.fulfill({ json: body }));
   await selectTable(page, "users");
 
   // Different rows AND a scope change — a sort click never passes
   // highlightNew, and scopeKey no longer matches, so neither path tints.
-  body = payload([[3, "c"], [1, "a"], [2, "b"]]);
+  body = payload([
+    [3, "c"],
+    [1, "a"],
+    [2, "b"],
+  ]);
   await page.locator('th[data-col="label"]').click({ position: { x: 6, y: 6 } });
   await waitForIdle(page);
 

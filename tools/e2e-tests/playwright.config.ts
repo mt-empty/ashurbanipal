@@ -25,7 +25,8 @@ const EXTERNAL_BASE_URL = process.env.PLAYWRIGHT_BASE_URL;
 // Unset or empty means all three.
 const BROWSERS = (process.env.E2E_BROWSERS || Object.keys(PORTS).join(",")).split(",");
 const unknown = BROWSERS.filter((b) => !(b in PORTS));
-if (unknown.length) throw new Error(`E2E_BROWSERS: unknown ${unknown.join(", ")}; expected ${Object.keys(PORTS).join(", ")}`);
+if (unknown.length)
+  throw new Error(`E2E_BROWSERS: unknown ${unknown.join(", ")}; expected ${Object.keys(PORTS).join(", ")}`);
 const selected = (browser: keyof typeof PORTS) => BROWSERS.includes(browser);
 
 function demoServer(port: number) {

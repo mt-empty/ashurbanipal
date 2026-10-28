@@ -1,4 +1,4 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { gotoApp, selectTable } from "./support/helpers";
 
 test("common-values dropdown is populated for a low-cardinality column", async ({ page }) => {

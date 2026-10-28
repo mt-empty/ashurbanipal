@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import { gotoApp, selectTable } from "./support/helpers";
 
 test.use({ realFades: true });
@@ -80,7 +80,8 @@ test("under reduced motion a view switch jumps to the top instead of scrolling t
     } as typeof scrollTo;
   });
   await gotoApp(page);
-  const lastBehavior = () => page.evaluate(() => (window as unknown as { scrollBehaviors: string[] }).scrollBehaviors.at(-1));
+  const lastBehavior = () =>
+    page.evaluate(() => (window as unknown as { scrollBehaviors: string[] }).scrollBehaviors.at(-1));
 
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await selectTable(page, "users");

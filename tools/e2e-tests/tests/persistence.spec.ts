@@ -1,9 +1,7 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { applyFilter, gotoApp, selectTable, uiState, urlParam } from "./support/helpers";
 
-test("table/sort/order/limit round-trip through localStorage across a fresh visit", async ({
-  page,
-}) => {
+test("table/sort/order/limit round-trip through localStorage across a fresh visit", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
   await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
@@ -51,22 +49,19 @@ test("the applied filter persists to the URL, never localStorage", async ({ page
   await expect(page.locator("#filter")).toHaveValue(""); // localStorage never carried it
 });
 
-const statusCells = (page: import("@playwright/test").Page) =>
-  page.locator('#tbody td[data-col="status"] .cell-text');
+const statusCells = (page: import("@playwright/test").Page) => page.locator('#tbody td[data-col="status"] .cell-text');
 
 test("a malformed filter URL param resets to no filter with a note", async ({ page }) => {
-  await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("status = 'unterminated"));
+  await gotoApp(page, `?table=orders&filter=${encodeURIComponent("status = 'unterminated")}`);
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
   await expect(page.locator("#error")).toBeEmpty();
   await expect(page.locator("#filter")).toHaveValue("");
   await expect(page.locator("#view-notice-text")).toHaveText("Your filter doesn't fit orders here, so it was removed.");
-  await expect
-    .poll(async () => new Set(await statusCells(page).allTextContents()).size)
-    .toBeGreaterThan(1); // unfiltered — mixed statuses still visible
+  await expect.poll(async () => new Set(await statusCells(page).allTextContents()).size).toBeGreaterThan(1); // unfiltered — mixed statuses still visible
 });
 
 test("a filter URL param restores the filtered view on load", async ({ page }) => {
-  await gotoApp(page, "?table=orders&filter=" + encodeURIComponent("status = completed"));
+  await gotoApp(page, `?table=orders&filter=${encodeURIComponent("status = completed")}`);
   await page.locator("#current").getByText("orders", { exact: true }).waitFor();
   await expect(page.locator("#filter")).toHaveValue("status = completed");
   await expect

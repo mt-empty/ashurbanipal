@@ -1,11 +1,9 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { gotoApp, selectTable } from "./support/helpers";
 
 test("an empty table renders the empty-state row and a real 0 count, not -1", async ({ page }) => {
   await gotoApp(page);
-  await expect(
-    page.locator('#tables [data-table="saved_reports"] .count'),
-  ).toHaveText("~0");
+  await expect(page.locator('#tables [data-table="saved_reports"] .count')).toHaveText("~0");
 
   await selectTable(page, "saved_reports");
   await expect(page.locator("#error")).toBeEmpty();

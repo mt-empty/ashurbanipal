@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import { applyFilter, gotoApp, selectTable, urlParam, waitForIdle } from "./support/helpers";
 
 const suggestions = (page: Page) => page.locator("#filter-suggest-list button");
@@ -7,7 +7,18 @@ test("an operator list follows a column and a space", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
   await page.locator("#filter").fill("status ");
-  await expect(suggestions(page)).toHaveText(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
+  await expect(suggestions(page)).toHaveText([
+    "=",
+    "!=",
+    ">",
+    "<",
+    ">=",
+    "<=",
+    "LIKE",
+    "ILIKE",
+    "IS NULL",
+    "IS NOT NULL",
+  ]);
   await page.locator("#filter").fill("status I");
   await expect(suggestions(page)).toHaveText(["ILIKE", "IS NULL", "IS NOT NULL"]);
 });
@@ -16,7 +27,9 @@ test("accepting a column moves on to its operators", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
   await page.locator("#filter").focus();
-  await suggestions(page).filter({ hasText: /^status$/ }).click();
+  await suggestions(page)
+    .filter({ hasText: /^status$/ })
+    .click();
   await expect(page.locator("#filter")).toHaveValue("status ");
   await expect(suggestions(page).first()).toHaveText("=");
 });
@@ -157,7 +170,10 @@ test("the coloured copy sits exactly under the input's own text", async ({ page 
     const first = document.querySelector("#filter-hl-text span") as HTMLElement;
     const i = input.getBoundingClientRect();
     const f = first.getBoundingClientRect();
-    return { dx: f.left - (i.left + Number.parseFloat(getComputedStyle(input).paddingLeft)), dy: f.top + f.height / 2 - (i.top + i.height / 2) };
+    return {
+      dx: f.left - (i.left + Number.parseFloat(getComputedStyle(input).paddingLeft)),
+      dy: f.top + f.height / 2 - (i.top + i.height / 2),
+    };
   });
   expect(Math.abs(box.dx)).toBeLessThan(1.5);
   expect(Math.abs(box.dy)).toBeLessThan(2);

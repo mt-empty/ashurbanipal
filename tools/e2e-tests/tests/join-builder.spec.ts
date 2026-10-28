@@ -5,9 +5,9 @@ import {
   gotoJoin,
   joinParam,
   nextJoinResponse,
-  openJoinOverlay,
   ORDERS_USERS,
   ORDERS_USERS_CANONICAL,
+  openJoinOverlay,
   pick,
   showResult,
   storedSavedJoins,
@@ -29,11 +29,15 @@ test("the form suggests the foreign key pair and builds a three-table join", asy
   await openJoinOverlay(page);
   await pick(page, "join 1 type", "left");
   await pick(page, "join 1 table", "users");
-  await expect(page.locator(".j-row").first()).toContainText("Suggested from the foreign key orders.user_id → users.id.");
+  await expect(page.locator(".j-row").first()).toContainText(
+    "Suggested from the foreign key orders.user_id → users.id.",
+  );
   await page.getByRole("button", { name: "add a table to the join" }).click();
   await pick(page, "join 2 type", "left");
   await pick(page, "join 2 table", "order_extra");
-  await expect(page.locator(".j-row").nth(1)).toContainText("Suggested from the foreign key orders.id → order_extra.order_id.");
+  await expect(page.locator(".j-row").nth(1)).toContainText(
+    "Suggested from the foreign key orders.id → order_extra.order_id.",
+  );
   await expect(page.locator("#join-preview")).toHaveText(
     "SELECT *\nFROM orders\nLEFT JOIN users ON orders.user_id = users.id\nLEFT JOIN order_extra ON orders.id = order_extra.order_id",
   );
@@ -76,12 +80,17 @@ test("the column cards pick what the result shows", async ({ page }) => {
 
 test("the SQL text builds the same join and switching modes keeps the definition", async ({ page }) => {
   await openJoinOverlay(page);
-  await writeSql(page, "from orders left join users on users.id = orders.user_id\nleft join order_extra on order_extra.order_id = orders.id");
+  await writeSql(
+    page,
+    "from orders left join users on users.id = orders.user_id\nleft join order_extra on order_extra.order_id = orders.id",
+  );
   await page.locator("#join-mode-form").click();
   await expect(page.getByRole("button", { name: "join 2 table" })).toHaveText("order_extra ▾");
   await expect(page.locator("#join-preview")).toContainText("LEFT JOIN users ON orders.user_id = users.id");
   await page.locator("#join-mode-sql").click();
-  await expect(page.locator("#join-sql")).toHaveValue(/^SELECT \*\nFROM orders\nLEFT JOIN users ON orders\.user_id = users\.id\nLEFT JOIN order_extra/);
+  await expect(page.locator("#join-sql")).toHaveValue(
+    /^SELECT \*\nFROM orders\nLEFT JOIN users ON orders\.user_id = users\.id\nLEFT JOIN order_extra/,
+  );
 
   const response = await showResult(page);
   expect(joinParam(response.url())).toEqual(ORDERS_USERS_EXTRA);
@@ -92,7 +101,9 @@ test("text that does not parse disables Form and Show result and says where and 
   await writeSql(page, "FROM orders o\nRIGHT JOIN users u ON o.user_id = u.id");
   await expect(page.locator("#join-mode-form")).toBeDisabled();
   await expect(page.locator("#join-run")).toBeDisabled();
-  await expect(page.locator("#join-sql-error")).toHaveText("Line 2: RIGHT joins are not supported. Swap the two tables and use LEFT.");
+  await expect(page.locator("#join-sql-error")).toHaveText(
+    "Line 2: RIGHT joins are not supported. Swap the two tables and use LEFT.",
+  );
   await expect(page.locator("#join-sql-tip")).toBeVisible();
   await expect(page.locator("#join-sql-hl-text .t-err")).toHaveText(["RIGHT", "JOIN"]);
 
@@ -105,9 +116,13 @@ test("text that does not parse disables Form and Show result and says where and 
 test("each part the join text may not contain gets its own message", async ({ page }) => {
   await openJoinOverlay(page);
   await writeSql(page, `${ORDERS_USERS}\nWHERE u.age > 30`);
-  await expect(page.locator("#join-sql-error")).toHaveText("Line 2: WHERE is not part of the join. Filter with the bar above the grid.");
+  await expect(page.locator("#join-sql-error")).toHaveText(
+    "Line 2: WHERE is not part of the join. Filter with the bar above the grid.",
+  );
   await page.locator("#join-sql").fill("FROM orders o JOIN users u ON u.id = o.usr_id");
-  await expect(page.locator("#join-sql-error")).toHaveText("Line 1: orders has no column usr_id. Did you mean user_id?");
+  await expect(page.locator("#join-sql-error")).toHaveText(
+    "Line 1: orders has no column usr_id. Did you mean user_id?",
+  );
 });
 
 test("an incompatible pair is refused in the text before any request", async ({ page }) => {
@@ -118,7 +133,9 @@ test("an incompatible pair is refused in the text before any request", async ({ 
     return route.continue();
   });
   await writeSql(page, "FROM orders o LEFT JOIN users u ON u.id = o.status");
-  await expect(page.locator("#join-sql-error")).toHaveText("Line 1: uuid cannot be joined to enum. Pick columns of the same kind.");
+  await expect(page.locator("#join-sql-error")).toHaveText(
+    "Line 1: uuid cannot be joined to enum. Pick columns of the same kind.",
+  );
   await expect(page.locator("#join-sql-hl-text .t-err")).toHaveText(["o", ".", "status"]);
   await expect(page.locator("#join-run")).toBeDisabled();
   expect(requests).toBe(0);
@@ -160,7 +177,9 @@ test("suggestions after JOIN offer a foreign key clause first, then tables with 
   await expect(sql).toHaveValue("FROM orders o JOIN users u ON o.user_id = u.id ");
 });
 
-test("suggestions after ON x.col = alias. list columns, grey the ones that cannot pair, and tag indexed ones", async ({ page }) => {
+test("suggestions after ON x.col = alias. list columns, grey the ones that cannot pair, and tag indexed ones", async ({
+  page,
+}) => {
   await openJoinOverlay(page);
   await writeSql(page, "FROM orders o JOIN users u ON o.user_id = ");
   const sql = page.locator("#join-sql");
@@ -181,7 +200,9 @@ test("a self-join with aliases shows one band per use", async ({ page }) => {
   await expect(page.locator("th.band")).toHaveText(["orders a", "orders b"]);
 });
 
-test("a saved join becomes a chip after the table chips that survives a reload and reopens its join", async ({ page }) => {
+test("a saved join becomes a chip after the table chips that survives a reload and reopens its join", async ({
+  page,
+}) => {
   await openJoinOverlay(page);
   await writeSql(page, ORDERS_USERS);
   await page.locator("#join-name").fill("orders with users");
@@ -358,7 +379,9 @@ test("the table menu narrows by fuzzy search as you type, and Enter picks the be
   await expect(page.getByRole("button", { name: "join 1 table", exact: true })).toHaveText("users ▾");
 });
 
-test("in the table menu, arrows wrap through the rows, and ArrowUp or typing on a row returns to the search box", async ({ page }) => {
+test("in the table menu, arrows wrap through the rows, and ArrowUp or typing on a row returns to the search box", async ({
+  page,
+}) => {
   await openJoinOverlay(page);
   await page.getByRole("button", { name: "join 1 table", exact: true }).click();
   const search = page.locator("#dd-pop-search");
@@ -413,7 +436,9 @@ test("the form suggests the foreign key pair for a table browsed earlier", async
   await selectTable(page, "orders");
   await page.locator("#join-btn").click();
   await pick(page, "join 1 table", "users");
-  await expect(page.locator(".j-row").first()).toContainText("Suggested from the foreign key orders.user_id → users.id.");
+  await expect(page.locator(".j-row").first()).toContainText(
+    "Suggested from the foreign key orders.user_id → users.id.",
+  );
 });
 
 test("saving the join in view keeps its filter, sort and page", async ({ page }) => {

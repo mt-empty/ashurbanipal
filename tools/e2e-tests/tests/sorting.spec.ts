@@ -1,4 +1,4 @@
-import { test, expect } from "./support/fixtures";
+import { expect, test } from "./support/fixtures";
 import { gotoApp, selectTable, waitForIdle } from "./support/helpers";
 
 test("a column sorts ascending then descending, and another column starts ascending and unsorts it", async ({

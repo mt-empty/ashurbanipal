@@ -1,6 +1,16 @@
-import { test, expect, type Page } from "./support/fixtures";
-import { spawnDemo, freePort } from "./support/second-server";
-import { apiCall, failRequests, goBack, gotoApp, reloadApp, tablesWith, uiState, urlParam, waitForIdle } from "./support/helpers";
+import { expect, type Page, test } from "./support/fixtures";
+import {
+  apiCall,
+  failRequests,
+  goBack,
+  gotoApp,
+  reloadApp,
+  tablesWith,
+  uiState,
+  urlParam,
+  waitForIdle,
+} from "./support/helpers";
+import { freePort, spawnDemo } from "./support/second-server";
 
 // ui-guidelines R12: the schema selected on a source is remembered, so
 // switching source away and back restores it instead of resetting to the
@@ -51,14 +61,13 @@ test("a source with no remembered schema opens the schema the server reports as 
     await gotoApp(page, "", demo.baseUrl);
     // The `other_schema` source's connection is pinned to other_schema, which it also lists first;
     // list public first so the first entry and the server's default differ.
-    await page.route(
-      apiCall("/schemas", { source: "other_schema" }),
-      async (route) => {
-        const body = await (await route.fetch()).json();
-        body.schemas.sort((a: { name: string }, b: { name: string }) => (a.name === "public" ? -1 : b.name === "public" ? 1 : 0));
-        await route.fulfill({ json: body });
-      },
-    );
+    await page.route(apiCall("/schemas", { source: "other_schema" }), async (route) => {
+      const body = await (await route.fetch()).json();
+      body.schemas.sort((a: { name: string }, b: { name: string }) =>
+        a.name === "public" ? -1 : b.name === "public" ? 1 : 0,
+      );
+      await route.fulfill({ json: body });
+    });
     await selectAndSettle(page, "#source-select", "other_schema", { source: "other_schema" });
     await expect(page.locator("#schema-select")).toHaveValue("other_schema");
     expect(urlParam(page, "schema")).toBe("other_schema");
@@ -88,10 +97,7 @@ test("a source whose schema list fails is still named on every request", async (
   const demo = await spawnDemo({ port, conformanceSecondSource: true });
   try {
     await gotoApp(page, "", demo.baseUrl);
-    await failRequests(
-      page,
-      apiCall("/schemas", { source: "other_schema" }),
-    );
+    await failRequests(page, apiCall("/schemas", { source: "other_schema" }));
     const tablesListed = page.waitForRequest(tablesWith("source", "other_schema"));
     await page.locator("#source-select").selectOption("other_schema");
     expect(new URL((await tablesListed).url()).searchParams.get("schema")).toBeNull();
@@ -125,9 +131,8 @@ test("Back across a source switch restores that source's schema list", async ({ 
     await gotoApp(page, "", demo.baseUrl);
     await selectAndSettle(page, "#schema-select", "warehouse", { schema: "warehouse" });
     // The second source lists other schemas, so the first source's list must come back with it.
-    await page.route(
-      apiCall("/schemas", { source: "other_schema" }),
-      (route) => route.fulfill({ json: { schemas: [{ name: "other_schema" }, { name: "public" }], default: "other_schema" } }),
+    await page.route(apiCall("/schemas", { source: "other_schema" }), (route) =>
+      route.fulfill({ json: { schemas: [{ name: "other_schema" }, { name: "public" }], default: "other_schema" } }),
     );
     await selectAndSettle(page, "#source-select", "other_schema", { source: "other_schema" });
     await expect(page.locator('#schema-select option[value="warehouse"]')).toHaveCount(0);
@@ -149,13 +154,10 @@ test("a superseded schema load does not reload the table list", async ({ page })
     await gotoApp(page, "", demo.baseUrl);
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    await page.route(
-      apiCall("/schemas", { source: "other_schema" }),
-      async (route) => {
-        await gate;
-        await route.continue().catch(() => {});
-      },
-    );
+    await page.route(apiCall("/schemas", { source: "other_schema" }), async (route) => {
+      await gate;
+      await route.continue().catch(() => {});
+    });
     const schemasSent = page.waitForRequest((r) => new URL(r.url()).searchParams.get("source") === "other_schema");
     await page.locator("#source-select").selectOption("other_schema");
     await schemasSent;

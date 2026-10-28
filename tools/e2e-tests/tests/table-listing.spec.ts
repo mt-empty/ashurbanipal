@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import { gotoApp, reloadApp, selectTable } from "./support/helpers";
 
 const SEEDED_TABLES = [
@@ -25,26 +25,16 @@ test("table chips list all seeded tables alphabetically with approx row counts",
   await expect(buttons).toHaveCount(SEEDED_TABLES.length);
   // _conformance_meta/feature_flags are deliberately never ANALYZEd, so
   // the frontend shows "?" (formatApproxCount) instead of a raw -1.
-  await expect(buttons).toHaveText(
-    SEEDED_TABLES.map((name) => new RegExp(`^${name}(~\\d+|\\?)$`)),
-  );
+  await expect(buttons).toHaveText(SEEDED_TABLES.map((name) => new RegExp(`^${name}(~\\d+|\\?)$`)));
 });
 
-test("title tooltip includes the comment when present, and is just the name otherwise", async ({
-  page,
-}) => {
+test("title tooltip includes the comment when present, and is just the name otherwise", async ({ page }) => {
   await gotoApp(page);
   // Every button gets a title (name is the R8 truncation escape hatch for
   // a long table name, see .chip-name's CSS) — commented tables get the
   // comment appended, uncommented ones just the bare name.
-  await expect(page.locator('#tables [data-table="users"]')).toHaveAttribute(
-    "title",
-    /^users — .+/,
-  );
-  await expect(page.locator('#tables [data-table="products"]')).toHaveAttribute(
-    "title",
-    "products",
-  );
+  await expect(page.locator('#tables [data-table="users"]')).toHaveAttribute("title", /^users — .+/);
+  await expect(page.locator('#tables [data-table="products"]')).toHaveAttribute("title", "products");
 });
 
 test("a long table name truncates instead of pushing the row count out", async ({ page }) => {
@@ -58,24 +48,19 @@ test("a long table name truncates instead of pushing the row count out", async (
   expect(minWidth).toBe("0px"); // must override the flex-item min-width:auto default to shrink at all
   // The count must stay fully visible regardless of name length — this is
   // the actual symptom being fixed (a long name pushing/clipping it).
-  await expect(
-    page.locator('#tables [data-table="support_tickets"] .count'),
-  ).toBeVisible();
+  await expect(page.locator('#tables [data-table="support_tickets"] .count')).toBeVisible();
 });
 
 // Narrow enough that the seeded tables wrap past three lines.
 const NARROW = { width: 360, height: 800 };
-const visibleChips = (page: Page) =>
-  page.locator("#tables li:not([hidden]):not(#tables-more-item)");
+const visibleChips = (page: Page) => page.locator("#tables li:not([hidden]):not(#tables-more-item)");
 
 // The button must end the collapsed list: within three rows, at the list's right edge.
 async function expectButtonOnLastRowAtRight(page: Page) {
   const geometry = await page.evaluate(() => {
     const ul = document.getElementById("tables") as HTMLElement;
     const item = document.getElementById("tables-more-item") as HTMLElement;
-    const tops = new Set(
-      [...ul.querySelectorAll<HTMLElement>("li:not([hidden])")].map((li) => li.offsetTop),
-    );
+    const tops = new Set([...ul.querySelectorAll<HTMLElement>("li:not([hidden])")].map((li) => li.offsetTop));
     return {
       rows: tops.size,
       buttonRow: item.offsetTop,
@@ -88,15 +73,15 @@ async function expectButtonOnLastRowAtRight(page: Page) {
   expect(geometry.gapToRightEdge).toBeLessThan(2);
 }
 
-test("a long table list collapses to three lines behind '+ N more' and expands in place", async ({
-  page,
-}) => {
+test("a long table list collapses to three lines behind '+ N more' and expands in place", async ({ page }) => {
   await page.setViewportSize(NARROW);
   await gotoApp(page);
   const more = page.locator("#tables-more");
   await expect(more).toHaveText(/^\+ \d+ more$/);
   await expect(more).toHaveAttribute("aria-expanded", "false");
-  const lines = await visibleChips(page).evaluateAll((els) => new Set(els.map((e) => (e as HTMLElement).offsetTop)).size);
+  const lines = await visibleChips(page).evaluateAll(
+    (els) => new Set(els.map((e) => (e as HTMLElement).offsetTop)).size,
+  );
   expect(lines).toBeLessThanOrEqual(3);
   await expectButtonOnLastRowAtRight(page);
   const collapsed = await visibleChips(page).count();
@@ -122,9 +107,7 @@ test("a long table list collapses to three lines behind '+ N more' and expands i
   await expect(page.locator("#tables li[hidden]:not(#tables-more-item)")).toHaveCount(0);
 });
 
-test("the active table stays visible in a collapsed list, and 'show fewer' keeps it collapsed", async ({
-  page,
-}) => {
+test("the active table stays visible in a collapsed list, and 'show fewer' keeps it collapsed", async ({ page }) => {
   await page.setViewportSize(NARROW);
   // users is past line three at this width, so it starts out in the hidden part.
   await gotoApp(page, "?table=users");
@@ -143,9 +126,7 @@ test("the active table stays visible in a collapsed list, and 'show fewer' keeps
   await expect(page.locator("#tables li[hidden]:not(#tables-more-item)").first()).toBeAttached();
 });
 
-test("an expanded table list stays expanded after a reload, and a collapsed one collapsed", async ({
-  page,
-}) => {
+test("an expanded table list stays expanded after a reload, and a collapsed one collapsed", async ({ page }) => {
   await page.setViewportSize(NARROW);
   await gotoApp(page);
   const more = page.locator("#tables-more");
@@ -161,9 +142,7 @@ test("an expanded table list stays expanded after a reload, and a collapsed one 
   await expect(more).toHaveText(/^\+ \d+ more$/);
 });
 
-test("a chip pulled up from the hidden part gets a divider only on a line with other chips", async ({
-  page,
-}) => {
+test("a chip pulled up from the hidden part gets a divider only on a line with other chips", async ({ page }) => {
   // At this width users is past line three and lands beside other chips once pulled up.
   await page.setViewportSize({ width: 480, height: 800 });
   await gotoApp(page, "?table=users");
@@ -205,9 +184,7 @@ test("a wide window shows every seeded table without expanding the list", async 
   for (const name of SEEDED_TABLES) await expect(page.locator(`#tables [data-table="${name}"]`)).toBeVisible();
 });
 
-test("a column name is capped with an ellipsis and keeps its full name in a title", async ({
-  page,
-}) => {
+test("a column name is capped with an ellipsis and keeps its full name in a title", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
   const name = page.locator('th[data-col="total_cents"] .col-name');
@@ -225,9 +202,6 @@ test("selecting a table updates the current-table chrome", async ({ page }) => {
   await expect(page.locator("#current")).toHaveText("products");
   await expect(page).toHaveTitle("products — Ashurbanipal");
   await expect(page.locator('#tables [data-table="products"]')).toHaveClass(/active/);
-  await expect(page.locator('#tables [data-table="products"]')).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
+  await expect(page.locator('#tables [data-table="products"]')).toHaveAttribute("aria-current", "true");
   await expect(page.locator('#tables [data-table="users"]')).not.toHaveClass(/active/);
 });

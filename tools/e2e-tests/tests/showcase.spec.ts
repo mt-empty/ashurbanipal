@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { test, expect } from "@playwright/test";
-import { gotoApp, selectTable, applyFilter, waitForIdle } from "./support/helpers";
+import { expect, test } from "@playwright/test";
+import { applyFilter, gotoApp, selectTable, waitForIdle } from "./support/helpers";
 import { pick, showResult } from "./support/join";
 
 // The refresh segment inserts a handful of rows straight into the
@@ -60,7 +60,7 @@ test("showcase: browse tables, filter down to one row, inspect jsonb, view struc
 
   // Open the jsonb cell popover and toggle a nested node to show the
   // colored, collapsible tree.
-  const jsonCell = page.locator('#tbody tr').first().locator('td[data-col="line_items"] .cell-text');
+  const jsonCell = page.locator("#tbody tr").first().locator('td[data-col="line_items"] .cell-text');
   await jsonCell.click();
   await expect(page.locator("#cell-pop")).toBeVisible();
   await beat(page);
@@ -127,9 +127,7 @@ test("showcase: browse tables, filter down to one row, inspect jsonb, view struc
   await idHeader.click({ position: { x: 6, y: 6 } }); // ...second flips it to descending — newest first
   await waitForIdle(page);
   try {
-    psql(
-      `INSERT INTO events (event_type) SELECT '${SHOWCASE_EVENT_TYPE}' FROM generate_series(1, 5)`,
-    );
+    psql(`INSERT INTO events (event_type) SELECT '${SHOWCASE_EVENT_TYPE}' FROM generate_series(1, 5)`);
     await page.locator("#refresh").click();
     await waitForIdle(page);
     await expect(page.locator("#tbody tr.row-new")).toHaveCount(5);

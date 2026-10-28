@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import { gotoApp, reloadApp } from "./support/helpers";
 
 test.use({ colorScheme: "light" });
