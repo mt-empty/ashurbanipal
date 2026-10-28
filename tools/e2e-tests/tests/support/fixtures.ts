@@ -1,5 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 import { recordCoverage } from "./coverage";
+import { freePort, type SpawnedDemo, spawnDemo } from "./second-server";
 
 export * from "@playwright/test";
 
@@ -9,8 +10,22 @@ const INSTANT_FADES =
 
 /** Every spec imports `test` from here. `realFades` keeps the 250 ms view-transition fade for a spec that opts in.
  * Fades and the dialog guard are set on the context, so a second page a test opens gets them too. */
-export const test = base.extend<{ realFades: boolean }>({
+export const test = base.extend<{ realFades: boolean }, { secondSourceDemo: SpawnedDemo }>({
   realFades: [false, { option: true }],
+  // A second `other_schema` source against the same DB. One per worker, started by the first test that asks for it;
+  // safe to share because the app is read-only and each test's storage and routes live in its own context.
+  secondSourceDemo: [
+    // biome-ignore lint/correctness/noEmptyPattern: Playwright requires a destructuring pattern for fixture dependencies.
+    async ({}, use) => {
+      const demo = await spawnDemo({ port: await freePort(), conformanceSecondSource: true });
+      try {
+        await use(demo);
+      } finally {
+        await demo.stop();
+      }
+    },
+    { scope: "worker", timeout: 120_000 },
+  ],
   context: async ({ context, realFades }, use) => {
     if (!realFades) {
       await context.addInitScript((css) => {

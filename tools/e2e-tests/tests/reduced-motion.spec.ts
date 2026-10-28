@@ -47,12 +47,28 @@ test("under reduced motion a table switch swaps without its cross-fade (R15)", a
 });
 
 test("under reduced motion the record dialog opens without its cross-fade (R15)", async ({ page }) => {
+  // The dialog opens inside startViewTransition and its fade starts after the dialog is visible, so closing it
+  // sooner can cancel the fade before it is seen. Waiting on the transition itself is the same signal under any load.
+  await page.addInitScript(() => {
+    const w = window as unknown as { transitions: ViewTransition[] };
+    w.transitions = [];
+    const start = document.startViewTransition?.bind(document);
+    if (start)
+      document.startViewTransition = (cb) => {
+        const transition = start(cb);
+        w.transitions.push(transition);
+        return transition;
+      };
+  });
   await gotoApp(page);
   test.skip(!(await page.evaluate(() => "startViewTransition" in document)), "no view transitions in this browser");
   await selectTable(page, "orders");
   const openRecord = async () => {
     await page.locator("#tbody tr").first().locator(".record-btn").click();
     await expect(page.locator("#record-dialog")).toBeVisible();
+    await page.evaluate(() =>
+      Promise.all((window as unknown as { transitions: ViewTransition[] }).transitions.map((t) => t.finished)),
+    );
     await page.keyboard.press("Escape");
     await expect(page.locator("#record-dialog")).toBeHidden();
   };
