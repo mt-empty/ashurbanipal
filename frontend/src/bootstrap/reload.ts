@@ -2,6 +2,7 @@
 // trigger a full reload but must not import controller.ts, which imports
 // them — that back-edge is what a cycle is made of. main.ts registers the
 // real implementation at bootstrap; a call before then is a no-op.
+import type { LoadReason } from "../core/perf-marks.js";
 import type { ViewRequest } from "../core/store.js";
 
 type LoadDataOpts = {
@@ -10,6 +11,7 @@ type LoadDataOpts = {
   auto?: boolean;
   next?: ViewRequest;
   replaceHistory?: boolean;
+  reason?: LoadReason;
 };
 
 let impl: ((opts?: LoadDataOpts) => Promise<void>) | null = null;

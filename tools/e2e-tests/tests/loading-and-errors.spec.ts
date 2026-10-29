@@ -121,13 +121,18 @@ test("a lone schema with no server default is still sent by name", async ({ page
   await expect(page.locator("#structure-title")).toHaveText(/^structure — public\./);
 });
 
-test("a failed /sources call drops a remembered source instead of sending it", async ({ page }) => {
+test("a failed /sources call drops a remembered source from every request after it", async ({ page }) => {
   await gotoApp(page);
   await page.evaluate(() => localStorage.setItem("ashurbanipal_view", JSON.stringify({ source: "gone" })));
   await failRequests(page, apiCall("/sources"));
+  // Start-up's early requests go out with the remembered name before /sources answers; none of their answers is used.
+  let sourcesFailed = false;
+  page.on("response", (r) => {
+    if (apiCall("/sources")(r.url())) sourcesFailed = true;
+  });
   const withSource: string[] = [];
   page.on("request", (r) => {
-    if (new URL(r.url()).searchParams.has("source")) withSource.push(r.url());
+    if (sourcesFailed && new URL(r.url()).searchParams.has("source")) withSource.push(r.url());
   });
   await reloadApp(page);
   await expect(page.locator("#tbody tr").first()).toBeVisible();

@@ -61,8 +61,89 @@ async function errorFromResponse(resp: Response): Promise<ApiError> {
   return new ApiError(`request failed with status ${resp.status}`, undefined);
 }
 
+// ==== Requests sent ahead ====
+// A request sent before anything asks for it (start-up's, a hovered chip's, the
+// next page); the first api() call for the same request takes the answer
+// instead of asking again. Each answer is used at most once.
+type PrefetchKind = "boot" | "view";
+
+interface Prefetched {
+  kind: PrefetchKind;
+  path: string;
+  route: string;
+  params: URLSearchParams;
+  response: Promise<Response>;
+  expires: number;
+}
+
+let prefetched: Prefetched[] = [];
+
+// Start-up's requests go out before the source and schema are known, so they
+// may leave either out; the server's defaults, read from its own answers to
+// /sources and /schemas, decide what they stand for.
+let defaultSource: string | null | undefined;
+let defaultSchema: string | null | undefined;
+let defaultsRead: Promise<unknown> = Promise.resolve();
+
+function readDefault(response: Promise<Response>, set: (value: string | null) => void): void {
+  const read = response
+    .then((r) => (r.ok ? r.clone().json() : null))
+    .then((body: { default?: string | null } | null) => set(body?.default ?? null))
+    .catch(() => set(null));
+  defaultsRead = Promise.all([defaultsRead, read]);
+}
+
+export function prefetch(path: string, kind: PrefetchKind, ttlMs = Number.POSITIVE_INFINITY): void {
+  const now = performance.now();
+  prefetched = prefetched.filter((p) => p.expires > now);
+  if (prefetched.some((p) => p.path === path)) return;
+  const response = fetch(API + path);
+  // A failed request surfaces when an api() call takes it, and only then.
+  response.catch(() => {});
+  const [route, query = ""] = path.split("?");
+  prefetched.push({ kind, path, route, params: new URLSearchParams(query), response, expires: now + ttlMs });
+  if (kind !== "boot") return;
+  if (route === "/sources") readDefault(response, (v) => (defaultSource = v));
+  if (route === "/schemas") readDefault(response, (v) => (defaultSchema = v));
+}
+
+export function clearPrefetched(kind?: PrefetchKind): void {
+  prefetched = prefetched.filter((p) => kind !== undefined && p.kind !== kind);
+}
+
+const SCOPE_KEYS = new Set(["source", "schema"]);
+const otherParams = (params: URLSearchParams) =>
+  [...params]
+    .filter(([k]) => !SCOPE_KEYS.has(k))
+    .map(([k, v]) => `${k}=${v}`)
+    .sort()
+    .join("&");
+
+// A start-up request that left the source or schema out matches only if the
+// server's default is exactly what the caller now asks for.
+function sameRequest(p: Prefetched, route: string, params: URLSearchParams): boolean {
+  if (p.kind !== "boot" || p.route !== route || otherParams(p.params) !== otherParams(params)) return false;
+  const source = (q: URLSearchParams) => q.get("source") ?? defaultSource;
+  const schema = (q: URLSearchParams) => q.get("schema") ?? (route === "/schemas" ? null : defaultSchema);
+  return source(p.params) === source(params) && schema(p.params) === schema(params);
+}
+
+async function takePrefetched(path: string): Promise<Response | undefined> {
+  const now = performance.now();
+  prefetched = prefetched.filter((p) => p.expires > now);
+  let found = prefetched.find((p) => p.path === path);
+  if (!found && prefetched.some((p) => p.kind === "boot")) {
+    await defaultsRead;
+    const [route, query = ""] = path.split("?");
+    found = prefetched.find((p) => sameRequest(p, route, new URLSearchParams(query)));
+  }
+  if (!found) return undefined;
+  prefetched = prefetched.filter((p) => p !== found);
+  return found.response;
+}
+
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(API + path, init);
+  const resp = (!init && (await takePrefetched(path))) || (await fetch(API + path, init));
   // path may carry a query string (e.g. "/tables?schema=…") — compare just
   // the route, not the whole path, so the version check still fires.
   if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);

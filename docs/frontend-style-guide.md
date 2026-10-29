@@ -27,14 +27,14 @@ value-import cycle, which a back-edge would create.
 ```
 src/
   index.html   styles.css
-  bootstrap/   main, controller, reload, table-focus
+  bootstrap/   main, controller, reload, table-focus, boot-prefetch
   features/    grid, column-widths, sticky-header, filter-ui, filter-highlight,
                scope-select (source/schema selectors), table-chips, view-history, record-view,
                referenced-by, structure, siblings, auto-refresh, load-bar, view-notice,
                api-reference, theme,
                join-dialog / join-form / join-sql / join-view / join-saved /
                join-catalog, dropdown (the join builder), suggest-list, overlay-highlight
-  core/        api, dom, types, state (+ store, url), url-intent
+  core/        api, dom, types, state (+ store, url), url-intent, perf-marks
   lib/         filter-dsl, filter-tokens, fuzzy, join-dsl, join-def, join-draft,
                join-tokens, join-types, join-saved, json-tree, format, row-diff,
                scope-key, fallback-note, sibling-matrix

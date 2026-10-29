@@ -158,8 +158,11 @@ should block on.
   never persisted (R6); a join view has no primary key to identify a row by,
   so it gets no tint either; and the fetch itself reports through the normal
   `fetchViewData` chrome, with the new-row count also announced via
-  `#status` (R9, no carve-out). *(Derives from: recognition rather than
-  recall, visibility of system status.)*
+  `#status` (R9, no carve-out). Rows fetched ahead of a click (a chip the
+  pointer rests on, the next page) are held only briefly and dropped by
+  Refresh and by every auto-refresh tick, so they never stand in for a
+  fresher answer. *(Derives from: recognition rather than recall,
+  visibility of system status.)*
 - **R11 — Sort is remembered per table.** (A join view keeps its sort and
   hidden columns for the visit only; both reset with the join.) `sort` +
   `order` persist keyed by
@@ -196,8 +199,9 @@ should block on.
   switch to another table or join (a chip, an FK cell, a referenced-by
   drill-in, Show result) replaces the grid only once its data arrives;
   until then the old grid, title and URL stay, and its controls act on the
-  view they show. A switch that replaces the table list first (schema,
-  source, Back/Forward, a cross-schema FK cell) cannot wait, so the old grid
+  view they show. A switch that changes the view before its rows arrive
+  (schema, source, Back/Forward, a cross-schema FK cell; all but a
+  Back/Forward within one schema also reload the table list) cannot wait, so the old grid
   stays dimmed and inert under a not-allowed cursor, with its columns,
   structure and pager buttons disabled, until the new grid renders. A failed switch names what it could
   not open (`Couldn't open orders: …`). *(Derives from: visibility of system

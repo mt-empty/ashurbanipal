@@ -1,9 +1,11 @@
 import { loadData } from "../bootstrap/reload.js";
-import { api } from "../core/api.js";
+import { api, prefetch } from "../core/api.js";
 import { $, el, qs, setStatus } from "../core/dom.js";
+import { type LoadReason, markTiming } from "../core/perf-marks.js";
 import {
   applyStoredSort,
   clearFilter,
+  dataParams,
   enterTable,
   scopeIdentity,
   scopeQuery,
@@ -126,16 +128,22 @@ export type TablesOutcome = "superseded" | "fell-back" | "loaded";
 export async function loadTables({
   replaceHistory = false,
   next,
+  reason,
 }: {
   replaceHistory?: boolean;
   next?: ViewRequest;
+  reason?: LoadReason;
 } = {}): Promise<TablesOutcome> {
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
     api<{ tables: TableListEntry[] }>(`/tables${scopeQuery()}`),
-    api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery()}`),
+    // Counts are a hint; a failure leaves the chips without them, not missing.
+    api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery()}`).catch((e) => {
+      console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
+      return { counts: [] };
+    }),
   ]);
   if (token !== loadTablesToken) return "superseded";
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
@@ -156,8 +164,9 @@ export async function loadTables({
     // (see .chip-name), so the title tooltip is the escape hatch.
     chip.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
     linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
-      loadData({ next: tableRequest(t.name) });
+      loadData({ next: tableRequest(t.name), reason: "chip" });
     });
+    prefetchOnRest(chip, t.name);
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
   }
@@ -165,6 +174,7 @@ export async function loadTables({
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
+  markTiming("tables-listed");
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back (R5).
   const fellBack = !tableNames.includes(startTable(next ? next.view : state.view) ?? "");
@@ -176,7 +186,7 @@ export async function loadTables({
     // over would 400 and dead-end the very load meant to recover (R5).
     clearFilter();
   }
-  await loadData({ replaceHistory, next: fellBack ? undefined : next });
+  await loadData({ replaceHistory, next: fellBack ? undefined : next, reason });
   return fellBack ? "fell-back" : "loaded";
 }
 
@@ -209,6 +219,29 @@ function linkTo(a: HTMLAnchorElement, href: string, run: () => void): HTMLAnchor
     run();
   };
   return a;
+}
+
+// A mouse pointer resting on a chip asks for the table's first page ahead of
+// the click. A pointer passing over does not; neither do touch, which has no
+// hover before its tap, or keyboard focus, which tabbing moves across every
+// chip. A press cancels it, because the click's own load is already on its way.
+const PREFETCH_REST_MS = 100;
+// Short, so a page shown from it is as fresh as one asked for on the click (R10).
+const PREFETCH_TTL_MS = 5000;
+
+function prefetchOnRest(chip: HTMLElement, name: string): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = () => clearTimeout(timer);
+  const start = () => {
+    cancel();
+    timer = setTimeout(() => {
+      if (name !== tableInView()) prefetch(`/tables/data?${dataParams(tableRequest(name))}`, "view", PREFETCH_TTL_MS);
+    }, PREFETCH_REST_MS);
+  };
+  chip.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "mouse") start();
+  });
+  for (const type of ["pointerleave", "pointerdown"]) chip.addEventListener(type, cancel);
 }
 
 function actionButton(run: () => void): HTMLButtonElement {

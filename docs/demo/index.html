@@ -1622,8 +1622,53 @@ async function errorFromResponse(resp) {
   }
   return new ApiError(`request failed with status ${resp.status}`, void 0);
 }
+var prefetched = [];
+var defaultSource;
+var defaultSchema;
+var defaultsRead = Promise.resolve();
+function readDefault(response, set) {
+  const read2 = response.then((r) => r.ok ? r.clone().json() : null).then((body) => set(body?.default ?? null)).catch(() => set(null));
+  defaultsRead = Promise.all([defaultsRead, read2]);
+}
+function prefetch(path, kind, ttlMs = Number.POSITIVE_INFINITY) {
+  const now = performance.now();
+  prefetched = prefetched.filter((p) => p.expires > now);
+  if (prefetched.some((p) => p.path === path)) return;
+  const response = fetch(API + path);
+  response.catch(() => {
+  });
+  const [route, query = ""] = path.split("?");
+  prefetched.push({ kind, path, route, params: new URLSearchParams(query), response, expires: now + ttlMs });
+  if (kind !== "boot") return;
+  if (route === "/sources") readDefault(response, (v) => defaultSource = v);
+  if (route === "/schemas") readDefault(response, (v) => defaultSchema = v);
+}
+function clearPrefetched(kind) {
+  prefetched = prefetched.filter((p) => kind !== void 0 && p.kind !== kind);
+}
+var SCOPE_KEYS = /* @__PURE__ */ new Set(["source", "schema"]);
+var otherParams = (params) => [...params].filter(([k]) => !SCOPE_KEYS.has(k)).map(([k, v]) => `${k}=${v}`).sort().join("&");
+function sameRequest(p, route, params) {
+  if (p.kind !== "boot" || p.route !== route || otherParams(p.params) !== otherParams(params)) return false;
+  const source = (q) => q.get("source") ?? defaultSource;
+  const schema = (q) => q.get("schema") ?? (route === "/schemas" ? null : defaultSchema);
+  return source(p.params) === source(params) && schema(p.params) === schema(params);
+}
+async function takePrefetched(path) {
+  const now = performance.now();
+  prefetched = prefetched.filter((p) => p.expires > now);
+  let found = prefetched.find((p) => p.path === path);
+  if (!found && prefetched.some((p) => p.kind === "boot")) {
+    await defaultsRead;
+    const [route, query = ""] = path.split("?");
+    found = prefetched.find((p) => sameRequest(p, route, new URLSearchParams(query)));
+  }
+  if (!found) return void 0;
+  prefetched = prefetched.filter((p) => p !== found);
+  return found.response;
+}
 async function api(path, init) {
-  const resp = await fetch(API + path, init);
+  const resp = !init && await takePrefetched(path) || await fetch(API + path, init);
   if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
   if (!resp.ok) throw await errorFromResponse(resp);
   return resp.json();
@@ -2976,6 +3021,20 @@ function applyScopeParams(params) {
   if (source) params.set("source", source);
   if (schema) params.set("schema", schema);
 }
+function dataParams(req) {
+  const { view, sort } = req;
+  const params = new URLSearchParams({ limit: String(state.limit), offset: String(req.offset) });
+  if (view.kind === "table") {
+    params.set("table", view.table);
+    if (sort) {
+      params.set("sort", sort);
+      params.set("order", req.order);
+    }
+  }
+  applyScopeParams(params);
+  if (req.filter) params.set("filter", JSON.stringify(req.ast));
+  return params;
+}
 function applyUrlScope(params) {
   const { source, schema } = chosenScope();
   if (source) params.set("source", source);
@@ -4158,6 +4217,13 @@ function openStructure() {
   });
 }
 
+// src/core/perf-marks.ts
+function markTiming(name, reason) {
+  const full = `ashurbanipal:${name}`;
+  performance.clearMarks(full);
+  performance.mark(full, reason ? { detail: { reason } } : void 0);
+}
+
 // src/bootstrap/table-focus.ts
 var tableEl = $("data-table");
 function captureTableFocus() {
@@ -4269,14 +4335,19 @@ new ResizeObserver(([entry]) => {
 var loadTablesToken = 0;
 async function loadTables({
   replaceHistory = false,
-  next
+  next,
+  reason
 } = {}) {
   syncGridLock();
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
   const [{ tables }, { counts: counts2 }] = await Promise.all([
     api(`/tables${scopeQuery()}`),
-    api(`/table-counts${scopeQuery()}`)
+    // Counts are a hint; a failure leaves the chips without them, not missing.
+    api(`/table-counts${scopeQuery()}`).catch((e) => {
+      console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
+      return { counts: [] };
+    })
   ]);
   if (token !== loadTablesToken) return "superseded";
   const countMap = Object.fromEntries(counts2.map((c) => [c.table, c.approx_rows]));
@@ -4295,8 +4366,9 @@ async function loadTables({
     chip.dataset.table = t.name;
     chip.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
     linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
-      loadData({ next: tableRequest(t.name) });
+      loadData({ next: tableRequest(t.name), reason: "chip" });
     });
+    prefetchOnRest(chip, t.name);
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
   }
@@ -4304,6 +4376,7 @@ async function loadTables({
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
+  markTiming("tables-listed");
   const tableNames = tables.map((t) => t.name);
   const fellBack = !tableNames.includes(startTable(next ? next.view : state.view) ?? "");
   if (fellBack) {
@@ -4311,7 +4384,7 @@ async function loadTables({
     applyStoredSort(tableInView());
     clearFilter();
   }
-  await loadData({ replaceHistory, next: fellBack ? void 0 : next });
+  await loadData({ replaceHistory, next: fellBack ? void 0 : next, reason });
   return fellBack ? "fell-back" : "loaded";
 }
 function listedTableNames() {
@@ -4328,6 +4401,22 @@ function linkTo(a, href, run) {
     run();
   };
   return a;
+}
+var PREFETCH_REST_MS = 100;
+var PREFETCH_TTL_MS = 5e3;
+function prefetchOnRest(chip, name) {
+  let timer2;
+  const cancel = () => clearTimeout(timer2);
+  const start = () => {
+    cancel();
+    timer2 = setTimeout(() => {
+      if (name !== tableInView()) prefetch(`/tables/data?${dataParams(tableRequest(name))}`, "view", PREFETCH_TTL_MS);
+    }, PREFETCH_REST_MS);
+  };
+  chip.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "mouse") start();
+  });
+  for (const type of ["pointerleave", "pointerdown"]) chip.addEventListener(type, cancel);
 }
 function actionButton(run) {
   const btn = el("button");
@@ -5222,7 +5311,7 @@ function mountJoinSql(onChange) {
     if (only) return;
     suggest2.show(rows, ctx.head);
   }
-  function prefetch() {
+  function prefetch2() {
     const listed = new Set(listedTableNames());
     const wanted = [...new Set(joinCompletionAt(field.value).declared.map((d) => d.table))].filter(
       (t) => listed.has(t) && !cachedColumns(t)
@@ -5235,7 +5324,7 @@ function mountJoinSql(onChange) {
     });
   }
   field.addEventListener("input", () => {
-    prefetch();
+    prefetch2();
     onChange();
     void update2();
   });
@@ -5698,10 +5787,10 @@ async function showCommonValues(e, table, column) {
 // src/features/scope-select.ts
 async function loadSources() {
   let names;
-  let defaultSource;
+  let defaultSource2;
   try {
     let sources;
-    ({ sources, default: defaultSource } = await api("/sources"));
+    ({ sources, default: defaultSource2 } = await api("/sources"));
     names = sources.map((s) => s.name);
   } catch (e) {
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
@@ -5709,7 +5798,7 @@ async function loadSources() {
     return;
   }
   const wanted = state.scope.source;
-  const fallback = names.includes(defaultSource) ? defaultSource : names[0] ?? null;
+  const fallback = names.includes(defaultSource2) ? defaultSource2 : names[0] ?? null;
   const source = wanted !== null && names.includes(wanted) ? wanted : fallback;
   settleSource(source, names.length > 1);
   if (!state.manySources) return;
@@ -5726,24 +5815,26 @@ async function loadSchemas() {
   syncGridLock();
   const token = ++loadSchemasToken;
   let schemas;
-  let defaultSchema;
+  let defaultSchema2;
   try {
     const listing = await api(`/schemas${sourceQuery()}`);
     schemas = listing.schemas.map((s) => s.name);
-    defaultSchema = listing.default ?? null;
+    defaultSchema2 = listing.default ?? null;
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
     settleSchema(null, false, false);
     $("schema-select-wrap").hidden = true;
+    markTiming("scope-settled");
     return true;
   }
   if (token !== loadSchemasToken) return false;
   const wanted = state.scope.schema;
-  const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema ?? schemas[0] ?? null;
-  settleSchema(schema, schemas.length > 1, defaultSchema === null);
+  const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema2 ?? schemas[0] ?? null;
+  settleSchema(schema, schemas.length > 1, defaultSchema2 === null);
   if (schema !== null) populateSelect($("schema-select"), schemas, schema);
   $("schema-select-wrap").hidden = !state.manySchemas;
+  markTiming("scope-settled");
   return true;
 }
 $("schema-select").onchange = () => {
@@ -6103,15 +6194,20 @@ window.addEventListener("popstate", () => {
   supersedeLoads();
   const params = new URLSearchParams(location.search);
   const previousSource = state.scope.source;
+  const previousSchema = state.scope.schema;
   applyUrlExact(params);
   $("source-select").value = state.scope.source ?? "";
   $("schema-select").value = state.scope.schema ?? "";
   persist();
   if (state.scope.source === previousSource) {
-    loadTables({ replaceHistory: true }).catch(reportError);
+    if (state.scope.schema === previousSchema && listedTableNames().includes(startTable(state.view) ?? "")) {
+      loadData({ replaceHistory: true, reason: "history" });
+      return;
+    }
+    loadTables({ replaceHistory: true, reason: "history" }).catch(reportError);
     return;
   }
-  loadSchemas().then((current2) => current2 ? loadTables({ replaceHistory: true }) : void 0).catch(reportError);
+  loadSchemas().then((current2) => current2 ? loadTables({ replaceHistory: true, reason: "history" }) : void 0).catch(reportError);
 });
 
 // src/features/sticky-header.ts
@@ -6123,6 +6219,16 @@ function update() {
 main.addEventListener("scroll", update, { passive: true });
 window.addEventListener("resize", update);
 update();
+
+// src/bootstrap/boot-prefetch.ts
+function prefetchStartup() {
+  prefetch("/sources", "boot");
+  prefetch(`/schemas${sourceQuery()}`, "boot");
+  prefetch(`/tables${scopeQuery()}`, "boot");
+  prefetch(`/table-counts${scopeQuery()}`, "boot");
+  const req = currentRequest();
+  if (req?.view.kind === "table") prefetch(`/tables/data?${dataParams(req)}`, "boot");
+}
 
 // src/lib/json-tree.ts
 var SCALAR_CLASS = {
@@ -6706,6 +6812,7 @@ function setTableBusy(busy) {
   else tableEl.removeAttribute("aria-busy");
 }
 var inFlightFetches = 0;
+var NEXT_PAGE_TTL_MS = 3e4;
 var LOADING_DELAY_MS = 250;
 var slowTimer;
 function setSlow(slow, announce = true) {
@@ -6767,21 +6874,13 @@ function dataPath(view, params) {
 async function fetchViewData(req, auto) {
   const { view, sort, order } = req;
   const table = startTable(view);
-  const params = new URLSearchParams({
-    limit: String(state.limit),
-    offset: String(req.offset)
-  });
-  if (view.kind === "table") params.set("table", view.table);
-  if (sort) {
-    const target = view.kind === "join" ? splitColumnKey(sort, view.def) : { column: sort, join: void 0 };
-    if (target) {
-      params.set("sort", target.column);
-      if (target.join !== void 0) params.set("sort_join", String(target.join));
-      params.set("order", order);
-    }
+  const params = dataParams(req);
+  const target = view.kind === "join" && sort ? splitColumnKey(sort, view.def) : void 0;
+  if (target) {
+    params.set("sort", target.column);
+    params.set("sort_join", String(target.join));
+    params.set("order", order);
   }
-  applyScopeParams(params);
-  if (req.filter) params.set("filter", JSON.stringify(req.ast));
   if (inFlightFetches++ === 0) {
     setFetching(true);
     setTableBusy(true);
@@ -6825,16 +6924,24 @@ function updateViewChrome() {
   $("current").textContent = title ?? "\u2014";
   document.title = title ? `${title} \u2014 Ashurbanipal` : "Ashurbanipal";
 }
-async function loadData2({
+function loadData2(opts = {}) {
+  const reason = opts.reason ?? (opts.auto ? "auto" : "other");
+  markTiming("load-start", reason);
+  return runLoad({ ...opts, reason });
+}
+async function runLoad({
   resetScroll = true,
   highlightNew = false,
   auto = false,
   next,
-  replaceHistory = false
-} = {}) {
+  replaceHistory = false,
+  reason = "other"
+}) {
   if (!auto) {
     clearError();
     clearJoinNotice();
+  } else {
+    clearPrefetched("view");
   }
   const req = next ?? currentRequest();
   syncViewNotice(req);
@@ -6859,9 +6966,9 @@ async function loadData2({
       return;
     }
     const code = e instanceof ApiError ? e.code : void 0;
-    if (!next && dropOneStaleInput(code)) return loadData2({ resetScroll, highlightNew, replaceHistory });
+    if (!next && dropOneStaleInput(code)) return runLoad({ resetScroll, highlightNew, replaceHistory, reason });
     const retry = next && dropStaleSort(next, code);
-    if (retry) return loadData2({ next: retry, resetScroll, highlightNew, replaceHistory });
+    if (retry) return runLoad({ next: retry, resetScroll, highlightNew, replaceHistory, reason });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
     reportError(failedLoadError(e, view, next));
     return;
@@ -6901,6 +7008,16 @@ async function loadData2({
   }
   if (superseded()) return;
   updatePager(data);
+  markTiming("rows-rendered", reason);
+  if (reason === "page" && view.kind === "table" && !$("next").disabled) {
+    const shown2 = currentRequest();
+    if (shown2)
+      prefetch(
+        `/tables/data?${dataParams({ ...shown2, offset: shown2.offset + state.limit })}`,
+        "view",
+        NEXT_PAGE_TTL_MS
+      );
+  }
   noteLoadOk();
   setNewChip(newRowKeys?.size ?? 0);
   if (newRowKeys?.size) {
@@ -6931,6 +7048,7 @@ $("theme-toggle").onclick = () => {
 
 // src/bootstrap/main.ts
 initState();
+prefetchStartup();
 registerLoadData(loadData2);
 window.addEventListener("unhandledrejection", (ev) => {
   console.error("ashurbanipal: unhandled promise rejection", ev.reason);
@@ -6949,28 +7067,30 @@ $("payload").onclick = () => {
 $("structure-btn").onclick = openStructure;
 $("prev").onclick = () => {
   state.offset = Math.max(0, state.offset - state.limit);
-  loadData2({ resetScroll: false });
+  loadData2({ resetScroll: false, reason: "page" });
 };
 $("next").onclick = () => {
   state.offset += state.limit;
-  loadData2({ resetScroll: false });
+  loadData2({ resetScroll: false, reason: "page" });
 };
 $("refresh").onclick = () => {
   const btn = $("refresh");
+  clearPrefetched("view");
   clearStructureCache();
   clearCommonValueCache();
   clearJoinCatalog();
   resetColumnWidths();
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 500);
-  loadData2({ resetScroll: false, highlightNew: true });
+  loadData2({ resetScroll: false, highlightNew: true, reason: "refresh" });
 };
 loadSources().then(loadSchemas).then((current2) => {
   if (!current2) return;
   const navType = performance.getEntriesByType("navigation")[0]?.type;
   if (state.sort === null && navType !== "reload" && navType !== "back_forward") applyStoredSort(tableInView());
-  return loadTables({ replaceHistory: true });
+  return loadTables({ replaceHistory: true, reason: "boot" });
 }).catch(reportError).finally(() => {
+  clearPrefetched("boot");
   noteStartupSettled();
   try {
     showBootFallbackNote();
