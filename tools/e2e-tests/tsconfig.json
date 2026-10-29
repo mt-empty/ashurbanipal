@@ -8,5 +8,12 @@
     "skipLibCheck": true,
     "types": ["node", "@playwright/test"]
   },
-  "include": ["tests/**/*.ts", "coverage/*.d.mts", "playwright.config.ts", "playwright.showcase.config.ts"]
+  "include": [
+    "tests/**/*.ts",
+    "perf/**/*.ts",
+    "coverage/*.d.mts",
+    "playwright.config.ts",
+    "playwright.showcase.config.ts",
+    "playwright.perf.config.ts"
+  ]
 }

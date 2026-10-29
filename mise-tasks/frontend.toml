@@ -137,6 +137,13 @@ exit $status
 dir = "tools/e2e-tests"
 depends = ["frontend:rebuild"]
 
+# Not part of `check` or CI: shared runners make timings too noisy to compare.
+["frontend:perf"]
+description = "rebuild and sync the frontend, then run the start-up timing experiment on Chromium (tools/e2e-tests/perf/README.md); PERF_RUNS and PERF_NETWORKS narrow it"
+run = "pnpm exec playwright test --config playwright.perf.config.ts"
+dir = "tools/e2e-tests"
+depends = ["frontend:rebuild"]
+
 ["frontend:showcase"]
 description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to a Bayer-dithered tools/e2e-tests/showcase.gif"
 run = "./generate-showcase-gif.sh"
