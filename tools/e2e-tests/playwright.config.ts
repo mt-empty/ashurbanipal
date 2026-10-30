@@ -21,7 +21,7 @@ const SMOKE_SPEC = /default-scope\.spec\.ts/;
 // merging with it, so every project-level `testIgnore` below must include
 // ALWAYS_IGNORE or showcase.spec.ts leaks back into that project's run.
 const ALWAYS_IGNORE = BACKEND === "postgres" ? [SHOWCASE_IGNORE, SMOKE_SPEC] : [SHOWCASE_IGNORE];
-const CHROMIUM_ONLY_IGNORE = [...ALWAYS_IGNORE, /inspection-affordances\.spec\.ts/];
+const CHROMIUM_ONLY_IGNORE = [...ALWAYS_IGNORE, /inspection-affordances\.spec\.ts/, /scrollbar-gutter\.spec\.ts/];
 const SQLITE_SEED = fileURLToPath(new URL("../../conformance/seed/seed.sqlite.sql", import.meta.url));
 
 // This suite is a frontend UI-regression suite, not

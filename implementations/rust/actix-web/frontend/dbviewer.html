@@ -80,8 +80,10 @@
 [hidden] { display: none !important; }
 body { margin: 0; height: 100vh; font-size: .875rem; }
 /* main is the only scroller: the chrome scrolls away with the page and only
-   the table header pins (thead th, top: 0). */
-main { height: 100%; overflow: auto; }
+   the table header pins (thead th, top: 0). The stable gutter keeps a classic
+   vertical scrollbar from narrowing the page, and so rewrapping the table
+   chips, when a short table switches to a tall one. */
+main { height: 100%; overflow: auto; scrollbar-gutter: stable; }
 /* sticky left keeps the chrome in view when a wide table scrolls sideways;
    it works because #content below is as wide as the table (see #content). */
 #chrome { position: sticky; left: 0; z-index: var(--z-chrome); padding: var(--gap-lg) var(--gap-xl) 0; }
