@@ -24,7 +24,7 @@ export interface DelayProxy {
 }
 
 export interface ProxyOptions {
-  /** Gzip HTML and JSON, standing in for a host that compresses its responses. */
+  /** Gzip HTML and JSON not already encoded, standing in for a host that compresses its API responses. */
   gzip?: boolean;
   /** Serve over HTTPS with HTTP/2 (self-signed certificate) instead of plain HTTP/1.1. */
   h2?: boolean;

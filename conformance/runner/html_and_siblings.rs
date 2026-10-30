@@ -47,6 +47,75 @@ async fn dbviewer_html_does_not_hardcode_the_api_base() {
     );
 }
 
+async fn fetch_page(srv: &TestServer, accept_encoding: Option<&str>) -> reqwest::Response {
+    let mut req = srv.client().get(srv.url(""));
+    if let Some(value) = accept_encoding {
+        req = req.header("accept-encoding", value);
+    }
+    let resp = req.send().await.unwrap();
+    assert_status(&resp, 200, "GET {mount}");
+    resp
+}
+
+fn header_values(resp: &reqwest::Response, name: &str) -> Vec<String> {
+    resp.headers()
+        .get_all(name)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .map(|v| v.trim().to_ascii_lowercase())
+        .collect()
+}
+
+#[tokio::test]
+async fn page_is_gzipped_when_accepted_and_decodes_to_the_same_bytes() {
+    use std::io::Read;
+
+    let srv = TestServer::spawn().await;
+    let plain = fetch_page(&srv, None).await;
+    assert!(
+        plain.headers().get("content-encoding").is_none(),
+        "a request without Accept-Encoding got a compressed page"
+    );
+    let plain = plain.bytes().await.unwrap();
+
+    let gzipped = fetch_page(&srv, Some("gzip")).await;
+    assert_eq!(
+        header_values(&gzipped, "content-encoding"),
+        ["gzip"],
+        "Accept-Encoding: gzip must get a gzip page"
+    );
+    assert!(
+        header_values(&gzipped, "vary")
+            .iter()
+            .any(|v| v == "accept-encoding"),
+        "a compressed page must carry Vary: Accept-Encoding"
+    );
+    let compressed = gzipped.bytes().await.unwrap();
+    assert!(
+        compressed.len() < plain.len() / 2,
+        "the gzip page is not smaller"
+    );
+    let mut decoded = Vec::new();
+    flate2::read::GzDecoder::new(&compressed[..])
+        .read_to_end(&mut decoded)
+        .expect("the gzip page does not decode");
+    assert!(
+        decoded == plain,
+        "the decoded gzip page differs from the uncompressed page"
+    );
+}
+
+#[tokio::test]
+async fn page_is_not_gzipped_when_gzip_has_q_zero() {
+    let srv = TestServer::spawn().await;
+    let resp = fetch_page(&srv, Some("gzip;q=0")).await;
+    assert!(
+        resp.headers().get("content-encoding").is_none(),
+        "Accept-Encoding: gzip;q=0 got a compressed page"
+    );
+}
+
 #[tokio::test]
 async fn siblings_endpoint_returns_empty_list_by_default() {
     let srv = TestServer::spawn().await;

@@ -1,6 +1,8 @@
 package ashurbanipal
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -20,6 +22,8 @@ const pinnedFrontendSHA256 = "e6c73182eb05688af6ced2a1c59d119b8ffb18642e0401b1fd
 
 var dbviewerHTML = mustLoadFrontend()
 
+var dbviewerHTMLGzip = mustGzip(dbviewerHTML)
+
 func mustLoadFrontend() []byte {
 	bytes, err := frontendFS.ReadFile("frontend/dbviewer.html")
 	if err != nil {
@@ -34,4 +38,16 @@ func mustLoadFrontend() []byte {
 			pinnedFrontendSHA256, actual))
 	}
 	return bytes
+}
+
+func mustGzip(page []byte) []byte {
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	if _, err := zw.Write(page); err != nil {
+		panic(fmt.Sprintf("ashurbanipal: gzip frontend/dbviewer.html: %v", err))
+	}
+	if err := zw.Close(); err != nil {
+		panic(fmt.Sprintf("ashurbanipal: gzip frontend/dbviewer.html: %v", err))
+	}
+	return buf.Bytes()
 }

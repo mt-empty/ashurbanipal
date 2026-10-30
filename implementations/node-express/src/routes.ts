@@ -11,7 +11,7 @@ import {
   withDefaults,
 } from "./config.js";
 import type { DbSource } from "./db/types.js";
-import { dbviewerHtml } from "./embed.js";
+import { dbviewerHtml, dbviewerHtmlGzip } from "./embed.js";
 import { FilterError, isQueryTimeout, NOT_ALLOWED_CODE, NotAllowedError } from "./errors.js";
 import { type Condition, parseFilter, parseFilterForJoin } from "./filter.js";
 import { BadJoinError, BadParamError, parseJoin } from "./join.js";
@@ -123,8 +123,14 @@ function withApiHeaders(
   };
 }
 
-function serveHtml(_req: Request, res: Response): void {
+function serveHtml(req: Request, res: Response): void {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.vary("Accept-Encoding");
+  if (req.acceptsEncodings("gzip")) {
+    res.setHeader("Content-Encoding", "gzip");
+    res.status(200).send(dbviewerHtmlGzip);
+    return;
+  }
   res.status(200).send(dbviewerHtml);
 }
 

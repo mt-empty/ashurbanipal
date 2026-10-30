@@ -1,7 +1,7 @@
 use actix_web::body::MessageBody;
 use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::http::header::{HeaderName, HeaderValue, X_CONTENT_TYPE_OPTIONS};
-use actix_web::middleware::{from_fn, Next};
+use actix_web::middleware::{from_fn, Compress, Next};
 use actix_web::web::{self, Data};
 use actix_web::{Error, HttpResponse, Scope};
 
@@ -59,7 +59,11 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
     // use `web::resource` (not `Scope::route`) so a method mismatch 405s.
     web::scope("/__ashurbanipal")
         .app_data(state)
-        .service(web::resource("").route(web::get().to(serve_html)))
+        .service(
+            web::resource("")
+                .wrap(Compress::default())
+                .route(web::get().to(serve_html)),
+        )
         .service(
             web::scope("/api")
                 .wrap(from_fn(stamp_api_headers))

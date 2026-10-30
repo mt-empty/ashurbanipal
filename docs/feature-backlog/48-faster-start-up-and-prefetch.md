@@ -1,6 +1,6 @@
 # Faster start-up and prefetch, from measured timings
 
-> **Status:** PARTIAL · **Area:** frontend, ports, docs · **Ref:** 4.1 (full version), 4.3, 4.4 (mouse hover only) and 4.5 shipped with the timing marks and `mise run frontend:perf`; 4.2 compression and minification undecided
+> **Status:** PARTIAL · **Area:** frontend, ports, docs · **Ref:** 4.1 (full version), 4.3, 4.4 (mouse hover only) and 4.5 shipped with the timing marks and `mise run frontend:perf`; 4.2 every port gzips the page; minification not done
 
 ## 1. The ask
 
@@ -131,6 +131,11 @@ The page is the same 255 KB on every start-up. Gzip brings it to about
   by letting the delay proxy gzip the page. Then decide between a host
   note in each port's README and compressing the UI route in each port.
 - **Care:** no doc mentions compression today.
+- **Done 2026-10-29:** every port sends the page gzipped when the request
+  accepts it (`spec/protocol.md` §5.1). axum uses tower-http's
+  `CompressionLayer` and actix-web its `Compress` middleware, on the page
+  route only. Go, Node, Flask and Spring compress the page once at start-up
+  with their standard library. The API stays uncompressed.
 
 ### 4.3 Reuse the table list on the browser's Back and Forward
 
@@ -332,6 +337,8 @@ HTTP/1.1 in every variant.
    are kept.
 2. Rerun the baseline (now HTTPS + HTTP/2 by default) so its results name
    a commit.
-3. Decide on compression (4.2): a host note or port code. Minifying the
-   page (built with `minify: false`, `frontend/bundle-options.mjs`) saves
-   4–12% of start-up without gzip and 0–5% with it.
+3. Decided 2026-10-29: every port gzips the page (4.2); see §4.2. Perf
+   results from before that change measured an uncompressed page, so
+   compare a new run with a `PERF_GZIP=1` result, not the plain baseline.
+   Minifying the page (built with `minify: false`,
+   `frontend/bundle-options.mjs`) is not done: 0–5% on top of gzip.

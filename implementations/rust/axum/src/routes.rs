@@ -8,6 +8,7 @@ use axum::middleware::map_response;
 use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::get;
 use axum::Router;
+use tower_http::compression::CompressionLayer;
 
 use ashurbanipal::protocol_wire::{
     CommonValuesParams, CommonValuesResponse, CountsResponse, DataParams, JoinParams,
@@ -75,7 +76,10 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
         .route("/__ashurbanipal/api/siblings", get(siblings::<S>))
         .layer(map_response(stamp_api_headers));
     Router::new()
-        .route("/__ashurbanipal", get(serve_html::<S>))
+        .route(
+            "/__ashurbanipal",
+            get(serve_html::<S>).layer(CompressionLayer::new()),
+        )
         .merge(api)
         .with_state(state)
 }

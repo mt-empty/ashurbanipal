@@ -12,6 +12,7 @@ from yet.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 from pathlib import Path
 
@@ -33,3 +34,5 @@ def _load_frontend() -> str:
 
 
 DBVIEWER_HTML = _load_frontend()
+
+DBVIEWER_HTML_GZIP = gzip.compress(DBVIEWER_HTML.encode("utf-8"), compresslevel=9, mtime=0)

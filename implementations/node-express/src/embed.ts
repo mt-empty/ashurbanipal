@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { constants, gzipSync } from "node:zlib";
 
 // Mirrors the Go port's embed.go and PORTING.md's vendoring contract: a
 // build pipeline can silently mangle the vendored file, so the hash is
@@ -29,3 +30,5 @@ function loadFrontend(): string {
 }
 
 export const dbviewerHtml = loadFrontend();
+
+export const dbviewerHtmlGzip = gzipSync(dbviewerHtml, { level: constants.Z_BEST_COMPRESSION });

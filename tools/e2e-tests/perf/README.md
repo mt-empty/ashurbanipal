@@ -18,7 +18,7 @@ node perf/compare.mjs perf-results/startup-before-….json perf-results/startup-
 | `PERF_RUNS` | Runs per cell (default 20) |
 | `PERF_NETWORKS` | Comma-separated subset of `local`, `same-region`, `cross-region`, `poor` (default: all but `local`) |
 | `PERF_LABEL` | Names the run in its file name and heading |
-| `PERF_GZIP=1` | The proxy gzips HTML and JSON, standing in for a host that compresses |
+| `PERF_GZIP=1` | The proxy gzips JSON and a `PERF_PAGE` page, standing in for a host that compresses its API responses. The demo gzips its own page (`spec/protocol.md` §5.1), so the page arrives compressed either way |
 | `PERF_HTTP1=1` | Plain HTTP/1.1 with no TLS, instead of HTTPS + HTTP/2 |
 | `PERF_PAGE` | Serve this saved page build instead of the demo's own, so builds can be compared on one backend without rebuilding it |
 

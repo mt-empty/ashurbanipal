@@ -138,7 +138,45 @@ func withAPIHeaders(h http.HandlerFunc) http.HandlerFunc {
 
 func serveHTML(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Add("Vary", "Accept-Encoding")
+	if acceptsGzip(r.Header.Values("Accept-Encoding")) {
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(dbviewerHTMLGzip)
+		return
+	}
 	_, _ = w.Write(dbviewerHTML)
+}
+
+// acceptsGzip reads Accept-Encoding per RFC 9110 §12.5.3: an explicit gzip
+// (or x-gzip) entry wins over "*", and q=0 means not acceptable.
+func acceptsGzip(headers []string) bool {
+	gzipQ, starQ := -1.0, -1.0
+	for _, header := range headers {
+		for _, entry := range strings.Split(header, ",") {
+			params := strings.Split(entry, ";")
+			q := 1.0
+			for _, param := range params[1:] {
+				name, value, _ := strings.Cut(strings.TrimSpace(param), "=")
+				if strings.EqualFold(strings.TrimSpace(name), "q") {
+					parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+					if err != nil {
+						parsed = 0
+					}
+					q = parsed
+				}
+			}
+			switch strings.ToLower(strings.TrimSpace(params[0])) {
+			case "gzip", "x-gzip":
+				gzipQ = q
+			case "*":
+				starQ = q
+			}
+		}
+	}
+	if gzipQ >= 0 {
+		return gzipQ > 0
+	}
+	return starQ > 0
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {

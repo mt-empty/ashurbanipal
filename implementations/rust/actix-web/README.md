@@ -91,6 +91,10 @@ extra config. If a reverse proxy strips the prefix before the request
 reaches your process, register `service(state.clone())` directly and it
 just works.
 
+## Compression
+
+The UI page is sent compressed when the browser accepts it (`spec/protocol.md` §5.1), through actix-web's `Compress` middleware on that route only; it may pick brotli or zstd over gzip. API responses are sent uncompressed. A host-wide `Compress` leaves the page alone, because it already carries `Content-Encoding`.
+
 ## Behind your own auth
 
 Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.
