@@ -316,7 +316,7 @@ test("a join still loading is dropped when Back restores the previous table", as
   const releaseJoin = await startHeldJoin(page);
   const usersRows = dataWith("table", "users");
   const releaseUsers = await holdRequests(page, usersRows);
-  const usersSent = page.waitForRequest((r) => usersRows(r.url()));
+  const usersSent = page.waitForRequest(usersRows);
   await goBack(page);
   await usersSent;
 

@@ -1,3 +1,5 @@
+import type { SchemasResponse, SourcesResponse } from "./types.js";
+
 // Derived from the page's own URL, not hardcoded, so the UI works behind
 // any reverse-proxy prefix; trailing slashes stripped so /x/ and /x agree.
 export const API = `${location.pathname.replace(/\/+$/, "")}/api`;
@@ -88,27 +90,37 @@ let defaultsRead: Promise<unknown> = Promise.resolve();
 function readDefault(response: Promise<Response>, set: (value: string | null) => void): void {
   const read = response
     .then((r) => (r.ok ? r.clone().json() : null))
-    .then((body: { default?: string | null } | null) => set(body?.default ?? null))
+    .then((body: SourcesResponse | SchemasResponse | null) => set(body?.default ?? null))
     .catch(() => set(null));
   defaultsRead = Promise.all([defaultsRead, read]);
 }
 
-export function prefetch(path: string, kind: PrefetchKind, ttlMs = Number.POSITIVE_INFINITY): void {
+function dropExpired(): number {
   const now = performance.now();
   prefetched = prefetched.filter((p) => p.expires > now);
+  return now;
+}
+
+function splitPath(path: string): [route: string, params: URLSearchParams] {
+  const [route, query = ""] = path.split("?");
+  return [route, new URLSearchParams(query)];
+}
+
+export function prefetch(path: string, kind: PrefetchKind, ttlMs = Number.POSITIVE_INFINITY): void {
+  const now = dropExpired();
   if (prefetched.some((p) => p.path === path)) return;
   const response = fetch(API + path);
   // A failed request surfaces when an api() call takes it, and only then.
   response.catch(() => {});
-  const [route, query = ""] = path.split("?");
-  prefetched.push({ kind, path, route, params: new URLSearchParams(query), response, expires: now + ttlMs });
+  const [route, params] = splitPath(path);
+  prefetched.push({ kind, path, route, params, response, expires: now + ttlMs });
   if (kind !== "boot") return;
   if (route === "/sources") readDefault(response, (v) => (defaultSource = v));
   if (route === "/schemas") readDefault(response, (v) => (defaultSchema = v));
 }
 
-export function clearPrefetched(kind?: PrefetchKind): void {
-  prefetched = prefetched.filter((p) => kind !== undefined && p.kind !== kind);
+export function clearPrefetched(kind: PrefetchKind): void {
+  prefetched = prefetched.filter((p) => p.kind !== kind);
 }
 
 const SCOPE_KEYS = new Set(["source", "schema"]);
@@ -129,13 +141,12 @@ function sameRequest(p: Prefetched, route: string, params: URLSearchParams): boo
 }
 
 async function takePrefetched(path: string): Promise<Response | undefined> {
-  const now = performance.now();
-  prefetched = prefetched.filter((p) => p.expires > now);
+  dropExpired();
   let found = prefetched.find((p) => p.path === path);
   if (!found && prefetched.some((p) => p.kind === "boot")) {
     await defaultsRead;
-    const [route, query = ""] = path.split("?");
-    found = prefetched.find((p) => sameRequest(p, route, new URLSearchParams(query)));
+    const [route, params] = splitPath(path);
+    found = prefetched.find((p) => sameRequest(p, route, params));
   }
   if (!found) return undefined;
   prefetched = prefetched.filter((p) => p !== found);

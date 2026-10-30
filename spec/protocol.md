@@ -135,7 +135,7 @@ Serves the Ashurbanipal frontend (`dbviewer.html`) as `text/html`.
 Implementations MUST serve the released frontend artifact unmodified
 (no forks).
 
-- When the request's `Accept-Encoding` accepts `gzip` (q > 0), the page
+- When the request's `Accept-Encoding` names `gzip` with q > 0, the page
   MUST be sent compressed, with `gzip` or another coding that header
   accepts. A compressed response MUST carry `Content-Encoding` and
   `Vary: Accept-Encoding`.

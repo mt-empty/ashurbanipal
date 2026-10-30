@@ -5,11 +5,15 @@
 import type { LoadReason } from "../core/perf-marks.js";
 import type { ViewRequest } from "../core/store.js";
 
-type LoadDataOpts = {
+export type LoadDataOpts = {
   resetScroll?: boolean;
   highlightNew?: boolean;
+  // An auto-refresh tick: it only re-fetches, so it never retries a dropped sort or filter,
+  // opens the join dialog, or clears a message the user's own last action left.
   auto?: boolean;
+  // A view to try; it replaces the state only if its data arrives.
   next?: ViewRequest;
+  // Start-up and history restores correct the current entry rather than add one (ui-guidelines R16).
   replaceHistory?: boolean;
   reason?: LoadReason;
 };

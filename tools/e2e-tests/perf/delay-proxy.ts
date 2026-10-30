@@ -4,6 +4,7 @@ import http2, { type Http2ServerRequest } from "node:http2";
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { createGzip } from "node:zlib";
+import { APP_PATH } from "../tests/support/helpers";
 import { perfCertificate } from "./tls";
 
 /** Simulated server time per route. */
@@ -32,7 +33,6 @@ export interface ProxyOptions {
   page?: string;
 }
 
-const MOUNT = "/__ashurbanipal";
 const DATA_ROUTE = /\/api\/tables\/(data|join)(\?|$)/;
 const COMPRESSIBLE = /^(text\/html|application\/json)/;
 // Connection-level headers HTTP/2 forbids in a response.
@@ -49,12 +49,9 @@ function serverTime(path: string, delays: Delays): number {
   return path.includes("/api/") ? delays.catalogMs : 0;
 }
 
-// The round trip is added here, not by Chromium's throttling: Chromium treats
-// its latency as a minimum time to response headers, so server time would hide
-// inside it instead of adding to it. A proxy rather than page.route(), because
-// Playwright turns the HTTP cache off while any route is registered. The first
-// request on a new connection pays its handshake: one more round trip for TCP,
-// two for TCP plus TLS 1.3 under `h2`.
+// Chromium's throttling latency is a minimum time to headers, which would hide
+// server time, and page.route() turns Playwright's HTTP cache off; so the round
+// trip, plus a handshake per new connection, is charged here.
 export async function startDelayProxy(target: string, options: ProxyOptions = {}): Promise<DelayProxy> {
   const { gzip = false, h2 = false } = options;
   const page = options.page ? readFileSync(options.page) : undefined;
@@ -82,7 +79,7 @@ export async function startDelayProxy(target: string, options: ProxyOptions = {}
   }
 
   function forward(req: Req, res: Res, path: string): void {
-    if (page && req.method === "GET" && new URL(path, "http://x").pathname.replace(/\/+$/, "") === MOUNT) {
+    if (page && req.method === "GET" && new URL(path, "http://x").pathname.replace(/\/+$/, "") === APP_PATH) {
       send(
         req,
         res,

@@ -52,7 +52,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.1-SERVE-HTML` | Serves `dbviewer.html` as `text/html` | `html_and_siblings::root_serves_the_embedded_dbviewer_html` |
 | `P5.1-UNMODIFIED-ARTIFACT` | Frontend artifact unmodified (mount-agnostic API base) | `html_and_siblings::dbviewer_html_does_not_hardcode_the_api_base` |
 | `P5.1-GZIP` | `Accept-Encoding: gzip` gets the page compressed, with `Content-Encoding` and `Vary: Accept-Encoding`; it decodes to the uncompressed page byte for byte | `html_and_siblings::page_is_gzipped_when_accepted_and_decodes_to_the_same_bytes` |
-| `P5.1-NO-GZIP-UNLESS-ACCEPTED` | No `Accept-Encoding`, or `gzip;q=0`, gets the page uncompressed | `html_and_siblings::page_is_gzipped_when_accepted_and_decodes_to_the_same_bytes` (absent case), `html_and_siblings::page_is_not_gzipped_when_gzip_has_q_zero` |
+| `P5.1-NO-GZIP-UNLESS-ACCEPTED` | `Accept-Encoding` is read with q values: a header naming gzip with q > 0 gets a compressed page; one that refuses it (`gzip;q=0`) never gets gzip; none, or `identity`, gets the page uncompressed | `html_and_siblings::page_is_gzipped_when_accepted_and_decodes_to_the_same_bytes` (absent case), `html_and_siblings::page_encoding_follows_accept_encoding_q_values` |
 
 ## §5.2 `GET /api/tables`
 

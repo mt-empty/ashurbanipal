@@ -18,11 +18,11 @@ var frontendFS embed.FS
 // re-verified on every build (init, here), not just recorded once at
 // vendoring time. It pins the sha256 of this repo's canonical
 // frontend/dbviewer.html — there is no separately published frontend artifact.
-const pinnedFrontendSHA256 = "e6c73182eb05688af6ced2a1c59d119b8ffb18642e0401b1fd34702f19858355"
+const pinnedFrontendSHA256 = "e6539e93787f14fc8cf9559504fe3f41ce446fcce14ac000d6b1390bb479c3e0"
 
 var dbviewerHTML = mustLoadFrontend()
 
-var dbviewerHTMLGzip = mustGzip(dbviewerHTML)
+var dbviewerHTMLGzip = gzipPage(dbviewerHTML)
 
 func mustLoadFrontend() []byte {
 	bytes, err := frontendFS.ReadFile("frontend/dbviewer.html")
@@ -40,14 +40,11 @@ func mustLoadFrontend() []byte {
 	return bytes
 }
 
-func mustGzip(page []byte) []byte {
+// gzipPage ignores errors: a gzip.Writer at a valid level over a bytes.Buffer never returns one.
+func gzipPage(page []byte) []byte {
 	var buf bytes.Buffer
 	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	if _, err := zw.Write(page); err != nil {
-		panic(fmt.Sprintf("ashurbanipal: gzip frontend/dbviewer.html: %v", err))
-	}
-	if err := zw.Close(); err != nil {
-		panic(fmt.Sprintf("ashurbanipal: gzip frontend/dbviewer.html: %v", err))
-	}
+	_, _ = zw.Write(page)
+	_ = zw.Close()
 	return buf.Bytes()
 }

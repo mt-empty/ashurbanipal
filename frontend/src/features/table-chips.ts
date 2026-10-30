@@ -5,12 +5,12 @@ import { type LoadReason, markTiming } from "../core/perf-marks.js";
 import {
   applyStoredSort,
   clearFilter,
-  dataParams,
   enterTable,
   scopeIdentity,
   scopeQuery,
   startTable,
   state,
+  tableDataPath,
   tableInView,
   tableRequest,
   type ViewRequest,
@@ -221,10 +221,8 @@ function linkTo(a: HTMLAnchorElement, href: string, run: () => void): HTMLAnchor
   return a;
 }
 
-// A mouse pointer resting on a chip asks for the table's first page ahead of
-// the click. A pointer passing over does not; neither do touch, which has no
-// hover before its tap, or keyboard focus, which tabbing moves across every
-// chip. A press cancels it, because the click's own load is already on its way.
+// Only a resting mouse asks ahead: touch has no hover before its tap, and
+// tabbing would focus, and so fetch, every chip it passes.
 const PREFETCH_REST_MS = 100;
 // Short, so a page shown from it is as fresh as one asked for on the click (R10).
 const PREFETCH_TTL_MS = 5000;
@@ -235,7 +233,7 @@ function prefetchOnRest(chip: HTMLElement, name: string): void {
   const start = () => {
     cancel();
     timer = setTimeout(() => {
-      if (name !== tableInView()) prefetch(`/tables/data?${dataParams(tableRequest(name))}`, "view", PREFETCH_TTL_MS);
+      if (name !== tableInView()) prefetch(tableDataPath(tableRequest(name)), "view", PREFETCH_TTL_MS);
     }, PREFETCH_REST_MS);
   };
   chip.addEventListener("pointerenter", (e) => {

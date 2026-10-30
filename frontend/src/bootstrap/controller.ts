@@ -14,6 +14,7 @@ import {
   pruneHiddenColumns,
   startTable,
   state,
+  tableDataPath,
   tableInView,
   type ViewRequest,
   viewKey,
@@ -32,7 +33,7 @@ import { syncUrl } from "../features/view-history.js";
 import { syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
-import { isCurrentLoad, nextLoadToken } from "./reload.js";
+import { isCurrentLoad, type LoadDataOpts, nextLoadToken } from "./reload.js";
 import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js";
 
 // The render-orchestration hub: loadData sequences fetch -> chrome ->
@@ -203,19 +204,6 @@ function updateViewChrome(): void {
   document.title = title ? `${title} — Ashurbanipal` : "Ashurbanipal";
 }
 
-type LoadDataOpts = {
-  resetScroll?: boolean;
-  highlightNew?: boolean;
-  // An auto-refresh tick: it only re-fetches, so it never retries a dropped sort or filter,
-  // opens the join dialog, or clears a message the user's own last action left.
-  auto?: boolean;
-  // A view to try; it replaces the state only if its data arrives.
-  next?: ViewRequest;
-  // Start-up and history restores correct the current entry rather than add one (ui-guidelines R16).
-  replaceHistory?: boolean;
-  reason?: LoadReason;
-};
-
 export function loadData(opts: LoadDataOpts = {}): Promise<void> {
   const reason = opts.reason ?? (opts.auto ? "auto" : "other");
   markTiming("load-start", reason);
@@ -229,15 +217,14 @@ async function runLoad({
   auto = false,
   next,
   replaceHistory = false,
-  reason = "other",
-}: LoadDataOpts): Promise<void> {
+  reason,
+}: LoadDataOpts & { reason: LoadReason }): Promise<void> {
   if (!auto) {
     clearError();
     clearJoinNotice();
-  } else {
-    // A tick asks for fresh rows; nothing fetched ahead of it may stand in for them (R10).
-    clearPrefetched("view");
   }
+  // Refresh and a tick ask for fresh rows; nothing fetched ahead of them may stand in (R10).
+  if (reason === "refresh" || reason === "auto") clearPrefetched("view");
   const req = next ?? currentRequest();
   syncViewNotice(req);
   syncGridLock();
@@ -325,13 +312,7 @@ async function runLoad({
   markTiming("rows-rendered", reason);
   // Joins are never asked for ahead: one can run up to the query timeout.
   if (reason === "page" && view.kind === "table" && !$<HTMLButtonElement>("next").disabled) {
-    const shown = currentRequest();
-    if (shown)
-      prefetch(
-        `/tables/data?${dataParams({ ...shown, offset: shown.offset + state.limit })}`,
-        "view",
-        NEXT_PAGE_TTL_MS,
-      );
+    prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);
   }
   noteLoadOk();
   // Sighted users see the tint; announce the count for everyone else. The

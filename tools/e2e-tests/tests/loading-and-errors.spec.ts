@@ -1,6 +1,7 @@
 import { expect, test } from "./support/fixtures";
 import {
   apiCall,
+  apiRoute,
   dataWith,
   failRequests,
   gotoApp,
@@ -131,11 +132,10 @@ test("a failed /sources call drops a remembered source from every request after 
   const sentAhead = new Set<string>();
   const withSource: string[] = [];
   page.on("request", (r) => {
-    const url = new URL(r.url());
-    const route = url.pathname.split("/api")[1];
+    const route = apiRoute(r.url());
     if (route === undefined) return;
     if (START_UP_ROUTES.includes(route) && !sentAhead.has(route)) sentAhead.add(route);
-    else if (url.searchParams.has("source")) withSource.push(r.url());
+    else if (new URL(r.url()).searchParams.has("source")) withSource.push(r.url());
   });
   await reloadApp(page);
   await expect(page.locator("#tbody tr").first()).toBeVisible();

@@ -96,6 +96,10 @@ export function dataParams(req: ViewRequest): URLSearchParams {
   return params;
 }
 
+export function tableDataPath(req: ViewRequest): string {
+  return `/tables/data?${dataParams(req)}`;
+}
+
 function applyUrlScope(params: URLSearchParams): void {
   const { source, schema } = chosenScope();
   if (source) params.set("source", source);

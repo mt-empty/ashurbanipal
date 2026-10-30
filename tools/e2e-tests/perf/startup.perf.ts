@@ -1,10 +1,10 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { type Browser, type BrowserContext, expect, type Page, test } from "@playwright/test";
-import { PERF_DEMO_PORT } from "../playwright.perf.config";
+import { H2, PERF_DEMO_PORT } from "../playwright.perf.config";
+import { APP_PATH } from "../tests/support/helpers";
 import { type DelayProxy, type ServerDelays, startDelayProxy } from "./delay-proxy";
 
-const MOUNT = "/__ashurbanipal";
 const DEEP_LINK = "?schema=warehouse&table=shipment_events";
 const CHIP_TABLE = "shipments";
 const HOVER_TABLE = "carriers";
@@ -13,8 +13,6 @@ const HOVER_MS = 300;
 const RUNS = Number(process.env.PERF_RUNS || 20);
 const LABEL = process.env.PERF_LABEL || "";
 const GZIP = process.env.PERF_GZIP === "1";
-// The usual deployment is HTTPS + HTTP/2; PERF_HTTP1=1 measures plain HTTP/1.1.
-const H2 = process.env.PERF_HTTP1 !== "1";
 const PAGE = process.env.PERF_PAGE || undefined;
 
 interface Network {
@@ -169,13 +167,13 @@ async function iteration(browser: Browser, network: Network, server: string, kee
   const save = (scenario: string, sample: Sample) => keep && record(network, server, scenario, sample);
 
   const fresh = await openPage(browser, network);
-  await fresh.page.goto(MOUNT);
+  await fresh.page.goto(APP_PATH);
   await waitRendered(fresh.page, "boot", 0);
   save("S1 fresh visit", await startupSample(fresh.page));
   await fresh.context.close();
 
   const { context, page } = await openPage(browser, network);
-  await page.goto(MOUNT + DEEP_LINK);
+  await page.goto(APP_PATH + DEEP_LINK);
   await waitRendered(page, "boot", 0);
   save("S2 deep link", await startupSample(page));
 
@@ -208,7 +206,7 @@ test("the simulated round trip and server time both reach every request", async 
   const server = SERVERS.find((s) => s.name === "typical")!;
   proxy.setDelays({ latencyMs: network.latencyMs, ...server });
   const { context, page } = await openPage(browser, network);
-  await page.goto(MOUNT);
+  await page.goto(APP_PATH);
   await waitRendered(page, "boot", 0);
   const timings = await page.evaluate(() => ({
     html: performance.getEntriesByType("navigation")[0].duration,

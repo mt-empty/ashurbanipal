@@ -67,7 +67,6 @@ $<HTMLButtonElement>("next").onclick = () => {
 // tints any row that wasn't in the previous result.
 $<HTMLButtonElement>("refresh").onclick = () => {
   const btn = $<HTMLButtonElement>("refresh");
-  clearPrefetched("view");
   clearStructureCache();
   clearCommonValueCache();
   clearJoinCatalog();

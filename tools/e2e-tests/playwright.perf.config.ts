@@ -6,6 +6,8 @@ import { perfCertificateSpki } from "./perf/tls";
 // numbers aren't a debug build's.
 const CRATE_ROOT = "../../implementations/rust/axum";
 export const PERF_DEMO_PORT = 4330;
+// The usual deployment is HTTPS + HTTP/2; PERF_HTTP1=1 measures plain HTTP/1.1.
+export const H2 = process.env.PERF_HTTP1 !== "1";
 
 export default defineConfig({
   testDir: "./perf",
@@ -18,10 +20,7 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
     // HTTPS by default (perf/README.md): trust the proxy's own certificate the way a
     // company's users trust its CA, rather than ignoring certificate errors.
-    launchOptions:
-      process.env.PERF_HTTP1 === "1"
-        ? {}
-        : { args: [`--ignore-certificate-errors-spki-list=${perfCertificateSpki()}`] },
+    launchOptions: H2 ? { args: [`--ignore-certificate-errors-spki-list=${perfCertificateSpki()}`] } : {},
   },
   webServer: {
     command: "exec cargo run --release -p ashurbanipal-axum --example demo",

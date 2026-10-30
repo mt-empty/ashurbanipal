@@ -106,14 +106,36 @@ async fn page_is_gzipped_when_accepted_and_decodes_to_the_same_bytes() {
     );
 }
 
+/// An `Accept-Encoding` naming gzip with q > 0 gets a compressed page; one giving gzip q=0 never gets gzip.
 #[tokio::test]
-async fn page_is_not_gzipped_when_gzip_has_q_zero() {
+async fn page_encoding_follows_accept_encoding_q_values() {
     let srv = TestServer::spawn().await;
-    let resp = fetch_page(&srv, Some("gzip;q=0")).await;
-    assert!(
-        resp.headers().get("content-encoding").is_none(),
-        "Accept-Encoding: gzip;q=0 got a compressed page"
-    );
+    for accept in [
+        "GZIP",
+        "gzip;q=0.5",
+        "*;q=0, gzip",
+        "gzip, deflate, br, zstd",
+    ] {
+        let resp = fetch_page(&srv, Some(accept)).await;
+        assert!(
+            resp.headers().get("content-encoding").is_some(),
+            "Accept-Encoding: {accept} got an uncompressed page"
+        );
+    }
+    for accept in ["gzip;q=0", "gzip;q=0, *"] {
+        let resp = fetch_page(&srv, Some(accept)).await;
+        assert!(
+            header_values(&resp, "content-encoding") != ["gzip"],
+            "Accept-Encoding: {accept} got a gzip page"
+        );
+    }
+    for accept in ["", "identity"] {
+        let resp = fetch_page(&srv, Some(accept)).await;
+        assert!(
+            resp.headers().get("content-encoding").is_none(),
+            "Accept-Encoding: {accept:?} got a compressed page"
+        );
+    }
 }
 
 #[tokio::test]

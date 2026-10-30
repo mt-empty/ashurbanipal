@@ -1630,21 +1630,29 @@ function readDefault(response, set) {
   const read2 = response.then((r) => r.ok ? r.clone().json() : null).then((body) => set(body?.default ?? null)).catch(() => set(null));
   defaultsRead = Promise.all([defaultsRead, read2]);
 }
-function prefetch(path, kind, ttlMs = Number.POSITIVE_INFINITY) {
+function dropExpired() {
   const now = performance.now();
   prefetched = prefetched.filter((p) => p.expires > now);
+  return now;
+}
+function splitPath(path) {
+  const [route, query = ""] = path.split("?");
+  return [route, new URLSearchParams(query)];
+}
+function prefetch(path, kind, ttlMs = Number.POSITIVE_INFINITY) {
+  const now = dropExpired();
   if (prefetched.some((p) => p.path === path)) return;
   const response = fetch(API + path);
   response.catch(() => {
   });
-  const [route, query = ""] = path.split("?");
-  prefetched.push({ kind, path, route, params: new URLSearchParams(query), response, expires: now + ttlMs });
+  const [route, params] = splitPath(path);
+  prefetched.push({ kind, path, route, params, response, expires: now + ttlMs });
   if (kind !== "boot") return;
   if (route === "/sources") readDefault(response, (v) => defaultSource = v);
   if (route === "/schemas") readDefault(response, (v) => defaultSchema = v);
 }
 function clearPrefetched(kind) {
-  prefetched = prefetched.filter((p) => kind !== void 0 && p.kind !== kind);
+  prefetched = prefetched.filter((p) => p.kind !== kind);
 }
 var SCOPE_KEYS = /* @__PURE__ */ new Set(["source", "schema"]);
 var otherParams = (params) => [...params].filter(([k]) => !SCOPE_KEYS.has(k)).map(([k, v]) => `${k}=${v}`).sort().join("&");
@@ -1655,13 +1663,12 @@ function sameRequest(p, route, params) {
   return source(p.params) === source(params) && schema(p.params) === schema(params);
 }
 async function takePrefetched(path) {
-  const now = performance.now();
-  prefetched = prefetched.filter((p) => p.expires > now);
+  dropExpired();
   let found = prefetched.find((p) => p.path === path);
   if (!found && prefetched.some((p) => p.kind === "boot")) {
     await defaultsRead;
-    const [route, query = ""] = path.split("?");
-    found = prefetched.find((p) => sameRequest(p, route, new URLSearchParams(query)));
+    const [route, params] = splitPath(path);
+    found = prefetched.find((p) => sameRequest(p, route, params));
   }
   if (!found) return void 0;
   prefetched = prefetched.filter((p) => p !== found);
@@ -3034,6 +3041,9 @@ function dataParams(req) {
   applyScopeParams(params);
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
   return params;
+}
+function tableDataPath(req) {
+  return `/tables/data?${dataParams(req)}`;
 }
 function applyUrlScope(params) {
   const { source, schema } = chosenScope();
@@ -4410,7 +4420,7 @@ function prefetchOnRest(chip, name) {
   const start = () => {
     cancel();
     timer2 = setTimeout(() => {
-      if (name !== tableInView()) prefetch(`/tables/data?${dataParams(tableRequest(name))}`, "view", PREFETCH_TTL_MS);
+      if (name !== tableInView()) prefetch(tableDataPath(tableRequest(name)), "view", PREFETCH_TTL_MS);
     }, PREFETCH_REST_MS);
   };
   chip.addEventListener("pointerenter", (e) => {
@@ -6227,7 +6237,7 @@ function prefetchStartup() {
   prefetch(`/tables${scopeQuery()}`, "boot");
   prefetch(`/table-counts${scopeQuery()}`, "boot");
   const req = currentRequest();
-  if (req?.view.kind === "table") prefetch(`/tables/data?${dataParams(req)}`, "boot");
+  if (req?.view.kind === "table") prefetch(tableDataPath(req), "boot");
 }
 
 // src/lib/json-tree.ts
@@ -6935,14 +6945,13 @@ async function runLoad({
   auto = false,
   next,
   replaceHistory = false,
-  reason = "other"
+  reason
 }) {
   if (!auto) {
     clearError();
     clearJoinNotice();
-  } else {
-    clearPrefetched("view");
   }
+  if (reason === "refresh" || reason === "auto") clearPrefetched("view");
   const req = next ?? currentRequest();
   syncViewNotice(req);
   syncGridLock();
@@ -7010,13 +7019,7 @@ async function runLoad({
   updatePager(data);
   markTiming("rows-rendered", reason);
   if (reason === "page" && view.kind === "table" && !$("next").disabled) {
-    const shown2 = currentRequest();
-    if (shown2)
-      prefetch(
-        `/tables/data?${dataParams({ ...shown2, offset: shown2.offset + state.limit })}`,
-        "view",
-        NEXT_PAGE_TTL_MS
-      );
+    prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);
   }
   noteLoadOk();
   setNewChip(newRowKeys?.size ?? 0);
@@ -7075,7 +7078,6 @@ $("next").onclick = () => {
 };
 $("refresh").onclick = () => {
   const btn = $("refresh");
-  clearPrefetched("view");
   clearStructureCache();
   clearCommonValueCache();
   clearJoinCatalog();

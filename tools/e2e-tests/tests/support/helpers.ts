@@ -1,4 +1,4 @@
-import { expect, type Page, type Route } from "@playwright/test";
+import { expect, type Page, type Request, type Route } from "@playwright/test";
 
 export const APP_PATH = "/__ashurbanipal";
 
@@ -106,6 +106,22 @@ export const apiCall =
     const u = target instanceof URL ? target : new URL(typeof target === "string" ? target : target.url());
     return u.pathname.endsWith(`/api${route}`) && Object.entries(params).every(([k, v]) => u.searchParams.get(k) === v);
   };
+
+/** The API route `url` calls (e.g. "/tables/data"), or undefined when it isn't an API call. */
+export function apiRoute(url: URL | string): string | undefined {
+  const path = new URL(url).pathname;
+  const at = path.indexOf("/api/");
+  return at < 0 ? undefined : path.slice(at + 4);
+}
+
+/** The URL of every request matching `match` that the page sends from now on. */
+export function recordRequests(page: Page, match: (r: Request) => boolean): string[] {
+  const urls: string[] = [];
+  page.on("request", (r) => {
+    if (match(r)) urls.push(r.url());
+  });
+  return urls;
+}
 
 export const tableData = apiCall("/tables/data");
 export const tableList = (schema: string) => apiCall("/tables", { schema });
