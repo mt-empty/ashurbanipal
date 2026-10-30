@@ -1623,60 +1623,53 @@ async function errorFromResponse(resp) {
   return new ApiError(`request failed with status ${resp.status}`, void 0);
 }
 var prefetched = [];
-var defaultSource;
-var defaultSchema;
-var defaultsRead = Promise.resolve();
-function readDefault(response, set) {
-  const read2 = response.then((r) => r.ok ? r.clone().json() : null).then((body) => set(body?.default ?? null)).catch(() => set(null));
-  defaultsRead = Promise.all([defaultsRead, read2]);
+function keyOf(route, params) {
+  const sorted = new URLSearchParams(params);
+  sorted.sort();
+  return `${route}?${sorted}`;
+}
+function splitPath(path) {
+  const [route, query = ""] = path.split("?");
+  return [route, new URLSearchParams(query)];
 }
 function dropExpired() {
   const now = performance.now();
   prefetched = prefetched.filter((p) => p.expires > now);
   return now;
 }
-function splitPath(path) {
-  const [route, query = ""] = path.split("?");
-  return [route, new URLSearchParams(query)];
-}
 function prefetch(path, kind, ttlMs = Number.POSITIVE_INFINITY) {
   const now = dropExpired();
-  if (prefetched.some((p) => p.path === path)) return;
+  const [route, params] = splitPath(path);
+  const key = keyOf(route, params);
+  if (prefetched.some((p) => p.key === key)) return;
   const response = fetch(API + path);
   response.catch(() => {
   });
-  const [route, params] = splitPath(path);
-  prefetched.push({ kind, path, route, params, response, expires: now + ttlMs });
-  if (kind !== "boot") return;
-  if (route === "/sources") readDefault(response, (v) => defaultSource = v);
-  if (route === "/schemas") readDefault(response, (v) => defaultSchema = v);
+  prefetched.push({ kind, route, params, key, response, expires: now + ttlMs });
 }
 function clearPrefetched(kind) {
   prefetched = prefetched.filter((p) => p.kind !== kind);
 }
-var SCOPE_KEYS = /* @__PURE__ */ new Set(["source", "schema"]);
-var otherParams = (params) => [...params].filter(([k]) => !SCOPE_KEYS.has(k)).map(([k, v]) => `${k}=${v}`).sort().join("&");
-function sameRequest(p, route, params) {
-  if (p.kind !== "boot" || p.route !== route || otherParams(p.params) !== otherParams(params)) return false;
-  const source = (q) => q.get("source") ?? defaultSource;
-  const schema = (q) => q.get("schema") ?? (route === "/schemas" ? null : defaultSchema);
-  return source(p.params) === source(params) && schema(p.params) === schema(params);
-}
-async function takePrefetched(path) {
-  dropExpired();
-  let found = prefetched.find((p) => p.path === path);
-  if (!found && prefetched.some((p) => p.kind === "boot")) {
-    await defaultsRead;
-    const [route, params] = splitPath(path);
-    found = prefetched.find((p) => sameRequest(p, route, params));
+function nameStartupDefault(param, value, among = {}) {
+  if (value === null) return;
+  for (const p of prefetched) {
+    if (p.kind !== "boot" || p.params.has(param)) continue;
+    if (Object.entries(among).some(([name, wanted]) => p.params.get(name) !== wanted)) continue;
+    p.params.set(param, value);
+    p.key = keyOf(p.route, p.params);
   }
+}
+function takePrefetched(path) {
+  dropExpired();
+  const key = keyOf(...splitPath(path));
+  const found = prefetched.find((p) => p.key === key);
   if (!found) return void 0;
   prefetched = prefetched.filter((p) => p !== found);
   return found.response;
 }
 async function api(path, init) {
-  const resp = !init && await takePrefetched(path) || await fetch(API + path, init);
-  if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
+  const resp = await (!init && takePrefetched(path) || fetch(API + path, init));
+  if (splitPath(path)[0] === "/tables") checkProtocolVersion(resp);
   if (!resp.ok) throw await errorFromResponse(resp);
   return resp.json();
 }
@@ -5797,18 +5790,19 @@ async function showCommonValues(e, table, column) {
 // src/features/scope-select.ts
 async function loadSources() {
   let names;
-  let defaultSource2;
+  let defaultSource;
   try {
     let sources;
-    ({ sources, default: defaultSource2 } = await api("/sources"));
+    ({ sources, default: defaultSource } = await api("/sources"));
     names = sources.map((s) => s.name);
+    nameStartupDefault("source", defaultSource);
   } catch (e) {
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
     settleSource(null, false);
     return;
   }
   const wanted = state.scope.source;
-  const fallback = names.includes(defaultSource2) ? defaultSource2 : names[0] ?? null;
+  const fallback = names.includes(defaultSource) ? defaultSource : names[0] ?? null;
   const source = wanted !== null && names.includes(wanted) ? wanted : fallback;
   settleSource(source, names.length > 1);
   if (!state.manySources) return;
@@ -5824,12 +5818,14 @@ var loadSchemasToken = 0;
 async function loadSchemas() {
   syncGridLock();
   const token = ++loadSchemasToken;
+  const { source } = state.scope;
   let schemas;
-  let defaultSchema2;
+  let defaultSchema;
   try {
     const listing = await api(`/schemas${sourceQuery()}`);
     schemas = listing.schemas.map((s) => s.name);
-    defaultSchema2 = listing.default ?? null;
+    defaultSchema = listing.default ?? null;
+    nameStartupDefault("schema", defaultSchema, { source });
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
@@ -5840,8 +5836,8 @@ async function loadSchemas() {
   }
   if (token !== loadSchemasToken) return false;
   const wanted = state.scope.schema;
-  const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema2 ?? schemas[0] ?? null;
-  settleSchema(schema, schemas.length > 1, defaultSchema2 === null);
+  const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema ?? schemas[0] ?? null;
+  settleSchema(schema, schemas.length > 1, defaultSchema === null);
   if (schema !== null) populateSelect($("schema-select"), schemas, schema);
   $("schema-select-wrap").hidden = !state.manySchemas;
   markTiming("scope-settled");
@@ -5854,11 +5850,11 @@ $("schema-select").onchange = () => {
 };
 
 // src/lib/sibling-matrix.ts
-var keyOf = (name, label) => JSON.stringify([name, label ?? null]);
+var keyOf2 = (name, label) => JSON.stringify([name, label ?? null]);
 function firstEntries(siblings) {
   const first = /* @__PURE__ */ new Map();
   for (const s of siblings) {
-    const key = keyOf(s.name, s.label);
+    const key = keyOf2(s.name, s.label);
     if (!first.has(key)) first.set(key, s);
   }
   return first;
@@ -5878,7 +5874,7 @@ function buildSiblingMatrix({ instance, siblings }) {
     const isInstance = instance?.name === name;
     const cells = labels.map((label) => {
       if (isInstance && instance?.label === label) return { kind: "here" };
-      const sibling = first.get(keyOf(name, label));
+      const sibling = first.get(keyOf2(name, label));
       return sibling ? { kind: "link", sibling, sameView: isInstance } : { kind: "missing" };
     });
     return { name, isInstance, cells };
@@ -5888,9 +5884,9 @@ function buildSiblingMatrix({ instance, siblings }) {
 function listedSiblings(siblings) {
   const first = firstEntries(siblings);
   const copies = /* @__PURE__ */ new Map();
-  for (const s of siblings) copies.set(keyOf(s.name, s.label), (copies.get(keyOf(s.name, s.label)) ?? 0) + 1);
+  for (const s of siblings) copies.set(keyOf2(s.name, s.label), (copies.get(keyOf2(s.name, s.label)) ?? 0) + 1);
   return siblings.flatMap((s) => {
-    const key = keyOf(s.name, s.label);
+    const key = keyOf2(s.name, s.label);
     if (s.label !== void 0) return first.get(key) === s ? [] : [{ sibling: s, note: `${s.label} \xB7 duplicate` }];
     return [(copies.get(key) ?? 0) > 1 ? { sibling: s, note: hostOf(s.base_url) } : { sibling: s }];
   });

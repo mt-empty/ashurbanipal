@@ -32,12 +32,19 @@ test("a deep link asks for its rows without waiting for the table list", async (
   await waitForTable(page, "shipments");
 });
 
-test("start-up asks the server for each thing once", async ({ page }) => {
-  const asked = recordRequests(page, isApiCall);
-  await gotoApp(page, "?schema=warehouse&table=shipments");
-  await waitForTable(page, "shipments");
-  expect(asked.map(apiRoute).sort()).toEqual(["/schemas", "/sources", "/table-counts", "/tables", "/tables/data"]);
-});
+// Without a scope in the URL, start-up's early requests leave it out and are
+// matched once the server's defaults are known.
+for (const [query, table] of [
+  ["?schema=warehouse&table=shipments", "shipments"],
+  ["?table=orders", "orders"],
+]) {
+  test(`start-up asks the server for each thing once (${query})`, async ({ page }) => {
+    const asked = recordRequests(page, isApiCall);
+    await gotoApp(page, query);
+    await waitForTable(page, table);
+    expect(asked.map(apiRoute).sort()).toEqual(["/schemas", "/sources", "/table-counts", "/tables", "/tables/data"]);
+  });
+}
 
 test("a start-up guess for a schema that doesn't exist is asked again in the real one", async ({ page }) => {
   // Start-up falls back to the default schema (R5); the early answer was for the named one.

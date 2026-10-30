@@ -1,5 +1,5 @@
 import { supersedeLoads } from "../bootstrap/reload.js";
-import { api } from "../core/api.js";
+import { api, nameStartupDefault } from "../core/api.js";
 import { $, populateSelect, reportError } from "../core/dom.js";
 import { markTiming } from "../core/perf-marks.js";
 import { settleSchema, settleSource, sourceQuery, state, switchSchema, switchSource } from "../core/state.js";
@@ -20,6 +20,7 @@ export async function loadSources(): Promise<void> {
     let sources: SourceEntry[];
     ({ sources, default: defaultSource } = await api<SourcesResponse>("/sources"));
     names = sources.map((s) => s.name);
+    nameStartupDefault("source", defaultSource);
   } catch (e) {
     // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
     // single-source, with no `source` param, but leave a trace.
@@ -57,6 +58,7 @@ let loadSchemasToken = 0;
 export async function loadSchemas(): Promise<boolean> {
   syncGridLock();
   const token = ++loadSchemasToken;
+  const { source } = state.scope;
   let schemas: string[];
   let defaultSchema: string | null;
   try {
@@ -64,6 +66,7 @@ export async function loadSchemas(): Promise<boolean> {
     schemas = listing.schemas.map((s) => s.name);
     // A host's JSON settings may drop a null field.
     defaultSchema = listing.default ?? null;
+    nameStartupDefault("schema", defaultSchema, { source });
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
