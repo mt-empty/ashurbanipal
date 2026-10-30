@@ -5,6 +5,12 @@ Notable changes to the `ashurbanipal` core crate (framework-agnostic config, `Db
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.12.0] - 2026-10-30
+
+### Performance
+
+- Faster start-up — send requests together, prefetch likely views, gzip the page (#221)
+
 ## [0.11.0] - 2026-10-28
 
 ### Features
