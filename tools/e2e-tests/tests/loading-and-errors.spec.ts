@@ -9,6 +9,7 @@ import {
   selectTable,
   tableData,
 } from "./support/helpers";
+import { START_UP_ROUTES } from "./support/scope";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({ page }) => {
   await gotoApp(page);
@@ -125,14 +126,16 @@ test("a failed /sources call drops a remembered source from every request after 
   await gotoApp(page);
   await page.evaluate(() => localStorage.setItem("ashurbanipal_view", JSON.stringify({ source: "gone" })));
   await failRequests(page, apiCall("/sources"));
-  // Start-up's early requests go out with the remembered name before /sources answers; none of their answers is used.
-  let sourcesFailed = false;
-  page.on("response", (r) => {
-    if (apiCall("/sources")(r.url())) sourcesFailed = true;
-  });
+  // Start-up sends one request per route ahead with the remembered name, and uses none of their answers. Firefox can
+  // report those requests after the /sources response, so they are told apart by being first, not by event order.
+  const sentAhead = new Set<string>();
   const withSource: string[] = [];
   page.on("request", (r) => {
-    if (sourcesFailed && new URL(r.url()).searchParams.has("source")) withSource.push(r.url());
+    const url = new URL(r.url());
+    const route = url.pathname.split("/api")[1];
+    if (route === undefined) return;
+    if (START_UP_ROUTES.includes(route) && !sentAhead.has(route)) sentAhead.add(route);
+    else if (url.searchParams.has("source")) withSource.push(r.url());
   });
   await reloadApp(page);
   await expect(page.locator("#tbody tr").first()).toBeVisible();

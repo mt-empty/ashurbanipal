@@ -19,7 +19,7 @@ const SCOPED_ROUTES = [
 ];
 
 // What start-up may send before /sources has answered (frontend/src/bootstrap/boot-prefetch.ts).
-const START_UP_ROUTES = ["/sources", "/schemas", "/tables", "/table-counts", "/tables/data"];
+export const START_UP_ROUTES = ["/sources", "/schemas", "/tables", "/table-counts", "/tables/data"];
 
 /** An API request, and whether start-up sent it ahead, before /sources had answered. */
 export interface SeenRequest {
