@@ -5,6 +5,16 @@ Notable changes to the Go/net-http port. Format follows
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.12.0] - 2026-10-30
+
+### Bug Fixes
+
+- *(frontend)* Keep the table chips from rewrapping when a scrollbar appears (#222)
+
+### Performance
+
+- Faster start-up — send requests together, prefetch likely views, gzip the page (#221)
+
 ## [0.11.0] - 2026-10-28
 
 ### Features
