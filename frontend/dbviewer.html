@@ -1080,10 +1080,14 @@ function takePrefetched(path) {
   const found = prefetched.find((p) => p.key === key);
   if (!found) return void 0;
   prefetched = prefetched.filter((p) => p !== found);
-  return found.response;
+  if (found.kind === "boot") return found.response;
+  return found.response.then(
+    (r) => r.status >= 500 ? void 0 : r,
+    () => void 0
+  );
 }
 async function api(path, init) {
-  const resp = await (!init && takePrefetched(path) || fetch(API + path, init));
+  const resp = !init && await takePrefetched(path) || await fetch(API + path, init);
   if (splitPath(path)[0] === "/tables") checkProtocolVersion(resp);
   if (!resp.ok) throw await errorFromResponse(resp);
   return resp.json();
@@ -2119,6 +2123,10 @@ function joinRequest(def) {
   const current2 = currentRequest();
   if (current2 && viewKey(current2.view) === viewKey(view)) return { ...current2, view };
   return { view, sort: null, order: "asc", offset: 0, filter: "", ast: [] };
+}
+function storedSortBeforeScope(table) {
+  const { source, schema } = state.scope;
+  return source && schema ? state.sortByTable[scopeKey(source, schema, table)] : void 0;
 }
 function tableRequest(name) {
   const stored2 = tableEntry(state.sortByTable, name);
@@ -3751,6 +3759,7 @@ new ResizeObserver(([entry]) => {
   updateTablesCap();
 }).observe($("tables"));
 var loadTablesToken = 0;
+var listedScope = null;
 async function loadTables({
   replaceHistory = false,
   next,
@@ -3790,6 +3799,7 @@ async function loadTables({
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
   }
+  listedScope = scopeIdentity();
   if (joinScope !== scopeIdentity()) joinEntries = [];
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
@@ -3804,6 +3814,9 @@ async function loadTables({
   }
   await loadData({ replaceHistory, next: fellBack ? void 0 : next, reason });
   return fellBack ? "fell-back" : "loaded";
+}
+function chipsListScopeInView() {
+  return listedScope === scopeIdentity();
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
@@ -3828,7 +3841,8 @@ function prefetchOnRest(chip, name) {
   const start = () => {
     cancel();
     timer2 = setTimeout(() => {
-      if (name !== tableInView()) prefetch(tableDataPath(tableRequest(name)), "view", PREFETCH_TTL_MS);
+      if (!chip.isConnected || !chipsListScopeInView() || name === tableInView()) return;
+      prefetch(tableDataPath(tableRequest(name)), "view", PREFETCH_TTL_MS);
     }, PREFETCH_REST_MS);
   };
   chip.addEventListener("pointerenter", (e) => {
@@ -5621,7 +5635,8 @@ window.addEventListener("popstate", () => {
   $("schema-select").value = state.scope.schema ?? "";
   persist();
   if (state.scope.source === previousSource) {
-    if (state.scope.schema === previousSchema && listedTableNames().includes(startTable(state.view) ?? "")) {
+    const listed = chipsListScopeInView() && listedTableNames().includes(startTable(state.view) ?? "");
+    if (state.scope.schema === previousSchema && listed) {
       loadData({ replaceHistory: true, reason: "history" });
       return;
     }
@@ -5648,7 +5663,13 @@ function prefetchStartup() {
   prefetch(`/tables${scopeQuery()}`, "boot");
   prefetch(`/table-counts${scopeQuery()}`, "boot");
   const req = currentRequest();
-  if (req?.view.kind === "table") prefetch(tableDataPath(req), "boot");
+  if (req?.view.kind !== "table") return;
+  const stored2 = opensWithStoredSort() ? storedSortBeforeScope(req.view.table) : void 0;
+  prefetch(tableDataPath(stored2 ? { ...req, sort: stored2.col, order: stored2.order } : req), "boot");
+}
+function opensWithStoredSort() {
+  const navType = performance.getEntriesByType("navigation")[0]?.type;
+  return state.sort === null && navType !== "reload" && navType !== "back_forward";
 }
 
 // src/lib/json-tree.ts
@@ -6356,6 +6377,7 @@ async function runLoad({
   auto = false,
   next,
   replaceHistory = false,
+  askNextPage = false,
   reason
 }) {
   if (!auto) {
@@ -6429,7 +6451,7 @@ async function runLoad({
   if (superseded()) return;
   updatePager(data);
   markTiming("rows-rendered", reason);
-  if (reason === "page" && view.kind === "table" && !$("next").disabled) {
+  if (askNextPage && view.kind === "table" && !$("next").disabled) {
     prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);
   }
   noteLoadOk();
@@ -6485,7 +6507,7 @@ $("prev").onclick = () => {
 };
 $("next").onclick = () => {
   state.offset += state.limit;
-  loadData2({ resetScroll: false, reason: "page" });
+  loadData2({ resetScroll: false, askNextPage: true, reason: "page" });
 };
 $("refresh").onclick = () => {
   const btn = $("refresh");
@@ -6499,8 +6521,7 @@ $("refresh").onclick = () => {
 };
 loadSources().then(loadSchemas).then((current2) => {
   if (!current2) return;
-  const navType = performance.getEntriesByType("navigation")[0]?.type;
-  if (state.sort === null && navType !== "reload" && navType !== "back_forward") applyStoredSort(tableInView());
+  if (opensWithStoredSort()) applyStoredSort(tableInView());
   return loadTables({ replaceHistory: true, reason: "boot" });
 }).catch(reportError).finally(() => {
   clearPrefetched("boot");

@@ -130,17 +130,22 @@ export function nameStartupDefault(
   }
 }
 
-function takePrefetched(path: string): Promise<Response> | undefined {
+function takePrefetched(path: string): Promise<Response | undefined> | undefined {
   dropExpired();
   const key = keyOf(...splitPath(path));
   const found = prefetched.find((p) => p.key === key);
   if (!found) return undefined;
   prefetched = prefetched.filter((p) => p !== found);
-  return found.response;
+  if (found.kind === "boot") return found.response;
+  // A hover or next page failed some seconds ago; the user's own action asks again.
+  return found.response.then(
+    (r) => (r.status >= 500 ? undefined : r),
+    () => undefined,
+  );
 }
 
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await ((!init && takePrefetched(path)) || fetch(API + path, init));
+  const resp = (!init && (await takePrefetched(path))) || (await fetch(API + path, init));
   if (splitPath(path)[0] === "/tables") checkProtocolVersion(resp);
   if (!resp.ok) throw await errorFromResponse(resp);
   return resp.json();

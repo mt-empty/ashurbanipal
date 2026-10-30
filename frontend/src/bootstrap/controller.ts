@@ -217,6 +217,7 @@ async function runLoad({
   auto = false,
   next,
   replaceHistory = false,
+  askNextPage = false,
   reason,
 }: LoadDataOpts & { reason: LoadReason }): Promise<void> {
   if (!auto) {
@@ -311,7 +312,7 @@ async function runLoad({
   updatePager(data);
   markTiming("rows-rendered", reason);
   // Joins are never asked for ahead: one can run up to the query timeout.
-  if (reason === "page" && view.kind === "table" && !$<HTMLButtonElement>("next").disabled) {
+  if (askNextPage && view.kind === "table" && !$<HTMLButtonElement>("next").disabled) {
     prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);
   }
   noteLoadOk();

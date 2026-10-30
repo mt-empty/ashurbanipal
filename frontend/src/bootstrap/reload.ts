@@ -15,6 +15,8 @@ export type LoadDataOpts = {
   next?: ViewRequest;
   // Start-up and history restores correct the current entry rather than add one (ui-guidelines R16).
   replaceHistory?: boolean;
+  // Next: the page after is likely wanted too, so it is asked for once this one shows.
+  askNextPage?: boolean;
   reason?: LoadReason;
 };
 

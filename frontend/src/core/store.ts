@@ -202,6 +202,13 @@ export function joinRequest(def: JoinDef): ViewRequest {
   return { view, sort: null, order: "asc", offset: 0, filter: "", ast: [] };
 }
 
+// The sort `table` opens with once start-up confirms the scope it names now;
+// none while either name is unknown, since the sort is stored per scope.
+export function storedSortBeforeScope(table: string): { col: string; order: "asc" | "desc" } | undefined {
+  const { source, schema } = state.scope;
+  return source && schema ? state.sortByTable[scopeKey(source, schema, table)] : undefined;
+}
+
 // Table chip click: the filter was written against the previous table's
 // columns so it clears; the sort is the one last used on this table.
 export function tableRequest(name: string): ViewRequest {

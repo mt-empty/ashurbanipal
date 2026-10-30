@@ -118,6 +118,7 @@ new ResizeObserver(([entry]) => {
 // followed by another) must not replace the chips with the wrong schema's
 // table list — same guard as reload.ts's load token and cvRequestToken.
 let loadTablesToken = 0;
+let listedScope: string | null = null;
 
 // `next`: a view in this table list to open instead of the current one; the
 // stale-state fallback below drops it.
@@ -170,6 +171,7 @@ export async function loadTables({
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
   }
+  listedScope = scopeIdentity();
   if (joinScope !== scopeIdentity()) joinEntries = [];
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
@@ -188,6 +190,11 @@ export async function loadTables({
   }
   await loadData({ replaceHistory, next: fellBack ? undefined : next, reason });
   return fellBack ? "fell-back" : "loaded";
+}
+
+// False while a source, schema or history switch still shows the last scope's chips.
+export function chipsListScopeInView(): boolean {
+  return listedScope === scopeIdentity();
 }
 
 export function listedTableNames(): string[] {
@@ -233,7 +240,9 @@ function prefetchOnRest(chip: HTMLElement, name: string): void {
   const start = () => {
     cancel();
     timer = setTimeout(() => {
-      if (name !== tableInView()) prefetch(tableDataPath(tableRequest(name)), "view", PREFETCH_TTL_MS);
+      // A chip of the last scope (or replaced since) names a table this scope may not have.
+      if (!chip.isConnected || !chipsListScopeInView() || name === tableInView()) return;
+      prefetch(tableDataPath(tableRequest(name)), "view", PREFETCH_TTL_MS);
     }, PREFETCH_REST_MS);
   };
   chip.addEventListener("pointerenter", (e) => {

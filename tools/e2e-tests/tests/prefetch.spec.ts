@@ -9,8 +9,10 @@ import {
   goForward,
   gotoApp,
   holdRequests,
+  problem,
   recordRequests,
   selectTable,
+  tableData,
   tableList,
   waitForIdle,
   waitForTable,
@@ -61,6 +63,31 @@ test("the table list still shows when the row counts fail", async ({ page }) => 
   await expect(page.locator('#tables [data-table="orders"] .count')).toHaveText("?");
 });
 
+test("Back while an earlier step's table list is on its way asks for the rows once", async ({ page }) => {
+  // Same-named tables in two schemas: warehouse's list also names users.
+  await page.route(tableList("warehouse"), async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.tables.push({ name: "users" });
+    await route.fulfill({ response, json: body });
+  });
+  await gotoApp(page);
+  await selectTable(page, "users");
+  await selectTable(page, "orders");
+  await page.locator("#schema-select").selectOption("warehouse");
+  await expect(page.locator('#tables [data-table="carriers"]')).toBeVisible();
+  await waitForIdle(page);
+  const release = await holdRequests(page, tableList("public"));
+  const asked = recordRequests(page, dataWith("table", "users"));
+  await goBack(page);
+  await goBack(page);
+  release();
+  await waitForTable(page, "users");
+  await expect(page.locator('#tables [data-table="payments"]')).toBeVisible();
+  await waitForIdle(page);
+  expect(asked).toHaveLength(1);
+});
+
 test("Back and Forward within one schema ask only for the rows", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "users");
@@ -109,4 +136,54 @@ test("after one Next, the page after is asked for before the next click, and onl
   await waitForIdle(page);
   await expect(page.locator("#page")).toHaveText("page 3");
   expect(asked).toHaveLength(1);
+});
+
+test("a pointer resting on a chip left from the last schema asks nothing ahead", async ({ page }) => {
+  await page.clock.install();
+  await gotoApp(page);
+  const release = await holdRequests(page, tableList("warehouse"));
+  await page.locator("#schema-select").selectOption("warehouse");
+  const asked = recordRequests(page, dataWith("table", "orders"));
+  await page.locator('#tables [data-table="orders"]').hover();
+  await page.clock.runFor(1000);
+  release();
+  await expect(page.locator('#tables [data-table="carriers"]')).toBeVisible();
+  await waitForIdle(page);
+  expect(asked).toEqual([]);
+});
+
+test("a click asks again when the rows asked for on hover failed", async ({ page }) => {
+  await gotoApp(page);
+  let calls = 0;
+  await page.route(dataWith("table", "orders"), (route) =>
+    ++calls === 1 ? route.fulfill(problem(500, "database unavailable", "database_error")) : route.continue(),
+  );
+  const early = page.waitForResponse(dataWith("table", "orders"));
+  await page.locator('#tables [data-table="orders"]').hover();
+  await early;
+  await selectTable(page, "orders");
+  expect(calls).toBe(2);
+});
+
+test("a revisit to a table with a remembered sort takes its early rows", async ({ page }) => {
+  await gotoApp(page, "?table=orders");
+  await page.locator("thead th[data-col] .sort-btn").first().click();
+  await waitForIdle(page);
+  const asked = recordRequests(page, dataWith("table", "orders"));
+  await gotoApp(page, "?table=orders");
+  expect(asked).toHaveLength(1);
+  expect(new URL(asked[0]).searchParams.get("sort")).not.toBeNull();
+});
+
+test("Prev asks for nothing ahead", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#next").click();
+  await waitForIdle(page);
+  await expect(page.locator("#page")).toHaveText("page 2");
+  const asked = recordRequests(page, tableData);
+  await page.locator("#prev").click();
+  await waitForIdle(page);
+  await expect(page.locator("#page")).toHaveText("page 1");
+  expect(asked.map((u) => new URL(u).searchParams.get("offset"))).toEqual(["0"]);
 });

@@ -15,7 +15,7 @@ import {
 import type { FilterCondition } from "../core/types.js";
 import { parseFilterDsl } from "../lib/filter-dsl.js";
 import { loadSchemas } from "./scope-select.js";
-import { listedTableNames, loadTables } from "./table-chips.js";
+import { chipsListScopeInView, listedTableNames, loadTables } from "./table-chips.js";
 
 // FK-cell nav and the referenced-by drill-in: `table` filtered by `clause`,
 // with no sort (a stale stored one would defeat loadData's drop-and-retry
@@ -113,7 +113,9 @@ window.addEventListener("popstate", () => {
   persist();
   if (state.scope.source === previousSource) {
     // The same scope's table list is the one on screen; only the rows are asked for.
-    if (state.scope.schema === previousSchema && listedTableNames().includes(startTable(state.view) ?? "")) {
+    // An earlier step's list may still be on its way, leaving the chips of another scope.
+    const listed = chipsListScopeInView() && listedTableNames().includes(startTable(state.view) ?? "");
+    if (state.scope.schema === previousSchema && listed) {
       loadData({ replaceHistory: true, reason: "history" });
       return;
     }

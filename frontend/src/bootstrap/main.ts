@@ -15,7 +15,7 @@ import { noteStartupSettled } from "../features/view-history.js";
 import "../features/sticky-header.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";
 import { showBootFallbackNote } from "../features/view-notice.js";
-import { prefetchStartup } from "./boot-prefetch.js";
+import { opensWithStoredSort, prefetchStartup } from "./boot-prefetch.js";
 import { loadData } from "./controller.js";
 import { registerLoadData } from "./reload.js";
 import "../features/theme.js";
@@ -61,7 +61,7 @@ $<HTMLButtonElement>("prev").onclick = () => {
 };
 $<HTMLButtonElement>("next").onclick = () => {
   state.offset += state.limit;
-  loadData({ resetScroll: false, reason: "page" });
+  loadData({ resetScroll: false, askNextPage: true, reason: "page" });
 };
 // resetScroll: false — an in-place re-fetch of the current view; highlightNew
 // tints any row that wasn't in the previous result.
@@ -88,11 +88,8 @@ loadSources()
   .then((current) => {
     // A source switch during start-up runs its own table load.
     if (!current) return;
-    // A fresh link without ?sort= opens with the table's remembered one (R11),
-    // once the scope it is keyed by is pinned; a reload or a history step
-    // reopens its entry exactly (R16).
-    const navType = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
-    if (state.sort === null && navType !== "reload" && navType !== "back_forward") applyStoredSort(tableInView());
+    // Applied once the scope the sort is stored under is pinned.
+    if (opensWithStoredSort()) applyStoredSort(tableInView());
     return loadTables({ replaceHistory: true, reason: "boot" });
   })
   .catch(reportError)
