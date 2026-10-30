@@ -132,10 +132,9 @@ The page is the same 255 KB on every start-up. Gzip brings it to about
   note in each port's README and compressing the UI route in each port.
 - **Care:** no doc mentions compression today.
 - **Done 2026-10-29:** every port sends the page gzipped when the request
-  accepts it (`spec/protocol.md` §5.1). axum uses tower-http's
-  `CompressionLayer` and actix-web its `Compress` middleware, on the page
-  route only. Go, Node, Flask and Spring compress the page once at start-up
-  with their standard library. The API stays uncompressed.
+  accepts it (`spec/protocol.md` §5.1). Every port compresses the page
+  once, when its router is built, and sends the stored bytes. The API
+  stays uncompressed.
 
 ### 4.3 Reuse the table list on the browser's Back and Forward
 

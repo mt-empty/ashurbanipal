@@ -93,7 +93,7 @@ just works.
 
 ## Compression
 
-The UI page is sent compressed when the browser accepts it (`spec/protocol.md` §5.1), through actix-web's `Compress` middleware on that route only; it may pick brotli or zstd over gzip. API responses are sent uncompressed. A host-wide `Compress` leaves the page alone, because it already carries `Content-Encoding`.
+The UI page is sent gzipped when the browser accepts gzip (`spec/protocol.md` §5.1); it is compressed once, when `service()` first runs. API responses are sent uncompressed. A host-wide `Compress` leaves the page alone, because it already carries `Content-Encoding`.
 
 ## Behind your own auth
 
