@@ -1,16 +1,23 @@
-import { expect, test } from "./support/fixtures";
+import { expect, type Page, test } from "./support/fixtures";
 import { gotoApp, selectTable } from "./support/helpers";
 
-// Every headless engine here uses overlay scrollbars; Chromium shows classic
-// ones once Playwright's --hide-scrollbars is dropped.
+// Headless engines give scrollbars no layout width; Chromium does once
+// Playwright's --hide-scrollbars is dropped, so this spec runs on Chromium only.
 test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } });
 
-test("the chip list keeps its width between a short table and a tall one", async ({ page, browserName }) => {
-  test.skip(browserName !== "chromium", "no classic scrollbars in this engine's headless mode");
+const mainBox = (page: Page) =>
+  page.locator("#main").evaluate((el) => ({
+    gutter: (el as HTMLElement).offsetWidth - el.clientWidth,
+    overflows: el.scrollHeight > el.clientHeight,
+  }));
+
+test("the chip list keeps its width between a short table and a tall one", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "saved_reports");
+  expect((await mainBox(page)).overflows).toBe(false);
   const short = await page.locator("#tables").evaluate((el) => el.clientWidth);
   await selectTable(page, "orders");
-  await expect.poll(() => page.locator("#main").evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  await expect.poll(async () => (await mainBox(page)).overflows).toBe(true);
+  expect((await mainBox(page)).gutter).toBeGreaterThan(0);
   expect(await page.locator("#tables").evaluate((el) => el.clientWidth)).toBe(short);
 });
