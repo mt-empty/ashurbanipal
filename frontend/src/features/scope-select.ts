@@ -1,6 +1,7 @@
 import { supersedeLoads } from "../bootstrap/reload.js";
-import { api } from "../core/api.js";
+import { api, nameStartupDefault } from "../core/api.js";
 import { $, populateSelect, reportError } from "../core/dom.js";
+import { markTiming } from "../core/perf-marks.js";
 import { settleSchema, settleSource, sourceQuery, state, switchSchema, switchSource } from "../core/state.js";
 import type { SchemasResponse, SourceEntry, SourcesResponse } from "../core/types.js";
 import { syncGridLock } from "./grid-lock.js";
@@ -19,6 +20,7 @@ export async function loadSources(): Promise<void> {
     let sources: SourceEntry[];
     ({ sources, default: defaultSource } = await api<SourcesResponse>("/sources"));
     names = sources.map((s) => s.name);
+    nameStartupDefault("source", defaultSource);
   } catch (e) {
     // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
     // single-source, with no `source` param, but leave a trace.
@@ -46,7 +48,7 @@ $<HTMLSelectElement>("source-select").onchange = () => {
 };
 
 // ==== Schema selector ====
-// Hidden for a single-schema source; every request still names its schema.
+// Hidden for a single-schema source; every request after start-up still names its schema.
 // Same supersession guard as loadTables: a slow /schemas from an earlier
 // source switch must not overwrite a later one's schema and selector.
 let loadSchemasToken = 0;
@@ -56,6 +58,7 @@ let loadSchemasToken = 0;
 export async function loadSchemas(): Promise<boolean> {
   syncGridLock();
   const token = ++loadSchemasToken;
+  const { source } = state.scope;
   let schemas: string[];
   let defaultSchema: string | null;
   try {
@@ -63,6 +66,7 @@ export async function loadSchemas(): Promise<boolean> {
     schemas = listing.schemas.map((s) => s.name);
     // A host's JSON settings may drop a null field.
     defaultSchema = listing.default ?? null;
+    nameStartupDefault("schema", defaultSchema, { source });
   } catch (e) {
     if (token !== loadSchemasToken) return false;
     // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
@@ -70,6 +74,7 @@ export async function loadSchemas(): Promise<boolean> {
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
     settleSchema(null, false, false);
     $("schema-select-wrap").hidden = true;
+    markTiming("scope-settled");
     return true;
   }
   if (token !== loadSchemasToken) return false;
@@ -81,6 +86,7 @@ export async function loadSchemas(): Promise<boolean> {
   // Re-hidden explicitly: a source switch can land on a source with fewer
   // schemas than the last one, whose selector would otherwise stay up.
   $("schema-select-wrap").hidden = !state.manySchemas;
+  markTiming("scope-settled");
   return true;
 }
 $<HTMLSelectElement>("schema-select").onchange = () => {

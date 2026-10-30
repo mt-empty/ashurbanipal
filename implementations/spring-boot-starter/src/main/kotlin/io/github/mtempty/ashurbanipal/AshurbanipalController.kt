@@ -4,11 +4,13 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import org.springframework.core.io.ClassPathResource
 import org.springframework.dao.DataAccessException
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -79,6 +81,8 @@ class AshurbanipalController(
         ClassPathResource("ashurbanipal/dbviewer.html").inputStream.use { it.readBytes() }
     }
 
+    private val dbviewerHtmlGzip: ByteArray by lazy { gzip(dbviewerHtml) }
+
     /** What an absent `source` resolves to; `/api/sources` reports it as `default`. */
     private fun defaultSourceName(): String = dbSources.keys.first()
 
@@ -88,8 +92,14 @@ class AshurbanipalController(
         else dbSources[name] ?: throw NotAllowedException("source \"$name\"", NotAllowedKind.SOURCE)
 
     @GetMapping(produces = [MediaType.TEXT_HTML_VALUE])
-    fun serveHtml(): ResponseEntity<ByteArray> =
-        ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(dbviewerHtml)
+    fun serveHtml(@RequestHeader headers: HttpHeaders): ResponseEntity<ByteArray> {
+        val response = ResponseEntity.ok().contentType(MediaType.TEXT_HTML).varyBy(HttpHeaders.ACCEPT_ENCODING)
+        return if (acceptsGzip(headers.getOrEmpty(HttpHeaders.ACCEPT_ENCODING))) {
+            response.header(HttpHeaders.CONTENT_ENCODING, "gzip").body(dbviewerHtmlGzip)
+        } else {
+            response.body(dbviewerHtml)
+        }
+    }
 
     @GetMapping("/api/sources")
     fun listSources(): ResponseEntity<SourcesResponse> =

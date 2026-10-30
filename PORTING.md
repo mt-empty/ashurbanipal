@@ -13,7 +13,8 @@ An implementation of `spec/protocol.md` at a specific protocol version,
 that:
 
 1. Serves the canonical `frontend/dbviewer.html` artifact, vendored (see
-   below), unmodified.
+   below), unmodified. Sending it gzip-compressed (`spec/protocol.md`
+   §5.1) is not a modification.
 2. Implements the ten API routes + the HTML route exactly as
    `spec/protocol.md` and `spec/openapi.yaml` specify them.
 3. Passes both conformance layers (behavior + shape) in its own CI.

@@ -1,14 +1,15 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use axum::extract::{FromRequestParts, State};
-use axum::http::header::X_CONTENT_TYPE_OPTIONS;
+use axum::http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, VARY, X_CONTENT_TYPE_OPTIONS};
 use axum::http::request::Parts;
-use axum::http::{HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::map_response;
 use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::get;
 use axum::Router;
 
+use ashurbanipal::page_encoding::{accepts_gzip, gzip_page};
 use ashurbanipal::protocol_wire::{
     CommonValuesParams, CommonValuesResponse, CountsResponse, DataParams, JoinParams,
     ReferencedByResponse, SchemaParams, SchemasResponse, SourceParams, SourcesResponse,
@@ -20,6 +21,8 @@ use ashurbanipal::{
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
+static DBVIEWER_HTML_GZIP: LazyLock<Vec<u8>> =
+    LazyLock::new(|| gzip_page(DBVIEWER_HTML.as_bytes()));
 
 const PROTOCOL_HEADER: &str = "x-ashurbanipal-protocol";
 /// Bumped only for non-additive wire changes; additive optional fields
@@ -48,6 +51,7 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
         return Router::new();
     }
     assert!(!sources.is_empty(), "router() requires at least one source");
+    LazyLock::force(&DBVIEWER_HTML_GZIP);
     let checker = SiblingChecker::new(&config);
     let state = Arc::new(AppState {
         config,
@@ -150,8 +154,16 @@ where
     }
 }
 
-async fn serve_html<S: DbSource>(State(_): State<Arc<AppState<S>>>) -> Html<&'static str> {
-    Html(DBVIEWER_HTML)
+async fn serve_html<S: DbSource>(
+    State(_): State<Arc<AppState<S>>>,
+    headers: HeaderMap,
+) -> Response {
+    let accept = headers.get_all(ACCEPT_ENCODING).iter();
+    if accepts_gzip(accept.filter_map(|v| v.to_str().ok())) {
+        let encoded = [(VARY, "accept-encoding"), (CONTENT_ENCODING, "gzip")];
+        return (encoded, Html(DBVIEWER_HTML_GZIP.as_slice())).into_response();
+    }
+    ([(VARY, "accept-encoding")], Html(DBVIEWER_HTML)).into_response()
 }
 
 /// Never fails: `sources` is always non-empty (`router()` asserts it), so

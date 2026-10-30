@@ -129,6 +129,7 @@ mise run frontend:test-e2e-spec tests/<name>.spec.ts   # rebuild + sync, then on
 mise run frontend:test-e2e-quick         # rebuild + sync, then the whole suite on Chromium + Firefox
 mise run frontend:test-e2e               # full three-browser suite against axum's vendored dbviewer.html
 mise run frontend:test-e2e-coverage      # Chromium e2e run with line/branch/function coverage per frontend/src file (HTML report)
+mise run frontend:perf                   # start-up timing experiment under simulated network/server delay (tools/e2e-tests/perf/README.md); not in CI
 ```
 
 The `rust:*` tasks `cd` into `implementations/rust` (the workspace root —

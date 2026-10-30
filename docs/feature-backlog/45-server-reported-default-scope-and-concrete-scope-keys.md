@@ -134,6 +134,10 @@ names no database.
 - **Send both on every request.** `applyScopeParams` builds request
   parameters from the concrete names. URL writing (`syncUrl`) still omits a
   name when its list has one entry, so it needs its own rule.
+  - Relaxed 2026-10-29 by story 48: start-up's early requests go out
+    before the scope is resolved, so they may leave a name out or carry a
+    remembered one. An early answer is used only when it matches the
+    scope start-up settles on; every request after start-up names both.
 - **One key helper**, `scopeKey(source, schema, ...rest)` in
   `lib/scope-key.ts` (a pure leaf, so it can have a unit test). It replaces
   these spellings:

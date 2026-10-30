@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "./support/fixtures";
 import {
   apiCall,
+  dataWith,
   failRequests,
   goBack,
   gotoApp,
@@ -70,9 +71,10 @@ test("a fresh visit to a source opens the schema its connection is pinned to", a
   // The first visit stores `primary` and `public`; `public` is listed on the other source too.
   await gotoApp(page, "", secondSourceDemo.baseUrl);
   await expect(page.locator("#schema-select")).toHaveValue("public");
-  const tablesListed = page.waitForRequest(tablesWith("source", "other_schema"));
+  // Start-up's early table list leaves the schema to the server; the rows, asked for once the scope settles, name it.
+  const rowsAsked = page.waitForRequest(dataWith("source", "other_schema"));
   await gotoApp(page, "?source=other_schema", secondSourceDemo.baseUrl);
-  expect(new URL((await tablesListed).url()).searchParams.get("schema")).toBe("other_schema");
+  expect(new URL((await rowsAsked).url()).searchParams.get("schema")).toBe("other_schema");
   await expect(page.locator("#schema-select")).toHaveValue("other_schema");
 });
 

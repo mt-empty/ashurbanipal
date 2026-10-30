@@ -1,10 +1,15 @@
+use std::sync::LazyLock;
+
 use actix_web::body::MessageBody;
 use actix_web::dev::{ServiceRequest, ServiceResponse};
-use actix_web::http::header::{HeaderName, HeaderValue, X_CONTENT_TYPE_OPTIONS};
+use actix_web::http::header::{
+    HeaderName, HeaderValue, ACCEPT_ENCODING, CONTENT_ENCODING, VARY, X_CONTENT_TYPE_OPTIONS,
+};
 use actix_web::middleware::{from_fn, Next};
 use actix_web::web::{self, Data};
-use actix_web::{Error, HttpResponse, Scope};
+use actix_web::{Error, HttpRequest, HttpResponse, Scope};
 
+use ashurbanipal::page_encoding::{accepts_gzip, gzip_page};
 use ashurbanipal::protocol_wire::{
     CommonValuesParams, CommonValuesResponse, CountsResponse, DataParams, JoinParams,
     ReferencedByResponse, SchemaParams, SchemasResponse, SourceParams, SourcesResponse,
@@ -15,6 +20,8 @@ use ashurbanipal::{
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
+static DBVIEWER_HTML_GZIP: LazyLock<Vec<u8>> =
+    LazyLock::new(|| gzip_page(DBVIEWER_HTML.as_bytes()));
 
 const PROTOCOL_HEADER: &str = "x-ashurbanipal-protocol";
 /// Bumped only for non-additive wire changes; additive optional fields
@@ -55,6 +62,7 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
     if !state.config.is_enabled() {
         return web::scope("/__ashurbanipal");
     }
+    LazyLock::force(&DBVIEWER_HTML_GZIP);
     // Version header only applies to /api (separate inner scope). Routes
     // use `web::resource` (not `Scope::route`) so a method mismatch 405s.
     web::scope("/__ashurbanipal")
@@ -169,10 +177,17 @@ fn query_error_handler(
     ApiError::BadRequest(err.to_string()).into()
 }
 
-async fn serve_html() -> HttpResponse {
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(DBVIEWER_HTML)
+async fn serve_html(req: HttpRequest) -> HttpResponse {
+    let mut resp = HttpResponse::Ok();
+    resp.content_type("text/html; charset=utf-8")
+        .insert_header((VARY, "accept-encoding"));
+    let accept = req.headers().get_all(ACCEPT_ENCODING);
+    if accepts_gzip(accept.filter_map(|v| v.to_str().ok())) {
+        return resp
+            .insert_header((CONTENT_ENCODING, "gzip"))
+            .body(DBVIEWER_HTML_GZIP.as_slice());
+    }
+    resp.body(DBVIEWER_HTML)
 }
 
 /// Never fails: `sources` is always non-empty (`app_state()` asserts it), so

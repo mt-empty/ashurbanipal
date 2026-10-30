@@ -8,6 +8,7 @@ import {
   startTable,
   state,
   tableView,
+  type ViewRequest,
   withSchema,
 } from "./store.js";
 import type { View } from "./types.js";
@@ -68,11 +69,35 @@ export function applyUrlExact(params: URLSearchParams): void {
 }
 
 // Every name the scope holds: both once start-up has resolved them, so no
-// request depends on the server's default.
+// request after start-up depends on the server's default. Start-up's early
+// requests may (bootstrap/boot-prefetch.ts).
 export function applyScopeParams(params: URLSearchParams): void {
   const { source, schema } = state.scope;
   if (source) params.set("source", source);
   if (schema) params.set("schema", schema);
+}
+
+// A data request's query, shared by the load itself and every prefetch of it so
+// the two build the same path. A join's sort and `join` value are the caller's.
+export function dataParams(req: ViewRequest): URLSearchParams {
+  const { view, sort } = req;
+  const params = new URLSearchParams({ limit: String(state.limit), offset: String(req.offset) });
+  if (view.kind === "table") {
+    params.set("table", view.table);
+    if (sort) {
+      params.set("sort", sort);
+      params.set("order", req.order);
+    }
+  }
+  applyScopeParams(params);
+  // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
+  // box's DSL text — URLSearchParams handles the URL-encoding.
+  if (req.filter) params.set("filter", JSON.stringify(req.ast));
+  return params;
+}
+
+export function tableDataPath(req: ViewRequest): string {
+  return `/tables/data?${dataParams(req)}`;
 }
 
 function applyUrlScope(params: URLSearchParams): void {

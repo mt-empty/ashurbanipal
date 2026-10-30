@@ -6,6 +6,7 @@ import {
   enterTable,
   persist,
   setSchema,
+  startTable,
   state,
   tableRequest,
   type ViewRequest,
@@ -14,7 +15,7 @@ import {
 import type { FilterCondition } from "../core/types.js";
 import { parseFilterDsl } from "../lib/filter-dsl.js";
 import { loadSchemas } from "./scope-select.js";
-import { loadTables } from "./table-chips.js";
+import { chipsListScopeInView, listedTableNames, loadTables } from "./table-chips.js";
 
 // FK-cell nav and the referenced-by drill-in: `table` filtered by `clause`,
 // with no sort (a stale stored one would defeat loadData's drop-and-retry
@@ -102,6 +103,7 @@ window.addEventListener("popstate", () => {
   supersedeLoads();
   const params = new URLSearchParams(location.search);
   const previousSource = state.scope.source;
+  const previousSchema = state.scope.schema;
   // Exact reader: reproduce this history entry verbatim, absences included
   // (contrast url.ts's load-time overlay). Keep it separate from that overlay
   // reader — the header comment in url.ts says why.
@@ -110,11 +112,18 @@ window.addEventListener("popstate", () => {
   $<HTMLSelectElement>("schema-select").value = state.scope.schema ?? "";
   persist();
   if (state.scope.source === previousSource) {
-    loadTables({ replaceHistory: true }).catch(reportError);
+    // The same scope's table list is the one on screen; only the rows are asked for.
+    // An earlier step's list may still be on its way, leaving the chips of another scope.
+    const listed = chipsListScopeInView() && listedTableNames().includes(startTable(state.view) ?? "");
+    if (state.scope.schema === previousSchema && listed) {
+      loadData({ replaceHistory: true, reason: "history" });
+      return;
+    }
+    loadTables({ replaceHistory: true, reason: "history" }).catch(reportError);
     return;
   }
   // Another source has its own schema list, so the selector's options must be re-fetched too.
   loadSchemas()
-    .then((current) => (current ? loadTables({ replaceHistory: true }) : undefined))
+    .then((current) => (current ? loadTables({ replaceHistory: true, reason: "history" }) : undefined))
     .catch(reportError);
 });

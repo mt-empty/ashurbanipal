@@ -6,7 +6,7 @@ import { exerciseEveryRoute, expectScoped } from "./support/scope";
 // on the server's defaults. The shared demo has one source, `primary`, whose
 // default schema is `public`.
 
-test("every scoped request names the source and the schema", async ({ page }) => {
+test("every scoped request after start-up names the source and the schema", async ({ page }) => {
   expectScoped(await exerciseEveryRoute(page), "primary", "public");
 });
 

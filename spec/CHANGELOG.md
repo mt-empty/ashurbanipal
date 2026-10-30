@@ -25,6 +25,12 @@ all keeping v1 (they change nothing an existing caller observes — see
 Every API response also carries `X-Content-Type-Options: nosniff` (§2).
 Additive — a response header an existing caller can ignore — so v1 stands.
 
+The UI route (§5.1) is sent compressed when the request accepts `gzip`,
+with `Content-Encoding` and `Vary: Accept-Encoding`; the decoded body is
+still the artifact byte for byte. Additive — a request without
+`Accept-Encoding` gets the same uncompressed page as before — so v1
+stands.
+
 `/api/siblings` (§5.6) gains an optional `instance` object and an optional
 `label` on each sibling, both host-configured opaque strings. The sibling
 matching `instance` is reported healthy without a health check. Additive —

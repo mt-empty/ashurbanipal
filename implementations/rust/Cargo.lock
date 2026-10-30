@@ -234,6 +234,7 @@ dependencies = [
 name = "ashurbanipal"
 version = "0.11.0"
 dependencies = [
+ "flate2",
  "futures-util",
  "reqwest",
  "serde",
@@ -265,6 +266,7 @@ dependencies = [
  "axum",
  "dotenvy",
  "escargot",
+ "flate2",
  "reqwest",
  "serde",
  "serde_json",

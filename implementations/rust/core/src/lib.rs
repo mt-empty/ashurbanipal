@@ -8,6 +8,7 @@ pub mod config;
 pub mod db;
 pub mod filter;
 pub mod join;
+pub mod page_encoding;
 pub mod protocol_wire;
 pub mod siblings;
 

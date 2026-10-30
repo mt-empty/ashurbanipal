@@ -70,6 +70,10 @@ once per operation" invariant without the explicit transaction-pinning a
 pooled driver (Rust's `sqlx::Pool`) needs. A host wanting connection
 pooling wraps the driver call inside its own `DbSource` implementation.
 
+## Compression
+
+The UI page is sent gzipped when the browser accepts gzip (`spec/protocol.md` §5.1); it is compressed once, at start-up. API responses are sent uncompressed. A host-wide Flask-Compress leaves the page alone, because it already carries `Content-Encoding`.
+
 ## Behind your own auth
 
 Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.

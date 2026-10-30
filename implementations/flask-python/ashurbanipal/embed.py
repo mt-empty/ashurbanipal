@@ -12,10 +12,11 @@ from yet.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 from pathlib import Path
 
-PINNED_FRONTEND_SHA256 = "160938abfc9a94c2926f2a8156d3ed823a5874c6e885dc3f363bc452d8684976"
+PINNED_FRONTEND_SHA256 = "6cb83e33ffe4fe301e1d6c67a60f437c62ee1fefd9ced6e46fe1971fd007092f"
 
 _FRONTEND_PATH = Path(__file__).resolve().parent / "frontend" / "dbviewer.html"
 
@@ -33,3 +34,5 @@ def _load_frontend() -> str:
 
 
 DBVIEWER_HTML = _load_frontend()
+
+DBVIEWER_HTML_GZIP = gzip.compress(DBVIEWER_HTML.encode("utf-8"), compresslevel=9, mtime=0)

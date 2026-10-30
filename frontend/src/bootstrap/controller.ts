@@ -1,9 +1,10 @@
-import { ApiError, api } from "../core/api.js";
+import { ApiError, api, clearPrefetched, prefetch } from "../core/api.js";
 import { $, clearError, reportError, setStatus } from "../core/dom.js";
+import { type LoadReason, markTiming } from "../core/perf-marks.js";
 import {
-  applyScopeParams,
   commitRequest,
   currentRequest,
+  dataParams,
   diffNewRows,
   dropOneStaleInput,
   dropStaleSort,
@@ -13,6 +14,7 @@ import {
   pruneHiddenColumns,
   startTable,
   state,
+  tableDataPath,
   tableInView,
   type ViewRequest,
   viewKey,
@@ -31,7 +33,7 @@ import { syncUrl } from "../features/view-history.js";
 import { syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
-import { isCurrentLoad, nextLoadToken } from "./reload.js";
+import { isCurrentLoad, type LoadDataOpts, nextLoadToken } from "./reload.js";
 import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js";
 
 // The render-orchestration hub: loadData sequences fetch -> chrome ->
@@ -51,6 +53,10 @@ function setTableBusy(busy: boolean): void {
 // resolves), and a plain true/false pair would let the first fetch to
 // finish clear aria-busy/#status while another is still running.
 let inFlightFetches = 0;
+
+// Someone paging is likely to page on, so the page after the one shown is asked
+// for ahead. Long enough to read a page; short enough to stay fresh (R10).
+const NEXT_PAGE_TTL_MS = 30_000;
 
 // A fetch that answers within this delay shows nothing, so fast ones never flash.
 const LOADING_DELAY_MS = 250;
@@ -138,24 +144,14 @@ async function fetchViewData(req: ViewRequest, auto: boolean): Promise<ViewData>
   // table A would clear table B's row-loading flag (whatever the view
   // had become by the time A's `finally` runs) instead of its own.
   const table = startTable(view);
-  const params = new URLSearchParams({
-    limit: String(state.limit),
-    offset: String(req.offset),
-  });
-  if (view.kind === "table") params.set("table", view.table);
-  if (sort) {
-    // In a join view the sort is `alias.column`; the wire wants the column and its table position.
-    const target = view.kind === "join" ? splitColumnKey(sort, view.def) : { column: sort, join: undefined };
-    if (target) {
-      params.set("sort", target.column);
-      if (target.join !== undefined) params.set("sort_join", String(target.join));
-      params.set("order", order);
-    }
+  const params = dataParams(req);
+  // In a join view the sort is `alias.column`; the wire wants the column and its table position.
+  const target = view.kind === "join" && sort ? splitColumnKey(sort, view.def) : undefined;
+  if (target) {
+    params.set("sort", target.column);
+    params.set("sort_join", String(target.join));
+    params.set("order", order);
   }
-  applyScopeParams(params);
-  // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
-  // box's DSL text — URLSearchParams handles the URL-encoding.
-  if (req.filter) params.set("filter", JSON.stringify(req.ast));
   if (inFlightFetches++ === 0) {
     setFetching(true);
     setTableBusy(true);
@@ -208,27 +204,28 @@ function updateViewChrome(): void {
   document.title = title ? `${title} — Ashurbanipal` : "Ashurbanipal";
 }
 
-export async function loadData({
+export function loadData(opts: LoadDataOpts = {}): Promise<void> {
+  const reason = opts.reason ?? (opts.auto ? "auto" : "other");
+  markTiming("load-start", reason);
+  return runLoad({ ...opts, reason });
+}
+
+// A retry of the same load keeps its reason and its start mark.
+async function runLoad({
   resetScroll = true,
   highlightNew = false,
   auto = false,
   next,
   replaceHistory = false,
-}: {
-  resetScroll?: boolean;
-  highlightNew?: boolean;
-  // An auto-refresh tick: it only re-fetches, so it never retries a dropped sort or filter,
-  // opens the join dialog, or clears a message the user's own last action left.
-  auto?: boolean;
-  // A view to try; it replaces the state only if its data arrives.
-  next?: ViewRequest;
-  // Start-up and history restores correct the current entry rather than add one (ui-guidelines R16).
-  replaceHistory?: boolean;
-} = {}): Promise<void> {
+  askNextPage = false,
+  reason,
+}: LoadDataOpts & { reason: LoadReason }): Promise<void> {
   if (!auto) {
     clearError();
     clearJoinNotice();
   }
+  // Refresh and a tick ask for fresh rows; nothing fetched ahead of them may stand in (R10).
+  if (reason === "refresh" || reason === "auto") clearPrefetched("view");
   const req = next ?? currentRequest();
   syncViewNotice(req);
   syncGridLock();
@@ -257,9 +254,9 @@ export async function loadData({
     // longer exists, so drop one and retry — at most one per call (sort before
     // filter, ui-guidelines R11), leaving the other a chance to render.
     // A view not yet in view can only have restored its sort; its failure leaves the state alone.
-    if (!next && dropOneStaleInput(code)) return loadData({ resetScroll, highlightNew, replaceHistory });
+    if (!next && dropOneStaleInput(code)) return runLoad({ resetScroll, highlightNew, replaceHistory, reason });
     const retry = next && dropStaleSort(next, code);
-    if (retry) return loadData({ next: retry, resetScroll, highlightNew, replaceHistory });
+    if (retry) return runLoad({ next: retry, resetScroll, highlightNew, replaceHistory, reason });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
     reportError(failedLoadError(e, view, next));
     return;
@@ -313,6 +310,11 @@ export async function loadData({
   // this load, and its pager/#status must not overwrite the newer one's.
   if (superseded()) return;
   updatePager(data);
+  markTiming("rows-rendered", reason);
+  // Joins are never asked for ahead: one can run up to the query timeout.
+  if (askNextPage && view.kind === "table" && !$<HTMLButtonElement>("next").disabled) {
+    prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);
+  }
   noteLoadOk();
   // Sighted users see the tint; announce the count for everyone else. The
   // next loadData clears #status the same way it clears "loading…".

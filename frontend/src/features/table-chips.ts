@@ -1,6 +1,7 @@
 import { loadData } from "../bootstrap/reload.js";
-import { api } from "../core/api.js";
+import { api, prefetch } from "../core/api.js";
 import { $, el, qs, setStatus } from "../core/dom.js";
+import { type LoadReason, markTiming } from "../core/perf-marks.js";
 import {
   applyStoredSort,
   clearFilter,
@@ -9,6 +10,7 @@ import {
   scopeQuery,
   startTable,
   state,
+  tableDataPath,
   tableInView,
   tableRequest,
   type ViewRequest,
@@ -116,6 +118,7 @@ new ResizeObserver(([entry]) => {
 // followed by another) must not replace the chips with the wrong schema's
 // table list — same guard as reload.ts's load token and cvRequestToken.
 let loadTablesToken = 0;
+let listedScope: string | null = null;
 
 // `next`: a view in this table list to open instead of the current one; the
 // stale-state fallback below drops it.
@@ -126,16 +129,22 @@ export type TablesOutcome = "superseded" | "fell-back" | "loaded";
 export async function loadTables({
   replaceHistory = false,
   next,
+  reason,
 }: {
   replaceHistory?: boolean;
   next?: ViewRequest;
+  reason?: LoadReason;
 } = {}): Promise<TablesOutcome> {
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
     api<{ tables: TableListEntry[] }>(`/tables${scopeQuery()}`),
-    api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery()}`),
+    // Counts are a hint; a failure leaves the chips without them, not missing.
+    api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery()}`).catch((e) => {
+      console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
+      return { counts: [] };
+    }),
   ]);
   if (token !== loadTablesToken) return "superseded";
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
@@ -156,15 +165,18 @@ export async function loadTables({
     // (see .chip-name), so the title tooltip is the escape hatch.
     chip.title = t.comment ? `${t.name} — ${t.comment}` : t.name;
     linkTo(chip, viewHref({ kind: "table", table: t.name }), () => {
-      loadData({ next: tableRequest(t.name) });
+      loadData({ next: tableRequest(t.name), reason: "chip" });
     });
+    prefetchOnRest(chip, t.name);
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
   }
+  listedScope = scopeIdentity();
   if (joinScope !== scopeIdentity()) joinEntries = [];
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
+  markTiming("tables-listed");
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back (R5).
   const fellBack = !tableNames.includes(startTable(next ? next.view : state.view) ?? "");
@@ -176,8 +188,13 @@ export async function loadTables({
     // over would 400 and dead-end the very load meant to recover (R5).
     clearFilter();
   }
-  await loadData({ replaceHistory, next: fellBack ? undefined : next });
+  await loadData({ replaceHistory, next: fellBack ? undefined : next, reason });
   return fellBack ? "fell-back" : "loaded";
+}
+
+// False while a source, schema or history switch still shows the last scope's chips.
+export function chipsListScopeInView(): boolean {
+  return listedScope === scopeIdentity();
 }
 
 export function listedTableNames(): string[] {
@@ -209,6 +226,29 @@ function linkTo(a: HTMLAnchorElement, href: string, run: () => void): HTMLAnchor
     run();
   };
   return a;
+}
+
+// Only a resting mouse asks ahead: touch has no hover before its tap, and
+// tabbing would focus, and so fetch, every chip it passes.
+const PREFETCH_REST_MS = 100;
+// Short, so a page shown from it is as fresh as one asked for on the click (R10).
+const PREFETCH_TTL_MS = 5000;
+
+function prefetchOnRest(chip: HTMLElement, name: string): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = () => clearTimeout(timer);
+  const start = () => {
+    cancel();
+    timer = setTimeout(() => {
+      // A chip of the last scope (or replaced since) names a table this scope may not have.
+      if (!chip.isConnected || !chipsListScopeInView() || name === tableInView()) return;
+      prefetch(tableDataPath(tableRequest(name)), "view", PREFETCH_TTL_MS);
+    }, PREFETCH_REST_MS);
+  };
+  chip.addEventListener("pointerenter", (e) => {
+    if (e.pointerType === "mouse") start();
+  });
+  for (const type of ["pointerleave", "pointerdown"]) chip.addEventListener(type, cancel);
 }
 
 function actionButton(run: () => void): HTMLButtonElement {

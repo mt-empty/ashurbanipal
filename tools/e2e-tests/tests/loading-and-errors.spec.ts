@@ -1,6 +1,7 @@
 import { expect, test } from "./support/fixtures";
 import {
   apiCall,
+  apiRoute,
   dataWith,
   failRequests,
   gotoApp,
@@ -9,6 +10,7 @@ import {
   selectTable,
   tableData,
 } from "./support/helpers";
+import { START_UP_ROUTES } from "./support/scope";
 
 test("a failed load leaves the previous table's rows and active state untouched", async ({ page }) => {
   await gotoApp(page);
@@ -121,13 +123,19 @@ test("a lone schema with no server default is still sent by name", async ({ page
   await expect(page.locator("#structure-title")).toHaveText(/^structure — public\./);
 });
 
-test("a failed /sources call drops a remembered source instead of sending it", async ({ page }) => {
+test("a failed /sources call drops a remembered source from every request after it", async ({ page }) => {
   await gotoApp(page);
   await page.evaluate(() => localStorage.setItem("ashurbanipal_view", JSON.stringify({ source: "gone" })));
   await failRequests(page, apiCall("/sources"));
+  // Start-up sends one request per route ahead with the remembered name, and uses none of their answers. Firefox can
+  // report those requests after the /sources response, so they are told apart by being first, not by event order.
+  const sentAhead = new Set<string>();
   const withSource: string[] = [];
   page.on("request", (r) => {
-    if (new URL(r.url()).searchParams.has("source")) withSource.push(r.url());
+    const route = apiRoute(r.url());
+    if (route === undefined) return;
+    if (START_UP_ROUTES.includes(route) && !sentAhead.has(route)) sentAhead.add(route);
+    else if (new URL(r.url()).searchParams.has("source")) withSource.push(r.url());
   });
   await reloadApp(page);
   await expect(page.locator("#tbody tr").first()).toBeVisible();

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { constants, gzipSync } from "node:zlib";
 
 // Mirrors the Go port's embed.go and PORTING.md's vendoring contract: a
 // build pipeline can silently mangle the vendored file, so the hash is
@@ -10,7 +11,7 @@ import { fileURLToPath } from "node:url";
 // frontend/dbviewer.html release artifact; here it pins this repo's own
 // copy since there is no separate tagged release to vendor from yet
 // (same caveat the go-nethttp port documents).
-const PINNED_FRONTEND_SHA256 = "160938abfc9a94c2926f2a8156d3ed823a5874c6e885dc3f363bc452d8684976";
+const PINNED_FRONTEND_SHA256 = "6cb83e33ffe4fe301e1d6c67a60f437c62ee1fefd9ced6e46fe1971fd007092f";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // From dist/ (built) or src/ (tsx dev run) the frontend dir is one level up, at the package root.
@@ -29,3 +30,5 @@ function loadFrontend(): string {
 }
 
 export const dbviewerHtml = loadFrontend();
+
+export const dbviewerHtmlGzip = gzipSync(dbviewerHtml, { level: constants.Z_BEST_COMPRESSION });

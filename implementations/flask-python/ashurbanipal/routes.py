@@ -26,7 +26,7 @@ from .db import (
     QueryOpts,
     QueryTimeout,
 )
-from .embed import DBVIEWER_HTML
+from .embed import DBVIEWER_HTML, DBVIEWER_HTML_GZIP
 from .join import JoinOpts, parse_join
 
 PROTOCOL_HEADER = "x-ashurbanipal-protocol"
@@ -101,7 +101,13 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("")
     def serve_html() -> Response:
-        return Response(DBVIEWER_HTML, mimetype="text/html")
+        if request.accept_encodings["gzip"] > 0:
+            resp = Response(DBVIEWER_HTML_GZIP, mimetype="text/html")
+            resp.content_encoding = "gzip"
+        else:
+            resp = Response(DBVIEWER_HTML, mimetype="text/html")
+        resp.vary.add("Accept-Encoding")
+        return resp
 
     @bp.get("/api/sources")
     def list_sources() -> Response:

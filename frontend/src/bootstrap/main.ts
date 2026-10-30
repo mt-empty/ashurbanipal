@@ -1,4 +1,4 @@
-import { onProtocolSkew } from "../core/api.js";
+import { clearPrefetched, onProtocolSkew } from "../core/api.js";
 import "../features/api-reference.js";
 import { $, reportError } from "../core/dom.js";
 import { applyStoredSort, getLastPayload, initState, state, tableInView } from "../core/state.js";
@@ -15,6 +15,7 @@ import { noteStartupSettled } from "../features/view-history.js";
 import "../features/sticky-header.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";
 import { showBootFallbackNote } from "../features/view-notice.js";
+import { opensWithStoredSort, prefetchStartup } from "./boot-prefetch.js";
 import { loadData } from "./controller.js";
 import { registerLoadData } from "./reload.js";
 import "../features/theme.js";
@@ -25,6 +26,7 @@ import "../features/theme.js";
 // payload dialog, then kick off the bootstrap sequence. All render
 // orchestration lives in controller.ts.
 initState();
+prefetchStartup();
 registerLoadData(loadData);
 
 // loadData() and the sibling fetches run unawaited and their own try/catch
@@ -55,11 +57,11 @@ $("structure-btn").onclick = openStructure;
 
 $<HTMLButtonElement>("prev").onclick = () => {
   state.offset = Math.max(0, state.offset - state.limit);
-  loadData({ resetScroll: false });
+  loadData({ resetScroll: false, reason: "page" });
 };
 $<HTMLButtonElement>("next").onclick = () => {
   state.offset += state.limit;
-  loadData({ resetScroll: false });
+  loadData({ resetScroll: false, askNextPage: true, reason: "page" });
 };
 // resetScroll: false — an in-place re-fetch of the current view; highlightNew
 // tints any row that wasn't in the previous result.
@@ -73,11 +75,12 @@ $<HTMLButtonElement>("refresh").onclick = () => {
   // animationend, which never fires under prefers-reduced-motion) clears it.
   btn.classList.add("spinning");
   setTimeout(() => btn.classList.remove("spinning"), 500);
-  loadData({ resetScroll: false, highlightNew: true });
+  loadData({ resetScroll: false, highlightNew: true, reason: "refresh" });
 };
 
 // Bootstrap-only order (a source switch reruns the last two alone): the source,
-// then the schema, are fixed before the next step's first request. The fallback
+// then the schema, are fixed before the next step uses an answer; every request
+// is already sent ahead (boot-prefetch.ts). The fallback
 // note waits for loadTables' first load; #tables' markup aria-busy (on the list,
 // not <main>, so live regions still announce) clears once all of it settles.
 loadSources()
@@ -85,15 +88,13 @@ loadSources()
   .then((current) => {
     // A source switch during start-up runs its own table load.
     if (!current) return;
-    // A fresh link without ?sort= opens with the table's remembered one (R11),
-    // once the scope it is keyed by is pinned; a reload or a history step
-    // reopens its entry exactly (R16).
-    const navType = (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type;
-    if (state.sort === null && navType !== "reload" && navType !== "back_forward") applyStoredSort(tableInView());
-    return loadTables({ replaceHistory: true });
+    // Applied once the scope the sort is stored under is pinned.
+    if (opensWithStoredSort()) applyStoredSort(tableInView());
+    return loadTables({ replaceHistory: true, reason: "boot" });
   })
   .catch(reportError)
   .finally(() => {
+    clearPrefetched("boot");
     noteStartupSettled();
     try {
       showBootFallbackNote();

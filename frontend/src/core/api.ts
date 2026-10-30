@@ -61,11 +61,92 @@ async function errorFromResponse(resp: Response): Promise<ApiError> {
   return new ApiError(`request failed with status ${resp.status}`, undefined);
 }
 
+// ==== Requests sent ahead ====
+// A request sent before anything asks for it (start-up's, a hovered chip's, the
+// next page); the first api() call for the same request takes the answer
+// instead of asking again. Each answer is used at most once.
+type PrefetchKind = "boot" | "view";
+
+interface Prefetched {
+  kind: PrefetchKind;
+  route: string;
+  params: URLSearchParams;
+  key: string;
+  response: Promise<Response>;
+  expires: number;
+}
+
+let prefetched: Prefetched[] = [];
+
+// Parameter order is not part of a request's identity.
+function keyOf(route: string, params: URLSearchParams): string {
+  const sorted = new URLSearchParams(params);
+  sorted.sort();
+  return `${route}?${sorted}`;
+}
+
+function splitPath(path: string): [route: string, params: URLSearchParams] {
+  const [route, query = ""] = path.split("?");
+  return [route, new URLSearchParams(query)];
+}
+
+function dropExpired(): number {
+  const now = performance.now();
+  prefetched = prefetched.filter((p) => p.expires > now);
+  return now;
+}
+
+export function prefetch(path: string, kind: PrefetchKind, ttlMs = Number.POSITIVE_INFINITY): void {
+  const now = dropExpired();
+  const [route, params] = splitPath(path);
+  const key = keyOf(route, params);
+  if (prefetched.some((p) => p.key === key)) return;
+  const response = fetch(API + path);
+  // A failed request surfaces when an api() call takes it, and only then.
+  response.catch(() => {});
+  prefetched.push({ kind, route, params, key, response, expires: now + ttlMs });
+}
+
+export function clearPrefetched(kind: PrefetchKind): void {
+  prefetched = prefetched.filter((p) => p.kind !== kind);
+}
+
+/**
+ * A start-up request that left `param` out asked for the default the server
+ * reports, so naming that default here lets it match by path. `among` limits
+ * this to requests carrying exactly those params (null: absent).
+ */
+export function nameStartupDefault(
+  param: string,
+  value: string | null,
+  among: Record<string, string | null> = {},
+): void {
+  if (value === null) return;
+  for (const p of prefetched) {
+    if (p.kind !== "boot" || p.params.has(param)) continue;
+    if (Object.entries(among).some(([name, wanted]) => p.params.get(name) !== wanted)) continue;
+    p.params.set(param, value);
+    p.key = keyOf(p.route, p.params);
+  }
+}
+
+function takePrefetched(path: string): Promise<Response | undefined> | undefined {
+  dropExpired();
+  const key = keyOf(...splitPath(path));
+  const found = prefetched.find((p) => p.key === key);
+  if (!found) return undefined;
+  prefetched = prefetched.filter((p) => p !== found);
+  if (found.kind === "boot") return found.response;
+  // A hover or next page failed some seconds ago; the user's own action asks again.
+  return found.response.then(
+    (r) => (r.status >= 500 ? undefined : r),
+    () => undefined,
+  );
+}
+
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(API + path, init);
-  // path may carry a query string (e.g. "/tables?schema=…") — compare just
-  // the route, not the whole path, so the version check still fires.
-  if (path.split("?")[0] === "/tables") checkProtocolVersion(resp);
+  const resp = (!init && (await takePrefetched(path))) || (await fetch(API + path, init));
+  if (splitPath(path)[0] === "/tables") checkProtocolVersion(resp);
   if (!resp.ok) throw await errorFromResponse(resp);
   return resp.json();
 }
