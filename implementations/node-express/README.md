@@ -1,20 +1,18 @@
-# ashurbanipal (node-express)
+# ashurbanipal-node-express
 
-A Node.js/TypeScript port of [Ashurbanipal](../../readme.md), targeting
-Express — implements the same `spec/protocol.md` + `spec/openapi.yaml`
-contract as the Rust reference and the Kotlin/Spring Boot, Go/`net-http`,
-and Flask ports.
+A read-only database browser you mount inside your own [Express](https://expressjs.com) app. It reuses your app's database pool, so there are no extra credentials and nothing extra to deploy. Part of [Ashurbanipal](https://github.com/mt-empty/ashurbanipal).
+
+Requires Node.js 24+ and Express 5.
+
+## Install
 
 ```sh
 npm install ashurbanipal-node-express pg
 ```
 
-`pg`/`sqlite3`/`mysql2` are optional peer dependencies — install whichever
-driver(s) your `DbSource` backend needs (see "Database support" below).
-Most hosts only need one backend — if that's not Postgres, skip installing
-`pg`.
+Install only the driver you use: `pg` for Postgres, `mysql2` for MySQL or MariaDB, `sqlite3` for SQLite.
 
-## Usage
+## Quick start
 
 ```ts
 import express from "express";
@@ -22,98 +20,85 @@ import { Pool } from "pg";
 import { createRouter, PostgresSource } from "ashurbanipal-node-express";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
 const viewer = createRouter({ enabled: true }, [{ name: "primary", source: new PostgresSource(pool) }]);
 
 const app = express();
-app.use(viewer); // paths already include the mount (default /__ashurbanipal)
+// app.get(...) your own routes
+app.use(viewer); // the router already includes the /__ashurbanipal path
 app.listen(3000);
 ```
 
-An empty/undefined `Config` is disabled by construction: `enabled` is
-undefined, which means disabled. Ashurbanipal has zero opinion on what
-environment it's running in — that decision is entirely the host's. A
-host that forgets to configure anything gets a 404'd viewer, never one
-silently enabled with defaults.
+Open <http://localhost:3000/__ashurbanipal>.
 
-`createRouter` takes an ordered, non-empty array of named sources rather
-than a single one — a host can register more than one `DbSource` (e.g.
-two Postgres databases) and a request's `source` query param selects
-which one it targets (`spec/protocol.md` §1, §5.8); the first entry is
-the default used when `source` is absent. A single-source deployment
-just registers one entry, as above.
+## Turn it on only where you want it
 
-The optional fields, shown here at their defaults/example values:
+`enabled` defaults to off. When it is off, every viewer path returns 404. Decide where to enable it, for example from an environment variable:
 
 ```ts
-const viewer = createRouter(
-  {
-    enabled: true,
-    basePath: "/__ashurbanipal", // undefined also means this
-    limits: { defaultPageSize: 50, maxPageSize: 100, queryTimeoutSecs: 5 },
-    instance: { name: "orders", label: "dev" }, // spec/protocol.md §5.6
-    // One shared list, in the same order, on every instance keeps the grid the same everywhere.
-    // label is optional; typically an environment (dev, int) or a region (eu, us).
-    siblings: [
-      { name: "orders", label: "int", baseUrl: "https://orders-int.internal.vpn/__ashurbanipal", healthPath: "/health" },
-      { name: "billing", baseUrl: "https://billing.internal.vpn/__ashurbanipal", healthPath: "/health" },
-    ],
-  },
-  [{ name: "primary", source: new PostgresSource(pool) }],
-);
+createRouter({ enabled: process.env.ASHURBANIPAL_ENABLED === "true" }, sources);
 ```
 
-Express's `app.get()` alone leaves every other HTTP verb on a registered
-path unmatched (a generic 404, indistinguishable from a nonexistent
-path), so `createRouter` registers each route with an explicit method
-check instead, returning 405 + `Allow: GET, HEAD` for any
-other verb — same behavior the other ports' underlying routers give for
-free by matching path before method.
+## Protect it
 
-## Compression
-
-The UI page is sent gzipped when the browser accepts gzip (`spec/protocol.md` §5.1); it is compressed once, at start-up. API responses are sent uncompressed. A host-wide `compression()` middleware leaves the page alone, because it already carries `Content-Encoding`.
-
-## Behind your own auth
-
-Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.
-
-Register the guard on the mount prefix (or your `basePath`) before the viewer. This example uses [Better Auth](https://www.better-auth.com) with its `admin` plugin; any session check works the same way:
+Ashurbanipal has no login. Anyone who can reach `/__ashurbanipal` can read every table your app's database user can read. Put your own auth in front, and check a role, not just a login. Register the guard on the viewer's path, before the viewer:
 
 ```ts
-import { fromNodeHeaders } from "better-auth/node";
-
-app.use("/__ashurbanipal", async (req, res, next) => {
-  const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
-  if (!session) return res.status(401).end();
-  if (session.user.role !== "admin") return res.status(403).end();
+app.use("/__ashurbanipal", (req, res, next) => {
+  if (!isAdmin(req)) return res.status(401).end();
   next();
 });
 
 app.use(viewer);
 ```
 
-## Database support
+If you changed `basePath`, guard that path instead.
 
-Postgres by default (`PostgresSource`, the package's main barrel export).
-MySQL/MariaDB and SQLite are supported with the same known degraded
-features as the Rust reference (see `docs/adapter-decisions.md`) —
-deliberately *not* re-exported from the main entry point, so a
-Postgres-only consumer's module graph never loads `sqlite3`/`mysql2`:
+## MySQL, MariaDB, or SQLite
+
+Import these sources from their own paths. The main entry doesn't export them, so a Postgres-only app never loads `mysql2` or `sqlite3`:
 
 ```ts
-import { createRouter } from "ashurbanipal-node-express";
-import { SqliteSource } from "ashurbanipal-node-express/dist/src/db/sqlite.js";
-import { MySqlSource } from "ashurbanipal-node-express/dist/src/db/mysql.js";
-import { Database } from "sqlite3";
 import { createPool } from "mysql2/promise";
+import { MySqlSource } from "ashurbanipal-node-express/dist/src/db/mysql.js";
 
-const sqliteViewer = createRouter(config, [{ name: "primary", source: new SqliteSource(new Database("app.db")) }]);
-const mysqlViewer = createRouter(config, [{ name: "primary", source: new MySqlSource(createPool(process.env.MYSQL_URL!)) }]);
+const viewer = createRouter(config, [{ name: "primary", source: new MySqlSource(createPool(process.env.MYSQL_URL!)) }]);
 ```
 
-`demo/main.ts` demonstrates all three via a `DB_BACKEND=postgres|sqlite|mysql`
-env var — `pnpm install && pnpm run demo`.
+```ts
+import sqlite3 from "sqlite3";
+import { SqliteSource } from "ashurbanipal-node-express/dist/src/db/sqlite.js";
 
-Full API/config reference:
-[docs/design.md](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md).
+const viewer = createRouter(config, [{ name: "primary", source: new SqliteSource(new sqlite3.Database("app.db")) }]);
+```
+
+Column comments and common-value stats are empty on MySQL and SQLite.
+
+## More than one database
+
+Pass more than one source. The first one is the default, and the UI lets you switch between them:
+
+```ts
+createRouter(config, [
+  { name: "orders", source: new PostgresSource(ordersPool) },
+  { name: "billing", source: new PostgresSource(billingPool) },
+]);
+```
+
+## Configuration
+
+```ts
+createRouter(
+  {
+    enabled: true,
+    basePath: "/__ashurbanipal", // optional; change the URL path
+    limits: { defaultPageSize: 50, maxPageSize: 100, queryTimeoutSecs: 5 }, // optional; the defaults
+  },
+  sources,
+);
+```
+
+The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. In TypeScript, write the names in camelCase (`baseUrl`, `healthPath`).
+
+## See also
+
+- [Live demo](https://mt-empty.github.io/ashurbanipal/demo/live/)

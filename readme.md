@@ -8,7 +8,7 @@ No-bullshit database browser for schemaful databases; self-contained, embeddable
 
 The library is named after [Ashurbanipal Library](https://en.wikipedia.org/wiki/Library_of_Ashurbanipal).
 
-**Try it live:** [the light demo](https://mt-empty.github.io/ashurbanipal/demo/) (synthetic data, no backend) or [real Postgres in your browser](https://mt-empty.github.io/ashurbanipal/demo/live/) (PGlite, about 5.5 MB).
+**Try it live:** [PGlite in your browser](https://mt-empty.github.io/ashurbanipal/demo/live/) or [the mobile-friendly light demo](https://mt-empty.github.io/ashurbanipal/demo/) (synthetic data, no backend).
 
 ## Why
 
@@ -79,8 +79,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), PgPool
 ```yaml
 # implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.12.0")
 ashurbanipal:
-  enabled: true
-  # backend: postgres is the default
+  enabled: true   # Postgres is the default backend
 ```
 </details>
 
@@ -105,7 +104,7 @@ const viewer = createRouter(config, [{ name: "primary", source: new PostgresSour
 <details><summary>Python / Flask</summary>
 
 ```python
-# uv add ashurbanipal-flask
+# uv add 'ashurbanipal-flask[postgres]'
 from ashurbanipal.db.postgres import PgSource
 app.register_blueprint(router(config, [("primary", PgSource(dsn=os.environ["DATABASE_URL"]))]))
 ```
@@ -137,7 +136,9 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), MySqlS
 # implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.12.0")
 ashurbanipal:
   enabled: true
-  backend: mysql   # covers MariaDB too
+  sources:
+    - name: primary
+      backend: mysql   # covers MariaDB too
 ```
 </details>
 
@@ -164,7 +165,7 @@ const viewer = createRouter(config, [{ name: "primary", source: new MySqlSource(
 <details><summary>Python / Flask</summary>
 
 ```python
-# uv add ashurbanipal-flask PyMySQL
+# uv add 'ashurbanipal-flask[mysql]'
 from ashurbanipal.db.mysql import MySqlSource, connect_kwargs_from_url
 app.register_blueprint(router(config, [("primary", MySqlSource(**connect_kwargs_from_url(os.environ["MYSQL_URL"])))]))
 ```
@@ -196,7 +197,9 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), Sqlite
 # implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.12.0")
 ashurbanipal:
   enabled: true
-  backend: sqlite
+  sources:
+    - name: primary
+      backend: sqlite
 ```
 </details>
 
@@ -244,14 +247,14 @@ Once mounted, the viewer is served under `/__ashurbanipal` (the default mount pa
 
 ## Implementations
 
-| Implementation | Package | Protocol version | Conformance CI |
-|----------------|---------|-------------------|-----------------|
-| [`rust/axum`](implementations/rust/axum/README.md) | `ashurbanipal-axum` · crates.io | 1 | [![rust-axum-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-axum-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-axum-conformance.yml) |
-| [`rust/actix-web`](implementations/rust/actix-web/README.md) | `ashurbanipal-actix-web` · crates.io | 1 | [![rust-actix-web-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-actix-web-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-actix-web-conformance.yml) |
-| [`spring-boot-starter`](implementations/spring-boot-starter/README.md) | `io.github.mt-empty:ashurbanipal-spring-boot-starter` · Maven Central | 1 | [![spring-boot-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/spring-boot-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/spring-boot-conformance.yml) |
-| [`go-nethttp`](implementations/go-nethttp/README.md) | `github.com/mt-empty/ashurbanipal/implementations/go-nethttp` · Go modules | 1 | [![go-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/go-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/go-conformance.yml) |
-| [`node-express`](implementations/node-express/README.md) | `ashurbanipal-node-express` · npm | 1 | [![node-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/node-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/node-conformance.yml) |
-| [`flask-python`](implementations/flask-python/README.md) | `ashurbanipal-flask` · PyPI | 1 | [![flask-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/flask-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/flask-conformance.yml) |
+| Implementation | Package | Conformance CI |
+|----------------|---------|-----------------|
+| [`rust/axum`](implementations/rust/axum/README.md) | [`ashurbanipal-axum`](https://crates.io/crates/ashurbanipal-axum) · crates.io | [![rust-axum-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-axum-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-axum-conformance.yml) |
+| [`rust/actix-web`](implementations/rust/actix-web/README.md) | [`ashurbanipal-actix-web`](https://crates.io/crates/ashurbanipal-actix-web) · crates.io | [![rust-actix-web-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-actix-web-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/rust-actix-web-conformance.yml) |
+| [`spring-boot-starter`](implementations/spring-boot-starter/README.md) | [`io.github.mt-empty:ashurbanipal-spring-boot-starter`](https://central.sonatype.com/artifact/io.github.mt-empty/ashurbanipal-spring-boot-starter) · Maven Central | [![spring-boot-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/spring-boot-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/spring-boot-conformance.yml) |
+| [`go-nethttp`](implementations/go-nethttp/README.md) | [`github.com/mt-empty/ashurbanipal/implementations/go-nethttp`](https://pkg.go.dev/github.com/mt-empty/ashurbanipal/implementations/go-nethttp) · Go modules | [![go-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/go-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/go-conformance.yml) |
+| [`node-express`](implementations/node-express/README.md) | [`ashurbanipal-node-express`](https://www.npmjs.com/package/ashurbanipal-node-express) · npm | [![node-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/node-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/node-conformance.yml) |
+| [`flask-python`](implementations/flask-python/README.md) | [`ashurbanipal-flask`](https://pypi.org/project/ashurbanipal-flask/) · PyPI | [![flask-conformance](https://github.com/mt-empty/ashurbanipal/actions/workflows/flask-conformance.yml/badge.svg)](https://github.com/mt-empty/ashurbanipal/actions/workflows/flask-conformance.yml) |
 
 ## Docs
 

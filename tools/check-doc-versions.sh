@@ -8,11 +8,11 @@ set -eu
 # (cargo add, go get @latest, pnpm/uv add), so it carries no version to drift.
 #
 #   check-doc-versions.sh          # verify, exit 1 on mismatch
-#   check-doc-versions.sh --fix    # rewrite readme.md to match the ledger
+#   check-doc-versions.sh --fix    # rewrite the READMEs to match the ledger
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ledger="$root/docs/publishing-checklist.md"
-readme="$root/readme.md"
+readmes="readme.md implementations/spring-boot-starter/README.md"
 
 fix=0
 if [ "${1:-}" = "--fix" ]; then
@@ -32,20 +32,37 @@ expected=$(grep 'ashurbanipal-spring-boot-starter`' "$ledger" \
 
 fail=0
 
-# readme.md's Gradle-coordinate snippets (Maven has no "latest" in a
-# dependency block, so this string is the one place a version must live).
-found=$(grep -oE 'ashurbanipal-spring-boot-starter:[0-9]+\.[0-9]+\.[0-9]+' "$readme" \
-    | sed 's/.*://' | sort -u)
-for v in $found; do
-    [ "$v" = "$expected" ] && continue
+# Gradle-coordinate snippets (Maven has no "latest" in a dependency block, so
+# this string is the one place a version must live).
+for rel in $readmes; do
+    readme="$root/$rel"
+    found=$(grep -oE 'ashurbanipal-spring-boot-starter:[0-9]+\.[0-9]+\.[0-9]+' "$readme" \
+        | sed 's/.*://' | sort -u)
+    for v in $found; do
+        [ "$v" = "$expected" ] && continue
+        if [ "$fix" -eq 1 ]; then
+            sed -i "s/ashurbanipal-spring-boot-starter:$v/ashurbanipal-spring-boot-starter:$expected/g" "$readme"
+            printf '%s\n' "fixed: $rel Spring coordinate $v -> $expected"
+        else
+            printf '%s\n' "$rel pins Spring $v, ledger says $expected; run: mise run docs:check-versions --fix" >&2
+            fail=1
+        fi
+    done
+done
+
+# The Spring README's Maven snippet carries the version on its own line.
+spring_readme="$root/implementations/spring-boot-starter/README.md"
+maven=$(grep -A1 '<artifactId>ashurbanipal-spring-boot-starter</artifactId>' "$spring_readme" \
+    | grep -oE '<version>[0-9]+\.[0-9]+\.[0-9]+</version>' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+if [ -n "$maven" ] && [ "$maven" != "$expected" ]; then
     if [ "$fix" -eq 1 ]; then
-        sed -i "s/ashurbanipal-spring-boot-starter:$v/ashurbanipal-spring-boot-starter:$expected/g" "$readme"
-        printf '%s\n' "fixed: readme.md Spring coordinate $v -> $expected"
+        sed -i "s|<version>$maven</version>|<version>$expected</version>|" "$spring_readme"
+        printf '%s\n' "fixed: Spring README Maven version $maven -> $expected"
     else
-        printf '%s\n' "readme.md pins Spring $v, ledger says $expected; run: mise run docs:check-versions --fix" >&2
+        printf '%s\n' "Spring README Maven snippet pins $maven, ledger says $expected; run: mise run docs:check-versions --fix" >&2
         fail=1
     fi
-done
+fi
 
 # The ledger itself can't silently lie: its number must equal the highest
 # pushed Spring release tag. The prefix moved from spring-v* to

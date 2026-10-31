@@ -1,71 +1,64 @@
-# ashurbanipal (go-nethttp)
+# ashurbanipal (Go, net/http)
 
-A `net/http`-native Go port of [Ashurbanipal](../../readme.md) — implements
-the same `spec/protocol.md` + `spec/openapi.yaml` contract as the Rust
-reference and the Kotlin/Spring Boot, Node/Express, and Flask ports,
-targeting the standard
-library's `http.Handler` directly rather than any specific router, so it
-mounts into a plain `net/http.ServeMux`, Chi, or anything else that speaks
-`http.Handler`.
+A read-only database browser you mount inside your own Go app. It reuses your app's `*sql.DB`, so there are no extra credentials and nothing extra to deploy. It is a plain `http.Handler`, so it works with `http.ServeMux`, Chi, or any router that accepts one. Part of [Ashurbanipal](https://github.com/mt-empty/ashurbanipal).
 
-Released via a subdirectory-module tag (`implementations/go-nethttp/vX.Y.Z`);
-`proxy.golang.org` serves it, no registry account involved. Install:
+Requires Go 1.26+.
+
+## Install
 
 ```sh
 go get github.com/mt-empty/ashurbanipal/implementations/go-nethttp@latest
+go get github.com/jackc/pgx/v5
 ```
 
-## Usage
+## Quick start
 
 ```go
-import ashurbanipal "github.com/mt-empty/ashurbanipal/implementations/go-nethttp"
+package main
 
-cfg := ashurbanipal.Config{Enabled: true}
-source := ashurbanipal.NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
-mux.Handle("/", viewer) // or nest it under any net/http-compatible router
-```
+import (
+	"database/sql"
+	"log"
+	"net/http"
+	"os"
 
-`Router` takes an ordered, non-empty list of named sources rather than a
-single one — a host can register more than one `DbSource` (e.g. two
-Postgres databases) and a request's `source` query param selects which one
-it targets (`spec/protocol.md` §1, §5.8); the first entry is the default
-used when `source` is absent. A single-source deployment just registers
-one entry, as above.
+	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" driver
 
-`Config` has no config-file format of its own (`docs/design.md` §7) — the
-host populates the struct however it likes, e.g. env vars or flags. The
-optional fields, shown here at their defaults/example values:
+	ashurbanipal "github.com/mt-empty/ashurbanipal/implementations/go-nethttp"
+)
 
-```go
-cfg := ashurbanipal.Config{
-	Enabled:  true,
-	BasePath: "/__ashurbanipal", // empty also means this
-	Limits:   ashurbanipal.Limits{DefaultPageSize: 50, MaxPageSize: 100, QueryTimeoutSecs: 5},
-	Instance: &ashurbanipal.Instance{Name: "orders", Label: "dev"}, // spec/protocol.md §5.6
-	// One shared list, in the same order, on every instance keeps the grid the same everywhere.
-	// Label is optional; typically an environment (dev, int) or a region (eu, us).
-	Siblings: []ashurbanipal.Sibling{
-		{Name: "orders", Label: "int", BaseURL: "https://orders-int.internal.vpn/__ashurbanipal", HealthPath: "/health"},
-		{Name: "billing", BaseURL: "https://billing.internal.vpn/__ashurbanipal", HealthPath: "/health"},
-	},
+func main() {
+	db, err := sql.Open("pgx", os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	cfg := ashurbanipal.Config{Enabled: true}
+	source := ashurbanipal.NewPostgresSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
+	viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
+
+	mux := http.NewServeMux()
+	// mux.Handle(...) your own routes
+	mux.Handle("/__ashurbanipal", viewer)
+	mux.Handle("/__ashurbanipal/", viewer)
+
+	log.Fatal(http.ListenAndServe(":3000", mux))
 }
 ```
 
-`Config{}` (the zero value) is disabled by construction: `Enabled` is
-`false`. A host that forgets to configure anything gets a 404'd viewer,
-never one silently enabled with defaults. Ashurbanipal has no opinion on
-which environment it's running in — that's entirely the host's call.
+Open <http://localhost:3000/__ashurbanipal>.
 
-## Compression
+## Turn it on only where you want it
 
-The UI page is sent gzipped when the browser accepts gzip (`spec/protocol.md` §5.1); it is compressed once, at start-up. API responses are sent uncompressed. A host compression handler such as `gzhttp` leaves the page alone, because it already carries `Content-Encoding`.
+`Enabled` defaults to `false`, so the zero `Config{}` is off and every viewer path returns 404. Decide where to enable it, for example from an environment variable:
 
-## Behind your own auth
+```go
+cfg := ashurbanipal.Config{Enabled: os.Getenv("ASHURBANIPAL_ENABLED") == "true"}
+```
 
-Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can.
+## Protect it
 
-Register the wrapped handler at the mount prefix (or `cfg.BasePath`) instead of `/`, so the guard doesn't cover the rest of your mux. The UI is served at the bare prefix, so register both the exact path and the subtree:
+Ashurbanipal has no login. Anyone who can reach `/__ashurbanipal` can read every table your app's database user can read. Put your own auth in front, and check a role, not just a login:
 
 ```go
 func requireAdmin(next http.Handler) http.Handler {
@@ -83,22 +76,60 @@ mux.Handle("/__ashurbanipal", guarded)
 mux.Handle("/__ashurbanipal/", guarded)
 ```
 
-## Database support
+Register both paths: the UI is served at the bare path, and the API under it. If you changed `BasePath`, use that path instead.
 
-Postgres by default. MySQL/MariaDB and SQLite are supported behind the
-`mysql`/`sqlite` build tags (some fields — comments, common-values stats
-— degrade to empty on those backends, see `docs/adapter-decisions.md`) —
-swap in `NewSQLiteSource`/`NewMySQLSource` in place of
-`NewPostgresSource`, everything else stays the same:
+## MySQL, MariaDB, or SQLite
+
+These backends are behind build tags, so a Postgres-only app doesn't compile their drivers. Add the tag to **your app's** build:
 
 ```sh
-go build -tags sqlite ./...   # or -tags mysql, or -tags sqlite,mysql for both
+go build -tags sqlite ./...   # or -tags mysql, or -tags sqlite,mysql
 ```
+
+SQLite uses the pure-Go `modernc.org/sqlite` driver:
 
 ```go
+import _ "modernc.org/sqlite" // registers the "sqlite" driver
+
+db, err := sql.Open("sqlite", "app.db")
 source := ashurbanipal.NewSQLiteSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
-viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{{Name: "primary", Source: source}})
 ```
 
-Full API/config reference:
-[docs/design.md](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md).
+MySQL and MariaDB use `github.com/go-sql-driver/mysql`. The `mysql` tag registers it for you. It takes a DSN, not a URL:
+
+```go
+db, err := sql.Open("mysql", "user:pass@tcp(localhost:3306)/app")
+source := ashurbanipal.NewMySQLSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
+```
+
+Column comments and common-value stats are empty on MySQL and SQLite.
+
+## More than one database
+
+Pass more than one source. The first one is the default, and the UI lets you switch between them:
+
+```go
+viewer := ashurbanipal.Router(cfg, []ashurbanipal.NamedSource{
+	{Name: "orders", Source: ordersSource},
+	{Name: "billing", Source: billingSource},
+})
+```
+
+## Configuration
+
+There is no config file. Fill in the struct however you like, for example from flags or environment variables:
+
+```go
+cfg := ashurbanipal.Config{
+	Enabled:  true,
+	BasePath: "/__ashurbanipal", // optional; change the URL path
+	Limits:   ashurbanipal.Limits{DefaultPageSize: 50, MaxPageSize: 100, QueryTimeoutSecs: 5}, // optional; the defaults
+}
+```
+
+The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `Instance` and `Siblings`. Those let the UI show which of your other services are reachable.
+
+## See also
+
+- [API reference on pkg.go.dev](https://pkg.go.dev/github.com/mt-empty/ashurbanipal/implementations/go-nethttp)
+- [Live demo](https://mt-empty.github.io/ashurbanipal/demo/live/)

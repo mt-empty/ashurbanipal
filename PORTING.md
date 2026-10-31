@@ -358,9 +358,8 @@ following are true — green CI is necessary, not sufficient:
   exempt: its router already returns `http.Handler`. Per-language notes:
   `docs/feature-backlog/15-core-lib-plus-per-framework-adapter-per-port.md`.
 - **Registry staleness.** Each port pins the protocol version it
-  implements (the `readme.md` table's "Protocol version" column). When
-  the version moves, the registry marks any row still on the old version
-  as stale until that port updates.
+  implements. When the version moves, the `readme.md` registry marks any
+  row still on the old version as stale until that port updates.
 
 ### Cross-port hardening checklist (listing prerequisite)
 
