@@ -1,0 +1,80 @@
+name: GitHub Pages demos
+
+# The synthetic (docs/demo/) and live PGlite (docs/demo/live/) demos. Their
+# backend imports node-express's PostgresSource, so its sources trigger this too.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/dbviewer.html"
+      - "frontend/src/demo/**"
+      - "frontend/*.mjs"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
+      - "implementations/node-express/src/**"
+      - "conformance/**"
+      - "tools/e2e-tests/demo/**"
+      - "tools/e2e-tests/playwright.demo.config.ts"
+      - "tools/e2e-tests/tests/support/**"
+      - ".github/workflows/_conformance-behavior.yml"
+      - "mise-tasks/frontend.toml"
+      - ".github/workflows/demo.yml"
+  pull_request:
+    paths:
+      - "frontend/dbviewer.html"
+      - "frontend/src/demo/**"
+      - "frontend/*.mjs"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
+      - "implementations/node-express/src/**"
+      - "conformance/**"
+      - "tools/e2e-tests/demo/**"
+      - "tools/e2e-tests/playwright.demo.config.ts"
+      - "tools/e2e-tests/tests/support/**"
+      - ".github/workflows/_conformance-behavior.yml"
+      - "mise-tasks/frontend.toml"
+      - ".github/workflows/demo.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-demo:
+    name: Playwright smoke of both demos (chromium, firefox, webkit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          version: 2026.7.13
+          install: false
+
+      - run: mise run frontend:test-e2e-install
+
+      - run: mise run frontend:test-demo
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: demo-test-results
+          path: tools/e2e-tests/test-results/demo/
+          retention-days: 14
+
+  # The live demo's backend (node-express's PostgresSource on PGlite) against
+  # the full kit, like any port's demo.
+  live-backend-conformance:
+    name: live demo backend — behavior conformance
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      toolchain: node
+      node-version: "26"
+      start-command: "cd frontend && pnpm install --frozen-lockfile && node demo-conformance.mjs"
+      health-url: "http://localhost:4005/health"
+      conformance-url: "http://localhost:4005/__ashurbanipal"
+      report-name: demo-live-conformance-report

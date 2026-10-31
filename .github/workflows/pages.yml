@@ -1,0 +1,58 @@
+name: GitHub Pages
+
+# Deploys docs/ — the Jekyll-rendered docs and both demos. The live demo
+# (docs/demo/live/: its page, PGlite worker, and PGlite's ~11 MB of files) is
+# built here and never committed. Needs Settings → Pages → Source set to
+# "GitHub Actions".
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time; a queued one waits rather than cancelling a deploy mid-way.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build docs/ and the demos
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          version: 2026.7.13
+          install: false
+
+      # Writes docs/demo/live/ before Jekyll runs, so Jekyll copies it into the site as-is.
+      - run: mise run frontend:build-demo-live
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+
+      - uses: actions/upload-pages-artifact@v5
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write # publish the artifact
+      id-token: write # required to mint the deployment's OIDC token
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
