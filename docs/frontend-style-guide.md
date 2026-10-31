@@ -38,7 +38,9 @@ src/
   lib/         filter-dsl, filter-tokens, fuzzy, join-dsl, join-def, join-draft,
                join-tokens, join-types, join-saved, json-tree, format, row-diff,
                scope-key, fallback-note, sibling-matrix
-  demo/        demo-shim, demo-fixtures — offline demo backend only
+  demo/        GitHub Pages demos only: seeds/*.sql (their one data source),
+               synthetic/ (snapshot-served), live/ (PGlite worker + node-express
+               PostgresSource), build/ (Node tools), page-shim, wire, siblings
 ```
 
 - `bootstrap/` wires the app and owns render orchestration. `main.ts` is
@@ -261,8 +263,9 @@ a broken page.
   struck-through entry rather than deleted so this doesn't read as an
   oversight next time someone re-derives "should parsing be client-side?"
   from first principles. The operator list and the filter limits are still
-  restated — `api-reference.ts` (the in-app dialog) and `demo-shim.ts` (the
-  offline demo backend, which reimplements filter/sort semantics) — now
+  restated — `api-reference.ts` (the in-app dialog) and
+  `demo/synthetic/serve.ts` (the synthetic demo, which reimplements
+  filter/sort semantics) — now
   held to `spec/openapi.yaml` by `tools/check-frontend-api-reference.sh`
   (`mise run frontend:check-api-reference`).
 - **`@scope`** — the file already gets rule-scoping for free from its

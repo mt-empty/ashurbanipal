@@ -45,7 +45,8 @@ Boot (`implementations/spring-boot-starter/`), Go/`net-http`
 one `core/` crate — `axum/` and `actix-web/` — each its own conformance
 target but one language-level port. `PORTING.md` is the checklist every
 port clears. `spec/`, `conformance/`, `docs/`, `frontend/`, and `tools/`
-are shared and implementation-neutral.
+are shared and implementation-neutral, except the live GitHub Pages demo's
+backend under `frontend/src/demo/` (see Frontend below).
 
 The Commands and invariants sections below go deepest on Rust because most
 sessions touch it, not because it is canonical; for another port, read
@@ -59,7 +60,11 @@ Two kinds of component — `docs/design.md` §3 has the full architecture:
   commit their vendored copy, Spring/Node/Flask regenerate theirs
   ephemerally (`PORTING.md` has the mechanics). axum embeds its copy,
   `implementations/rust/axum/frontend/dbviewer.html`, via `include_str!`
-  in `src/routes.rs`.
+  in `src/routes.rs`. The GitHub Pages demos come from
+  `frontend/src/demo/seeds/*.sql`: `docs/demo/` (committed, a build-time
+  snapshot) and `docs/demo/live/` (PGlite, built only by `pages.yml`). The
+  live demo's backend imports `implementations/node-express/src/` — the one
+  place `frontend/` depends on a port.
 - **Backend** — one per port, each an independent implementation of
   `spec/protocol.md`. Rust's is a three-crate Cargo workspace at
   `implementations/rust/`: `core/` (framework-agnostic — config,

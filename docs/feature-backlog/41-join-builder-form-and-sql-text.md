@@ -206,7 +206,7 @@ that cover new controls.
 
 ## Left open after building
 
-- **Offline demo.** `docs/demo` has no `/tables/join`; the join button there ends in an error line. Hiding it or adding a fixture is still to decide.
+- **Offline demo.** Decided 2026-10-30: the live demo (`docs/demo/live/`, PGlite) runs joins on Postgres; the synthetic `docs/demo` still has no `/tables/join`, and its error line points to the live demo.
 - **Timeout text.** The limit is the host's `query_timeout_secs`, so the notice says "longer than the time limit", not "5 seconds" as board T does.
 - **Saved chips and the 3-line cap.** Saved-join chips share the table chips' cap, so on a database with many tables they sit behind `+ N more` (the active join chip stays visible).
 - **Enum label.** Postgres reports every enum (and citext) as `USER-DEFINED`; the hint calls it `enum`, and lets it pair with `text` in case it is citext. A column type with no known class is never greyed; the server answers 400.
