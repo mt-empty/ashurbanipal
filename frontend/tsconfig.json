@@ -8,7 +8,10 @@
     "noEmit": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "paths": {
+      "pg": ["./node_modules/@types/pg"]
+    }
   },
   "include": ["src/**/*.ts"]
 }

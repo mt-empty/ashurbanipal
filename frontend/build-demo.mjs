@@ -6,7 +6,7 @@
 //                         its PGlite worker, and PGlite's files (never
 //                         committed; built at deploy time by pages.yml)
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
@@ -44,13 +44,17 @@ const withScript = (script) => dbviewer.replace(marker, () => `${marker}\n<scrip
 async function cachedSnapshot() {
   const hash = createHash("sha256").update(readFileSync(`${pglite}/../package.json`));
   for (const root of [`${dir}src/demo`, `${repoRoot}implementations/node-express/src`]) {
-    for (const file of readdirSync(root, { recursive: true }).sort()) {
-      const path = `${root}/${file}`;
-      if (statSync(path).isFile()) hash.update(path).update(readFileSync(path));
+    const files = readdirSync(root, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
+    for (const path of files.map((e) => `${e.parentPath}/${e.name}`).sort()) {
+      hash.update(path).update(readFileSync(path));
     }
   }
   const cache = `${dir}node_modules/.cache/ashurbanipal-demo/snapshot-${hash.digest("hex").slice(0, 16)}.json`;
-  if (existsSync(cache)) return JSON.parse(readFileSync(cache, "utf8"));
+  try {
+    return JSON.parse(readFileSync(cache, "utf8"));
+  } catch {
+    // Not built for these inputs yet (or unreadable): build it.
+  }
   const { buildSnapshot } = await importDemoEntry("snapshot");
   const snapshot = await buildSnapshot();
   mkdirSync(dirname(cache), { recursive: true });

@@ -1,6 +1,6 @@
 // Serves docs/ the way GitHub Pages does for the demos — gzip for html/js/wasm,
 // no COOP/COEP headers — at http://localhost:4003/demo/ and /demo/live/.
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,11 +26,15 @@ createServer((req, res) => {
   let file = join(root, normalize(pathname));
   if (!file.startsWith(root)) return void res.writeHead(403).end();
   try {
-    if (statSync(file).isDirectory()) {
+    let body;
+    try {
+      body = readFileSync(file);
+    } catch (err) {
+      if (err.code !== "EISDIR") throw err;
       if (!pathname.endsWith("/")) return void res.writeHead(301, { location: `${pathname}/` }).end();
       file = join(file, "index.html");
+      body = readFileSync(file);
     }
-    let body = readFileSync(file);
     const ext = extname(file);
     const headers = { "content-type": TYPES[ext] ?? "application/octet-stream" };
     if (COMPRESS.has(ext) && /\bgzip\b/.test(req.headers["accept-encoding"] ?? "")) {
