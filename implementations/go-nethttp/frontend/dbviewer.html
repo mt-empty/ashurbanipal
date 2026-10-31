@@ -718,9 +718,6 @@ thead tr.bands + tr th { top: var(--band-h); }
 .jmono { font-family: var(--font-mono); }
 .jmuted { color: var(--text-muted); }
 .j-start { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
-.j-chip { display: inline-flex; gap: .4rem; align-items: baseline; padding: .25rem .65rem; border-radius: 999px;
-          font-size: .8125rem; background: var(--chip-active-bg); color: var(--chip-active-fg); }
-.j-chip i { font-style: normal; font-size: .6875rem; opacity: .7; }
 .j-row { border: 1px solid var(--rule-strong); border-radius: 8px; padding: .6rem .75rem; margin-top: .5rem;
          border-color: var(--border); }
 .j-line { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .8125rem; }
@@ -3170,6 +3167,17 @@ function removeJoin(draft, index) {
     }
   }
 }
+function setTableAt(draft, pos, table) {
+  if (pos === 0) draft.table = table;
+  else draft.joins[pos - 1].table = table;
+  const own2 = Math.max(pos, 1) - 1;
+  if (draft.joins[own2]) draft.joins[own2].on = [emptyPair()];
+  for (const j of draft.joins.slice(own2 + 1)) {
+    for (const p of j.on) if (p.leftJoin === pos) p.leftColumn = "";
+  }
+  forgetColumns(draft, pos);
+  return own2;
+}
 function forgetColumns(draft, pos) {
   draft.columns[pos] = null;
   draft.order = draft.order?.filter((c) => c.join !== pos) ?? null;
@@ -3973,6 +3981,7 @@ function textButton(text, className, label, run) {
   b.onclick = run;
   return b;
 }
+var tableOptions = () => listedTableNames().map((t) => ({ value: t, label: t, note: tableChipCount(t) }));
 function mountJoinForm(root, onChange) {
   let draft = newDraft("");
   let loadToken2 = 0;
@@ -4012,6 +4021,12 @@ function mountJoinForm(root, onChange) {
     render6();
     if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
+  };
+  const pickTable = (pos, table) => {
+    const at = setTableAt(draft, pos, table);
+    const join = draft.joins[at];
+    if (join && join.table !== "") join.on = [foreignKey(at + 1) ?? emptyPair()];
+    changed(true);
   };
   const aliasInput = (value, label, set) => {
     const input2 = el("input", "j-alias");
@@ -4109,22 +4124,14 @@ function mountJoinForm(root, onChange) {
       }),
       createDropdown({
         ariaLabel: `join ${pos} table`,
-        options: listedTableNames().map((t) => ({ value: t, label: t, note: tableChipCount(t) })),
+        options: tableOptions(),
         value: join.table,
+        display: join.table || void 0,
         placeholder: "choose a table",
         mono: true,
         searchable: true,
         onPick: (v) => {
-          if (v !== join.table) {
-            for (const later of draft.joins.slice(i + 1)) {
-              for (const p of later.on) if (p.leftJoin === pos) p.leftColumn = "";
-            }
-          }
-          join.table = v;
-          join.on = [foreignKey(pos) ?? emptyPair()];
-          forgetColumns(draft, pos);
-          changed(true);
-          load();
+          if (v !== join.table) pickTable(pos, v);
         }
       }),
       el("span", "j-kw", "as"),
@@ -4232,16 +4239,25 @@ function mountJoinForm(root, onChange) {
     const parts = [];
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
-    const chip = el("span", "j-chip jmono", draft.table);
-    const count = tableChipCount(draft.table);
-    if (count) chip.append(" ", el("i", void 0, count));
     start.append(
-      chip,
+      createDropdown({
+        ariaLabel: "start table",
+        options: tableOptions(),
+        value: draft.table,
+        display: draft.table || void 0,
+        placeholder: "choose a table",
+        mono: true,
+        searchable: true,
+        onPick: (v) => {
+          if (v !== draft.table) pickTable(0, v);
+        }
+      }),
       aliasInput(draft.alias, "start table alias", (v) => {
         draft.alias = v;
-      }),
-      el("span", "jmuted", "the table you are viewing")
+      })
     );
+    if (state.view?.kind === "table" && state.view.table === draft.table)
+      start.append(el("span", "jmuted", "the table you are viewing"));
     parts.push(start);
     parts.push(el("div", "jlab", `Joins \xB7 ${draft.joins.length} of ${JOIN_MAX_TABLES - 1}`));
     draft.joins.forEach((j, i) => {

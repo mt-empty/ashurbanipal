@@ -45,7 +45,8 @@ saved in the browser and shared by link.
   A `+ new join` chip after the divider opens it empty.
 - **Overlay.** Header: title, `Form | SQL` switch, close. Footer: Name,
   Cancel, Show result.
-  - *Form* (board O): start-from chip, one row per join with type
+  - *Form* (board O): start-table dropdown (the table in view by default;
+    changing it resets the pairs that used its columns), one row per join with type
     (INNER/LEFT), table, alias, and up to 3 `ON` pairs. Each column picker
     lists every column with its type; columns that cannot join to the other
     side are greyed with the reason (`enum ≠ uuid`, `jsonb: not

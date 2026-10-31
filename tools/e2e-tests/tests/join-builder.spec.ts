@@ -50,6 +50,29 @@ test("the form suggests the foreign key pair and builds a three-table join", asy
   await expect(page.locator("#tbody tr").first()).toBeVisible();
 });
 
+test("the start table can be changed in the form, and the pair follows it", async ({ page }) => {
+  await openJoinOverlay(page);
+  await expect(page.locator(".j-start")).toContainText("the table you are viewing");
+  await pick(page, "join 1 table", "users");
+  await pick(page, "start table", "reviews");
+  await expect(page.locator(".j-start")).not.toContainText("the table you are viewing");
+  await expect(page.locator(".j-row").first()).toContainText(
+    "Suggested from the foreign key reviews.user_id → users.id.",
+  );
+  await expect(page.locator("#join-preview")).toHaveText(
+    "SELECT *\nFROM reviews\nINNER JOIN users ON reviews.user_id = users.id",
+  );
+
+  const response = await showResult(page);
+  expect(joinParam(response.url())).toEqual({
+    table: "reviews",
+    joins: [{ type: "inner", table: "users", on: [{ left: { join: 0, column: "user_id" }, right: "id" }] }],
+  });
+  // A join in view is not its start table.
+  await page.getByRole("button", { name: "edit join" }).click();
+  await expect(page.locator(".j-start")).not.toContainText("the table you are viewing");
+});
+
 test("the form shows the table limit and lets a join be removed", async ({ page }) => {
   await openJoinOverlay(page);
   await pick(page, "join 1 table", "users");

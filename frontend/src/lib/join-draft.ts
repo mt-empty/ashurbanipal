@@ -127,6 +127,21 @@ export function removeJoin(draft: Draft, index: number): void {
   }
 }
 
+// Puts `table` at position `pos` (0 is the start table). The join that pairs
+// it with earlier tables, join 1 for the start, starts over; later pairs that
+// named one of its columns lose that side. Returns that join's index.
+export function setTableAt(draft: Draft, pos: number, table: string): number {
+  if (pos === 0) draft.table = table;
+  else draft.joins[pos - 1].table = table;
+  const own = Math.max(pos, 1) - 1;
+  if (draft.joins[own]) draft.joins[own].on = [emptyPair()];
+  for (const j of draft.joins.slice(own + 1)) {
+    for (const p of j.on) if (p.leftJoin === pos) p.leftColumn = "";
+  }
+  forgetColumns(draft, pos);
+  return own;
+}
+
 // Table `pos` changed: its written columns named the old table's.
 export function forgetColumns(draft: Draft, pos: number): void {
   draft.columns[pos] = null;
