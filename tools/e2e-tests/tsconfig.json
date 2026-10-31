@@ -11,9 +11,11 @@
   "include": [
     "tests/**/*.ts",
     "perf/**/*.ts",
+    "demo/**/*.ts",
     "coverage/*.d.mts",
     "playwright.config.ts",
     "playwright.showcase.config.ts",
-    "playwright.perf.config.ts"
+    "playwright.perf.config.ts",
+    "playwright.demo.config.ts"
   ]
 }

@@ -8,14 +8,14 @@ run = "pnpm install --frozen-lockfile"
 dir = "frontend"
 
 ["frontend:build"]
-description = "bundle frontend/src/ into frontend/dbviewer.html, then regenerate the docs/demo/index.html GitHub Pages demo from it"
+description = "bundle frontend/src/ into frontend/dbviewer.html, then regenerate the docs/demo/index.html synthetic GitHub Pages demo from it"
 run = "node build.mjs && node build-demo.mjs"
 dir = "frontend"
 depends = ["frontend:install"]
 # Skip the esbuild re-bundle when nothing it reads has changed. Only the two
 # bundlers get this — test/lint/*-check tasks stay unconditional so a stale
-# marker can never mask a real failure.
-sources = ["src/**/*", "build.mjs", "build-demo.mjs", "bundle-options.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json"]
+# marker can never mask a real failure. The demo imports node-express's backend.
+sources = ["src/**/*", "build.mjs", "build-demo.mjs", "demo-node-entry.mjs", "bundle-options.mjs", "package.json", "pnpm-lock.yaml", "tsconfig.json", "../implementations/node-express/src/**/*.ts"]
 outputs = ["dbviewer.html", "../docs/demo/index.html"]
 
 ["frontend:typecheck"]
@@ -68,10 +68,30 @@ run = "sh tools/check-frontend-build.sh"
 depends = ["frontend:install"]
 
 ["frontend:build-demo"]
-description = "bundle a synthetic in-browser demo (fake data, no backend) into docs/demo/index.html for GitHub Pages — runs automatically as part of frontend:build; this is for explicit standalone use"
+description = "bundle the synthetic GitHub Pages demo (a build-time snapshot of src/demo/seeds/, no backend) into docs/demo/index.html — runs automatically as part of frontend:build; this is for explicit standalone use"
 run = "node build-demo.mjs"
 dir = "frontend"
 depends = ["frontend:build"]
+
+# Never committed (.gitignore): pages.yml builds it at deploy time.
+["frontend:build-demo-live"]
+description = "build both GitHub Pages demos, including the live one (real Postgres via PGlite in the browser) into docs/demo/live/"
+run = "node build-demo.mjs --live"
+dir = "frontend"
+depends = ["frontend:build"]
+
+# Start it as a backgrounded, harness-tracked task and stop it when done.
+["frontend:demo-preview"]
+description = "build both demos, then serve docs/ as GitHub Pages does at http://localhost:4003/demo/ and /demo/live/"
+run = "node demo-preview.mjs"
+dir = "frontend"
+depends = ["frontend:build-demo-live"]
+
+["frontend:demo-conformance-server"]
+description = "serve the live demo's backend (node-express's PostgresSource on PGlite, conformance seed) at http://localhost:4005/__ashurbanipal for: ASHURBANIPAL_CONFORMANCE_URL=http://localhost:4005/__ashurbanipal mise run conformance:test"
+run = "node demo-conformance.mjs"
+dir = "frontend"
+depends = ["frontend:install"]
 
 ["frontend:build-demo-check"]
 description = "verify docs/demo/index.html is what frontend/src/ + dbviewer.html currently builds to"
@@ -136,6 +156,13 @@ exit $status
 '''
 dir = "tools/e2e-tests"
 depends = ["frontend:rebuild"]
+
+["frontend:test-demo"]
+description = "build both GitHub Pages demos, then smoke them (synthetic and live PGlite) on Chromium, Firefox and WebKit"
+usage = 'arg "[args]..." help="passed on to playwright test, e.g. --project chromium or -g title" var=#true'
+run = 'pnpm exec playwright test --config playwright.demo.config.ts {{arg(name="args", var=true, default="")}}'
+dir = "tools/e2e-tests"
+depends = ["frontend:build-demo-live", "frontend:e2e-install"]
 
 # Not part of `check` or CI: shared runners make timings too noisy to compare.
 ["frontend:perf"]
