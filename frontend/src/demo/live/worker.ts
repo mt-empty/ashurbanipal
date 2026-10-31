@@ -2,11 +2,11 @@
 // slow query never blocks the page and the page can stop it by terminating
 // the worker — PGlite ignores statement_timeout.
 import { withDefaults } from "../../../../implementations/node-express/src/config.js";
+import { handleApi, type NamedSource } from "../../../../implementations/node-express/src/handlers.js";
 import { SEEDS } from "../seeds.js";
 import { DEMO_SOURCES, type DemoSource } from "../sources.js";
 import type { ApiResponse } from "../wire.js";
 import { openSource } from "./open-source.js";
-import { handleApi, type NamedSource } from "./routes.js";
 
 export type ToWorker = { id: number; path: string; query: string };
 export type FromWorker =
@@ -42,7 +42,7 @@ sources.then(
   (err: unknown) => post({ type: "failed", message: err instanceof Error ? err.message : String(err) }),
 );
 
-const OPTIONS = { limits: withDefaults(undefined), siblings: () => ({ siblings: [] }) };
+const OPTIONS = { limits: withDefaults(undefined), siblings: async () => ({ siblings: [] }) };
 
 // One request at a time (PGlite has one connection anyway), announced as it
 // starts so the page times the query, not its wait in this queue.
@@ -51,7 +51,8 @@ self.onmessage = ({ data }: MessageEvent<ToWorker>) => {
   queue = queue.then(async () => {
     const ready = await sources;
     post({ type: "started", id: data.id });
-    const response = await handleApi(ready, data.path, new URLSearchParams(data.query), OPTIONS);
+    const params = new URLSearchParams(data.query);
+    const response = await handleApi(ready, data.path, (key) => params.get(key) ?? undefined, OPTIONS);
     post({ type: "response", id: data.id, response });
   });
 };

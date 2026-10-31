@@ -7,8 +7,8 @@ import { createServer } from "node:http";
 import { gzipSync } from "node:zlib";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { withDefaults } from "../../../../implementations/node-express/src/config.js";
+import { handleApi } from "../../../../implementations/node-express/src/handlers.js";
 import { openSource } from "../live/open-source.js";
-import { handleApi } from "../live/routes.js";
 
 const MOUNT = "/__ashurbanipal";
 const repo = new URL("../../../../", import.meta.url);
@@ -18,7 +18,7 @@ const seed = readFileSync(new URL("conformance/seed/seed.sql", repo), "utf8");
 const html = readFileSync(new URL("frontend/dbviewer.html", repo));
 const htmlGzip = gzipSync(html);
 const sources = [{ name: "primary", source: await openSource(seed, { extensions: { pgcrypto } }) }];
-const options = { limits: withDefaults(undefined), siblings: () => ({ siblings: [] }) };
+const options = { limits: withDefaults(undefined), siblings: async () => ({ siblings: [] }) };
 
 // RFC 9110 §12.5.3: an explicit gzip entry decides; otherwise `*` does; q=0 refuses.
 function acceptsGzip(header: string | undefined): boolean {
@@ -56,6 +56,7 @@ createServer(async (req, res) => {
     res.end(req.method === "HEAD" ? undefined : gzip ? htmlGzip : html);
     return;
   }
-  const r = await handleApi(sources, url.pathname.slice(`${MOUNT}/api`.length), url.searchParams, options);
+  const path = url.pathname.slice(`${MOUNT}/api`.length);
+  const r = await handleApi(sources, path, (key) => url.searchParams.get(key) ?? undefined, options);
   res.writeHead(r.status, r.headers).end(req.method === "HEAD" ? undefined : r.body);
 }).listen(port, () => console.log(`demo backend (conformance) on http://localhost:${port}${MOUNT}`));
