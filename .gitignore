@@ -30,3 +30,6 @@ implementations/spring-boot-starter/.gradle/
 implementations/spring-boot-starter/**/out/
 implementations/spring-boot-starter/**/.kotlin/
 *.gitignore/
+
+# Live GitHub Pages demo: built at deploy time (frontend:build-demo-live), never committed
+docs/demo/live/

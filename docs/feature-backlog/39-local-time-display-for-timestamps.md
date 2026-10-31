@@ -173,7 +173,7 @@ if it matches strict RFC 3339 date-time:
   leaf with type-only imports (`format.ts:3-4`), so `json-tree.ts`
   imports the shared parser from a small new leaf module, not from
   `format.ts`.
-- `frontend/src/demo/demo-fixtures.ts`, `docs/demo/` — regenerate.
+- `frontend/src/demo/seeds/`, `docs/demo/` — regenerate.
 - `spec/protocol.md` §5.4.3, `docs/adapter-decisions.md:48` — the wording
   fix above, and the MySQL `TIMESTAMP` gap. Companion edit, no behavior
   change; confirm it is acceptable under spec governance.

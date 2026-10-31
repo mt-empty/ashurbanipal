@@ -1,6 +1,6 @@
 # Frontend architecture refactor — deferred follow-ups
 
-> **Status:** PARTIAL · **Area:** frontend · **Ref:** items 2, 3, 7, 9 done; 5 moved to story 43; 1, 4, 6, 8 open
+> **Status:** PARTIAL · **Area:** frontend · **Ref:** items 2, 3, 6, 7, 9 done; 5 moved to story 43; 1, 4, 8 open
 
 The nine-phase `frontend/src/` refactor (commits `47d10a7`..`7d86976`)
 landed the import-cycle break, the Biome adoption, the `state.ts` split,
@@ -82,7 +82,15 @@ every port then has to honour. If done, extend
 `check-frontend-api-reference.sh` to assert against the spec value instead of
 the self-check.
 
-## 6. `demo-shim.ts` re-implementing the wire contract
+## 6. `demo-shim.ts` re-implementing the wire contract — DONE
+
+Landed 2026-10-30 (story 16): `demo-shim.ts` is gone. The live demo runs
+node-express's own `PostgresSource` on PGlite, and its route layer passes
+the full conformance kit in CI (`demo.yml`). The synthetic page replays a
+build-time snapshot of that backend's answers and keeps only its filter,
+sort and paging in JS (`frontend/src/demo/synthetic/serve.ts`). The
+original note follows.
+
 
 `frontend/src/demo/demo-shim.ts` re-implements schema resolution, all ten
 filter operators, `LIKE`→regex, typed sort, and pagination — a slice of

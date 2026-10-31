@@ -8,7 +8,7 @@ No-bullshit database browser for schemaful databases; self-contained, embeddable
 
 The library is named after [Ashurbanipal Library](https://en.wikipedia.org/wiki/Library_of_Ashurbanipal).
 
-**[Try it live](https://mt-empty.github.io/ashurbanipal/demo/)**: synthetic data, no backend.
+**Try it live:** [the light demo](https://mt-empty.github.io/ashurbanipal/demo/) (synthetic data, no backend) or [real Postgres in your browser](https://mt-empty.github.io/ashurbanipal/demo/live/) (PGlite, about 5.5 MB).
 
 ## Why
 

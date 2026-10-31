@@ -1,6 +1,13 @@
 # WASM SQLite backend for the GitHub Pages demo
 
-> **Status:** OPEN · **Area:** frontend
+> **Status:** DONE · **Area:** frontend · **Ref:** superseded by PGlite (Postgres in WASM), 2026-10-30: `docs/demo/live/`
+
+**Outcome:** the demo got a real database, but Postgres rather than SQLite.
+PGlite keeps what SQLite would have lost (schemas, comments, row
+estimates, `pg_stats`, jsonb/uuid types) and runs node-express's
+`PostgresSource` unchanged. `/demo/` stays a light synthetic page, now a
+build-time snapshot of the same seeds (`frontend/src/demo/seeds/`);
+`/demo/live/` loads PGlite. The original proposal follows.
 
 **What it is:** replace `docs/demo/`'s fetch-shim backend
 (`frontend/src/demo/demo-shim.ts` answering `/api/*` from JS-array fixtures

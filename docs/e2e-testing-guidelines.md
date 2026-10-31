@@ -109,6 +109,16 @@ The suite above runs on Postgres. `E2E_BACKEND=sqlite|mysql` points the same
 loaded from `conformance/seed/seed.mysql.sql`, named `ashurbanipal`, at
 `E2E_MYSQL_URL` (default `MYSQL_TEST_URL`).
 
+### The GitHub Pages demos
+
+`mise run frontend:test-demo` builds both demos (`docs/demo/` and the
+uncommitted `docs/demo/live/`) and smokes them on all three browsers with
+`playwright.demo.config.ts`, from `demo/*.demo.ts`. It serves `docs/` as
+Pages does, not a port. The demos answer `fetch` inside the page, so
+Playwright sees no network response for `/api/*`: wait on what the page
+shows. The `demo.yml` workflow runs it, plus the conformance kit against the
+live demo's backend.
+
 ## 6. Measure coverage on demand
 
 `mise run frontend:test-e2e-coverage [spec or -g title…]` runs the suite on
