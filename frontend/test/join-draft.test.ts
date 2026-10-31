@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addJoin, defToDraft, draftToDef, newDraft, removeJoin } from "../src/lib/join-draft.ts";
+import { addJoin, defToDraft, draftToDef, newDraft, removeJoin, setTableAt } from "../src/lib/join-draft.ts";
 import { parseJoin, printJoin } from "../src/lib/join-dsl.ts";
 
 const parse = (text: string) => {
@@ -111,4 +111,41 @@ test("removing a join drops its written columns and renumbers the rest", () => {
     { join: 1, column: "id" },
     { join: 0, column: "id" },
   ]);
+});
+
+test("a new start table resets join 1 and the later pairs that named its columns", () => {
+  const draft = defToDraft(
+    parse(
+      "SELECT o.id, u.email, x.is_gift FROM orders o JOIN users u ON o.user_id = u.id JOIN order_extra x ON o.id = x.order_id AND u.id = x.order_id",
+    ),
+  );
+  assert.equal(setTableAt(draft, 0, "reviews"), 0);
+  assert.equal(draft.table, "reviews");
+  assert.equal(draft.alias, "o");
+  assert.deepEqual(draft.joins[0].on, [{ leftJoin: 0, leftColumn: "", rightColumn: "" }]);
+  assert.deepEqual(draft.joins[1].on, [
+    { leftJoin: 0, leftColumn: "", rightColumn: "order_id" },
+    { leftJoin: 1, leftColumn: "id", rightColumn: "order_id" },
+  ]);
+  assert.deepEqual(draft.columns, [null, ["email"], ["is_gift"]]);
+  assert.deepEqual(draft.order, [
+    { join: 1, column: "email" },
+    { join: 2, column: "is_gift" },
+  ]);
+});
+
+test("a new join table resets its own pairs and the later pairs that named its columns", () => {
+  const draft = defToDraft(
+    parse(
+      "SELECT o.id, u.email, x.is_gift FROM orders o JOIN users u ON o.user_id = u.id JOIN order_extra x ON o.id = x.order_id AND u.id = x.order_id",
+    ),
+  );
+  assert.equal(setTableAt(draft, 1, "sessions"), 0);
+  assert.equal(draft.joins[0].table, "sessions");
+  assert.deepEqual(draft.joins[0].on, [{ leftJoin: 0, leftColumn: "", rightColumn: "" }]);
+  assert.deepEqual(draft.joins[1].on, [
+    { leftJoin: 0, leftColumn: "id", rightColumn: "order_id" },
+    { leftJoin: 1, leftColumn: "", rightColumn: "order_id" },
+  ]);
+  assert.deepEqual(draft.columns, [["id"], null, ["is_gift"]]);
 });

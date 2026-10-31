@@ -1,4 +1,5 @@
 import { el } from "../core/dom.js";
+import { state } from "../core/state.js";
 import type { Column } from "../core/types.js";
 import {
   addJoin,
@@ -6,9 +7,9 @@ import {
   type DraftJoin,
   type DraftPair,
   emptyPair,
-  forgetColumns,
   newDraft,
   removeJoin,
+  setTableAt,
 } from "../lib/join-draft.js";
 import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
 import { findForeignKey, joinMismatch, pairNote } from "../lib/join-types.js";
@@ -27,6 +28,8 @@ function textButton(text: string, className: string, label: string, run: () => v
   b.onclick = run;
   return b;
 }
+
+const tableOptions = () => listedTableNames().map((t) => ({ value: t, label: t, note: tableChipCount(t) }));
 
 export interface JoinForm {
   setDraft(draft: Draft): void;
@@ -83,6 +86,14 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     render();
     if (focused) root.querySelector<HTMLElement>(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
+  };
+
+  // render() calls load(), which fills the pair for a table whose columns are not cached yet.
+  const pickTable = (pos: number, table: string): void => {
+    const at = setTableAt(draft, pos, table);
+    const join = draft.joins[at];
+    if (join && join.table !== "") join.on = [foreignKey(at + 1) ?? emptyPair()];
+    changed(true);
   };
 
   const aliasInput = (value: string, label: string, set: (v: string) => void): HTMLInputElement => {
@@ -184,24 +195,14 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
       }),
       createDropdown({
         ariaLabel: `join ${pos} table`,
-        options: listedTableNames().map((t) => ({ value: t, label: t, note: tableChipCount(t) })),
+        options: tableOptions(),
         value: join.table,
+        display: join.table || undefined,
         placeholder: "choose a table",
         mono: true,
         searchable: true,
         onPick: (v) => {
-          if (v !== join.table) {
-            // Pairs of later joins that named a column of the old table no longer point at anything.
-            for (const later of draft.joins.slice(i + 1)) {
-              for (const p of later.on) if (p.leftJoin === pos) p.leftColumn = "";
-            }
-          }
-          join.table = v;
-          // A table browsed earlier has its columns already; load() fills the pair for the rest.
-          join.on = [foreignKey(pos) ?? emptyPair()];
-          forgetColumns(draft, pos);
-          changed(true);
-          load();
+          if (v !== join.table) pickTable(pos, v);
         },
       }),
       el("span", "j-kw", "as"),
@@ -316,16 +317,25 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     const parts: HTMLElement[] = [];
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
-    const chip = el("span", "j-chip jmono", draft.table);
-    const count = tableChipCount(draft.table);
-    if (count) chip.append(" ", el("i", undefined, count));
     start.append(
-      chip,
+      createDropdown({
+        ariaLabel: "start table",
+        options: tableOptions(),
+        value: draft.table,
+        display: draft.table || undefined,
+        placeholder: "choose a table",
+        mono: true,
+        searchable: true,
+        onPick: (v) => {
+          if (v !== draft.table) pickTable(0, v);
+        },
+      }),
       aliasInput(draft.alias, "start table alias", (v) => {
         draft.alias = v;
       }),
-      el("span", "jmuted", "the table you are viewing"),
     );
+    if (state.view?.kind === "table" && state.view.table === draft.table)
+      start.append(el("span", "jmuted", "the table you are viewing"));
     parts.push(start);
     parts.push(el("div", "jlab", `Joins · ${draft.joins.length} of ${JOIN_MAX_TABLES - 1}`));
     draft.joins.forEach((j, i) => {
