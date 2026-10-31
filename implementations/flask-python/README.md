@@ -88,10 +88,13 @@ Column comments and common-value stats are empty on MySQL and SQLite.
 Pass more than one source. The first one is the default, and the UI lets you switch between them:
 
 ```python
-router(config, [
-    ("orders", PgSource(dsn=os.environ["ORDERS_DATABASE_URL"])),
-    ("billing", PgSource(dsn=os.environ["BILLING_DATABASE_URL"])),
-])
+router(
+    config,
+    [
+        ("orders", PgSource(dsn=os.environ["ORDERS_DATABASE_URL"])),
+        ("billing", PgSource(dsn=os.environ["BILLING_DATABASE_URL"])),
+    ],
+)
 ```
 
 ## Connections
