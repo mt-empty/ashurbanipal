@@ -1,81 +1,52 @@
 # Ashurbanipal Spring Boot starter
 
-Kotlin/Spring Boot autoconfiguration starter implementing `spec/protocol.md`
-— see the repo root `readme.md` for what this is and `PORTING.md` for what a
-port implements/reuses.
+A read-only database browser for your own Spring Boot app. It reuses your app's `DataSource`, so there are no extra credentials and nothing extra to deploy. Part of [Ashurbanipal](https://github.com/mt-empty/ashurbanipal).
 
-## Usage
+Requires Java 21+ and Spring Boot 4 (Spring MVC). It does not work on Spring Boot 3.
+
+## Install
+
+Gradle:
+
+```kotlin
+implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.12.0")
+```
+
+Maven:
+
+```xml
+<dependency>
+  <groupId>io.github.mt-empty</groupId>
+  <artifactId>ashurbanipal-spring-boot-starter</artifactId>
+  <version>0.12.0</version>
+</dependency>
+```
+
+Your app must be a Spring MVC app (`spring-boot-starter-web`) with a `DataSource` bean and a JDBC driver on the classpath. The starter adds no driver of its own.
+
+## Quick start
+
+Add this to `application.yml`:
+
+```yaml
+ashurbanipal:
+  enabled: true
+```
+
+Start your app and open `http://localhost:8080/__ashurbanipal`. That's it: the starter uses your app's `DataSource` and assumes Postgres.
+
+## Turn it on only where you want it
+
+`enabled` defaults to `false`. When it is off, the starter registers nothing, so the path returns 404. Decide where to enable it, for example from an environment variable:
 
 ```yaml
 ashurbanipal:
   enabled: ${ASHURBANIPAL_ENABLED:false}
-
-  # Optional. Omit entirely for a single-datasource host: it's equivalent
-  # to `sources: [{name: default, backend: postgres}]`, bound to the
-  # primary/only DataSource bean in the context.
-  sources:
-    - name: primary
-      backend: postgres # or "mysql" (covers MariaDB too), "sqlite"
-      # data-source-bean: ordersDataSourceV2  # only needed with >1 DataSource bean
-
-  # optional — these are the defaults/examples, shown explicitly
-  base-path: /__ashurbanipal
-  limits:
-    default-page-size: 50
-    max-page-size: 100
-    query-timeout-secs: 5
-  instance: # this instance's own name and label (spec/protocol.md §5.6)
-    name: orders
-    label: dev
-  # One shared list, in the same order, on every instance keeps the grid the same everywhere.
-  siblings:
-    - name: orders
-      label: int # optional; typically an environment (dev, int) or a region (eu, us)
-      base-url: https://orders-int.internal.vpn/__ashurbanipal
-      health-path: /health
-    - name: billing
-      base-url: https://billing.internal.vpn/__ashurbanipal
-      health-path: /health
 ```
 
-Autoconfigured — no bean wiring needed beyond the host's own `DataSource`
-bean(s). Each `sources` entry gets its own `DbSource`, selectable via the
-`source` query param (`spec/protocol.md` §1, §5.8); the first entry is the
-default used when `source` is absent. `data-source-bean` picks which
-`DataSource` bean an entry binds to — required once the context has more
-than one, since there's no default to fall back on. Backend selection is
-always an explicit config property, never inferred from which JDBC driver
-happens to be on the classpath (`PORTING.md`'s hardening checklist item
-2). This starter has no opinion on which environment it's running in —
-deciding when `enabled` is true is entirely up to the host. Absent config
-means disabled (no `AshurbanipalController`/`DbSource` bean registered),
-never enabled with defaults.
+## Protect it
 
-
-## Integration requirements
-
-Two host-side settings this starter deliberately does not apply for you,
-since both would change host-global behavior (`PORTING.md`):
-
-- **Strict CSP** — the vendored `dbviewer.html` runs an inline
-  `<script type="module">`. A host whose `Content-Security-Policy` forbids
-  inline scripts must extend `script-src` for `${ashurbanipal.base-path}`
-  or the UI renders but never loads data. This starter sets no CSP header
-  of its own (`PORTING.md`, "CSP and inline scripts").
-- **Large filters** — a `filter` query param near `spec/protocol.md`
-  §5.4.2's 8192-byte cap can overrun embedded Tomcat's default 8 KiB
-  `server.max-http-request-header-size` once URL-encoded, yielding
-  Tomcat's own 400 page instead of the protocol's. Raise
-  `server.max-http-request-header-size` (e.g. `64KB`) if your users build
-  filters that large (`PORTING.md`, "Request-boundary rejections").
-
-## Compression
-
-The UI page is sent gzipped when the browser accepts gzip (`spec/protocol.md` §5.1); it is compressed once, at start-up. API responses are sent uncompressed. A host that sets `server.compression.enabled=true` compresses them too; Tomcat leaves the page alone, because it already carries `Content-Encoding`.
-
-## Behind your own auth
-
-Ashurbanipal ships no authentication ([`docs/design.md`](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md) §6); guard the mount prefix with your host's own. Cover the whole prefix, UI included, and check a role rather than just a login — otherwise every signed-in user can read every table the database role can. With Spring Security, add a rule for the starter's path:
+Ashurbanipal has no login. Anyone who can reach `/__ashurbanipal` can read every table your app's database user can read. Put your own auth in front, and check a role, not just a login. With Spring Security:
 
 ```kotlin
 http.authorizeHttpRequests {
@@ -83,17 +54,57 @@ http.authorizeHttpRequests {
 }
 ```
 
-Use `${ashurbanipal.base-path}` in place of `/__ashurbanipal` if you changed it. Without Spring Security, a `OncePerRequestFilter` that matches only that prefix does the same job.
+If you changed `base-path`, match that path instead. Without Spring Security, a `OncePerRequestFilter` that matches only that path does the same job.
 
-## Database support
+## MySQL, MariaDB, or SQLite
 
-Same per-backend degraded features and mechanisms as the Rust reference
-(comments/common-values unavailable on SQLite and MySQL, MySQL-vs-MariaDB
-runtime detection for the query-timeout mechanism, Xerial `sqlite-jdbc`'s
-`ProgressHandler` instead of JDBC's non-functional `setQueryTimeout`) —
-see `docs/adapter-decisions.md` for the full registry. A host opting into
-`mysql`/`sqlite` still supplies its own `DataSource` bean; this starter
-never adds a JDBC driver dependency of its own.
+Name the backend on a source. `mysql` covers MariaDB too:
 
-Full API/config reference:
-[docs/design.md](https://github.com/mt-empty/ashurbanipal/blob/main/docs/design.md).
+```yaml
+ashurbanipal:
+  enabled: true
+  sources:
+    - name: primary
+      backend: mysql   # or sqlite
+```
+
+Add the driver yourself, for example `com.mysql:mysql-connector-j`, `org.mariadb.jdbc:mariadb-java-client`, or `org.xerial:sqlite-jdbc`. The starter never guesses the backend from the driver on your classpath.
+
+Column comments and common-value stats are empty on MySQL and SQLite.
+
+## More than one database
+
+List each source. The first one is the default, and the UI lets you switch between them. When your app has more than one `DataSource` bean, name the bean for each source:
+
+```yaml
+ashurbanipal:
+  enabled: true
+  sources:
+    - name: orders
+      data-source-bean: ordersDataSource
+    - name: billing
+      data-source-bean: billingDataSource
+```
+
+## Configuration
+
+```yaml
+ashurbanipal:
+  enabled: true
+  base-path: /__ashurbanipal   # optional; change the URL path
+  limits:                      # optional; these are the defaults
+    default-page-size: 50
+    max-page-size: 100
+    query-timeout-secs: 5
+```
+
+The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. In YAML, write the names in kebab-case (`base-url`, `health-path`).
+
+## Troubleshooting
+
+- **The UI loads but shows no data.** Your `Content-Security-Policy` probably blocks inline scripts. The page runs one inline `<script type="module">`, so allow it for the viewer's path.
+- **Large filters return Tomcat's own 400 page.** A long filter can go over Tomcat's 8 KB header limit. Raise `server.max-http-request-header-size`, for example to `64KB`.
+
+## See also
+
+- [Live demo](https://mt-empty.github.io/ashurbanipal/demo/live/)
