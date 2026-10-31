@@ -1,36 +1,10 @@
 import express, { type Router as ExpressRouter, type Request, type Response } from "express";
-import {
-  basePath,
-  type Config,
-  type Instance,
-  isEnabled,
-  type ResolvedLimits,
-  type Sibling,
-  type SiblingsView,
-  siblingsView,
-  withDefaults,
-} from "./config.js";
-import type { DbSource } from "./db/types.js";
+import { basePath, type Config, isEnabled, type SiblingsView, siblingsView, withDefaults } from "./config.js";
 import { dbviewerHtml, dbviewerHtmlGzip } from "./embed.js";
-import { FilterError, isQueryTimeout, NOT_ALLOWED_CODE, NotAllowedError } from "./errors.js";
-import { type Condition, parseFilter, parseFilterForJoin } from "./filter.js";
-import { BadJoinError, BadParamError, parseJoin } from "./join.js";
+import { API_PATHS, handleApi, type NamedSource } from "./handlers.js";
 import { checkSiblings } from "./siblings.js";
 
-const PROTOCOL_HEADER = "x-ashurbanipal-protocol";
-// Bumped only for non-additive wire changes (spec/protocol.md §7).
-const PROTOCOL_VERSION = "1";
-
-/**
- * One registered `DbSource`, named for `source` param resolution
- * (spec/protocol.md §1's "Resolved source", §5.8) — a live connection
- * object, never `Config` data (a host constructs these itself, same as
- * the single-source `DbSource` this replaces).
- */
-export interface NamedSource {
-  name: string;
-  source: DbSource;
-}
+export type { NamedSource } from "./handlers.js";
 
 /**
  * Mounts the Ashurbanipal viewer's routes (the UI plus the API routes)
@@ -59,70 +33,38 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
     throw new Error("createRouter requires at least one source");
   }
 
-  const limits = withDefaults(config.limits);
-  const timeoutMs = limits.queryTimeoutSecs * 1000;
+  const opts = { limits: withDefaults(config.limits), siblings: siblingsBody(siblingsView(config)) };
   const mount = basePath(config);
 
   registerGet(router, mount, serveHtml);
-  registerGet(router, `${mount}/api/sources`, withApiHeaders(listSourcesHandler(sources)));
-  registerGet(router, `${mount}/api/schemas`, withApiHeaders(listSchemasHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables`, withApiHeaders(listTablesHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/table-counts`, withApiHeaders(tableCountsHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/data`, withApiHeaders(tableDataHandler(sources, limits, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/common-values`, withApiHeaders(commonValuesHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/referenced-by`, withApiHeaders(referencedByHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/structure`, withApiHeaders(structureHandler(sources, timeoutMs)));
-  registerGet(router, `${mount}/api/tables/join`, withApiHeaders(tableJoinHandler(sources, limits, timeoutMs)));
-  registerGet(router, `${mount}/api/siblings`, withApiHeaders(siblingsHandler(siblingsView(config))));
+  for (const path of API_PATHS) {
+    registerGet(router, `${mount}/api${path}`, async (req, res) => {
+      const r = await handleApi(sources, path, (key) => firstQueryValue(req, key), opts);
+      res.status(r.status).set(r.headers).send(r.body);
+    });
+  }
 
   return router;
 }
 
-/** What an absent `source` param resolves to, which `/api/sources` reports as `default`. */
-function defaultSource(sources: NamedSource[]): NamedSource {
-  return sources[0];
-}
-
-/**
- * Resolves the `source` query param against `sources` the same way
- * `schema` resolves against a live catalog list (spec/protocol.md §1):
- * absent means the first-registered default, present means an exact
- * case-sensitive match or a rejection — never a fallback guess.
- */
-function resolveSource(sources: NamedSource[], requested: string | undefined): DbSource {
-  if (requested === undefined) return defaultSource(sources).source;
-  const found = sources.find((s) => s.name === requested);
-  if (found === undefined) {
-    throw new NotAllowedError(`source ${JSON.stringify(requested)}`, "source");
-  }
-  return found.source;
-}
-
-// Return 405 for non-GET methods on an existing protocol path.
-function registerGet(router: ExpressRouter, path: string, handler: (req: Request, res: Response) => void): void {
-  router.all(path, (req, res) => {
+// Return 405 for non-GET methods on an existing protocol path. A handler's
+// rejection goes to Express's error handling, never an unhandled rejection.
+function registerGet(
+  router: ExpressRouter,
+  path: string,
+  handler: (req: Request, res: Response) => void | Promise<void>,
+): void {
+  router.all(path, (req, res, next) => {
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.status(405).set("Allow", "GET, HEAD").type("text/plain; charset=utf-8").send("Method Not Allowed");
       return;
     }
-    handler(req, res);
+    Promise.resolve(handler(req, res)).catch(next);
   });
 }
 
-// Stamps every API response, success or error (spec/protocol.md §2/§7),
-// with the protocol version header and nosniff, which stops a browser from
-// rendering echoed request text as HTML. The HTML route (serveHtml) is wired
-// directly, without this wrapper, since §5.1 carries neither.
-function withApiHeaders(
-  handler: (req: Request, res: Response) => void | Promise<void>,
-): (req: Request, res: Response) => void {
-  return (req, res) => {
-    res.setHeader(PROTOCOL_HEADER, PROTOCOL_VERSION);
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    Promise.resolve(handler(req, res)).catch((err: unknown) => writeError(res, err));
-  };
-}
-
+// The page carries neither API header (spec/protocol.md §5.1), so it is wired
+// directly rather than through handleApi.
 function serveHtml(req: Request, res: Response): void {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.vary("Accept-Encoding");
@@ -134,267 +76,12 @@ function serveHtml(req: Request, res: Response): void {
   res.status(200).send(dbviewerHtml);
 }
 
-// RFC 9457 Problem Details (spec/protocol.md §2) — `type` is always
-// "about:blank", Ashurbanipal defines no problem-type URI namespace.
-function httpProblemError(res: Response, status: number, code: string, title: string): void {
-  res
-    .status(status)
-    .type("application/problem+json")
-    .send(JSON.stringify({ type: "about:blank", title, status, code }));
-}
-
-// Maps a DbSource/filter error to the wire's error taxonomy
-// (spec/protocol.md §2): NotAllowedError's kind picks the exact
-// unknown_*/not_readable code; FilterError is always invalid_filter;
-// BadJoinError is invalid_join; BadParamError is invalid_parameter; a statement stopped by the query
-// timeout is query_timeout; anything else is a database failure (500). Status code + code are the
-// contract — `title` wording is implementation-defined.
-function writeError(res: Response, err: unknown): void {
-  if (err instanceof NotAllowedError) {
-    httpProblemError(res, 400, NOT_ALLOWED_CODE[err.kind], err.message);
-    return;
-  }
-  if (err instanceof FilterError) {
-    httpProblemError(res, 400, "invalid_filter", err.message);
-    return;
-  }
-  if (err instanceof BadJoinError) {
-    httpProblemError(res, 400, "invalid_join", err.message);
-    return;
-  }
-  if (err instanceof BadParamError) {
-    httpProblemError(res, 400, "invalid_parameter", err.message);
-    return;
-  }
-  if (isQueryTimeout(err)) {
-    httpProblemError(res, 500, "query_timeout", "query timed out");
-    return;
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  httpProblemError(res, 500, "database_error", `database error: ${message}`);
-}
-
-function listSourcesHandler(sources: NamedSource[]) {
-  return async (_req: Request, res: Response): Promise<void> => {
-    res.json({ sources: sources.map(({ name }) => ({ name })), default: defaultSource(sources).name });
-  };
-}
-
-function listSchemasHandler(sources: NamedSource[], timeoutMs: number) {
-  return async (req: Request, res: Response): Promise<void> => {
-    const source = resolveSource(sources, firstQueryValue(req, "source"));
-    const listing = await source.listSchemas(timeoutMs);
-    res.json({ schemas: listing.schemas.map((name) => ({ name })), default: listing.default });
-  };
-}
-
-function listTablesHandler(sources: NamedSource[], timeoutMs: number) {
-  return async (req: Request, res: Response): Promise<void> => {
-    const source = resolveSource(sources, firstQueryValue(req, "source"));
-    const schema = firstQueryValue(req, "schema");
-    const tables = await source.listTables(schema, timeoutMs);
-    res.json({ tables });
-  };
-}
-
-function tableCountsHandler(sources: NamedSource[], timeoutMs: number) {
-  return async (req: Request, res: Response): Promise<void> => {
-    const source = resolveSource(sources, firstQueryValue(req, "source"));
-    const schema = firstQueryValue(req, "schema");
-    const counts = await source.tableCounts(schema, timeoutMs);
-    res.json({ counts });
-  };
-}
-
-function tableDataHandler(sources: NamedSource[], limits: ResolvedLimits, timeoutMs: number) {
-  return async (req: Request, res: Response): Promise<void> => {
-    const source = resolveSource(sources, firstQueryValue(req, "source"));
-    const schema = firstQueryValue(req, "schema");
-    const table = firstQueryValue(req, "table");
-    if (table === undefined) {
-      httpProblemError(res, 400, "invalid_parameter", "table parameter is required");
-      return;
-    }
-
-    // An empty (or whitespace-only) filter param means "no filter", same
-    // as an absent param; a valid-but-empty JSON array means the same
-    // thing (spec/protocol.md §5.4.2).
-    let conditions: Condition[] = [];
-    const rawFilter = firstQueryValue(req, "filter");
-    if (rawFilter !== undefined && rawFilter.trim() !== "") {
-      try {
-        conditions = parseFilter(rawFilter);
-      } catch (err) {
-        writeError(res, err);
-        return;
-      }
-    }
-
-    let limit: number;
-    try {
-      const requested = parseSaturating(req, "limit");
-      limit = clamp(requested ?? limits.defaultPageSize, 1, limits.maxPageSize);
-    } catch (err) {
-      httpProblemError(res, 400, "invalid_parameter", err instanceof Error ? err.message : String(err));
-      return;
-    }
-
-    let offset: number;
-    try {
-      offset = parseSaturating(req, "offset") ?? 0;
-      if (offset < 0) offset = 0;
-    } catch (err) {
-      httpProblemError(res, 400, "invalid_parameter", err instanceof Error ? err.message : String(err));
-      return;
-    }
-
-    const sort = firstQueryValue(req, "sort");
-
-    let descending = false;
-    const order = firstQueryValue(req, "order") ?? "";
-    if (order === "" || order === "asc") {
-      descending = false;
-    } else if (order === "desc") {
-      descending = true;
-    } else {
-      httpProblemError(res, 400, "invalid_parameter", `invalid order "${order}" (expected "asc" or "desc")`);
-      return;
-    }
-
-    const data = await source.queryTable(
-      schema,
-      table,
-      {
-        limit,
-        offset,
-        sort: sort && sort !== "" ? sort : undefined,
-        descending,
-        filter: conditions,
-      },
-      timeoutMs,
-    );
-    res.json(data);
-  };
-}
-
-function tableJoinHandler(sources: NamedSource[], limits: ResolvedLimits, timeoutMs: number) {
-  return async (req: Request, res: Response): Promise<void> => {
-    const source = resolveSource(sources, firstQueryValue(req, "source"));
-    const schema = firstQueryValue(req, "schema");
-    const rawJoin = firstQueryValue(req, "join");
-    if (rawJoin === undefined) {
-      httpProblemError(res, 400, "invalid_parameter", "join parameter is required");
-      return;
-    }
-    const spec = parseJoin(rawJoin);
-
-    let conditions: Condition[] = [];
-    const rawFilter = firstQueryValue(req, "filter");
-    if (rawFilter !== undefined && rawFilter.trim() !== "") {
-      conditions = parseFilterForJoin(rawFilter);
-    }
-
-    let limit: number;
-    let offset: number;
-    try {
-      limit = clamp(parseSaturating(req, "limit") ?? limits.defaultPageSize, 1, limits.maxPageSize);
-      offset = Math.max(parseSaturating(req, "offset") ?? 0, 0);
-    } catch (err) {
-      httpProblemError(res, 400, "invalid_parameter", err instanceof Error ? err.message : String(err));
-      return;
-    }
-
-    const sort = firstQueryValue(req, "sort");
-    let sortJoin: number | undefined;
-    const rawSortJoin = firstQueryValue(req, "sort_join");
-    if (rawSortJoin !== undefined) {
-      if (!/^\d+$/.test(rawSortJoin.trim())) {
-        httpProblemError(
-          res,
-          400,
-          "invalid_parameter",
-          `invalid sort_join "${rawSortJoin}" (expected a table position)`,
-        );
-        return;
-      }
-      sortJoin = Number(rawSortJoin.trim());
-    }
-
-    const order = firstQueryValue(req, "order") ?? "";
-    if (order !== "" && order !== "asc" && order !== "desc") {
-      httpProblemError(res, 400, "invalid_parameter", `invalid order "${order}" (expected "asc" or "desc")`);
-      return;
-    }
-
-    res.json(
-      await source.queryJoin(
-        schema,
-        spec,
-        {
-          limit,
-          offset,
-          sort: sort && sort !== "" ? sort : undefined,
-          sortJoin,
-          descending: order === "desc",
-          filter: conditions,
-        },
-        timeoutMs,
-      ),
-    );
-  };
-}
-
-function commonValuesHandler(sources: NamedSource[], timeoutMs: number) {
-  return async (req: Request, res: Response): Promise<void> => {
-    const source = resolveSource(sources, firstQueryValue(req, "source"));
-    const schema = firstQueryValue(req, "schema");
-    const table = firstQueryValue(req, "table");
-    const column = firstQueryValue(req, "column");
-    if (table === undefined || column === undefined) {
-      httpProblemError(res, 400, "invalid_parameter", "table and column parameters are required");
-      return;
-    }
-    const values = await source.commonValues(schema, table, column, timeoutMs);
-    res.json({ values });
-  };
-}
-
-function referencedByHandler(sources: NamedSource[], timeoutMs: number) {
-  return async (req: Request, res: Response): Promise<void> => {
-    const source = resolveSource(sources, firstQueryValue(req, "source"));
-    const schema = firstQueryValue(req, "schema");
-    const table = firstQueryValue(req, "table");
-    if (table === undefined) {
-      httpProblemError(res, 400, "invalid_parameter", "table parameter is required");
-      return;
-    }
-    const entries = await source.referencedBy(schema, table, timeoutMs);
-    res.json({ referenced_by: entries });
-  };
-}
-
-function structureHandler(sources: NamedSource[], timeoutMs: number) {
-  return async (req: Request, res: Response): Promise<void> => {
-    const source = resolveSource(sources, firstQueryValue(req, "source"));
-    const schema = firstQueryValue(req, "schema");
-    const table = firstQueryValue(req, "table");
-    if (table === undefined) {
-      httpProblemError(res, 400, "invalid_parameter", "table parameter is required");
-      return;
-    }
-    res.json(await source.structure(schema, table, timeoutMs));
-  };
-}
-
-function siblingsHandler({ instance, siblings, warnings }: SiblingsView) {
-  return async (_req: Request, res: Response): Promise<void> => {
-    const statuses = await checkSiblings(siblings, instance);
-    res.json({
-      ...(instance && { instance: { name: instance.name, label: instance.label } }),
-      siblings: statuses,
-      ...(warnings.length > 0 && { warnings }),
-    });
-  };
+function siblingsBody({ instance, siblings, warnings }: SiblingsView): () => Promise<unknown> {
+  return async () => ({
+    ...(instance && { instance: { name: instance.name, label: instance.label } }),
+    siblings: await checkSiblings(siblings, instance),
+    ...(warnings.length > 0 && { warnings }),
+  });
 }
 
 function firstQueryValue(req: Request, key: string): string | undefined {
@@ -402,25 +89,4 @@ function firstQueryValue(req: Request, key: string): string | undefined {
   if (value === undefined) return undefined;
   if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : undefined;
   return typeof value === "string" ? value : undefined;
-}
-
-function clamp(value: number, lo: number, hi: number): number {
-  if (value < lo) return lo;
-  if (value > hi) return hi;
-  return value;
-}
-
-// Clamp numeric limit/offset without precision loss; reject only non-numeric text
-// (spec/protocol.md §5.4).
-function parseSaturating(req: Request, key: string): number | undefined {
-  const raw = firstQueryValue(req, key)?.trim();
-  if (raw === undefined || raw === "") return undefined;
-  if (!/^[+-]?\d+$/.test(raw)) {
-    throw new Error(`invalid integer parameter "${key}": "${raw}"`);
-  }
-  let n = BigInt(raw);
-  if (n < 0n) n = 0n;
-  const max = BigInt(Number.MAX_SAFE_INTEGER);
-  if (n > max) n = max;
-  return Number(n);
 }
