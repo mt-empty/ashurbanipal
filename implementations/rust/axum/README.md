@@ -100,7 +100,18 @@ ashurbanipal_axum::router(config, vec![
 ]);
 ```
 
-All sources must use the same backend type.
+To mix backends, wrap each source in `Source::new`. This needs the matching features, for example `--features sqlite`:
+
+```rust
+use ashurbanipal_axum::Source;
+
+ashurbanipal_axum::router(config, vec![
+    ("orders".to_string(), Source::new(PgPoolSource::new(pg_pool))),
+    ("local".to_string(), Source::new(SqliteSource::new(sqlite_pool))),
+]);
+```
+
+Any type that implements `DbSource` works here, including your own.
 
 ## Configuration
 

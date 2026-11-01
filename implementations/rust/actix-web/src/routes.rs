@@ -40,12 +40,12 @@ pub struct AppState<S> {
 /// Built once, not per worker — cheap to share via `web::Data`'s `Arc`,
 /// unlike [`service`]'s route tree, which Actix rebuilds per worker anyway.
 ///
-/// `sources` MUST be non-empty — a host with nothing to browse should pass
-/// `enabled = false` instead, not an empty list. Sibling config is never
-/// rejected: `/api/siblings` reports what it corrected in `warnings`.
+/// `sources` MUST be non-empty when enabled — a host with nothing to browse
+/// should pass `enabled = false` instead, not an empty list. Sibling config
+/// is never rejected: `/api/siblings` reports what it corrected in `warnings`.
 pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data<AppState<S>> {
     assert!(
-        !sources.is_empty(),
+        !config.is_enabled() || !sources.is_empty(),
         "app_state() requires at least one source"
     );
     let siblings = SiblingChecker::new(&config);
@@ -347,6 +347,27 @@ mod kill_switch_tests {
         ) -> Result<JoinData, DbError> {
             unreachable!("kill switch must 404 before reaching the handler")
         }
+    }
+
+    #[actix_web::test]
+    #[should_panic(expected = "app_state() requires at least one source")]
+    async fn app_state_panics_on_empty_sources_when_enabled() {
+        let config = Config::from_toml("enabled = true").unwrap();
+        let _ = app_state::<NeverQueried>(config, Vec::new());
+    }
+
+    #[actix_web::test]
+    async fn disabled_with_no_sources_404s_instead_of_panicking() {
+        // Fail-closed takes priority: a disabled host with no sources
+        // configured must 404 quietly, not panic at startup.
+        let state = app_state::<NeverQueried>(Config::default(), Vec::new());
+        let app = test::init_service(App::new().service(service(state))).await;
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get().uri("/__ashurbanipal").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 404);
     }
 
     #[actix_web::test]

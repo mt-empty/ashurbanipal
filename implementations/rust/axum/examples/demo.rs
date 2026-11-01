@@ -42,8 +42,15 @@
 //! `DATABASE_URL`), `sqlite` (from `SQLITE_PATH`, needs `--features sqlite`),
 //! or `mysql` (from `DATABASE_URL`, needs `--features mysql`). The
 //! `SECOND_SOURCE` / `CONFORMANCE_SECOND_SOURCE` extras are Postgres-only.
+//!
+//! To demo two backends in one router, add a SQLite `local` source next to
+//! the Postgres ones (mise: `rust:demo-mixed`):
+//!
+//! ```sh
+//! SECOND_SQLITE_PATH=app.db cargo run -p ashurbanipal-axum --example demo --features sqlite
+//! ```
 
-use ashurbanipal_axum::{Config, PgPoolSource};
+use ashurbanipal_axum::{Config, PgPoolSource, Source};
 use axum::routing::get;
 use axum::Router;
 
@@ -67,19 +74,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ))?;
 
     let db_backend = std::env::var("DB_BACKEND").unwrap_or_else(|_| "postgres".to_string());
+    if std::env::var("SECOND_SQLITE_PATH").is_ok()
+        && (db_backend != "postgres" || !cfg!(feature = "sqlite"))
+    {
+        return Err(
+            "SECOND_SQLITE_PATH needs DB_BACKEND=postgres (the default) and \
+                    `--features sqlite`"
+                .into(),
+        );
+    }
     let ashurbanipal = match db_backend.as_str() {
         "postgres" => build_postgres_router(config).await?,
         #[cfg(feature = "sqlite")]
         "sqlite" => {
-            use std::str::FromStr;
             let path = std::env::var("SQLITE_PATH")
                 .expect("SQLITE_PATH must be set when DB_BACKEND=sqlite");
-            let opts = sqlx::sqlite::SqliteConnectOptions::from_str(&path)?.create_if_missing(true);
-            let pool = sqlx::sqlite::SqlitePoolOptions::new()
-                .max_connections(5)
-                .connect_with(opts)
-                .await?;
-            let source = ashurbanipal_axum::SqliteSource::new(pool);
+            let source = sqlite_source(&path).await?;
             ashurbanipal_axum::router(config, vec![("primary".to_string(), source)])
         }
         #[cfg(feature = "mysql")]
@@ -128,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// The default Postgres path, including the `SECOND_SOURCE` /
-/// `CONFORMANCE_SECOND_SOURCE` extras (both Postgres-only).
+/// `CONFORMANCE_SECOND_SOURCE` extras and the `SECOND_SQLITE_PATH` SQLite one.
 async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::error::Error>> {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
@@ -142,7 +152,7 @@ async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::er
     // server (.devcontainer/db/init/02-reporting-seed.sql), not just a
     // second name for the same pool — so switching sources in the UI shows
     // genuinely different tables/data, not the same rows twice.
-    let mut sources = vec![("primary".to_string(), PgPoolSource::new(pool))];
+    let mut sources = vec![("primary".to_string(), Source::new(PgPoolSource::new(pool)))];
     if std::env::var("SECOND_SOURCE").is_ok() {
         let reporting_url = std::env::var("REPORTING_DATABASE_URL").unwrap_or_else(|_| {
             let (prefix, _) = database_url
@@ -154,7 +164,10 @@ async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::er
             .max_connections(5)
             .connect(&reporting_url)
             .await?;
-        sources.push(("reporting".to_string(), PgPoolSource::new(reporting_pool)));
+        sources.push((
+            "reporting".to_string(),
+            Source::new(PgPoolSource::new(reporting_pool)),
+        ));
     }
     if std::env::var("CONFORMANCE_SECOND_SOURCE").is_ok() {
         let pinned_pool = sqlx::postgres::PgPoolOptions::new()
@@ -167,9 +180,32 @@ async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::er
             })
             .connect(&database_url)
             .await?;
-        sources.push(("other_schema".to_string(), PgPoolSource::new(pinned_pool)));
+        sources.push((
+            "other_schema".to_string(),
+            Source::new(PgPoolSource::new(pinned_pool)),
+        ));
+    }
+    #[cfg(feature = "sqlite")]
+    if let Ok(path) = std::env::var("SECOND_SQLITE_PATH") {
+        sources.push((
+            "local".to_string(),
+            Source::new(sqlite_source(&path).await?),
+        ));
     }
     Ok(ashurbanipal_axum::router(config, sources))
+}
+
+#[cfg(feature = "sqlite")]
+async fn sqlite_source(
+    path: &str,
+) -> Result<ashurbanipal_axum::SqliteSource, Box<dyn std::error::Error>> {
+    use std::str::FromStr;
+    let opts = sqlx::sqlite::SqliteConnectOptions::from_str(path)?.create_if_missing(true);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect_with(opts)
+        .await?;
+    Ok(ashurbanipal_axum::SqliteSource::new(pool))
 }
 
 /// `SIBLING_LABEL` labels the `SIBLING_PORT` sibling and `INSTANCE_LABEL`

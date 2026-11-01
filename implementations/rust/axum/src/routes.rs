@@ -322,6 +322,62 @@ mod tests {
         }
     }
 
+    /// A second, distinct `DbSource` type, so one router can hold two types.
+    struct OneTable(&'static str);
+
+    impl DbSource for OneTable {
+        async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
+            unreachable!()
+        }
+        async fn list_tables(&self, _schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
+            Ok(vec![TableInfo {
+                name: self.0.to_string(),
+                comment: None,
+            }])
+        }
+        async fn table_counts(&self, _schema: Option<&str>) -> Result<Vec<(String, i64)>, DbError> {
+            unreachable!()
+        }
+        async fn query_table(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+            _opts: QueryOpts,
+        ) -> Result<ashurbanipal::TableData, DbError> {
+            unreachable!()
+        }
+        async fn common_values(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+            _column: &str,
+        ) -> Result<Vec<(String, f32)>, DbError> {
+            unreachable!()
+        }
+        async fn referenced_by(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+        ) -> Result<Vec<ReferencedBy>, DbError> {
+            unreachable!()
+        }
+        async fn structure(
+            &self,
+            _schema: Option<&str>,
+            _table: &str,
+        ) -> Result<Structure, DbError> {
+            unreachable!()
+        }
+        async fn query_join(
+            &self,
+            _schema: Option<&str>,
+            _spec: &JoinSpec,
+            _opts: JoinOpts,
+        ) -> Result<JoinData, DbError> {
+            unreachable!()
+        }
+    }
+
     #[test]
     #[should_panic(expected = "router() requires at least one source")]
     fn router_panics_on_empty_sources_when_enabled() {
@@ -418,6 +474,47 @@ mod tests {
         assert_eq!(
             json["warnings"],
             serde_json::json!(["two siblings share the name \"orders\" and the label \"dev\""])
+        );
+    }
+
+    #[tokio::test]
+    async fn one_router_holds_sources_of_different_types() {
+        use ashurbanipal::Source;
+        use tower::ServiceExt;
+        let config = Config::from_toml("enabled = true").unwrap();
+        let app = router(
+            config,
+            vec![
+                ("never".to_string(), Source::new(NeverQueriedSource)),
+                ("orders".to_string(), Source::new(OneTable("orders"))),
+            ],
+        );
+        let get = |uri: &'static str| {
+            let app = app.clone();
+            async move {
+                let resp = app
+                    .oneshot(
+                        axum::http::Request::builder()
+                            .uri(uri)
+                            .body(axum::body::Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(resp.status(), StatusCode::OK);
+                let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+            }
+        };
+        assert_eq!(
+            get("/__ashurbanipal/api/sources").await,
+            serde_json::json!({ "sources": [{ "name": "never" }, { "name": "orders" }], "default": "never" })
+        );
+        assert_eq!(
+            get("/__ashurbanipal/api/tables?source=orders").await,
+            serde_json::json!({ "tables": [{ "name": "orders" }] })
         );
     }
 }
