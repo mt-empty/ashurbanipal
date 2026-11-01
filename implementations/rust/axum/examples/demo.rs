@@ -44,7 +44,7 @@
 //! `SECOND_SOURCE` / `CONFORMANCE_SECOND_SOURCE` extras are Postgres-only.
 //!
 //! To demo two backends in one router, add a SQLite `local` source next to
-//! the Postgres ones (mise: `rust:demo-mixed`):
+//! any backend's sources (mise: `rust:demo-mixed`, on Postgres):
 //!
 //! ```sh
 //! SECOND_SQLITE_PATH=app.db cargo run -p ashurbanipal-axum --example demo --features sqlite
@@ -74,23 +74,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ))?;
 
     let db_backend = std::env::var("DB_BACKEND").unwrap_or_else(|_| "postgres".to_string());
-    if std::env::var("SECOND_SQLITE_PATH").is_ok()
-        && (db_backend != "postgres" || !cfg!(feature = "sqlite"))
-    {
-        return Err(
-            "SECOND_SQLITE_PATH needs DB_BACKEND=postgres (the default) and \
-                    `--features sqlite`"
-                .into(),
-        );
-    }
-    let ashurbanipal = match db_backend.as_str() {
-        "postgres" => build_postgres_router(config).await?,
+    let mut sources = match db_backend.as_str() {
+        "postgres" => postgres_sources().await?,
         #[cfg(feature = "sqlite")]
         "sqlite" => {
             let path = std::env::var("SQLITE_PATH")
                 .expect("SQLITE_PATH must be set when DB_BACKEND=sqlite");
-            let source = sqlite_source(&path).await?;
-            ashurbanipal_axum::router(config, vec![("primary".to_string(), source)])
+            vec![(
+                "primary".to_string(),
+                Source::new(sqlite_source(&path).await?),
+            )]
         }
         #[cfg(feature = "mysql")]
         "mysql" => {
@@ -100,8 +93,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .max_connections(5)
                 .connect(&database_url)
                 .await?;
-            let source = ashurbanipal_axum::MySqlSource::new(pool);
-            ashurbanipal_axum::router(config, vec![("primary".to_string(), source)])
+            vec![(
+                "primary".to_string(),
+                Source::new(ashurbanipal_axum::MySqlSource::new(pool)),
+            )]
         }
         other => {
             return Err(format!(
@@ -111,6 +106,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .into())
         }
     };
+    if let Ok(path) = std::env::var("SECOND_SQLITE_PATH") {
+        sources.push(("local".to_string(), second_sqlite_source(&path).await?));
+    }
+    let ashurbanipal = ashurbanipal_axum::router(config, sources);
     // MOUNT_PREFIX (e.g. "/svc") simulates a reverse proxy that serves the
     // host under a path prefix, to exercise the frontend's mount-point
     // agnosticism; unset means the plain one-line merge as before.
@@ -137,9 +136,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// The default Postgres path, including the `SECOND_SOURCE` /
-/// `CONFORMANCE_SECOND_SOURCE` extras and the `SECOND_SQLITE_PATH` SQLite one.
-async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::error::Error>> {
+/// The default Postgres sources, including the `SECOND_SOURCE` /
+/// `CONFORMANCE_SECOND_SOURCE` extras.
+async fn postgres_sources() -> Result<Vec<(String, Source)>, Box<dyn std::error::Error>> {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -185,14 +184,17 @@ async fn build_postgres_router(config: Config) -> Result<Router, Box<dyn std::er
             Source::new(PgPoolSource::new(pinned_pool)),
         ));
     }
-    #[cfg(feature = "sqlite")]
-    if let Ok(path) = std::env::var("SECOND_SQLITE_PATH") {
-        sources.push((
-            "local".to_string(),
-            Source::new(sqlite_source(&path).await?),
-        ));
-    }
-    Ok(ashurbanipal_axum::router(config, sources))
+    Ok(sources)
+}
+
+#[cfg(feature = "sqlite")]
+async fn second_sqlite_source(path: &str) -> Result<Source, Box<dyn std::error::Error>> {
+    Ok(Source::new(sqlite_source(path).await?))
+}
+
+#[cfg(not(feature = "sqlite"))]
+async fn second_sqlite_source(path: &str) -> Result<Source, Box<dyn std::error::Error>> {
+    Err(format!("SECOND_SQLITE_PATH={path:?} needs `--features sqlite`").into())
 }
 
 #[cfg(feature = "sqlite")]

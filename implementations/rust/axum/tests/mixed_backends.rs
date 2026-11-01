@@ -62,15 +62,6 @@ async fn get_json(app: &axum::Router, path: &str) -> serde_json::Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
-fn table_names(tables: &serde_json::Value) -> Vec<&str> {
-    tables["tables"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["name"].as_str().unwrap())
-        .collect()
-}
-
 #[tokio::test]
 async fn one_router_serves_a_sqlite_and_a_mysql_source() {
     let test_url = std::env::var("MYSQL_TEST_URL")
@@ -95,17 +86,21 @@ async fn one_router_serves_a_sqlite_and_a_mysql_source() {
         serde_json::json!({"sources": [{"name": "local"}, {"name": "remote"}], "default": "local"})
     );
 
-    let local = get_json(&app, "/__ashurbanipal/api/tables").await;
-    assert_eq!(table_names(&local), vec!["probe_sqlite"]);
+    assert_eq!(
+        get_json(&app, "/__ashurbanipal/api/tables").await,
+        serde_json::json!({"tables": [{"name": "probe_sqlite"}]})
+    );
     let local_rows = get_json(&app, "/__ashurbanipal/api/tables/data?table=probe_sqlite").await;
     assert_eq!(local_rows["rows"][0]["marker"], serde_json::json!("SQLITE"));
 
-    let remote = get_json(
-        &app,
-        &format!("/__ashurbanipal/api/tables?source=remote&schema={MYSQL_DB}"),
-    )
-    .await;
-    assert_eq!(table_names(&remote), vec!["probe_mysql"]);
+    assert_eq!(
+        get_json(
+            &app,
+            &format!("/__ashurbanipal/api/tables?source=remote&schema={MYSQL_DB}"),
+        )
+        .await,
+        serde_json::json!({"tables": [{"name": "probe_mysql"}]})
+    );
     let remote_rows = get_json(
         &app,
         &format!(

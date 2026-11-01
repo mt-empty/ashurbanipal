@@ -270,62 +270,11 @@ mod tests {
     // resolve_source itself now lives in ashurbanipal-core (see its own
     // tests there) — only the router()-specific behavior below is
     // axum-adapter-specific and stays here.
-    struct NeverQueriedSource;
+    /// Each `N` is a distinct type, so one router can hold two of them. Only
+    /// `list_tables` answers, with one table named after the stub.
+    struct StubSource<const N: u8>(&'static str);
 
-    impl DbSource for NeverQueriedSource {
-        async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
-            unreachable!("router() must panic on empty sources before any query runs")
-        }
-        async fn list_tables(&self, _schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
-            unreachable!()
-        }
-        async fn table_counts(&self, _schema: Option<&str>) -> Result<Vec<(String, i64)>, DbError> {
-            unreachable!()
-        }
-        async fn query_table(
-            &self,
-            _schema: Option<&str>,
-            _table: &str,
-            _opts: QueryOpts,
-        ) -> Result<ashurbanipal::TableData, DbError> {
-            unreachable!()
-        }
-        async fn common_values(
-            &self,
-            _schema: Option<&str>,
-            _table: &str,
-            _column: &str,
-        ) -> Result<Vec<(String, f32)>, DbError> {
-            unreachable!()
-        }
-        async fn referenced_by(
-            &self,
-            _schema: Option<&str>,
-            _table: &str,
-        ) -> Result<Vec<ReferencedBy>, DbError> {
-            unreachable!()
-        }
-        async fn structure(
-            &self,
-            _schema: Option<&str>,
-            _table: &str,
-        ) -> Result<Structure, DbError> {
-            unreachable!()
-        }
-        async fn query_join(
-            &self,
-            _schema: Option<&str>,
-            _spec: &JoinSpec,
-            _opts: JoinOpts,
-        ) -> Result<JoinData, DbError> {
-            unreachable!()
-        }
-    }
-
-    /// A second, distinct `DbSource` type, so one router can hold two types.
-    struct OneTable(&'static str);
-
-    impl DbSource for OneTable {
+    impl<const N: u8> DbSource for StubSource<N> {
         async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
             unreachable!()
         }
@@ -378,11 +327,29 @@ mod tests {
         }
     }
 
+    async fn get_json(app: Router, uri: &str) -> serde_json::Value {
+        use tower::ServiceExt;
+        let resp = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "GET {uri}");
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
     #[test]
     #[should_panic(expected = "router() requires at least one source")]
     fn router_panics_on_empty_sources_when_enabled() {
         let config = Config::from_toml("enabled = true").unwrap();
-        let _ = router::<NeverQueriedSource>(config, Vec::new());
+        let _ = router::<StubSource<0>>(config, Vec::new());
     }
 
     #[test]
@@ -390,7 +357,7 @@ mod tests {
         // Fail-closed takes priority: a disabled host with no sources
         // configured must 404 quietly, not panic at startup.
         let config = Config::default();
-        let _ = router::<NeverQueriedSource>(config, Vec::new());
+        let _ = router::<StubSource<0>>(config, Vec::new());
     }
 
     // Port 9 refuses at once, so every check is a fast `healthy: false`.
@@ -421,24 +388,10 @@ mod tests {
 
     #[tokio::test]
     async fn siblings_report_this_instance_in_place_without_a_check() {
-        use tower::ServiceExt;
         let config = Config::from_toml(LABELLED).unwrap();
-        let app = router(config, vec![("primary".to_string(), NeverQueriedSource)]);
-        let resp = app
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri("/__ashurbanipal/api/siblings")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let app = router(config, vec![("primary".to_string(), StubSource::<0>(""))]);
         assert_eq!(
-            json,
+            get_json(app, "/__ashurbanipal/api/siblings").await,
             serde_json::json!({
                 "instance": { "name": "orders", "label": "dev" },
                 "siblings": [
@@ -452,24 +405,10 @@ mod tests {
 
     #[tokio::test]
     async fn sibling_config_mistakes_are_kept_and_warned() {
-        use tower::ServiceExt;
         let config =
             Config::from_toml(&LABELLED.replace("label = \"int\"", "label = \"dev\"")).unwrap();
-        let app = router(config, vec![("primary".to_string(), NeverQueriedSource)]);
-        let resp = app
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri("/__ashurbanipal/api/siblings")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let app = router(config, vec![("primary".to_string(), StubSource::<0>(""))]);
+        let json = get_json(app, "/__ashurbanipal/api/siblings").await;
         assert_eq!(json["siblings"].as_array().unwrap().len(), 3);
         assert_eq!(
             json["warnings"],
@@ -480,41 +419,27 @@ mod tests {
     #[tokio::test]
     async fn one_router_holds_sources_of_different_types() {
         use ashurbanipal::Source;
-        use tower::ServiceExt;
         let config = Config::from_toml("enabled = true").unwrap();
         let app = router(
             config,
             vec![
-                ("never".to_string(), Source::new(NeverQueriedSource)),
-                ("orders".to_string(), Source::new(OneTable("orders"))),
+                ("a".to_string(), Source::new(StubSource::<0>("users"))),
+                ("b".to_string(), Source::new(StubSource::<1>("orders"))),
             ],
         );
-        let get = |uri: &'static str| {
-            let app = app.clone();
-            async move {
-                let resp = app
-                    .oneshot(
-                        axum::http::Request::builder()
-                            .uri(uri)
-                            .body(axum::body::Body::empty())
-                            .unwrap(),
-                    )
-                    .await
-                    .unwrap();
-                assert_eq!(resp.status(), StatusCode::OK);
-                let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-                    .await
-                    .unwrap();
-                serde_json::from_slice::<serde_json::Value>(&body).unwrap()
-            }
-        };
         assert_eq!(
-            get("/__ashurbanipal/api/sources").await,
-            serde_json::json!({ "sources": [{ "name": "never" }, { "name": "orders" }], "default": "never" })
+            get_json(app.clone(), "/__ashurbanipal/api/sources").await,
+            serde_json::json!({ "sources": [{ "name": "a" }, { "name": "b" }], "default": "a" })
         );
-        assert_eq!(
-            get("/__ashurbanipal/api/tables?source=orders").await,
-            serde_json::json!({ "tables": [{ "name": "orders" }] })
-        );
+        for (source, table) in [("a", "users"), ("b", "orders")] {
+            assert_eq!(
+                get_json(
+                    app.clone(),
+                    &format!("/__ashurbanipal/api/tables?source={source}")
+                )
+                .await,
+                serde_json::json!({ "tables": [{ "name": table }] })
+            );
+        }
     }
 }
