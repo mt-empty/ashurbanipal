@@ -5,6 +5,7 @@ must 404 identically to an unmounted app, and the enabled case must carry
 the protocol header on API routes but not the HTML route.
 """
 
+import pytest
 from flask import Flask
 
 from ashurbanipal.config import Config
@@ -75,6 +76,21 @@ def test_enabled_false_is_disabled() -> None:
     client = _client(Config(enabled=False))
     for path in ALL_MOUNT_PATHS:
         assert client.get(path).status_code == 404, path
+
+
+def test_disabled_with_no_sources_404s_instead_of_failing() -> None:
+    # Fail-closed takes priority: a disabled host with no sources configured
+    # must 404 quietly, not fail at startup.
+    app = Flask(__name__)
+    app.register_blueprint(router(Config(enabled=False), []))
+    client = app.test_client()
+    for path in ALL_MOUNT_PATHS:
+        assert client.get(path).status_code == 404, path
+
+
+def test_enabled_with_no_sources_fails_at_startup() -> None:
+    with pytest.raises(ValueError, match="at least one source"):
+        router(Config(enabled=True), [])
 
 
 def test_enabled_true_enables_routes() -> None:

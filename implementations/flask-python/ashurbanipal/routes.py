@@ -39,11 +39,11 @@ _MAX_I64 = 2**63 - 1
 
 
 def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str = "/__ashurbanipal") -> Blueprint:
-    assert sources, "router() requires at least one source"
-
     bp = Blueprint("ashurbanipal", __name__, url_prefix=mount)
     if not config.is_enabled():
         return bp  # zero routes registered — 404 on every path under `mount`
+    if not sources:
+        raise ValueError("router() requires at least one source when enabled; register one or set enabled=False")
     # Never rejected: /api/siblings reports what it corrected in "warnings".
     view = config.siblings_view()
 
