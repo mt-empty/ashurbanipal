@@ -1,5 +1,5 @@
 import { expect, test } from "./support/fixtures";
-import { applyFilter, gotoApp, selectTable } from "./support/helpers";
+import { applyFilter, dataWith, gotoApp, selectTable } from "./support/helpers";
 
 test.use({ permissions: ["clipboard-read", "clipboard-write"] });
 
@@ -121,6 +121,26 @@ test("whole-row JSON nests jsonb but keeps a Postgres array as its text, with no
   const parsed = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
   expect(parsed.tags).toBe(tagsValue);
   expect(Array.isArray(parsed.line_items)).toBe(true);
+});
+
+test("whole-row JSON keeps an integer above 2^53 inside jsonb exact", async ({ page }) => {
+  // No seed value is that large, so the first orders row carries one.
+  const big = '{"id": 9007199254740993, "ratio": 0.1000000000000000055511}';
+  await page.route(dataWith("table", "orders"), async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.rows[0].line_items = big;
+    await route.fulfill({ response, json: body });
+  });
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#tbody tr").first().locator(".record-btn").click();
+  await expect(page.locator("#record-dialog")).toBeVisible();
+
+  await page.locator("#record-copy-row").click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain('"line_items": {\n    "id": 9007199254740993,\n    "ratio": 0.1000000000000000055511\n  }');
 });
 
 test("record view's INSERT copy button copies the row as a SQL INSERT", async ({ page }) => {

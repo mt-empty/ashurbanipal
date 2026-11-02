@@ -22,6 +22,9 @@ export function recordJson(fields: JsonField[]): string {
 // every string and number token verbatim. `depth` is the nesting level the
 // value starts at. Callers validate first; malformed input gives garbled
 // output but never throws.
+// JSON's four whitespace characters; JS `\s` matches more.
+const isJsonSpace = (ch: string | undefined) => ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+
 export function reindentJson(text: string, depth = 0): string {
   let out = "";
   let level = depth;
@@ -36,7 +39,7 @@ export function reindentJson(text: string, depth = 0): string {
     } else if (ch === "{" || ch === "[") {
       const close = ch === "{" ? "}" : "]";
       let j = i + 1;
-      while (j < text.length && /\s/.test(text[j])) j++;
+      while (isJsonSpace(text[j])) j++;
       if (text[j] === close) {
         out += ch + close;
         i = j;
@@ -51,7 +54,7 @@ export function reindentJson(text: string, depth = 0): string {
       out += `,${newline()}`;
     } else if (ch === ":") {
       out += ": ";
-    } else if (!/\s/.test(ch)) {
+    } else if (!isJsonSpace(ch)) {
       out += ch;
     }
   }

@@ -86,28 +86,20 @@ const TYPE_CLASS_CSS: Partial<Record<ColumnTypeClass, string>> = {
 // Plain string types, where JSON is often stored as text (always, on
 // SQLite). Value-shape detection is limited to these: Postgres arrays,
 // ranges, multiranges and paths also lead with { or [ but are not JSON.
-const TEXT_TYPES = new Set([
-  "",
-  "unknown",
-  "text",
-  "character varying",
-  "varchar",
-  "character",
-  "char",
-  "nvarchar",
-  "nchar",
-  "clob",
-  "tinytext",
-  "mediumtext",
-  "longtext",
-]);
+// SQLite's text-affinity rule (a name containing CHAR, CLOB or TEXT) covers
+// every engine's spelling, plus SQLite's undeclared "" and our "unknown";
+// `text[]` and `_text` are Postgres arrays.
+function isTextType(type: string): boolean {
+  if (type.endsWith("[]") || type.startsWith("_")) return false;
+  return type === "" || type === "unknown" || /char|clob|text/.test(type);
+}
 
 // A column renders as a JSON tree when the backend typed it as JSON, or when
 // it is a plain string type and the value itself leads with { or [.
 export function rendersAsJson(col: Column, raw: string): boolean {
   const type = typeKey(col.type);
   if (TYPE_ALIASES[type] === "json") return true;
-  return TEXT_TYPES.has(type) && /^\s*[[{]/.test(raw);
+  return isTextType(type) && /^\s*[[{]/.test(raw);
 }
 
 // A value that won't parse is only worth flagging when the backend actually

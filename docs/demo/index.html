@@ -2885,25 +2885,14 @@ var TYPE_CLASS_CSS = {
   bool: "cell-type-bool",
   uuid: "cell-type-uuid"
 };
-var TEXT_TYPES = /* @__PURE__ */ new Set([
-  "",
-  "unknown",
-  "text",
-  "character varying",
-  "varchar",
-  "character",
-  "char",
-  "nvarchar",
-  "nchar",
-  "clob",
-  "tinytext",
-  "mediumtext",
-  "longtext"
-]);
+function isTextType(type) {
+  if (type.endsWith("[]") || type.startsWith("_")) return false;
+  return type === "" || type === "unknown" || /char|clob|text/.test(type);
+}
 function rendersAsJson(col, raw) {
   const type = typeKey(col.type);
   if (TYPE_ALIASES[type] === "json") return true;
-  return TEXT_TYPES.has(type) && /^\s*[[{]/.test(raw);
+  return isTextType(type) && /^\s*[[{]/.test(raw);
 }
 function warnBadJsonCell(col, err) {
   if (columnTypeClass(col.type) === "json") {
@@ -6355,6 +6344,7 @@ function recordJson(fields) {
 ${lines.join(",\n")}
 }`;
 }
+var isJsonSpace = (ch) => ch === " " || ch === "	" || ch === "\n" || ch === "\r";
 function reindentJson(text, depth = 0) {
   let out = "";
   let level = depth;
@@ -6370,7 +6360,7 @@ ${"  ".repeat(Math.max(level, 0))}`;
     } else if (ch === "{" || ch === "[") {
       const close = ch === "{" ? "}" : "]";
       let j = i + 1;
-      while (j < text.length && /\s/.test(text[j])) j++;
+      while (isJsonSpace(text[j])) j++;
       if (text[j] === close) {
         out += ch + close;
         i = j;
@@ -6385,7 +6375,7 @@ ${"  ".repeat(Math.max(level, 0))}`;
       out += `,${newline()}`;
     } else if (ch === ":") {
       out += ": ";
-    } else if (!/\s/.test(ch)) {
+    } else if (!isJsonSpace(ch)) {
       out += ch;
     }
   }
@@ -6554,12 +6544,14 @@ var cellTemplate = $("cell-template");
 var rowActionTemplate = $("row-action-template");
 var cellPopAnchor = null;
 function showCellPop(e, text, col) {
-  let isJson = true;
-  try {
-    $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text)));
-  } catch (err) {
-    isJson = false;
-    warnBadJsonCell(col, err);
+  let isJson = rendersAsJson(col, text);
+  if (isJson) {
+    try {
+      $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text)));
+    } catch (err) {
+      isJson = false;
+      warnBadJsonCell(col, err);
+    }
   }
   $("cell-pre").hidden = isJson;
   $("cell-json").hidden = !isJson;

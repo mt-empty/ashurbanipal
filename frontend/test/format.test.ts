@@ -79,6 +79,13 @@ const JSON_CASES: [string, string, boolean][] = [
   ["varchar(255)", '{"a":1}', true],
   ["TEXT", "[1]", true],
   ["", "{}", true],
+  ["citext", '{"a":1}', true],
+  ["VARYING CHARACTER(20)", "[1]", true],
+  ["NVARCHAR2(40)", "[1]", true],
+  ["numeric", "[1.5,2.5]", false],
+  ["numrange", "[1.5,2.5]", false],
+  ["USER-DEFINED", "[1.5,2.5]", false],
+  ["_text", "{a,b}", false],
 ];
 
 for (const [type, raw, expected] of JSON_CASES) {
