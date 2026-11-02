@@ -48,9 +48,8 @@ export async function exerciseEveryRoute(page: Page): Promise<SeenRequest[]> {
   await page.locator('.common-values-btn[aria-label="common values for status"]').click();
   await commonValues;
   await page.keyboard.press("Escape");
-  const structure = page.waitForResponse(apiCall("/tables/structure"));
+  // The grid already asked for the structure when the table opened.
   await page.locator("#structure-btn").click();
-  await structure;
   await expect(page.locator("#structure-body")).toContainText("user_id");
   await page.keyboard.press("Escape");
   await page.locator("#tbody tr").first().locator(".record-btn").click();

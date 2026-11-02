@@ -77,3 +77,21 @@ test("clicking a cross-schema FK cell switches schema, table, and filters to the
     })
     .toBe(true);
 });
+
+test("a composite foreign key links each member cell with every column pair", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "inventory_counts");
+  const icon = page.locator('th[data-col="bin_code"] .key-icon');
+  await expect(icon).toHaveAttribute(
+    "title",
+    "part of foreign key (warehouse_code, bin_code) → inventory_locations(warehouse_code, bin_code)",
+  );
+  const row = page.locator("#tbody tr").first();
+  const warehouse = await row.locator('td[data-col="warehouse_code"] .cell-text').textContent();
+  const bin = await row.locator('td[data-col="bin_code"] .cell-text').textContent();
+  await row.locator('td[data-col="bin_code"] .fk-cell').click();
+
+  await waitForTable(page, "inventory_locations");
+  await expect(page.locator("#filter")).toHaveValue(`warehouse_code = ${warehouse} AND bin_code = ${bin}`);
+  await expect(page.locator("#tbody tr")).toHaveCount(1);
+});

@@ -2,7 +2,9 @@ import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
 import { applyScopeParams, scopeIdentity, tableInView } from "../core/state.js";
 import type { ReferencedByEntry, Row } from "../core/types.js";
+import { fkTarget } from "../lib/column-key.js";
 import { filterClauses } from "../lib/filter-dsl.js";
+import { createPromiseCache } from "../lib/promise-cache.js";
 import { navigateWithSeededFilter } from "./view-history.js";
 
 // ---- "referenced by": the incoming FKs that target the viewed table
@@ -14,11 +16,22 @@ import { navigateWithSeededFilter } from "./view-history.js";
 
 // §5.9 is catalog-only and row-independent — the answer is the same for
 // every row of a table — so the result is memoised per (source, schema,
-// table). Browsing a wide table row by row through the record dialog then
-// costs one fetch, not one per open. The key namespaces scope, so a
-// source/schema switch invalidates implicitly; only mid-session DDL goes
-// stale, which nothing else in the app guards against either.
-const cache = new Map<string, ReferencedByEntry[]>();
+// table). The key namespaces scope, so a source/schema switch invalidates
+// implicitly; the refresh button clears it for mid-session DDL.
+const cache = createPromiseCache<ReferencedByEntry[]>();
+
+export function clearReferencedByCache(): void {
+  cache.clear();
+}
+
+// The loader runs inside get(), so the key and applyScopeParams read the same scope.
+export function fetchReferencedBy(table: string): Promise<ReferencedByEntry[]> {
+  return cache.get(scopeIdentity(table), () => {
+    const params = new URLSearchParams({ table });
+    applyScopeParams(params);
+    return api<{ referenced_by: ReferencedByEntry[] }>(`/tables/referenced-by?${params}`).then((d) => d.referenced_by);
+  });
+}
 
 // Same staleness guard as cvRequestToken: a second call targeting the same
 // container before the first response lands must not overwrite the list
@@ -49,7 +62,7 @@ function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: R
   }
   container.replaceChildren(
     ...entries.map((entry) => {
-      const label = entry.schema ? `${entry.schema}.${entry.table}` : entry.table;
+      const label = fkTarget(entry);
       const btn = el("button");
       btn.type = "button";
       btn.className = "refby-entry";
@@ -81,23 +94,16 @@ export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: ()
   // Only offered in a table view: a join row has several tables.
   const table = tableInView();
   if (table === null) return;
-  // Key captured now, alongside applyScopeParams' read of the same scope,
-  // so a mid-flight scope switch can't file the result under the wrong key.
-  const key = scopeIdentity(table);
-  const hit = cache.get(key);
+  const hit = cache.peek(scopeIdentity(table));
   if (hit) {
     renderList(container, hit, row, dismiss);
     return;
   }
   container.replaceChildren(msg("loading…"));
-
-  const params = new URLSearchParams({ table });
-  applyScopeParams(params);
-  api<{ referenced_by: ReferencedByEntry[] }>(`/tables/referenced-by?${params}`)
-    .then((data) => {
-      cache.set(key, data.referenced_by);
+  fetchReferencedBy(table)
+    .then((entries) => {
       if (renderTokens.get(container) !== token) return;
-      renderList(container, data.referenced_by, row, dismiss);
+      renderList(container, entries, row, dismiss);
     })
     .catch((e) => {
       if (renderTokens.get(container) !== token) return;

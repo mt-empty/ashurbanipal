@@ -87,13 +87,9 @@ test("a jsonb cell round-trips through the URL as a shareable filter", async ({ 
   await expect(page.locator("#tbody tr")).toHaveCount(1);
 });
 
-test("clicking a cell too long for the DSL cap fails closed, sending no request", async ({ page }) => {
+test("a cell too long for the DSL cap offers no filter button, only copy", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "support_tickets");
-  const dataRequests: string[] = [];
-  page.on("request", (r) => {
-    if (r.url().includes("/tables/data")) dataRequests.push(r.url());
-  });
 
   // support_tickets.description is the one seeded column exceeding the
   // parser's 1024-byte limit; pick the longest one actually on this page.
@@ -102,16 +98,11 @@ test("clicking a cell too long for the DSL cap fails closed, sending no request"
     .evaluateAll((els) => els.map((e) => (e.textContent ?? "").length));
   const longest = Math.max(...lengths);
   expect(longest).toBeGreaterThan(1024); // guards against seed drift below the cap
-  const cell = page.locator('#tbody td[data-col="description"]').nth(lengths.indexOf(longest));
+  const long = page.locator('#tbody td[data-col="description"]').nth(lengths.indexOf(longest));
+  await expect(long.locator(".filter-eq")).toHaveCount(0);
+  await expect(long.locator(".copy")).toHaveCount(1);
 
-  await cell.hover();
-  await cell.locator(".filter-eq").click();
-
-  // Rejected client-side by parseFilterDsl, so nothing is fetched, nothing
-  // is applied, and the oversize value never reaches the URL.
-  await expect(page.locator("#error")).toHaveText(/filter too long \(max 1024 bytes\)/);
-  expect(dataRequests).toEqual([]);
-  expect(new URL(page.url()).searchParams.has("filter")).toBe(false);
-  // The previous view is intact, not wedged (R5).
-  await expect(page.locator("#tbody tr").first()).toBeVisible();
+  const shortest = Math.min(...lengths);
+  const short = page.locator('#tbody td[data-col="description"]').nth(lengths.indexOf(shortest));
+  await expect(short.locator(".filter-eq")).toHaveCount(1);
 });

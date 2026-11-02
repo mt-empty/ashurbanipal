@@ -1,5 +1,5 @@
 import { expect, type Route, test } from "./support/fixtures";
-import { apiCall, gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
+import { apiCall, gotoApp, problem, recordRequests, selectTable, waitForIdle } from "./support/helpers";
 
 // Seed shape (conformance/seed): orders has the partial index
 // orders_pending_idx and orders.user_id ON DELETE CASCADE; inventory_counts
@@ -7,10 +7,10 @@ import { apiCall, gotoApp, problem, selectTable, waitForIdle } from "./support/h
 
 const STRUCTURE = "**/api/tables/structure*";
 
+// The grid asks for the structure when a table opens, so the dialog usually finds it cached.
 async function openStructure(page: import("@playwright/test").Page) {
-  const response = page.waitForResponse(apiCall("/tables/structure"));
   await page.locator("#structure-btn").click();
-  await response;
+  await expect(page.locator("#structure-body")).not.toContainText("loading…");
 }
 
 test("structure shows a partial index and a non-default FK action", async ({ page }) => {
@@ -41,9 +41,9 @@ test("structure shows a composite FK as one entry with both column pairs", async
 test("a failed structure fetch is reported inside the dialog and leaves the grid and banner alone", async ({
   page,
 }) => {
+  await page.route(STRUCTURE, (route) => route.fulfill(problem(500, "catalog unavailable", "database_error")));
   await gotoApp(page);
   await selectTable(page, "orders");
-  await page.route(STRUCTURE, (route) => route.fulfill(problem(500, "catalog unavailable", "database_error")));
   await openStructure(page);
 
   await expect(page.locator("#structure-body")).toContainText("catalog unavailable");
@@ -51,32 +51,29 @@ test("a failed structure fetch is reported inside the dialog and leaves the grid
   await expect(page.locator("#tbody tr").first()).toBeVisible();
 });
 
-test("structure is cached per table: reopening is free, another table fetches again", async ({ page }) => {
+test("structure is cached per table: opening and reopening are free, another table fetches again", async ({ page }) => {
+  const orders = recordRequests(page, apiCall("/tables/structure", { table: "orders" }));
+  const products = recordRequests(page, apiCall("/tables/structure", { table: "products" }));
   await gotoApp(page);
   await selectTable(page, "orders");
-  let requests = 0;
-  await page.route(STRUCTURE, (route) => {
-    requests++;
-    return route.continue();
-  });
+  // The grid asks once when the table opens.
+  await expect.poll(() => orders.length).toBe(1);
 
   await openStructure(page);
   await page.keyboard.press("Escape");
   await expect(page.locator("#structure-dialog")).toBeHidden();
   await page.locator("#structure-btn").click();
   await expect(page.locator("#structure-body").getByText("orders_pending_idx")).toBeVisible();
-  expect(requests).toBe(1);
+  expect(orders.length).toBe(1);
 
   await page.keyboard.press("Escape");
-  await selectTable(page, "users");
+  await selectTable(page, "products");
   await openStructure(page);
-  expect(requests).toBe(2);
+  await expect(page.locator("#structure-title")).toHaveText("structure — public.products");
+  expect(products.length).toBe(1);
 });
 
 test("a slow response for a previous table never overwrites the current table's structure", async ({ page }) => {
-  await gotoApp(page);
-  await selectTable(page, "users");
-
   let held: Route | undefined;
   await page.route(STRUCTURE, (route) => {
     if (new URL(route.request().url()).searchParams.get("table") === "users") {
@@ -85,7 +82,10 @@ test("a slow response for a previous table never overwrites the current table's 
     }
     return route.continue();
   });
+  await gotoApp(page);
+  await selectTable(page, "users");
 
+  // The dialog shares the grid's request, still held.
   await page.locator("#structure-btn").click();
   await expect.poll(() => held !== undefined).toBe(true);
   await expect(page.locator("#structure-body")).toContainText("loading…");

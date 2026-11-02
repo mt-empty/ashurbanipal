@@ -44,7 +44,18 @@ for (const [query, table] of [
     const asked = recordRequests(page, isApiCall);
     await gotoApp(page, query);
     await waitForTable(page, table);
-    expect(asked.map(apiRoute).sort()).toEqual(["/schemas", "/sources", "/table-counts", "/tables", "/tables/data"]);
+    // The grid's catalog lookups (structure, referenced-by) go out beside the rows.
+    await expect
+      .poll(() => asked.map(apiRoute).sort())
+      .toEqual([
+        "/schemas",
+        "/sources",
+        "/table-counts",
+        "/tables",
+        "/tables/data",
+        "/tables/referenced-by",
+        "/tables/structure",
+      ]);
   });
 }
 
