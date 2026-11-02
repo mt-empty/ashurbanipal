@@ -178,6 +178,8 @@ should block on.
   stale-risk — its 400 is theirs to see, and it suppresses the sort retry
   rather than being silently discarded.
   Sort is never carried across tables — a column name is table-specific.
+  The ✕ after the header line's sort note clears it, back to the
+  database's own order, and forgets the remembered sort too.
   *(Derives from: recognition rather than recall.)*
 - **R12 — Schema is remembered per source.** The selected schema persists
   keyed by source name (like R11's sort keyed by table), so switching

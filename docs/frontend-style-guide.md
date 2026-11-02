@@ -30,7 +30,7 @@ src/
   bootstrap/   main, controller, reload, table-focus, boot-prefetch
   features/    grid, column-widths, sticky-header, filter-ui, filter-highlight,
                scope-select (source/schema selectors), table-chips, view-history, record-view,
-               referenced-by, structure, table-meta, siblings, auto-refresh, load-bar, view-notice,
+               referenced-by, structure, table-meta, column-parts, siblings, auto-refresh, load-bar, view-notice,
                api-reference, theme,
                join-dialog / join-form / join-sql / join-view / join-saved /
                join-catalog, dropdown (the join builder), suggest-list, overlay-highlight

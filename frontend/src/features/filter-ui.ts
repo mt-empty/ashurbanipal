@@ -11,7 +11,7 @@ import {
   state,
   tableInView,
 } from "../core/state.js";
-import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
+import type { CommonValue, FilterCondition } from "../core/types.js";
 import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
 import { columnKey } from "./join-view.js";
@@ -35,8 +35,7 @@ export function submitFilter(text: string): void {
   loadData();
 }
 
-export function applyFilterClause(column: string, op: FilterOp, value?: string): void {
-  const clause = filterClause(column, op, value);
+export function applyFilter(clause: string): void {
   $<HTMLInputElement>("filter").value = clause;
   submitFilter(clause);
 }
@@ -302,7 +301,7 @@ function renderCommonValues(values: CommonValue[], column: string): void {
       btn.append(val, freq);
       btn.onclick = () => {
         $("cv-pop").hidePopover();
-        applyFilterClause(column, "=", v.value);
+        applyFilter(filterClause(column, "=", v.value));
       };
       return btn;
     }),

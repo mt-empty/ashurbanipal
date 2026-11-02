@@ -1,6 +1,6 @@
 import { el } from "../core/dom.js";
 import type { KeyDescription } from "../lib/column-key.js";
-import { keyIcon } from "./table-meta.js";
+import { keyIcon } from "./column-parts.js";
 
 export interface Suggestion {
   label: string;

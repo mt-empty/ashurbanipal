@@ -171,3 +171,16 @@ export function uiState(page: Page) {
     return raw ? JSON.parse(raw) : null;
   });
 }
+
+/** One field of the open record dialog, by column name: key icon, name cell, value, and = and copy buttons. */
+export function recordField(page: Page, column: string) {
+  const part = (selector: string) => page.locator(`#record-dl ${selector}[data-col="${column}"]`);
+  const acts = part(".record-acts");
+  return {
+    key: part(".key-icon"),
+    dt: part("dt"),
+    dd: part("dd"),
+    eq: acts.locator(".filter-eq"),
+    copy: acts.locator(".copy"),
+  };
+}

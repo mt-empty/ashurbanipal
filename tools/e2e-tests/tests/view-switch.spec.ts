@@ -156,6 +156,7 @@ test("a locked grid's all-hidden Show all cannot change the view that replaced i
   await expect(page.locator("#data-table")).toHaveAttribute("data-stale", "");
   await expect(page.locator("#all-hidden-show")).toBeDisabled();
   await expect(page.locator("#sort-note-show")).toBeDisabled();
+  await expect(page.locator("#sort-note-clear")).toBeDisabled();
 });
 
 test("a cross-schema FK cell opens its table from the first page", async ({ page }) => {

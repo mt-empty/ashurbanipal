@@ -15,6 +15,24 @@ test("a table keeps the sort last chosen on it when you leave and come back", as
   await expect(page.locator('th[data-col="price"]')).toHaveAttribute("aria-sort", "ascending");
 });
 
+test("the sort note's ✕ clears the sort, and the table stays unsorted when you come back", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "products");
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
+  await waitForIdle(page);
+  await expect(page.locator("#sort-note")).toBeVisible();
+
+  await page.locator("#sort-note-clear").click();
+  await waitForIdle(page);
+  await expect(page.locator("#sort-note")).toBeHidden();
+  await expect(page.locator('thead th[data-col]:not([aria-sort="none"])')).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("sort")).toBeNull();
+
+  await selectTable(page, "users");
+  await selectTable(page, "products");
+  await expect(page.locator('thead th[data-col]:not([aria-sort="none"])')).toHaveCount(0);
+});
+
 test("a sort stored under a bare table name, from before keys were scoped, is dropped", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem(

@@ -108,7 +108,11 @@ Two components, same as the original concept:
     more than avoiding the overlap.
   - *Record / vertical view* — a per-row button opens that row as a stacked
     `column: value` list, reusing the same `<dialog>` chrome as the payload
-    viewer. Per-field copy buttons plus a whole-row-as-JSON copy button.
+    viewer. Each field shows the grid header's key icon and type chip, its
+    comment on a muted line, and a foreign key value as a link that closes
+    the dialog; `=` and copy sit beside the value, plus whole-row JSON and
+    INSERT copies. Previous / next step through the page's rows and stop
+    at its ends rather than fetching another page.
   - *API reference for AI agents* — a fixed "?" button in the corner opens
     a native `<dialog>` (same chrome as the payload viewer) showing a
     static, hand-maintained JSON document describing every route in §4
@@ -193,7 +197,8 @@ Two components, same as the original concept:
     table, named and coloured like its band), each with *all* / *none*.
     The toolbar shows the hidden count, the header line reads "7 of 9
     columns" and names the sort column (tagged in the popover too), with
-    a *show it* button while that column is hidden, and hiding every
+    a *show it* button while that column is hidden and a ✕ that clears
+    the sort (and the table's remembered one, R11), and hiding every
     column leaves a message with *Show all* in place of an empty grid.
     A join shows each column's own name; the band above it names the
     table, and `alias.column` is the title. Hidden names a table no longer

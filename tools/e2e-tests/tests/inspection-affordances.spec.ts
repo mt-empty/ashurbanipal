@@ -1,5 +1,5 @@
 import { expect, test } from "./support/fixtures";
-import { applyFilter, dataWith, gotoApp, selectTable } from "./support/helpers";
+import { applyFilter, dataWith, gotoApp, recordField, selectTable } from "./support/helpers";
 
 test.use({ permissions: ["clipboard-read", "clipboard-write"] });
 
@@ -65,13 +65,11 @@ test("record view lists every column as dt/dd, and per-field copy works", async 
 
   await expect(page.locator("#record-dialog")).toBeVisible();
   const columnNames = ["id", "user_id", "status", "total_cents", "discount_pct", "tags", "line_items", "created_at"];
-  await expect(page.locator("#record-dl dt")).toHaveText(columnNames);
+  await expect(page.locator("#record-dl .record-name")).toHaveText(columnNames);
 
-  const statusDt = page.locator("#record-dl dt", { hasText: /^status$/ });
-  const statusDd = statusDt.locator("xpath=following-sibling::dd[1]");
-  await expect(statusDd).toHaveText(statusValue!);
-  const statusCopyBtn = statusDd.locator("xpath=following-sibling::button[1]");
-  await statusCopyBtn.click();
+  const status = recordField(page, "status");
+  await expect(status.dd).toHaveText(statusValue!);
+  await status.copy.click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(statusValue);
 });
 
@@ -112,7 +110,7 @@ test("whole-row JSON nests jsonb but keeps a Postgres array as its text, with no
 
   await firstRow.locator(".record-btn").click();
   await expect(page.locator("#record-dialog")).toBeVisible();
-  const tagsDd = page.locator("#record-dl dt", { hasText: /^tags$/ }).locator("xpath=following-sibling::dd[1]");
+  const tagsDd = recordField(page, "tags").dd;
   await expect(tagsDd).not.toHaveClass(/json-tree/);
   await expect(tagsDd).toHaveText(tagsValue!);
 
@@ -177,4 +175,83 @@ test("record view closes via Escape", async ({ page }) => {
   await expect(page.locator("#record-dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator("#record-dialog")).toBeHidden();
+});
+
+test("record view shows each field's key icon, type and comment", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#tbody tr").first().locator(".record-btn").click();
+  await expect(page.locator("#record-dialog")).toBeVisible();
+  await expect(recordField(page, "id").key).toHaveText("🔑");
+  await expect(recordField(page, "user_id").key).toHaveText("🔗");
+  await expect(recordField(page, "status").key).toHaveText("");
+  await expect(recordField(page, "id").dt.locator("code.col-type")).toHaveText("uuid");
+  await expect(recordField(page, "user_id").dd.locator(".record-note")).toHaveText(
+    "The user who placed this order. · references users.id",
+  );
+  await expect(recordField(page, "status").dd.locator(".record-note")).toHaveCount(0);
+});
+
+test("a foreign key value in the record view closes the dialog and opens the referenced row", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const userId = await page.locator("#tbody tr").first().locator('td[data-col="user_id"] .cell-text').textContent();
+  await page.locator("#tbody tr").first().locator(".record-btn").click();
+  await recordField(page, "user_id").dd.locator(".record-link").click();
+  await expect(page.locator("#record-dialog")).toBeHidden();
+  await page.locator("#current").getByText("users", { exact: true }).waitFor();
+  await expect(page.locator("#filter")).toHaveValue(`id = ${userId}`);
+});
+
+test("a composite foreign key value in the record view filters on every pair", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "inventory_counts");
+  const row = page.locator("#tbody tr").first();
+  const warehouse = await row.locator('td[data-col="warehouse_code"] .cell-text').textContent();
+  const bin = await row.locator('td[data-col="bin_code"] .cell-text').textContent();
+  await row.locator(".record-btn").click();
+  await recordField(page, "bin_code").dd.locator(".record-link").click();
+  await page.locator("#current").getByText("inventory_locations", { exact: true }).waitFor();
+  await expect(page.locator("#filter")).toHaveValue(`warehouse_code = ${warehouse} AND bin_code = ${bin}`);
+});
+
+test("= in the record view closes the dialog and filters on that value", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const status = await page.locator("#tbody tr").first().locator('td[data-col="status"] .cell-text').textContent();
+  await page.locator("#tbody tr").first().locator(".record-btn").click();
+  await recordField(page, "status").eq.click();
+  await expect(page.locator("#record-dialog")).toBeHidden();
+  await expect(page.locator("#filter")).toHaveValue(`status = ${status}`);
+});
+
+test("previous and next step through the page's rows and stop at its ends", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const rows = page.locator("#tbody tr");
+  const count = await rows.count();
+  const idOf = (i: number) => rows.nth(i).locator('td[data-col="id"] .cell-text').textContent();
+  await rows.first().locator(".record-btn").click();
+  await expect(page.locator("#record-pos")).toHaveText(`1 of ${count}`);
+  await expect(page.locator("#record-prev")).toBeDisabled();
+
+  await page.locator("#record-next").click();
+  await expect(page.locator("#record-pos")).toHaveText(`2 of ${count}`);
+  await expect(recordField(page, "id").dd).toHaveText((await idOf(1))!);
+  await page.locator("#record-prev").click();
+  await expect(recordField(page, "id").dd).toHaveText((await idOf(0))!);
+  await page.keyboard.press("Escape");
+
+  await rows.last().locator(".record-btn").click();
+  await expect(page.locator("#record-pos")).toHaveText(`${count} of ${count}`);
+  await expect(page.locator("#record-next")).toBeDisabled();
+  await expect(page.locator("#record-prev")).toBeEnabled();
+
+  // Reaching an end from the keyboard leaves focus on the other button, not lost.
+  await page.locator("#record-prev").focus();
+  await page.keyboard.press("Enter");
+  await page.locator("#record-next").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#record-next")).toBeDisabled();
+  await expect(page.locator("#record-prev")).toBeFocused();
 });

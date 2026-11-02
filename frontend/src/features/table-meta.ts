@@ -1,4 +1,3 @@
-import { el } from "../core/dom.js";
 import { scopeIdentity } from "../core/state.js";
 import type { Column, ConstraintFk, ReferencedByEntry, StructureResponse } from "../core/types.js";
 import { type KeyDescription, keyDescription } from "../lib/column-key.js";
@@ -23,15 +22,6 @@ const metas = new Map<string, { meta: TableMeta; shape: string }>();
 
 export function tableMeta(table: string | null): TableMeta | undefined {
   return table === null ? undefined : metas.get(scopeIdentity(table))?.meta;
-}
-
-// A column's key icon; null keeps an empty slot so names line up. Decorative:
-// callers put the key's text in a title or label.
-export function keyIcon(key: KeyDescription | null): HTMLElement {
-  const icon = el("span", "key-icon", key?.icon ?? "");
-  icon.setAttribute("aria-hidden", "true");
-  if (key) icon.title = key.label;
-  return icon;
 }
 
 export function columnKeyOf(col: Column, meta: TableMeta | undefined): KeyDescription | null {

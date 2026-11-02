@@ -1,10 +1,10 @@
 import { loadData } from "../bootstrap/reload.js";
 import { tableEl } from "../bootstrap/table-focus.js";
 import { $, copyText, el, qs } from "../core/dom.js";
-import { hiddenColumns, joinInView, rememberSort, setHiddenColumns, state, tableInView } from "../core/state.js";
+import { hiddenColumns, joinInView, setHiddenColumns, setSort, state, tableInView } from "../core/state.js";
 import type { Column, Row, View, ViewData } from "../core/types.js";
-import { fkTarget, type KeyDescription } from "../lib/column-key.js";
-import { filterClause, filterClauses, filterTooLong } from "../lib/filter-dsl.js";
+import type { KeyDescription } from "../lib/column-key.js";
+import { eqClause, filterClause } from "../lib/filter-dsl.js";
 import {
   APPROX_COUNT_TITLE,
   formatApproxCount,
@@ -12,17 +12,17 @@ import {
   rendersAsJson,
   warnBadJsonCell,
 } from "../lib/format.js";
-import { tableLabel } from "../lib/join-def.js";
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
+import { eqButton, fkLink, keyIcon, typeChip } from "./column-parts.js";
 import { columnMinWidth } from "./column-widths.js";
-import { applyFilterClause, commonValuesButton } from "./filter-ui.js";
+import { applyFilter, commonValuesButton } from "./filter-ui.js";
 import { markGridDrawn } from "./grid-lock.js";
 import { switchToLeftJoin } from "./join-dialog.js";
-import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands } from "./join-view.js";
+import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands, tableGroups } from "./join-view.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
-import { columnKeyOf, keyIcon, type TableMeta, tableMeta } from "./table-meta.js";
+import { columnKeyOf, type TableMeta, tableMeta } from "./table-meta.js";
 import { navigateWithSeededFilter } from "./view-history.js";
 
 // The columns and view the grid last rendered; the columns menu, the counts,
@@ -68,11 +68,7 @@ export function renderHeader(columns: Column[]): void {
     if (hidden.has(col.name)) th.classList.add("col-hidden");
     // Also the sort key: sort and filter name a column the same way.
     const fullName = columnKey(col);
-    const label = `${fullName} (${col.type})`;
-    // The visible header renders the engine-native type spelling as inline
-    // code; `label` stays the plain-text form for the aria-label only.
-    const typeCode = el("code", "col-type", col.type);
-    typeCode.title = col.type; // the chip ellipsizes a long spelling (R8)
+    const label = `${fullName} (${col.type})`; // the aria-label's plain-text form
     // Name, ▾ and the sort arrow share one line; the type chip sits under it.
     const head = el("span", "th-name");
     // Capped in CSS (a 63-char identifier would otherwise set the column's
@@ -96,16 +92,13 @@ export function renderHeader(columns: Column[]): void {
       fullName === state.sort ? (state.order === "desc" ? "descending" : "ascending") : "none",
     );
     th.onclick = () => {
-      state.order = state.sort === fullName && state.order === "asc" ? "desc" : "asc";
-      state.sort = fullName;
-      state.offset = 0;
-      rememberSort();
+      setSort(fullName, state.sort === fullName && state.order === "asc" ? "desc" : "asc");
       loadData({ resetScroll: false });
     };
     // A column unique on its own has no common values to show.
     const unique = (col.key === "pk" && singlePk) || meta?.uniqueColumns.has(col.name);
     if (table !== null && !unique) head.appendChild(commonValuesButton(table, col.name));
-    th.append(head, typeCode);
+    th.append(head, typeChip(col));
     tr.appendChild(th);
   }
   const bands = buildBands(columns, [...tr.cells].slice(1));
@@ -174,15 +167,14 @@ function buildCell(col: Column, row: Row, { hidden, meta }: CellContext): HTMLTa
     td.appendChild(span);
     // Nothing to copy or expand for a null cell, but "filter by this
     // value" is still meaningful (IS NULL).
-    const filterBtn = el("button", "filter-eq");
-    filterBtn.setAttribute("aria-label", "filter by null");
-    filterBtn.textContent = "=";
-    filterBtn.onclick = (e) => {
-      e.stopPropagation();
-      applyFilterClause(columnKey(col), "IS NULL");
-    };
+    const clause = filterClause(columnKey(col), "IS NULL");
     const actions = el("span", "cell-actions");
-    actions.appendChild(filterBtn);
+    actions.appendChild(
+      eqButton(true, (e) => {
+        e.stopPropagation();
+        applyFilter(clause);
+      }),
+    );
     td.appendChild(actions);
     return td;
   }
@@ -194,29 +186,19 @@ function buildCell(col: Column, row: Row, { hidden, meta }: CellContext): HTMLTa
     e.stopPropagation();
     copyText(raw, btn);
   };
-  // The click replaces the whole filter, so the clause alone must fit the DSL's limit.
-  if (filterTooLong(raw) || filterTooLong(filterClause(columnKey(col), "=", raw))) filterBtn.remove();
+  const eq = eqClause(columnKey(col), raw);
+  if (eq === null) filterBtn.remove();
   else {
     filterBtn.onclick = (e) => {
       e.stopPropagation();
-      applyFilterClause(columnKey(col), "=", raw);
+      applyFilter(eq);
     };
   }
-  const compositeFk = meta?.compositeFkOf.get(col.name);
-  // False when a member is null: no filter can name that row.
-  const compositeClause =
-    compositeFk?.columns.every((c) => row[c.from] != null) &&
-    filterClauses(compositeFk.columns.map((c) => ({ column: c.to, value: row[c.from] as string })));
-  if (col.references) {
-    const references = col.references;
+  const link = fkLink(col, raw, row, meta);
+  if (link) {
     cellText.classList.add("fk-cell");
-    cellText.title = `go to ${fkTarget(references)}.${references.column} = ${raw}`;
-    cellText.onclick = () =>
-      navigateWithSeededFilter(references.table, references.schema, filterClause(references.column, "=", raw));
-  } else if (compositeFk && compositeClause && !filterTooLong(compositeClause)) {
-    cellText.classList.add("fk-cell");
-    cellText.title = `go to ${fkTarget(compositeFk)} where ${compositeClause}`;
-    cellText.onclick = () => navigateWithSeededFilter(compositeFk.table, compositeFk.schema, compositeClause);
+    cellText.title = link.title;
+    cellText.onclick = () => navigateWithSeededFilter(link.table, link.schema, link.clause);
   } else if (col.key === "pk" && meta !== undefined && meta.referrers !== 0) {
     // What points *at* this row, once the table is known to have referrers (or
     // the lookup failed); FK-bearing PKs and no-PK tables use the record dialog.
@@ -323,6 +305,11 @@ function syncColumnChrome(): void {
   if (emptyCell) emptyCell.colSpan = shown + 1;
 }
 
+// Back to the database's own order; the table's remembered sort goes too (R11).
+$("sort-note-clear").onclick = () => {
+  setSort(null);
+  loadData({ resetScroll: false });
+};
 $("sort-note-show").onclick = () => {
   const sorted = sortedColumn();
   if (sorted) setColumnHidden(sorted.name, false);
@@ -339,9 +326,7 @@ interface ColumnGroup {
 // per table even when the select list alternates); a table view is one group.
 function columnGroups(columns: Column[]): ColumnGroup[] {
   if (viewInGrid?.kind !== "join") return [{ label: viewInGrid?.table ?? "", band: 0, columns }];
-  return viewInGrid.def.tables
-    .map((t, i) => ({ label: tableLabel(t), band: i, columns: columns.filter((c) => c.join === i) }))
-    .filter((g) => g.columns.length > 0);
+  return tableGroups(columns, viewInGrid.def).map((g) => ({ label: g.label, band: g.index, columns: g.columns }));
 }
 
 function groupButton(action: "all" | "none", label: string, names: ReadonlySet<string>): HTMLButtonElement {
@@ -411,10 +396,10 @@ export function renderColumnMenu(): void {
   syncColumnChrome();
 }
 
-function buildRowActionCell(columns: Column[], row: Row): HTMLTableCellElement {
+function buildRowActionCell(columns: Column[], rows: Row[], index: number): HTMLTableCellElement {
   const td = (rowActionTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement;
   const def = viewInGrid?.kind === "join" ? viewInGrid.def : undefined;
-  qs<HTMLElement>(td, ".record-btn").onclick = () => openRecordView(columns, row, def);
+  qs<HTMLElement>(td, ".record-btn").onclick = () => openRecordView(columns, rows, index, def);
   return td;
 }
 
@@ -432,10 +417,10 @@ export function renderRows(data: ViewData, newRowKeys?: Set<string>, pkNames: st
   const ctx: CellContext = { hidden, meta: tableMeta(tableInView()) };
   const tbody = $("tbody");
   tbody.replaceChildren(
-    ...data.rows.map((row) => {
+    ...data.rows.map((row, index) => {
       const tr = el("tr");
       if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
-      tr.appendChild(buildRowActionCell(data.columns, row));
+      tr.appendChild(buildRowActionCell(data.columns, data.rows, index));
       for (const col of data.columns) {
         tr.appendChild(buildCell(col, row, ctx));
       }

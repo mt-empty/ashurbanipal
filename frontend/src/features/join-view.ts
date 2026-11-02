@@ -14,6 +14,14 @@ export function columnKey(col: Column, def: JoinDef | undefined = joinInView()?.
   return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
 }
 
+// A join's columns under the table each came from, in table order: one group
+// per table even when the select list alternates tables.
+export function tableGroups(columns: Column[], def: JoinDef): { label: string; index: number; columns: Column[] }[] {
+  return def.tables
+    .map((t, index) => ({ label: tableLabel(t), index, columns: columns.filter((c) => c.join === index) }))
+    .filter((g) => g.columns.length > 0);
+}
+
 // What a column is called on screen: its own name, since the band, menu
 // heading or record group above it already names the table. The server's
 // label exists only to keep `name` unique and is never shown.
