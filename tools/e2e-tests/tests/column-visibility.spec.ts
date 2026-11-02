@@ -33,11 +33,22 @@ test("hiding a column removes it from the grid and updates the hidden-count indi
   await expect(page.locator('th[data-col="sku"]')).not.toHaveClass(/col-hidden/);
 });
 
+test("each menu row shows the column's key icon and type", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#columns-btn").click();
+  await expect(menuItem(page, "id").locator(".key-icon")).toHaveText("🔑");
+  await expect(menuItem(page, "user_id").locator(".key-icon")).toHaveText("🔗");
+  await expect(menuItem(page, "user_id").locator("input")).toHaveAttribute("aria-label", /^user_id, foreign key/);
+  await expect(menuItem(page, "status").locator(".key-icon")).toHaveText("");
+  await expect(menuItem(page, "total_cents").locator(".cols-type")).toHaveText("integer");
+});
+
 test("hiding a column is scoped per-table", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "products");
   await page.locator("#columns-btn").click();
-  await page.locator("#columns-pop-list label", { hasText: "id" }).locator("input").uncheck();
+  await menuItem(page, "id").locator("input").uncheck();
   await expect(page.locator('th[data-col="id"]')).toHaveClass(/col-hidden/);
 
   await selectTable(page, "orders");
@@ -142,8 +153,8 @@ test("a join shows plain column names and groups the menu by table", async ({ pa
   await page.locator("#columns-btn").click();
   await expect(page.locator("#columns-pop-list .cols-pill")).toHaveText(["orders o", "users u"]);
   const first = page.locator('.cols-group[data-band="1"] label').first();
-  await expect(first).toHaveText("id");
-  await expect(first.locator("input")).toHaveAttribute("aria-label", "u.id");
+  await expect(first.locator(".cols-name")).toHaveText("id");
+  await expect(first.locator("input")).toHaveAttribute("aria-label", "u.id, primary key");
 });
 
 test("none and all on a join heading hide and show that table's columns and band", async ({ page }) => {

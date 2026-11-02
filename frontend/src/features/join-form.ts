@@ -284,7 +284,16 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
       const h = el("h3");
       const title = el("span", "j-card-name", nameAt(pos));
       const tally = el("span", undefined, `${count} of ${cols.length}`);
-      h.append(title, tally);
+      const pick = (all: boolean) => () => {
+        draft.columns[pos] = all ? null : [];
+        changed();
+      };
+      h.append(
+        title,
+        tally,
+        textButton("all", "cols-action", `select all ${nameAt(pos)} columns`, pick(true)),
+        textButton("none", "cols-action", `select no ${nameAt(pos)} columns`, pick(false)),
+      );
       card.appendChild(h);
       const boxes: HTMLInputElement[] = [];
       for (const c of cols) {

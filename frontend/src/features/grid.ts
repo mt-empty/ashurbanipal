@@ -3,7 +3,8 @@ import { tableEl } from "../bootstrap/table-focus.js";
 import { $, copyText, el, qs } from "../core/dom.js";
 import { hiddenColumns, joinInView, rememberSort, setHiddenColumns, state, tableInView } from "../core/state.js";
 import type { Column, Row, View, ViewData } from "../core/types.js";
-import { filterClause } from "../lib/filter-dsl.js";
+import { fkTarget, type KeyDescription, keyDescription } from "../lib/column-key.js";
+import { filterClause, filterClauses, filterTooLong } from "../lib/filter-dsl.js";
 import {
   APPROX_COUNT_TITLE,
   formatApproxCount,
@@ -15,12 +16,13 @@ import { tableLabel } from "../lib/join-def.js";
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { columnMinWidth } from "./column-widths.js";
-import { applyFilterClause, showCommonValues } from "./filter-ui.js";
+import { applyFilterClause, hasNoCommonValues, showCommonValues } from "./filter-ui.js";
 import { markGridDrawn } from "./grid-lock.js";
 import { switchToLeftJoin } from "./join-dialog.js";
 import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands } from "./join-view.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
+import { type TableMeta, tableMeta } from "./table-meta.js";
 import { navigateWithSeededFilter } from "./view-history.js";
 
 // A focusable control nested in the sortable th — stopPropagation so
@@ -31,6 +33,10 @@ function commonValuesButton(table: string, column: string): HTMLButtonElement {
   btn.className = "common-values-btn";
   btn.setAttribute("aria-label", `common values for ${column}`);
   btn.textContent = "▾";
+  if (hasNoCommonValues(table, column)) {
+    btn.classList.add("cv-none");
+    btn.title = "no common values in the statistics";
+  }
   btn.onclick = (e) => {
     e.stopPropagation();
     showCommonValues(e, table, column);
@@ -53,6 +59,14 @@ interface ColumnCounts {
 
 let counts: ColumnCounts = { hidden: new Set(), shown: 0, total: 0 };
 
+// Decorative: the header's aria-label and the menu's checkbox label carry the text.
+function keyIcon(key: KeyDescription): HTMLElement {
+  const icon = el("span", "key-icon", key.icon);
+  icon.setAttribute("aria-hidden", "true");
+  icon.title = key.label;
+  return icon;
+}
+
 function countColumns(): void {
   const hidden = new Set(hiddenColumns());
   counts = { hidden, shown: columnsInView.filter((c) => !hidden.has(c.name)).length, total: columnsInView.length };
@@ -66,6 +80,9 @@ export function renderHeader(columns: Column[]): void {
   const { hidden } = counts;
   // Common values are a per-table query; a join column has no single table to ask.
   const table = tableInView();
+  const meta = table === null ? undefined : tableMeta(table);
+  // Every member of a composite primary key reports key "pk".
+  const singlePk = columns.filter((c) => c.key === "pk").length === 1;
   const tr = el("tr");
   const actionsTh = el("th", "row-actions");
   tr.appendChild(actionsTh);
@@ -91,24 +108,12 @@ export function renderHeader(columns: Column[]): void {
     const nameEl = el("button", "col-name sort-btn", displayName(col));
     nameEl.type = "button";
     nameEl.title = col.comment ? `${fullName} — ${col.comment}` : fullName;
-    if (col.key === "pk" || col.key === "fk") {
-      // A column can be its own table's PK and an FK at once (1:1 detail
-      // table shape) — key still reports "pk", but references is populated
-      // too (spec/protocol.md §5.4.1), so the label surfaces both facts.
-      const keyLabel =
-        col.key === "pk"
-          ? col.references
-            ? `primary key, also references ${col.references.table}.${col.references.column}`
-            : "primary key"
-          : `foreign key, references ${col.references.table}.${col.references.column}`;
-      const icon = el("span", "key-icon");
-      icon.setAttribute("aria-hidden", "true");
-      icon.title = keyLabel;
-      icon.textContent = col.key === "pk" ? "🔑" : "🔗";
-      head.append(icon, nameEl, " ");
+    const key = keyDescription(col, meta?.compositeFkOf.get(col.name));
+    if (key) {
+      head.append(keyIcon(key), nameEl, " ");
       // Layers onto the accessible name rather than replacing the key
       // description — the icon keeps its own `title` above.
-      th.setAttribute("aria-label", col.comment ? `${label}, ${keyLabel}, ${col.comment}` : `${label}, ${keyLabel}`);
+      th.setAttribute("aria-label", col.comment ? `${label}, ${key.label}, ${col.comment}` : `${label}, ${key.label}`);
     } else {
       head.append(nameEl, " ");
     }
@@ -124,7 +129,9 @@ export function renderHeader(columns: Column[]): void {
       rememberSort();
       loadData({ resetScroll: false });
     };
-    if (table !== null) head.appendChild(commonValuesButton(table, col.name));
+    // A column unique on its own has no common values to show.
+    const unique = (col.key === "pk" && singlePk) || meta?.uniqueColumns.has(col.name);
+    if (table !== null && !unique) head.appendChild(commonValuesButton(table, col.name));
     th.append(head, typeCode);
     tr.appendChild(th);
   }
@@ -172,9 +179,15 @@ function showCellPop(e: MouseEvent, text: string, col: Column): void {
   $("cell-pop").showPopover();
 }
 
+interface CellContext {
+  hidden: Set<string>;
+  table: string | null;
+  meta: TableMeta | undefined;
+}
+
 // A real <button> as the click target so it's keyboard-focusable and
 // Enter/Space-activatable, matching the copy button one element over.
-function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellElement {
+function buildCell(col: Column, row: Row, { hidden, table, meta }: CellContext): HTMLTableCellElement {
   const raw = row[col.name];
   const isNull = raw == null;
   // A null cell has no copy/expand affordance to clone, so it builds a bare
@@ -209,25 +222,38 @@ function buildCell(col: Column, row: Row, hidden: Set<string>): HTMLTableCellEle
     e.stopPropagation();
     copyText(raw, btn);
   };
-  filterBtn.onclick = (e) => {
-    e.stopPropagation();
-    applyFilterClause(columnKey(col), "=", raw);
-  };
+  // The click replaces the whole filter, so the clause alone must fit the DSL's limit.
+  const eqClause = filterClause(columnKey(col), "=", raw);
+  if (filterTooLong(eqClause)) filterBtn.remove();
+  else {
+    filterBtn.onclick = (e) => {
+      e.stopPropagation();
+      applyFilterClause(columnKey(col), "=", raw);
+    };
+  }
+  const compositeFk = meta?.compositeFkOf.get(col.name);
   if (col.references) {
     const references = col.references;
     cellText.classList.add("fk-cell");
-    const refLabel = references.schema ? `${references.schema}.${references.table}` : references.table;
-    cellText.title = `go to ${refLabel}.${references.column} = ${raw}`;
+    cellText.title = `go to ${fkTarget(references)}.${references.column} = ${raw}`;
     cellText.onclick = () =>
       navigateWithSeededFilter(references.table, references.schema, filterClause(references.column, "=", raw));
-  } else if (col.key === "pk" && tableInView() !== null) {
+  } else if (compositeFk?.columns.every((c) => row[c.from] != null)) {
+    const pairs = compositeFk.columns.map((c) => ({ column: c.to, value: row[c.from] as string }));
+    cellText.classList.add("fk-cell");
+    cellText.title = `go to ${fkTarget(compositeFk)} where ${pairs.map((p) => `${p.column} = ${p.value}`).join(" AND ")}`;
+    cellText.onclick = () => navigateWithSeededFilter(compositeFk.table, compositeFk.schema, filterClauses(pairs));
+  } else if (col.key === "pk" && table !== null && meta !== undefined && meta.referrers !== 0) {
     // Reverse of the FK-cell click: what points *at* this row. A pk+fk
     // column took the branch above; those rows, and no-PK tables, reach the
-    // same list through the record dialog instead.
+    // same list through the record dialog instead. Offered only once the
+    // table is known to have referrers, or the lookup failed.
     cellText.classList.add("pk-cell");
     // Embeds `raw` so a truncated PK stays readable via hover, same as the
     // fk-cell title above — the overflow-expand skip below relies on it.
-    cellText.title = `${raw} — what references this row`;
+    const n = meta.referrers;
+    cellText.title =
+      n === null ? `${raw} — what references this row` : `${raw} — referenced by ${n} ${n === 1 ? "table" : "tables"}`;
     cellText.onclick = (e) => openReferencedByPopover(e, row);
   } else {
     const jsonAtRender = rendersAsJson(col, raw);
@@ -357,7 +383,7 @@ function groupButton(action: "all" | "none", label: string, names: ReadonlySet<s
   return btn;
 }
 
-function buildMenuItem(col: Column): HTMLLabelElement {
+function buildMenuItem(col: Column, key: KeyDescription | null): HTMLLabelElement {
   const label = el("label");
   label.dataset.name = col.name;
   const input = el("input");
@@ -365,14 +391,18 @@ function buildMenuItem(col: Column): HTMLLabelElement {
   input.onchange = () => setColumnHidden(col.name, !input.checked);
   const fullName = columnKey(col);
   // In a join the visible name drops the table, which the heading carries.
-  if (fullName !== displayName(col)) input.setAttribute("aria-label", fullName);
+  if (fullName !== displayName(col) || key)
+    input.setAttribute("aria-label", key ? `${fullName}, ${key.label}` : fullName);
   const text = el("span", "cols-name", displayName(col));
   text.title = fullName;
-  label.append(input, text, el("span", "cols-sorted"));
+  const type = el("span", "cols-type", col.type);
+  type.title = col.type;
+  // The key slot stays even when empty, so every row's name starts in one column.
+  label.append(input, key ? keyIcon(key) : el("span", "key-icon"), text, type, el("span", "cols-sorted"));
   return label;
 }
 
-function buildMenuGroup(group: ColumnGroup): HTMLElement {
+function buildMenuGroup(group: ColumnGroup, keys: Map<string, KeyDescription | null>): HTMLElement {
   const box = el("div", "cols-group");
   box.dataset.band = String(group.band);
   const head = el("div", "cols-head");
@@ -385,7 +415,7 @@ function buildMenuGroup(group: ColumnGroup): HTMLElement {
     groupButton("all", group.label, names),
     groupButton("none", group.label, names),
   );
-  box.append(head, ...group.columns.map(buildMenuItem));
+  box.append(head, ...group.columns.map((c) => buildMenuItem(c, keys.get(c.name) ?? null)));
   return box;
 }
 
@@ -396,10 +426,16 @@ let menuShape = "";
 
 export function renderColumnMenu(): void {
   const groups = columnGroups(columnsInView);
-  const shape = JSON.stringify(groups.map((g) => [g.band, g.label, g.columns.map((c) => [c.name, columnKey(c)])]));
+  const table = tableInView();
+  const meta = table === null ? undefined : tableMeta(table);
+  const keys = new Map(columnsInView.map((c) => [c.name, keyDescription(c, meta?.compositeFkOf.get(c.name))]));
+  const shape = JSON.stringify([
+    groups.map((g) => [g.band, g.label, g.columns.map((c) => [c.name, columnKey(c), c.type])]),
+    [...keys],
+  ]);
   if (shape !== menuShape) {
     menuShape = shape;
-    $("columns-pop-list").replaceChildren(...groups.map(buildMenuGroup));
+    $("columns-pop-list").replaceChildren(...groups.map((g) => buildMenuGroup(g, keys)));
   }
   syncColumnChrome();
 }
@@ -422,6 +458,8 @@ export function renderRows(data: ViewData, newRowKeys?: Set<string>, pkNames: st
     renderEmptyState(shown + 1);
     return;
   }
+  const table = tableInView();
+  const ctx: CellContext = { hidden, table, meta: table === null ? undefined : tableMeta(table) };
   const tbody = $("tbody");
   tbody.replaceChildren(
     ...data.rows.map((row) => {
@@ -429,7 +467,7 @@ export function renderRows(data: ViewData, newRowKeys?: Set<string>, pkNames: st
       if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
       tr.appendChild(buildRowActionCell(data.columns, row));
       for (const col of data.columns) {
-        tr.appendChild(buildCell(col, row, hidden));
+        tr.appendChild(buildCell(col, row, ctx));
       }
       return tr;
     }),

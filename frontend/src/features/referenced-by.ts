@@ -14,11 +14,41 @@ import { navigateWithSeededFilter } from "./view-history.js";
 
 // §5.9 is catalog-only and row-independent — the answer is the same for
 // every row of a table — so the result is memoised per (source, schema,
-// table). Browsing a wide table row by row through the record dialog then
-// costs one fetch, not one per open. The key namespaces scope, so a
-// source/schema switch invalidates implicitly; only mid-session DDL goes
-// stale, which nothing else in the app guards against either.
+// table). The key namespaces scope, so a source/schema switch invalidates
+// implicitly; the refresh button clears it for mid-session DDL.
 const cache = new Map<string, ReferencedByEntry[]>();
+// A request already on its way is shared, so the grid's lookup and a click never ask twice.
+const inflight = new Map<string, Promise<ReferencedByEntry[]>>();
+let cacheGeneration = 0;
+
+export function clearReferencedByCache(): void {
+  cache.clear();
+  inflight.clear();
+  cacheGeneration++;
+}
+
+// The key is captured alongside applyScopeParams' read of the same scope, so
+// a mid-flight scope switch can't file the result under the wrong key.
+export function fetchReferencedBy(table: string): Promise<ReferencedByEntry[]> {
+  const key = scopeIdentity(table);
+  const hit = cache.get(key);
+  if (hit) return Promise.resolve(hit);
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const generation = cacheGeneration;
+  const params = new URLSearchParams({ table });
+  applyScopeParams(params);
+  const request = api<{ referenced_by: ReferencedByEntry[] }>(`/tables/referenced-by?${params}`)
+    .then((data) => {
+      if (generation === cacheGeneration) cache.set(key, data.referenced_by);
+      return data.referenced_by;
+    })
+    .finally(() => {
+      if (inflight.get(key) === request) inflight.delete(key);
+    });
+  inflight.set(key, request);
+  return request;
+}
 
 // Same staleness guard as cvRequestToken: a second call targeting the same
 // container before the first response lands must not overwrite the list
@@ -81,23 +111,16 @@ export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: ()
   // Only offered in a table view: a join row has several tables.
   const table = tableInView();
   if (table === null) return;
-  // Key captured now, alongside applyScopeParams' read of the same scope,
-  // so a mid-flight scope switch can't file the result under the wrong key.
-  const key = scopeIdentity(table);
-  const hit = cache.get(key);
+  const hit = cache.get(scopeIdentity(table));
   if (hit) {
     renderList(container, hit, row, dismiss);
     return;
   }
   container.replaceChildren(msg("loading…"));
-
-  const params = new URLSearchParams({ table });
-  applyScopeParams(params);
-  api<{ referenced_by: ReferencedByEntry[] }>(`/tables/referenced-by?${params}`)
-    .then((data) => {
-      cache.set(key, data.referenced_by);
+  fetchReferencedBy(table)
+    .then((entries) => {
       if (renderTokens.get(container) !== token) return;
-      renderList(container, data.referenced_by, row, dismiss);
+      renderList(container, entries, row, dismiss);
     })
     .catch((e) => {
       if (renderTokens.get(container) !== token) return;

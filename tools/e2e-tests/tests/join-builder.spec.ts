@@ -101,6 +101,18 @@ test("the column cards pick what the result shows", async ({ page }) => {
   expect(columns).not.toContainEqual({ join: 0, column: "id" });
 });
 
+test("a column card's all and none buttons pick every or no column of that table", async ({ page }) => {
+  await openJoinOverlay(page);
+  await pick(page, "join 1 table", "users");
+  const card = page.locator(".j-card").nth(1);
+  await card.getByRole("button", { name: "select no users columns" }).click();
+  await expect(card.locator("h3")).toContainText("0 of 9");
+  await expect(card.getByRole("checkbox", { checked: true })).toHaveCount(0);
+  await card.getByRole("button", { name: "select all users columns" }).click();
+  await expect(card.locator("h3")).toContainText("9 of 9");
+  await expect(card.getByRole("checkbox", { checked: false })).toHaveCount(0);
+});
+
 test("the SQL text builds the same join and switching modes keeps the definition", async ({ page }) => {
   await openJoinOverlay(page);
   await writeSql(

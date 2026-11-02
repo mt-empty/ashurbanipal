@@ -103,7 +103,7 @@ test("column autocomplete suggests all columns at an empty/condition-start bound
   await selectTable(page, "users");
   await page.locator("#filter").click();
   await expect(page.locator("#filter-suggest")).toBeVisible();
-  const suggestions = await page.locator("#filter-suggest-list button").allTextContents();
+  const suggestions = await page.locator("#filter-suggest-list .sg-label").allTextContents();
   expect(suggestions).toEqual([
     "id",
     "email",

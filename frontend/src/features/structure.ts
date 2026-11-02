@@ -13,6 +13,7 @@ const cache = new Map<string, StructureResponse>();
 let cacheGeneration = 0;
 export function clearStructureCache(): void {
   cache.clear();
+  inflight.clear();
   cacheGeneration++;
 }
 
@@ -78,18 +79,29 @@ function renderStructure(data: StructureResponse): void {
   );
 }
 
+// A request already on its way is shared, so the grid's lookup and the dialog never ask twice.
+const inflight = new Map<string, Promise<StructureResponse>>();
+
 // One table's structure through the same cache the dialog uses; errors are not cached.
 export function tableStructure(table: string): Promise<StructureResponse> {
   const key = scopeIdentity(table);
   const generation = cacheGeneration;
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
+  const pending = inflight.get(key);
+  if (pending) return pending;
   const params = new URLSearchParams({ table });
   applyScopeParams(params);
-  return api<StructureResponse>(`/tables/structure?${params}`).then((data) => {
-    if (generation === cacheGeneration) cache.set(key, data);
-    return data;
-  });
+  const request = api<StructureResponse>(`/tables/structure?${params}`)
+    .then((data) => {
+      if (generation === cacheGeneration) cache.set(key, data);
+      return data;
+    })
+    .finally(() => {
+      if (inflight.get(key) === request) inflight.delete(key);
+    });
+  inflight.set(key, request);
+  return request;
 }
 
 export function openStructure(): void {

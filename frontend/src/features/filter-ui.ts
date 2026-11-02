@@ -11,10 +11,12 @@ import {
   tableInView,
 } from "../core/state.js";
 import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
+import { keyDescription } from "../lib/column-key.js";
 import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
 import { columnKey } from "./join-view.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
+import { tableMeta } from "./table-meta.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
@@ -158,8 +160,23 @@ const suggest = createSuggestList({
 // serves every keystroke, a failed or empty answer included. Refresh clears it.
 const commonValueCache = new Map<string, Promise<string[]>>();
 
+// Columns whose header ▾ came back empty, keyed like commonValueCache; the
+// header draws their ▾ dimmed. Refresh clears it.
+const emptyCommonValues = new Set<string>();
+
 export function clearCommonValueCache(): void {
   commonValueCache.clear();
+  emptyCommonValues.clear();
+}
+
+function commonValuesKey(table: string, column: string): string {
+  const params = new URLSearchParams({ table, column });
+  applyScopeParams(params);
+  return params.toString();
+}
+
+export function hasNoCommonValues(table: string, column: string): boolean {
+  return emptyCommonValues.has(commonValuesKey(table, column));
 }
 
 async function fetchCommonValues(table: string, column: string): Promise<CommonValue[]> {
@@ -169,9 +186,7 @@ async function fetchCommonValues(table: string, column: string): Promise<CommonV
 }
 
 function commonValuesFor(table: string, column: string): Promise<string[]> {
-  const params = new URLSearchParams({ table, column });
-  applyScopeParams(params);
-  const key = params.toString();
+  const key = commonValuesKey(table, column);
   let values = commonValueCache.get(key);
   if (!values) {
     values = fetchCommonValues(table, column)
@@ -188,6 +203,12 @@ function commonValuesFor(table: string, column: string): Promise<string[]> {
 function showFilterSuggestions(ctx: Completion, all: Suggestion[]): void {
   const partial = ctx.partial.toLowerCase();
   const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
+  // A column also matches mid-name (`at` finds created_at), after the prefix matches.
+  if (ctx.expect === "column" && partial !== "") {
+    matches.push(
+      ...all.filter((s) => !s.label.toLowerCase().startsWith(partial) && s.label.toLowerCase().includes(partial)),
+    );
+  }
   // Nothing left to complete: a lone row identical to what is typed, except columns.
   const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
   if (matches.length === 0 || done) {
@@ -219,7 +240,17 @@ function updateFilterSuggestions(): void {
   const table = tableInView();
   const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
-    showFilterSuggestions(ctx, plain((getLastPayload()?.columns ?? []).map((c) => columnKey(c))));
+    const columns = getLastPayload()?.columns ?? [];
+    const meta = table === null ? undefined : tableMeta(table);
+    showFilterSuggestions(
+      ctx,
+      columns.map((c) => ({
+        label: columnKey(c),
+        insert: columnKey(c),
+        note: c.type,
+        key: keyDescription(c, meta?.compositeFkOf.get(c.name)),
+      })),
+    );
   } else if (ctx.expect === "operator") {
     if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
@@ -290,5 +321,10 @@ export async function showCommonValues(e: MouseEvent, table: string, column: str
     return;
   }
   if (token !== cvRequestToken) return;
+  if (values.length === 0) {
+    emptyCommonValues.add(commonValuesKey(table, column));
+    btn.classList.add("cv-none");
+    btn.title = "no common values in the statistics";
+  }
   renderCommonValues(values, column);
 }

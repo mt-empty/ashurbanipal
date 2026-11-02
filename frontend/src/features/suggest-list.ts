@@ -1,4 +1,6 @@
 import { el } from "../core/dom.js";
+import type { KeyDescription } from "../lib/column-key.js";
+
 export interface Suggestion {
   label: string;
   insert: string;
@@ -6,6 +8,8 @@ export interface Suggestion {
   note?: string;
   // A small badge after the note (`foreign key`, `indexed`).
   tag?: string;
+  // A column's key icon, drawn before the label.
+  key?: KeyDescription | null;
   // The row shows greyed and cannot be taken.
   blocked?: boolean;
 }
@@ -57,14 +61,20 @@ export function createSuggestList(opts: SuggestOptions): SuggestList {
   };
 
   const render = (): void => {
+    // When any row has a key, every row gets the slot, so the labels line up.
+    const keyed = matches.some((m) => m.key);
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
         const btn = el("button");
         btn.type = "button";
-        const text = [suggestion.label, suggestion.note, suggestion.tag].filter(Boolean).join(" · ");
-        btn.title = text; // long values are cut off with an ellipsis
-        const name = el("span");
-        name.textContent = suggestion.label;
+        const text = [suggestion.label, suggestion.note, suggestion.key?.label, suggestion.tag].filter(Boolean);
+        btn.title = text.join(" · "); // long values are cut off with an ellipsis
+        if (keyed) {
+          const icon = el("span", "key-icon", suggestion.key?.icon ?? "");
+          icon.setAttribute("aria-hidden", "true");
+          btn.appendChild(icon);
+        }
+        const name = el("span", "sg-label", suggestion.label);
         btn.appendChild(name);
         if (suggestion.note || suggestion.tag) {
           const note = el("span", "sg-note", suggestion.note ?? "");

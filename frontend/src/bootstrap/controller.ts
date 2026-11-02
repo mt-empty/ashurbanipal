@@ -29,6 +29,7 @@ import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
 import { setLoadingBar } from "../features/load-bar.js";
 import { setActiveTable, setTableChipLoading } from "../features/table-chips.js";
+import { loadTableMeta } from "../features/table-meta.js";
 import { syncUrl } from "../features/view-history.js";
 import { syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
@@ -311,6 +312,12 @@ async function runLoad({
   if (superseded()) return;
   updatePager(data);
   markTiming("rows-rendered", reason);
+  // Incoming references and composite FKs change what the grid links; it drew without them.
+  if (view.kind === "table") {
+    loadTableMeta(view.table).then((changed) => {
+      if (changed && !superseded()) renderTable();
+    });
+  }
   // Joins are never asked for ahead: one can run up to the query timeout.
   if (askNextPage && view.kind === "table" && !$<HTMLButtonElement>("next").disabled) {
     prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);

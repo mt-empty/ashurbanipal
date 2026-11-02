@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { parseFilterDsl, quoteFilterValue } from "../src/lib/filter-dsl.ts";
+import { filterTooLong, parseFilterDsl, quoteFilterValue } from "../src/lib/filter-dsl.ts";
 
 // The single canonical DSL-text -> wire-AST parser (spec/filter-dsl.md). Cases
 // come from spec/fixtures/parser-tests.json, generated from the doc's §5
@@ -56,4 +56,12 @@ test("a join alias spelled like a filter keyword parses once quoted", () => {
   assert.deepEqual(parseFilterDsl(`"not".status = 'x'`, ["not", "u"]), [
     { column: "status", join: 0, op: "=", value: "x" },
   ]);
+});
+
+test("filterTooLong counts UTF-8 bytes against the 1024-byte cap", () => {
+  assert.equal(filterTooLong("a".repeat(1024)), false);
+  assert.equal(filterTooLong("a".repeat(1025)), true);
+  // 342 three-byte characters are 1026 bytes but only 342 code units.
+  assert.equal(filterTooLong("€".repeat(341)), false);
+  assert.equal(filterTooLong("€".repeat(342)), true);
 });

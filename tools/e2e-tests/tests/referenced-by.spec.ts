@@ -1,5 +1,5 @@
 import { expect, test } from "./support/fixtures";
-import { gotoApp, selectTable, uiState, waitForTable } from "./support/helpers";
+import { apiCall, gotoApp, selectTable, uiState, waitForIdle, waitForTable } from "./support/helpers";
 
 // Seed shape (conformance/seed): public.users is referenced by orders.user_id
 // and support_tickets.(user_id, assigned_admin_id); public.inventory_locations
@@ -100,9 +100,6 @@ test("a cross-schema referrer absent from the target schema's own table list sur
   // A referrer the target schema's /api/tables doesn't list (e.g. a
   // partitioned table) must not have its seeded filter applied to whatever
   // table the fallback lands on. Mocked: the seed has no such table.
-  await gotoApp(page);
-  await selectTable(page, "users");
-
   await page.route("**/api/tables/referenced-by*", (route) =>
     route.fulfill({
       json: {
@@ -117,6 +114,9 @@ test("a cross-schema referrer absent from the target schema's own table list sur
       },
     }),
   );
+  await gotoApp(page);
+  await selectTable(page, "users");
+
   await page.route("**/api/tables*", (route) => {
     const schema = new URL(route.request().url()).searchParams.get("schema");
     if (schema === "warehouse") return route.fulfill({ json: { tables: [{ name: "shipment_events" }] } });
@@ -140,9 +140,6 @@ test("an entry naming a column absent from the row (the referenced table has no 
   // column /api/tables/data never exposes — that must read as "no primary
   // key to filter by", not "column is null" (row["rowid"] is genuinely
   // undefined here, not a real column holding a null value).
-  await gotoApp(page);
-  await selectTable(page, "users");
-
   await page.route("**/api/tables/referenced-by*", (route) =>
     route.fulfill({
       json: {
@@ -152,6 +149,8 @@ test("an entry naming a column absent from the row (the referenced table has no 
       },
     }),
   );
+  await gotoApp(page);
+  await selectTable(page, "users");
 
   const idCell = page.locator("#tbody tr").first().locator('td[data-col="id"] .cell-text.pk-cell');
   await idCell.click();
@@ -160,4 +159,20 @@ test("an entry naming a column absent from the row (the referenced table has no 
   const btn = pop.getByRole("button", { name: /ghost_children/ });
   await expect(btn).toBeDisabled();
   await expect(btn).toHaveAttribute("title", "this table has no primary key — no filter is expressible");
+});
+
+test("a PK cell links to what references it only when something does", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "users");
+  const userId = page.locator("#tbody tr").first().locator('td[data-col="id"] .cell-text');
+  await expect(userId).toHaveClass(/pk-cell/);
+  await expect(userId).toHaveAttribute("title", / — referenced by \d+ tables$/);
+
+  // Nothing references payments.
+  const looked = page.waitForResponse(apiCall("/tables/referenced-by", { table: "payments" }));
+  await selectTable(page, "payments");
+  await looked;
+  await waitForIdle(page);
+  const paymentId = page.locator("#tbody tr").first().locator('td[data-col="id"] .cell-text');
+  await expect(paymentId).not.toHaveClass(/pk-cell/);
 });
