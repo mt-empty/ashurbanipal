@@ -29,6 +29,7 @@ import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
 import { setLoadingBar } from "../features/load-bar.js";
 import { setActiveTable, setTableChipLoading } from "../features/table-chips.js";
+import { loadTableMeta, type TableMeta, tableMeta } from "../features/table-meta.js";
 import { syncUrl } from "../features/view-history.js";
 import { syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
@@ -240,6 +241,8 @@ async function runLoad({
   const token = nextLoadToken();
   const superseded = () => !isCurrentLoad(token);
   const widthScope = widthScopeOf(view);
+  // Asked beside the rows, so the first draw usually has it already.
+  const metaLoad = view.kind === "table" ? loadTableMeta(view.table) : null;
   let data: ViewData;
   try {
     data = await fetchViewData(req, auto);
@@ -280,9 +283,12 @@ async function runLoad({
   refreshSavedChips();
   // An auto-refresh tick is never a step of the user's own.
   syncUrl(replaceHistory || auto);
+  const metaInView = () => (view.kind === "table" ? tableMeta(view.table) : undefined);
+  let drawnMeta: TableMeta | undefined;
   const renderTable = () => {
     // The transition can wait for a frame; a view switch meanwhile owns the grid, and this data is not its join's.
     if (superseded()) return;
+    drawnMeta = metaInView();
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
@@ -311,6 +317,10 @@ async function runLoad({
   if (superseded()) return;
   updatePager(data);
   markTiming("rows-rendered", reason);
+  // Incoming references and composite FKs change what the grid links.
+  metaLoad?.then(() => {
+    if (!superseded() && metaInView() !== drawnMeta) renderTable();
+  });
   // Joins are never asked for ahead: one can run up to the query timeout.
   if (askNextPage && view.kind === "table" && !$<HTMLButtonElement>("next").disabled) {
     prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);

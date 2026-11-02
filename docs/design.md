@@ -130,12 +130,18 @@ Two components, same as the original concept:
   - *Common-values dropdown* — a header affordance lists a column's most
     frequent values, fetched on demand from `/tables/common-values` (§4),
     as one-click filter shortcuts; empty when the column has no planner
-    statistics yet.
+    statistics yet. Not offered on a column unique on its own (a
+    single-column primary key or unique constraint), and dimmed once an
+    answer comes back empty.
   - *Foreign-key navigation* — a cell in an FK column (per the `key`/
     `references` column metadata, §4) is clickable: it switches to the
     referenced table and filters it to the matching row. Per §2's
     non-goal carve-out, this is two sequential single-table queries, never
-    a join; it leaves a join view, if one is open.
+    a join; it leaves a join view, if one is open. A composite FK, which
+    the column metadata omits, comes from the table's structure (§4) and
+    filters on every column pair. A PK cell opens what references the row,
+    offered only when the table has referrers; both lookups are sent
+    beside the row fetch, and the grid redraws if they land after it.
   - *Filter autocomplete* — the filter input suggests whatever the grammar
     allows next, via a hand-rolled, caret-anchored list that stays open
     while typing and scrolls with the page, passing behind the sticky table

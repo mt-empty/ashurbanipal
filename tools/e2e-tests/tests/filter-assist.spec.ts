@@ -2,6 +2,8 @@ import { expect, type Page, test } from "./support/fixtures";
 import { applyFilter, gotoApp, selectTable, urlParam, waitForIdle } from "./support/helpers";
 
 const suggestions = (page: Page) => page.locator("#filter-suggest-list button");
+// The label alone: a column row also shows its type and key.
+const labels = (page: Page) => page.locator("#filter-suggest-list .sg-label");
 
 test("an operator list follows a column and a space", async ({ page }) => {
   await gotoApp(page);
@@ -27,11 +29,27 @@ test("accepting a column moves on to its operators", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");
   await page.locator("#filter").focus();
-  await suggestions(page)
+  await labels(page)
     .filter({ hasText: /^status$/ })
     .click();
   await expect(page.locator("#filter")).toHaveValue("status ");
   await expect(suggestions(page).first()).toHaveText("=");
+});
+
+test("a column row shows its type and key, and a column also matches mid-name", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await page.locator("#filter").focus();
+  const idRow = suggestions(page).filter({ has: page.locator(".sg-label", { hasText: /^id$/ }) });
+  await expect(idRow.locator(".sg-note")).toHaveText("uuid");
+  await expect(idRow.locator(".key-icon")).toHaveText("🔑");
+  await expect(idRow).toHaveAttribute("title", /primary key/);
+  // Rows without a key keep the empty slot, so every name starts in one column.
+  const statusRow = suggestions(page).filter({ has: page.locator(".sg-label", { hasText: /^status$/ }) });
+  await expect(statusRow.locator(".key-icon")).toHaveText("");
+  // Prefix matches first, then names containing the text.
+  await page.locator("#filter").fill("t");
+  await expect(labels(page)).toHaveText(["total_cents", "tags", "status", "discount_pct", "line_items", "created_at"]);
 });
 
 test("a value list follows an operator, from the column's common values", async ({ page }) => {
@@ -83,7 +101,7 @@ test("Enter submits a part-typed column instead of completing it", async ({ page
   await selectTable(page, "orders");
   const input = page.locator("#filter");
   await input.fill("sta");
-  await expect(suggestions(page)).toHaveText(["status"]);
+  await expect(labels(page)).toHaveText(["status"]);
   await input.press("Enter");
   // Only a submit runs parseFilterDsl, so the parse error proves Enter submitted.
   await expect(page.locator("#error")).toContainText("expected operator");

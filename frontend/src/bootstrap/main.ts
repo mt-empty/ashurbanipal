@@ -13,7 +13,9 @@ import { startSiblings } from "../features/siblings.js";
 import { loadTables } from "../features/table-chips.js";
 import { noteStartupSettled } from "../features/view-history.js";
 import "../features/sticky-header.js";
+import { clearReferencedByCache } from "../features/referenced-by.js";
 import { clearStructureCache, openStructure } from "../features/structure.js";
+import { expireTableMeta } from "../features/table-meta.js";
 import { showBootFallbackNote } from "../features/view-notice.js";
 import { opensWithStoredSort, prefetchStartup } from "./boot-prefetch.js";
 import { loadData } from "./controller.js";
@@ -69,6 +71,8 @@ $<HTMLButtonElement>("refresh").onclick = () => {
   const btn = $<HTMLButtonElement>("refresh");
   clearStructureCache();
   clearCommonValueCache();
+  clearReferencedByCache();
+  expireTableMeta();
   clearJoinCatalog();
   resetColumnWidths();
   // Guaranteed one rotation even on a few-ms fetch; the timer (not

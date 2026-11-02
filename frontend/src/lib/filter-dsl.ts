@@ -9,6 +9,15 @@ import type { FilterCondition, FilterOp } from "../core/types.js";
 // input, same convention the DSL-era backend parser reported.
 const FILTER_MAX_DSL_BYTES = 1024;
 const FILTER_MAX_CONDITIONS = 10;
+
+const utf8 = new TextEncoder();
+
+// UTF-8 takes 1 to 3 bytes per UTF-16 code unit, so only the middle band needs the encode.
+export function filterTooLong(text: string): boolean {
+  if (text.length > FILTER_MAX_DSL_BYTES) return true;
+  return text.length * 3 > FILTER_MAX_DSL_BYTES && utf8.encode(text).length > FILTER_MAX_DSL_BYTES;
+}
+
 // The one place that decides what counts as a reserved word: the parser
 // rejects it bare, and quoteFilterValue quotes it so a value spelled like
 // one still round-trips.
@@ -38,8 +47,7 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
     const position = new TextEncoder().encode(input.slice(0, index)).length;
     return new FilterDslError(message, position, index);
   };
-  if (new TextEncoder().encode(input).length > FILTER_MAX_DSL_BYTES)
-    throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
+  if (filterTooLong(input)) throw err(`filter too long (max ${FILTER_MAX_DSL_BYTES} bytes)`, 0);
 
   let pos = 0;
   // Peeks return the full code point (length 2 for astral chars) so

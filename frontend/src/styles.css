@@ -239,6 +239,8 @@ th code.col-type { display: block; width: fit-content; max-width: 10rem; overflo
 .common-values-btn { background: none; border: none; cursor: pointer; font: inherit;
             color: inherit; margin-left: .3rem; padding: 0 .15rem; border-radius: 3px; }
 .common-values-btn:hover { background: var(--hover); }
+/* Dimmed once an answer came back empty; still clickable to ask again. */
+.common-values-btn.cv-none { opacity: .35; }
 /* Styled distinctly from the plain cell-text button so it doesn't read
    as an <a> hyperlink — it's an in-app state change, not navigation.
    The pk cell (reverse direction: what references this row) is the same
@@ -268,6 +270,8 @@ td.expandable .cell-text { cursor: zoom-in; }
                 display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: canvas;
                 box-shadow: 0 0 0 1px var(--border), 0 2px 6px #0002; opacity: 0; }
 .cell-actions button { padding: .1rem .45rem; border-radius: 4px; }
+/* Short values (ids, booleans) must leave room for the overlay beside them. */
+:where(#data-table) td[data-col] { min-width: 5.5rem; }
 td:hover .cell-actions, td:focus-within .cell-actions { opacity: 1; }
 /* No hover on touch: keep the buttons visible, in reserved space. */
 @media (hover: none) {
@@ -348,8 +352,7 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #all-hidden { display: flex; align-items: center; gap: var(--gap); width: fit-content; margin: var(--gap) 0;
               padding: .6rem .8rem; border: 1px solid var(--rule); border-radius: 6px; }
 /* Data and identifiers stay monospace; the chrome around them is system-ui. */
-.json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value,
-#filter-suggest button { font-family: var(--font-mono); }
+.json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value { font-family: var(--font-mono); }
 #current { font-family: var(--font-mono); color: CanvasText; }
 #actions { display: flex; gap: 2px; }
 #actions button, #pager button { background: none; border: none; font: inherit;
@@ -594,23 +597,29 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 .structure-row-detail { opacity: .7; font-size: .9em; }
 
 /* Same shape as #cv-pop, but the anchor is a single static button
-   rather than one per header, so anchor-name is set once in CSS. */
+   rather than one per header, so anchor-name is set once in CSS.
+   max-content: shrink-to-fit would squeeze it into the room right of the
+   button instead of overflowing, so flip-inline would never run. */
 #columns-btn { anchor-name: --columns-anchor; }
 #columns-pop { position: fixed; position-anchor: --columns-anchor;
           position-try-fallbacks: flip-block, flip-inline;
           inset: auto; top: calc(anchor(bottom) + .3rem); left: anchor(left);
           margin: 0; border: 1px solid var(--border-strong);
-          border-radius: 8px; padding: .3rem; max-width: min(20rem, 90vw);
+          border-radius: 8px; padding: .3rem; width: max-content; max-width: min(28rem, 90vw);
           max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
 #columns-pop label { display: flex; align-items: center; gap: .4rem;
           padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+/* Right-aligned as in #filter-suggest, so the types line up. */
+.cols-type { margin-left: auto; padding-left: .6rem; font-family: var(--font-mono); font-size: .75rem;
+             color: var(--text-muted); }
+#columns-pop label .cols-sorted { margin-left: 0; }
 #columns-pop label:hover { background: var(--hover); }
 /* Sticky so a long list keeps its table's all / none in reach. */
 .cols-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .4rem;
              padding: .3rem .5rem; background: canvas; }
 .cols-group + .cols-group { margin-top: .3rem; }
 /* Names and table labels ellipsize; their titles carry the full text (R8). */
-.cols-pill, .cols-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cols-pill, .cols-name, .cols-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cols-pill { padding: .1rem .45rem; border-radius: 4px; font-family: var(--font-mono); font-size: .75rem;
              background: var(--band-0); color: var(--band-0-fg); }
 /* padding-block: overflow:hidden would otherwise clip an underscore's descent. */
@@ -627,12 +636,17 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
    z-index decides whether it is over or behind the sticky table header. */
 #filter-suggest { position: absolute; z-index: 1; top: calc(100% + .15rem); left: 0;
           background: canvas; color: inherit; border: 1px solid var(--border-strong);
-          border-radius: 8px; padding: .2rem; max-width: 16rem; max-height: 10rem;
+          border-radius: 8px; padding: .2rem; max-width: 26rem; max-height: 10rem;
           overflow: auto; box-shadow: 0 4px 16px #0004; }
-#filter-suggest button { display: block; width: 100%; box-sizing: border-box;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-          background: none; border: none; font: inherit; color: inherit;
+#filter-suggest button { display: flex; align-items: baseline; width: 100%; box-sizing: border-box; white-space: nowrap;
+          background: none; border: none; font: inherit; font-family: var(--font-mono); color: inherit;
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
+#filter-suggest .sg-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Pushed to the right edge, so the types of every row line up. */
+#filter-suggest .sg-note { align-self: baseline; margin-left: auto; padding-left: 1.25rem;
+          font-family: var(--font-mono); font-size: .75rem; }
+/* A fixed slot, empty on columns without a key, so the names line up too. */
+#filter-suggest .key-icon, #columns-pop .key-icon { flex: none; width: 1.5em; margin-right: 0; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 
 /* ==== Join: saved chips, bands, notices ==== */
@@ -747,7 +761,7 @@ thead tr.bands + tr th { top: var(--band-h); }
 .j-card h3 { margin: 0 0 .35rem; font-size: .75rem; font-weight: 600; display: flex; justify-content: space-between;
              gap: .5rem; font-family: var(--font-mono); }
 .j-card h3 span { font-weight: 400; color: var(--text-muted); }
-.j-card h3 span.j-card-name { font-weight: 600; color: inherit; }
+.j-card h3 span.j-card-name { font-weight: 600; color: inherit; margin-right: auto; }
 .j-card label { display: flex; align-items: center; gap: .4rem; font-size: .75rem; line-height: 1.25rem; cursor: pointer; }
 .j-card input { margin: 0; }
 .j-sql { margin: 0; padding: .6rem .85rem; background: var(--surface); border-radius: 8px; font-family: var(--font-mono);
