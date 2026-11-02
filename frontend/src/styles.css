@@ -229,8 +229,8 @@ th[aria-sort="descending"] .th-name::after { content: " ↓"; opacity: 1; }
 .key-icon { margin-right: .2rem; }
 /* The engine-native column type, on its own line under the name so a long
    spelling ("timestamp with time zone") doesn't set the column's width. */
-th code.col-type { display: block; width: fit-content; max-width: 10rem; overflow: hidden;
-            text-overflow: ellipsis; margin-top: .1rem; font-family: var(--font-mono);
+code.col-type { display: block; width: fit-content; max-width: 10rem; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; margin-top: .1rem; font-family: var(--font-mono);
             font-size: .7rem; font-weight: normal; opacity: .75;
             background: color-mix(in srgb, currentColor 10%, transparent);
             padding: 0 .25em; border-radius: 3px; }
@@ -241,15 +241,14 @@ th code.col-type { display: block; width: fit-content; max-width: 10rem; overflo
 .common-values-btn:hover { background: var(--hover); }
 /* Dimmed once an answer came back empty; still clickable to ask again. */
 .common-values-btn.cv-none { opacity: .35; }
-/* Styled distinctly from the plain cell-text button so it doesn't read
-   as an <a> hyperlink — it's an in-app state change, not navigation.
-   The pk cell (reverse direction: what references this row) is the same
-   family, dashed instead of dotted so the two never read alike — a
-   column can be both pk and fk. */
-.fk-cell, .pk-cell { cursor: pointer; text-decoration: underline dotted;
+/* A foreign key leads to another table: solid, like a link. A primary key
+   opens what references this row: dotted. Half strength keeps a grid of
+   them calm; hover brings it to full. */
+.fk-cell, .pk-cell { cursor: pointer; text-decoration: underline solid;
+                     text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
                      text-underline-offset: .15em; }
-.pk-cell { text-decoration-style: dashed; }
-.fk-cell:hover, .pk-cell:hover { text-decoration-style: solid; }
+.pk-cell { text-decoration-style: dotted; }
+.fk-cell:hover, .pk-cell:hover { text-decoration-color: currentColor; }
 th.row-actions, td.row-actions { width: 1%; white-space: nowrap; cursor: default; }
 td.row-actions { padding-right: .25rem; }
 .record-btn { background: none; border: none; cursor: pointer; font: inherit;
@@ -257,8 +256,9 @@ td.row-actions { padding-right: .25rem; }
 .record-btn:hover { background: var(--hover); color: inherit; }
 .cell-text { display: block; max-width: 24rem; overflow: hidden;
              text-overflow: ellipsis; white-space: nowrap; }
-button.cell-text { background: none; border: none; padding: 0; margin: 0;
+button.cell-text, dialog dl .record-link { background: none; border: none; padding: 0; margin: 0;
                    font: inherit; color: inherit; text-align: left; cursor: inherit; }
+dialog dl .record-link { cursor: pointer; }
 td.expandable .cell-text { cursor: zoom-in; }
 .copy, .filter-eq { background: none; border: none; cursor: pointer; font: inherit;
         color: inherit; padding: 0 .15rem; border-radius: 3px; }
@@ -349,6 +349,9 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #sort-note-col { font-family: var(--font-mono); }
 #sort-note-show { background: none; border: none; padding: 0 .15rem; font: inherit; color: inherit;
                   text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+#sort-note-clear { background: none; border: none; padding: 0 .3rem; margin-left: .1rem; border-radius: 4px;
+                   font: inherit; font-size: .75rem; color: var(--text-muted); cursor: pointer; }
+#sort-note-clear:hover { background: var(--hover); color: CanvasText; }
 #all-hidden { display: flex; align-items: center; gap: var(--gap); width: fit-content; margin: var(--gap) 0;
               padding: .6rem .8rem; border: 1px solid var(--rule); border-radius: 6px; }
 /* Data and identifiers stay monospace; the chrome around them is system-ui. */
@@ -457,22 +460,32 @@ dialog::backdrop { background: var(--backdrop); }
    dialog and add a second scrollbar around the pre's own. */
 dialog pre, dialog dl { margin: 0; padding: var(--gap-lg); overflow: auto;
                         max-height: var(--dialog-body-max-h); box-sizing: border-box; }
-dialog dl { display: grid; grid-template-columns: max-content 1fr max-content;
-            gap: .3rem var(--gap-lg); }
+/* Key icon, name over its type chip, value, then = and copy. */
+dialog dl { display: grid; grid-template-columns: max-content max-content 1fr max-content;
+            gap: .3rem var(--gap-lg); align-items: baseline; }
 /* A 63-char name would otherwise take the dialog's width from the values. */
-dialog dl dt { font-weight: 600; max-width: 16rem; overflow-wrap: anywhere; }
+dialog dl dt { max-width: 16rem; overflow-wrap: anywhere; }
+dialog dl .record-name { font-weight: 600; }
+dialog dl dt code.col-type { max-width: 16rem; }
+dialog dl .key-icon { font-size: .8em; }
+/* The comment, and where a foreign key points, under the value. */
+dialog dl .record-note { display: block; margin-top: .1rem; font-size: .75rem; color: var(--text-muted);
+                         font-family: system-ui, sans-serif; white-space: normal; }
 dialog dl dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A join row's fields are grouped under the table they came from. */
 dialog dl dt.record-group { grid-column: 1 / -1; color: var(--text-muted); font-size: .75rem;
                            border-bottom: 1px solid var(--rule); padding-top: .5rem; max-width: none;
                            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A grid item, not absolutely positioned over a td, so it needs
-   `position: static`; hover-to-reveal otherwise matches the table's
-   copy button, keyed off dd:hover since dt/dd/button are flat grid
-   siblings here. */
-dialog dl .copy { position: static; top: auto; transform: none; opacity: 0; align-self: start; }
-dialog dl dd:hover + .copy, dialog dl .copy:focus-visible { opacity: .7; }
-dialog dl .copy:hover { opacity: 1; }
+/* Revealed on hover like the grid's cell actions, keyed off dd:hover since
+   dt/dd/actions are flat grid siblings; opacity keeps them focusable. */
+dialog dl .record-acts { display: flex; gap: 2px; opacity: 0; align-self: start; }
+dialog dl dd:hover + .record-acts, dialog dl .record-acts:focus-within { opacity: .7; }
+dialog dl .record-acts:hover { opacity: 1; }
+.record-nav { display: flex; align-items: center; gap: .4rem; margin-left: auto; margin-right: .5rem;
+              font-size: .8rem; color: var(--text-muted); }
+/* .dialog-head button resets the border, so it comes back here. */
+.dialog-head .record-nav .btn { border: 1px solid var(--border); border-radius: 4px; padding: .1rem .45rem;
+                                font-size: .8rem; color: CanvasText; }
 /* Lives in the dialog header, so it stays visible regardless of hover —
    a standalone action, not a per-field affordance. */
 .dialog-head-title { display: flex; align-items: center; gap: .5rem; }

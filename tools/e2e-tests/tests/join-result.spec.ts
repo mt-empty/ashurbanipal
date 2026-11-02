@@ -100,12 +100,19 @@ test("a qualifier that is not in the join is a filter error, not a request", asy
   await expect(page.locator("#error")).toContainText("unknown table alias z");
 });
 
+test("the record dialog names each table once when the select list alternates tables", async ({ page }) => {
+  await gotoJoin(page, "SELECT o.id, u.email, o.status FROM orders o LEFT JOIN users u ON o.user_id = u.id");
+  await page.locator("#tbody tr").first().locator(".record-btn").click();
+  await expect(page.locator("#record-dl dt.record-group")).toHaveText(["orders o", "users u"]);
+  await expect(page.locator("#record-dl .record-name")).toHaveText(["id", "status", "email"]);
+});
+
 test("the record dialog groups a joined row by table, under the band's name", async ({ page }) => {
   await gotoJoin(page, ORDERS_USERS);
   await page.locator("#tbody tr").first().locator(".record-btn").click();
   await expect(page.locator("#record-dl dt.record-group")).toHaveText(["orders o", "users u"]);
   // Fields carry the column's own name; the group above names the table.
-  await expect(page.locator("#record-dl dt:not(.record-group)").first()).toHaveText("id");
+  await expect(page.locator("#record-dl .record-name").first()).toHaveText("id");
   await expect(page.locator("#record-copy-insert")).toBeHidden();
   await expect(page.locator("#record-referenced-by-wrap")).toBeHidden();
 });

@@ -426,6 +426,15 @@ export function pruneHiddenColumns(live: readonly string[]): void {
   if (kept.length !== current.length) setHiddenColumns(kept);
 }
 
+// A sort the user chose (null clears it): back to the first page, and
+// remembered for the table (R11).
+export function setSort(sort: string | null, order: "asc" | "desc" = "asc"): void {
+  state.sort = sort;
+  state.order = order;
+  state.offset = 0;
+  rememberSort();
+}
+
 // sort + order are remembered per table (like hiddenColumns): a column
 // name is table-specific, so this never carries a sort across tables.
 export function rememberSort(): void {

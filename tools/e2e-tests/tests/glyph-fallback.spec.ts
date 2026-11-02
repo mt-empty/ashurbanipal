@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { expect, type Locator, type Page, test } from "./support/fixtures";
-import { gotoApp, selectTable } from "./support/helpers";
+import { gotoApp, recordField, selectTable } from "./support/helpers";
 import { gotoJoin, ORDERS_USERS } from "./support/join";
 
 // Debian/Ubuntu paths of fonts-freefont-ttf and fonts-ipafont-gothic, which
@@ -62,7 +62,7 @@ test("a record copy button keeps its size while ⧉ flashes to a tick", async ({
     btn.evaluate((b) => {
       const box = (el: Element) => el.getBoundingClientRect();
       const dts = [...document.querySelectorAll("#record-dl dt")];
-      const next = dts[dts.findIndex((dt) => dt.textContent === "status") + 1];
+      const next = dts[dts.findIndex((dt) => dt.querySelector(".record-name")?.textContent === "status") + 1];
       return {
         button: box(b).height,
         head: box(document.querySelector("#record-dialog .dialog-head")!).height,
@@ -78,9 +78,7 @@ test("a record copy button keeps its size while ⧉ flashes to a tick", async ({
     return { before, during };
   };
 
-  const statusCopy = page
-    .locator("#record-dl dt", { hasText: /^status$/ })
-    .locator("xpath=following-sibling::button[1]");
+  const statusCopy = recordField(page, "status").copy;
   for (const btn of [page.locator("#record-copy-row"), statusCopy]) {
     const { before, during } = await flash(btn);
     expect(during).toEqual(before);

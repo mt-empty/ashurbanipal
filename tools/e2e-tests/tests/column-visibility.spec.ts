@@ -265,7 +265,7 @@ test("the record dialog of a join grid left by a failed load keeps its table gro
   await expect(page.locator("#error")).not.toBeEmpty();
   await page.locator("#tbody tr").first().locator(".record-btn").click();
   await expect(page.locator("#record-dl dt.record-group")).toHaveText(["orders o", "users u"]);
-  await expect(page.locator("#record-dl dt", { hasText: /^id$/ }).last()).toHaveAttribute("title", "u.id");
+  await expect(page.locator("#record-dl .record-name", { hasText: /^id$/ }).last()).toHaveAttribute("title", "u.id");
 });
 
 test("a schema with no tables clears the sort note and the all-hidden message", async ({ page }) => {

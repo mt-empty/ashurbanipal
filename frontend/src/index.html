@@ -73,7 +73,7 @@
         <button id="view-notice-close" type="button" aria-label="Close this note">✕</button>
       </div>
       <div id="meta">
-        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="sort-note" hidden> · sorted by <code id="sort-note-col"></code> <span id="sort-note-dir"></span> <button id="sort-note-show" type="button">show it</button></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span></span>
+        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="sort-note" hidden> · sorted by <code id="sort-note-col"></code> <span id="sort-note-dir"></span> <button id="sort-note-show" type="button">show it</button><button id="sort-note-clear" type="button" aria-label="clear sort" title="clear sort">✕</button></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
         <span id="actions">
           <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
@@ -112,6 +112,7 @@
 <dialog id="record-dialog" closedby="any">
   <div class="dialog-head">
     <span class="dialog-head-title"><strong>record</strong><button id="record-copy-row" class="copy" aria-label="copy row as JSON" title="copy row as JSON"><span class="copy-icon">⧉</span> JSON</button><button id="record-copy-insert" class="copy" aria-label="copy row as SQL INSERT statement" title="copy row as an INSERT statement"><span class="copy-icon">⧉</span> SQL INSERT</button></span>
+    <span class="record-nav"><button id="record-prev" class="btn" type="button" aria-label="previous row">‹ previous</button><span id="record-pos"></span><button id="record-next" class="btn" type="button" aria-label="next row">next ›</button></span>
     <form method="dialog"><button type="submit" aria-label="close">✕</button></form>
   </div>
   <div id="record-body">

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { filterTooLong, parseFilterDsl, quoteFilterValue } from "../src/lib/filter-dsl.ts";
+import { eqClause, filterTooLong, parseFilterDsl, quoteFilterValue } from "../src/lib/filter-dsl.ts";
 
 // The single canonical DSL-text -> wire-AST parser (spec/filter-dsl.md). Cases
 // come from spec/fixtures/parser-tests.json, generated from the doc's §5
@@ -64,4 +64,12 @@ test("filterTooLong counts UTF-8 bytes against the 1024-byte cap", () => {
   // 342 three-byte characters are 1026 bytes but only 342 code units.
   assert.equal(filterTooLong("€".repeat(341)), false);
   assert.equal(filterTooLong("€".repeat(342)), true);
+});
+
+test("eqClause writes = or IS NULL, and nothing past the limit", () => {
+  assert.equal(eqClause("status", "pending"), "status = pending");
+  assert.equal(eqClause("o.note", "two words"), "o.note = 'two words'");
+  assert.equal(eqClause("status", null), "status IS NULL");
+  assert.equal(eqClause("status", "x".repeat(1025)), null);
+  assert.equal(eqClause("status", "é".repeat(600)), null);
 });

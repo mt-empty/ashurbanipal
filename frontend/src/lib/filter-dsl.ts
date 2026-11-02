@@ -270,6 +270,15 @@ export function filterClause(column: string, op: FilterOp, value?: string): stri
   return value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
 }
 
+// What an `=` button writes for this value (IS NULL for null), or null when it
+// would pass the limit. The click replaces the whole filter, so the clause alone must fit.
+export function eqClause(column: string, raw: string | null): string | null {
+  if (raw == null) return filterClause(column, "IS NULL");
+  if (filterTooLong(raw)) return null;
+  const clause = filterClause(column, "=", raw);
+  return filterTooLong(clause) ? null : clause;
+}
+
 // AND of `column = value`: the composite-key drill-in from referenced-by.
 export function filterClauses(pairs: { column: string; value: string }[]): string {
   return pairs.map((p) => filterClause(p.column, "=", p.value)).join(" AND ");

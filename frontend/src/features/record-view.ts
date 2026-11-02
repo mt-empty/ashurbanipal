@@ -1,54 +1,105 @@
 import { $, copyText, el } from "../core/dom.js";
 import { qualifiedTable, tableInView } from "../core/state.js";
 import type { Column, JoinDef, Row } from "../core/types.js";
+import { type KeyDescription, refTarget } from "../lib/column-key.js";
+import { eqClause } from "../lib/filter-dsl.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
-import { tableLabel } from "../lib/join-def.js";
 import { recordJson } from "../lib/json-text.js";
 import { renderJsonTree } from "../lib/json-tree.js";
-import { columnKey, displayName } from "./join-view.js";
+import { copyButton, eqButton, fkLink, keyIcon, typeChip } from "./column-parts.js";
+import { applyFilter } from "./filter-ui.js";
+import { columnKey, displayName, tableGroups } from "./join-view.js";
 import { renderReferencedBy } from "./referenced-by.js";
+import { columnKeyOf, type TableMeta, tableMeta } from "./table-meta.js";
+import { navigateWithSeededFilter } from "./view-history.js";
 
 // ---- record / vertical view: one already-fetched row as a stacked
 // column:value list, for tables too wide to scan across ----
+
+const dialog = () => $<HTMLDialogElement>("record-dialog");
+
+// A join row is grouped under one heading per table; a table row is one group.
+function recordGroups(columns: Column[], def: JoinDef | undefined): { label?: string; columns: Column[] }[] {
+  return def && columns.some((c) => c.join !== undefined) ? tableGroups(columns, def) : [{ columns }];
+}
+
+// The muted line under a field: its comment, and where a foreign key points.
+function fieldNote(col: Column, key: KeyDescription | null, composite: boolean): string {
+  const where = col.references ? `references ${refTarget(col.references)}` : composite ? key?.label : undefined;
+  return [col.comment, where].filter(Boolean).join(" · ");
+}
+
+function fieldValue(col: Column, raw: string, row: Row, meta: TableMeta | undefined): HTMLElement {
+  const dd = el("dd");
+  if (rendersAsJson(col, raw)) {
+    try {
+      // Parse and render share one catch: a malformed tree build degrades
+      // to plain text the same as unparseable JSON.
+      dd.appendChild(renderJsonTree(JSON.parse(raw)));
+      dd.classList.add("json-tree");
+    } catch (e) {
+      warnBadJsonCell(col, e);
+      dd.textContent = raw;
+    }
+    return dd;
+  }
+  const value = formatCellValue(col, raw);
+  const link = fkLink(col, raw, row, meta);
+  if (!link) {
+    dd.appendChild(value);
+    return dd;
+  }
+  const btn = el("button", "fk-cell record-link");
+  btn.type = "button";
+  btn.title = link.title;
+  btn.appendChild(value);
+  btn.onclick = () => {
+    dialog().close();
+    navigateWithSeededFilter(link.table, link.schema, link.clause);
+  };
+  dd.appendChild(btn);
+  return dd;
+}
+
+function fieldActions(col: Column, raw: string | null, def: JoinDef | undefined): HTMLElement {
+  const acts = el("span", "record-acts");
+  const eq = eqClause(columnKey(col, def), raw);
+  if (eq !== null) {
+    acts.appendChild(
+      eqButton(raw == null, () => {
+        dialog().close();
+        applyFilter(eq);
+      }),
+    );
+  }
+  if (raw != null) acts.appendChild(copyButton(raw));
+  return acts;
+}
+
 export function buildRecordEntries(columns: Column[], row: Row, def: JoinDef | undefined): Node[] {
+  const meta = tableMeta(tableInView());
   const nodes: Node[] = [];
-  let group: number | undefined;
-  for (const col of columns) {
-    // A join row is grouped by the table each column came from.
-    if (def && col.join !== undefined && col.join !== group) {
-      group = col.join;
-      const heading = el("dt", "record-group", tableLabel(def.tables[col.join]));
-      heading.title = heading.textContent;
+  for (const group of recordGroups(columns, def)) {
+    if (group.label !== undefined) {
+      const heading = el("dt", "record-group", group.label);
+      heading.title = group.label;
       nodes.push(heading);
     }
-    const dt = el("dt");
-    dt.textContent = displayName(col);
-    dt.title = columnKey(col, def);
-    const dd = el("dd");
-    const raw = row[col.name];
-    // Nothing to copy for a null field, but the grid's three-column
-    // alignment still needs a cell here.
-    let action: Node = document.createElement("span");
-    if (raw == null) dd.textContent = "∅";
-    else {
-      if (rendersAsJson(col, raw)) {
-        try {
-          // Parse and render share one catch: a malformed tree build degrades
-          // to plain text the same as unparseable JSON.
-          dd.appendChild(renderJsonTree(JSON.parse(raw)));
-          dd.classList.add("json-tree");
-        } catch (e) {
-          warnBadJsonCell(col, e);
-          dd.textContent = raw;
-        }
-      } else dd.appendChild(formatCellValue(col, raw));
-      const btn = el("button", "copy");
-      btn.setAttribute("aria-label", "copy cell value");
-      btn.append(el("span", "copy-icon", "⧉"));
-      btn.onclick = () => copyText(raw, btn);
-      action = btn;
+    for (const col of group.columns) {
+      const key = columnKeyOf(col, meta);
+      const dt = el("dt");
+      const name = el("span", "record-name", displayName(col));
+      name.title = columnKey(col, def);
+      dt.append(name, typeChip(col));
+      const raw = row[col.name];
+      const dd = raw == null ? el("dd", undefined, "∅") : fieldValue(col, raw, row, meta);
+      const note = fieldNote(col, key, meta?.compositeFkOf.has(col.name) ?? false);
+      if (note) dd.appendChild(el("span", "record-note", note));
+      const field = [keyIcon(key), dt, dd, fieldActions(col, raw, def)];
+      // Tests and anything else find a field by its column, not its position.
+      for (const part of field) part.dataset.col = col.name;
+      nodes.push(...field);
     }
-    nodes.push(dt, dd, action);
   }
   return nodes;
 }
@@ -92,20 +143,32 @@ function sqlLiteral(col: Column, raw: string | null): string {
   return `'${raw.replace(/'/g, "''")}'`;
 }
 
-// `def` is the join the row was rendered for, which state.view may have moved on from.
-export function openRecordView(columns: Column[], row: Row, def: JoinDef | undefined): void {
-  $("record-dl").replaceChildren(...buildRecordEntries(columns, row, def));
+// `rows` is the page as it was when the dialog opened; `def` is the join it
+// was rendered for, which state.view may have moved on from.
+export function openRecordView(columns: Column[], rows: Row[], index: number, def: JoinDef | undefined): void {
   // Both name one table; a join row has several.
   const table = tableInView();
   $("record-referenced-by-wrap").hidden = table === null;
-  const copyInsertBtn = $("record-copy-insert");
+  const copyInsertBtn = $<HTMLButtonElement>("record-copy-insert");
   copyInsertBtn.hidden = table === null;
-  if (table !== null) {
-    renderReferencedBy($("record-referenced-by"), row, () => $<HTMLDialogElement>("record-dialog").close());
-    copyInsertBtn.onclick = () => copyText(recordAsInsert(table, columns, row), copyInsertBtn);
-  }
-  const copyRowBtn = $("record-copy-row");
-  copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
-  const open = () => $<HTMLDialogElement>("record-dialog").showModal();
+  const copyRowBtn = $<HTMLButtonElement>("record-copy-row");
+  const prev = $<HTMLButtonElement>("record-prev");
+  const next = $<HTMLButtonElement>("record-next");
+  const show = (i: number) => {
+    const row = rows[i];
+    $("record-dl").replaceChildren(...buildRecordEntries(columns, row, def));
+    $("record-pos").textContent = `${i + 1} of ${rows.length}`;
+    prev.disabled = i === 0;
+    next.disabled = i === rows.length - 1;
+    prev.onclick = () => show(i - 1);
+    next.onclick = () => show(i + 1);
+    if (table !== null) {
+      renderReferencedBy($("record-referenced-by"), row, () => dialog().close());
+      copyInsertBtn.onclick = () => copyText(recordAsInsert(table, columns, row), copyInsertBtn);
+    }
+    copyRowBtn.onclick = () => copyText(recordAsJson(columns, row), copyRowBtn);
+  };
+  show(index);
+  const open = () => dialog().showModal();
   document.startViewTransition ? document.startViewTransition(open) : open();
 }
