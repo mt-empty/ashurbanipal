@@ -3,6 +3,7 @@ import { qualifiedTable, tableInView } from "../core/state.js";
 import type { Column, JoinDef, Row } from "../core/types.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
 import { tableLabel } from "../lib/join-def.js";
+import { recordJson } from "../lib/json-text.js";
 import { renderJsonTree } from "../lib/json-tree.js";
 import { columnKey, displayName } from "./join-view.js";
 import { renderReferencedBy } from "./referenced-by.js";
@@ -34,8 +35,8 @@ export function buildRecordEntries(columns: Column[], row: Row, def: JoinDef | u
         try {
           // Parse and render share one catch: a malformed tree build degrades
           // to plain text the same as unparseable JSON.
-          dd.classList.add("json-tree");
           dd.appendChild(renderJsonTree(JSON.parse(raw)));
+          dd.classList.add("json-tree");
         } catch (e) {
           warnBadJsonCell(col, e);
           dd.textContent = raw;
@@ -52,26 +53,27 @@ export function buildRecordEntries(columns: Column[], row: Row, def: JoinDef | u
   return nodes;
 }
 
-// Parsed JSON or, when it won't parse, the raw string — so recordAsJson's copy
-// still produces a usable document instead of throwing out of the click handler.
-function parseJsonOrRaw(col: Column, raw: string): unknown {
+// Nested exactly when the record view draws it as a tree, so copy matches
+// what is on screen. Invalid JSON stays a string, so the copy is still a
+// usable document.
+function isValidJsonColumn(col: Column, raw: string): boolean {
+  if (!rendersAsJson(col, raw)) return false;
   try {
-    return JSON.parse(raw);
+    JSON.parse(raw);
+    return true;
   } catch (e) {
     warnBadJsonCell(col, e);
-    return raw;
+    return false;
   }
 }
 
-// JSON columns are re-nested (the value is the engine's text-cast JSON string)
-// so the copied JSON has real nested objects instead of an escaped string.
 function recordAsJson(columns: Column[], row: Row): string {
-  const obj: Record<string, unknown> = {};
-  for (const col of columns) {
-    const raw = row[col.name];
-    obj[col.name] = raw != null && rendersAsJson(col, raw) ? parseJsonOrRaw(col, raw) : raw;
-  }
-  return JSON.stringify(obj, null, 2);
+  return recordJson(
+    columns.map((col) => {
+      const raw = row[col.name];
+      return { name: col.name, raw, json: raw != null && isValidJsonColumn(col, raw) };
+    }),
+  );
 }
 
 function recordAsInsert(table: string, columns: Column[], row: Row): string {

@@ -131,17 +131,17 @@ const rowActionTemplate = $<HTMLTemplateElement>("row-action-template");
 // ---- cell preview ----
 let cellPopAnchor: HTMLElement | null = null;
 function showCellPop(e: MouseEvent, text: string, col: Column): void {
-  // A JSON column (or any JSON-shaped value) renders as a colored,
-  // collapsible tree; everything else falls back to the plain <pre>.
-  // Parsing and rendering share one try/catch, matching record-view.ts's
-  // pattern — a malformed tree build degrades to plain text the same as
-  // unparseable JSON, rather than throwing out of a click handler.
-  let isJson = true;
-  try {
-    $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text) as JsonValue));
-  } catch (err) {
-    isJson = false;
-    warnBadJsonCell(col, err);
+  // The same rule as the record view (rendersAsJson): a tree when it parses,
+  // else the plain <pre>. Parse and render share one catch, so a malformed
+  // tree build degrades to plain text instead of throwing out of a click handler.
+  let isJson = rendersAsJson(col, text);
+  if (isJson) {
+    try {
+      $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text) as JsonValue));
+    } catch (err) {
+      isJson = false;
+      warnBadJsonCell(col, err);
+    }
   }
   $("cell-pre").hidden = isJson;
   $("cell-json").hidden = !isJson;

@@ -176,8 +176,9 @@ during a `/simplify` pass:
   both; nothing renders them differently (same `<time>` + `cell-type-date`),
   so `ColumnTypeClass` carries only `date`.
 - **The "render as JSON?" rule is one shared predicate, not two.**
-  `format.ts` exports `rendersAsJson(col, raw)` (declared JSON, or an
-  unbucketed type whose value leads with `{`/`[`) and `warnBadJsonCell(col,
+  `format.ts` exports `rendersAsJson(col, raw)` (declared JSON, or a
+  plain text type whose value leads with `{`/`[`; narrowed from "any
+  unbucketed type" on 2026-11-02 so arrays and ranges stay text) and `warnBadJsonCell(col,
   err)` (self-gates on declared-JSON). `grid.ts` and `record-view.ts` both
   call them instead of open-coding the check; `record-view.ts` lost its
   local `jsonShape`/`NUMERIC_TYPE_RE` (item 6's generalisation, finished —

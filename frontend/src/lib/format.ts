@@ -66,12 +66,15 @@ const TYPE_ALIASES: Record<string, ColumnTypeClass> = {
   jsonb: "json",
 };
 
-export function columnTypeClass(rawType: string): ColumnTypeClass | null {
-  const key = rawType
+function typeKey(rawType: string): string {
+  return rawType
     .toLowerCase()
     .replace(/\s*\(.*$/, "")
     .trim();
-  return TYPE_ALIASES[key] ?? null;
+}
+
+export function columnTypeClass(rawType: string): ColumnTypeClass | null {
+  return TYPE_ALIASES[typeKey(rawType)] ?? null;
 }
 
 const TYPE_CLASS_CSS: Partial<Record<ColumnTypeClass, string>> = {
@@ -80,12 +83,23 @@ const TYPE_CLASS_CSS: Partial<Record<ColumnTypeClass, string>> = {
   uuid: "cell-type-uuid",
 };
 
-// A column renders as a JSON tree when the backend typed it as JSON, or —
-// when the declared type isn't one we bucket (SQLite "unknown", Postgres
-// "text"/"xml", …) — when the value itself leads with { or [.
+// Plain string types, where JSON is often stored as text (always, on
+// SQLite). Value-shape detection is limited to these: Postgres arrays,
+// ranges, multiranges and paths also lead with { or [ but are not JSON.
+// SQLite's text-affinity rule (a name containing CHAR, CLOB or TEXT) covers
+// every engine's spelling, plus SQLite's undeclared "" and our "unknown";
+// `text[]` and `_text` are Postgres arrays.
+function isTextType(type: string): boolean {
+  if (type.endsWith("[]") || type.startsWith("_")) return false;
+  return type === "" || type === "unknown" || /char|clob|text/.test(type);
+}
+
+// A column renders as a JSON tree when the backend typed it as JSON, or when
+// it is a plain string type and the value itself leads with { or [.
 export function rendersAsJson(col: Column, raw: string): boolean {
-  const klass = columnTypeClass(col.type);
-  return klass === "json" || (klass === null && /^\s*[[{]/.test(raw));
+  const type = typeKey(col.type);
+  if (TYPE_ALIASES[type] === "json") return true;
+  return isTextType(type) && /^\s*[[{]/.test(raw);
 }
 
 // A value that won't parse is only worth flagging when the backend actually

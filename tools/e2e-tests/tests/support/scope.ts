@@ -30,13 +30,20 @@ export interface SeenRequest {
 /** Opens the app and drives it through every scoped API route, returning each API request the page made. */
 export async function exerciseEveryRoute(page: Page): Promise<SeenRequest[]> {
   const seen: SeenRequest[] = [];
+  const routesSeen = new Set<string>();
   let sourcesAnswered = false;
   page.on("response", (r) => {
     if (apiCall("/sources")(r.url())) sourcesAnswered = true;
   });
+  // Firefox can report a start-up request after /sources' answer, so the
+  // first request on each start-up route counts as early too.
   page.on("request", (r) => {
     const url = new URL(r.url());
-    if (url.pathname.startsWith(`${API}/`)) seen.push({ url, early: !sourcesAnswered });
+    if (!url.pathname.startsWith(`${API}/`)) return;
+    const route = url.pathname.slice(API.length);
+    const firstStartUp = START_UP_ROUTES.includes(route) && !routesSeen.has(route);
+    routesSeen.add(route);
+    seen.push({ url, early: !sourcesAnswered || firstStartUp });
   });
 
   await gotoApp(page);

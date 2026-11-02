@@ -2569,18 +2569,25 @@ var TYPE_ALIASES = {
   json: "json",
   jsonb: "json"
 };
+function typeKey(rawType) {
+  return rawType.toLowerCase().replace(/\s*\(.*$/, "").trim();
+}
 function columnTypeClass(rawType) {
-  const key = rawType.toLowerCase().replace(/\s*\(.*$/, "").trim();
-  return TYPE_ALIASES[key] ?? null;
+  return TYPE_ALIASES[typeKey(rawType)] ?? null;
 }
 var TYPE_CLASS_CSS = {
   number: "cell-type-number",
   bool: "cell-type-bool",
   uuid: "cell-type-uuid"
 };
+function isTextType(type) {
+  if (type.endsWith("[]") || type.startsWith("_")) return false;
+  return type === "" || type === "unknown" || /char|clob|text/.test(type);
+}
 function rendersAsJson(col, raw) {
-  const klass = columnTypeClass(col.type);
-  return klass === "json" || klass === null && /^\s*[[{]/.test(raw);
+  const type = typeKey(col.type);
+  if (TYPE_ALIASES[type] === "json") return true;
+  return isTextType(type) && /^\s*[[{]/.test(raw);
 }
 function warnBadJsonCell(col, err) {
   if (columnTypeClass(col.type) === "json") {
@@ -6021,6 +6028,55 @@ function scalarSpan(node) {
   return span;
 }
 
+// src/lib/json-text.ts
+function recordJson(fields) {
+  if (fields.length === 0) return "{}";
+  const lines = fields.map(({ name, raw, json }) => {
+    const value = raw == null ? "null" : json ? reindentJson(raw, 1) : JSON.stringify(raw);
+    return `  ${JSON.stringify(name)}: ${value}`;
+  });
+  return `{
+${lines.join(",\n")}
+}`;
+}
+var isJsonSpace = (ch) => ch === " " || ch === "	" || ch === "\n" || ch === "\r";
+function reindentJson(text, depth = 0) {
+  let out = "";
+  let level = depth;
+  const newline = () => `
+${"  ".repeat(Math.max(level, 0))}`;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (ch === "{" || ch === "[") {
+      const close = ch === "{" ? "}" : "]";
+      let j = i + 1;
+      while (isJsonSpace(text[j])) j++;
+      if (text[j] === close) {
+        out += ch + close;
+        i = j;
+      } else {
+        level++;
+        out += ch + newline();
+      }
+    } else if (ch === "}" || ch === "]") {
+      level--;
+      out += newline() + ch;
+    } else if (ch === ",") {
+      out += `,${newline()}`;
+    } else if (ch === ":") {
+      out += ": ";
+    } else if (!isJsonSpace(ch)) {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 // src/features/record-view.ts
 function buildRecordEntries(columns, row2, def) {
   const nodes = [];
@@ -6042,8 +6098,8 @@ function buildRecordEntries(columns, row2, def) {
     else {
       if (rendersAsJson(col, raw)) {
         try {
-          dd.classList.add("json-tree");
           dd.appendChild(renderJsonTree(JSON.parse(raw)));
+          dd.classList.add("json-tree");
         } catch (e) {
           warnBadJsonCell(col, e);
           dd.textContent = raw;
@@ -6059,21 +6115,23 @@ function buildRecordEntries(columns, row2, def) {
   }
   return nodes;
 }
-function parseJsonOrRaw(col, raw) {
+function isValidJsonColumn(col, raw) {
+  if (!rendersAsJson(col, raw)) return false;
   try {
-    return JSON.parse(raw);
+    JSON.parse(raw);
+    return true;
   } catch (e) {
     warnBadJsonCell(col, e);
-    return raw;
+    return false;
   }
 }
 function recordAsJson(columns, row2) {
-  const obj = {};
-  for (const col of columns) {
-    const raw = row2[col.name];
-    obj[col.name] = raw != null && rendersAsJson(col, raw) ? parseJsonOrRaw(col, raw) : raw;
-  }
-  return JSON.stringify(obj, null, 2);
+  return recordJson(
+    columns.map((col) => {
+      const raw = row2[col.name];
+      return { name: col.name, raw, json: raw != null && isValidJsonColumn(col, raw) };
+    })
+  );
 }
 function recordAsInsert(table, columns, row2) {
   const target = qualifiedTable(table);
@@ -6181,12 +6239,14 @@ var cellTemplate = $("cell-template");
 var rowActionTemplate = $("row-action-template");
 var cellPopAnchor = null;
 function showCellPop(e, text, col) {
-  let isJson = true;
-  try {
-    $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text)));
-  } catch (err) {
-    isJson = false;
-    warnBadJsonCell(col, err);
+  let isJson = rendersAsJson(col, text);
+  if (isJson) {
+    try {
+      $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text)));
+    } catch (err) {
+      isJson = false;
+      warnBadJsonCell(col, err);
+    }
   }
   $("cell-pre").hidden = isJson;
   $("cell-json").hidden = !isJson;
