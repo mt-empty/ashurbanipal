@@ -4,6 +4,7 @@ import type { Condition } from "../filter.js";
 import {
   BadJoinError,
   buildJoinSelect,
+  columnInfo,
   type JoinColMeta,
   type JoinData,
   type JoinDialect,
@@ -247,6 +248,32 @@ function buildWhereClauseSqlite(conditions: Condition[], columnNames: string[]):
 }
 
 /** SQLite implementation; see docs/adapter-decisions.md for protocol differences. */
+// `table` must already be allow-listed: it is spliced into the pragma call.
+async function joinTableMeta(db: Database, table: string): Promise<JoinTableMeta> {
+  const declared = await dbAll<{ cid: number; name: string; type: string }>(
+    db,
+    `select cid, name, type from pragma_table_info(${quoteIdent(table)}) order by cid`,
+  );
+  const { pkColumns, fkColumns } = await keyMetadataUnbounded(db, table);
+  const columns = declared.map((ct): JoinColMeta => {
+    const col: JoinColMeta = {
+      name: ct.name,
+      // A declared type can be empty (""); a stable label beats emitting "".
+      type: ct.type || "unknown",
+      class: sqliteTypeClass(ct.type ?? ""),
+    };
+    if (pkColumns.has(ct.name)) {
+      col.key = "pk";
+      if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
+    } else if (fkColumns.has(ct.name)) {
+      col.key = "fk";
+      col.references = fkColumns.get(ct.name);
+    }
+    return col;
+  });
+  return { name: table, columns };
+}
+
 export class SqliteSource implements DbSource {
   constructor(private readonly db: Database) {}
 
@@ -283,27 +310,7 @@ export class SqliteSource implements DbSource {
       for (const name of names) {
         if (metas.has(name)) continue;
         if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
-        const declared = await dbAll<{ cid: number; name: string; type: string }>(
-          this.db,
-          `select cid, name, type from pragma_table_info(${quoteIdent(name)}) order by cid`,
-        );
-        const { pkColumns, fkColumns } = await keyMetadataUnbounded(this.db, name);
-        const columns = declared.map((ct): JoinColMeta => {
-          const col: JoinColMeta = {
-            name: ct.name,
-            type: ct.type || "unknown",
-            class: sqliteTypeClass(ct.type ?? ""),
-          };
-          if (pkColumns.has(ct.name)) {
-            col.key = "pk";
-            if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
-          } else if (fkColumns.has(ct.name)) {
-            col.key = "fk";
-            col.references = fkColumns.get(ct.name);
-          }
-          return col;
-        });
-        metas.set(name, { name, columns });
+        metas.set(name, await joinTableMeta(this.db, name));
       }
       const plan = planJoin(
         spec,
@@ -342,32 +349,11 @@ export class SqliteSource implements DbSource {
     }
 
     const { where: whereClause, values: filterValues } = buildWhereClauseSqlite(opts.filter, columnNames);
-    const { pkColumns, fkColumns } = await keyMetadata(this.db, realTable, timeoutMs);
-
     const quotedTable = quoteIdent(realTable);
-    const columnTypes = await bounded(this.db, timeoutMs, () =>
-      dbAll<{ cid: number; name: string; type: string }>(
-        this.db,
-        `select cid, name, type from pragma_table_info(${quotedTable}) order by cid`,
-      ),
-    );
-
-    const columns: ColumnInfo[] = columnTypes.map((ct) => {
-      const col: ColumnInfo = {
-        name: ct.name,
-        // SQLite's declared column types can be empty (""); fall back to
-        // a stable label rather than emitting "".
-        type: ct.type || "unknown",
-      };
-      if (pkColumns.has(ct.name)) {
-        col.key = "pk";
-        if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
-      } else if (fkColumns.has(ct.name)) {
-        col.key = "fk";
-        col.references = fkColumns.get(ct.name);
-      }
-      return col;
-    });
+    // The join route's lookup, so both routes report the same columns.
+    const columns: ColumnInfo[] = (
+      await bounded(this.db, timeoutMs, () => joinTableMeta(this.db, realTable))
+    ).columns.map(columnInfo);
 
     // Aliased back to the real column name: an un-aliased CAST(...)
     // expression's result-set label is the literal expression text on

@@ -177,6 +177,20 @@ describe("SqliteSource", () => {
   // bug — pragma_foreign_key_list.to is NULL for "REFERENCES parent" with
   // no named column, and until fixed keyMetadata doesn't resolve it the
   // way referencedBy now does.
+  it("query_table reports each column's join class", async () => {
+    db = await new Promise<Database>((resolve, reject) => {
+      const conn = new Database(":memory:", (err) => {
+        if (err) return reject(err);
+        conn.exec("create table t (id integer primary key, label text, meta json, loose);", (execErr) =>
+          execErr ? reject(execErr) : resolve(conn),
+        );
+      });
+    });
+    const data = await new SqliteSource(db).queryTable(undefined, "t", baseOpts, 5000);
+    expect(data.columns.map((c) => c.class)).toEqual(["number", "text", undefined, "untyped"]);
+    expect("class" in data.columns[2], "a JSON column carries no class").toBe(false);
+  });
+
   it("query_table resolves a shorthand FK with no named parent column", async () => {
     db = await new Promise<Database>((resolve, reject) => {
       const conn = new Database(":memory:", (err) => {

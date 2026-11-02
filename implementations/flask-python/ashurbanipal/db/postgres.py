@@ -27,7 +27,6 @@ from ..join import (
     unknown_join_table,
 )
 from . import (
-    ColumnInfo,
     ColumnPair,
     ColumnRef,
     ConstraintCheck,
@@ -314,27 +313,8 @@ class PgSource(DbSource):
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
-                cur.execute(
-                    "select column_name, data_type from information_schema.columns "
-                    "where table_schema = %s and table_name = %s "
-                    "order by ordinal_position",
-                    (resolved_schema, table),
-                )
-                column_types = list(cur.fetchall())
-
-                column_comments = _column_comments(cur, resolved_schema, table)
-
-                pk_columns, fk_columns = self._key_metadata(cur, resolved_schema, table)
-                columns = [
-                    ColumnInfo(
-                        name=name,
-                        type_name=type_name,
-                        key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
-                        references=fk_columns.get(name),
-                        comment=column_comments.get(name),
-                    )
-                    for name, type_name in column_types
-                ]
+                # The join route's lookup, so both routes report the same columns.
+                columns = [c.column_info() for c in self._join_table_meta(cur, resolved_schema, table).columns]
 
                 select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
                 order_clause = ""

@@ -1,4 +1,4 @@
-import { type ColumnRef, type KeyKind, opSql, opTakesValue } from "./db/types.js";
+import { type ColumnInfo, type ColumnRef, type JoinClassName, type KeyKind, opSql, opTakesValue } from "./db/types.js";
 import { FilterError, NotAllowedError } from "./errors.js";
 import type { Condition } from "./filter.js";
 
@@ -148,7 +148,7 @@ export function parseJoin(raw: string): JoinSpec {
  * no declared type and pairs only with itself.
  */
 export interface TypeClass {
-  kind: "number" | "text" | "uuid" | "boolean" | "temporal" | "time" | "binary" | "enum" | "untyped";
+  kind: JoinClassName;
   id?: string;
 }
 
@@ -187,6 +187,7 @@ export interface JoinColumnInfo {
   join: number;
   table: string;
   column: string;
+  class?: JoinClassName;
   key?: KeyKind;
   references?: ColumnRef;
   comment?: string;
@@ -388,15 +389,21 @@ export function buildJoinSelect(
   return { body: sql, values };
 }
 
+/** The §5.4.1 shape of a column; an enum's identity stays server-side, so `class` is the kind alone. */
+export function columnInfo(col: JoinColMeta): ColumnInfo {
+  const info: ColumnInfo = { name: col.name, type: col.type };
+  if (col.class) info.class = col.class.kind;
+  if (col.key) info.key = col.key;
+  if (col.references) info.references = col.references;
+  if (col.comment) info.comment = col.comment;
+  return info;
+}
+
 export function joinColumnInfos(plan: JoinPlan): JoinColumnInfo[] {
   return plan.selection.map(([p, c], i) => {
     const t = plan.tables[p];
-    const col = t.columns[c];
-    const info: JoinColumnInfo = { name: plan.labels[i], type: col.type, join: p, table: t.name, column: col.name };
-    if (col.key) info.key = col.key;
-    if (col.references) info.references = col.references;
-    if (col.comment) info.comment = col.comment;
-    return info;
+    const { name, ...rest } = columnInfo(t.columns[c]);
+    return { name: plan.labels[i], ...rest, join: p, table: t.name, column: name };
   });
 }
 

@@ -311,36 +311,8 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val whereClause = opts.filter?.let { filterValidator.buildWhereClause(it, columnNames) }
             ?: WhereClause("", emptyList())
 
-        val columnTypes = jdbcTemplate.query(
-            "select column_name, data_type from information_schema.columns " +
-                "where table_schema = ? and table_name = ? " +
-                "order by ordinal_position",
-            RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
-            realSchema,
-            realTable,
-        )
-        val columnComments = columnComments(realSchema, realTable)
-
-        val (pkColumns, fkColumns) = keyMetadata(realSchema, realTable)
-        val columns = columnTypes.map { (name, typeName) ->
-            val key: String?
-            val references: ColumnRef?
-            when {
-                pkColumns.contains(name) -> {
-                    key = "pk"
-                    references = fkColumns[name]
-                }
-                fkColumns.containsKey(name) -> {
-                    key = "fk"
-                    references = fkColumns[name]
-                }
-                else -> {
-                    key = null
-                    references = null
-                }
-            }
-            ColumnInfo(name, typeName, key, references, columnComments[name])
-        }
+        // The join route's lookup, so both routes report the same columns.
+        val columns = joinTableMeta(realSchema, realTable).columns.map { it.columnInfo() }
 
         val selectList = columns.joinToString(", ") { "${quoteIdent(it.name)}::text" }
         // Qualify the source column so ORDER BY keeps its native type.

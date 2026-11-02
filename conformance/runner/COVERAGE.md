@@ -91,6 +91,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 |---|---|---|
 | `P5.4.1-FK-METADATA` | `key`/`references` for FK columns | `table_data::foreign_key_columns_report_key_and_references` |
 | `P5.4.1-COMMENT-OMITTED` | `comment` omitted when absent | `table_data::column_comments_are_present_only_where_seeded` |
+| `P5.4.1-CLASS` | `class` is the §5.11.2 join class, omitted for a column that cannot be joined | `table_data::columns_report_their_join_class` |
 | `P5.4.1-COMPOSITE-FK-OMITTED` | Composite FKs omit `key`/`references` entirely | `table_data::composite_foreign_key_columns_omit_key_metadata` |
 
 ### §5.4.2 Filter JSON AST
@@ -210,7 +211,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | ID | Requirement | Test |
 |---|---|---|
 | `P5.11-SHAPE` | `columns` entries carry `name`, `type`, `join`, `table`, `column`; labels unique; `rows` keyed by label; `has_more` present, `total_approx` absent | `join::response_shape_has_join_metadata_and_no_total` |
-| `P5.11-COLUMN-METADATA` | §5.4.1 `type`/`key`/`references`/`comment` apply per table, as `/api/tables/data` reports them | `join::column_metadata_is_carried_per_table` |
+| `P5.11-COLUMN-METADATA` | §5.4.1 `type`/`class`/`key`/`references`/`comment` apply per table, as `/api/tables/data` reports them | `join::column_metadata_is_carried_per_table` |
 | `P5.11-LEFT-INNER` | `left` keeps unmatched base rows as nulls; `inner` drops them | `join::left_keeps_unmatched_rows_and_inner_drops_them` |
 | `P5.11-THREE-TABLES` | A three-table join returns each table's columns in position order with unique labels | `join::three_table_join_returns_every_tables_columns` |
 | `P5.11-SELF-JOIN` | The same table at two positions returns both sides with distinct labels | `join::self_join_returns_both_sides` |
@@ -226,6 +227,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.11-JOIN-BOUND` | An oversize `join` is a 400 `invalid_join`, never truncated | `join::oversize_join_is_rejected` |
 | `P5.11-COMPATIBILITY` | A pair across type classes, or a `json`/`jsonb` column, → 400 `invalid_join` | `join::incompatible_column_pairs_are_rejected` |
 | `P5.11-SAME-CLASS` | Exact numerics of different widths join | `join::same_class_pairs_with_different_types_join` |
+| `P5.11-ENUM-IDENTITY` | Two enum columns join only when they share one enumerated type (Postgres seed) | `join::enum_columns_join_only_to_the_same_enum` |
 | `P5.11-SORT-PARAMS` | `sort_join` needs `sort` and a real position, and bad `order`, → `invalid_parameter`; unknown sort column → `unknown_column` | `join::sort_parameters_are_validated` |
 | `P5.11-FILTER-RULES` | §5.4.2 structural rules apply; out-of-range `join` → `invalid_filter`; §5.4 rejects a `join` key | `join::filter_rules_hold_on_the_join_route` |
 | `P5.11-HEADER` | Carries the protocol version header on 200 and 400 | `join::every_response_carries_the_protocol_version_header` |

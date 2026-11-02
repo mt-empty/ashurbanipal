@@ -45,12 +45,11 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   const tableAt = (pos: number): string => (pos === 0 ? draft.table : draft.joins[pos - 1].table);
   const nameAt = (pos: number): string => (pos === 0 ? draft.alias : draft.joins[pos - 1].alias).trim() || tableAt(pos);
   const columnsAt = (pos: number): Column[] => cachedColumns(tableAt(pos)) ?? [];
-  const typeOf = (pos: number, column: string): string | undefined =>
-    columnsAt(pos).find((c) => c.name === column)?.type;
+  const columnOf = (pos: number, column: string): Column | undefined => columnsAt(pos).find((c) => c.name === column);
 
   const mismatch = (pos: number, pair: DraftPair) => {
-    const left = typeOf(pair.leftJoin, pair.leftColumn);
-    const right = typeOf(pos, pair.rightColumn);
+    const left = columnOf(pair.leftJoin, pair.leftColumn);
+    const right = columnOf(pos, pair.rightColumn);
     return left && right ? joinMismatch(left, right) : null;
   };
 
@@ -115,11 +114,11 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     const first = k === 0;
     const which = first ? "" : ` pair ${k + 1}`;
     const clash = mismatch(pos, pair);
-    const rightType = typeOf(pos, pair.rightColumn);
-    const leftType = typeOf(pair.leftJoin, pair.leftColumn);
+    const right = columnOf(pos, pair.rightColumn);
+    const left = columnOf(pair.leftJoin, pair.leftColumn);
     const leftOptions = Array.from({ length: pos }, (_, p) => p).flatMap((p) =>
       columnsAt(p).map((c) => {
-        const note = pairNote(c.type, rightType);
+        const note = pairNote(c, right);
         return {
           value: `${p}|${c.name}`,
           label: `${nameAt(p)}.${c.name}`,
@@ -129,7 +128,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
       }),
     );
     const rightOptions = columnsAt(pos).map((c) => {
-      const note = pairNote(c.type, leftType);
+      const note = pairNote(c, left);
       return { value: c.name, label: c.name, note: note ?? c.type, blocked: note !== null };
     });
     const parts: Node[] = [
@@ -163,7 +162,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         },
       }),
     ];
-    if (leftType && rightType && !clash) parts.push(el("span", "j-ok", `${leftType} = ${rightType} ✓`));
+    if (left && right && !clash) parts.push(el("span", "j-ok", `${left.type} = ${right.type} ✓`));
     if (!first) {
       parts.push(
         textButton("✕", "j-rm", `remove column pair from join ${pos}`, () => {

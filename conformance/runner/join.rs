@@ -174,7 +174,7 @@ async fn column_metadata_is_carried_per_table() {
                 .iter()
                 .find(|c| c["join"] == pos && c["column"] == col["name"])
                 .unwrap();
-            for field in ["type", "key", "references", "comment"] {
+            for field in ["type", "class", "key", "references", "comment"] {
                 assert_exact(
                     joined.get(field),
                     col.get(field),
@@ -685,6 +685,30 @@ async fn incompatible_column_pairs_are_rejected() {
         }
         NotJoinableColumns::NotSeeded => {}
     }
+}
+
+/// P5.11-ENUM-IDENTITY: two enum columns join only when they share one
+/// enumerated type. Only the Postgres seed has enums.
+#[tokio::test]
+async fn enum_columns_join_only_to_the_same_enum() {
+    if Backend::current() != Backend::Postgres {
+        return;
+    }
+    let srv = TestServer::spawn().await;
+    let pair = |table: &str| {
+        json!({
+            "table": "orders",
+            "joins": [{
+                "type": "inner", "table": table,
+                "on": [{"left": {"join": 0, "column": "status"}, "right": "status"}]
+            }],
+            "columns": [{"join": 0, "column": "id"}]
+        })
+    };
+    let resp = get_join(&srv, &pair("support_tickets"), &[]).await;
+    assert_problem_code(resp, 400, "invalid_join", "order_status to ticket_status").await;
+    let resp = get_join(&srv, &pair("orders"), &[("limit", "1".into())]).await;
+    assert_status(&resp, 200, "order_status to order_status");
 }
 
 /// P5.11-SAME-CLASS: an exact numeric pair joins even when the

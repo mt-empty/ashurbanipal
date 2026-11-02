@@ -17,7 +17,7 @@ pub use sqlite::SqliteSource;
 use serde::Serialize;
 
 use crate::filter::{Condition, FilterOp};
-use crate::join::{JoinData, JoinOpts, JoinSpec};
+use crate::join::{JoinData, JoinOpts, JoinSpec, TypeClass};
 
 #[derive(Debug, Clone)]
 pub struct QueryOpts {
@@ -53,6 +53,9 @@ pub struct ColumnInfo {
     pub name: String,
     #[serde(rename = "type")]
     pub type_name: String,
+    /// The §5.11.2 join class; absent when the column cannot be joined.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class: Option<TypeClass>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<KeyKind>,
     #[serde(skip_serializing_if = "Option::is_none")]

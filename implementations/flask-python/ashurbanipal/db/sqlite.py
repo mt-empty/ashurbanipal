@@ -31,7 +31,6 @@ from ..join import (
 )
 from . import (
     BadJoin,
-    ColumnInfo,
     ColumnPair,
     ColumnRef,
     ConstraintFk,
@@ -211,6 +210,25 @@ class SqliteSource(DbSource):
         cur.execute(f"select cid, name from pragma_table_info({quote_ident(table)}) order by cid")
         return [row[1] for row in cur.fetchall()]
 
+    def _join_table_meta(self, cur: sqlite3.Cursor, table: str) -> TableMeta:
+        """`table` must already be allow-listed: it is spliced into the pragma call."""
+        pk_columns, fk_columns = self._key_metadata(cur, table)
+        cur.execute(f"select cid, name, type from pragma_table_info({quote_ident(table)}) order by cid")
+        return TableMeta(
+            name=table,
+            columns=[
+                ColMeta(
+                    name=col,
+                    # A declared type can be empty (""); a stable label beats emitting "".
+                    type_name=declared or "unknown",
+                    cls=type_class(declared or ""),
+                    key=(KeyKind.PK if col in pk_columns else (KeyKind.FK if col in fk_columns else None)),
+                    references=fk_columns.get(col),
+                )
+                for _, col, declared in cur.fetchall()
+            ],
+        )
+
     def _key_metadata(self, cur: sqlite3.Cursor, table: str) -> tuple[list[str], dict[str, ColumnRef]]:
         quoted = quote_ident(table)
         cur.execute(f"select cid, name, pk from pragma_table_info({quoted}) order by cid")
@@ -296,28 +314,9 @@ class SqliteSource(DbSource):
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
-                pk_columns, fk_columns = self._key_metadata(cur, table)
                 quoted_table = quote_ident(table)
-                cur.execute(f"select cid, name, type from pragma_table_info({quoted_table}) order by cid")
-                columns = []
-                for _, name, type_name in cur.fetchall():
-                    if name in pk_columns:
-                        key = KeyKind.PK
-                    elif name in fk_columns:
-                        key = KeyKind.FK
-                    else:
-                        key = None
-                    columns.append(
-                        ColumnInfo(
-                            name=name,
-                            # SQLite's declared column types can be empty (""),
-                            # fall back to a stable label rather than emitting "".
-                            type_name=type_name or "unknown",
-                            key=key,
-                            references=fk_columns.get(name),
-                            comment=None,
-                        )
-                    )
+                # The join route's lookup, so both routes report the same columns.
+                columns = [c.column_info() for c in self._join_table_meta(cur, table).columns]
             finally:
                 self._clear_bound(conn)
 
@@ -371,25 +370,7 @@ class SqliteSource(DbSource):
                         continue
                     if name not in allowed:
                         raise BadJoin(f"unknown table {name!r}")
-                    pk_columns, fk_columns = self._key_metadata(cur, name)
-                    cur.execute(f"select cid, name, type from pragma_table_info({quote_ident(name)}) order by cid")
-                    metas[name] = TableMeta(
-                        name=name,
-                        columns=[
-                            ColMeta(
-                                name=col,
-                                type_name=declared or "unknown",
-                                cls=type_class(declared or ""),
-                                key=(
-                                    KeyKind.PK
-                                    if col in pk_columns
-                                    else (KeyKind.FK if col in fk_columns else None)
-                                ),
-                                references=fk_columns.get(col),
-                            )
-                            for _, col, declared in cur.fetchall()
-                        ],
-                    )
+                    metas[name] = self._join_table_meta(cur, name)
                 plan = plan_join(spec, [metas[n] for n in names], opts)
 
                 # The statement is built from catalog names and generated

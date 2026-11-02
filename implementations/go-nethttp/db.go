@@ -121,6 +121,7 @@ func newStructure() Structure {
 type ColumnInfo struct {
 	Name       string     `json:"name"`
 	Type       string     `json:"type"`
+	Class      string     `json:"class,omitempty"` // the §5.11.2 join class; empty when not joinable
 	Key        KeyKind    `json:"key,omitempty"`
 	References *ColumnRef `json:"references,omitempty"`
 	Comment    string     `json:"comment,omitempty"`

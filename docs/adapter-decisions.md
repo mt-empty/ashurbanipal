@@ -242,7 +242,8 @@ Protocol property: each `on` pair joins columns of one type class
 (`spec/protocol.md` §5.11.2), checked from the catalog before the
 statement runs, with a 400 naming the pair. The classes are engine-neutral;
 how a native type reaches a class is not. A type with no class is not
-joinable.
+joinable. `/tables/data` and the join route report each column's class
+(§5.4.1 `class`) from the same lookup, so the browser never re-derives it.
 
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|

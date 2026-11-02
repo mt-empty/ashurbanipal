@@ -12,7 +12,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .db import OP_SQL, BadJoin, BadParam, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
+from .db import OP_SQL, BadJoin, BadParam, ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
 from .filter import Condition, load_json
 
@@ -180,6 +180,17 @@ class ColMeta:
     references: ColumnRef | None = None
     comment: str | None = None
 
+    def column_info(self) -> ColumnInfo:
+        """The §5.4.1 shape; an enum's identity stays server-side, so the class is the kind alone."""
+        return ColumnInfo(
+            name=self.name,
+            type_name=self.type_name,
+            key=self.key,
+            references=self.references,
+            comment=self.comment,
+            class_name=self.cls.kind if self.cls else None,
+        )
+
 
 @dataclass
 class TableMeta:
@@ -228,6 +239,7 @@ class JoinColumnInfo:
     key: KeyKind | None = None
     references: ColumnRef | None = None
     comment: str | None = None
+    class_name: str | None = None
 
 
 @dataclass
@@ -272,6 +284,7 @@ class JoinPlan:
                     key=c.key,
                     references=c.references,
                     comment=c.comment,
+                    class_name=c.cls.kind if c.cls else None,
                 )
             )
         return out

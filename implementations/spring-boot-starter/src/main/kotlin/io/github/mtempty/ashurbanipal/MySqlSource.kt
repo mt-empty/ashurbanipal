@@ -384,9 +384,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val whereClause = opts.filter?.let { buildWhereClauseMysql(it, columnNames) } ?: WhereClause("", emptyList())
 
         // The join route's lookup, so both routes report the same column types.
-        val columns = tableMeta(variant, realSchema, realTable).columns.map {
-            ColumnInfo(it.name, it.type, it.key, it.references, it.comment)
-        }
+        val columns = tableMeta(variant, realSchema, realTable).columns.map { it.columnInfo() }
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdentMysql(it.name)} AS CHAR)" }
         val orderClause = sort?.let {

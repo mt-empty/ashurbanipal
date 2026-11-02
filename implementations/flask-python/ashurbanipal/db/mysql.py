@@ -27,7 +27,6 @@ from ..join import (
 )
 from . import (
     BadJoin,
-    ColumnInfo,
     ColumnPair,
     ColumnRef,
     ConstraintCheck,
@@ -369,16 +368,7 @@ class MySqlSource(DbSource):
 
                 # The join route's lookup, so both routes report the same column types.
                 meta = self._table_meta(cur, variant, resolved_schema, table, timeout)
-                columns = [
-                    ColumnInfo(
-                        name=c.name,
-                        type_name=c.type_name,
-                        key=c.key,
-                        references=c.references,
-                        comment=c.comment,
-                    )
-                    for c in meta.columns
-                ]
+                columns = [c.column_info() for c in meta.columns]
 
                 select_list = ", ".join(f"CAST({_quote_ident(c.name)} AS CHAR)" for c in columns)
                 order_clause = ""

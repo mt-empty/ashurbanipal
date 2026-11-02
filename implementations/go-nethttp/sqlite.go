@@ -455,57 +455,14 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 		}
 	}
 
-	pkColumns, fkColumns, err := c.keyMetadata(ctx, c.db, realTable)
+	// The join route's lookup, so both routes report the same columns.
+	meta, err := c.joinTableMeta(ctx, c.db, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
-
-	typeCtx, typeCancel := c.bounded(ctx)
-	typeRows, err := c.db.QueryContext(typeCtx,
-		fmt.Sprintf("select cid, name, type from pragma_table_info(%s) order by cid", quoteIdent(realTable)))
-	if err != nil {
-		typeCancel()
-		return TableData{}, err
-	}
-	type colType struct{ name, typ string }
-	var columnTypes []colType
-	for typeRows.Next() {
-		var cid int64
-		var ct colType
-		if err := typeRows.Scan(&cid, &ct.name, &ct.typ); err != nil {
-			typeRows.Close()
-			typeCancel()
-			return TableData{}, err
-		}
-		columnTypes = append(columnTypes, ct)
-	}
-	if err := typeRows.Err(); err != nil {
-		typeRows.Close()
-		typeCancel()
-		return TableData{}, err
-	}
-	typeRows.Close()
-	typeCancel()
-
-	columns := make([]ColumnInfo, 0, len(columnTypes))
-	for _, ct := range columnTypes {
-		col := ColumnInfo{Name: ct.name, Type: ct.typ}
-		// SQLite's declared column types can be empty (dynamic typing);
-		// fall back to a stable label rather than emitting "".
-		if col.Type == "" {
-			col.Type = "unknown"
-		}
-		if ref, ok := fkColumns[ct.name]; ok {
-			r := ref
-			col.References = &r
-		}
-		switch {
-		case pkColumns[ct.name]:
-			col.Key = KeyPK
-		case col.References != nil:
-			col.Key = KeyFK
-		}
-		columns = append(columns, col)
+	columns := make([]ColumnInfo, 0, len(meta.columns))
+	for _, cm := range meta.columns {
+		columns = append(columns, cm.columnInfo())
 	}
 
 	selectParts := make([]string, len(columns))

@@ -668,6 +668,14 @@ components:
             MySQL information_schema.COLUMNS.DATA_TYPE; SQLite the declared
             type, or "unknown" when none). Informational only — never used
             to build SQL.
+        class:
+          type: string
+          enum: [number, text, uuid, boolean, temporal, time, binary, enum, untyped]
+          description: >
+            The column's join class (spec/protocol.md §5.11.2), the same one
+            the server checks join pairs with; omitted when the column is
+            not joinable. Two enum columns join only when their type
+            strings are equal.
         key:
           type: string
           enum: [pk, fk]

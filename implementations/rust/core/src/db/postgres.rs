@@ -689,36 +689,13 @@ impl DbSource for PgPoolSource {
             None => (String::new(), Vec::new()),
         };
 
-        let column_types = sqlx::query_as::<_, (String, String)>(
-            "select column_name, data_type from information_schema.columns \
-             where table_schema = $1 and table_name = $2 \
-             order by ordinal_position",
-        )
-        .bind(&schema)
-        .bind(&table)
-        .fetch_all(&mut *tx)
-        .await?;
-        let column_comments = self.column_comments_in_tx(&mut tx, &schema, &table).await?;
-        let (pk_columns, fk_columns) = self.key_metadata_in_tx(&mut tx, &schema, &table).await?;
-        let columns: Vec<ColumnInfo> = column_types
+        // The join route's lookup, so both routes report the same columns.
+        let columns: Vec<ColumnInfo> = self
+            .join_table_meta_in_tx(&mut tx, &schema, &table)
+            .await?
+            .columns
             .into_iter()
-            .map(|(name, type_name)| {
-                let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                } else if let Some(r) = fk_columns.get(&name) {
-                    (Some(KeyKind::Fk), Some(r.clone()))
-                } else {
-                    (None, None)
-                };
-                let comment = column_comments.get(&name).cloned();
-                ColumnInfo {
-                    name,
-                    type_name,
-                    key,
-                    references,
-                    comment,
-                }
-            })
+            .map(ColumnInfo::from)
             .collect();
 
         let select_list = columns

@@ -4,6 +4,7 @@ import type { Condition } from "../filter.js";
 import {
   BadJoinError,
   buildJoinSelect,
+  columnInfo,
   type JoinColMeta,
   type JoinData,
   type JoinDialect,
@@ -506,13 +507,7 @@ export class MySqlSource implements DbSource {
 
       // The join route's lookup, so both routes report the same column types.
       const meta = await this.tableMeta(conn, variant, realSchema, realTable, timeoutMs);
-      const columns: ColumnInfo[] = meta.columns.map(({ name, type, key, references, comment }) => {
-        const col: ColumnInfo = { name, type };
-        if (key) col.key = key;
-        if (references) col.references = references;
-        if (comment) col.comment = comment;
-        return col;
-      });
+      const columns: ColumnInfo[] = meta.columns.map(columnInfo);
 
       // Alias CAST results to the column names expected by cellToJson.
       const selectList = columns

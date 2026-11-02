@@ -694,7 +694,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	}
 	columns := make([]ColumnInfo, 0, len(meta.columns))
 	for _, cm := range meta.columns {
-		columns = append(columns, ColumnInfo{Name: cm.name, Type: cm.typeName, Key: cm.key, References: cm.references, Comment: cm.comment})
+		columns = append(columns, cm.columnInfo())
 	}
 
 	selectParts := make([]string, len(columns))

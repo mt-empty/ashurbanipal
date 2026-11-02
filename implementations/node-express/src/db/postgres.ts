@@ -3,6 +3,7 @@ import { assertSafeTimeoutMs, mapSelectDenied, NotAllowedError, quoteIdent } fro
 import { buildWhereClause } from "../filter.js";
 import {
   buildJoinSelect,
+  columnInfo,
   type JoinColMeta,
   type JoinData,
   type JoinDialect,
@@ -403,30 +404,8 @@ export class PostgresSource implements DbSource {
         filterValues = built.values;
       }
 
-      const { rows: columnTypeRows } = await client.query<{ column_name: string; data_type: string }>(
-        `select column_name, data_type from information_schema.columns
-         where table_schema = $1 and table_name = $2
-         order by ordinal_position`,
-        [realSchema, realTable],
-      );
-
-      const comments = await columnComments(client, realSchema, realTable);
-
-      const { pkColumns, fkColumns } = await this.keyMetadata(client, realSchema, realTable);
-
-      const columns: ColumnInfo[] = columnTypeRows.map((ct) => {
-        const col: ColumnInfo = { name: ct.column_name, type: ct.data_type };
-        if (pkColumns.has(ct.column_name)) {
-          col.key = "pk";
-          if (fkColumns.has(ct.column_name)) col.references = fkColumns.get(ct.column_name);
-        } else if (fkColumns.has(ct.column_name)) {
-          col.key = "fk";
-          col.references = fkColumns.get(ct.column_name);
-        }
-        const comment = comments.get(ct.column_name);
-        if (comment !== undefined) col.comment = comment;
-        return col;
-      });
+      // The join route's lookup, so both routes report the same columns.
+      const columns: ColumnInfo[] = (await this.joinTableMeta(client, realSchema, realTable)).columns.map(columnInfo);
 
       const selectList = columns.map((col) => `${quoteIdent(col.name)}::text`).join(", ");
 

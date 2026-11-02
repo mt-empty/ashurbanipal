@@ -91,20 +91,6 @@ impl SqliteSource {
         })
         .await
     }
-
-    /// Composite FKs are dropped rather than risk mislabeling which
-    /// referencing column pairs with which referenced column, mirroring
-    /// `postgres::PgPoolSource::key_metadata`.
-    async fn key_metadata(
-        &self,
-        table: &str,
-    ) -> Result<(Vec<String>, HashMap<String, ColumnRef>), DbError> {
-        let table = table.to_string();
-        self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-            key_metadata_on(conn, &table).await
-        })
-        .await
-    }
 }
 
 /// `table` must already be allow-listed: it is spliced into the pragma calls.
@@ -119,6 +105,8 @@ async fn allowed_tables_on(conn: &mut sqlx::SqliteConnection) -> Result<Vec<Stri
     .await?)
 }
 
+/// Composite FKs are dropped rather than risk mislabeling which referencing
+/// column pairs with which referenced column.
 async fn key_metadata_on(
     conn: &mut sqlx::SqliteConnection,
     table: &str,
@@ -445,45 +433,16 @@ impl DbSource for SqliteSource {
             None => (String::new(), Vec::new()),
         };
 
-        let (pk_columns, fk_columns) = self.key_metadata(&table).await?;
-        let pragma_table = quote_ident(&table);
-        let column_types: Vec<(String, String)> = self
+        // The join route's lookup, so both routes report the same columns.
+        let meta_table = table.clone();
+        let columns: Vec<ColumnInfo> = self
             .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-                let rows =
-                    sqlx::query_as::<_, (i64, String, String)>(sqlx::AssertSqlSafe(format!(
-                        "select cid, name, type from pragma_table_info({pragma_table}) \
-                         order by cid"
-                    )))
-                    .fetch_all(&mut *conn)
-                    .await?;
-                Ok(rows.into_iter().map(|(_, name, ty)| (name, ty)).collect())
+                join_table_meta(conn, &meta_table).await
             })
-            .await?;
-
-        let columns: Vec<ColumnInfo> = column_types
+            .await?
+            .columns
             .into_iter()
-            .map(|(name, type_name)| {
-                let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                } else if let Some(r) = fk_columns.get(&name) {
-                    (Some(KeyKind::Fk), Some(r.clone()))
-                } else {
-                    (None, None)
-                };
-                ColumnInfo {
-                    name,
-                    // SQLite's declared column types can be empty ("");
-                    // fall back to a stable label rather than emitting "".
-                    type_name: if type_name.is_empty() {
-                        "unknown".to_string()
-                    } else {
-                        type_name
-                    },
-                    key,
-                    references,
-                    comment: None,
-                }
-            })
+            .map(ColumnInfo::from)
             .collect();
 
         let select_list = columns
@@ -1082,6 +1041,50 @@ mod tests {
     // `referenced_by`'s pre-fix bug — `pragma_foreign_key_list.to` is NULL
     // for `REFERENCES parent` with no named column, and until fixed
     // `key_metadata` doesn't resolve it the way `referenced_by` now does.
+    #[tokio::test]
+    async fn query_table_reports_each_columns_join_class() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "create table t (id integer primary key, label text, meta json, loose);".to_string(),
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let source = SqliteSource::new(pool);
+        let data = source
+            .query_table(
+                None,
+                "t",
+                QueryOpts {
+                    limit: 10,
+                    offset: 0,
+                    sort: None,
+                    descending: false,
+                    timeout_secs: 5,
+                    filter: None,
+                },
+            )
+            .await
+            .unwrap();
+        let classes: Vec<_> = data.columns.iter().map(|c| c.class.clone()).collect();
+        assert_eq!(
+            classes,
+            [
+                Some(TypeClass::Number),
+                Some(TypeClass::Text),
+                None,
+                Some(TypeClass::Untyped)
+            ]
+        );
+        let wire = serde_json::to_value(&data.columns).unwrap();
+        assert_eq!(wire[0]["class"], "number");
+        assert!(
+            wire[2].get("class").is_none(),
+            "a JSON column carries no class"
+        );
+        assert_eq!(wire[3]["type"], "unknown");
+    }
+
     #[tokio::test]
     async fn query_table_resolves_shorthand_fk_with_no_named_parent_column() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();

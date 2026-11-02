@@ -586,61 +586,14 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 		}
 	}
 
-	metaCtx, metaCancel := c.bounded(ctx)
-	columnTypeRows, err := tx.QueryContext(metaCtx,
-		`select column_name, data_type from information_schema.columns
-		 where table_schema = $1 and table_name = $2
-		 order by ordinal_position`, realSchema, realTable)
-	if err != nil {
-		metaCancel()
-		return TableData{}, err
-	}
-	type colType struct{ name, typ string }
-	var columnTypes []colType
-	for columnTypeRows.Next() {
-		var ct colType
-		if err := columnTypeRows.Scan(&ct.name, &ct.typ); err != nil {
-			columnTypeRows.Close()
-			metaCancel()
-			return TableData{}, err
-		}
-		columnTypes = append(columnTypes, ct)
-	}
-	if err := columnTypeRows.Err(); err != nil {
-		columnTypeRows.Close()
-		metaCancel()
-		return TableData{}, err
-	}
-	columnTypeRows.Close()
-
-	columnComments, err := pgColumnComments(metaCtx, tx, realSchema, realTable)
-	if err != nil {
-		metaCancel()
-		return TableData{}, err
-	}
-	metaCancel()
-
-	pkColumns, fkColumns, err := c.keyMetadata(ctx, tx, realSchema, realTable)
+	// The join route's lookup, so both routes report the same columns.
+	meta, err := c.joinTableMeta(ctx, tx, realSchema, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
-
-	columns := make([]ColumnInfo, 0, len(columnTypes))
-	for _, ct := range columnTypes {
-		col := ColumnInfo{Name: ct.name, Type: ct.typ}
-		if ref, ok := fkColumns[ct.name]; ok {
-			col.References = &ref
-		}
-		switch {
-		case pkColumns[ct.name]:
-			col.Key = KeyPK
-		case col.References != nil:
-			col.Key = KeyFK
-		}
-		if comment, ok := columnComments[ct.name]; ok {
-			col.Comment = comment
-		}
-		columns = append(columns, col)
+	columns := make([]ColumnInfo, 0, len(meta.columns))
+	for _, cm := range meta.columns {
+		columns = append(columns, cm.columnInfo())
 	}
 
 	selectParts := make([]string, len(columns))

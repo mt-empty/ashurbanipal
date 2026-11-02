@@ -238,11 +238,11 @@ Response:
 ```json
 {
   "columns": [
-    { "name": "id", "type": "uuid", "key": "pk" },
-    { "name": "user_id", "type": "uuid", "key": "fk",
+    { "name": "id", "type": "uuid", "class": "uuid", "key": "pk" },
+    { "name": "user_id", "type": "uuid", "class": "uuid", "key": "fk",
       "references": { "table": "users", "column": "id" } },
-    { "name": "status", "type": "text", "comment": "Order lifecycle state." },
-    { "name": "created_at", "type": "timestamp with time zone" }
+    { "name": "status", "type": "text", "class": "text", "comment": "Order lifecycle state." },
+    { "name": "created_at", "type": "timestamp with time zone", "class": "temporal" }
   ],
   "rows": [
     { "id": "7d9…", "user_id": "18d…", "status": "completed",
@@ -257,6 +257,11 @@ Response:
 Each `columns` entry is `{name, type}` plus optional fields, all sourced
 from schema catalogs (never data queries):
 
+- `class` — the column's §5.11.2 join class (`number`, `text`, `uuid`,
+  `boolean`, `temporal`, `time`, `binary`, `enum` or `untyped`), the same
+  one the server checks `on` pairs with. Omitted when the column is not
+  joinable. A client deciding which pairs can join reads this rather than
+  guessing from `type`; for `enum` it also compares `type` (§5.11.2).
 - `key` — `"pk"` or `"fk"`. A column that is simultaneously its own
   table's primary key *and* a foreign key (the 1:1 "detail table" shape,
   e.g. `order_extra.order_id integer primary key references orders(id)`)
@@ -735,8 +740,8 @@ Response:
 ```json
 {
   "columns": [
-    { "name": "id", "join": 0, "table": "orders", "column": "id", "type": "uuid", "key": "pk" },
-    { "name": "full_name", "join": 1, "table": "users", "column": "full_name", "type": "text" }
+    { "name": "id", "join": 0, "table": "orders", "column": "id", "type": "uuid", "class": "uuid", "key": "pk" },
+    { "name": "full_name", "join": 1, "table": "users", "column": "full_name", "type": "text", "class": "text" }
   ],
   "rows": [
     { "id": "7d9…", "full_name": "Ada Lovelace" },
@@ -790,7 +795,8 @@ this from the catalog types before running the statement; a mismatch → 400
 | `temporal` | `date` and timestamp types, with or without time zone    |
 | `time`     | time-of-day types                                        |
 | `binary`   | byte-string types                                        |
-| `enum`     | an enumerated type; joinable only to a column of the same enumerated type |
+| `enum`     | an enumerated type; joinable only to a column of the same enumerated type, which §5.4.1 shows as an equal `type` |
+| `untyped`  | a column with no declared type (SQLite); joinable only to another such column |
 
 Every other type is not joinable, including `json`/`jsonb`, arrays,
 floating-point types, and types with no class above. The per-engine
@@ -815,8 +821,8 @@ the columns' native types, not the text cast of §5.4.2.
 #### 5.11.4 Response
 
 - Each `columns` entry carries `name`, `type`, `join`, `table` and
-  `column`, plus the optional §5.4.1 fields `key`, `references`, `comment`
-  as they apply to that column in its own table. `type` and those fields
+  `column`, plus the optional §5.4.1 fields `class`, `key`, `references`,
+  `comment` as they apply to that column in its own table. `type` and those fields
   MUST equal what §5.4.1 reports for the column. `name` is a **label**
   unique within the response: the column's own name when that is unique
   among the returned columns, otherwise `{column}_{join}`, with a numeric

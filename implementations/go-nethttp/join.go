@@ -234,6 +234,21 @@ type joinColMeta struct {
 	comment    string
 }
 
+// className is the class on the wire; an enum's identity stays server-side.
+func (c joinColMeta) className() string {
+	if c.class == nil {
+		return ""
+	}
+	return c.class.kind
+}
+
+func (c joinColMeta) columnInfo() ColumnInfo {
+	return ColumnInfo{
+		Name: c.name, Type: c.typeName, Class: c.className(),
+		Key: c.key, References: c.references, Comment: c.comment,
+	}
+}
+
 type joinTableMeta struct {
 	name    string
 	columns []joinColMeta
@@ -264,6 +279,7 @@ type JoinColumnInfo struct {
 	Join       int        `json:"join"`
 	Table      string     `json:"table"`
 	Column     string     `json:"column"`
+	Class      string     `json:"class,omitempty"`
 	Key        KeyKind    `json:"key,omitempty"`
 	References *ColumnRef `json:"references,omitempty"`
 	Comment    string     `json:"comment,omitempty"`
@@ -583,7 +599,7 @@ func (p *joinPlan) columnInfos() []JoinColumnInfo {
 		c := t.columns[s[1]]
 		out[i] = JoinColumnInfo{
 			Name: p.labels[i], Type: c.typeName, Join: s[0], Table: t.name, Column: c.name,
-			Key: c.key, References: c.references, Comment: c.comment,
+			Class: c.className(), Key: c.key, References: c.references, Comment: c.comment,
 		}
 	}
 	return out

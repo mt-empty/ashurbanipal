@@ -4,9 +4,14 @@ export interface ColumnRef {
   column: string;
 }
 
+// spec/protocol.md §5.11.2: the class the server checks join pairs with.
+export type JoinClass = "number" | "text" | "uuid" | "boolean" | "temporal" | "time" | "binary" | "enum" | "untyped";
+
 interface ColumnBase {
   name: string;
   type: string;
+  // Absent when the column cannot be joined.
+  class?: JoinClass;
   comment?: string;
   // Join responses only (spec/protocol.md §5.11.4): `name` is a unique label;
   // these locate the column. Never parse the label.

@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::{ColumnRef, DbError, KeyKind, NotAllowedKind};
+use crate::db::{ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowedKind};
 use crate::filter::{Condition, FilterOp, Logic};
 
 pub const MAX_JOIN_BYTES: usize = 8192;
@@ -164,6 +164,30 @@ pub enum TypeClass {
     Untyped,
 }
 
+impl TypeClass {
+    /// The class name on the wire (`spec/protocol.md` §5.4.1). An enum's
+    /// identity stays server-side; clients compare `type` instead.
+    pub fn name(&self) -> &'static str {
+        match self {
+            TypeClass::Number => "number",
+            TypeClass::Text => "text",
+            TypeClass::Uuid => "uuid",
+            TypeClass::Boolean => "boolean",
+            TypeClass::Temporal => "temporal",
+            TypeClass::Time => "time",
+            TypeClass::Binary => "binary",
+            TypeClass::Enum(_) => "enum",
+            TypeClass::Untyped => "untyped",
+        }
+    }
+}
+
+impl Serialize for TypeClass {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.name())
+    }
+}
+
 /// One column as the live catalog reports it.
 #[derive(Debug, Clone)]
 pub struct ColMeta {
@@ -175,6 +199,19 @@ pub struct ColMeta {
     pub key: Option<KeyKind>,
     pub references: Option<ColumnRef>,
     pub comment: Option<String>,
+}
+
+impl From<ColMeta> for ColumnInfo {
+    fn from(c: ColMeta) -> Self {
+        ColumnInfo {
+            name: c.name,
+            type_name: c.type_name,
+            class: c.class,
+            key: c.key,
+            references: c.references,
+            comment: c.comment,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -192,6 +229,8 @@ pub struct JoinColumnInfo {
     pub join: usize,
     pub table: String,
     pub column: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class: Option<TypeClass>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<KeyKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -261,6 +300,7 @@ impl Plan {
                     join: pos,
                     table: table.name.clone(),
                     column: c.name.clone(),
+                    class: c.class.clone(),
                     key: c.key,
                     references: c.references.clone(),
                     comment: c.comment.clone(),

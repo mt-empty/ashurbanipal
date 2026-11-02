@@ -37,6 +37,8 @@ class ColumnInfo:
     key: KeyKind | None = None
     references: ColumnRef | None = None
     comment: str | None = None
+    # The §5.11.2 join class (`class` on the wire); None when not joinable.
+    class_name: str | None = None
 
 
 @dataclass

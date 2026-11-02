@@ -79,20 +79,29 @@ test("toWire expands alias.* items that leave a table out of the select list", (
   assert.ok(wire.columns.every((c) => c.join !== 2));
 });
 
-test("join type hints grey incompatible and unjoinable columns, and allow what they cannot tell", () => {
-  assert.equal(joinMismatch("uuid", "uuid"), null);
-  assert.equal(joinMismatch("integer", "bigint"), null);
-  assert.equal(joinMismatch("USER-DEFINED", "uuid")?.note, "enum ≠ uuid");
+test("join pair checks follow the server's class, and the type for enums", () => {
+  const uuid = { type: "uuid", class: "uuid" as const };
+  const int = { type: "integer", class: "number" as const };
+  const big = { type: "bigint", class: "number" as const };
+  const text = { type: "text", class: "text" as const };
+  const status = { type: "order_status", class: "enum" as const };
+  const ticket = { type: "ticket_status", class: "enum" as const };
+  const jsonb = { type: "jsonb" };
+  assert.equal(joinMismatch(uuid, uuid), null);
+  assert.equal(joinMismatch(int, big), null);
+  assert.equal(joinMismatch(status, status), null);
+  assert.equal(joinMismatch(status, uuid)?.note, "order_status ≠ uuid");
+  assert.equal(joinMismatch(status, uuid)?.message, "enum cannot be joined to uuid. Pick columns of the same kind.");
+  assert.equal(joinMismatch(status, ticket)?.note, "order_status ≠ ticket_status");
   assert.equal(
-    joinMismatch("USER-DEFINED", "uuid")?.message,
-    "enum cannot be joined to uuid. Pick columns of the same kind.",
+    joinMismatch(status, ticket)?.message,
+    "order_status cannot be joined to ticket_status: they are different enumerated types.",
   );
-  assert.equal(joinMismatch("USER-DEFINED", "text"), null);
-  assert.equal(joinMismatch("jsonb", "text")?.note, "jsonb: not joinable");
-  assert.equal(joinMismatch("text", "ARRAY")?.note, "ARRAY: not joinable");
-  assert.equal(joinMismatch("geometry", "uuid"), null);
-  assert.equal(unjoinableReason("double precision"), "double precision: not joinable");
-  assert.equal(unjoinableReason("uuid"), null);
+  assert.equal(joinMismatch(status, text)?.note, "order_status ≠ text");
+  assert.equal(joinMismatch(jsonb, text)?.note, "jsonb: not joinable");
+  assert.equal(joinMismatch(text, jsonb)?.message, "jsonb columns cannot be joined. Pick another column.");
+  assert.equal(unjoinableReason({ type: "double precision" }), "double precision: not joinable");
+  assert.equal(unjoinableReason(uuid), null);
 });
 
 test("a pair check supplied by the page rejects a mismatched pair at its second column", () => {
@@ -108,8 +117,16 @@ test("a pair check supplied by the page rejects a mismatched pair at its second 
 });
 
 test("a foreign key is found in either direction and greyed notes follow the other side", () => {
-  const orders = [{ name: "user_id", type: "uuid", key: "fk" as const, references: { table: "users", column: "id" } }];
-  const users = [{ name: "id", type: "uuid" }];
+  const orders = [
+    {
+      name: "user_id",
+      type: "uuid",
+      class: "uuid" as const,
+      key: "fk" as const,
+      references: { table: "users", column: "id" },
+    },
+  ];
+  const users = [{ name: "id", type: "uuid", class: "uuid" as const }];
   assert.deepEqual(findForeignKey([{ table: "orders", columns: orders }], "users", users), {
     at: 0,
     leftColumn: "user_id",
@@ -120,9 +137,9 @@ test("a foreign key is found in either direction and greyed notes follow the oth
     leftColumn: "id",
     rightColumn: "user_id",
   });
-  assert.equal(pairNote("jsonb", undefined), "jsonb: not joinable");
-  assert.equal(pairNote("text", "uuid"), "text ≠ uuid");
-  assert.equal(pairNote("uuid", "uuid"), null);
+  assert.equal(pairNote({ type: "jsonb" }, undefined), "jsonb: not joinable");
+  assert.equal(pairNote({ type: "text", class: "text" }, users[0]), "text ≠ uuid");
+  assert.equal(pairNote(users[0], users[0]), null);
 });
 
 test("toWire keeps alias.* items written out of table order as an explicit column list", () => {

@@ -13,9 +13,23 @@ export interface ColumnRef {
   schema?: string;
 }
 
+/** A §5.11.2 join class, as `class` carries it on the wire. */
+export type JoinClassName =
+  | "number"
+  | "text"
+  | "uuid"
+  | "boolean"
+  | "temporal"
+  | "time"
+  | "binary"
+  | "enum"
+  | "untyped";
+
 export interface ColumnInfo {
   name: string;
   type: string;
+  /** Absent when the column cannot be joined. */
+  class?: JoinClassName;
   key?: KeyKind;
   references?: ColumnRef;
   comment?: string;

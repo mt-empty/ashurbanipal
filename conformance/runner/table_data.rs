@@ -510,3 +510,46 @@ async fn malicious_sort_value_against_a_valid_table_is_rejected_cleanly() {
         assert_problem_code(resp, 400, "unknown_column", &format!("sort={evil:?}")).await;
     }
 }
+
+/// P5.4.1-CLASS: each column reports the §5.11.2 join class the server
+/// checks join pairs with, and none when it cannot be joined.
+#[tokio::test]
+async fn columns_report_their_join_class() {
+    let srv = TestServer::spawn().await;
+    let class_of = |body: &serde_json::Value, column: &str| {
+        body["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == column)
+            .unwrap_or_else(|| panic!("no {column} column"))
+            .get("class")
+            .cloned()
+    };
+    let data = |table: &'static str| {
+        let srv = &srv;
+        async move {
+            srv.client()
+                .get(srv.url("/api/tables/data"))
+                .query(&[("table", table), ("limit", "1")])
+                .send()
+                .await
+                .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap()
+        }
+    };
+    let orders = data("orders").await;
+    let users = data("users").await;
+    let number = Some(serde_json::json!("number"));
+    assert_exact(class_of(&orders, "total_cents"), number.clone(), "orders.total_cents class");
+    let (id, status, metadata) = match Backend::current() {
+        Backend::Postgres => ("uuid", Some("enum"), None),
+        Backend::Mysql => ("number", Some("text"), None),
+        Backend::Sqlite => ("number", Some("text"), Some("text")),
+    };
+    assert_exact(class_of(&orders, "id"), Some(serde_json::json!(id)), "orders.id class");
+    assert_exact(class_of(&orders, "status"), status.map(|s| serde_json::json!(s)), "orders.status class");
+    assert_exact(class_of(&users, "metadata"), metadata.map(|s| serde_json::json!(s)), "users.metadata class");
+}

@@ -601,13 +601,7 @@ impl DbSource for MySqlSource {
             .await?
             .columns
             .into_iter()
-            .map(|c| ColumnInfo {
-                name: c.name,
-                type_name: c.type_name,
-                key: c.key,
-                references: c.references,
-                comment: c.comment,
-            })
+            .map(ColumnInfo::from)
             .collect();
 
         let select_list = columns

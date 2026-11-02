@@ -5,7 +5,9 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -595,5 +597,32 @@ func TestSQLiteTypeClassFollowsDeclaredNamesThenAffinity(t *testing.T) {
 		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
 			t.Errorf("%q: got %v want %v", c.declared, got, c.want)
 		}
+	}
+}
+
+func TestSQLiteQueryTableReportsEachColumnsJoinClass(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "classes.db"))
+	if err != nil {
+		t.Fatalf("opening sqlite db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(`create table t (id integer primary key, label text, meta json, loose)`); err != nil {
+		t.Fatalf("creating schema: %v", err)
+	}
+	data, err := NewSQLiteSource(db, 5).QueryTable(context.Background(), nil, "t", QueryOpts{Limit: 10})
+	if err != nil {
+		t.Fatalf("QueryTable: %v", err)
+	}
+	var got []string
+	for _, c := range data.Columns {
+		got = append(got, c.Class)
+	}
+	want := []string{"number", "text", "", "untyped"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("classes = %q, want %q", got, want)
+	}
+	raw, _ := json.Marshal(data.Columns[2])
+	if strings.Contains(string(raw), `"class"`) {
+		t.Errorf("a JSON column carries no class: %s", raw)
 	}
 }

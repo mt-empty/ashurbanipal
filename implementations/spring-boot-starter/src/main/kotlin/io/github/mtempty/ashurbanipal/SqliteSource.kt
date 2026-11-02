@@ -140,8 +140,26 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
     /** Composite FKs are dropped, mirroring [PostgresSource]/[MySqlSource]. */
-    private fun keyMetadata(table: String): Pair<List<String>, Map<String, ColumnRef>> =
-        bounded(queryTimeoutSecs) { conn -> keyMetadataOn(conn, table) }
+    /** [table] must already be allow-listed: it is spliced into the pragma call. */
+    private fun joinTableMeta(conn: Connection, table: String): JoinTableMeta {
+        val (pk, fkColumns) = keyMetadataOn(conn, table)
+        val quoted = quoteIdent(table)
+        return JoinTableMeta(
+            table,
+            query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
+                rs.getString(2) to (rs.getString(3) ?: "")
+            }.map { (col, declared) ->
+                JoinColMeta(
+                    name = col,
+                    // A declared type can be empty (""); a stable label beats emitting "".
+                    type = declared.ifEmpty { "unknown" },
+                    cls = sqliteTypeClass(declared),
+                    key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
+                    references = fkColumns[col],
+                )
+            },
+        )
+    }
 
     private fun keyMetadataOn(conn: Connection, table: String): Pair<List<String>, Map<String, ColumnRef>> {
         val quoted = quoteIdent(table)
@@ -206,22 +224,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
             for (name in names) {
                 if (name in metas) continue
                 if (name !in allowed) throw BadJoinException("unknown table \"$name\"")
-                val quoted = quoteIdent(name)
-                val (pk, fkColumns) = keyMetadataOn(conn, name)
-                metas[name] = JoinTableMeta(
-                    name,
-                    query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
-                        rs.getString(2) to (rs.getString(3) ?: "")
-                    }.map { (col, declared) ->
-                        JoinColMeta(
-                            name = col,
-                            type = declared.ifEmpty { "unknown" },
-                            cls = sqliteTypeClass(declared),
-                            key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
-                            references = fkColumns[col],
-                        )
-                    },
-                )
+                metas[name] = joinTableMeta(conn, name)
             }
             val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
 
@@ -246,27 +249,9 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         }
 
         val whereClause = opts.filter?.let { buildWhereClauseSqlite(it, columnNames) } ?: WhereClause("", emptyList())
-        val (pkColumns, fkColumns) = keyMetadata(realTable)
-
         val quotedTable = quoteIdent(realTable)
-        val columnTypes = bounded(queryTimeoutSecs) { conn ->
-            query(conn, "select cid, name, type from pragma_table_info($quotedTable) order by cid") { rs ->
-                rs.getString(2) to rs.getString(3)
-            }
-        }
-
-        val columns = columnTypes.map { (name, typeName) ->
-            val key: String?
-            val references: ColumnRef?
-            when {
-                pkColumns.contains(name) -> { key = "pk"; references = fkColumns[name] }
-                fkColumns.containsKey(name) -> { key = "fk"; references = fkColumns[name] }
-                else -> { key = null; references = null }
-            }
-            // SQLite's declared column types can be empty (dynamic typing);
-            // fall back to a stable label rather than emitting "".
-            ColumnInfo(name, typeName?.takeIf { it.isNotEmpty() } ?: "unknown", key, references, null)
-        }
+        // The join route's lookup, so both routes report the same columns.
+        val columns = bounded(queryTimeoutSecs) { conn -> joinTableMeta(conn, realTable) }.columns.map { it.columnInfo() }
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdent(it.name)} AS TEXT)" }
         val orderClause = sort?.let {
