@@ -98,6 +98,11 @@ Two components, same as the original concept:
   - *Per-cell copy* — a small copy button on the right of every non-null
     cell, revealed on hover; Clipboard API with an `execCommand` fallback
     for plain-http internal hosts (Clipboard API needs a secure context).
+  - *Cell marks* — null shows a grey `∅`, empty text a faint `''` in the
+    interface font, and leading or trailing whitespace stays as real text on
+    a shaded background, with a CSS-drawn `↵` for a newline (so a selection
+    never picks it up). Each mark's title names it ("2 leading spaces");
+    whitespace inside a value is left alone, and copy takes the raw value.
   - *Cell preview* — clicking a `jsonb` cell, or any cell truncated by the
     max cell width (~24rem), opens a native Popover API popup
     (`popover` attribute: non-modal, light-dismiss) near the cell with the

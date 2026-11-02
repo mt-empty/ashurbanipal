@@ -110,9 +110,63 @@ export function warnBadJsonCell(col: Column, err: unknown): void {
   }
 }
 
-// Shared by grid's buildCell and record-view's buildRecordEntries so a
-// column's rendering rule lives in one place.
-export function formatCellValue(col: Column, raw: string): Node {
+// JS `\s` (which takes in no-break space and the byte-order mark) plus the
+// zero-width space: all of them make a value fail to match its visible text.
+const isEdgeSpace = (ch: string) => /\s/.test(ch) || ch === "\u200B";
+
+// A value's leading and trailing whitespace, apart from the rest. A value
+// that is all whitespace is all `lead`. A scan, not a regex: an unanchored
+// trailing-run regex backtracks quadratically on long inner runs.
+export function edgeWhitespace(raw: string): { lead: string; core: string; trail: string } {
+  let start = 0;
+  while (start < raw.length && isEdgeSpace(raw[start])) start++;
+  let end = raw.length;
+  while (end > start && isEdgeSpace(raw[end - 1])) end--;
+  return { lead: raw.slice(0, start), core: raw.slice(start, end), trail: raw.slice(end) };
+}
+
+const WS_NAMES: Record<string, [string, string]> = {
+  " ": ["space", "spaces"],
+  "\t": ["tab", "tabs"],
+  "\u00A0": ["no-break space", "no-break spaces"],
+  "\u200B": ["zero-width space", "zero-width spaces"],
+  "\uFEFF": ["byte-order mark", "byte-order marks"],
+};
+
+const NEWLINE = /\r\n?|[\n\u2028\u2029]/g;
+
+// The hover text for one edge run: "2 leading spaces", "trailing newline".
+export function whitespaceTitle(run: string, side: "leading" | "trailing"): string {
+  const chars = [...run.replace(NEWLINE, "\n")];
+  if (chars.every((c) => c === "\n")) {
+    return chars.length === 1 ? `${side} newline` : `${chars.length} ${side} newlines`;
+  }
+  const names = WS_NAMES[chars[0]];
+  if (names && chars.every((c) => c === chars[0])) {
+    return `${chars.length} ${side} ${chars.length === 1 ? names[0] : names[1]}`;
+  }
+  return `${chars.length} ${side} whitespace characters`;
+}
+
+// Whitespace with width stays as real text on a shaded span, so a selection
+// copies it. A newline or a zero-width character has no width, so CSS draws
+// a mark in an empty span instead.
+function edgeMarks(run: string, side: "leading" | "trailing"): Node[] {
+  const title = whitespaceTitle(run, side);
+  return (run.match(/\r\n?|[\n\u2028\u2029]|[\u200B\uFEFF]|[^\r\n\u2028\u2029\u200B\uFEFF]+/g) ?? []).map((part) => {
+    const span = document.createElement("span");
+    span.title = title;
+    if (/^[\r\n\u2028\u2029]/.test(part)) span.className = "cell-ws cell-nl";
+    else if (/^[\u200B\uFEFF]/.test(part)) span.className = "cell-ws cell-zw";
+    else {
+      span.className = "cell-ws";
+      span.textContent = part;
+    }
+    return span;
+  });
+}
+
+function typedValue(col: Column, raw: string): Node {
   const klass = columnTypeClass(col.type);
   if (klass === "date") {
     // No `datetime` attribute: the engine's text cast isn't a valid HTML
@@ -135,4 +189,24 @@ export function formatCellValue(col: Column, raw: string): Node {
     return span;
   }
   return document.createTextNode(raw);
+}
+
+// Shared by grid's buildCell and record-view's buildRecordEntries so a
+// column's rendering rule lives in one place. Empty text and edge whitespace
+// are marked, so neither reads as nothing.
+export function formatCellValue(col: Column, raw: string): Node {
+  if (raw === "") {
+    const empty = document.createElement("span");
+    empty.className = "cell-empty";
+    empty.title = "empty text";
+    empty.textContent = "''";
+    return empty;
+  }
+  const { lead, core, trail } = edgeWhitespace(raw);
+  if (!lead && !trail) return typedValue(col, raw);
+  const out = document.createDocumentFragment();
+  if (lead) out.append(...edgeMarks(lead, "leading"));
+  if (core) out.append(typedValue(col, core));
+  if (trail) out.append(...edgeMarks(trail, "trailing"));
+  return out;
 }

@@ -542,6 +542,16 @@ dialog dl .record-acts:hover { opacity: 1; }
 .cell-type-bool { color: var(--type-bool); }
 .cell-type-number { color: var(--type-number); }
 .cell-type-date { color: var(--type-date); }
+/* Null, empty text and edge whitespace look different, so none reads as
+   another or as nothing. pre keeps edge spaces that nowrap would collapse. */
+.cell-null { color: var(--json-null); }
+.cell-empty { color: var(--text-muted); font-family: system-ui, sans-serif; }
+.cell-ws { white-space: pre; tab-size: 2; border-radius: 2px;
+           background: color-mix(in srgb, var(--warning) 22%, transparent); }
+/* The record view wraps long values, edge whitespace included. */
+dialog dl dd .cell-ws { white-space: pre-wrap; }
+.cell-zw { display: inline-block; width: .35em; height: 1em; vertical-align: text-bottom; }
+.cell-nl::after { content: "↵"; color: var(--text-muted); font-family: system-ui, sans-serif; font-size: .8em; }
 
 /* Icon buttons in the top bar. */
 #api-help-btn, #theme-toggle { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 6px; padding: 0;
@@ -2620,7 +2630,48 @@ function warnBadJsonCell(col, err) {
     console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
   }
 }
-function formatCellValue(col, raw) {
+var isEdgeSpace = (ch) => /\s/.test(ch) || ch === "\u200B";
+function edgeWhitespace(raw) {
+  let start = 0;
+  while (start < raw.length && isEdgeSpace(raw[start])) start++;
+  let end = raw.length;
+  while (end > start && isEdgeSpace(raw[end - 1])) end--;
+  return { lead: raw.slice(0, start), core: raw.slice(start, end), trail: raw.slice(end) };
+}
+var WS_NAMES = {
+  " ": ["space", "spaces"],
+  "	": ["tab", "tabs"],
+  "\xA0": ["no-break space", "no-break spaces"],
+  "\u200B": ["zero-width space", "zero-width spaces"],
+  "\uFEFF": ["byte-order mark", "byte-order marks"]
+};
+var NEWLINE = /\r\n?|[\n\u2028\u2029]/g;
+function whitespaceTitle(run, side) {
+  const chars = [...run.replace(NEWLINE, "\n")];
+  if (chars.every((c) => c === "\n")) {
+    return chars.length === 1 ? `${side} newline` : `${chars.length} ${side} newlines`;
+  }
+  const names = WS_NAMES[chars[0]];
+  if (names && chars.every((c) => c === chars[0])) {
+    return `${chars.length} ${side} ${chars.length === 1 ? names[0] : names[1]}`;
+  }
+  return `${chars.length} ${side} whitespace characters`;
+}
+function edgeMarks(run, side) {
+  const title = whitespaceTitle(run, side);
+  return (run.match(/\r\n?|[\n\u2028\u2029]|[\u200B\uFEFF]|[^\r\n\u2028\u2029\u200B\uFEFF]+/g) ?? []).map((part) => {
+    const span = document.createElement("span");
+    span.title = title;
+    if (/^[\r\n\u2028\u2029]/.test(part)) span.className = "cell-ws cell-nl";
+    else if (/^[\u200B\uFEFF]/.test(part)) span.className = "cell-ws cell-zw";
+    else {
+      span.className = "cell-ws";
+      span.textContent = part;
+    }
+    return span;
+  });
+}
+function typedValue(col, raw) {
   const klass = columnTypeClass(col.type);
   if (klass === "date") {
     const time = document.createElement("time");
@@ -2638,6 +2689,22 @@ function formatCellValue(col, raw) {
     return span;
   }
   return document.createTextNode(raw);
+}
+function formatCellValue(col, raw) {
+  if (raw === "") {
+    const empty = document.createElement("span");
+    empty.className = "cell-empty";
+    empty.title = "empty text";
+    empty.textContent = "''";
+    return empty;
+  }
+  const { lead, core, trail } = edgeWhitespace(raw);
+  if (!lead && !trail) return typedValue(col, raw);
+  const out = document.createDocumentFragment();
+  if (lead) out.append(...edgeMarks(lead, "leading"));
+  if (core) out.append(typedValue(col, core));
+  if (trail) out.append(...edgeMarks(trail, "trailing"));
+  return out;
 }
 
 // src/features/load-bar.ts
@@ -6168,7 +6235,7 @@ function fieldValue(col, raw, row2, { meta, act }) {
       dd.classList.add("json-tree");
     } catch (e) {
       warnBadJsonCell(col, e);
-      dd.textContent = raw;
+      dd.replaceChildren(formatCellValue(col, raw));
     }
     return dd;
   }
@@ -6184,6 +6251,13 @@ function fieldValue(col, raw, row2, { meta, act }) {
   btn.appendChild(value);
   btn.onclick = act(() => navigateWithSeededFilter(link.table, link.schema, link.clause));
   dd.appendChild(btn);
+  return dd;
+}
+function nullValue() {
+  const mark = el("span", "cell-null", "\u2205");
+  mark.title = "null";
+  const dd = el("dd");
+  dd.appendChild(mark);
   return dd;
 }
 function fieldActions(col, raw, { def, act }) {
@@ -6215,7 +6289,7 @@ function buildRecordEntries(columns, row2, ctx) {
       name.title = columnKey(col, def);
       dt.append(name, typeChip(col));
       const raw = row2[col.name];
-      const dd = raw == null ? el("dd", void 0, "\u2205") : fieldValue(col, raw, row2, ctx);
+      const dd = raw == null ? nullValue() : fieldValue(col, raw, row2, ctx);
       const note = fieldNote(col, meta?.compositeFkOf.get(col.name));
       if (note) dd.appendChild(el("span", "record-note", note));
       const field = [keyIcon(key), dt, dd, fieldActions(col, raw, ctx)];
@@ -6391,7 +6465,8 @@ function buildCell(col, row2, { hidden, meta }) {
   td.dataset.col = col.name;
   if (hidden.has(col.name)) td.classList.add("col-hidden");
   if (isNull) {
-    const span = el("span", "cell-text", "\u2205");
+    const span = el("span", "cell-text cell-null", "\u2205");
+    span.title = "null";
     td.appendChild(span);
     const clause = filterClause(columnKey(col), "IS NULL");
     const actions = el("span", "cell-actions");

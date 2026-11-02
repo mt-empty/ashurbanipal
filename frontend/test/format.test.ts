@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type ColumnTypeClass, columnTypeClass, rendersAsJson } from "../src/lib/format.ts";
+import {
+  type ColumnTypeClass,
+  columnTypeClass,
+  edgeWhitespace,
+  rendersAsJson,
+  whitespaceTitle,
+} from "../src/lib/format.ts";
 
 // columnTypeClass buckets the DB engine's own catalog type spelling into a
 // small render class. It must cover Postgres, MySQL, and SQLite vocabularies
@@ -93,3 +99,42 @@ for (const [type, raw, expected] of JSON_CASES) {
     assert.equal(rendersAsJson({ name: "c", type }, raw), expected);
   });
 }
+
+const EDGE_CASES: [string, [string, string, string]][] = [
+  ["plain", ["", "plain", ""]],
+  ["  mug ", ["  ", "mug", " "]],
+  ["\tlabel", ["\t", "label", ""]],
+  ["line\n", ["", "line", "\n"]],
+  ["line\r\n", ["", "line", "\r\n"]],
+  ["a  b", ["", "a  b", ""]],
+  ["   ", ["   ", "", ""]],
+  ["", ["", "", ""]],
+  ["\u00A0Team mug", ["\u00A0", "Team mug", ""]],
+  ["\uFEFFid", ["\uFEFF", "id", ""]],
+  ["x\u200B", ["", "x", "\u200B"]],
+];
+
+for (const [raw, [lead, core, trail]] of EDGE_CASES) {
+  test(`edgeWhitespace(${JSON.stringify(raw)})`, () => {
+    assert.deepEqual(edgeWhitespace(raw), { lead, core, trail });
+  });
+}
+
+test("whitespaceTitle says how much whitespace and which kind", () => {
+  assert.equal(whitespaceTitle("  ", "leading"), "2 leading spaces");
+  assert.equal(whitespaceTitle(" ", "trailing"), "1 trailing space");
+  assert.equal(whitespaceTitle("\t", "leading"), "1 leading tab");
+  assert.equal(whitespaceTitle("\n", "trailing"), "trailing newline");
+  assert.equal(whitespaceTitle("\r\n", "trailing"), "trailing newline");
+  assert.equal(whitespaceTitle("\n\n", "trailing"), "2 trailing newlines");
+  assert.equal(whitespaceTitle(" \t ", "leading"), "3 leading whitespace characters");
+  assert.equal(whitespaceTitle("\u00A0", "leading"), "1 leading no-break space");
+  assert.equal(whitespaceTitle("\uFEFF", "leading"), "1 leading byte-order mark");
+});
+
+test("edgeWhitespace stays linear on a long inner run", () => {
+  const raw = `a${" ".repeat(200_000)}x`;
+  const started = performance.now();
+  assert.equal(edgeWhitespace(raw).core, raw);
+  assert.ok(performance.now() - started < 200);
+});

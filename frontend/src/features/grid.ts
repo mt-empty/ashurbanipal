@@ -163,7 +163,8 @@ function buildCell(col: Column, row: Row, { hidden, meta }: CellContext): HTMLTa
   td.dataset.col = col.name;
   if (hidden.has(col.name)) td.classList.add("col-hidden");
   if (isNull) {
-    const span = el("span", "cell-text", "∅");
+    const span = el("span", "cell-text cell-null", "∅");
+    span.title = "null";
     td.appendChild(span);
     // Nothing to copy or expand for a null cell, but "filter by this
     // value" is still meaningful (IS NULL).
