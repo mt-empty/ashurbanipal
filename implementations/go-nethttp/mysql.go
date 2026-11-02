@@ -693,10 +693,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	if err != nil {
 		return TableData{}, err
 	}
-	columns := make([]ColumnInfo, 0, len(meta.columns))
-	for _, cm := range meta.columns {
-		columns = append(columns, cm.columnInfo())
-	}
+	columns := meta.columnInfos()
 
 	selectParts := make([]string, len(columns))
 	for i, col := range columns {

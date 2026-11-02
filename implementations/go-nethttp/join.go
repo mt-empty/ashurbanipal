@@ -234,17 +234,18 @@ type joinColMeta struct {
 	comment    string
 }
 
-// className is the class on the wire; an enum's identity stays server-side.
-func (c joinColMeta) className() string {
+// wireClass is the class and, for an enum, its identity as the wire carries them.
+func (c joinColMeta) wireClass() (class, enumType string) {
 	if c.class == nil {
-		return ""
+		return "", ""
 	}
-	return c.class.kind
+	return c.class.kind, c.class.id
 }
 
 func (c joinColMeta) columnInfo() ColumnInfo {
+	class, enumType := c.wireClass()
 	return ColumnInfo{
-		Name: c.name, Type: c.typeName, Class: c.className(),
+		Name: c.name, Type: c.typeName, Class: class, EnumType: enumType,
 		Key: c.key, References: c.references, Comment: c.comment,
 	}
 }
@@ -252,6 +253,14 @@ func (c joinColMeta) columnInfo() ColumnInfo {
 type joinTableMeta struct {
 	name    string
 	columns []joinColMeta
+}
+
+func (t joinTableMeta) columnInfos() []ColumnInfo {
+	out := make([]ColumnInfo, len(t.columns))
+	for i, c := range t.columns {
+		out[i] = c.columnInfo()
+	}
+	return out
 }
 
 func (t joinTableMeta) index(column string) (int, error) {
@@ -280,6 +289,7 @@ type JoinColumnInfo struct {
 	Table      string     `json:"table"`
 	Column     string     `json:"column"`
 	Class      string     `json:"class,omitempty"`
+	EnumType   string     `json:"enum_type,omitempty"`
 	Key        KeyKind    `json:"key,omitempty"`
 	References *ColumnRef `json:"references,omitempty"`
 	Comment    string     `json:"comment,omitempty"`
@@ -598,9 +608,10 @@ func (p *joinPlan) columnInfos() []JoinColumnInfo {
 	for i, s := range p.selection {
 		t := p.tables[s[0]]
 		c := t.columns[s[1]]
+		class, enumType := c.wireClass()
 		out[i] = JoinColumnInfo{
 			Name: p.labels[i], Type: c.typeName, Join: s[0], Table: t.name, Column: c.name,
-			Class: c.className(), Key: c.key, References: c.references, Comment: c.comment,
+			Class: class, EnumType: enumType, Key: c.key, References: c.references, Comment: c.comment,
 		}
 	}
 	return out

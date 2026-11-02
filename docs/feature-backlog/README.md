@@ -62,7 +62,7 @@ Each row links its rationale doc. Status lives in that doc's
 | [40](40-server-side-table-joins.md) | Server-side table joins | spec, ports, conformance, docs | implemented 2026-10-15 in spec §5.11 and all five ports; the conformance cases pass on all five ports against Postgres, plus Rust and Flask on MySQL and SQLite and Node on MySQL; every other port and engine pair is covered by the port tests |
 | [41](41-join-builder-form-and-sql-text.md) | Join builder: form and SQL-like text | frontend, spec, docs, e2e | implemented 2026-10-16 in `frontend/src` (`features/join-*`, `lib/join-*`), `spec/join-dsl.md` and the `join-*.spec.ts` Playwright suites |
 | [45](45-server-reported-default-scope-and-concrete-scope-keys.md) | Server-reported default source and schema, and concrete scope keys | spec, ports, conformance, frontend, docs, e2e | found in the 2026-10-25 architecture review of source/schema/table use; do before story 44 |
-| [47](47-server-reported-join-class.md) | Server-reported join class per column | spec, ports, conformance, frontend | found in the PR #213 review (MariaDB JSON columns); shipped with the full column type spelling, 2026-11-02. Enums: two enum columns join when their `type` strings are equal. |
+| [47](47-server-reported-join-class.md) | Server-reported join class per column | spec, ports, conformance, frontend | found in the PR #213 review (MariaDB JSON columns); shipped with the full column type spelling, 2026-11-02. Enums: a separate `enum_type` field carries the enumerated type's identity, and two enum columns join when it is equal. |
 
 ## Reference
 

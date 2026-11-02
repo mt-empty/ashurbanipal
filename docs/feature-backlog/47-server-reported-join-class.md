@@ -1,6 +1,6 @@
 # Server-reported join class per column
 
-> **Status:** DONE · **Area:** spec, ports, conformance, frontend · **Ref:** found in the PR #213 review (MariaDB JSON columns); shipped with the full column type spelling, 2026-11-02. Enums: two enum columns join when their `type` strings are equal.
+> **Status:** DONE · **Area:** spec, ports, conformance, frontend · **Ref:** found in the PR #213 review (MariaDB JSON columns); shipped with the full column type spelling, 2026-11-02. Enums: a separate `enum_type` field carries the enumerated type's identity, and two enum columns join when it is equal.
 
 Have the server say which §5.11.2 class each column is in, so the join
 builder stops guessing it from the type name.

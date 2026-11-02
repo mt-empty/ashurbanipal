@@ -68,6 +68,8 @@ data class ColumnInfo(
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
     /** The §5.11.2 join class; null when the column cannot be joined. */
     @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("class") val className: String? = null,
+    /** The enumerated type's identity; set only when the class is enum. */
+    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("enum_type") val enumType: String? = null,
 )
 data class TableData(val columns: List<ColumnInfo>, val rows: List<LinkedHashMap<String, String?>>, val totalApprox: Long)
 data class CommonValueEntry(val value: String, val freq: Float)

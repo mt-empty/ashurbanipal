@@ -174,7 +174,7 @@ async fn column_metadata_is_carried_per_table() {
                 .iter()
                 .find(|c| c["join"] == pos && c["column"] == col["name"])
                 .unwrap();
-            for field in ["type", "class", "key", "references", "comment"] {
+            for field in ["type", "class", "enum_type", "key", "references", "comment"] {
                 assert_exact(
                     joined.get(field),
                     col.get(field),

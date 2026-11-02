@@ -12,6 +12,8 @@ interface ColumnBase {
   type: string;
   // Absent when the column cannot be joined.
   class?: JoinClass;
+  // The enumerated type's identity; set only when class is "enum".
+  enum_type?: string;
   comment?: string;
   // Join responses only (spec/protocol.md §5.11.4): `name` is a unique label;
   // these locate the column. Never parse the label.

@@ -265,7 +265,12 @@ per-engine source is in `spec/openapi.yaml`.
   `boolean`, `temporal`, `time`, `binary`, `enum` or `untyped`), the same
   one the server checks `on` pairs with. Omitted when the column is not
   joinable. A client deciding which pairs can join reads this rather than
-  guessing from `type`; for `enum` it also compares `type` (§5.11.2).
+  guessing from `type`.
+- `enum_type` — present only when `class` is `enum`: the enumerated type's
+  identity (Postgres `schema.name`, MySQL the column's `enum(…)` definition).
+  Two `enum` columns join only when their `enum_type` values are equal. It is
+  an identifier to compare, never to display: `type` names a domain over an
+  enum by the domain's name, while `enum_type` names the enum beneath it.
 - `key` — `"pk"` or `"fk"`. A column that is simultaneously its own
   table's primary key *and* a foreign key (the 1:1 "detail table" shape,
   e.g. `order_extra.order_id integer primary key references orders(id)`)
@@ -799,7 +804,7 @@ this from the catalog types before running the statement; a mismatch → 400
 | `temporal` | `date` and timestamp types, with or without time zone    |
 | `time`     | time-of-day types                                        |
 | `binary`   | byte-string types                                        |
-| `enum`     | an enumerated type; joinable only to a column of the same enumerated type, which §5.4.1 shows as an equal `type` |
+| `enum`     | an enumerated type; joinable only to a column of the same enumerated type, which §5.4.1 reports as an equal `enum_type` |
 | `untyped`  | a column with no declared type (SQLite); joinable only to another such column |
 
 Every other type is not joinable, including `json`/`jsonb`, arrays,
@@ -825,7 +830,7 @@ the columns' native types, not the text cast of §5.4.2.
 #### 5.11.4 Response
 
 - Each `columns` entry carries `name`, `type`, `join`, `table` and
-  `column`, plus the optional §5.4.1 fields `class`, `key`, `references`,
+  `column`, plus the optional §5.4.1 fields `class`, `enum_type`, `key`, `references`,
   `comment` as they apply to that column in its own table. `type` and those fields
   MUST equal what §5.4.1 reports for the column. `name` is a **label**
   unique within the response: the column's own name when that is unique

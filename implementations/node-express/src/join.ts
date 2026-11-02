@@ -154,10 +154,10 @@ export interface TypeClass {
 
 const classKey = (c: TypeClass): string => `${c.kind}:${c.id ?? ""}`;
 
-/** One column as the live catalog reports it. */
 /** Whole words only, so a user type such as `realm_kind` is not taken for one. */
 export const FLOAT_TYPE = /\b(real|double|float\d*)\b/i;
 
+/** One column as the live catalog reports it. */
 export interface JoinColMeta {
   name: string;
   type: string;
@@ -191,6 +191,7 @@ export interface JoinColumnInfo {
   table: string;
   column: string;
   class?: JoinClassName;
+  enum_type?: string;
   key?: KeyKind;
   references?: ColumnRef;
   comment?: string;
@@ -392,10 +393,11 @@ export function buildJoinSelect(
   return { body: sql, values };
 }
 
-/** The §5.4.1 shape of a column; an enum's identity stays server-side, so `class` is the kind alone. */
+/** The §5.4.1 shape of a column. */
 export function columnInfo(col: JoinColMeta): ColumnInfo {
   const info: ColumnInfo = { name: col.name, type: col.type };
   if (col.class) info.class = col.class.kind;
+  if (col.class?.id) info.enum_type = col.class.id;
   if (col.key) info.key = col.key;
   if (col.references) info.references = col.references;
   if (col.comment) info.comment = col.comment;

@@ -84,12 +84,15 @@ test("join pair checks follow the server's class, and the type for enums", () =>
   const int = { type: "integer", class: "number" as const };
   const big = { type: "bigint", class: "number" as const };
   const text = { type: "text", class: "text" as const };
-  const status = { type: "order_status", class: "enum" as const };
-  const ticket = { type: "ticket_status", class: "enum" as const };
+  const status = { type: "order_status", class: "enum" as const, enum_type: "public.order_status" };
+  const ticket = { type: "ticket_status", class: "enum" as const, enum_type: "public.ticket_status" };
+  // A domain over order_status shows its own name but is the same enum underneath.
+  const open = { type: "open_status", class: "enum" as const, enum_type: "public.order_status" };
   const jsonb = { type: "jsonb" };
   assert.equal(joinMismatch(uuid, uuid), null);
   assert.equal(joinMismatch(int, big), null);
   assert.equal(joinMismatch(status, status), null);
+  assert.equal(joinMismatch(open, status), null);
   assert.equal(joinMismatch(status, uuid)?.note, "order_status ≠ uuid");
   assert.equal(joinMismatch(status, uuid)?.message, "enum cannot be joined to uuid. Pick columns of the same kind.");
   assert.equal(joinMismatch(status, ticket)?.note, "order_status ≠ ticket_status");

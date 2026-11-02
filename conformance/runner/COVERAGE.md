@@ -92,7 +92,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.4.1-FK-METADATA` | `key`/`references` for FK columns | `table_data::foreign_key_columns_report_key_and_references` |
 | `P5.4.1-COMMENT-OMITTED` | `comment` omitted when absent | `table_data::column_comments_are_present_only_where_seeded` |
 | `P5.4.1-TYPE` | `type` is the engine's full spelling (length, precision, array element, enum name) | `table_data::columns_report_the_engines_full_type` |
-| `P5.4.1-CLASS` | `class` is the §5.11.2 join class, omitted for a column that cannot be joined | `table_data::columns_report_their_join_class` |
+| `P5.4.1-CLASS` | `class` is the §5.11.2 join class, omitted for a column that cannot be joined; only an enum carries `enum_type` | `table_data::columns_report_their_join_class` |
 | `P5.4.1-COMPOSITE-FK-OMITTED` | Composite FKs omit `key`/`references` entirely | `table_data::composite_foreign_key_columns_omit_key_metadata` |
 
 ### §5.4.2 Filter JSON AST
@@ -212,7 +212,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | ID | Requirement | Test |
 |---|---|---|
 | `P5.11-SHAPE` | `columns` entries carry `name`, `type`, `join`, `table`, `column`; labels unique; `rows` keyed by label; `has_more` present, `total_approx` absent | `join::response_shape_has_join_metadata_and_no_total` |
-| `P5.11-COLUMN-METADATA` | §5.4.1 `type`/`class`/`key`/`references`/`comment` apply per table, as `/api/tables/data` reports them | `join::column_metadata_is_carried_per_table` |
+| `P5.11-COLUMN-METADATA` | §5.4.1 `type`/`class`/`enum_type`/`key`/`references`/`comment` apply per table, as `/api/tables/data` reports them | `join::column_metadata_is_carried_per_table` |
 | `P5.11-LEFT-INNER` | `left` keeps unmatched base rows as nulls; `inner` drops them | `join::left_keeps_unmatched_rows_and_inner_drops_them` |
 | `P5.11-THREE-TABLES` | A three-table join returns each table's columns in position order with unique labels | `join::three_table_join_returns_every_tables_columns` |
 | `P5.11-SELF-JOIN` | The same table at two positions returns both sides with distinct labels | `join::self_join_returns_both_sides` |

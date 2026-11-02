@@ -3,7 +3,7 @@ import { qualifiedTable, state, tableInView, viewKey } from "../core/state.js";
 import type { Column, ConstraintFk, JoinDef, Row } from "../core/types.js";
 import { compositeLabel, refTarget } from "../lib/column-key.js";
 import { eqClause } from "../lib/filter-dsl.js";
-import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
+import { cellTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
 import { recordJson } from "../lib/json-text.js";
 import { renderJsonTree } from "../lib/json-tree.js";
 import { copyButton, eqButton, fkLink, keyIcon, typeChip } from "./column-parts.js";
@@ -152,7 +152,7 @@ function recordAsInsert(table: string, columns: Column[], row: Row): string {
 // MySQL/SQLite, and a quoted string inserts fine into a bool column on all three.
 function sqlLiteral(col: Column, raw: string | null): string {
   if (raw == null) return "NULL";
-  if (columnTypeClass(col.type) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
+  if (cellTypeClass(col) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
   return `'${raw.replace(/'/g, "''")}'`;
 }
 

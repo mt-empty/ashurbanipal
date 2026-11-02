@@ -139,7 +139,6 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
     private fun requireTable(table: String): String =
         allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
-    /** Composite FKs are dropped, mirroring [PostgresSource]/[MySqlSource]. */
     /** [table] must already be allow-listed: it is spliced into the pragma call. */
     private fun joinTableMeta(conn: Connection, table: String): JoinTableMeta {
         val (pk, fkColumns) = keyMetadataOn(conn, table)
@@ -161,6 +160,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         )
     }
 
+    /** Composite FKs are dropped rather than risk mislabeling which columns pair up. */
     private fun keyMetadataOn(conn: Connection, table: String): Pair<List<String>, Map<String, ColumnRef>> {
         val quoted = quoteIdent(table)
         val cols = query(conn, "select cid, name, pk from pragma_table_info($quoted) order by cid") { rs ->

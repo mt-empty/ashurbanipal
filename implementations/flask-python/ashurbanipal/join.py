@@ -181,7 +181,7 @@ class ColMeta:
     comment: str | None = None
 
     def column_info(self) -> ColumnInfo:
-        """The §5.4.1 shape; an enum's identity stays server-side, so the class is the kind alone."""
+        """The §5.4.1 shape of this column."""
         return ColumnInfo(
             name=self.name,
             type_name=self.type_name,
@@ -189,6 +189,7 @@ class ColMeta:
             references=self.references,
             comment=self.comment,
             class_name=self.cls.kind if self.cls else None,
+            enum_type=(self.cls.id or None) if self.cls else None,
         )
 
 
@@ -240,6 +241,7 @@ class JoinColumnInfo:
     references: ColumnRef | None = None
     comment: str | None = None
     class_name: str | None = None
+    enum_type: str | None = None
 
 
 @dataclass
@@ -273,7 +275,7 @@ class JoinPlan:
         out = []
         for (pos, col), label in zip(self.selection, self.labels, strict=True):
             t = self.tables[pos]
-            c = t.columns[col]
+            c = t.columns[col].column_info()
             out.append(
                 JoinColumnInfo(
                     name=label,
@@ -284,7 +286,8 @@ class JoinPlan:
                     key=c.key,
                     references=c.references,
                     comment=c.comment,
-                    class_name=c.cls.kind if c.cls else None,
+                    class_name=c.class_name,
+                    enum_type=c.enum_type,
                 )
             )
         return out

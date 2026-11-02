@@ -127,17 +127,9 @@ async function allowedColumns(db: Database, table: string, timeoutMs: number): P
   return rows.map((r) => r.name);
 }
 
-// Composite FKs are omitted rather than risk mislabeling columns (spec/protocol.md §5.4.1).
+// Composite FKs are omitted rather than risk mislabeling columns (spec/protocol.md
+// §5.4.1). The caller owns the deadline.
 async function keyMetadata(
-  db: Database,
-  table: string,
-  timeoutMs: number,
-): Promise<{ pkColumns: Set<string>; fkColumns: Map<string, ColumnRef> }> {
-  return bounded(db, timeoutMs, () => keyMetadataUnbounded(db, table));
-}
-
-// The caller owns the deadline (queryJoin runs every lookup under one).
-async function keyMetadataUnbounded(
   db: Database,
   table: string,
 ): Promise<{ pkColumns: Set<string>; fkColumns: Map<string, ColumnRef> }> {
@@ -247,14 +239,13 @@ function buildWhereClauseSqlite(conditions: Condition[], columnNames: string[]):
   return { where: ` where ${clause}`, values };
 }
 
-/** SQLite implementation; see docs/adapter-decisions.md for protocol differences. */
 // `table` must already be allow-listed: it is spliced into the pragma call.
 async function joinTableMeta(db: Database, table: string): Promise<JoinTableMeta> {
   const declared = await dbAll<{ cid: number; name: string; type: string }>(
     db,
     `select cid, name, type from pragma_table_info(${quoteIdent(table)}) order by cid`,
   );
-  const { pkColumns, fkColumns } = await keyMetadataUnbounded(db, table);
+  const { pkColumns, fkColumns } = await keyMetadata(db, table);
   const columns = declared.map((ct): JoinColMeta => {
     const col: JoinColMeta = {
       name: ct.name,
@@ -274,6 +265,7 @@ async function joinTableMeta(db: Database, table: string): Promise<JoinTableMeta
   return { name: table, columns };
 }
 
+/** SQLite implementation; see docs/adapter-decisions.md for protocol differences. */
 export class SqliteSource implements DbSource {
   constructor(private readonly db: Database) {}
 

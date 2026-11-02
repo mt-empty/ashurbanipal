@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   type ColumnTypeClass,
+  cellTypeClass,
   columnTypeClass,
   edgeWhitespace,
   rendersAsJson,
@@ -152,4 +153,12 @@ test("edgeWhitespace stays linear on a long inner run", () => {
   const started = performance.now();
   assert.equal(edgeWhitespace(raw).core, raw);
   assert.ok(performance.now() - started < 200);
+});
+
+test("cellTypeClass falls back to the server's join class when the type name is unknown", () => {
+  assert.equal(cellTypeClass({ type: "positive_int", class: "number" }), "number");
+  assert.equal(cellTypeClass({ type: "event_time", class: "temporal" }), "date");
+  assert.equal(cellTypeClass({ type: "tinyint(1)", class: "number" }), "bool");
+  assert.equal(cellTypeClass({ type: "label", class: "text" }), null);
+  assert.equal(cellTypeClass({ type: "mystery" }), null);
 });

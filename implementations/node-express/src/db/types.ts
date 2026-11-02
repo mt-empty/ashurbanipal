@@ -30,6 +30,8 @@ export interface ColumnInfo {
   type: string;
   /** Absent when the column cannot be joined. */
   class?: JoinClassName;
+  /** The enumerated type's identity; set only when `class` is "enum". */
+  enum_type?: string;
   key?: KeyKind;
   references?: ColumnRef;
   comment?: string;

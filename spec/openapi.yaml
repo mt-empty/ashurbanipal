@@ -668,17 +668,20 @@ components:
             format_type(atttypid, atttypmod), e.g. "numeric(10,2)",
             "text[]", "order_status"; MySQL information_schema.COLUMNS.COLUMN_TYPE,
             e.g. "tinyint(1)", "enum('a','b')"; SQLite the declared type, or
-            "unknown" when none). Informational, never used to build SQL,
-            except that two enum columns join only when their types are
-            equal.
+            "unknown" when none). Informational, never used to build SQL.
         class:
           type: string
           enum: [number, text, uuid, boolean, temporal, time, binary, enum, untyped]
           description: >
             The column's join class (spec/protocol.md §5.11.2), the same one
             the server checks join pairs with; omitted when the column is
-            not joinable. Two enum columns join only when their type
-            strings are equal.
+            not joinable.
+        enum_type:
+          type: string
+          description: >
+            Present only when class is enum: the enumerated type's identity
+            (Postgres schema.name; MySQL the column's enum(...) definition).
+            Two enum columns join only when their enum_type values are equal.
         key:
           type: string
           enum: [pk, fk]

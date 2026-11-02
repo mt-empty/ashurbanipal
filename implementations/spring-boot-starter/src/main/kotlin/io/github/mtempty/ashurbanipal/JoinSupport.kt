@@ -59,6 +59,7 @@ data class JoinColumnInfo(
     @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("class") val className: String? = null,
+    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("enum_type") val enumType: String? = null,
 )
 
 data class JoinData(
@@ -179,8 +180,8 @@ data class JoinColMeta(
     val references: ColumnRef? = null,
     val comment: String? = null,
 ) {
-    /** The §5.4.1 shape; an enum's identity stays server-side, so the class is the kind alone. */
-    fun columnInfo() = ColumnInfo(name, type, key, references, comment, cls?.kind)
+    /** The §5.4.1 shape of this column. */
+    fun columnInfo() = ColumnInfo(name, type, key, references, comment, cls?.kind, cls?.id?.takeIf { it.isNotEmpty() })
 }
 
 data class JoinTableMeta(val name: String, val columns: List<JoinColMeta>) {
@@ -215,8 +216,8 @@ class JoinPlan internal constructor(
 ) {
     fun columnInfos(): List<JoinColumnInfo> = selection.mapIndexed { i, (pos, col) ->
         val t = tables[pos]
-        val c = t.columns[col]
-        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.key, c.references, c.comment, c.cls?.kind)
+        val c = t.columns[col].columnInfo()
+        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.key, c.references, c.comment, c.className, c.enumType)
     }
 
     /** Keys positional result rows by label and trims the extra row asked for `has_more`. */

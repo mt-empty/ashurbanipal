@@ -165,9 +165,9 @@ pub enum TypeClass {
 }
 
 impl TypeClass {
-    /// The class name on the wire (`spec/protocol.md` §5.4.1). An enum's
-    /// identity stays server-side; clients compare `type` instead.
-    pub fn name(&self) -> &'static str {
+    /// The class name on the wire (`spec/protocol.md` §5.4.1); an enum's
+    /// identity travels separately as `enum_type`.
+    fn name(&self) -> &'static str {
         match self {
             TypeClass::Number => "number",
             TypeClass::Text => "text",
@@ -178,6 +178,14 @@ impl TypeClass {
             TypeClass::Binary => "binary",
             TypeClass::Enum(_) => "enum",
             TypeClass::Untyped => "untyped",
+        }
+    }
+
+    /// The enumerated type's identity, which two enum columns must share to join.
+    pub fn enum_type(&self) -> Option<String> {
+        match self {
+            TypeClass::Enum(id) => Some(id.clone()),
+            _ => None,
         }
     }
 }
@@ -206,6 +214,7 @@ impl From<ColMeta> for ColumnInfo {
         ColumnInfo {
             name: c.name,
             type_name: c.type_name,
+            enum_type: c.class.as_ref().and_then(TypeClass::enum_type),
             class: c.class,
             key: c.key,
             references: c.references,
@@ -231,6 +240,8 @@ pub struct JoinColumnInfo {
     pub column: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<TypeClass>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enum_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<KeyKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -301,6 +312,7 @@ impl Plan {
                     table: table.name.clone(),
                     column: c.name.clone(),
                     class: c.class.clone(),
+                    enum_type: c.class.as_ref().and_then(TypeClass::enum_type),
                     key: c.key,
                     references: c.references.clone(),
                     comment: c.comment.clone(),

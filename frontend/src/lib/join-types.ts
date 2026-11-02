@@ -3,9 +3,9 @@ import type { Column, JoinClass } from "../core/types.js";
 // ==== Join pair checks (spec/protocol.md §5.11.2) ====
 // The server reports each column's join class, so the form greys exactly the
 // pairs it would reject: a different class, two different enumerated types
-// (an equal `type` means the same enum), or a column with no class at all.
+// (`enum_type`), or a column with no class at all.
 
-type Typed = Pick<Column, "type" | "class">;
+type Typed = Pick<Column, "type" | "class" | "enum_type">;
 
 const LABEL: Record<JoinClass, string> = {
   number: "number",
@@ -35,7 +35,7 @@ export function joinMismatch(candidate: Typed, other: Typed): JoinMismatch | nul
   }
   const a = candidate.class as JoinClass;
   const b = other.class as JoinClass;
-  if (a === b && (a !== "enum" || candidate.type === other.type)) return null;
+  if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   return {
     note: `${candidate.type} ≠ ${other.type}`,
     message:

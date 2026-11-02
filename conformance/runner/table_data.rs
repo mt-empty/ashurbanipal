@@ -1,5 +1,5 @@
 use crate::assert::{assert_exact, assert_problem_code, assert_row_estimate, assert_status};
-use crate::backend::{Backend, Comments};
+use crate::backend::{Backend, Comments, NotJoinableColumns};
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
 
@@ -511,63 +511,52 @@ async fn malicious_sort_value_against_a_valid_table_is_rejected_cleanly() {
     }
 }
 
+/// The named column of `table` as `/api/tables/data` reports it.
+async fn column(srv: &TestServer, table: &str, name: &str) -> serde_json::Value {
+    let body: serde_json::Value = srv
+        .client()
+        .get(srv.url("/api/tables/data"))
+        .query(&[("table", table), ("limit", "1")])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    body["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == name)
+        .unwrap_or_else(|| panic!("{table} has no {name} column"))
+        .clone()
+}
+
 /// P5.4.1-CLASS: each column reports the §5.11.2 join class the server
-/// checks join pairs with, and none when it cannot be joined.
+/// checks join pairs with, and none when it cannot be joined; only an enum
+/// column carries `enum_type`.
 #[tokio::test]
 async fn columns_report_their_join_class() {
     let srv = TestServer::spawn().await;
-    let class_of = |body: &serde_json::Value, column: &str| {
-        body["columns"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|c| c["name"] == column)
-            .unwrap_or_else(|| panic!("no {column} column"))
-            .get("class")
-            .cloned()
+    let (id, status) = match Backend::current() {
+        Backend::Postgres => ("uuid", "enum"),
+        Backend::Mysql | Backend::Sqlite => ("number", "text"),
     };
-    let data = |table: &'static str| {
-        let srv = &srv;
-        async move {
-            srv.client()
-                .get(srv.url("/api/tables/data"))
-                .query(&[("table", table), ("limit", "1")])
-                .send()
-                .await
-                .unwrap()
-                .json::<serde_json::Value>()
-                .await
-                .unwrap()
-        }
+    let metadata = match Backend::current().not_joinable_columns() {
+        NotJoinableColumns::Seeded => None,
+        NotJoinableColumns::NotSeeded => Some(serde_json::json!("text")),
     };
-    let orders = data("orders").await;
-    let users = data("users").await;
-    let number = Some(serde_json::json!("number"));
-    assert_exact(
-        class_of(&orders, "total_cents"),
-        number.clone(),
-        "orders.total_cents class",
-    );
-    let (id, status, metadata) = match Backend::current() {
-        Backend::Postgres => ("uuid", Some("enum"), None),
-        Backend::Mysql => ("number", Some("text"), None),
-        Backend::Sqlite => ("number", Some("text"), Some("text")),
-    };
-    assert_exact(
-        class_of(&orders, "id"),
-        Some(serde_json::json!(id)),
-        "orders.id class",
-    );
-    assert_exact(
-        class_of(&orders, "status"),
-        status.map(|s| serde_json::json!(s)),
-        "orders.status class",
-    );
-    assert_exact(
-        class_of(&users, "metadata"),
-        metadata.map(|s| serde_json::json!(s)),
-        "users.metadata class",
-    );
+    let status_enum = (status == "enum").then(|| serde_json::json!("public.order_status"));
+    for (table, name, expected, enum_type) in [
+        ("orders", "total_cents", Some(serde_json::json!("number")), None),
+        ("orders", "id", Some(serde_json::json!(id)), None),
+        ("orders", "status", Some(serde_json::json!(status)), status_enum),
+        ("users", "metadata", metadata, None),
+    ] {
+        let col = column(&srv, table, name).await;
+        assert_exact(col.get("class").cloned(), expected, &format!("{table}.{name} class"));
+        assert_exact(col.get("enum_type").cloned(), enum_type, &format!("{table}.{name} enum_type"));
+    }
 }
 
 /// P5.4.1-TYPE: `type` is the engine's full spelling, keeping the length,
@@ -575,39 +564,24 @@ async fn columns_report_their_join_class() {
 #[tokio::test]
 async fn columns_report_the_engines_full_type() {
     let srv = TestServer::spawn().await;
-    let types = |table: &'static str| {
-        let srv = &srv;
-        async move {
-            let body: serde_json::Value = srv
-                .client()
-                .get(srv.url("/api/tables/data"))
-                .query(&[("table", table), ("limit", "1")])
-                .send()
-                .await
-                .unwrap()
-                .json()
-                .await
-                .unwrap();
-            body["columns"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|c| (c["name"].as_str().unwrap().to_string(), c["type"].clone()))
-                .collect::<std::collections::HashMap<_, _>>()
-        }
-    };
-    let orders = types("orders").await;
-    let users = types("users").await;
-    let expected: &[(&std::collections::HashMap<String, serde_json::Value>, &str, &str)] = match Backend::current() {
+    let expected: &[(&str, &str, &str)] = match Backend::current() {
         Backend::Postgres => &[
-            (&orders, "discount_pct", "numeric(5,2)"),
-            (&orders, "tags", "text[]"),
-            (&orders, "status", "order_status"),
+            ("orders", "discount_pct", "numeric(5,2)"),
+            ("orders", "tags", "text[]"),
+            ("orders", "status", "order_status"),
         ],
-        Backend::Mysql => &[(&orders, "discount_pct", "decimal(5,2)"), (&users, "is_active", "tinyint(1)")],
-        Backend::Sqlite => &[(&users, "is_active", "INTEGER")],
+        Backend::Mysql => &[
+            ("orders", "discount_pct", "decimal(5,2)"),
+            ("users", "is_active", "tinyint(1)"),
+        ],
+        Backend::Sqlite => &[("users", "is_active", "INTEGER")],
     };
-    for (cols, column, ty) in expected {
-        assert_exact(cols[*column].clone(), serde_json::json!(ty), &format!("{column} type"));
+    for (table, name, ty) in expected {
+        let col = column(&srv, table, name).await;
+        assert_exact(
+            col["type"].clone(),
+            serde_json::json!(ty),
+            &format!("{table}.{name} type"),
+        );
     }
 }

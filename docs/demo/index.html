@@ -1647,7 +1647,7 @@ function buildApiReference() {
       {
         method: "GET",
         path: `${base}/tables/join`,
-        summary: "Rows of up to 4 tables joined server-side (INNER or LEFT, equality on 1-3 column pairs per join), read-only. Every table and column name is checked against the live catalog; each pair must join columns of one type class (number, text, uuid, boolean, temporal, time, binary, enum, untyped), reported as each column's `class` in /tables/data, where two enums must also have an equal `type`; floats, json and arrays have no class and cannot be joined. Positions: the start table is 0 and `joins[]` entries are 1..n; a `left` reference may only point at an earlier position. The response has `has_more` and never a total. A column carries `join`, `table` and `column` beside a unique `name` label (never parse the label); rows are keyed by label and a LEFT-join miss is null. Anything wrong with `join` itself (shape, an unknown table or column, an incompatible pair, the size limit) is a 400 with `code: invalid_join`; a bad `filter`, `sort` or `order` keeps its usual code. A join that runs over the query timeout is a 500 with `code: query_timeout`.",
+        summary: "Rows of up to 4 tables joined server-side (INNER or LEFT, equality on 1-3 column pairs per join), read-only. Every table and column name is checked against the live catalog; each pair must join columns of one type class (number, text, uuid, boolean, temporal, time, binary, enum, untyped), reported as each column's `class` in /tables/data, where two enums must also have an equal `enum_type`; floats, json and arrays have no class and cannot be joined. Positions: the start table is 0 and `joins[]` entries are 1..n; a `left` reference may only point at an earlier position. The response has `has_more` and never a total. A column carries `join`, `table` and `column` beside a unique `name` label (never parse the label); rows are keyed by label and a LEFT-join miss is null. Anything wrong with `join` itself (shape, an unknown table or column, an incompatible pair, the size limit) is a 400 with `code: invalid_join`; a bad `filter`, `sort` or `order` keeps its usual code. A join that runs over the query timeout is a 500 with `code: query_timeout`.",
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables; every table of the join is in it" },
@@ -2919,6 +2919,15 @@ function columnTypeClass(rawType) {
   if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
   return TYPE_ALIASES[typeKey(rawType)] ?? null;
 }
+var FROM_JOIN_CLASS = {
+  number: "number",
+  temporal: "date",
+  uuid: "uuid",
+  boolean: "bool"
+};
+function cellTypeClass(col) {
+  return columnTypeClass(col.type) ?? (col.class ? FROM_JOIN_CLASS[col.class] ?? null : null);
+}
 var TYPE_CLASS_CSS = {
   number: "cell-type-number",
   bool: "cell-type-bool",
@@ -2980,7 +2989,7 @@ function edgeMarks(run, side) {
   });
 }
 function typedValue(col, raw) {
-  const klass = columnTypeClass(col.type);
+  const klass = cellTypeClass(col);
   if (klass === "date") {
     const time = document.createElement("time");
     time.textContent = raw;
@@ -3779,7 +3788,7 @@ function joinMismatch(candidate, other) {
   }
   const a = candidate.class;
   const b = other.class;
-  if (a === b && (a !== "enum" || candidate.type === other.type)) return null;
+  if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   return {
     note: `${candidate.type} \u2260 ${other.type}`,
     message: a === b ? `${candidate.type} cannot be joined to ${other.type}: they are different enumerated types.` : `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`
@@ -6599,7 +6608,7 @@ VALUES (${vals});`;
 }
 function sqlLiteral(col, raw) {
   if (raw == null) return "NULL";
-  if (columnTypeClass(col.type) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
+  if (cellTypeClass(col) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
   return `'${raw.replace(/'/g, "''")}'`;
 }
 function openRecordView(columns, rows, index, def) {

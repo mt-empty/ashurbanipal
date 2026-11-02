@@ -1,4 +1,4 @@
-import type { Column } from "../core/types.js";
+import type { Column, JoinClass } from "../core/types.js";
 
 // Mirrors json-tree.ts's UUID scalar test; kept local so this leaf stays
 // unit-testable without a runtime import.
@@ -82,6 +82,19 @@ export function columnTypeClass(rawType: string): ColumnTypeClass | null {
   // MySQL's boolean is tinyint(1); only the display width tells it apart.
   if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
   return TYPE_ALIASES[typeKey(rawType)] ?? null;
+}
+
+const FROM_JOIN_CLASS: Partial<Record<JoinClass, ColumnTypeClass>> = {
+  number: "number",
+  temporal: "date",
+  uuid: "uuid",
+  boolean: "bool",
+};
+
+// The type name first; the server's join class covers what the name hides,
+// such as a Postgres domain over integer, whose `type` is the domain's name.
+export function cellTypeClass(col: Pick<Column, "type" | "class">): ColumnTypeClass | null {
+  return columnTypeClass(col.type) ?? (col.class ? (FROM_JOIN_CLASS[col.class] ?? null) : null);
 }
 
 const TYPE_CLASS_CSS: Partial<Record<ColumnTypeClass, string>> = {
@@ -174,7 +187,7 @@ function edgeMarks(run: string, side: "leading" | "trailing"): Node[] {
 }
 
 function typedValue(col: Column, raw: string): Node {
-  const klass = columnTypeClass(col.type);
+  const klass = cellTypeClass(col);
   if (klass === "date") {
     // No `datetime` attribute: the engine's text cast isn't a valid HTML
     // datetime value on any backend.
