@@ -1,6 +1,15 @@
 import { el } from "../core/dom.js";
 import type { KeyDescription } from "../lib/column-key.js";
 
+// A column's key icon; null keeps an empty slot so names line up. Decorative:
+// callers put the key's text in a title or label.
+export function keyIcon(key: KeyDescription | null): HTMLElement {
+  const icon = el("span", "key-icon", key?.icon ?? "");
+  icon.setAttribute("aria-hidden", "true");
+  if (key) icon.title = key.label;
+  return icon;
+}
+
 export interface Suggestion {
   label: string;
   insert: string;
@@ -8,7 +17,7 @@ export interface Suggestion {
   note?: string;
   // A small badge after the note (`foreign key`, `indexed`).
   tag?: string;
-  // A column's key icon, drawn before the label.
+  // A column's key icon before the label; null draws the empty slot.
   key?: KeyDescription | null;
   // The row shows greyed and cannot be taken.
   blocked?: boolean;
@@ -61,19 +70,13 @@ export function createSuggestList(opts: SuggestOptions): SuggestList {
   };
 
   const render = (): void => {
-    // When any row has a key, every row gets the slot, so the labels line up.
-    const keyed = matches.some((m) => m.key);
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
         const btn = el("button");
         btn.type = "button";
         const text = [suggestion.label, suggestion.note, suggestion.key?.label, suggestion.tag].filter(Boolean);
         btn.title = text.join(" · "); // long values are cut off with an ellipsis
-        if (keyed) {
-          const icon = el("span", "key-icon", suggestion.key?.icon ?? "");
-          icon.setAttribute("aria-hidden", "true");
-          btn.appendChild(icon);
-        }
+        if (suggestion.key !== undefined) btn.appendChild(keyIcon(suggestion.key));
         const name = el("span", "sg-label", suggestion.label);
         btn.appendChild(name);
         if (suggestion.note || suggestion.tag) {

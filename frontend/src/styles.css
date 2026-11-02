@@ -352,8 +352,7 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #all-hidden { display: flex; align-items: center; gap: var(--gap); width: fit-content; margin: var(--gap) 0;
               padding: .6rem .8rem; border: 1px solid var(--rule); border-radius: 6px; }
 /* Data and identifiers stay monospace; the chrome around them is system-ui. */
-.json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value,
-#filter-suggest button { font-family: var(--font-mono); }
+.json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value { font-family: var(--font-mono); }
 #current { font-family: var(--font-mono); color: CanvasText; }
 #actions { display: flex; gap: 2px; }
 #actions button, #pager button { background: none; border: none; font: inherit;
@@ -608,25 +607,19 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
           margin: 0; border: 1px solid var(--border-strong);
           border-radius: 8px; padding: .3rem; width: max-content; max-width: min(28rem, 90vw);
           max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
-/* Rows share the group's columns (checkbox, key icon, name, type, sorted),
-   so names and types line up; the heading spans them all. */
-.cols-group { display: grid; grid-template-columns: auto auto minmax(0, auto) minmax(0, 1fr) auto .1rem;
-              column-gap: .4rem; }
-.cols-head { grid-column: 1 / -1; }
-/* Inline padding as in #filter-suggest: Chrome leaves a subgrid's padding out of the track sizes. */
-#columns-pop label { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center;
-          padding: .3rem 0; border-radius: 4px; cursor: pointer; }
-#columns-pop label > input { margin: 0 0 0 .5rem; }
-#columns-pop .key-icon { margin-right: 0; }
-.cols-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-             padding-left: .6rem; font-family: var(--font-mono); font-size: .75rem; color: var(--text-muted); }
+#columns-pop label { display: flex; align-items: center; gap: .4rem;
+          padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+/* Right-aligned as in #filter-suggest, so the types line up. */
+.cols-type { margin-left: auto; padding-left: .6rem; font-family: var(--font-mono); font-size: .75rem;
+             color: var(--text-muted); }
+#columns-pop label .cols-sorted { margin-left: 0; }
 #columns-pop label:hover { background: var(--hover); }
 /* Sticky so a long list keeps its table's all / none in reach. */
 .cols-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .4rem;
              padding: .3rem .5rem; background: canvas; }
 .cols-group + .cols-group { margin-top: .3rem; }
 /* Names and table labels ellipsize; their titles carry the full text (R8). */
-.cols-pill, .cols-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cols-pill, .cols-name, .cols-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cols-pill { padding: .1rem .45rem; border-radius: 4px; font-family: var(--font-mono); font-size: .75rem;
              background: var(--band-0); color: var(--band-0-fg); }
 /* padding-block: overflow:hidden would otherwise clip an underscore's descent. */
@@ -645,17 +638,15 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
           background: canvas; color: inherit; border: 1px solid var(--border-strong);
           border-radius: 8px; padding: .2rem; max-width: 26rem; max-height: 10rem;
           overflow: auto; box-shadow: 0 4px 16px #0004; }
-/* Rows share the list's columns (key icon, name, type), so the types line up.
-   Chrome leaves a subgrid's own padding and gaps out of the track sizes, so
-   the inline padding is the first item's margin and a fixed last track. */
-#filter-suggest-list { display: grid; grid-template-columns: auto minmax(0, auto) minmax(0, auto) .5rem; }
-#filter-suggest button { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;
-          align-items: baseline; white-space: nowrap;
+#filter-suggest button { display: flex; align-items: baseline; width: 100%; box-sizing: border-box; white-space: nowrap;
           background: none; border: none; font: inherit; font-family: var(--font-mono); color: inherit;
-          text-align: left; padding: .25rem 0; border-radius: 4px; cursor: pointer; }
-#filter-suggest button > :first-child { margin-left: .5rem; }
-#filter-suggest .sg-label { overflow: hidden; text-overflow: ellipsis; }
-#filter-suggest .sg-note { align-self: baseline; padding-left: 1.25rem; font-family: var(--font-mono); font-size: .75rem; }
+          text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
+#filter-suggest .sg-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Pushed to the right edge, so the types of every row line up. */
+#filter-suggest .sg-note { align-self: baseline; margin-left: auto; padding-left: 1.25rem;
+          font-family: var(--font-mono); font-size: .75rem; }
+/* A fixed slot, empty on columns without a key, so the names line up too. */
+#filter-suggest .key-icon, #columns-pop .key-icon { flex: none; width: 1.5em; margin-right: 0; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 
 /* ==== Join: saved chips, bands, notices ==== */

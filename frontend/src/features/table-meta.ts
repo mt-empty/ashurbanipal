@@ -1,12 +1,11 @@
 import { scopeIdentity } from "../core/state.js";
-import type { ConstraintFk, ReferencedByEntry, StructureResponse } from "../core/types.js";
+import type { Column, ConstraintFk, ReferencedByEntry, StructureResponse } from "../core/types.js";
+import { type KeyDescription, keyDescription } from "../lib/column-key.js";
 import { fetchReferencedBy } from "./referenced-by.js";
 import { tableStructure } from "./structure.js";
 
-// ---- per-table catalog facts the grid needs beyond §5.4.1's columns:
-// incoming references (§5.9) and composite FKs / unique columns (§5.10).
-// Fetched after a table view renders; the grid draws without them until
-// they arrive, then once more. ----
+// ---- per-table catalog facts beyond §5.4.1's columns: incoming references
+// (§5.9) and composite FKs / unique columns (§5.10). ----
 
 export interface TableMeta {
   // Distinct tables with an FK into this one; null when the lookup failed.
@@ -21,8 +20,12 @@ export interface TableMeta {
 // don't flicker off and back on.
 const metas = new Map<string, { meta: TableMeta; shape: string }>();
 
-export function tableMeta(table: string): TableMeta | undefined {
-  return metas.get(scopeIdentity(table))?.meta;
+export function tableMeta(table: string | null): TableMeta | undefined {
+  return table === null ? undefined : metas.get(scopeIdentity(table))?.meta;
+}
+
+export function columnKeyOf(col: Column, meta: TableMeta | undefined): KeyDescription | null {
+  return keyDescription(col, meta?.compositeFkOf.get(col.name));
 }
 
 function referrerCount(entries: ReferencedByEntry[]): number {
@@ -44,20 +47,28 @@ function buildMeta(structure: StructureResponse | null, entries: ReferencedByEnt
   return { referrers: entries ? referrerCount(entries) : null, compositeFkOf, uniqueColumns };
 }
 
-// Resolves true when the stored facts changed, so the caller redraws.
-export async function loadTableMeta(table: string): Promise<boolean> {
+// Tables asked since the last refresh, failures included, so an auto-refresh
+// tick never repeats a lookup that keeps failing.
+const asked = new Set<string>();
+
+export function expireTableMeta(): void {
+  asked.clear();
+}
+
+// Never rejects. tableMeta()'s answer changes identity only when the facts do.
+export async function loadTableMeta(table: string): Promise<void> {
   const key = scopeIdentity(table);
+  if (asked.has(key)) return;
+  asked.add(key);
   const [structure, entries] = await Promise.allSettled([tableStructure(table), fetchReferencedBy(table)]);
   const failed = [structure, entries].filter((r) => r.status === "rejected");
   for (const r of failed) console.warn("ashurbanipal: table metadata lookup failed", r.reason);
   // A failed refresh keeps the last good answer.
-  if (failed.length > 0 && metas.has(key)) return false;
+  if (failed.length > 0 && metas.has(key)) return;
   const meta = buildMeta(
     structure.status === "fulfilled" ? structure.value : null,
     entries.status === "fulfilled" ? entries.value : null,
   );
   const shape = JSON.stringify([meta.referrers, [...meta.compositeFkOf], [...meta.uniqueColumns]]);
-  if (metas.get(key)?.shape === shape) return false;
-  metas.set(key, { meta, shape });
-  return true;
+  if (metas.get(key)?.shape !== shape) metas.set(key, { meta, shape });
 }

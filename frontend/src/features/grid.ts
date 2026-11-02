@@ -3,7 +3,7 @@ import { tableEl } from "../bootstrap/table-focus.js";
 import { $, copyText, el, qs } from "../core/dom.js";
 import { hiddenColumns, joinInView, rememberSort, setHiddenColumns, state, tableInView } from "../core/state.js";
 import type { Column, Row, View, ViewData } from "../core/types.js";
-import { fkTarget, type KeyDescription, keyDescription } from "../lib/column-key.js";
+import { fkTarget, type KeyDescription } from "../lib/column-key.js";
 import { filterClause, filterClauses, filterTooLong } from "../lib/filter-dsl.js";
 import {
   APPROX_COUNT_TITLE,
@@ -16,33 +16,15 @@ import { tableLabel } from "../lib/join-def.js";
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { columnMinWidth } from "./column-widths.js";
-import { applyFilterClause, hasNoCommonValues, showCommonValues } from "./filter-ui.js";
+import { applyFilterClause, commonValuesButton } from "./filter-ui.js";
 import { markGridDrawn } from "./grid-lock.js";
 import { switchToLeftJoin } from "./join-dialog.js";
 import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands } from "./join-view.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
-import { type TableMeta, tableMeta } from "./table-meta.js";
+import { keyIcon } from "./suggest-list.js";
+import { columnKeyOf, type TableMeta, tableMeta } from "./table-meta.js";
 import { navigateWithSeededFilter } from "./view-history.js";
-
-// A focusable control nested in the sortable th — stopPropagation so
-// opening it doesn't also toggle sort.
-function commonValuesButton(table: string, column: string): HTMLButtonElement {
-  const btn = el("button");
-  btn.type = "button";
-  btn.className = "common-values-btn";
-  btn.setAttribute("aria-label", `common values for ${column}`);
-  btn.textContent = "▾";
-  if (hasNoCommonValues(table, column)) {
-    btn.classList.add("cv-none");
-    btn.title = "no common values in the statistics";
-  }
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    showCommonValues(e, table, column);
-  };
-  return btn;
-}
 
 // The columns and view the grid last rendered; the columns menu, the counts,
 // the sort note and the record dialog all describe these. state.view moves to
@@ -59,14 +41,6 @@ interface ColumnCounts {
 
 let counts: ColumnCounts = { hidden: new Set(), shown: 0, total: 0 };
 
-// Decorative: the header's aria-label and the menu's checkbox label carry the text.
-function keyIcon(key: KeyDescription): HTMLElement {
-  const icon = el("span", "key-icon", key.icon);
-  icon.setAttribute("aria-hidden", "true");
-  icon.title = key.label;
-  return icon;
-}
-
 function countColumns(): void {
   const hidden = new Set(hiddenColumns());
   counts = { hidden, shown: columnsInView.filter((c) => !hidden.has(c.name)).length, total: columnsInView.length };
@@ -80,7 +54,7 @@ export function renderHeader(columns: Column[]): void {
   const { hidden } = counts;
   // Common values are a per-table query; a join column has no single table to ask.
   const table = tableInView();
-  const meta = table === null ? undefined : tableMeta(table);
+  const meta = tableMeta(table);
   // Every member of a composite primary key reports key "pk".
   const singlePk = columns.filter((c) => c.key === "pk").length === 1;
   const tr = el("tr");
@@ -108,7 +82,7 @@ export function renderHeader(columns: Column[]): void {
     const nameEl = el("button", "col-name sort-btn", displayName(col));
     nameEl.type = "button";
     nameEl.title = col.comment ? `${fullName} — ${col.comment}` : fullName;
-    const key = keyDescription(col, meta?.compositeFkOf.get(col.name));
+    const key = columnKeyOf(col, meta);
     if (key) {
       head.append(keyIcon(key), nameEl, " ");
       // Layers onto the accessible name rather than replacing the key
@@ -181,13 +155,12 @@ function showCellPop(e: MouseEvent, text: string, col: Column): void {
 
 interface CellContext {
   hidden: Set<string>;
-  table: string | null;
   meta: TableMeta | undefined;
 }
 
 // A real <button> as the click target so it's keyboard-focusable and
 // Enter/Space-activatable, matching the copy button one element over.
-function buildCell(col: Column, row: Row, { hidden, table, meta }: CellContext): HTMLTableCellElement {
+function buildCell(col: Column, row: Row, { hidden, meta }: CellContext): HTMLTableCellElement {
   const raw = row[col.name];
   const isNull = raw == null;
   // A null cell has no copy/expand affordance to clone, so it builds a bare
@@ -223,8 +196,7 @@ function buildCell(col: Column, row: Row, { hidden, table, meta }: CellContext):
     copyText(raw, btn);
   };
   // The click replaces the whole filter, so the clause alone must fit the DSL's limit.
-  const eqClause = filterClause(columnKey(col), "=", raw);
-  if (filterTooLong(eqClause)) filterBtn.remove();
+  if (filterTooLong(raw) || filterTooLong(filterClause(columnKey(col), "=", raw))) filterBtn.remove();
   else {
     filterBtn.onclick = (e) => {
       e.stopPropagation();
@@ -239,15 +211,13 @@ function buildCell(col: Column, row: Row, { hidden, table, meta }: CellContext):
     cellText.onclick = () =>
       navigateWithSeededFilter(references.table, references.schema, filterClause(references.column, "=", raw));
   } else if (compositeFk?.columns.every((c) => row[c.from] != null)) {
-    const pairs = compositeFk.columns.map((c) => ({ column: c.to, value: row[c.from] as string }));
+    const clause = filterClauses(compositeFk.columns.map((c) => ({ column: c.to, value: row[c.from] as string })));
     cellText.classList.add("fk-cell");
-    cellText.title = `go to ${fkTarget(compositeFk)} where ${pairs.map((p) => `${p.column} = ${p.value}`).join(" AND ")}`;
-    cellText.onclick = () => navigateWithSeededFilter(compositeFk.table, compositeFk.schema, filterClauses(pairs));
-  } else if (col.key === "pk" && table !== null && meta !== undefined && meta.referrers !== 0) {
-    // Reverse of the FK-cell click: what points *at* this row. A pk+fk
-    // column took the branch above; those rows, and no-PK tables, reach the
-    // same list through the record dialog instead. Offered only once the
-    // table is known to have referrers, or the lookup failed.
+    cellText.title = `go to ${fkTarget(compositeFk)} where ${clause}`;
+    cellText.onclick = () => navigateWithSeededFilter(compositeFk.table, compositeFk.schema, clause);
+  } else if (col.key === "pk" && meta !== undefined && meta.referrers !== 0) {
+    // What points *at* this row, once the table is known to have referrers (or
+    // the lookup failed); FK-bearing PKs and no-PK tables use the record dialog.
     cellText.classList.add("pk-cell");
     // Embeds `raw` so a truncated PK stays readable via hover, same as the
     // fk-cell title above — the overflow-expand skip below relies on it.
@@ -398,7 +368,7 @@ function buildMenuItem(col: Column, key: KeyDescription | null): HTMLLabelElemen
   const type = el("span", "cols-type", col.type);
   type.title = col.type;
   // The key slot stays even when empty, so every row's name starts in one column.
-  label.append(input, key ? keyIcon(key) : el("span", "key-icon"), text, type, el("span", "cols-sorted"));
+  label.append(input, keyIcon(key), text, type, el("span", "cols-sorted"));
   return label;
 }
 
@@ -426,9 +396,8 @@ let menuShape = "";
 
 export function renderColumnMenu(): void {
   const groups = columnGroups(columnsInView);
-  const table = tableInView();
-  const meta = table === null ? undefined : tableMeta(table);
-  const keys = new Map(columnsInView.map((c) => [c.name, keyDescription(c, meta?.compositeFkOf.get(c.name))]));
+  const meta = tableMeta(tableInView());
+  const keys = new Map(columnsInView.map((c) => [c.name, columnKeyOf(c, meta)]));
   const shape = JSON.stringify([
     groups.map((g) => [g.band, g.label, g.columns.map((c) => [c.name, columnKey(c), c.type])]),
     [...keys],
@@ -458,8 +427,7 @@ export function renderRows(data: ViewData, newRowKeys?: Set<string>, pkNames: st
     renderEmptyState(shown + 1);
     return;
   }
-  const table = tableInView();
-  const ctx: CellContext = { hidden, table, meta: table === null ? undefined : tableMeta(table) };
+  const ctx: CellContext = { hidden, meta: tableMeta(tableInView()) };
   const tbody = $("tbody");
   tbody.replaceChildren(
     ...data.rows.map((row) => {

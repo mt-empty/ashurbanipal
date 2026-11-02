@@ -374,8 +374,7 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 #all-hidden { display: flex; align-items: center; gap: var(--gap); width: fit-content; margin: var(--gap) 0;
               padding: .6rem .8rem; border: 1px solid var(--rule); border-radius: 6px; }
 /* Data and identifiers stay monospace; the chrome around them is system-ui. */
-.json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value,
-#filter-suggest button { font-family: var(--font-mono); }
+.json-tree, dialog pre, dialog dl, .structure-row, button.refby-entry, #cv-pop button.cv-value { font-family: var(--font-mono); }
 #current { font-family: var(--font-mono); color: CanvasText; }
 #actions { display: flex; gap: 2px; }
 #actions button, #pager button { background: none; border: none; font: inherit;
@@ -630,25 +629,19 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
           margin: 0; border: 1px solid var(--border-strong);
           border-radius: 8px; padding: .3rem; width: max-content; max-width: min(28rem, 90vw);
           max-height: 50vh; overflow: auto; box-shadow: 0 4px 16px #0004; }
-/* Rows share the group's columns (checkbox, key icon, name, type, sorted),
-   so names and types line up; the heading spans them all. */
-.cols-group { display: grid; grid-template-columns: auto auto minmax(0, auto) minmax(0, 1fr) auto .1rem;
-              column-gap: .4rem; }
-.cols-head { grid-column: 1 / -1; }
-/* Inline padding as in #filter-suggest: Chrome leaves a subgrid's padding out of the track sizes. */
-#columns-pop label { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center;
-          padding: .3rem 0; border-radius: 4px; cursor: pointer; }
-#columns-pop label > input { margin: 0 0 0 .5rem; }
-#columns-pop .key-icon { margin-right: 0; }
-.cols-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-             padding-left: .6rem; font-family: var(--font-mono); font-size: .75rem; color: var(--text-muted); }
+#columns-pop label { display: flex; align-items: center; gap: .4rem;
+          padding: .3rem .5rem; border-radius: 4px; cursor: pointer; }
+/* Right-aligned as in #filter-suggest, so the types line up. */
+.cols-type { margin-left: auto; padding-left: .6rem; font-family: var(--font-mono); font-size: .75rem;
+             color: var(--text-muted); }
+#columns-pop label .cols-sorted { margin-left: 0; }
 #columns-pop label:hover { background: var(--hover); }
 /* Sticky so a long list keeps its table's all / none in reach. */
 .cols-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .4rem;
              padding: .3rem .5rem; background: canvas; }
 .cols-group + .cols-group { margin-top: .3rem; }
 /* Names and table labels ellipsize; their titles carry the full text (R8). */
-.cols-pill, .cols-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cols-pill, .cols-name, .cols-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cols-pill { padding: .1rem .45rem; border-radius: 4px; font-family: var(--font-mono); font-size: .75rem;
              background: var(--band-0); color: var(--band-0-fg); }
 /* padding-block: overflow:hidden would otherwise clip an underscore's descent. */
@@ -667,17 +660,15 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
           background: canvas; color: inherit; border: 1px solid var(--border-strong);
           border-radius: 8px; padding: .2rem; max-width: 26rem; max-height: 10rem;
           overflow: auto; box-shadow: 0 4px 16px #0004; }
-/* Rows share the list's columns (key icon, name, type), so the types line up.
-   Chrome leaves a subgrid's own padding and gaps out of the track sizes, so
-   the inline padding is the first item's margin and a fixed last track. */
-#filter-suggest-list { display: grid; grid-template-columns: auto minmax(0, auto) minmax(0, auto) .5rem; }
-#filter-suggest button { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;
-          align-items: baseline; white-space: nowrap;
+#filter-suggest button { display: flex; align-items: baseline; width: 100%; box-sizing: border-box; white-space: nowrap;
           background: none; border: none; font: inherit; font-family: var(--font-mono); color: inherit;
-          text-align: left; padding: .25rem 0; border-radius: 4px; cursor: pointer; }
-#filter-suggest button > :first-child { margin-left: .5rem; }
-#filter-suggest .sg-label { overflow: hidden; text-overflow: ellipsis; }
-#filter-suggest .sg-note { align-self: baseline; padding-left: 1.25rem; font-family: var(--font-mono); font-size: .75rem; }
+          text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
+#filter-suggest .sg-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Pushed to the right edge, so the types of every row line up. */
+#filter-suggest .sg-note { align-self: baseline; margin-left: auto; padding-left: 1.25rem;
+          font-family: var(--font-mono); font-size: .75rem; }
+/* A fixed slot, empty on columns without a key, so the names line up too. */
+#filter-suggest .key-icon, #columns-pop .key-icon { flex: none; width: 1.5em; margin-right: 0; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 
 /* ==== Join: saved chips, bands, notices ==== */
@@ -1395,8 +1386,10 @@ $("api-help-copy").onclick = () => copyText($("api-help-pre").textContent ?? "",
 // src/lib/filter-dsl.ts
 var FILTER_MAX_DSL_BYTES = 1024;
 var FILTER_MAX_CONDITIONS = 10;
+var utf8 = new TextEncoder();
 function filterTooLong(text) {
-  return text.length * 3 > FILTER_MAX_DSL_BYTES && new TextEncoder().encode(text).length > FILTER_MAX_DSL_BYTES;
+  if (text.length > FILTER_MAX_DSL_BYTES) return true;
+  return text.length * 3 > FILTER_MAX_DSL_BYTES && utf8.encode(text).length > FILTER_MAX_DSL_BYTES;
 }
 var RESERVED_WORD_RE = /^(AND|OR|NOT)$/i;
 var FilterDslError = class extends Error {
@@ -2642,9 +2635,9 @@ function stopCountdown() {
 
 // src/lib/fallback-note.ts
 var ORDER = ["source", "schema", "table", "filter"];
-function swapsFrom(asked2, settled) {
+function swapsFrom(asked3, settled) {
   return ORDER.flatMap((kind) => {
-    const want = asked2[kind];
+    const want = asked3[kind];
     const got = settled[kind];
     if (want === void 0 || want === got) return [];
     if ((kind === "source" || kind === "schema") && got === null) return [];
@@ -3586,13 +3579,52 @@ pop().addEventListener("toggle", (e) => {
   }
 });
 
+// src/lib/column-key.ts
+function fkTarget(ref) {
+  return ref.schema ? `${ref.schema}.${ref.table}` : ref.table;
+}
+function keyDescription(col, compositeFk) {
+  const composite = compositeFk && `part of foreign key (${compositeFk.columns.map((c) => c.from).join(", ")}) \u2192 ${fkTarget(compositeFk)}(${compositeFk.columns.map((c) => c.to).join(", ")})`;
+  if (col.key === "pk") {
+    const also = col.references ? `, also references ${fkTarget(col.references)}.${col.references.column}` : composite ? `, also ${composite}` : "";
+    return { icon: "\u{1F511}", label: `primary key${also}` };
+  }
+  if (col.references) {
+    return { icon: "\u{1F517}", label: `foreign key, references ${fkTarget(col.references)}.${col.references.column}` };
+  }
+  return composite ? { icon: "\u{1F517}", label: composite } : null;
+}
+
+// src/lib/promise-cache.ts
+function createPromiseCache() {
+  const done = /* @__PURE__ */ new Map();
+  const inflight = /* @__PURE__ */ new Map();
+  return {
+    get(key, load) {
+      if (done.has(key)) return Promise.resolve(done.get(key));
+      const pending = inflight.get(key);
+      if (pending) return pending;
+      const request = load().then((value) => {
+        if (inflight.get(key) === request) done.set(key, value);
+        return value;
+      }).finally(() => {
+        if (inflight.get(key) === request) inflight.delete(key);
+      });
+      inflight.set(key, request);
+      return request;
+    },
+    peek: (key) => done.get(key),
+    clear() {
+      done.clear();
+      inflight.clear();
+    }
+  };
+}
+
 // src/features/structure.ts
-var cache = /* @__PURE__ */ new Map();
-var cacheGeneration = 0;
+var cache = createPromiseCache();
 function clearStructureCache() {
   cache.clear();
-  inflight.clear();
-  cacheGeneration++;
 }
 var requestToken = 0;
 function msg(text) {
@@ -3616,10 +3648,9 @@ function section(label, rows, emptyText) {
   return wrap2;
 }
 function fkRow(fk) {
-  const target = fk.schema ? `${fk.schema}.${fk.table}` : fk.table;
   const from = fk.columns.map((c) => c.from).join(", ");
   const to = fk.columns.map((c) => c.to).join(", ");
-  return row(`${fk.name}  ${from} \u2192 ${target}(${to})`, `ON DELETE ${fk.on_delete}  ON UPDATE ${fk.on_update}`);
+  return row(`${fk.name}  ${from} \u2192 ${fkTarget(fk)}(${to})`, `ON DELETE ${fk.on_delete}  ON UPDATE ${fk.on_update}`);
 }
 function renderStructure(data) {
   const { primary_key: pk, unique, foreign_keys, check } = data.constraints;
@@ -3648,24 +3679,12 @@ function renderStructure(data) {
     )
   );
 }
-var inflight = /* @__PURE__ */ new Map();
 function tableStructure(table) {
-  const key = scopeIdentity(table);
-  const generation2 = cacheGeneration;
-  const hit = cache.get(key);
-  if (hit) return Promise.resolve(hit);
-  const pending = inflight.get(key);
-  if (pending) return pending;
-  const params = new URLSearchParams({ table });
-  applyScopeParams(params);
-  const request = api(`/tables/structure?${params}`).then((data) => {
-    if (generation2 === cacheGeneration) cache.set(key, data);
-    return data;
-  }).finally(() => {
-    if (inflight.get(key) === request) inflight.delete(key);
+  return cache.get(scopeIdentity(table), () => {
+    const params = new URLSearchParams({ table });
+    applyScopeParams(params);
+    return api(`/tables/structure?${params}`);
   });
-  inflight.set(key, request);
-  return request;
 }
 function openStructure() {
   const table = tableInView();
@@ -3673,7 +3692,7 @@ function openStructure() {
   const token = ++requestToken;
   $("structure-title").textContent = `structure \u2014 ${qualifiedTable(table)}`;
   $("structure-dialog").showModal();
-  const hit = cache.get(scopeIdentity(table));
+  const hit = cache.peek(scopeIdentity(table));
   if (hit) {
     renderStructure(hit);
     return;
@@ -3964,19 +3983,19 @@ function tableColumns(table) {
     const params = new URLSearchParams({ table, limit: "1", offset: "0" });
     applyScopeParams(params);
     const started = generation;
-    const asked2 = api(`/tables/data?${params}`).then((d) => {
+    const asked3 = api(`/tables/data?${params}`).then((d) => {
       if (started === generation) {
         resolved.set(key, d.columns);
         version++;
       }
       return d.columns;
     });
-    cache2.set(key, asked2);
-    asked2.catch((e) => {
+    cache2.set(key, asked3);
+    asked3.catch((e) => {
       const lasting = e instanceof ApiError && (e.code === "unknown_table" || e.code === "not_readable");
-      if (!lasting && cache2.get(key) === asked2) cache2.delete(key);
+      if (!lasting && cache2.get(key) === asked3) cache2.delete(key);
     });
-    columns = asked2;
+    columns = asked3;
   }
   return columns;
 }
@@ -3990,12 +4009,12 @@ function indexedColumns(table) {
   const key = scopeIdentity(table);
   let found = indexes.get(key);
   if (!found) {
-    const asked2 = generation;
+    const asked3 = generation;
     found = tableStructure(table).then(
       (s) => new Set(s.indexes.map((i) => i.columns[0])),
       () => /* @__PURE__ */ new Set()
     ).then((set) => {
-      if (asked2 === generation) indexesRead.set(key, set);
+      if (asked3 === generation) indexesRead.set(key, set);
       return set;
     });
     indexes.set(key, found);
@@ -4529,6 +4548,12 @@ function renderSavedChips(actions) {
 }
 
 // src/features/suggest-list.ts
+function keyIcon(key) {
+  const icon = el("span", "key-icon", key?.icon ?? "");
+  icon.setAttribute("aria-hidden", "true");
+  if (key) icon.title = key.label;
+  return icon;
+}
 function createSuggestList(opts) {
   const { input: input2, popup, list, idPrefix } = opts;
   let matches = [];
@@ -4548,18 +4573,13 @@ function createSuggestList(opts) {
     if (matches[i] && !matches[i].blocked) opts.accept(matches[i], head);
   };
   const render6 = () => {
-    const keyed = matches.some((m) => m.key);
     list.replaceChildren(
       ...matches.map((suggestion, i) => {
         const btn = el("button");
         btn.type = "button";
         const text = [suggestion.label, suggestion.note, suggestion.key?.label, suggestion.tag].filter(Boolean);
         btn.title = text.join(" \xB7 ");
-        if (keyed) {
-          const icon = el("span", "key-icon", suggestion.key?.icon ?? "");
-          icon.setAttribute("aria-hidden", "true");
-          btn.appendChild(icon);
-        }
+        if (suggestion.key !== void 0) btn.appendChild(keyIcon(suggestion.key));
         const name = el("span", "sg-label", suggestion.label);
         btn.appendChild(name);
         if (suggestion.note || suggestion.tag) {
@@ -4974,22 +4994,6 @@ $("join-cancel").onclick = () => dialog.close();
 $("join-btn").onclick = () => openJoinDialog();
 $("join-edit-btn").onclick = () => openJoinDialog();
 
-// src/lib/column-key.ts
-function fkTarget(ref) {
-  return ref.schema ? `${ref.schema}.${ref.table}` : ref.table;
-}
-function keyDescription(col, compositeFk) {
-  const composite = compositeFk && `part of foreign key (${compositeFk.columns.map((c) => c.from).join(", ")}) \u2192 ${fkTarget(compositeFk)}(${compositeFk.columns.map((c) => c.to).join(", ")})`;
-  if (col.key === "pk") {
-    const also = col.references ? `, also references ${fkTarget(col.references)}.${col.references.column}` : composite ? `, also ${composite}` : "";
-    return { icon: "\u{1F511}", label: `primary key${also}` };
-  }
-  if (col.references) {
-    return { icon: "\u{1F517}", label: `foreign key, references ${fkTarget(col.references)}.${col.references.column}` };
-  }
-  return composite ? { icon: "\u{1F517}", label: composite } : null;
-}
-
 // src/features/join-view.ts
 var filterQualifier = (name) => /^(AND|OR|NOT)$/i.test(name) ? `"${name}"` : quoteJoinName(name);
 function columnKey(col, def = joinInView()?.def) {
@@ -5223,31 +5227,16 @@ window.addEventListener("popstate", () => {
 });
 
 // src/features/referenced-by.ts
-var cache3 = /* @__PURE__ */ new Map();
-var inflight2 = /* @__PURE__ */ new Map();
-var cacheGeneration2 = 0;
+var cache3 = createPromiseCache();
 function clearReferencedByCache() {
   cache3.clear();
-  inflight2.clear();
-  cacheGeneration2++;
 }
 function fetchReferencedBy(table) {
-  const key = scopeIdentity(table);
-  const hit = cache3.get(key);
-  if (hit) return Promise.resolve(hit);
-  const pending = inflight2.get(key);
-  if (pending) return pending;
-  const generation2 = cacheGeneration2;
-  const params = new URLSearchParams({ table });
-  applyScopeParams(params);
-  const request = api(`/tables/referenced-by?${params}`).then((data) => {
-    if (generation2 === cacheGeneration2) cache3.set(key, data.referenced_by);
-    return data.referenced_by;
-  }).finally(() => {
-    if (inflight2.get(key) === request) inflight2.delete(key);
+  return cache3.get(scopeIdentity(table), () => {
+    const params = new URLSearchParams({ table });
+    applyScopeParams(params);
+    return api(`/tables/referenced-by?${params}`).then((d) => d.referenced_by);
   });
-  inflight2.set(key, request);
-  return request;
 }
 var renderTokens = /* @__PURE__ */ new Map();
 function msg2(text) {
@@ -5266,7 +5255,7 @@ function renderList(container, entries, row2, dismiss) {
   }
   container.replaceChildren(
     ...entries.map((entry) => {
-      const label = entry.schema ? `${entry.schema}.${entry.table}` : entry.table;
+      const label = fkTarget(entry);
       const btn = el("button");
       btn.type = "button";
       btn.className = "refby-entry";
@@ -5288,7 +5277,7 @@ function renderReferencedBy(container, row2, dismiss) {
   renderTokens.set(container, token);
   const table = tableInView();
   if (table === null) return;
-  const hit = cache3.get(scopeIdentity(table));
+  const hit = cache3.peek(scopeIdentity(table));
   if (hit) {
     renderList(container, hit, row2, dismiss);
     return;
@@ -5314,7 +5303,10 @@ function openReferencedByPopover(e, row2) {
 // src/features/table-meta.ts
 var metas = /* @__PURE__ */ new Map();
 function tableMeta(table) {
-  return metas.get(scopeIdentity(table))?.meta;
+  return table === null ? void 0 : metas.get(scopeIdentity(table))?.meta;
+}
+function columnKeyOf(col, meta) {
+  return keyDescription(col, meta?.compositeFkOf.get(col.name));
 }
 function referrerCount(entries) {
   return new Set(entries.map((e) => `${e.schema ?? ""}.${e.table}`)).size;
@@ -5333,20 +5325,24 @@ function buildMeta(structure, entries) {
   }
   return { referrers: entries ? referrerCount(entries) : null, compositeFkOf, uniqueColumns };
 }
+var asked2 = /* @__PURE__ */ new Set();
+function expireTableMeta() {
+  asked2.clear();
+}
 async function loadTableMeta(table) {
   const key = scopeIdentity(table);
+  if (asked2.has(key)) return;
+  asked2.add(key);
   const [structure, entries] = await Promise.allSettled([tableStructure(table), fetchReferencedBy(table)]);
   const failed = [structure, entries].filter((r) => r.status === "rejected");
   for (const r of failed) console.warn("ashurbanipal: table metadata lookup failed", r.reason);
-  if (failed.length > 0 && metas.has(key)) return false;
+  if (failed.length > 0 && metas.has(key)) return;
   const meta = buildMeta(
     structure.status === "fulfilled" ? structure.value : null,
     entries.status === "fulfilled" ? entries.value : null
   );
   const shape = JSON.stringify([meta.referrers, [...meta.compositeFkOf], [...meta.uniqueColumns]]);
-  if (metas.get(key)?.shape === shape) return false;
-  metas.set(key, { meta, shape });
-  return true;
+  if (metas.get(key)?.shape !== shape) metas.set(key, { meta, shape });
 }
 
 // src/features/filter-ui.ts
@@ -5460,13 +5456,22 @@ function clearCommonValueCache() {
   commonValueCache.clear();
   emptyCommonValues.clear();
 }
-function commonValuesKey(table, column) {
-  const params = new URLSearchParams({ table, column });
-  applyScopeParams(params);
-  return params.toString();
+function markNoCommonValues(btn) {
+  btn.classList.add("cv-none");
+  btn.title = "no common values in the statistics";
 }
-function hasNoCommonValues(table, column) {
-  return emptyCommonValues.has(commonValuesKey(table, column));
+function commonValuesButton(table, column) {
+  const btn = el("button");
+  btn.type = "button";
+  btn.className = "common-values-btn";
+  btn.setAttribute("aria-label", `common values for ${column}`);
+  btn.textContent = "\u25BE";
+  if (emptyCommonValues.has(scopeIdentity(table, column))) markNoCommonValues(btn);
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    showCommonValues(e, table, column);
+  };
+  return btn;
 }
 async function fetchCommonValues(table, column) {
   const params = new URLSearchParams({ table, column });
@@ -5474,7 +5479,7 @@ async function fetchCommonValues(table, column) {
   return (await api(`/tables/common-values?${params}`)).values;
 }
 function commonValuesFor(table, column) {
-  const key = commonValuesKey(table, column);
+  const key = scopeIdentity(table, column);
   let values = commonValueCache.get(key);
   if (!values) {
     values = fetchCommonValues(table, column).then((rows) => rows.map((v) => v.value)).catch((e) => {
@@ -5517,14 +5522,14 @@ function updateFilterSuggestions() {
   const plain = (labels) => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
     const columns = getLastPayload()?.columns ?? [];
-    const meta = table === null ? void 0 : tableMeta(table);
+    const meta = tableMeta(table);
     showFilterSuggestions(
       ctx,
       columns.map((c) => ({
         label: columnKey(c),
         insert: columnKey(c),
         note: c.type,
-        key: keyDescription(c, meta?.compositeFkOf.get(c.name))
+        key: columnKeyOf(c, meta)
       }))
     );
   } else if (ctx.expect === "operator") {
@@ -5588,9 +5593,8 @@ async function showCommonValues(e, table, column) {
   }
   if (token !== cvRequestToken) return;
   if (values.length === 0) {
-    emptyCommonValues.add(commonValuesKey(table, column));
-    btn.classList.add("cv-none");
-    btn.title = "no common values in the statistics";
+    emptyCommonValues.add(scopeIdentity(table, column));
+    markNoCommonValues(btn);
   }
   renderCommonValues(values, column);
 }
@@ -6092,31 +6096,9 @@ function openRecordView(columns, row2, def) {
 }
 
 // src/features/grid.ts
-function commonValuesButton(table, column) {
-  const btn = el("button");
-  btn.type = "button";
-  btn.className = "common-values-btn";
-  btn.setAttribute("aria-label", `common values for ${column}`);
-  btn.textContent = "\u25BE";
-  if (hasNoCommonValues(table, column)) {
-    btn.classList.add("cv-none");
-    btn.title = "no common values in the statistics";
-  }
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    showCommonValues(e, table, column);
-  };
-  return btn;
-}
 var columnsInView = [];
 var viewInGrid = null;
 var counts = { hidden: /* @__PURE__ */ new Set(), shown: 0, total: 0 };
-function keyIcon(key) {
-  const icon = el("span", "key-icon", key.icon);
-  icon.setAttribute("aria-hidden", "true");
-  icon.title = key.label;
-  return icon;
-}
 function countColumns() {
   const hidden = new Set(hiddenColumns());
   counts = { hidden, shown: columnsInView.filter((c) => !hidden.has(c.name)).length, total: columnsInView.length };
@@ -6128,7 +6110,7 @@ function renderHeader(columns) {
   countColumns();
   const { hidden } = counts;
   const table = tableInView();
-  const meta = table === null ? void 0 : tableMeta(table);
+  const meta = tableMeta(table);
   const singlePk = columns.filter((c) => c.key === "pk").length === 1;
   const tr = el("tr");
   const actionsTh = el("th", "row-actions");
@@ -6148,7 +6130,7 @@ function renderHeader(columns) {
     const nameEl = el("button", "col-name sort-btn", displayName(col));
     nameEl.type = "button";
     nameEl.title = col.comment ? `${fullName} \u2014 ${col.comment}` : fullName;
-    const key = keyDescription(col, meta?.compositeFkOf.get(col.name));
+    const key = columnKeyOf(col, meta);
     if (key) {
       head.append(keyIcon(key), nameEl, " ");
       th.setAttribute("aria-label", col.comment ? `${label}, ${key.label}, ${col.comment}` : `${label}, ${key.label}`);
@@ -6206,7 +6188,7 @@ function showCellPop(e, text, col) {
   cellPopAnchor.style.anchorName = "--cell-anchor";
   $("cell-pop").showPopover();
 }
-function buildCell(col, row2, { hidden, table, meta }) {
+function buildCell(col, row2, { hidden, meta }) {
   const raw = row2[col.name];
   const isNull = raw == null;
   const td = isNull ? document.createElement("td") : cellTemplate.content.cloneNode(true).firstElementChild;
@@ -6235,8 +6217,7 @@ function buildCell(col, row2, { hidden, table, meta }) {
     e.stopPropagation();
     copyText(raw, btn);
   };
-  const eqClause = filterClause(columnKey(col), "=", raw);
-  if (filterTooLong(eqClause)) filterBtn.remove();
+  if (filterTooLong(raw) || filterTooLong(filterClause(columnKey(col), "=", raw))) filterBtn.remove();
   else {
     filterBtn.onclick = (e) => {
       e.stopPropagation();
@@ -6250,11 +6231,11 @@ function buildCell(col, row2, { hidden, table, meta }) {
     cellText.title = `go to ${fkTarget(references)}.${references.column} = ${raw}`;
     cellText.onclick = () => navigateWithSeededFilter(references.table, references.schema, filterClause(references.column, "=", raw));
   } else if (compositeFk?.columns.every((c) => row2[c.from] != null)) {
-    const pairs = compositeFk.columns.map((c) => ({ column: c.to, value: row2[c.from] }));
+    const clause = filterClauses(compositeFk.columns.map((c) => ({ column: c.to, value: row2[c.from] })));
     cellText.classList.add("fk-cell");
-    cellText.title = `go to ${fkTarget(compositeFk)} where ${pairs.map((p) => `${p.column} = ${p.value}`).join(" AND ")}`;
-    cellText.onclick = () => navigateWithSeededFilter(compositeFk.table, compositeFk.schema, filterClauses(pairs));
-  } else if (col.key === "pk" && table !== null && meta !== void 0 && meta.referrers !== 0) {
+    cellText.title = `go to ${fkTarget(compositeFk)} where ${clause}`;
+    cellText.onclick = () => navigateWithSeededFilter(compositeFk.table, compositeFk.schema, clause);
+  } else if (col.key === "pk" && meta !== void 0 && meta.referrers !== 0) {
     cellText.classList.add("pk-cell");
     const n = meta.referrers;
     cellText.title = n === null ? `${raw} \u2014 what references this row` : `${raw} \u2014 referenced by ${n} ${n === 1 ? "table" : "tables"}`;
@@ -6361,7 +6342,7 @@ function buildMenuItem(col, key) {
   text.title = fullName;
   const type = el("span", "cols-type", col.type);
   type.title = col.type;
-  label.append(input2, key ? keyIcon(key) : el("span", "key-icon"), text, type, el("span", "cols-sorted"));
+  label.append(input2, keyIcon(key), text, type, el("span", "cols-sorted"));
   return label;
 }
 function buildMenuGroup(group, keys) {
@@ -6383,9 +6364,8 @@ function buildMenuGroup(group, keys) {
 var menuShape = "";
 function renderColumnMenu() {
   const groups = columnGroups(columnsInView);
-  const table = tableInView();
-  const meta = table === null ? void 0 : tableMeta(table);
-  const keys = new Map(columnsInView.map((c) => [c.name, keyDescription(c, meta?.compositeFkOf.get(c.name))]));
+  const meta = tableMeta(tableInView());
+  const keys = new Map(columnsInView.map((c) => [c.name, columnKeyOf(c, meta)]));
   const shape = JSON.stringify([
     groups.map((g) => [g.band, g.label, g.columns.map((c) => [c.name, columnKey(c), c.type])]),
     [...keys]
@@ -6408,8 +6388,7 @@ function renderRows2(data, newRowKeys, pkNames = []) {
     renderEmptyState(shown2 + 1);
     return;
   }
-  const table = tableInView();
-  const ctx = { hidden, table, meta: table === null ? void 0 : tableMeta(table) };
+  const ctx = { hidden, meta: tableMeta(tableInView()) };
   const tbody = $("tbody");
   tbody.replaceChildren(
     ...data.rows.map((row2) => {
@@ -6596,6 +6575,7 @@ async function runLoad({
   const token = nextLoadToken();
   const superseded = () => !isCurrentLoad(token);
   const widthScope = widthScopeOf(view);
+  const metaLoad = view.kind === "table" ? loadTableMeta(view.table) : null;
   let data;
   try {
     data = await fetchViewData(req, auto);
@@ -6628,8 +6608,11 @@ async function runLoad({
   updateJoinChrome();
   refreshSavedChips();
   syncUrl(replaceHistory || auto);
+  const metaInView = () => view.kind === "table" ? tableMeta(view.table) : void 0;
+  let drawnMeta;
   const renderTable = () => {
     if (superseded()) return;
+    drawnMeta = metaInView();
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
@@ -6649,11 +6632,9 @@ async function runLoad({
   if (superseded()) return;
   updatePager(data);
   markTiming("rows-rendered", reason);
-  if (view.kind === "table") {
-    loadTableMeta(view.table).then((changed) => {
-      if (changed && !superseded()) renderTable();
-    });
-  }
+  metaLoad?.then(() => {
+    if (!superseded() && metaInView() !== drawnMeta) renderTable();
+  });
   if (askNextPage && view.kind === "table" && !$("next").disabled) {
     prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);
   }
@@ -6717,6 +6698,7 @@ $("refresh").onclick = () => {
   clearStructureCache();
   clearCommonValueCache();
   clearReferencedByCache();
+  expireTableMeta();
   clearJoinCatalog();
   resetColumnWidths();
   btn.classList.add("spinning");

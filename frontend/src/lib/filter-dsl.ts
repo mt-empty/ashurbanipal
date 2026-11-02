@@ -10,9 +10,12 @@ import type { FilterCondition, FilterOp } from "../core/types.js";
 const FILTER_MAX_DSL_BYTES = 1024;
 const FILTER_MAX_CONDITIONS = 10;
 
-// UTF-8 needs at most 3 bytes per UTF-16 code unit, so short text skips the encode.
+const utf8 = new TextEncoder();
+
+// UTF-8 takes 1 to 3 bytes per UTF-16 code unit, so only the middle band needs the encode.
 export function filterTooLong(text: string): boolean {
-  return text.length * 3 > FILTER_MAX_DSL_BYTES && new TextEncoder().encode(text).length > FILTER_MAX_DSL_BYTES;
+  if (text.length > FILTER_MAX_DSL_BYTES) return true;
+  return text.length * 3 > FILTER_MAX_DSL_BYTES && utf8.encode(text).length > FILTER_MAX_DSL_BYTES;
 }
 
 // The one place that decides what counts as a reserved word: the parser

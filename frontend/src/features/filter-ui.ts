@@ -6,17 +6,17 @@ import {
   getLastPayload,
   joinAliases,
   markFilterVerified,
+  scopeIdentity,
   setAppliedFilterAst,
   state,
   tableInView,
 } from "../core/state.js";
 import type { CommonValue, FilterCondition, FilterOp } from "../core/types.js";
-import { keyDescription } from "../lib/column-key.js";
 import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
 import { columnKey } from "./join-view.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
-import { tableMeta } from "./table-meta.js";
+import { columnKeyOf, tableMeta } from "./table-meta.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
@@ -169,14 +169,25 @@ export function clearCommonValueCache(): void {
   emptyCommonValues.clear();
 }
 
-function commonValuesKey(table: string, column: string): string {
-  const params = new URLSearchParams({ table, column });
-  applyScopeParams(params);
-  return params.toString();
+function markNoCommonValues(btn: HTMLElement): void {
+  btn.classList.add("cv-none");
+  btn.title = "no common values in the statistics";
 }
 
-export function hasNoCommonValues(table: string, column: string): boolean {
-  return emptyCommonValues.has(commonValuesKey(table, column));
+// A focusable control nested in the sortable th — stopPropagation so
+// opening it doesn't also toggle sort.
+export function commonValuesButton(table: string, column: string): HTMLButtonElement {
+  const btn = el("button");
+  btn.type = "button";
+  btn.className = "common-values-btn";
+  btn.setAttribute("aria-label", `common values for ${column}`);
+  btn.textContent = "▾";
+  if (emptyCommonValues.has(scopeIdentity(table, column))) markNoCommonValues(btn);
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    showCommonValues(e, table, column);
+  };
+  return btn;
 }
 
 async function fetchCommonValues(table: string, column: string): Promise<CommonValue[]> {
@@ -186,7 +197,7 @@ async function fetchCommonValues(table: string, column: string): Promise<CommonV
 }
 
 function commonValuesFor(table: string, column: string): Promise<string[]> {
-  const key = commonValuesKey(table, column);
+  const key = scopeIdentity(table, column);
   let values = commonValueCache.get(key);
   if (!values) {
     values = fetchCommonValues(table, column)
@@ -241,14 +252,14 @@ function updateFilterSuggestions(): void {
   const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
     const columns = getLastPayload()?.columns ?? [];
-    const meta = table === null ? undefined : tableMeta(table);
+    const meta = tableMeta(table);
     showFilterSuggestions(
       ctx,
       columns.map((c) => ({
         label: columnKey(c),
         insert: columnKey(c),
         note: c.type,
-        key: keyDescription(c, meta?.compositeFkOf.get(c.name)),
+        key: columnKeyOf(c, meta),
       })),
     );
   } else if (ctx.expect === "operator") {
@@ -298,7 +309,7 @@ function renderCommonValues(values: CommonValue[], column: string): void {
   );
 }
 
-export async function showCommonValues(e: MouseEvent, table: string, column: string): Promise<void> {
+async function showCommonValues(e: MouseEvent, table: string, column: string): Promise<void> {
   const btn = e.currentTarget as HTMLElement;
   if (cvAnchor) cvAnchor.style.anchorName = "";
   cvAnchor = btn;
@@ -322,9 +333,8 @@ export async function showCommonValues(e: MouseEvent, table: string, column: str
   }
   if (token !== cvRequestToken) return;
   if (values.length === 0) {
-    emptyCommonValues.add(commonValuesKey(table, column));
-    btn.classList.add("cv-none");
-    btn.title = "no common values in the statistics";
+    emptyCommonValues.add(scopeIdentity(table, column));
+    markNoCommonValues(btn);
   }
   renderCommonValues(values, column);
 }

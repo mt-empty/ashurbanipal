@@ -1,5 +1,5 @@
 import { expect, type Route, test } from "./support/fixtures";
-import { gotoApp, problem, selectTable, waitForIdle } from "./support/helpers";
+import { apiCall, gotoApp, problem, recordRequests, selectTable, waitForIdle } from "./support/helpers";
 
 // Seed shape (conformance/seed): orders has the partial index
 // orders_pending_idx and orders.user_id ON DELETE CASCADE; inventory_counts
@@ -52,30 +52,25 @@ test("a failed structure fetch is reported inside the dialog and leaves the grid
 });
 
 test("structure is cached per table: opening and reopening are free, another table fetches again", async ({ page }) => {
-  const requests = new Map<string, number>();
-  const asked = (table: string) => requests.get(table) ?? 0;
-  await page.route(STRUCTURE, (route) => {
-    const table = new URL(route.request().url()).searchParams.get("table") ?? "";
-    requests.set(table, asked(table) + 1);
-    return route.continue();
-  });
+  const orders = recordRequests(page, apiCall("/tables/structure", { table: "orders" }));
+  const products = recordRequests(page, apiCall("/tables/structure", { table: "products" }));
   await gotoApp(page);
   await selectTable(page, "orders");
   // The grid asks once when the table opens.
-  await expect.poll(() => asked("orders")).toBe(1);
+  await expect.poll(() => orders.length).toBe(1);
 
   await openStructure(page);
   await page.keyboard.press("Escape");
   await expect(page.locator("#structure-dialog")).toBeHidden();
   await page.locator("#structure-btn").click();
   await expect(page.locator("#structure-body").getByText("orders_pending_idx")).toBeVisible();
-  expect(asked("orders")).toBe(1);
+  expect(orders.length).toBe(1);
 
   await page.keyboard.press("Escape");
   await selectTable(page, "products");
   await openStructure(page);
   await expect(page.locator("#structure-title")).toHaveText("structure — public.products");
-  expect(asked("products")).toBe(1);
+  expect(products.length).toBe(1);
 });
 
 test("a slow response for a previous table never overwrites the current table's structure", async ({ page }) => {
