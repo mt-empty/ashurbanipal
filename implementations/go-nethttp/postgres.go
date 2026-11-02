@@ -301,13 +301,20 @@ func pgColumnComments(ctx context.Context, q queryer, schema, table string) (map
 func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, table string) (joinTableMeta, error) {
 	metaCtx, cancel := c.bounded(ctx)
 	defer cancel()
+	// information_schema.columns drives the list (column privileges, order);
+	// format_type gives the full spelling data_type drops: lengths, precision,
+	// array element types, the enum's own name.
 	rows, err := tx.QueryContext(metaCtx,
 		`select c.column_name, c.data_type, c.udt_schema, c.udt_name,
 		        exists (select 1 from pg_type t
 		                join pg_namespace n on n.oid = t.typnamespace
 		                where n.nspname = c.udt_schema and t.typname = c.udt_name
-		                  and t.typtype = 'e')
+		                  and t.typtype = 'e'),
+		        format_type(a.atttypid, a.atttypmod)
 		 from information_schema.columns c
+		 join pg_namespace pn on pn.nspname = c.table_schema
+		 join pg_class pc on pc.relnamespace = pn.oid and pc.relname = c.table_name
+		 join pg_attribute a on a.attrelid = pc.oid and a.attname = c.column_name
 		 where c.table_schema = $1 and c.table_name = $2
 		 order by c.ordinal_position`, schema, table)
 	if err != nil {
@@ -315,14 +322,14 @@ func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, 
 	}
 	meta := joinTableMeta{name: table}
 	for rows.Next() {
-		var name, dataType, udtSchema, udtName string
+		var name, dataType, udtSchema, udtName, fullType string
 		var isEnum bool
-		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum); err != nil {
+		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum, &fullType); err != nil {
 			rows.Close()
 			return joinTableMeta{}, err
 		}
 		meta.columns = append(meta.columns, joinColMeta{
-			name: name, typeName: dataType, class: pgTypeClass(dataType, udtSchema, udtName, isEnum),
+			name: name, typeName: fullType, class: pgTypeClass(dataType, udtSchema, udtName, isEnum),
 		})
 	}
 	if err := rows.Err(); err != nil {

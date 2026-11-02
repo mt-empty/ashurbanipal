@@ -309,12 +309,14 @@ impl MySqlSource {
             name: table.to_string(),
             columns: columns
                 .into_iter()
-                .map(|(name, type_name, comment, collation, column_type)| {
+                .map(|(name, data_type, comment, collation, column_type)| {
+                    // column_type keeps what data_type drops: `tinyint(1)`,
+                    // `int unsigned`, an enum's members.
                     let (type_name, class) = if json_columns.contains(&name) {
                         ("json".to_string(), None)
                     } else {
-                        let class = type_class(&type_name, &column_type);
-                        (type_name, class)
+                        let class = type_class(&data_type, &column_type);
+                        (column_type, class)
                     };
                     let (key, references) = if pk_columns.contains(&name) {
                         (Some(KeyKind::Pk), fk_columns.get(&name).cloned())

@@ -329,7 +329,8 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
                 val isJson = c.name in jsonColumns
                 JoinColMeta(
                     name = c.name,
-                    type = if (isJson) "json" else c.type,
+                    // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
+                    type = if (isJson) "json" else c.columnType,
                     cls = if (isJson) null else mysqlTypeClass(c.type, c.columnType),
                     collation = c.collation?.takeIf { it.isNotEmpty() },
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,

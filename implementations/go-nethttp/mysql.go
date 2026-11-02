@@ -412,7 +412,8 @@ func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVa
 			rows.Close()
 			return joinTableMeta{}, err
 		}
-		col := joinColMeta{name: name, typeName: dataType, class: mysqlTypeClass(dataType, columnType), comment: comment}
+		// column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
+		col := joinColMeta{name: name, typeName: columnType, class: mysqlTypeClass(dataType, columnType), comment: comment}
 		if jsonColumns[name] {
 			col.typeName, col.class = "json", nil
 		}

@@ -543,13 +543,71 @@ async fn columns_report_their_join_class() {
     let orders = data("orders").await;
     let users = data("users").await;
     let number = Some(serde_json::json!("number"));
-    assert_exact(class_of(&orders, "total_cents"), number.clone(), "orders.total_cents class");
+    assert_exact(
+        class_of(&orders, "total_cents"),
+        number.clone(),
+        "orders.total_cents class",
+    );
     let (id, status, metadata) = match Backend::current() {
         Backend::Postgres => ("uuid", Some("enum"), None),
         Backend::Mysql => ("number", Some("text"), None),
         Backend::Sqlite => ("number", Some("text"), Some("text")),
     };
-    assert_exact(class_of(&orders, "id"), Some(serde_json::json!(id)), "orders.id class");
-    assert_exact(class_of(&orders, "status"), status.map(|s| serde_json::json!(s)), "orders.status class");
-    assert_exact(class_of(&users, "metadata"), metadata.map(|s| serde_json::json!(s)), "users.metadata class");
+    assert_exact(
+        class_of(&orders, "id"),
+        Some(serde_json::json!(id)),
+        "orders.id class",
+    );
+    assert_exact(
+        class_of(&orders, "status"),
+        status.map(|s| serde_json::json!(s)),
+        "orders.status class",
+    );
+    assert_exact(
+        class_of(&users, "metadata"),
+        metadata.map(|s| serde_json::json!(s)),
+        "users.metadata class",
+    );
+}
+
+/// P5.4.1-TYPE: `type` is the engine's full spelling, keeping the length,
+/// precision, array element type or enum name a bare data type drops.
+#[tokio::test]
+async fn columns_report_the_engines_full_type() {
+    let srv = TestServer::spawn().await;
+    let types = |table: &'static str| {
+        let srv = &srv;
+        async move {
+            let body: serde_json::Value = srv
+                .client()
+                .get(srv.url("/api/tables/data"))
+                .query(&[("table", table), ("limit", "1")])
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            body["columns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| (c["name"].as_str().unwrap().to_string(), c["type"].clone()))
+                .collect::<std::collections::HashMap<_, _>>()
+        }
+    };
+    let orders = types("orders").await;
+    let users = types("users").await;
+    let expected: &[(&std::collections::HashMap<String, serde_json::Value>, &str, &str)] = match Backend::current() {
+        Backend::Postgres => &[
+            (&orders, "discount_pct", "numeric(5,2)"),
+            (&orders, "tags", "text[]"),
+            (&orders, "status", "order_status"),
+        ],
+        Backend::Mysql => &[(&orders, "discount_pct", "decimal(5,2)"), (&users, "is_active", "tinyint(1)")],
+        Backend::Sqlite => &[(&users, "is_active", "INTEGER")],
+    };
+    for (cols, column, ty) in expected {
+        assert_exact(cols[*column].clone(), serde_json::json!(ty), &format!("{column} type"));
+    }
 }

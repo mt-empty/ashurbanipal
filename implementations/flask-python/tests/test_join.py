@@ -21,6 +21,7 @@ from ashurbanipal.db.sqlite import SqliteSource
 from ashurbanipal.db.sqlite import type_class as sqlite_type_class
 from ashurbanipal.filter import Condition, FilterError, parse, parse_for_join
 from ashurbanipal.join import (
+    FLOAT_TYPE,
     NUMBER,
     TEXT,
     UUID,
@@ -394,3 +395,10 @@ def test_errors_use_problem_json_with_informative_titles(client) -> None:
         "/__ashurbanipal/api/tables/data?table=users&filter=" + quote('[{"join":0,"column":"id","op":"IS NULL"}]')
     )
     assert data_with_join.get_json()["code"] == "invalid_filter"
+
+
+def test_float_types_are_told_apart_from_names_that_contain_the_word() -> None:
+    for t in ["real", "double precision", "float", "float8", "float(7,4)", "DOUBLE"]:
+        assert FLOAT_TYPE.search(t), t
+    for t in ["realm_kind", "numeric(10,2)", "text", "float_kind", "my_real"]:
+        assert not FLOAT_TYPE.search(t), t

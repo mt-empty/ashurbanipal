@@ -426,13 +426,20 @@ impl PgPoolSource {
         schema: &str,
         table: &str,
     ) -> Result<TableMeta, DbError> {
-        let columns = sqlx::query_as::<_, (String, String, String, String, bool)>(
+        // information_schema.columns drives the list (column privileges, order);
+        // format_type gives the full spelling data_type drops: lengths,
+        // precision, array element types, the enum's own name.
+        let columns = sqlx::query_as::<_, (String, String, String, String, bool, String)>(
             "select c.column_name, c.data_type, c.udt_schema, c.udt_name, \
                     exists (select 1 from pg_type t \
                             join pg_namespace n on n.oid = t.typnamespace \
                             where n.nspname = c.udt_schema and t.typname = c.udt_name \
-                              and t.typtype = 'e') \
+                              and t.typtype = 'e'), \
+                    format_type(a.atttypid, a.atttypmod) \
              from information_schema.columns c \
+             join pg_namespace pn on pn.nspname = c.table_schema \
+             join pg_class pc on pc.relnamespace = pn.oid and pc.relname = c.table_name \
+             join pg_attribute a on a.attrelid = pc.oid and a.attname = c.column_name \
              where c.table_schema = $1 and c.table_name = $2 \
              order by c.ordinal_position",
         )
@@ -446,24 +453,26 @@ impl PgPoolSource {
             name: table.to_string(),
             columns: columns
                 .into_iter()
-                .map(|(name, type_name, udt_schema, udt_name, is_enum)| {
-                    let (key, references) = if pk_columns.contains(&name) {
-                        (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                    } else if let Some(r) = fk_columns.get(&name) {
-                        (Some(KeyKind::Fk), Some(r.clone()))
-                    } else {
-                        (None, None)
-                    };
-                    ColMeta {
-                        class: type_class(&type_name, &udt_schema, &udt_name, is_enum),
-                        collation: None,
-                        comment: comments.get(&name).cloned(),
-                        key,
-                        references,
-                        type_name,
-                        name,
-                    }
-                })
+                .map(
+                    |(name, data_type, udt_schema, udt_name, is_enum, type_name)| {
+                        let (key, references) = if pk_columns.contains(&name) {
+                            (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
+                        } else if let Some(r) = fk_columns.get(&name) {
+                            (Some(KeyKind::Fk), Some(r.clone()))
+                        } else {
+                            (None, None)
+                        };
+                        ColMeta {
+                            class: type_class(&data_type, &udt_schema, &udt_name, is_enum),
+                            collation: None,
+                            comment: comments.get(&name).cloned(),
+                            key,
+                            references,
+                            type_name,
+                            name,
+                        }
+                    },
+                )
                 .collect(),
         })
     }

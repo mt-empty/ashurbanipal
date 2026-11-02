@@ -300,12 +300,12 @@ def _describe(t: TableMeta, c: ColMeta) -> str:
     return f"{t.name}.{c.name} ({c.type_name})"
 
 
+# Whole words only, so a user type such as `realm_kind` is not taken for one.
+FLOAT_TYPE = re.compile(r"\b(real|double|float\d*)\b", re.I)
+
+
 def _unjoinable(position: int, t: TableMeta, c: ColMeta) -> BadJoin:
-    why = (
-        ": floating-point values are not compared exactly"
-        if re.search(r"real|float|double", c.type_name, re.I)
-        else ""
-    )
+    why = ": floating-point values are not compared exactly" if FLOAT_TYPE.search(c.type_name) else ""
     return BadJoin(f"join {position} on: {_describe(t, c)} cannot be used in a join{why}")
 
 

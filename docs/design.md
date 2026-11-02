@@ -405,10 +405,10 @@ Query params:
 ```json
 {
   "columns": [
-    { "name": "id", "type": "uuid", "key": "pk" },
-    { "name": "user_id", "type": "uuid", "key": "fk", "references": { "table": "users", "column": "id" } },
-    { "name": "status", "type": "text", "comment": "Order lifecycle state." },
-    { "name": "created_at", "type": "timestamptz" }
+    { "name": "id", "type": "uuid", "class": "uuid", "key": "pk" },
+    { "name": "user_id", "type": "uuid", "class": "uuid", "key": "fk", "references": { "table": "users", "column": "id" } },
+    { "name": "status", "type": "order_status", "class": "enum", "comment": "Order lifecycle state." },
+    { "name": "created_at", "type": "timestamp with time zone", "class": "temporal" }
   ],
   "rows": [ { "id": "...", "user_id": "...", "status": "...", "created_at": "..." } ],
   "total_approx": 108234

@@ -24,9 +24,10 @@ export const APPROX_COUNT_TITLE =
   "~ = approximate, from the backend's own statistics, not a live count; " +
   "? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
 
-// col.type is the DB engine's own catalog spelling (Postgres data_type,
-// MySQL DATA_TYPE, SQLite declared type or "unknown"), so bucketing folds
-// case, strips a length/precision suffix, and matches a closed alias set.
+// col.type is the DB engine's full spelling (Postgres format_type, MySQL
+// COLUMN_TYPE, SQLite declared type or "unknown"), so bucketing folds case,
+// drops length/precision groups and MySQL's unsigned/zerofill, and matches a
+// closed alias set.
 // An explicit set, never substring matching: "int" as a substring also
 // hits Postgres interval/point/inet/int4range/line/lseg, none of them
 // numbers. `date` covers plain dates and timestamps alike — nothing
@@ -66,14 +67,20 @@ const TYPE_ALIASES: Record<string, ColumnTypeClass> = {
   jsonb: "json",
 };
 
+// Only the parenthesised groups go, so `numeric(10,2)[]` stays an array and
+// `timestamp(3) with time zone` keeps its zone.
 function typeKey(rawType: string): string {
   return rawType
     .toLowerCase()
-    .replace(/\s*\(.*$/, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\b(unsigned|signed|zerofill)\b/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 export function columnTypeClass(rawType: string): ColumnTypeClass | null {
+  // MySQL's boolean is tinyint(1); only the display width tells it apart.
+  if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
   return TYPE_ALIASES[typeKey(rawType)] ?? null;
 }
 

@@ -255,7 +255,11 @@ Response:
 #### 5.4.1 Column metadata
 
 Each `columns` entry is `{name, type}` plus optional fields, all sourced
-from schema catalogs (never data queries):
+from schema catalogs (never data queries). `type` is the engine's full
+spelling of the column's type, keeping its length, precision, array element
+type and enum name (for example `character varying(20)`, `numeric(10,2)`,
+`text[]`, `order_status`, MySQL `tinyint(1)` or `enum('a','b')`); the
+per-engine source is in `spec/openapi.yaml`.
 
 - `class` — the column's §5.11.2 join class (`number`, `text`, `uuid`,
   `boolean`, `temporal`, `time`, `binary`, `enum` or `untyped`), the same

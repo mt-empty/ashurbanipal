@@ -64,3 +64,11 @@ already applied to SQLite columns with no declared type, and says that two
 now greys join pairs by `class` instead of guessing from type names. This
 lands with every port, the conformance runner, and the bundled UI changed
 together, under §7's alpha exception.
+
+In the same release, `type` (§5.4.1) changed from the bare catalog data type
+to the engine's full spelling: Postgres `format_type()` instead of
+`information_schema.columns.data_type`, so `USER-DEFINED`, `ARRAY`,
+`character varying` and `numeric` become the enum's name, `text[]`,
+`character varying(20)` and `numeric(10,2)`; MySQL `COLUMN_TYPE` instead of
+`DATA_TYPE`, so a boolean reads `tinyint(1)`. SQLite is unchanged. This is not
+additive, and lands under the same alpha exception.

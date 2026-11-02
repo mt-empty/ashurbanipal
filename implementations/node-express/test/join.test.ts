@@ -7,6 +7,7 @@ import {
   BadJoinError,
   BadParamError,
   buildJoinSelect,
+  FLOAT_TYPE,
   type JoinColMeta,
   type JoinDialect,
   type JoinOpts,
@@ -220,5 +221,14 @@ describe("pgTypeClass", () => {
     for (const t of ["ARRAY", "jsonb", "json", "double precision", "money"]) {
       expect(pgTypeClass(t, "", "", false), t).toBeUndefined();
     }
+  });
+});
+
+describe("FLOAT_TYPE", () => {
+  it("matches float types by whole word, not names that contain one", () => {
+    for (const t of ["real", "double precision", "float", "float8", "float(7,4)", "DOUBLE"])
+      expect(FLOAT_TYPE.test(t), t).toBe(true);
+    for (const t of ["realm_kind", "numeric(10,2)", "text", "float_kind", "my_real"])
+      expect(FLOAT_TYPE.test(t), t).toBe(false);
   });
 });

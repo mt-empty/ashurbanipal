@@ -281,3 +281,16 @@ func TestParseFilterRejectsAKeyInAnotherCase(t *testing.T) {
 		t.Errorf("the documented keys must still parse: %v", err)
 	}
 }
+
+func TestFloatTypesAreToldApartFromNamesThatContainTheWord(t *testing.T) {
+	for _, typ := range []string{"real", "double precision", "float", "float8", "float(7,4)", "DOUBLE"} {
+		if !floatTypeRe.MatchString(typ) {
+			t.Errorf("%q is a float type", typ)
+		}
+	}
+	for _, typ := range []string{"realm_kind", "numeric(10,2)", "text", "float_kind", "my_real"} {
+		if floatTypeRe.MatchString(typ) {
+			t.Errorf("%q is not a float type", typ)
+		}
+	}
+}

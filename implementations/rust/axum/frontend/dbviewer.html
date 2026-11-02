@@ -2607,9 +2607,10 @@ var TYPE_ALIASES = {
   jsonb: "json"
 };
 function typeKey(rawType) {
-  return rawType.toLowerCase().replace(/\s*\(.*$/, "").trim();
+  return rawType.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\b(unsigned|signed|zerofill)\b/g, "").replace(/\s+/g, " ").trim();
 }
 function columnTypeClass(rawType) {
+  if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
   return TYPE_ALIASES[typeKey(rawType)] ?? null;
 }
 var TYPE_CLASS_CSS = {

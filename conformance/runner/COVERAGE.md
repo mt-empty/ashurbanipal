@@ -91,6 +91,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 |---|---|---|
 | `P5.4.1-FK-METADATA` | `key`/`references` for FK columns | `table_data::foreign_key_columns_report_key_and_references` |
 | `P5.4.1-COMMENT-OMITTED` | `comment` omitted when absent | `table_data::column_comments_are_present_only_where_seeded` |
+| `P5.4.1-TYPE` | `type` is the engine's full spelling (length, precision, array element, enum name) | `table_data::columns_report_the_engines_full_type` |
 | `P5.4.1-CLASS` | `class` is the §5.11.2 join class, omitted for a column that cannot be joined | `table_data::columns_report_their_join_class` |
 | `P5.4.1-COMPOSITE-FK-OMITTED` | Composite FKs omit `key`/`references` entirely | `table_data::composite_foreign_key_columns_omit_key_metadata` |
 

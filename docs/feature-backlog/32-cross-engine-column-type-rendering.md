@@ -33,7 +33,9 @@ codebase already trusts (`lib/json-tree.ts` value-pattern detection,
 coordination. Escalate to B (its conformance schema-tests are the real
 drift guard the alias map lacks) when any port emits a column-type
 spelling `TYPE_ALIASES` doesn't cover, or the team wants a hard
-cross-engine consistency guarantee. This supersedes the open question in
+cross-engine consistency guarantee. (Answered 2026-11-02 by story 47: the
+server now reports `class` and the engine's full `type` spelling.) This
+supersedes the open question in
 `docs/feature-backlog/23-inline-column-type-nullable-default-enum.md` §4
 ("Raw engine type string, or a normalised label?") for rendering purposes
 — fold any revisit into item 23.

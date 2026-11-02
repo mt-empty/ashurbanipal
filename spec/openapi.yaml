@@ -663,11 +663,14 @@ components:
         type:
           type: string
           description: >
-            The column's type name as the backing engine's own catalog
-            reports it (Postgres information_schema.columns.data_type;
-            MySQL information_schema.COLUMNS.DATA_TYPE; SQLite the declared
-            type, or "unknown" when none). Informational only — never used
-            to build SQL.
+            The column's full type as the backing engine spells it, keeping
+            length, precision, array element type and enum name (Postgres
+            format_type(atttypid, atttypmod), e.g. "numeric(10,2)",
+            "text[]", "order_status"; MySQL information_schema.COLUMNS.COLUMN_TYPE,
+            e.g. "tinyint(1)", "enum('a','b')"; SQLite the declared type, or
+            "unknown" when none). Informational, never used to build SQL,
+            except that two enum columns join only when their types are
+            equal.
         class:
           type: string
           enum: [number, text, uuid, boolean, temporal, time, binary, enum, untyped]

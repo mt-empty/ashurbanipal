@@ -361,13 +361,20 @@ class PgSource(DbSource):
 
     def _join_table_meta(self, cur: psycopg.Cursor, schema: str, table: str) -> TableMeta:
         """Column metadata of a table already cleared by `_readable_table_oid`."""
+        # information_schema.columns drives the list (column privileges, order);
+        # format_type gives the full spelling data_type drops: lengths,
+        # precision, array element types, the enum's own name.
         cur.execute(
             "select c.column_name, c.data_type, c.udt_schema, c.udt_name, "
             "       exists (select 1 from pg_type t "
             "               join pg_namespace n on n.oid = t.typnamespace "
             "               where n.nspname = c.udt_schema and t.typname = c.udt_name "
-            "                 and t.typtype = 'e') "
+            "                 and t.typtype = 'e'), "
+            "       format_type(a.atttypid, a.atttypmod) "
             "from information_schema.columns c "
+            "join pg_namespace pn on pn.nspname = c.table_schema "
+            "join pg_class pc on pc.relnamespace = pn.oid and pc.relname = c.table_name "
+            "join pg_attribute a on a.attrelid = pc.oid and a.attname = c.column_name "
             "where c.table_schema = %s and c.table_name = %s "
             "order by c.ordinal_position",
             (schema, table),
@@ -380,13 +387,13 @@ class PgSource(DbSource):
             columns=[
                 ColMeta(
                     name=name,
-                    type_name=data_type,
+                    type_name=full_type,
                     cls=type_class(data_type, udt_schema, udt_name, is_enum),
                     key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                     references=fk_columns.get(name),
                     comment=comments.get(name),
                 )
-                for name, data_type, udt_schema, udt_name, is_enum in column_rows
+                for name, data_type, udt_schema, udt_name, is_enum, full_type in column_rows
             ],
         )
 

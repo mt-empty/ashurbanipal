@@ -327,7 +327,8 @@ func describeCol(t joinTableMeta, c joinColMeta) string {
 	return fmt.Sprintf("%s.%s (%s)", t.name, c.name, c.typeName)
 }
 
-var floatTypeRe = regexp.MustCompile(`(?i)real|float|double`)
+// Whole words only, so a user type such as realm_kind is not taken for one.
+var floatTypeRe = regexp.MustCompile(`(?i)\b(real|double|float\d*)\b`)
 
 func unjoinable(position int, t joinTableMeta, c joinColMeta) error {
 	why := ""

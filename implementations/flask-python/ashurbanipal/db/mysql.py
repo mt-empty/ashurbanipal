@@ -443,7 +443,8 @@ class MySqlSource(DbSource):
             columns=[
                 ColMeta(
                     name=name,
-                    type_name="json" if name in json_columns else data_type,
+                    # column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
+                    type_name="json" if name in json_columns else column_type,
                     cls=None if name in json_columns else type_class(data_type, column_type),
                     collation=collation or None,
                     key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),

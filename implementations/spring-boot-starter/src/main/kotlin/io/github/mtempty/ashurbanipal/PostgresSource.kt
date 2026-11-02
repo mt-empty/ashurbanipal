@@ -219,17 +219,33 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     /** Column metadata of a table already cleared by [requireTable]. */
     private fun joinTableMeta(schema: String, table: String): JoinTableMeta {
-        data class Col(val name: String, val type: String, val udtSchema: String, val udtName: String, val isEnum: Boolean)
+        data class Col(
+            val name: String,
+            val type: String,
+            val udtSchema: String,
+            val udtName: String,
+            val isEnum: Boolean,
+            val fullType: String,
+        )
+        // information_schema.columns drives the list (column privileges, order);
+        // format_type gives the full spelling data_type drops: lengths,
+        // precision, array element types, the enum's own name.
         val columns = jdbcTemplate.query(
             "select c.column_name, c.data_type, c.udt_schema, c.udt_name, " +
                 "       exists (select 1 from pg_type t " +
                 "               join pg_namespace n on n.oid = t.typnamespace " +
                 "               where n.nspname = c.udt_schema and t.typname = c.udt_name " +
-                "                 and t.typtype = 'e') " +
+                "                 and t.typtype = 'e'), " +
+                "       format_type(a.atttypid, a.atttypmod) " +
                 "from information_schema.columns c " +
+                "join pg_namespace pn on pn.nspname = c.table_schema " +
+                "join pg_class pc on pc.relnamespace = pn.oid and pc.relname = c.table_name " +
+                "join pg_attribute a on a.attrelid = pc.oid and a.attname = c.column_name " +
                 "where c.table_schema = ? and c.table_name = ? " +
                 "order by c.ordinal_position",
-            RowMapper { rs, _ -> Col(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getBoolean(5)) },
+            RowMapper { rs, _ ->
+                Col(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getBoolean(5), rs.getString(6))
+            },
             schema,
             table,
         )
@@ -240,7 +256,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             columns.map { c ->
                 JoinColMeta(
                     name = c.name,
-                    type = c.type,
+                    type = c.fullType,
                     cls = pgTypeClass(c.type, c.udtSchema, c.udtName, c.isEnum),
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],

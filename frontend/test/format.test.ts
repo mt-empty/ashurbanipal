@@ -36,7 +36,7 @@ const CASES: [string, ColumnTypeClass | null][] = [
   ["bytea", null],
   // MySQL DATA_TYPE spellings
   ["int", "number"],
-  ["tinyint", "number"], // bool-vs-int isn't on the wire; accepted gap
+  ["tinyint", "number"],
   ["mediumint", "number"],
   ["decimal", "number"],
   ["double", "number"],
@@ -59,6 +59,19 @@ const CASES: [string, ColumnTypeClass | null][] = [
   ["varchar(255)", null],
   ["  Integer ", "number"],
   ["TIMESTAMP(6)", "date"],
+  // full spellings: Postgres format_type, MySQL COLUMN_TYPE
+  ["tinyint(1)", "bool"],
+  ["TINYINT(1)", "bool"],
+  ["tinyint(4)", "number"],
+  ["int unsigned", "number"],
+  ["bigint(20) unsigned zerofill", "number"],
+  ["decimal(10,2)", "number"],
+  ["timestamp(3) with time zone", "date"],
+  ["datetime(6)", "date"],
+  ["character varying(255)", null],
+  ["numeric(10,2)[]", null],
+  ["order_status", null],
+  ["enum('a','b')", null],
 ];
 
 for (const [input, expected] of CASES) {
@@ -85,6 +98,8 @@ const JSON_CASES: [string, string, boolean][] = [
   ["varchar(255)", '{"a":1}', true],
   ["TEXT", "[1]", true],
   ["", "{}", true],
+  ["character varying(255)", '{"a":1}', true],
+  ["character varying(255)[]", "{a,b}", false],
   ["citext", '{"a":1}', true],
   ["VARYING CHARACTER(20)", "[1]", true],
   ["NVARCHAR2(40)", "[1]", true],

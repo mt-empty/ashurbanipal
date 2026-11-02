@@ -338,9 +338,21 @@ fn describe(table: &TableMeta, col: &ColMeta) -> String {
     format!("{}.{} ({})", table.name, col.name, col.type_name)
 }
 
+/// Whole words only, so a user type such as `realm_kind` is not taken for one.
+fn is_float_type(type_name: &str) -> bool {
+    type_name
+        .to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .any(|w| {
+            w == "real"
+                || w == "double"
+                || w.strip_prefix("float")
+                    .is_some_and(|d| d.chars().all(|c| c.is_ascii_digit()))
+        })
+}
+
 fn unjoinable(position: usize, table: &TableMeta, col: &ColMeta) -> DbError {
-    let t = col.type_name.to_lowercase();
-    let why = if ["real", "float", "double"].iter().any(|f| t.contains(f)) {
+    let why = if is_float_type(&col.type_name) {
         ": floating-point values are not compared exactly"
     } else {
         ""
@@ -765,6 +777,29 @@ mod tests {
             plan(&array, vec![orders(), users()], &opts()),
             Err(DbError::BadJoin(_))
         ));
+    }
+
+    #[test]
+    fn float_types_are_told_apart_from_names_that_contain_the_word() {
+        for t in [
+            "real",
+            "double precision",
+            "float",
+            "float8",
+            "float(7,4)",
+            "DOUBLE",
+        ] {
+            assert!(is_float_type(t), "{t}");
+        }
+        for t in [
+            "realm_kind",
+            "numeric(10,2)",
+            "text",
+            "float_kind",
+            "my_real",
+        ] {
+            assert!(!is_float_type(t), "{t}");
+        }
     }
 
     #[test]

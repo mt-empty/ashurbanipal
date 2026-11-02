@@ -231,7 +231,8 @@ class JoinPlan internal constructor(
 
 private fun describe(t: JoinTableMeta, c: JoinColMeta) = "${t.name}.${c.name} (${c.type})"
 
-private val FLOAT_TYPE = Regex("real|float|double", RegexOption.IGNORE_CASE)
+/** Whole words only, so a user type such as `realm_kind` is not taken for one. */
+internal val FLOAT_TYPE = Regex("""\b(real|double|float\d*)\b""", RegexOption.IGNORE_CASE)
 
 private fun unjoinable(position: Int, t: JoinTableMeta, c: JoinColMeta): BadJoinException {
     val why = if (FLOAT_TYPE.containsMatchIn(c.type)) ": floating-point values are not compared exactly" else ""

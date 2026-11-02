@@ -155,6 +155,9 @@ export interface TypeClass {
 const classKey = (c: TypeClass): string => `${c.kind}:${c.id ?? ""}`;
 
 /** One column as the live catalog reports it. */
+/** Whole words only, so a user type such as `realm_kind` is not taken for one. */
+export const FLOAT_TYPE = /\b(real|double|float\d*)\b/i;
+
 export interface JoinColMeta {
   name: string;
   type: string;
@@ -235,7 +238,7 @@ function joinColumnIndex(table: JoinTableMeta, column: string): number {
 const describe = (t: JoinTableMeta, c: JoinColMeta): string => `${t.name}.${c.name} (${c.type})`;
 
 function unjoinable(position: number, t: JoinTableMeta, c: JoinColMeta): BadJoinError {
-  const why = /real|float|double/i.test(c.type) ? ": floating-point values are not compared exactly" : "";
+  const why = FLOAT_TYPE.test(c.type) ? ": floating-point values are not compared exactly" : "";
   return new BadJoinError(`join ${position} on: ${describe(t, c)} cannot be used in a join${why}`);
 }
 

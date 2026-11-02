@@ -437,7 +437,8 @@ export class MySqlSource implements DbSource {
       const name = r.column_name as string;
       const col: JoinColMeta = jsonColumns.has(name)
         ? { name, type: "json", class: undefined }
-        : { name, type: r.data_type as string, class: mysqlTypeClass(r.data_type as string, String(r.column_type)) };
+        : // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
+          { name, type: String(r.column_type), class: mysqlTypeClass(r.data_type as string, String(r.column_type)) };
       if (r.collation_name) col.collation = r.collation_name as string;
       if (pkColumns.has(name)) {
         col.key = "pk";
