@@ -318,20 +318,10 @@ a `Config` field — see `implementations/rust/axum/src/routes.rs`'s
 
 `default` is the source an absent `source` param resolves to, so a client
 never infers it from list order. Each entry is deliberately just
-`{ "name": ... }` — no `backend` field. This round of
-the feature is homogeneous-backend-only: every source registered with one
-`router()` call must be the same concrete `DbSource` implementation,
-because the Rust reference's router stays generic over one type
-(`router<S: DbSource>`, no `dyn`/`async_trait`, per the architecture
-invariants in `CLAUDE.md`) rather than introducing an `AnySource` enum to
-support mixing e.g. Postgres and SQLite sources in one process. That's a
-real but deferred "nice to have," not a wire-contract decision — the JSON
-shape stays open to a future `backend` field if that ever lands, but
-nothing today needs it, and every port would have had to agree on
-disclosing it for consistency regardless of whether its own `DbSource` is
-generically or dynamically dispatched. Tracked as its own backlog item
-(`docs/feature-backlog/18-anysource-cross-backend-mixing.md`), not
-designed or scheduled.
+`{ "name": ... }` — no `backend` field, because `spec/protocol.md` §5.8
+says a response must not reveal which engine a source uses. Sources
+registered together may use different backends (e.g. Postgres and SQLite
+in one process) in every port; in Rust, through `Source` (§5).
 
 A single-source deployment still returns exactly one entry — same
 degrade-gracefully shape as `/schemas`, and the frontend's source
@@ -607,7 +597,14 @@ pub trait DbSource: Send + Sync + 'static {
 ```
 
 Native async-fn-in-trait — no `async_trait` macro. The router is generic
-over `S: DbSource` (no `dyn`), one concrete `DbSource` per `router()` call.
+over `S: DbSource`, one concrete type per `router()` call. To mix backends
+in one router, a host wraps each source in `Source::new(..)`
+(`core/src/db/source.rs`) and passes `Vec<(String, Source)>`. `Source` is
+itself a `DbSource`: an `Arc` over a private trait whose methods return
+boxed futures, with a blanket impl for every `DbSource`. It erases the type
+rather than enumerating backends because hosts can implement `DbSource`
+for their own pools, and an enum would only cover the ones in `core`.
+Single-backend hosts never box anything.
 
 - Three implementations ship: `PgPoolSource(sqlx::PgPool)` (default),
   `SqliteSource` (`sqlite` feature), and `MySqlSource` (`mysql` feature);

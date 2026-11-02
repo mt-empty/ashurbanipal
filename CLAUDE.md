@@ -199,9 +199,10 @@ demo-deps-stay-dev-dependencies.
   `mysql.rs`'s `MySqlSource` (`sqlite`, `mysql`, both off by default), so
   code that names one needs the matching `#[cfg(feature = …)]`. Keep
   the trait native async-fn-in-trait (no `async_trait`) and the router
-  generic over it (`router<S: DbSource>`, no `dyn`); per-backend behavioral
-  differences belong in `docs/adapter-decisions.md`, not in a
-  `dyn`/`async_trait` escape hatch.
+  generic over it (`router<S: DbSource>`). Mixing backends goes through
+  `core/src/db/source.rs`'s `Source` (`docs/design.md` §5), the only place
+  futures are boxed. Per-backend behavioral differences belong in
+  `docs/adapter-decisions.md`, never in engine checks above `DbSource`.
 - **Kill switch is fail-closed and checked once, at router construction.**
   `Config::is_enabled()` gates every route identically — if disabled,
   `router()` returns an empty `Router::new()`, so the mounted app 404s
