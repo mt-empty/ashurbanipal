@@ -99,6 +99,30 @@ test("record view's whole-row copy button copies the full row as JSON", async ({
   ]);
 });
 
+test("whole-row JSON nests jsonb but keeps a Postgres array as its text, with no expand cue", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  await applyFilter(page, "tags IS NOT NULL AND line_items IS NOT NULL");
+  const firstRow = page.locator("#tbody tr").first();
+  const tagsCell = firstRow.locator('td[data-col="tags"]');
+  const tagsValue = await tagsCell.locator(".cell-text").textContent();
+  expect(tagsValue).toMatch(/^\{.*\}$/);
+  await expect(tagsCell).not.toHaveClass(/expandable/);
+  await expect(firstRow.locator('td[data-col="line_items"]')).toHaveClass(/expandable/);
+
+  await firstRow.locator(".record-btn").click();
+  await expect(page.locator("#record-dialog")).toBeVisible();
+  const tagsDd = page.locator("#record-dl dt", { hasText: /^tags$/ }).locator("xpath=following-sibling::dd[1]");
+  await expect(tagsDd).not.toHaveClass(/json-tree/);
+  await expect(tagsDd).toHaveText(tagsValue!);
+
+  await page.locator("#record-copy-row").click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('"line_items": [');
+  const parsed = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
+  expect(parsed.tags).toBe(tagsValue);
+  expect(Array.isArray(parsed.line_items)).toBe(true);
+});
+
 test("record view's INSERT copy button copies the row as a SQL INSERT", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");

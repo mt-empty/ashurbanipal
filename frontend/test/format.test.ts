@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type ColumnTypeClass, columnTypeClass } from "../src/lib/format.ts";
+import { type ColumnTypeClass, columnTypeClass, rendersAsJson } from "../src/lib/format.ts";
 
 // columnTypeClass buckets the DB engine's own catalog type spelling into a
 // small render class. It must cover Postgres, MySQL, and SQLite vocabularies
@@ -58,5 +58,31 @@ const CASES: [string, ColumnTypeClass | null][] = [
 for (const [input, expected] of CASES) {
   test(`${JSON.stringify(input)} -> ${expected}`, () => {
     assert.equal(columnTypeClass(input), expected);
+  });
+}
+
+// rendersAsJson: declared JSON always; a plain string type by value shape;
+// never another type whose text form leads with { or [.
+const JSON_CASES: [string, string, boolean][] = [
+  ["jsonb", '{"a":1}', true],
+  ["json", "not json", true], // declared type wins; the render path degrades
+  ["text", '{"a":1}', true],
+  ["unknown", "[1,2]", true],
+  ["text", "plain", false],
+  ["integer", "[1]", false],
+  ["ARRAY", "{a,b}", false],
+  ["text[]", "{a,b}", false],
+  ["integer[]", '{"1","2"}', false],
+  ["int4range", "[1,10)", false],
+  ["int4multirange", "{[1,3)}", false],
+  ["path", "[(0,0),(1,1)]", false],
+  ["varchar(255)", '{"a":1}', true],
+  ["TEXT", "[1]", true],
+  ["", "{}", true],
+];
+
+for (const [type, raw, expected] of JSON_CASES) {
+  test(`rendersAsJson(${JSON.stringify(type)}, ${JSON.stringify(raw)}) -> ${expected}`, () => {
+    assert.equal(rendersAsJson({ name: "c", type }, raw), expected);
   });
 }
