@@ -520,6 +520,16 @@ dialog dl .record-acts:hover { opacity: 1; }
 .cell-type-bool { color: var(--type-bool); }
 .cell-type-number { color: var(--type-number); }
 .cell-type-date { color: var(--type-date); }
+/* Null, empty text and edge whitespace look different, so none reads as
+   another or as nothing. pre keeps edge spaces that nowrap would collapse. */
+.cell-null { color: var(--json-null); }
+.cell-empty { color: var(--text-muted); font-family: system-ui, sans-serif; }
+.cell-ws { white-space: pre; tab-size: 2; border-radius: 2px;
+           background: color-mix(in srgb, var(--warning) 22%, transparent); }
+/* The record view wraps long values, edge whitespace included. */
+dialog dl dd .cell-ws { white-space: pre-wrap; }
+.cell-zw { display: inline-block; width: .35em; height: 1em; vertical-align: text-bottom; }
+.cell-nl::after { content: "↵"; color: var(--text-muted); font-family: system-ui, sans-serif; font-size: .8em; }
 
 /* Icon buttons in the top bar. */
 #api-help-btn, #theme-toggle { flex: none; width: 1.75rem; height: 1.75rem; border-radius: 6px; padding: 0;

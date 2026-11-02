@@ -47,7 +47,7 @@ function fieldValue(col: Column, raw: string, row: Row, { meta, act }: RecordCon
       dd.classList.add("json-tree");
     } catch (e) {
       warnBadJsonCell(col, e);
-      dd.textContent = raw;
+      dd.replaceChildren(formatCellValue(col, raw));
     }
     return dd;
   }
@@ -63,6 +63,15 @@ function fieldValue(col: Column, raw: string, row: Row, { meta, act }: RecordCon
   btn.appendChild(value);
   btn.onclick = act(() => navigateWithSeededFilter(link.table, link.schema, link.clause));
   dd.appendChild(btn);
+  return dd;
+}
+
+// On a span, not the dd: the field's note joins the dd and keeps its own hover.
+function nullValue(): HTMLElement {
+  const mark = el("span", "cell-null", "∅");
+  mark.title = "null";
+  const dd = el("dd");
+  dd.appendChild(mark);
   return dd;
 }
 
@@ -96,7 +105,7 @@ function buildRecordEntries(columns: Column[], row: Row, ctx: RecordContext): No
       name.title = columnKey(col, def);
       dt.append(name, typeChip(col));
       const raw = row[col.name];
-      const dd = raw == null ? el("dd", undefined, "∅") : fieldValue(col, raw, row, ctx);
+      const dd = raw == null ? nullValue() : fieldValue(col, raw, row, ctx);
       const note = fieldNote(col, meta?.compositeFkOf.get(col.name));
       if (note) dd.appendChild(el("span", "record-note", note));
       const field = [keyIcon(key), dt, dd, fieldActions(col, raw, ctx)];

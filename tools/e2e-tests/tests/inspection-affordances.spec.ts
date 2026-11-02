@@ -243,6 +243,8 @@ test("previous and next step through the page's rows and stop at its ends", asyn
   await page.keyboard.press("Escape");
 
   await rows.last().locator(".record-btn").click();
+  // Opening moves focus into the dialog, so wait for it before focusing a button.
+  await expect(page.locator("#record-dialog")).toBeVisible();
   await expect(page.locator("#record-pos")).toHaveText(`${count} of ${count}`);
   await expect(page.locator("#record-next")).toBeDisabled();
   await expect(page.locator("#record-prev")).toBeEnabled();
@@ -254,4 +256,22 @@ test("previous and next step through the page's rows and stop at its ends", asyn
   await page.keyboard.press("Enter");
   await expect(page.locator("#record-next")).toBeDisabled();
   await expect(page.locator("#record-prev")).toBeFocused();
+});
+
+test("copying a value with marked edge whitespace copies the raw value", async ({ page }) => {
+  // No seed value has edge whitespace, so the first products row carries some.
+  const raw = "  Team mug, 350 ml\n";
+  await page.route(dataWith("table", "products"), async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.rows[0].description = raw;
+    await route.fulfill({ response, json: body });
+  });
+  await gotoApp(page);
+  await selectTable(page, "products");
+  const cell = page.locator("#tbody tr").first().locator('td[data-col="description"]');
+  await expect(cell.locator(".cell-ws")).toHaveCount(2);
+  await cell.hover();
+  await cell.locator(".copy").click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(raw);
 });
