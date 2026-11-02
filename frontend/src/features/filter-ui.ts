@@ -322,6 +322,8 @@ async function showCommonValues(e: MouseEvent, table: string, column: string): P
   // the token discards a stale response instead of clobbering the column
   // actually showing.
   const token = ++cvRequestToken;
+  // Taken before the await: a scope switch meanwhile must not get this answer.
+  const key = scopeIdentity(table, column);
   let values: CommonValue[];
   try {
     values = await fetchCommonValues(table, column);
@@ -333,7 +335,7 @@ async function showCommonValues(e: MouseEvent, table: string, column: string): P
   }
   if (token !== cvRequestToken) return;
   if (values.length === 0) {
-    emptyCommonValues.add(scopeIdentity(table, column));
+    emptyCommonValues.add(key);
     markNoCommonValues(btn);
   }
   renderCommonValues(values, column);

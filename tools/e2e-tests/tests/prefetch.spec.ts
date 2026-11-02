@@ -44,7 +44,7 @@ for (const [query, table] of [
     const asked = recordRequests(page, isApiCall);
     await gotoApp(page, query);
     await waitForTable(page, table);
-    // The grid's catalog lookups (structure, referenced-by) follow the rows.
+    // The grid's catalog lookups (structure, referenced-by) go out beside the rows.
     await expect
       .poll(() => asked.map(apiRoute).sort())
       .toEqual([

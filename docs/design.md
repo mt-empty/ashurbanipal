@@ -140,8 +140,8 @@ Two components, same as the original concept:
     a join; it leaves a join view, if one is open. A composite FK, which
     the column metadata omits, comes from the table's structure (§4) and
     filters on every column pair. A PK cell opens what references the row,
-    offered only when the table has referrers; both lookups run once the
-    rows have drawn, and the grid redraws when they land.
+    offered only when the table has referrers; both lookups are sent
+    beside the row fetch, and the grid redraws if they land after it.
   - *Filter autocomplete* — the filter input suggests whatever the grammar
     allows next, via a hand-rolled, caret-anchored list that stays open
     while typing and scrolls with the page, passing behind the sticky table

@@ -22,8 +22,7 @@ import { switchToLeftJoin } from "./join-dialog.js";
 import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands } from "./join-view.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
-import { keyIcon } from "./suggest-list.js";
-import { columnKeyOf, type TableMeta, tableMeta } from "./table-meta.js";
+import { columnKeyOf, keyIcon, type TableMeta, tableMeta } from "./table-meta.js";
 import { navigateWithSeededFilter } from "./view-history.js";
 
 // The columns and view the grid last rendered; the columns menu, the counts,
@@ -204,17 +203,20 @@ function buildCell(col: Column, row: Row, { hidden, meta }: CellContext): HTMLTa
     };
   }
   const compositeFk = meta?.compositeFkOf.get(col.name);
+  // False when a member is null: no filter can name that row.
+  const compositeClause =
+    compositeFk?.columns.every((c) => row[c.from] != null) &&
+    filterClauses(compositeFk.columns.map((c) => ({ column: c.to, value: row[c.from] as string })));
   if (col.references) {
     const references = col.references;
     cellText.classList.add("fk-cell");
     cellText.title = `go to ${fkTarget(references)}.${references.column} = ${raw}`;
     cellText.onclick = () =>
       navigateWithSeededFilter(references.table, references.schema, filterClause(references.column, "=", raw));
-  } else if (compositeFk?.columns.every((c) => row[c.from] != null)) {
-    const clause = filterClauses(compositeFk.columns.map((c) => ({ column: c.to, value: row[c.from] as string })));
+  } else if (compositeFk && compositeClause && !filterTooLong(compositeClause)) {
     cellText.classList.add("fk-cell");
-    cellText.title = `go to ${fkTarget(compositeFk)} where ${clause}`;
-    cellText.onclick = () => navigateWithSeededFilter(compositeFk.table, compositeFk.schema, clause);
+    cellText.title = `go to ${fkTarget(compositeFk)} where ${compositeClause}`;
+    cellText.onclick = () => navigateWithSeededFilter(compositeFk.table, compositeFk.schema, compositeClause);
   } else if (col.key === "pk" && meta !== undefined && meta.referrers !== 0) {
     // What points *at* this row, once the table is known to have referrers (or
     // the lookup failed); FK-bearing PKs and no-PK tables use the record dialog.

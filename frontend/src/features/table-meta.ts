@@ -1,3 +1,4 @@
+import { el } from "../core/dom.js";
 import { scopeIdentity } from "../core/state.js";
 import type { Column, ConstraintFk, ReferencedByEntry, StructureResponse } from "../core/types.js";
 import { type KeyDescription, keyDescription } from "../lib/column-key.js";
@@ -24,6 +25,15 @@ export function tableMeta(table: string | null): TableMeta | undefined {
   return table === null ? undefined : metas.get(scopeIdentity(table))?.meta;
 }
 
+// A column's key icon; null keeps an empty slot so names line up. Decorative:
+// callers put the key's text in a title or label.
+export function keyIcon(key: KeyDescription | null): HTMLElement {
+  const icon = el("span", "key-icon", key?.icon ?? "");
+  icon.setAttribute("aria-hidden", "true");
+  if (key) icon.title = key.label;
+  return icon;
+}
+
 export function columnKeyOf(col: Column, meta: TableMeta | undefined): KeyDescription | null {
   return keyDescription(col, meta?.compositeFkOf.get(col.name));
 }
@@ -47,20 +57,30 @@ function buildMeta(structure: StructureResponse | null, entries: ReferencedByEnt
   return { referrers: entries ? referrerCount(entries) : null, compositeFkOf, uniqueColumns };
 }
 
-// Tables asked since the last refresh, failures included, so an auto-refresh
-// tick never repeats a lookup that keeps failing.
-const asked = new Set<string>();
+// One lookup per table since the last refresh, failures included: a load that
+// replaces another waits on the same lookup, and an auto-refresh tick never
+// repeats one that keeps failing.
+const loads = new Map<string, Promise<void>>();
 
 export function expireTableMeta(): void {
-  asked.clear();
+  loads.clear();
 }
 
 // Never rejects. tableMeta()'s answer changes identity only when the facts do.
-export async function loadTableMeta(table: string): Promise<void> {
+export function loadTableMeta(table: string): Promise<void> {
   const key = scopeIdentity(table);
-  if (asked.has(key)) return;
-  asked.add(key);
+  let load = loads.get(key);
+  if (!load) {
+    // A lookup from before a refresh must not overwrite the newer answer.
+    load = fetchTableMeta(table, key, () => loads.get(key) === load);
+    loads.set(key, load);
+  }
+  return load;
+}
+
+async function fetchTableMeta(table: string, key: string, current: () => boolean): Promise<void> {
   const [structure, entries] = await Promise.allSettled([tableStructure(table), fetchReferencedBy(table)]);
+  if (!current()) return;
   const failed = [structure, entries].filter((r) => r.status === "rejected");
   for (const r of failed) console.warn("ashurbanipal: table metadata lookup failed", r.reason);
   // A failed refresh keeps the last good answer.
