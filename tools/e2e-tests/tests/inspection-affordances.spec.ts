@@ -246,4 +246,12 @@ test("previous and next step through the page's rows and stop at its ends", asyn
   await expect(page.locator("#record-pos")).toHaveText(`${count} of ${count}`);
   await expect(page.locator("#record-next")).toBeDisabled();
   await expect(page.locator("#record-prev")).toBeEnabled();
+
+  // Reaching an end from the keyboard leaves focus on the other button, not lost.
+  await page.locator("#record-prev").focus();
+  await page.keyboard.press("Enter");
+  await page.locator("#record-next").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#record-next")).toBeDisabled();
+  await expect(page.locator("#record-prev")).toBeFocused();
 });

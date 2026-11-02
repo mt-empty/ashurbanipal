@@ -23,8 +23,8 @@ export function syncGridLock(): void {
   const locked = gridIsStale();
   tableEl.inert = locked;
   tableEl.toggleAttribute("data-stale", locked);
-  // The two note buttons sit outside the table but act on the grid's columns.
-  for (const id of ["columns-btn", "structure-btn", "sort-note-show", "all-hidden-show"]) {
+  // The note buttons sit outside the table but act on the grid's columns and sort.
+  for (const id of ["columns-btn", "structure-btn", "sort-note-show", "sort-note-clear", "all-hidden-show"]) {
     $<HTMLButtonElement>(id).disabled = locked;
   }
   if (!locked) return;

@@ -3619,8 +3619,13 @@ function fkTarget(ref) {
 function refTarget(ref) {
   return `${fkTarget(ref)}.${ref.column}`;
 }
+function compositeLabel(fk) {
+  const from = fk.columns.map((c) => c.from).join(", ");
+  const to = fk.columns.map((c) => c.to).join(", ");
+  return `part of foreign key (${from}) \u2192 ${fkTarget(fk)}(${to})`;
+}
 function keyDescription(col, compositeFk) {
-  const composite = compositeFk && `part of foreign key (${compositeFk.columns.map((c) => c.from).join(", ")}) \u2192 ${fkTarget(compositeFk)}(${compositeFk.columns.map((c) => c.to).join(", ")})`;
+  const composite = compositeFk && compositeLabel(compositeFk);
   if (col.key === "pk") {
     const also = col.references ? `, also references ${refTarget(col.references)}` : composite ? `, also ${composite}` : "";
     return { icon: "\u{1F511}", label: `primary key${also}` };
@@ -3787,7 +3792,7 @@ function syncGridLock() {
   const locked = gridIsStale();
   tableEl.inert = locked;
   tableEl.toggleAttribute("data-stale", locked);
-  for (const id of ["columns-btn", "structure-btn", "sort-note-show", "all-hidden-show"]) {
+  for (const id of ["columns-btn", "structure-btn", "sort-note-show", "sort-note-clear", "all-hidden-show"]) {
     $(id).disabled = locked;
   }
   if (!locked) return;
@@ -4599,6 +4604,7 @@ function fkLink(col, raw, row2, meta) {
   const ref = col.references;
   if (ref) {
     const clause2 = filterClause(ref.column, "=", raw);
+    if (filterTooLong(clause2)) return null;
     return { title: `go to ${refTarget(ref)} = ${raw}`, table: ref.table, schema: ref.schema, clause: clause2 };
   }
   const fk = meta?.compositeFkOf.get(col.name);
@@ -6150,11 +6156,11 @@ var dialog2 = () => $("record-dialog");
 function recordGroups(columns, def) {
   return def && columns.some((c) => c.join !== void 0) ? tableGroups(columns, def) : [{ columns }];
 }
-function fieldNote(col, key, composite) {
-  const where = col.references ? `references ${refTarget(col.references)}` : composite ? key?.label : void 0;
+function fieldNote(col, compositeFk) {
+  const where = col.references ? `references ${refTarget(col.references)}` : compositeFk && compositeLabel(compositeFk);
   return [col.comment, where].filter(Boolean).join(" \xB7 ");
 }
-function fieldValue(col, raw, row2, meta) {
+function fieldValue(col, raw, row2, { meta, act }) {
   const dd = el("dd");
   if (rendersAsJson(col, raw)) {
     try {
@@ -6176,29 +6182,25 @@ function fieldValue(col, raw, row2, meta) {
   btn.type = "button";
   btn.title = link.title;
   btn.appendChild(value);
-  btn.onclick = () => {
-    dialog2().close();
-    navigateWithSeededFilter(link.table, link.schema, link.clause);
-  };
+  btn.onclick = act(() => navigateWithSeededFilter(link.table, link.schema, link.clause));
   dd.appendChild(btn);
   return dd;
 }
-function fieldActions(col, raw, def) {
+function fieldActions(col, raw, { def, act }) {
   const acts = el("span", "record-acts");
   const eq = eqClause(columnKey(col, def), raw);
-  if (eq !== null) {
+  if (eq !== null)
     acts.appendChild(
-      eqButton(raw == null, () => {
-        dialog2().close();
-        applyFilter(eq);
-      })
+      eqButton(
+        raw == null,
+        act(() => applyFilter(eq))
+      )
     );
-  }
   if (raw != null) acts.appendChild(copyButton(raw));
   return acts;
 }
-function buildRecordEntries(columns, row2, def) {
-  const meta = tableMeta(tableInView());
+function buildRecordEntries(columns, row2, ctx) {
+  const { def, meta } = ctx;
   const nodes = [];
   for (const group of recordGroups(columns, def)) {
     if (group.label !== void 0) {
@@ -6213,10 +6215,10 @@ function buildRecordEntries(columns, row2, def) {
       name.title = columnKey(col, def);
       dt.append(name, typeChip(col));
       const raw = row2[col.name];
-      const dd = raw == null ? el("dd", void 0, "\u2205") : fieldValue(col, raw, row2, meta);
-      const note = fieldNote(col, key, meta?.compositeFkOf.has(col.name) ?? false);
+      const dd = raw == null ? el("dd", void 0, "\u2205") : fieldValue(col, raw, row2, ctx);
+      const note = fieldNote(col, meta?.compositeFkOf.get(col.name));
       if (note) dd.appendChild(el("span", "record-note", note));
-      const field = [keyIcon(key), dt, dd, fieldActions(col, raw, def)];
+      const field = [keyIcon(key), dt, dd, fieldActions(col, raw, ctx)];
       for (const part of field) part.dataset.col = col.name;
       nodes.push(...field);
     }
@@ -6261,12 +6263,24 @@ function openRecordView(columns, rows, index, def) {
   const copyRowBtn = $("record-copy-row");
   const prev = $("record-prev");
   const next = $("record-next");
+  const view = viewKey(state.view);
+  const ctx = {
+    def,
+    meta: tableMeta(table),
+    act: (run) => () => {
+      dialog2().close();
+      if (viewKey(state.view) === view) run();
+    }
+  };
   const show = (i) => {
     const row2 = rows[i];
-    $("record-dl").replaceChildren(...buildRecordEntries(columns, row2, def));
+    $("record-dl").replaceChildren(...buildRecordEntries(columns, row2, ctx));
     $("record-pos").textContent = `${i + 1} of ${rows.length}`;
+    const focused = document.activeElement;
     prev.disabled = i === 0;
     next.disabled = i === rows.length - 1;
+    if (focused === next && next.disabled) prev.focus();
+    if (focused === prev && prev.disabled) next.focus();
     prev.onclick = () => show(i - 1);
     next.onclick = () => show(i + 1);
     if (table !== null) {

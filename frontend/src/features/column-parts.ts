@@ -33,11 +33,12 @@ export interface FkLink {
 
 // Where a foreign key value leads: its single-column reference, or every pair
 // of a composite key (from `meta`, so table views only). Null when a composite
-// member is null, or its filter would not fit.
+// member is null, or the filter would not fit.
 export function fkLink(col: Column, raw: string, row: Row, meta: TableMeta | undefined): FkLink | null {
   const ref = col.references;
   if (ref) {
     const clause = filterClause(ref.column, "=", raw);
+    if (filterTooLong(clause)) return null;
     return { title: `go to ${refTarget(ref)} = ${raw}`, table: ref.table, schema: ref.schema, clause };
   }
   const fk = meta?.compositeFkOf.get(col.name);

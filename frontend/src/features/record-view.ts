@@ -1,7 +1,7 @@
 import { $, copyText, el } from "../core/dom.js";
-import { qualifiedTable, tableInView } from "../core/state.js";
-import type { Column, JoinDef, Row } from "../core/types.js";
-import { type KeyDescription, refTarget } from "../lib/column-key.js";
+import { qualifiedTable, state, tableInView, viewKey } from "../core/state.js";
+import type { Column, ConstraintFk, JoinDef, Row } from "../core/types.js";
+import { compositeLabel, refTarget } from "../lib/column-key.js";
 import { eqClause } from "../lib/filter-dsl.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
 import { recordJson } from "../lib/json-text.js";
@@ -23,13 +23,21 @@ function recordGroups(columns: Column[], def: JoinDef | undefined): { label?: st
   return def && columns.some((c) => c.join !== undefined) ? tableGroups(columns, def) : [{ columns }];
 }
 
+// What the dialog was opened for. `act` wraps a field's click: it closes the
+// dialog, and runs only while that view is still the one in state.
+interface RecordContext {
+  def: JoinDef | undefined;
+  meta: TableMeta | undefined;
+  act: (run: () => void) => () => void;
+}
+
 // The muted line under a field: its comment, and where a foreign key points.
-function fieldNote(col: Column, key: KeyDescription | null, composite: boolean): string {
-  const where = col.references ? `references ${refTarget(col.references)}` : composite ? key?.label : undefined;
+function fieldNote(col: Column, compositeFk: ConstraintFk | undefined): string {
+  const where = col.references ? `references ${refTarget(col.references)}` : compositeFk && compositeLabel(compositeFk);
   return [col.comment, where].filter(Boolean).join(" · ");
 }
 
-function fieldValue(col: Column, raw: string, row: Row, meta: TableMeta | undefined): HTMLElement {
+function fieldValue(col: Column, raw: string, row: Row, { meta, act }: RecordContext): HTMLElement {
   const dd = el("dd");
   if (rendersAsJson(col, raw)) {
     try {
@@ -53,31 +61,27 @@ function fieldValue(col: Column, raw: string, row: Row, meta: TableMeta | undefi
   btn.type = "button";
   btn.title = link.title;
   btn.appendChild(value);
-  btn.onclick = () => {
-    dialog().close();
-    navigateWithSeededFilter(link.table, link.schema, link.clause);
-  };
+  btn.onclick = act(() => navigateWithSeededFilter(link.table, link.schema, link.clause));
   dd.appendChild(btn);
   return dd;
 }
 
-function fieldActions(col: Column, raw: string | null, def: JoinDef | undefined): HTMLElement {
+function fieldActions(col: Column, raw: string | null, { def, act }: RecordContext): HTMLElement {
   const acts = el("span", "record-acts");
   const eq = eqClause(columnKey(col, def), raw);
-  if (eq !== null) {
+  if (eq !== null)
     acts.appendChild(
-      eqButton(raw == null, () => {
-        dialog().close();
-        applyFilter(eq);
-      }),
+      eqButton(
+        raw == null,
+        act(() => applyFilter(eq)),
+      ),
     );
-  }
   if (raw != null) acts.appendChild(copyButton(raw));
   return acts;
 }
 
-export function buildRecordEntries(columns: Column[], row: Row, def: JoinDef | undefined): Node[] {
-  const meta = tableMeta(tableInView());
+function buildRecordEntries(columns: Column[], row: Row, ctx: RecordContext): Node[] {
+  const { def, meta } = ctx;
   const nodes: Node[] = [];
   for (const group of recordGroups(columns, def)) {
     if (group.label !== undefined) {
@@ -92,10 +96,10 @@ export function buildRecordEntries(columns: Column[], row: Row, def: JoinDef | u
       name.title = columnKey(col, def);
       dt.append(name, typeChip(col));
       const raw = row[col.name];
-      const dd = raw == null ? el("dd", undefined, "∅") : fieldValue(col, raw, row, meta);
-      const note = fieldNote(col, key, meta?.compositeFkOf.has(col.name) ?? false);
+      const dd = raw == null ? el("dd", undefined, "∅") : fieldValue(col, raw, row, ctx);
+      const note = fieldNote(col, meta?.compositeFkOf.get(col.name));
       if (note) dd.appendChild(el("span", "record-note", note));
-      const field = [keyIcon(key), dt, dd, fieldActions(col, raw, def)];
+      const field = [keyIcon(key), dt, dd, fieldActions(col, raw, ctx)];
       // Tests and anything else find a field by its column, not its position.
       for (const part of field) part.dataset.col = col.name;
       nodes.push(...field);
@@ -154,12 +158,25 @@ export function openRecordView(columns: Column[], rows: Row[], index: number, de
   const copyRowBtn = $<HTMLButtonElement>("record-copy-row");
   const prev = $<HTMLButtonElement>("record-prev");
   const next = $<HTMLButtonElement>("record-next");
+  const view = viewKey(state.view);
+  const ctx: RecordContext = {
+    def,
+    meta: tableMeta(table),
+    act: (run) => () => {
+      dialog().close();
+      if (viewKey(state.view) === view) run();
+    },
+  };
   const show = (i: number) => {
     const row = rows[i];
-    $("record-dl").replaceChildren(...buildRecordEntries(columns, row, def));
+    $("record-dl").replaceChildren(...buildRecordEntries(columns, row, ctx));
     $("record-pos").textContent = `${i + 1} of ${rows.length}`;
+    // A disabled button drops focus, so at an end it moves to the other one.
+    const focused = document.activeElement;
     prev.disabled = i === 0;
     next.disabled = i === rows.length - 1;
+    if (focused === next && next.disabled) prev.focus();
+    if (focused === prev && prev.disabled) next.focus();
     prev.onclick = () => show(i - 1);
     next.onclick = () => show(i + 1);
     if (table !== null) {
