@@ -255,6 +255,14 @@ type joinTableMeta struct {
 	columns []joinColMeta
 }
 
+func (t joinTableMeta) names() []string {
+	out := make([]string, len(t.columns))
+	for i, c := range t.columns {
+		out[i] = c.name
+	}
+	return out
+}
+
 func (t joinTableMeta) columnInfos() []ColumnInfo {
 	out := make([]ColumnInfo, len(t.columns))
 	for i, c := range t.columns {
@@ -337,12 +345,17 @@ func describeCol(t joinTableMeta, c joinColMeta) string {
 	return fmt.Sprintf("%s.%s (%s)", t.name, c.name, c.typeName)
 }
 
-// Whole words only, so a user type such as realm_kind is not taken for one.
-var floatTypeRe = regexp.MustCompile(`(?i)\b(real|double|float\d*)\b`)
+// The type's first word, so neither a user type such as realm_kind, a MySQL
+// set('real'), nor a float array (which fails as an array) counts.
+var floatTypeRe = regexp.MustCompile(`(?i)^\s*(real|double|float\d*)\b`)
+
+func isFloatType(typeName string) bool {
+	return floatTypeRe.MatchString(typeName) && !strings.Contains(typeName, "[")
+}
 
 func unjoinable(position int, t joinTableMeta, c joinColMeta) error {
 	why := ""
-	if floatTypeRe.MatchString(c.typeName) {
+	if isFloatType(c.typeName) {
 		why = ": floating-point values are not compared exactly"
 	}
 	return badJoin("join %d on: %s cannot be used in a join%s", position, describeCol(t, c), why)

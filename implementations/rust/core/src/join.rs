@@ -350,17 +350,20 @@ fn describe(table: &TableMeta, col: &ColMeta) -> String {
     format!("{}.{} ({})", table.name, col.name, col.type_name)
 }
 
-/// Whole words only, so a user type such as `realm_kind` is not taken for one.
+/// The type's first word, so neither a user type such as `realm_kind`, a
+/// MySQL `set('real')`, nor a float array (which fails as an array) counts.
 fn is_float_type(type_name: &str) -> bool {
-    type_name
-        .to_lowercase()
+    let t = type_name.trim().to_lowercase();
+    let first = t
         .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .any(|w| {
-            w == "real"
-                || w == "double"
-                || w.strip_prefix("float")
-                    .is_some_and(|d| d.chars().all(|c| c.is_ascii_digit()))
-        })
+        .next()
+        .unwrap_or("");
+    !t.contains('[')
+        && (first == "real"
+            || first == "double"
+            || first
+                .strip_prefix("float")
+                .is_some_and(|d| d.chars().all(|c| c.is_ascii_digit())))
 }
 
 fn unjoinable(position: usize, table: &TableMeta, col: &ColMeta) -> DbError {
@@ -809,6 +812,8 @@ mod tests {
             "text",
             "float_kind",
             "my_real",
+            "set('real','virtual')",
+            "double precision[]",
         ] {
             assert!(!is_float_type(t), "{t}");
         }

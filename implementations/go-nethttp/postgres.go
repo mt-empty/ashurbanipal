@@ -268,55 +268,26 @@ func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, ta
 	return pkColumns, fkColumns, nil
 }
 
-// pgColumnComments joins pg_attribute/pg_class directly: col_description is
-// keyed by attnum, which can diverge from ordinal_position once a column has
-// been dropped.
-func pgColumnComments(ctx context.Context, q queryer, schema, table string) (map[string]string, error) {
-	rows, err := q.QueryContext(ctx,
-		`select a.attname::text, col_description(a.attrelid, a.attnum::int)
-		 from pg_attribute a
-		 join pg_class c on c.oid = a.attrelid
-		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = $1 and c.relname = $2
-		   and a.attnum > 0 and not a.attisdropped`, schema, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	comments := map[string]string{}
-	for rows.Next() {
-		var name string
-		var comment sql.NullString
-		if err := rows.Scan(&name, &comment); err != nil {
-			return nil, err
-		}
-		if comment.Valid {
-			comments[name] = comment.String
-		}
-	}
-	return comments, rows.Err()
-}
-
-// joinTableMeta reads a table already cleared by readableTableOID.
-func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, table string) (joinTableMeta, error) {
+// joinTableMeta reads a table already cleared by readableTableOID, which
+// supplies oid.
+func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, table string, oid int) (joinTableMeta, error) {
 	metaCtx, cancel := c.bounded(ctx)
 	defer cancel()
 	// information_schema.columns drives the list (column privileges, order);
-	// format_type gives the full spelling data_type drops: lengths, precision,
-	// array element types, the enum's own name.
+	// pg_attribute adds the full type spelling and the comment, both keyed by
+	// attnum, which can diverge from ordinal_position after a drop.
 	rows, err := tx.QueryContext(metaCtx,
 		`select c.column_name, c.data_type, c.udt_schema, c.udt_name,
 		        exists (select 1 from pg_type t
 		                join pg_namespace n on n.oid = t.typnamespace
 		                where n.nspname = c.udt_schema and t.typname = c.udt_name
 		                  and t.typtype = 'e'),
-		        format_type(a.atttypid, a.atttypmod)
+		        format_type(a.atttypid, a.atttypmod),
+		        col_description(a.attrelid, a.attnum::int)
 		 from information_schema.columns c
-		 join pg_namespace pn on pn.nspname = c.table_schema
-		 join pg_class pc on pc.relnamespace = pn.oid and pc.relname = c.table_name
-		 join pg_attribute a on a.attrelid = pc.oid and a.attname = c.column_name
+		 join pg_attribute a on a.attrelid = $3 and a.attname = c.column_name
 		 where c.table_schema = $1 and c.table_name = $2
-		 order by c.ordinal_position`, schema, table)
+		 order by c.ordinal_position`, schema, table, oid)
 	if err != nil {
 		return joinTableMeta{}, err
 	}
@@ -324,12 +295,14 @@ func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, 
 	for rows.Next() {
 		var name, dataType, udtSchema, udtName, fullType string
 		var isEnum bool
-		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum, &fullType); err != nil {
+		var comment sql.NullString
+		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum, &fullType, &comment); err != nil {
 			rows.Close()
 			return joinTableMeta{}, err
 		}
 		meta.columns = append(meta.columns, joinColMeta{
 			name: name, typeName: fullType, class: pgTypeClass(dataType, udtSchema, udtName, isEnum),
+			comment: comment.String,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -338,11 +311,6 @@ func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, 
 	}
 	rows.Close()
 
-	comments, err := pgColumnComments(metaCtx, tx, schema, table)
-	if err != nil {
-		return joinTableMeta{}, err
-	}
-
 	pk, fk, err := c.keyMetadata(ctx, tx, schema, table)
 	if err != nil {
 		return joinTableMeta{}, err
@@ -350,7 +318,6 @@ func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, 
 	for i := range meta.columns {
 		col := &meta.columns[i]
 		col.key, col.references = joinKeyOf(col.name, pk, fk)
-		col.comment = comments[col.name]
 	}
 	return meta, nil
 }
@@ -374,10 +341,11 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 		if _, ok := metas[name]; ok {
 			continue
 		}
-		if _, err := c.readableTableOID(ctx, tx, realSchema, name); err != nil {
+		oid, err := c.readableTableOID(ctx, tx, realSchema, name)
+		if err != nil {
 			return JoinData{}, unknownJoinTable(err)
 		}
-		meta, err := c.joinTableMeta(ctx, tx, realSchema, name)
+		meta, err := c.joinTableMeta(ctx, tx, realSchema, name, oid)
 		if err != nil {
 			return JoinData{}, unknownJoinTable(err)
 		}
@@ -565,15 +533,20 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 		return TableData{}, err
 	}
 
-	if _, err := c.readableTableOID(ctx, tx, realSchema, table); err != nil {
+	oid, err := c.readableTableOID(ctx, tx, realSchema, table)
+	if err != nil {
 		return TableData{}, err
 	}
 	realTable := table
 
-	columnNames, err := c.allowedColumns(ctx, tx, realSchema, realTable)
+	// The join route's lookup, so both routes report the same columns; its
+	// names are the live catalog's, so they also serve as the allow-list.
+	meta, err := c.joinTableMeta(ctx, tx, realSchema, realTable, oid)
 	if err != nil {
 		return TableData{}, err
 	}
+	columns := meta.columnInfos()
+	columnNames := meta.names()
 
 	var sort *string
 	if opts.Sort != nil {
@@ -592,13 +565,6 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 			return TableData{}, err
 		}
 	}
-
-	// The join route's lookup, so both routes report the same columns.
-	meta, err := c.joinTableMeta(ctx, tx, realSchema, realTable)
-	if err != nil {
-		return TableData{}, err
-	}
-	columns := meta.columnInfos()
 
 	selectParts := make([]string, len(columns))
 	for i, col := range columns {

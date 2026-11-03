@@ -12,7 +12,7 @@ import {
   setTableAt,
 } from "../lib/join-draft.js";
 import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
-import { findForeignKey, joinMismatch, pairNote } from "../lib/join-types.js";
+import { findForeignKey, joinMismatch, pairNote, shortType } from "../lib/join-types.js";
 import { createDropdown, lastDropdownLabel } from "./dropdown.js";
 import { cachedColumns, tableColumns } from "./join-catalog.js";
 import { listedTableNames, tableChipCount } from "./table-chips.js";
@@ -162,7 +162,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         },
       }),
     ];
-    if (left && right && !clash) parts.push(el("span", "j-ok", `${left.type} = ${right.type} ✓`));
+    if (left && right && !clash) parts.push(el("span", "j-ok", `${shortType(left.type)} = ${shortType(right.type)} ✓`));
     if (!first) {
       parts.push(
         textButton("✕", "j-rm", `remove column pair from join ${pos}`, () => {

@@ -2634,7 +2634,7 @@ function isTextType(type) {
 function rendersAsJson(col, raw) {
   const type = typeKey(col.type);
   if (TYPE_ALIASES[type] === "json") return true;
-  return isTextType(type) && /^\s*[[{]/.test(raw);
+  return (isTextType(type) || col.class === "text") && /^\s*[[{]/.test(raw);
 }
 function warnBadJsonCell(col, err) {
   if (columnTypeClass(col.type) === "json") {
@@ -3474,22 +3474,25 @@ var LABEL = {
   enum: "enum",
   untyped: "untyped"
 };
+var shortType = (type) => type.length > 24 ? `${type.slice(0, 23)}\u2026` : type;
 function joinMismatch(candidate, other) {
   const blocked = unjoinableReason(candidate) ?? unjoinableReason(other);
   if (blocked) {
-    const type = candidate.class ? other.type : candidate.type;
+    const type = shortType(candidate.class ? other.type : candidate.type);
     return { note: blocked, message: `${type} columns cannot be joined. Pick another column.` };
   }
   const a = candidate.class;
   const b = other.class;
   if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
+  const left = shortType(candidate.type);
+  const right = shortType(other.type);
   return {
-    note: `${candidate.type} \u2260 ${other.type}`,
-    message: a === b ? `${candidate.type} cannot be joined to ${other.type}: they are different enumerated types.` : `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`
+    note: `${left} \u2260 ${right}`,
+    message: a === b ? `${left} cannot be joined to ${right}: they are different enumerated types.` : `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`
   };
 }
 function unjoinableReason(column) {
-  return column.class ? null : `${column.type}: not joinable`;
+  return column.class ? null : `${shortType(column.type)}: not joinable`;
 }
 function pairNote(column, other) {
   return other === void 0 ? unjoinableReason(column) : joinMismatch(column, other)?.note ?? null;
@@ -4229,7 +4232,7 @@ function mountJoinForm(root, onChange) {
         }
       })
     ];
-    if (left && right && !clash) parts.push(el("span", "j-ok", `${left.type} = ${right.type} \u2713`));
+    if (left && right && !clash) parts.push(el("span", "j-ok", `${shortType(left.type)} = ${shortType(right.type)} \u2713`));
     if (!first) {
       parts.push(
         textButton("\u2715", "j-rm", `remove column pair from join ${pos}`, () => {

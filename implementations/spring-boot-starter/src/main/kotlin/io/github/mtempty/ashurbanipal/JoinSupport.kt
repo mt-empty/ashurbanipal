@@ -232,11 +232,13 @@ class JoinPlan internal constructor(
 
 private fun describe(t: JoinTableMeta, c: JoinColMeta) = "${t.name}.${c.name} (${c.type})"
 
-/** Whole words only, so a user type such as `realm_kind` is not taken for one. */
-internal val FLOAT_TYPE = Regex("""\b(real|double|float\d*)\b""", RegexOption.IGNORE_CASE)
+private val FLOAT_FIRST_WORD = Regex("""^\s*(real|double|float\d*)\b""", RegexOption.IGNORE_CASE)
+
+/** The type's first word, so neither a user type such as `realm_kind`, a MySQL `set('real')`, nor a float array (which fails as an array) counts. */
+internal fun isFloatType(type: String) = FLOAT_FIRST_WORD.containsMatchIn(type) && '[' !in type
 
 private fun unjoinable(position: Int, t: JoinTableMeta, c: JoinColMeta): BadJoinException {
-    val why = if (FLOAT_TYPE.containsMatchIn(c.type)) ": floating-point values are not compared exactly" else ""
+    val why = if (isFloatType(c.type)) ": floating-point values are not compared exactly" else ""
     return BadJoinException("join $position on: ${describe(t, c)} cannot be used in a join$why")
 }
 

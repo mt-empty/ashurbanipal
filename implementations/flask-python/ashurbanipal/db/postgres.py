@@ -124,20 +124,6 @@ def type_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) ->
     return None
 
 
-def _column_comments(cur, schema: str, table: str) -> dict[str, str]:
-    # attnum survives dropped columns; ordinal_position does not.
-    cur.execute(
-        "select a.attname::text, col_description(a.attrelid, a.attnum::int) "
-        "from pg_attribute a "
-        "join pg_class c on c.oid = a.attrelid "
-        "join pg_namespace n on n.oid = c.relnamespace "
-        "where n.nspname = %s and c.relname = %s "
-        "  and a.attnum > 0 and not a.attisdropped",
-        (schema, table),
-    )
-    return {name: comment for name, comment in cur.fetchall() if comment is not None}
-
-
 class PgSource(DbSource):
     def __init__(self, dsn: str):
         self._dsn = dsn
@@ -302,9 +288,14 @@ class PgSource(DbSource):
                 cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
 
                 resolved_schema = self._resolve_schema(cur, schema)
-                self._readable_table_oid(cur, resolved_schema, table)
+                oid = self._readable_table_oid(cur, resolved_schema, table)
 
-                column_names = self._allowed_columns(cur, resolved_schema, table)
+                # The join route's lookup, so both routes report the same columns; its
+                # names are the live catalog's, so they also serve as the allow-list.
+                columns = [
+                    c.column_info() for c in self._join_table_meta(cur, resolved_schema, table, oid).columns
+                ]
+                column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
                     if opts.sort not in column_names:
@@ -312,9 +303,6 @@ class PgSource(DbSource):
                     sort = opts.sort
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
-
-                # The join route's lookup, so both routes report the same columns.
-                columns = [c.column_info() for c in self._join_table_meta(cur, resolved_schema, table).columns]
 
                 select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
                 order_clause = ""
@@ -359,28 +347,26 @@ class PgSource(DbSource):
 
                 return TableData(columns=columns, rows=rows, total_approx=total_approx)
 
-    def _join_table_meta(self, cur: psycopg.Cursor, schema: str, table: str) -> TableMeta:
-        """Column metadata of a table already cleared by `_readable_table_oid`."""
+    def _join_table_meta(self, cur: psycopg.Cursor, schema: str, table: str, oid: int) -> TableMeta:
+        """Column metadata of a table already cleared by `_readable_table_oid`, which supplies `oid`."""
         # information_schema.columns drives the list (column privileges, order);
-        # format_type gives the full spelling data_type drops: lengths,
-        # precision, array element types, the enum's own name.
+        # pg_attribute adds the full type spelling and the comment, both keyed by
+        # attnum, which can diverge from ordinal_position after a drop.
         cur.execute(
             "select c.column_name, c.data_type, c.udt_schema, c.udt_name, "
             "       exists (select 1 from pg_type t "
             "               join pg_namespace n on n.oid = t.typnamespace "
             "               where n.nspname = c.udt_schema and t.typname = c.udt_name "
             "                 and t.typtype = 'e'), "
-            "       format_type(a.atttypid, a.atttypmod) "
+            "       format_type(a.atttypid, a.atttypmod), "
+            "       col_description(a.attrelid, a.attnum::int) "
             "from information_schema.columns c "
-            "join pg_namespace pn on pn.nspname = c.table_schema "
-            "join pg_class pc on pc.relnamespace = pn.oid and pc.relname = c.table_name "
-            "join pg_attribute a on a.attrelid = pc.oid and a.attname = c.column_name "
+            "join pg_attribute a on a.attrelid = %s and a.attname = c.column_name "
             "where c.table_schema = %s and c.table_name = %s "
             "order by c.ordinal_position",
-            (schema, table),
+            (oid, schema, table),
         )
         column_rows = list(cur.fetchall())
-        comments = _column_comments(cur, schema, table)
         pk_columns, fk_columns = self._key_metadata(cur, schema, table)
         return TableMeta(
             name=table,
@@ -391,9 +377,9 @@ class PgSource(DbSource):
                     cls=type_class(data_type, udt_schema, udt_name, is_enum),
                     key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                     references=fk_columns.get(name),
-                    comment=comments.get(name),
+                    comment=comment,
                 )
-                for name, data_type, udt_schema, udt_name, is_enum, full_type in column_rows
+                for name, data_type, udt_schema, udt_name, is_enum, full_type, comment in column_rows
             ],
         )
 
@@ -409,8 +395,8 @@ class PgSource(DbSource):
                 for name in names:
                     if name not in metas:
                         try:
-                            self._readable_table_oid(cur, resolved_schema, name)
-                            metas[name] = self._join_table_meta(cur, resolved_schema, name)
+                            oid = self._readable_table_oid(cur, resolved_schema, name)
+                            metas[name] = self._join_table_meta(cur, resolved_schema, name, oid)
                         except NotAllowed as e:
                             raise unknown_join_table(e, name) from None
                 plan = plan_join(spec, [metas[n] for n in names], opts)

@@ -242,7 +242,10 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData {
         checkSchema(schema)
         val realTable = requireTable(table)
-        val columnNames = allowedColumns(realTable)
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        val columns = bounded(queryTimeoutSecs) { conn -> joinTableMeta(conn, realTable) }.columns.map { it.columnInfo() }
+        val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
@@ -250,8 +253,6 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
 
         val whereClause = opts.filter?.let { buildWhereClauseSqlite(it, columnNames) } ?: WhereClause("", emptyList())
         val quotedTable = quoteIdent(realTable)
-        // The join route's lookup, so both routes report the same columns.
-        val columns = bounded(queryTimeoutSecs) { conn -> joinTableMeta(conn, realTable) }.columns.map { it.columnInfo() }
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdent(it.name)} AS TEXT)" }
         val orderClause = sort?.let {

@@ -548,14 +548,32 @@ async fn columns_report_their_join_class() {
     };
     let status_enum = (status == "enum").then(|| serde_json::json!("public.order_status"));
     for (table, name, expected, enum_type) in [
-        ("orders", "total_cents", Some(serde_json::json!("number")), None),
+        (
+            "orders",
+            "total_cents",
+            Some(serde_json::json!("number")),
+            None,
+        ),
         ("orders", "id", Some(serde_json::json!(id)), None),
-        ("orders", "status", Some(serde_json::json!(status)), status_enum),
+        (
+            "orders",
+            "status",
+            Some(serde_json::json!(status)),
+            status_enum,
+        ),
         ("users", "metadata", metadata, None),
     ] {
         let col = column(&srv, table, name).await;
-        assert_exact(col.get("class").cloned(), expected, &format!("{table}.{name} class"));
-        assert_exact(col.get("enum_type").cloned(), enum_type, &format!("{table}.{name} enum_type"));
+        assert_exact(
+            col.get("class").cloned(),
+            expected,
+            &format!("{table}.{name} class"),
+        );
+        assert_exact(
+            col.get("enum_type").cloned(),
+            enum_type,
+            &format!("{table}.{name} enum_type"),
+        );
     }
 }
 

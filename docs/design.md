@@ -169,8 +169,9 @@ Two components, same as the original concept:
     and a SQL mode that edit the same definition
     (`frontend/src/features/join-dialog.ts`). The Form lists each table's
     columns with their types, greys the ones that cannot pair with the other
-    side (by the `class` each column reports, so it matches the server's
-    check exactly) and says why, and suggests a foreign key match. The SQL mode is a
+    side (by the `class` and `enum_type` each column reports, the server's
+    own type check; a MySQL collation clash is still caught only on Run) and
+    says why, and suggests a foreign key match. The SQL mode is a
     restricted subset (`spec/join-dsl.md`) with the filter box's colouring and
     suggestions; it is parsed in the browser into the structured `join` object
     of `GET /tables/join`, so no SQL text reaches the server. The result is the

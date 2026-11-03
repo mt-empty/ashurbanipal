@@ -154,8 +154,8 @@ export interface TypeClass {
 
 const classKey = (c: TypeClass): string => `${c.kind}:${c.id ?? ""}`;
 
-/** Whole words only, so a user type such as `realm_kind` is not taken for one. */
-export const FLOAT_TYPE = /\b(real|double|float\d*)\b/i;
+/** The type's first word, so neither a user type such as `realm_kind`, a MySQL `set('real')`, nor a float array (which fails as an array) counts. */
+export const isFloatType = (type: string): boolean => /^\s*(real|double|float\d*)\b/i.test(type) && !type.includes("[");
 
 /** One column as the live catalog reports it. */
 export interface JoinColMeta {
@@ -239,7 +239,7 @@ function joinColumnIndex(table: JoinTableMeta, column: string): number {
 const describe = (t: JoinTableMeta, c: JoinColMeta): string => `${t.name}.${c.name} (${c.type})`;
 
 function unjoinable(position: number, t: JoinTableMeta, c: JoinColMeta): BadJoinError {
-  const why = FLOAT_TYPE.test(c.type) ? ": floating-point values are not compared exactly" : "";
+  const why = isFloatType(c.type) ? ": floating-point values are not compared exactly" : "";
   return new BadJoinError(`join ${position} on: ${describe(t, c)} cannot be used in a join${why}`);
 }
 

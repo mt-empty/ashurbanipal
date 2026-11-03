@@ -433,10 +433,14 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 		return TableData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 
-	columnNames, err := c.allowedColumns(ctx, realTable)
+	// The join route's lookup, so both routes report the same columns; its
+	// names are the live catalog's, so they also serve as the allow-list.
+	meta, err := c.joinTableMeta(ctx, c.db, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
+	columns := meta.columnInfos()
+	columnNames := meta.names()
 	var sort *string
 	if opts.Sort != nil {
 		found, ok := findExact(columnNames, *opts.Sort)
@@ -454,13 +458,6 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 			return TableData{}, err
 		}
 	}
-
-	// The join route's lookup, so both routes report the same columns.
-	meta, err := c.joinTableMeta(ctx, c.db, realTable)
-	if err != nil {
-		return TableData{}, err
-	}
-	columns := meta.columnInfos()
 
 	selectParts := make([]string, len(columns))
 	for i, col := range columns {

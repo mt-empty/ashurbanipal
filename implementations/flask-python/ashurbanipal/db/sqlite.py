@@ -305,7 +305,10 @@ class SqliteSource(DbSource):
                 if table not in tables:
                     raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
 
-                column_names = self._allowed_columns(cur, table)
+                # The join route's lookup, so both routes report the same columns; its
+                # names are the live catalog's, so they also serve as the allow-list.
+                columns = [c.column_info() for c in self._join_table_meta(cur, table).columns]
+                column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
                     if opts.sort not in column_names:
@@ -315,8 +318,6 @@ class SqliteSource(DbSource):
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
                 quoted_table = quote_ident(table)
-                # The join route's lookup, so both routes report the same columns.
-                columns = [c.column_info() for c in self._join_table_meta(cur, table).columns]
             finally:
                 self._clear_bound(conn)
 

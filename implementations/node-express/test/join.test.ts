@@ -7,7 +7,7 @@ import {
   BadJoinError,
   BadParamError,
   buildJoinSelect,
-  FLOAT_TYPE,
+  isFloatType,
   type JoinColMeta,
   type JoinDialect,
   type JoinOpts,
@@ -224,11 +224,19 @@ describe("pgTypeClass", () => {
   });
 });
 
-describe("FLOAT_TYPE", () => {
+describe("isFloatType", () => {
   it("matches float types by whole word, not names that contain one", () => {
     for (const t of ["real", "double precision", "float", "float8", "float(7,4)", "DOUBLE"])
-      expect(FLOAT_TYPE.test(t), t).toBe(true);
-    for (const t of ["realm_kind", "numeric(10,2)", "text", "float_kind", "my_real"])
-      expect(FLOAT_TYPE.test(t), t).toBe(false);
+      expect(isFloatType(t), t).toBe(true);
+    for (const t of [
+      "realm_kind",
+      "numeric(10,2)",
+      "text",
+      "float_kind",
+      "my_real",
+      "set('real','virtual')",
+      "double precision[]",
+    ])
+      expect(isFloatType(t), t).toBe(false);
   });
 });

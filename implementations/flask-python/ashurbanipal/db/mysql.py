@@ -357,7 +357,11 @@ class MySqlSource(DbSource):
                 if table not in tables:
                     raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
 
-                column_names = self._allowed_columns(cur, variant, resolved_schema, table, timeout)
+                # The join route's lookup, so both routes report the same columns; its
+                # names are the live catalog's, so they also serve as the allow-list.
+                meta = self._table_meta(cur, variant, resolved_schema, table, timeout)
+                columns = [c.column_info() for c in meta.columns]
+                column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
                     if opts.sort not in column_names:
@@ -365,10 +369,6 @@ class MySqlSource(DbSource):
                     sort = opts.sort
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
-
-                # The join route's lookup, so both routes report the same column types.
-                meta = self._table_meta(cur, variant, resolved_schema, table, timeout)
-                columns = [c.column_info() for c in meta.columns]
 
                 select_list = ", ".join(f"CAST({_quote_ident(c.name)} AS CHAR)" for c in columns)
                 order_clause = ""

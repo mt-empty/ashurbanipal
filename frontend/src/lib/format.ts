@@ -119,7 +119,8 @@ function isTextType(type: string): boolean {
 export function rendersAsJson(col: Column, raw: string): boolean {
   const type = typeKey(col.type);
   if (TYPE_ALIASES[type] === "json") return true;
-  return isTextType(type) && /^\s*[[{]/.test(raw);
+  // The class covers a text type whose name hides it, such as a domain over varchar.
+  return (isTextType(type) || col.class === "text") && /^\s*[[{]/.test(raw);
 }
 
 // A value that won't parse is only worth flagging when the backend actually

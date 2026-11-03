@@ -95,6 +95,15 @@
     if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
     return TYPE_ALIASES[typeKey(rawType)] ?? null;
   }
+  var FROM_JOIN_CLASS = {
+    number: "number",
+    temporal: "date",
+    uuid: "uuid",
+    boolean: "bool"
+  };
+  function cellTypeClass(col) {
+    return columnTypeClass(col.type) ?? (col.class ? FROM_JOIN_CLASS[col.class] ?? null : null);
+  }
 
   // src/demo/siblings.ts
   var SIBLINGS_INSTANCE = { name: "shop (demo)", label: "dev" };
@@ -159,11 +168,11 @@
     if (!table) return problem(400, "unknown_table", `table ${JSON.stringify(name)}`);
     return { table };
   }
-  function typedCompare(type, a, b) {
+  function typedCompare(col, a, b) {
     if (a === null && b === null) return 0;
     if (a === null) return 1;
     if (b === null) return -1;
-    const cls = columnTypeClass(type);
+    const cls = cellTypeClass(col);
     if (cls === "number") return Number(a) - Number(b);
     if (cls === "date") return new Date(a).getTime() - new Date(b).getTime();
     return a < b ? -1 : a > b ? 1 : 0;
@@ -173,7 +182,7 @@
     const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
     return new RegExp(`^${escaped}$`, ci ? "i" : "");
   }
-  function matches(type, cell, cond) {
+  function matches(col, cell, cond) {
     let result;
     switch (cond.op) {
       case "IS NULL":
@@ -200,7 +209,7 @@
           result = false;
           break;
         }
-        const cmp = typedCompare(type, cell, cond.value ?? "");
+        const cmp = typedCompare(col, cell, cond.value ?? "");
         result = cond.op === ">" ? cmp > 0 : cond.op === "<" ? cmp < 0 : cond.op === ">=" ? cmp >= 0 : cmp <= 0;
         break;
       }
@@ -220,7 +229,7 @@
       else groups[groups.length - 1].push(c);
     }
     const at = (column) => table.columns.findIndex((c) => c.name === column);
-    return groups.some((g) => g.every((c) => matches(table.columns[at(c.column)].type, row[at(c.column)], c)));
+    return groups.some((g) => g.every((c) => matches(table.columns[at(c.column)], row[at(c.column)], c)));
   }
   function tableData(params) {
     const t = tableIn(params);
@@ -252,7 +261,7 @@
       }
       const i = table.columns.findIndex((c) => c.name === sort);
       const dir = order === "desc" ? -1 : 1;
-      rows = [...rows].sort((a, b) => dir * typedCompare(table.columns[i].type, a[i], b[i]));
+      rows = [...rows].sort((a, b) => dir * typedCompare(table.columns[i], a[i], b[i]));
     }
     const num = (key, fallback) => {
       const n = Number(params.get(key) ?? Number.NaN);
@@ -2940,7 +2949,7 @@ function isTextType(type) {
 function rendersAsJson(col, raw) {
   const type = typeKey(col.type);
   if (TYPE_ALIASES[type] === "json") return true;
-  return isTextType(type) && /^\s*[[{]/.test(raw);
+  return (isTextType(type) || col.class === "text") && /^\s*[[{]/.test(raw);
 }
 function warnBadJsonCell(col, err) {
   if (columnTypeClass(col.type) === "json") {
@@ -3780,22 +3789,25 @@ var LABEL = {
   enum: "enum",
   untyped: "untyped"
 };
+var shortType = (type) => type.length > 24 ? `${type.slice(0, 23)}\u2026` : type;
 function joinMismatch(candidate, other) {
   const blocked = unjoinableReason(candidate) ?? unjoinableReason(other);
   if (blocked) {
-    const type = candidate.class ? other.type : candidate.type;
+    const type = shortType(candidate.class ? other.type : candidate.type);
     return { note: blocked, message: `${type} columns cannot be joined. Pick another column.` };
   }
   const a = candidate.class;
   const b = other.class;
   if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
+  const left = shortType(candidate.type);
+  const right = shortType(other.type);
   return {
-    note: `${candidate.type} \u2260 ${other.type}`,
-    message: a === b ? `${candidate.type} cannot be joined to ${other.type}: they are different enumerated types.` : `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`
+    note: `${left} \u2260 ${right}`,
+    message: a === b ? `${left} cannot be joined to ${right}: they are different enumerated types.` : `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`
   };
 }
 function unjoinableReason(column) {
-  return column.class ? null : `${column.type}: not joinable`;
+  return column.class ? null : `${shortType(column.type)}: not joinable`;
 }
 function pairNote(column, other) {
   return other === void 0 ? unjoinableReason(column) : joinMismatch(column, other)?.note ?? null;
@@ -4535,7 +4547,7 @@ function mountJoinForm(root, onChange) {
         }
       })
     ];
-    if (left && right && !clash) parts.push(el("span", "j-ok", `${left.type} = ${right.type} \u2713`));
+    if (left && right && !clash) parts.push(el("span", "j-ok", `${shortType(left.type)} = ${shortType(right.type)} \u2713`));
     if (!first) {
       parts.push(
         textButton("\u2715", "j-rm", `remove column pair from join ${pos}`, () => {

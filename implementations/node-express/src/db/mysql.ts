@@ -495,7 +495,11 @@ export class MySqlSource implements DbSource {
         throw new NotAllowedError(`table "${table}"`, "table");
       }
 
-      const columnNames = await this.allowedColumnsInTx(conn, variant, realSchema, realTable, timeoutMs);
+      // The join route's lookup, so both routes report the same columns; its
+      // names are the live catalog's, so they also serve as the allow-list.
+      const meta = await this.tableMeta(conn, variant, realSchema, realTable, timeoutMs);
+      const columns: ColumnInfo[] = meta.columns.map(columnInfo);
+      const columnNames = columns.map((c) => c.name);
       let sort: string | undefined;
       if (opts.sort !== undefined) {
         sort = findExact(columnNames, opts.sort);
@@ -505,10 +509,6 @@ export class MySqlSource implements DbSource {
       }
 
       const { where: whereClause, values: filterValues } = buildWhereClauseMysql(opts.filter, columnNames);
-
-      // The join route's lookup, so both routes report the same column types.
-      const meta = await this.tableMeta(conn, variant, realSchema, realTable, timeoutMs);
-      const columns: ColumnInfo[] = meta.columns.map(columnInfo);
 
       // Alias CAST results to the column names expected by cellToJson.
       const selectList = columns

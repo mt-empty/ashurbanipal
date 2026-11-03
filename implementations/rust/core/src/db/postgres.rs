@@ -393,68 +393,44 @@ impl PgPoolSource {
         Ok(rows)
     }
 
-    /// Joins through pg_attribute/pg_class directly: col_description is
-    /// keyed by attnum, which can diverge from ordinal_position once a
-    /// column has been dropped.
-    async fn column_comments_in_tx(
-        &self,
-        tx: &mut Transaction<'_, Postgres>,
-        schema: &str,
-        table: &str,
-    ) -> Result<HashMap<String, String>, DbError> {
-        Ok(sqlx::query_as::<_, (String, Option<String>)>(
-            "select a.attname::text, col_description(a.attrelid, a.attnum::int) \
-             from pg_attribute a \
-             join pg_class c on c.oid = a.attrelid \
-             join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = $1 and c.relname = $2 \
-               and a.attnum > 0 and not a.attisdropped",
-        )
-        .bind(schema)
-        .bind(table)
-        .fetch_all(&mut **tx)
-        .await?
-        .into_iter()
-        .filter_map(|(name, comment)| comment.map(|c| (name, c)))
-        .collect())
-    }
-
-    /// Column metadata of a table already cleared by `readable_table_oid_in_tx`.
+    /// Column metadata of a table already cleared by `readable_table_oid_in_tx`,
+    /// which supplies `oid`.
     async fn join_table_meta_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
         table: &str,
+        oid: i32,
     ) -> Result<TableMeta, DbError> {
         // information_schema.columns drives the list (column privileges, order);
-        // format_type gives the full spelling data_type drops: lengths,
-        // precision, array element types, the enum's own name.
-        let columns = sqlx::query_as::<_, (String, String, String, String, bool, String)>(
-            "select c.column_name, c.data_type, c.udt_schema, c.udt_name, \
+        // pg_attribute adds the full type spelling and the comment, both keyed
+        // by attnum, which can diverge from ordinal_position after a drop.
+        let columns =
+            sqlx::query_as::<_, (String, String, String, String, bool, String, Option<String>)>(
+                "select c.column_name, c.data_type, c.udt_schema, c.udt_name, \
                     exists (select 1 from pg_type t \
                             join pg_namespace n on n.oid = t.typnamespace \
                             where n.nspname = c.udt_schema and t.typname = c.udt_name \
                               and t.typtype = 'e'), \
-                    format_type(a.atttypid, a.atttypmod) \
+                    format_type(a.atttypid, a.atttypmod), \
+                    col_description(a.attrelid, a.attnum::int) \
              from information_schema.columns c \
-             join pg_namespace pn on pn.nspname = c.table_schema \
-             join pg_class pc on pc.relnamespace = pn.oid and pc.relname = c.table_name \
-             join pg_attribute a on a.attrelid = pc.oid and a.attname = c.column_name \
+             join pg_attribute a on a.attrelid = $3 and a.attname = c.column_name \
              where c.table_schema = $1 and c.table_name = $2 \
              order by c.ordinal_position",
-        )
-        .bind(schema)
-        .bind(table)
-        .fetch_all(&mut **tx)
-        .await?;
-        let comments = self.column_comments_in_tx(tx, schema, table).await?;
+            )
+            .bind(schema)
+            .bind(table)
+            .bind(oid)
+            .fetch_all(&mut **tx)
+            .await?;
         let (pk_columns, fk_columns) = self.key_metadata_in_tx(tx, schema, table).await?;
         Ok(TableMeta {
             name: table.to_string(),
             columns: columns
                 .into_iter()
                 .map(
-                    |(name, data_type, udt_schema, udt_name, is_enum, type_name)| {
+                    |(name, data_type, udt_schema, udt_name, is_enum, type_name, comment)| {
                         let (key, references) = if pk_columns.contains(&name) {
                             (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
                         } else if let Some(r) = fk_columns.get(&name) {
@@ -465,7 +441,7 @@ impl PgPoolSource {
                         ColMeta {
                             class: type_class(&data_type, &udt_schema, &udt_name, is_enum),
                             collation: None,
-                            comment: comments.get(&name).cloned(),
+                            comment,
                             key,
                             references,
                             type_name,
@@ -672,11 +648,21 @@ impl DbSource for PgPoolSource {
     ) -> Result<TableData, DbError> {
         let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        self.readable_table_oid_in_tx(&mut tx, &schema, table)
+        let oid = self
+            .readable_table_oid_in_tx(&mut tx, &schema, table)
             .await?;
         let table = table.to_string();
 
-        let column_names = self.allowed_columns_in_tx(&mut tx, &schema, &table).await?;
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        let columns: Vec<ColumnInfo> = self
+            .join_table_meta_in_tx(&mut tx, &schema, &table, oid)
+            .await?
+            .columns
+            .into_iter()
+            .map(ColumnInfo::from)
+            .collect();
+        let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
@@ -697,15 +683,6 @@ impl DbSource for PgPoolSource {
             Some(filter) => build_where_clause(filter, &column_names)?,
             None => (String::new(), Vec::new()),
         };
-
-        // The join route's lookup, so both routes report the same columns.
-        let columns: Vec<ColumnInfo> = self
-            .join_table_meta_in_tx(&mut tx, &schema, &table)
-            .await?
-            .columns
-            .into_iter()
-            .map(ColumnInfo::from)
-            .collect();
 
         let select_list = columns
             .iter()
@@ -778,11 +755,12 @@ impl DbSource for PgPoolSource {
         let mut metas: HashMap<&str, TableMeta> = HashMap::new();
         for name in &names {
             if !metas.contains_key(name) {
-                self.readable_table_oid_in_tx(&mut tx, &schema, name)
+                let oid = self
+                    .readable_table_oid_in_tx(&mut tx, &schema, name)
                     .await
                     .map_err(join::unknown_join_table)?;
                 let meta = self
-                    .join_table_meta_in_tx(&mut tx, &schema, name)
+                    .join_table_meta_in_tx(&mut tx, &schema, name, oid)
                     .await
                     .map_err(join::unknown_join_table)?;
                 metas.insert(name, meta);

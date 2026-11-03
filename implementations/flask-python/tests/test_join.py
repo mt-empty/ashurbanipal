@@ -21,7 +21,6 @@ from ashurbanipal.db.sqlite import SqliteSource
 from ashurbanipal.db.sqlite import type_class as sqlite_type_class
 from ashurbanipal.filter import Condition, FilterError, parse, parse_for_join
 from ashurbanipal.join import (
-    FLOAT_TYPE,
     NUMBER,
     TEXT,
     UUID,
@@ -32,6 +31,7 @@ from ashurbanipal.join import (
     assign_labels,
     build_select,
     enum_class,
+    is_float_type,
     parse_join,
     plan_join,
 )
@@ -399,6 +399,14 @@ def test_errors_use_problem_json_with_informative_titles(client) -> None:
 
 def test_float_types_are_told_apart_from_names_that_contain_the_word() -> None:
     for t in ["real", "double precision", "float", "float8", "float(7,4)", "DOUBLE"]:
-        assert FLOAT_TYPE.search(t), t
-    for t in ["realm_kind", "numeric(10,2)", "text", "float_kind", "my_real"]:
-        assert not FLOAT_TYPE.search(t), t
+        assert is_float_type(t), t
+    for t in [
+        "realm_kind",
+        "numeric(10,2)",
+        "text",
+        "float_kind",
+        "my_real",
+        "set('real','virtual')",
+        "double precision[]",
+    ]:
+        assert not is_float_type(t), t

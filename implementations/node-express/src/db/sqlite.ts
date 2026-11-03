@@ -331,7 +331,12 @@ export class SqliteSource implements DbSource {
       throw new NotAllowedError(`table "${table}"`, "table");
     }
 
-    const columnNames = await allowedColumns(this.db, realTable, timeoutMs);
+    // The join route's lookup, so both routes report the same columns; its
+    // names are the live catalog's, so they also serve as the allow-list.
+    const columns: ColumnInfo[] = (
+      await bounded(this.db, timeoutMs, () => joinTableMeta(this.db, realTable))
+    ).columns.map(columnInfo);
+    const columnNames = columns.map((c) => c.name);
     let sort: string | undefined;
     if (opts.sort !== undefined) {
       sort = findExact(columnNames, opts.sort);
@@ -342,10 +347,6 @@ export class SqliteSource implements DbSource {
 
     const { where: whereClause, values: filterValues } = buildWhereClauseSqlite(opts.filter, columnNames);
     const quotedTable = quoteIdent(realTable);
-    // The join route's lookup, so both routes report the same columns.
-    const columns: ColumnInfo[] = (
-      await bounded(this.db, timeoutMs, () => joinTableMeta(this.db, realTable))
-    ).columns.map(columnInfo);
 
     // Aliased back to the real column name: an un-aliased CAST(...)
     // expression's result-set label is the literal expression text on

@@ -411,7 +411,19 @@ impl DbSource for SqliteSource {
             .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
             .clone();
 
-        let column_names = self.allowed_columns(&table).await?;
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        let meta_table = table.clone();
+        let columns: Vec<ColumnInfo> = self
+            .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
+                join_table_meta(conn, &meta_table).await
+            })
+            .await?
+            .columns
+            .into_iter()
+            .map(ColumnInfo::from)
+            .collect();
+        let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
@@ -432,18 +444,6 @@ impl DbSource for SqliteSource {
             Some(filter) => build_where_clause(filter, &column_names)?,
             None => (String::new(), Vec::new()),
         };
-
-        // The join route's lookup, so both routes report the same columns.
-        let meta_table = table.clone();
-        let columns: Vec<ColumnInfo> = self
-            .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-                join_table_meta(conn, &meta_table).await
-            })
-            .await?
-            .columns
-            .into_iter()
-            .map(ColumnInfo::from)
-            .collect();
 
         let select_list = columns
             .iter()
@@ -1036,11 +1036,6 @@ mod tests {
         );
     }
 
-    // Same shorthand-FK bug, forward direction: `key_metadata` (which
-    // supplies `query_table`'s per-column `references`) shares
-    // `referenced_by`'s pre-fix bug — `pragma_foreign_key_list.to` is NULL
-    // for `REFERENCES parent` with no named column, and until fixed
-    // `key_metadata` doesn't resolve it the way `referenced_by` now does.
     #[tokio::test]
     async fn query_table_reports_each_columns_join_class() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -1085,6 +1080,11 @@ mod tests {
         assert_eq!(wire[3]["type"], "unknown");
     }
 
+    // Same shorthand-FK bug, forward direction: `key_metadata_on` (which
+    // supplies `query_table`'s per-column `references`) shares
+    // `referenced_by`'s pre-fix bug — `pragma_foreign_key_list.to` is NULL
+    // for `REFERENCES parent` with no named column, and until fixed
+    // `key_metadata` doesn't resolve it the way `referenced_by` now does.
     #[tokio::test]
     async fn query_table_resolves_shorthand_fk_with_no_named_parent_column() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();

@@ -2,8 +2,8 @@
 // of the seeded sources. Catalog routes replay what PostgresSource answered;
 // /tables/data filters, sorts, and pages the snapshot rows in JS.
 import snapshotData from "virtual:demo-snapshot";
-import type { FilterCondition, FilterOp } from "../../core/types.js";
-import { columnTypeClass } from "../../lib/format.js";
+import type { Column, FilterCondition, FilterOp } from "../../core/types.js";
+import { cellTypeClass } from "../../lib/format.js";
 import { SIBLINGS, SIBLINGS_INSTANCE } from "../siblings.js";
 import { type ApiResponse, json, problem } from "../wire.js";
 import type { Snapshot, SnapshotSource, SnapshotTable } from "./snapshot-types.js";
@@ -36,11 +36,11 @@ function tableIn(params: URLSearchParams): { table: SnapshotTable } | ApiRespons
 // Compares by native type, not spec/protocol.md §5.4.2's text-cast
 // lexicographic quirk ("10" < "9") — a demo should show filtering work.
 // Nulls sort as greater than any value: Postgres's NULLS LAST ascending.
-function typedCompare(type: string, a: Cell, b: Cell): number {
+function typedCompare(col: Pick<Column, "type" | "class">, a: Cell, b: Cell): number {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
   if (b === null) return -1;
-  const cls = columnTypeClass(type);
+  const cls = cellTypeClass(col);
   if (cls === "number") return Number(a) - Number(b);
   if (cls === "date") return new Date(a).getTime() - new Date(b).getTime();
   return a < b ? -1 : a > b ? 1 : 0;
@@ -53,7 +53,7 @@ function likeToRegExp(pattern: string, ci: boolean): RegExp {
     .replace(/_/g, ".");
   return new RegExp(`^${escaped}$`, ci ? "i" : "");
 }
-function matches(type: string, cell: Cell, cond: FilterCondition): boolean {
+function matches(col: Pick<Column, "type" | "class">, cell: Cell, cond: FilterCondition): boolean {
   let result: boolean;
   switch (cond.op) {
     case "IS NULL":
@@ -80,7 +80,7 @@ function matches(type: string, cell: Cell, cond: FilterCondition): boolean {
         result = false;
         break;
       }
-      const cmp = typedCompare(type, cell, cond.value ?? "");
+      const cmp = typedCompare(col, cell, cond.value ?? "");
       result = cond.op === ">" ? cmp > 0 : cond.op === "<" ? cmp < 0 : cond.op === ">=" ? cmp >= 0 : cmp <= 0;
       break;
     }
@@ -102,7 +102,7 @@ function matchesFilter(table: SnapshotTable, row: Cell[], conditions: FilterCond
     else groups[groups.length - 1].push(c);
   }
   const at = (column: string) => table.columns.findIndex((c) => c.name === column);
-  return groups.some((g) => g.every((c) => matches(table.columns[at(c.column)].type, row[at(c.column)], c)));
+  return groups.some((g) => g.every((c) => matches(table.columns[at(c.column)], row[at(c.column)], c)));
 }
 
 function tableData(params: URLSearchParams): ApiResponse {
@@ -135,7 +135,7 @@ function tableData(params: URLSearchParams): ApiResponse {
     }
     const i = table.columns.findIndex((c) => c.name === sort);
     const dir = order === "desc" ? -1 : 1;
-    rows = [...rows].sort((a, b) => dir * typedCompare(table.columns[i].type, a[i], b[i]));
+    rows = [...rows].sort((a, b) => dir * typedCompare(table.columns[i], a[i], b[i]));
   }
   // Absent or non-numeric means the default; an explicit "0" is a real value
   // (offset 0, or a limit clamped up to the minimum).

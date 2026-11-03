@@ -376,16 +376,16 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val variant = variant()
         val realSchema = resolveSchema(variant, schema)
         val realTable = requireTable(variant, realSchema, table)
-        val columnNames = allowedColumns(variant, realSchema, realTable)
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        val columns = tableMeta(variant, realSchema, realTable).columns.map { it.columnInfo() }
+        val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
         val whereClause = opts.filter?.let { buildWhereClauseMysql(it, columnNames) } ?: WhereClause("", emptyList())
-
-        // The join route's lookup, so both routes report the same column types.
-        val columns = tableMeta(variant, realSchema, realTable).columns.map { it.columnInfo() }
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdentMysql(it.name)} AS CHAR)" }
         val orderClause = sort?.let {

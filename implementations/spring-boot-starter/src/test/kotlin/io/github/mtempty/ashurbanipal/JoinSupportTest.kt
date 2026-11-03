@@ -190,10 +190,10 @@ class JoinSupportTest {
     @Test
     fun `float types are told apart from names that contain the word`() {
         for (t in listOf("real", "double precision", "float", "float8", "float(7,4)", "DOUBLE")) {
-            assertTrue(FLOAT_TYPE.containsMatchIn(t), t)
+            assertTrue(isFloatType(t), t)
         }
-        for (t in listOf("realm_kind", "numeric(10,2)", "text", "float_kind", "my_real")) {
-            assertFalse(FLOAT_TYPE.containsMatchIn(t), t)
+        for (t in listOf("realm_kind", "numeric(10,2)", "text", "float_kind", "my_real", "set('real','virtual')", "double precision[]")) {
+            assertFalse(isFloatType(t), t)
         }
     }
 }

@@ -573,9 +573,16 @@ impl DbSource for MySqlSource {
             .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
             .clone();
 
-        let column_names = self
-            .allowed_columns_in_tx(&mut tx, variant, &schema, &table, timeout)
-            .await?;
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        let columns: Vec<ColumnInfo> = self
+            .table_meta_in_tx(&mut tx, variant, &schema, &table, timeout)
+            .await?
+            .columns
+            .into_iter()
+            .map(ColumnInfo::from)
+            .collect();
+        let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
@@ -596,15 +603,6 @@ impl DbSource for MySqlSource {
             Some(filter) => build_where_clause(filter, &column_names)?,
             None => (String::new(), Vec::new()),
         };
-
-        // The join route's lookup, so both routes report the same column types.
-        let columns: Vec<ColumnInfo> = self
-            .table_meta_in_tx(&mut tx, variant, &schema, &table, timeout)
-            .await?
-            .columns
-            .into_iter()
-            .map(ColumnInfo::from)
-            .collect();
 
         let select_list = columns
             .iter()

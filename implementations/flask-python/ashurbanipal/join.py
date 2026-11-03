@@ -303,12 +303,17 @@ def _describe(t: TableMeta, c: ColMeta) -> str:
     return f"{t.name}.{c.name} ({c.type_name})"
 
 
-# Whole words only, so a user type such as `realm_kind` is not taken for one.
-FLOAT_TYPE = re.compile(r"\b(real|double|float\d*)\b", re.I)
+_FLOAT_FIRST_WORD = re.compile(r"\s*(real|double|float\d*)\b", re.I)
+
+
+def is_float_type(type_name: str) -> bool:
+    """The type's first word, so neither a user type such as `realm_kind`, a MySQL
+    `set('real')`, nor a float array (which fails as an array) counts."""
+    return bool(_FLOAT_FIRST_WORD.match(type_name)) and "[" not in type_name
 
 
 def _unjoinable(position: int, t: TableMeta, c: ColMeta) -> BadJoin:
-    why = ": floating-point values are not compared exactly" if FLOAT_TYPE.search(c.type_name) else ""
+    why = ": floating-point values are not compared exactly" if is_float_type(c.type_name) else ""
     return BadJoin(f"join {position} on: {_describe(t, c)} cannot be used in a join{why}")
 
 

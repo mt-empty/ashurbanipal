@@ -105,6 +105,10 @@ test("join pair checks follow the server's class, and the type for enums", () =>
   assert.equal(joinMismatch(text, jsonb)?.message, "jsonb columns cannot be joined. Pick another column.");
   assert.equal(unjoinableReason({ type: "double precision" }), "double precision: not joinable");
   assert.equal(unjoinableReason(uuid), null);
+  assert.equal(
+    unjoinableReason({ type: "set('pending','completed','cancelled')" }),
+    "set('pending','complete…: not joinable",
+  );
 });
 
 test("a pair check supplied by the page rejects a mismatched pair at its second column", () => {

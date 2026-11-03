@@ -666,10 +666,14 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 		return TableData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 
-	columnNames, err := c.allowedColumnsInTx(ctx, tx, variant, realSchema, realTable)
+	// The join route's lookup, so both routes report the same columns; its
+	// names are the live catalog's, so they also serve as the allow-list.
+	meta, err := c.tableMeta(ctx, tx, variant, realSchema, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
+	columns := meta.columnInfos()
+	columnNames := meta.names()
 	var sort *string
 	if opts.Sort != nil {
 		found, ok := findExact(columnNames, *opts.Sort)
@@ -687,13 +691,6 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 			return TableData{}, err
 		}
 	}
-
-	// The join route's lookup, so both routes report the same column types.
-	meta, err := c.tableMeta(ctx, tx, variant, realSchema, realTable)
-	if err != nil {
-		return TableData{}, err
-	}
-	columns := meta.columnInfos()
 
 	selectParts := make([]string, len(columns))
 	for i, col := range columns {

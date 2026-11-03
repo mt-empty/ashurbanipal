@@ -162,3 +162,8 @@ test("cellTypeClass falls back to the server's join class when the type name is 
   assert.equal(cellTypeClass({ type: "label", class: "text" }), null);
   assert.equal(cellTypeClass({ type: "mystery" }), null);
 });
+
+test("a text domain still gets JSON shape detection through its class", () => {
+  assert.equal(rendersAsJson({ name: "c", type: "settings_text", class: "text" }, '{"a":1}'), true);
+  assert.equal(rendersAsJson({ name: "c", type: "positive_int", class: "number" }, "[1]"), false);
+});

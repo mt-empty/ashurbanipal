@@ -1,9 +1,10 @@
 import type { Column, JoinClass } from "../core/types.js";
 
 // ==== Join pair checks (spec/protocol.md §5.11.2) ====
-// The server reports each column's join class, so the form greys exactly the
-// pairs it would reject: a different class, two different enumerated types
-// (`enum_type`), or a column with no class at all.
+// The server reports each column's join class, so the form greys the pairs
+// it would reject by type: a different class, two different enumerated types
+// (`enum_type`), or a column with no class at all. A MySQL collation clash
+// between two text columns is still only caught by the server.
 
 type Typed = Pick<Column, "type" | "class" | "enum_type">;
 
@@ -26,28 +27,33 @@ export interface JoinMismatch {
   message: string;
 }
 
+// A full type can be long (MySQL `enum('a','b',…)`), so notes cut it to fit a menu row.
+export const shortType = (type: string): string => (type.length > 24 ? `${type.slice(0, 23)}…` : type);
+
 // Why column `candidate` cannot pair with `other`, or null when it can.
 export function joinMismatch(candidate: Typed, other: Typed): JoinMismatch | null {
   const blocked = unjoinableReason(candidate) ?? unjoinableReason(other);
   if (blocked) {
-    const type = candidate.class ? other.type : candidate.type;
+    const type = shortType(candidate.class ? other.type : candidate.type);
     return { note: blocked, message: `${type} columns cannot be joined. Pick another column.` };
   }
   const a = candidate.class as JoinClass;
   const b = other.class as JoinClass;
   if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
+  const left = shortType(candidate.type);
+  const right = shortType(other.type);
   return {
-    note: `${candidate.type} ≠ ${other.type}`,
+    note: `${left} ≠ ${right}`,
     message:
       a === b
-        ? `${candidate.type} cannot be joined to ${other.type}: they are different enumerated types.`
+        ? `${left} cannot be joined to ${right}: they are different enumerated types.`
         : `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`,
   };
 }
 
 // A column that cannot join anything, whatever the other side is.
 export function unjoinableReason(column: Typed): string | null {
-  return column.class ? null : `${column.type}: not joinable`;
+  return column.class ? null : `${shortType(column.type)}: not joinable`;
 }
 
 // The note a menu row shows for `column` when the other side is `other` (or

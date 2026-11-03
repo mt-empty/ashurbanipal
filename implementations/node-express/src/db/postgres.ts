@@ -82,22 +82,6 @@ export function pgTypeClass(
   }
 }
 
-// attnum survives dropped columns; ordinal_position does not.
-async function columnComments(client: PoolClient, schema: string, table: string): Promise<Map<string, string>> {
-  const { rows } = await client.query<{ attname: string; comment: string | null }>(
-    `select a.attname::text, col_description(a.attrelid, a.attnum::int) as comment
-     from pg_attribute a
-     join pg_class c on c.oid = a.attrelid
-     join pg_namespace n on n.oid = c.relnamespace
-     where n.nspname = $1 and c.relname = $2
-       and a.attnum > 0 and not a.attisdropped`,
-    [schema, table],
-  );
-  const comments = new Map<string, string>();
-  for (const row of rows) if (row.comment !== null) comments.set(row.attname, row.comment);
-  return comments;
-}
-
 /** Postgres `DbSource`; `SET LOCAL` scopes query timeouts (`spec/protocol.md` §6). */
 export class PostgresSource implements DbSource {
   constructor(private readonly pool: Pool) {}
@@ -306,8 +290,8 @@ export class PostgresSource implements DbSource {
     });
   }
 
-  // Column metadata of a table already cleared by readableTableOid.
-  private async joinTableMeta(client: PoolClient, schema: string, table: string): Promise<JoinTableMeta> {
+  // Column metadata of a table already cleared by readableTableOid, which supplies `oid`.
+  private async joinTableMeta(client: PoolClient, schema: string, table: string, oid: number): Promise<JoinTableMeta> {
     const { rows } = await client.query<{
       column_name: string;
       data_type: string;
@@ -315,25 +299,24 @@ export class PostgresSource implements DbSource {
       udt_name: string;
       is_enum: boolean;
       full_type: string;
+      comment: string | null;
     }>(
       // information_schema.columns drives the list (column privileges, order);
-      // format_type gives the full spelling data_type drops: lengths,
-      // precision, array element types, the enum's own name.
+      // pg_attribute adds the full type spelling and the comment, both keyed by
+      // attnum, which can diverge from ordinal_position after a drop.
       `select c.column_name, c.data_type, c.udt_schema, c.udt_name,
               exists (select 1 from pg_type t
                       join pg_namespace n on n.oid = t.typnamespace
                       where n.nspname = c.udt_schema and t.typname = c.udt_name
                         and t.typtype = 'e') as is_enum,
-              format_type(a.atttypid, a.atttypmod) as full_type
+              format_type(a.atttypid, a.atttypmod) as full_type,
+              col_description(a.attrelid, a.attnum::int) as comment
        from information_schema.columns c
-       join pg_namespace pn on pn.nspname = c.table_schema
-       join pg_class pc on pc.relnamespace = pn.oid and pc.relname = c.table_name
-       join pg_attribute a on a.attrelid = pc.oid and a.attname = c.column_name
+       join pg_attribute a on a.attrelid = $3 and a.attname = c.column_name
        where c.table_schema = $1 and c.table_name = $2
        order by c.ordinal_position`,
-      [schema, table],
+      [schema, table, oid],
     );
-    const comments = await columnComments(client, schema, table);
     const { pkColumns, fkColumns } = await this.keyMetadata(client, schema, table);
     const columns = rows.map((r): JoinColMeta => {
       const col: JoinColMeta = {
@@ -348,8 +331,7 @@ export class PostgresSource implements DbSource {
         col.key = "fk";
         col.references = fkColumns.get(r.column_name);
       }
-      const comment = comments.get(r.column_name);
-      if (comment !== undefined) col.comment = comment;
+      if (r.comment !== null) col.comment = r.comment;
       return col;
     });
     return { name: table, columns };
@@ -363,8 +345,8 @@ export class PostgresSource implements DbSource {
       for (const name of names) {
         if (metas.has(name)) continue;
         try {
-          await this.readableTableOid(client, realSchema, name);
-          metas.set(name, await this.joinTableMeta(client, realSchema, name));
+          const oid = await this.readableTableOid(client, realSchema, name);
+          metas.set(name, await this.joinTableMeta(client, realSchema, name, oid));
         } catch (err) {
           throw unknownJoinTable(err, name);
         }
@@ -391,10 +373,15 @@ export class PostgresSource implements DbSource {
   async queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-      await this.readableTableOid(client, realSchema, table);
+      const oid = await this.readableTableOid(client, realSchema, table);
       const realTable = table;
 
-      const columnNames = await this.allowedColumns(client, realSchema, realTable);
+      // The join route's lookup, so both routes report the same columns; its
+      // names are the live catalog's, so they also serve as the allow-list.
+      const columns: ColumnInfo[] = (await this.joinTableMeta(client, realSchema, realTable, oid)).columns.map(
+        columnInfo,
+      );
+      const columnNames = columns.map((c) => c.name);
 
       let sort: string | undefined;
       if (opts.sort !== undefined) {
@@ -411,9 +398,6 @@ export class PostgresSource implements DbSource {
         whereClause = built.where;
         filterValues = built.values;
       }
-
-      // The join route's lookup, so both routes report the same columns.
-      const columns: ColumnInfo[] = (await this.joinTableMeta(client, realSchema, realTable)).columns.map(columnInfo);
 
       const selectList = columns.map((col) => `${quoteIdent(col.name)}::text`).join(", ");
 
