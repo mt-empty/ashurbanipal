@@ -10,20 +10,20 @@ import (
 	"testing"
 )
 
-func uuidCol(name string) joinColMeta {
+func uuidCol(name string) colMeta {
 	c := classUUID
-	return joinColMeta{name: name, typeName: "uuid", class: &c}
+	return colMeta{name: name, typeName: "uuid", class: &c}
 }
 
-func textCol(name string) joinColMeta {
+func textCol(name string) colMeta {
 	c := classText
-	return joinColMeta{name: name, typeName: "text", class: &c}
+	return colMeta{name: name, typeName: "text", class: &c}
 }
 
-func testOrdersUsers() []joinTableMeta {
-	return []joinTableMeta{
-		{name: "orders", columns: []joinColMeta{uuidCol("id"), uuidCol("user_id"), textCol("status"), {name: "tags", typeName: "ARRAY"}}},
-		{name: "users", columns: []joinColMeta{uuidCol("id"), textCol("email")}},
+func testOrdersUsers() []tableMeta {
+	return []tableMeta{
+		{name: "orders", columns: []colMeta{uuidCol("id"), uuidCol("user_id"), textCol("status"), {name: "tags", typeName: "ARRAY"}}},
+		{name: "users", columns: []colMeta{uuidCol("id"), textCol("email")}},
 	}
 }
 
@@ -111,7 +111,7 @@ func TestPlanJoinRejectsUnknownNamesAndIncompatiblePairs(t *testing.T) {
 	}
 
 	metas := testOrdersUsers()
-	metas[0].columns = append(metas[0].columns, joinColMeta{name: "score", typeName: "double precision"})
+	metas[0].columns = append(metas[0].columns, colMeta{name: "score", typeName: "double precision"})
 	float := spec
 	float.Joins = []JoinEntry{{Table: "users", On: []OnPair{{Left: ColumnPos{Join: 0, Column: "score"}, Right: "id"}}}}
 	_, err = planJoin(float, metas, JoinOpts{})
@@ -123,9 +123,9 @@ func TestPlanJoinRejectsUnknownNamesAndIncompatiblePairs(t *testing.T) {
 
 func TestPlanJoinEnumsPairOnlyWithinOneType(t *testing.T) {
 	enumA, enumB := classEnum("public.a"), classEnum("public.b")
-	tables := []joinTableMeta{
-		{name: "x", columns: []joinColMeta{{name: "e", typeName: "USER-DEFINED", class: &enumA}}},
-		{name: "y", columns: []joinColMeta{{name: "e", typeName: "USER-DEFINED", class: &enumA}, {name: "f", typeName: "USER-DEFINED", class: &enumB}}},
+	tables := []tableMeta{
+		{name: "x", columns: []colMeta{{name: "e", typeName: "USER-DEFINED", class: &enumA}}},
+		{name: "y", columns: []colMeta{{name: "e", typeName: "USER-DEFINED", class: &enumA}, {name: "f", typeName: "USER-DEFINED", class: &enumB}}},
 	}
 	spec := JoinSpec{Table: "x", Joins: []JoinEntry{{Table: "y", On: []OnPair{{Left: ColumnPos{Column: "e"}, Right: "e"}}}}}
 	if _, err := planJoin(spec, tables, JoinOpts{}); err != nil {
@@ -141,7 +141,7 @@ func TestPlanJoinTextCollationClash(t *testing.T) {
 	bin, ci := "utf8mb4_bin", "utf8mb4_general_ci"
 	a, b := textCol("v"), textCol("v")
 	a.collation, b.collation = &bin, &ci
-	tables := []joinTableMeta{{name: "ca", columns: []joinColMeta{a}}, {name: "cb", columns: []joinColMeta{b}}}
+	tables := []tableMeta{{name: "ca", columns: []colMeta{a}}, {name: "cb", columns: []colMeta{b}}}
 	spec := JoinSpec{Table: "ca", Joins: []JoinEntry{{Table: "cb", On: []OnPair{{Left: ColumnPos{Column: "v"}, Right: "v"}}}}}
 	_, err := planJoin(spec, tables, JoinOpts{})
 	if bad, ok := err.(*BadJoinError); !ok || !strings.Contains(bad.Reason, "collation") {
@@ -243,11 +243,11 @@ func TestWriteErrorNamesTimeoutsAndBadJoins(t *testing.T) {
 	}
 }
 
-func TestPgTypeClass(t *testing.T) {
+func TestPgJoinClass(t *testing.T) {
 	cases := []struct {
 		dataType, schema, udt string
 		enum                  bool
-		want                  *typeClass
+		want                  *joinClass
 	}{
 		{"integer", "", "", false, &classNumber},
 		{"numeric", "", "", false, &classNumber},
@@ -259,16 +259,16 @@ func TestPgTypeClass(t *testing.T) {
 		{"double precision", "", "", false, nil},
 	}
 	for _, c := range cases {
-		got := pgTypeClass(c.dataType, c.schema, c.udt, c.enum)
+		got := pgJoinClass(c.dataType, c.schema, c.udt, c.enum)
 		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
 			t.Errorf("%s: got %v want %v", c.dataType, got, c.want)
 		}
 	}
-	e := pgTypeClass("USER-DEFINED", "public", "mood", true)
+	e := pgJoinClass("USER-DEFINED", "public", "mood", true)
 	if e == nil || *e != classEnum("public.mood") {
 		t.Errorf("enum class = %v", e)
 	}
-	if pgTypeClass("USER-DEFINED", "public", "geometry", false) != nil {
+	if pgJoinClass("USER-DEFINED", "public", "geometry", false) != nil {
 		t.Error("an unknown user-defined type is not joinable")
 	}
 }

@@ -77,21 +77,21 @@ private val JOIN_DIALECT = JoinDialect(
 )
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
-internal fun sqliteTypeClass(declared: String): TypeClass? {
+internal fun sqliteJoinClass(declared: String): JoinClass? {
     val upper = declared.trim().uppercase()
-    if (upper.isEmpty()) return TypeClass.UNTYPED
+    if (upper.isEmpty()) return JoinClass.UNTYPED
     val base = upper.substringBefore('(').trim()
     return when {
-        base == "UUID" -> TypeClass.UUID
-        base == "BOOLEAN" || base == "BOOL" -> TypeClass.BOOLEAN
-        base == "DATE" || base == "DATETIME" || base.startsWith("TIMESTAMP") -> TypeClass.TEMPORAL
-        base == "TIME" -> TypeClass.TIME
+        base == "UUID" -> JoinClass.UUID
+        base == "BOOLEAN" || base == "BOOL" -> JoinClass.BOOLEAN
+        base == "DATE" || base == "DATETIME" || base.startsWith("TIMESTAMP") -> JoinClass.TEMPORAL
+        base == "TIME" -> JoinClass.TIME
         base == "JSON" || base == "JSONB" -> null
-        "INT" in upper -> TypeClass.NUMBER
-        "CHAR" in upper || "CLOB" in upper || "TEXT" in upper -> TypeClass.TEXT
-        "BLOB" in upper -> TypeClass.BINARY
+        "INT" in upper -> JoinClass.NUMBER
+        "CHAR" in upper || "CLOB" in upper || "TEXT" in upper -> JoinClass.TEXT
+        "BLOB" in upper -> JoinClass.BINARY
         "REAL" in upper || "FLOA" in upper || "DOUB" in upper -> null
-        else -> TypeClass.NUMBER
+        else -> JoinClass.NUMBER
     }
 }
 
@@ -140,19 +140,19 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
     /** [table] must already be allow-listed: it is spliced into the pragma call. */
-    private fun joinTableMeta(conn: Connection, table: String): JoinTableMeta {
+    private fun tableMeta(conn: Connection, table: String): TableMeta {
         val (pk, fkColumns) = keyMetadataOn(conn, table)
         val quoted = quoteIdent(table)
-        return JoinTableMeta(
+        return TableMeta(
             table,
             query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
                 rs.getString(2) to (rs.getString(3) ?: "")
             }.map { (col, declared) ->
-                JoinColMeta(
+                ColMeta(
                     name = col,
                     // A declared type can be empty (""); a stable label beats emitting "".
                     type = declared.ifEmpty { "unknown" },
-                    cls = sqliteTypeClass(declared),
+                    joinClass = sqliteJoinClass(declared),
                     key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
                     references = fkColumns[col],
                 )
@@ -220,11 +220,11 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         return bounded(queryTimeoutSecs) { conn ->
             val allowed = allowedTablesOn(conn)
             val names = spec.tableNames()
-            val metas = HashMap<String, JoinTableMeta>()
+            val metas = HashMap<String, TableMeta>()
             for (name in names) {
                 if (name in metas) continue
                 if (name !in allowed) throw BadJoinException("unknown table \"$name\"")
-                metas[name] = joinTableMeta(conn, name)
+                metas[name] = tableMeta(conn, name)
             }
             val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
 
@@ -244,7 +244,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         val realTable = requireTable(table)
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
-        val columns = bounded(queryTimeoutSecs) { conn -> joinTableMeta(conn, realTable) }.columns.map { it.columnInfo() }
+        val columns = bounded(queryTimeoutSecs) { conn -> tableMeta(conn, realTable) }.columns.map { it.columnInfo() }
         val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->

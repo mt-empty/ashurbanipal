@@ -512,7 +512,7 @@ async fn malicious_sort_value_against_a_valid_table_is_rejected_cleanly() {
 }
 
 /// The named column of `table` as `/api/tables/data` reports it.
-async fn column(srv: &TestServer, table: &str, name: &str) -> serde_json::Value {
+async fn reported_column(srv: &TestServer, table: &str, name: &str) -> serde_json::Value {
     let body: serde_json::Value = srv
         .client()
         .get(srv.url("/api/tables/data"))
@@ -538,15 +538,16 @@ async fn column(srv: &TestServer, table: &str, name: &str) -> serde_json::Value 
 #[tokio::test]
 async fn columns_report_their_join_class() {
     let srv = TestServer::spawn().await;
-    let (id, status) = match Backend::current() {
+    let (id_class, status_class) = match Backend::current() {
         Backend::Postgres => ("uuid", "enum"),
         Backend::Mysql | Backend::Sqlite => ("number", "text"),
     };
-    let metadata = match Backend::current().not_joinable_columns() {
+    let metadata_class = match Backend::current().not_joinable_columns() {
         NotJoinableColumns::Seeded => None,
         NotJoinableColumns::NotSeeded => Some(serde_json::json!("text")),
     };
-    let status_enum = (status == "enum").then(|| serde_json::json!("public.order_status"));
+    let status_enum_type =
+        (status_class == "enum").then(|| serde_json::json!("public.order_status"));
     for (table, name, expected, enum_type) in [
         (
             "orders",
@@ -554,16 +555,16 @@ async fn columns_report_their_join_class() {
             Some(serde_json::json!("number")),
             None,
         ),
-        ("orders", "id", Some(serde_json::json!(id)), None),
+        ("orders", "id", Some(serde_json::json!(id_class)), None),
         (
             "orders",
             "status",
-            Some(serde_json::json!(status)),
-            status_enum,
+            Some(serde_json::json!(status_class)),
+            status_enum_type,
         ),
-        ("users", "metadata", metadata, None),
+        ("users", "metadata", metadata_class, None),
     ] {
-        let col = column(&srv, table, name).await;
+        let col = reported_column(&srv, table, name).await;
         assert_exact(
             col.get("class").cloned(),
             expected,
@@ -595,7 +596,7 @@ async fn columns_report_the_engines_full_type() {
         Backend::Sqlite => &[("users", "is_active", "INTEGER")],
     };
     for (table, name, ty) in expected {
-        let col = column(&srv, table, name).await;
+        let col = reported_column(&srv, table, name).await;
         assert_exact(
             col["type"].clone(),
             serde_json::json!(ty),

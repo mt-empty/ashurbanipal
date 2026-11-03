@@ -16,9 +16,9 @@ from flask import Flask
 
 from ashurbanipal.config import Config
 from ashurbanipal.db import BadJoin, BadParam, FilterParseError, NotAllowed, QueryTimeout, wrap_driver_errors
-from ashurbanipal.db.postgres import type_class as pg_type_class
+from ashurbanipal.db.postgres import join_class as pg_join_class
 from ashurbanipal.db.sqlite import SqliteSource
-from ashurbanipal.db.sqlite import type_class as sqlite_type_class
+from ashurbanipal.db.sqlite import join_class as sqlite_join_class
 from ashurbanipal.filter import Condition, FilterError, parse, parse_for_join
 from ashurbanipal.join import (
     NUMBER,
@@ -54,8 +54,8 @@ _PG = Dialect(
 )
 
 
-def _col(name: str, type_name: str, cls) -> ColMeta:
-    return ColMeta(name=name, type_name=type_name, cls=cls)
+def _col(name: str, type_name: str, join_class) -> ColMeta:
+    return ColMeta(name=name, type_name=type_name, join_class=join_class)
 
 
 def _orders() -> TableMeta:
@@ -175,7 +175,7 @@ def test_enums_pair_only_within_one_type_and_collations_must_match() -> None:
         plan_join(spec, [enum_table("x", "a"), enum_table("y", "b")], _opts())
 
     def text_table(name: str, collation: str) -> TableMeta:
-        return TableMeta(name, [ColMeta(name="e", type_name="varchar", cls=TEXT, collation=collation)])
+        return TableMeta(name, [ColMeta(name="e", type_name="varchar", join_class=TEXT, collation=collation)])
 
     with pytest.raises(BadJoin, match="collation"):
         plan_join(spec, [text_table("x", "utf8mb4_bin"), text_table("y", "utf8mb4_general_ci")], _opts())
@@ -226,17 +226,17 @@ def test_join_key_in_a_filter_is_only_accepted_by_parse_for_join() -> None:
         parse_for_join('[{"join": -1, "column": "email", "op": "IS NULL"}]')
 
 
-def test_type_classes() -> None:
-    assert pg_type_class("integer", "", "", False) == NUMBER
-    assert pg_type_class("USER-DEFINED", "public", "mood", True) == enum_class("public.mood")
+def test_join_classes() -> None:
+    assert pg_join_class("integer", "", "", False) == NUMBER
+    assert pg_join_class("USER-DEFINED", "public", "mood", True) == enum_class("public.mood")
     for t in ("ARRAY", "jsonb", "json", "double precision", "money"):
-        assert pg_type_class(t, "", "", False) is None, t
-    assert sqlite_type_class("DECIMAL(10,2)") == NUMBER
-    assert sqlite_type_class("VARCHAR(20)") == TEXT
-    assert sqlite_type_class("UUID") == UUID
-    assert sqlite_type_class("") is not None
+        assert pg_join_class(t, "", "", False) is None, t
+    assert sqlite_join_class("DECIMAL(10,2)") == NUMBER
+    assert sqlite_join_class("VARCHAR(20)") == TEXT
+    assert sqlite_join_class("UUID") == UUID
+    assert sqlite_join_class("") is not None
     for t in ("REAL", "DOUBLE PRECISION", "JSON"):
-        assert sqlite_type_class(t) is None, t
+        assert sqlite_join_class(t) is None, t
 
 
 class _Timeout(Exception):

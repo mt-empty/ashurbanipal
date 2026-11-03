@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   type ColumnTypeClass,
-  cellTypeClass,
   columnTypeClass,
   edgeWhitespace,
   rendersAsJson,
+  typeNameClass,
   whitespaceTitle,
 } from "../src/lib/format.ts";
 
-// columnTypeClass buckets the DB engine's own catalog type spelling into a
+// typeNameClass buckets the DB engine's own catalog type spelling into a
 // small render class. It must cover Postgres, MySQL, and SQLite vocabularies
 // without a bare-substring match that would mis-bucket Postgres geometry /
 // network / range types.
@@ -77,7 +77,7 @@ const CASES: [string, ColumnTypeClass | null][] = [
 
 for (const [input, expected] of CASES) {
   test(`${JSON.stringify(input)} -> ${expected}`, () => {
-    assert.equal(columnTypeClass(input), expected);
+    assert.equal(typeNameClass(input), expected);
   });
 }
 
@@ -155,12 +155,12 @@ test("edgeWhitespace stays linear on a long inner run", () => {
   assert.ok(performance.now() - started < 200);
 });
 
-test("cellTypeClass falls back to the server's join class when the type name is unknown", () => {
-  assert.equal(cellTypeClass({ type: "positive_int", class: "number" }), "number");
-  assert.equal(cellTypeClass({ type: "event_time", class: "temporal" }), "date");
-  assert.equal(cellTypeClass({ type: "tinyint(1)", class: "number" }), "bool");
-  assert.equal(cellTypeClass({ type: "label", class: "text" }), null);
-  assert.equal(cellTypeClass({ type: "mystery" }), null);
+test("columnTypeClass falls back to the server's join class when the type name is unknown", () => {
+  assert.equal(columnTypeClass({ type: "positive_int", class: "number" }), "number");
+  assert.equal(columnTypeClass({ type: "event_time", class: "temporal" }), "date");
+  assert.equal(columnTypeClass({ type: "tinyint(1)", class: "number" }), "bool");
+  assert.equal(columnTypeClass({ type: "label", class: "text" }), null);
+  assert.equal(columnTypeClass({ type: "mystery" }), null);
 });
 
 test("a text domain still gets JSON shape detection through its class", () => {

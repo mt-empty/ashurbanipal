@@ -691,11 +691,11 @@ async fn incompatible_column_pairs_are_rejected() {
 /// enumerated type. Only the Postgres seed has enums.
 #[tokio::test]
 async fn enum_columns_join_only_to_the_same_enum() {
+    let srv = TestServer::spawn().await;
     if Backend::current() != Backend::Postgres {
         return;
     }
-    let srv = TestServer::spawn().await;
-    let pair = |table: &str| {
+    let status_join_to = |table: &str| {
         json!({
             "table": "orders",
             "joins": [{
@@ -705,9 +705,9 @@ async fn enum_columns_join_only_to_the_same_enum() {
             "columns": [{"join": 0, "column": "id"}]
         })
     };
-    let resp = get_join(&srv, &pair("support_tickets"), &[]).await;
+    let resp = get_join(&srv, &status_join_to("support_tickets"), &[]).await;
     assert_problem_code(resp, 400, "invalid_join", "order_status to ticket_status").await;
-    let resp = get_join(&srv, &pair("orders"), &[("limit", "1".into())]).await;
+    let resp = get_join(&srv, &status_join_to("orders"), &[("limit", "1".into())]).await;
     assert_status(&resp, 200, "order_status to order_status");
 }
 

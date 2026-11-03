@@ -579,12 +579,12 @@ func TestSQLiteJoinFilterSortAndRejections(t *testing.T) {
 	}
 }
 
-func TestSQLiteTypeClassFollowsDeclaredNamesThenAffinity(t *testing.T) {
+func TestSQLiteJoinClassFollowsDeclaredNamesThenAffinity(t *testing.T) {
 	num, txt, blob, uuid, temporal, tm, untyped := classNumber, classText, classBinary, classUUID, classTemporal, classTime, classUntyped
 	boolean := classBoolean
 	cases := []struct {
 		declared string
-		want     *typeClass
+		want     *joinClass
 	}{
 		{"INTEGER", &num}, {"bigint", &num}, {"DECIMAL(10,2)", &num},
 		{"VARCHAR(20)", &txt}, {"TEXT", &txt}, {"BLOB", &blob},
@@ -593,7 +593,7 @@ func TestSQLiteTypeClassFollowsDeclaredNamesThenAffinity(t *testing.T) {
 		{"TIMESTAMP(6)", &temporal}, {"TIME", &tm}, {"", &untyped},
 	}
 	for _, c := range cases {
-		got := sqliteTypeClass(c.declared)
+		got := sqliteJoinClass(c.declared)
 		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
 			t.Errorf("%q: got %v want %v", c.declared, got, c.want)
 		}

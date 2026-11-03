@@ -1,6 +1,6 @@
 import { Database } from "sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { partialIndexPredicate, SqliteSource, sqliteTypeClass } from "../../src/db/sqlite.js";
+import { partialIndexPredicate, SqliteSource, sqliteJoinClass } from "../../src/db/sqlite.js";
 import type { QueryOpts } from "../../src/db/types.js";
 import { isQueryTimeout, NotAllowedError } from "../../src/errors.js";
 import { BadJoinError, type JoinSpec, parseJoin } from "../../src/join.js";
@@ -431,15 +431,15 @@ describe("SqliteSource.queryJoin", () => {
   });
 });
 
-describe("sqliteTypeClass", () => {
+describe("sqliteJoinClass", () => {
   it("classes follow declared names, then affinity", () => {
-    expect(sqliteTypeClass("INTEGER")).toEqual({ kind: "number" });
-    expect(sqliteTypeClass("DECIMAL(10,2)")).toEqual({ kind: "number" });
-    expect(sqliteTypeClass("VARCHAR(20)")).toEqual({ kind: "text" });
-    expect(sqliteTypeClass("BLOB")).toEqual({ kind: "binary" });
-    expect(sqliteTypeClass("UUID")).toEqual({ kind: "uuid" });
-    expect(sqliteTypeClass("TIMESTAMP(6)")).toEqual({ kind: "temporal" });
-    expect(sqliteTypeClass("")).toEqual({ kind: "untyped" });
-    for (const t of ["REAL", "DOUBLE PRECISION", "JSON"]) expect(sqliteTypeClass(t), t).toBeUndefined();
+    expect(sqliteJoinClass("INTEGER")).toEqual({ kind: "number" });
+    expect(sqliteJoinClass("DECIMAL(10,2)")).toEqual({ kind: "number" });
+    expect(sqliteJoinClass("VARCHAR(20)")).toEqual({ kind: "text" });
+    expect(sqliteJoinClass("BLOB")).toEqual({ kind: "binary" });
+    expect(sqliteJoinClass("UUID")).toEqual({ kind: "uuid" });
+    expect(sqliteJoinClass("TIMESTAMP(6)")).toEqual({ kind: "temporal" });
+    expect(sqliteJoinClass("")).toEqual({ kind: "untyped" });
+    for (const t of ["REAL", "DOUBLE PRECISION", "JSON"]) expect(sqliteJoinClass(t), t).toBeUndefined();
   });
 });

@@ -16,17 +16,17 @@ private val JOIN_DIALECT = JoinDialect(
 )
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun pgTypeClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): TypeClass? = when (dataType) {
-    "smallint", "integer", "bigint", "numeric" -> TypeClass.NUMBER
-    "character varying", "character", "text" -> TypeClass.TEXT
-    "uuid" -> TypeClass.UUID
-    "boolean" -> TypeClass.BOOLEAN
-    "bytea" -> TypeClass.BINARY
-    "date", "timestamp without time zone", "timestamp with time zone" -> TypeClass.TEMPORAL
-    "time without time zone", "time with time zone" -> TypeClass.TIME
+internal fun pgJoinClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): JoinClass? = when (dataType) {
+    "smallint", "integer", "bigint", "numeric" -> JoinClass.NUMBER
+    "character varying", "character", "text" -> JoinClass.TEXT
+    "uuid" -> JoinClass.UUID
+    "boolean" -> JoinClass.BOOLEAN
+    "bytea" -> JoinClass.BINARY
+    "date", "timestamp without time zone", "timestamp with time zone" -> JoinClass.TEMPORAL
+    "time without time zone", "time with time zone" -> JoinClass.TIME
     "USER-DEFINED" -> when {
-        isEnum -> TypeClass.enum("$udtSchema.$udtName")
-        udtName == "citext" -> TypeClass.TEXT
+        isEnum -> JoinClass.enum("$udtSchema.$udtName")
+        udtName == "citext" -> JoinClass.TEXT
         else -> null
     }
     else -> null
@@ -219,7 +219,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     /** Column metadata of a table already cleared by [requireTable]. */
     /** Column metadata of a table already cleared by [readableTableOid], which supplies [oid]. */
-    private fun joinTableMeta(schema: String, table: String, oid: Long): JoinTableMeta {
+    private fun tableMeta(schema: String, table: String, oid: Long): TableMeta {
         data class Col(
             val name: String,
             val type: String,
@@ -255,13 +255,13 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             table,
         )
         val (pkColumns, fkColumns) = keyMetadata(schema, table)
-        return JoinTableMeta(
+        return TableMeta(
             table,
             columns.map { c ->
-                JoinColMeta(
+                ColMeta(
                     name = c.name,
                     type = c.fullType,
-                    cls = pgTypeClass(c.type, c.udtSchema, c.udtName, c.isEnum),
+                    joinClass = pgJoinClass(c.type, c.udtSchema, c.udtName, c.isEnum),
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],
                     comment = c.comment,
@@ -273,11 +273,11 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
     override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
         val realSchema = resolveSchema(schema)
         val names = spec.tableNames()
-        val metas = HashMap<String, JoinTableMeta>()
+        val metas = HashMap<String, TableMeta>()
         for (name in names) {
             if (name in metas) continue
             metas[name] = joinTable(name) {
-                joinTableMeta(realSchema, name, readableTableOid(realSchema, name))
+                tableMeta(realSchema, name, readableTableOid(realSchema, name))
             }
         }
         val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
@@ -311,7 +311,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val realTable = table
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
-        val columns = joinTableMeta(realSchema, realTable, oid).columns.map { it.columnInfo() }
+        val columns = tableMeta(realSchema, realTable, oid).columns.map { it.columnInfo() }
         val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->

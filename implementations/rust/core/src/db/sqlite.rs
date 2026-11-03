@@ -11,7 +11,7 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
-    self, ColMeta, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta, TypeClass,
+    self, ColMeta, Dialect, IlikeStyle, JoinClass, JoinData, JoinOpts, JoinSpec, TableMeta,
 };
 
 /// Catalog/metadata queries need a fixed bounded timeout.
@@ -208,31 +208,31 @@ fn partial_index_predicate(sql: &str) -> Option<String> {
 
 /// `spec/protocol.md` §5.11.2: recognised names first, then SQLite's own
 /// affinity rules (`docs/adapter-decisions.md` §5.11).
-fn type_class(declared: &str) -> Option<TypeClass> {
+fn join_class(declared: &str) -> Option<JoinClass> {
     let upper = declared.trim().to_ascii_uppercase();
     if upper.is_empty() {
-        return Some(TypeClass::Untyped);
+        return Some(JoinClass::Untyped);
     }
     let base = upper.split('(').next().unwrap_or("").trim();
     match base {
-        "UUID" => return Some(TypeClass::Uuid),
-        "BOOLEAN" | "BOOL" => return Some(TypeClass::Boolean),
-        "DATE" | "DATETIME" => return Some(TypeClass::Temporal),
-        "TIME" => return Some(TypeClass::Time),
+        "UUID" => return Some(JoinClass::Uuid),
+        "BOOLEAN" | "BOOL" => return Some(JoinClass::Boolean),
+        "DATE" | "DATETIME" => return Some(JoinClass::Temporal),
+        "TIME" => return Some(JoinClass::Time),
         "JSON" | "JSONB" => return None,
-        _ if base.starts_with("TIMESTAMP") => return Some(TypeClass::Temporal),
+        _ if base.starts_with("TIMESTAMP") => return Some(JoinClass::Temporal),
         _ => {}
     }
     if upper.contains("INT") {
-        Some(TypeClass::Number)
+        Some(JoinClass::Number)
     } else if upper.contains("CHAR") || upper.contains("CLOB") || upper.contains("TEXT") {
-        Some(TypeClass::Text)
+        Some(JoinClass::Text)
     } else if upper.contains("BLOB") {
-        Some(TypeClass::Binary)
+        Some(JoinClass::Binary)
     } else if upper.contains("REAL") || upper.contains("FLOA") || upper.contains("DOUB") {
         None
     } else {
-        Some(TypeClass::Number)
+        Some(JoinClass::Number)
     }
 }
 
@@ -247,10 +247,7 @@ const JOIN_DIALECT: Dialect = Dialect {
     ilike: IlikeStyle::Like,
 };
 
-async fn join_table_meta(
-    conn: &mut sqlx::SqliteConnection,
-    table: &str,
-) -> Result<TableMeta, DbError> {
+async fn table_meta(conn: &mut sqlx::SqliteConnection, table: &str) -> Result<TableMeta, DbError> {
     let quoted = quote_ident(table);
     let columns = sqlx::query_as::<_, (i64, String, String)>(sqlx::AssertSqlSafe(format!(
         "select cid, name, type from pragma_table_info({quoted}) order by cid"
@@ -271,7 +268,7 @@ async fn join_table_meta(
                     (None, None)
                 };
                 ColMeta {
-                    class: type_class(&declared),
+                    class: join_class(&declared),
                     collation: None,
                     comment: None,
                     key,
@@ -416,7 +413,7 @@ impl DbSource for SqliteSource {
         let meta_table = table.clone();
         let columns: Vec<ColumnInfo> = self
             .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-                join_table_meta(conn, &meta_table).await
+                table_meta(conn, &meta_table).await
             })
             .await?
             .columns
@@ -513,7 +510,7 @@ impl DbSource for SqliteSource {
                 if !allowed.iter().any(|t| t == name) {
                     return Err(DbError::BadJoin(format!("unknown table {name:?}")));
                 }
-                metas.insert(name, join_table_meta(conn, name).await?);
+                metas.insert(name, table_meta(conn, name).await?);
             }
             let tables = names.iter().map(|n| metas[n].clone()).collect();
             let plan = join::plan(spec, tables, &opts)?;
@@ -1065,10 +1062,10 @@ mod tests {
         assert_eq!(
             classes,
             [
-                Some(TypeClass::Number),
-                Some(TypeClass::Text),
+                Some(JoinClass::Number),
+                Some(JoinClass::Text),
                 None,
-                Some(TypeClass::Untyped)
+                Some(JoinClass::Untyped)
             ]
         );
         let wire = serde_json::to_value(&data.columns).unwrap();
@@ -1393,8 +1390,8 @@ mod tests {
     }
 
     #[test]
-    fn type_classes_follow_declared_names_then_affinity() {
-        use TypeClass::*;
+    fn join_classes_follow_declared_names_then_affinity() {
+        use JoinClass::*;
         for (declared, expected) in [
             ("INTEGER", Some(Number)),
             ("bigint", Some(Number)),
@@ -1412,7 +1409,7 @@ mod tests {
             ("JSON", None),
             ("", Some(Untyped)),
         ] {
-            assert_eq!(type_class(declared), expected, "{declared:?}");
+            assert_eq!(join_class(declared), expected, "{declared:?}");
         }
     }
 }

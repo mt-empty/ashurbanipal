@@ -851,7 +851,7 @@ the columns' native types, not the text cast of §5.4.2.
 - The statement is built with generated aliases for tables and columns;
   no request text becomes an alias or label. Values are bound parameters.
 - A timed-out join is a 500 with `code: "query_timeout"` (§2, §6).
-- See `docs/adapter-decisions.md` for per-engine type classes, text
+- See `docs/adapter-decisions.md` for per-engine join classes, text
   collation handling, and accepted gaps.
 
 ## 6. Server invariants

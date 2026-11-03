@@ -58,7 +58,7 @@ data class JoinColumnInfo(
     @JsonInclude(JsonInclude.Include.NON_NULL) val key: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
-    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("class") val className: String? = null,
+    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("class") val joinClass: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("enum_type") val enumType: String? = null,
 )
 
@@ -152,39 +152,39 @@ fun parseJoin(raw: String): JoinSpec {
 }
 
 /**
- * Comparison class of a column type (`spec/protocol.md` §5.11.2). [id] carries
+ * Comparison class of a column type (`spec/protocol.md` §5.11.2). [enumType] carries
  * an enumerated type's identity; `untyped` is a SQLite column with no declared
  * type and pairs only with itself.
  */
-data class TypeClass(val kind: String, val id: String = "") {
+data class JoinClass(val kind: String, val enumType: String = "") {
     companion object {
-        val NUMBER = TypeClass("number")
-        val TEXT = TypeClass("text")
-        val UUID = TypeClass("uuid")
-        val BOOLEAN = TypeClass("boolean")
-        val TEMPORAL = TypeClass("temporal")
-        val TIME = TypeClass("time")
-        val BINARY = TypeClass("binary")
-        val UNTYPED = TypeClass("untyped")
-        fun enum(identity: String) = TypeClass("enum", identity)
+        val NUMBER = JoinClass("number")
+        val TEXT = JoinClass("text")
+        val UUID = JoinClass("uuid")
+        val BOOLEAN = JoinClass("boolean")
+        val TEMPORAL = JoinClass("temporal")
+        val TIME = JoinClass("time")
+        val BINARY = JoinClass("binary")
+        val UNTYPED = JoinClass("untyped")
+        fun enum(identity: String) = JoinClass("enum", identity)
     }
 }
 
 /** One column as the live catalog reports it. [collation] is set where two text collations can clash (MySQL). */
-data class JoinColMeta(
+data class ColMeta(
     val name: String,
     val type: String,
-    val cls: TypeClass?,
+    val joinClass: JoinClass?,
     val collation: String? = null,
     val key: String? = null,
     val references: ColumnRef? = null,
     val comment: String? = null,
 ) {
     /** The §5.4.1 shape of this column. */
-    fun columnInfo() = ColumnInfo(name, type, key, references, comment, cls?.kind, cls?.id?.takeIf { it.isNotEmpty() })
+    fun columnInfo() = ColumnInfo(name, type, key, references, comment, joinClass?.kind, joinClass?.enumType?.takeIf { it.isNotEmpty() })
 }
 
-data class JoinTableMeta(val name: String, val columns: List<JoinColMeta>) {
+data class TableMeta(val name: String, val columns: List<ColMeta>) {
     fun index(column: String): Int {
         val i = columns.indexOfFirst { it.name == column }
         if (i < 0) throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
@@ -203,7 +203,7 @@ internal data class ResolvedCondition(val cond: Condition, val pos: Int, val col
 
 /** A request resolved against the catalog; every name in SQL text comes from [tables], never the request. */
 class JoinPlan internal constructor(
-    val tables: List<JoinTableMeta>,
+    val tables: List<TableMeta>,
     internal val left: List<Boolean>,
     /** Per join entry: (left position, left column, right column). */
     internal val ons: List<List<Triple<Int, Int, Int>>>,
@@ -217,7 +217,7 @@ class JoinPlan internal constructor(
     fun columnInfos(): List<JoinColumnInfo> = selection.mapIndexed { i, (pos, col) ->
         val t = tables[pos]
         val c = t.columns[col].columnInfo()
-        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.key, c.references, c.comment, c.className, c.enumType)
+        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.key, c.references, c.comment, c.joinClass, c.enumType)
     }
 
     /** Keys positional result rows by label and trims the extra row asked for `has_more`. */
@@ -230,25 +230,25 @@ class JoinPlan internal constructor(
     }
 }
 
-private fun describe(t: JoinTableMeta, c: JoinColMeta) = "${t.name}.${c.name} (${c.type})"
+private fun describe(t: TableMeta, c: ColMeta) = "${t.name}.${c.name} (${c.type})"
 
 private val FLOAT_FIRST_WORD = Regex("""^\s*(real|double|float\d*)\b""", RegexOption.IGNORE_CASE)
 
 /** The type's first word, so neither a user type such as `realm_kind`, a MySQL `set('real')`, nor a float array (which fails as an array) counts. */
 internal fun isFloatType(type: String) = FLOAT_FIRST_WORD.containsMatchIn(type) && '[' !in type
 
-private fun unjoinable(position: Int, t: JoinTableMeta, c: JoinColMeta): BadJoinException {
+private fun unjoinable(position: Int, t: TableMeta, c: ColMeta): BadJoinException {
     val why = if (isFloatType(c.type)) ": floating-point values are not compared exactly" else ""
     return BadJoinException("join $position on: ${describe(t, c)} cannot be used in a join$why")
 }
 
-private fun checkPair(position: Int, lt: JoinTableMeta, lc: JoinColMeta, rt: JoinTableMeta, rc: JoinColMeta) {
-    val lcls = lc.cls ?: throw unjoinable(position, lt, lc)
-    val rcls = rc.cls ?: throw unjoinable(position, rt, rc)
-    if (lcls != rcls) {
+private fun checkPair(position: Int, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta) {
+    val leftJoinClass = lc.joinClass ?: throw unjoinable(position, lt, lc)
+    val rightJoinClass = rc.joinClass ?: throw unjoinable(position, rt, rc)
+    if (leftJoinClass != rightJoinClass) {
         throw BadJoinException("join $position on: ${describe(lt, lc)} cannot be joined to ${describe(rt, rc)}")
     }
-    if (lcls == TypeClass.TEXT && lc.collation != null && rc.collation != null && lc.collation != rc.collation) {
+    if (leftJoinClass == JoinClass.TEXT && lc.collation != null && rc.collation != null && lc.collation != rc.collation) {
         throw BadJoinException(
             "join $position on: ${describe(lt, lc)} and ${describe(rt, rc)} use different text collations (${lc.collation} and ${rc.collation})",
         )
@@ -271,7 +271,7 @@ internal fun assignJoinLabels(names: List<String>, joins: List<Int>): List<Strin
 }
 
 /** Resolves a request against the catalog; `tables[i]` is the metadata of position i. */
-fun planJoin(spec: JoinSpec, tables: List<JoinTableMeta>, opts: JoinOpts): JoinPlan {
+fun planJoin(spec: JoinSpec, tables: List<TableMeta>, opts: JoinOpts): JoinPlan {
     val ons = spec.joins.mapIndexed { i, entry ->
         val position = i + 1
         entry.on.map { pair ->

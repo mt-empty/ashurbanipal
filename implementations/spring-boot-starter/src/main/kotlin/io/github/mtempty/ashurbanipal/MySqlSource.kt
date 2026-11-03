@@ -114,14 +114,14 @@ private const val MARIADB_JSON_COLUMNS_SQL =
         "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun mysqlTypeClass(dataType: String, columnType: String): TypeClass? = when (dataType.lowercase()) {
-    "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> TypeClass.NUMBER
-    "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> TypeClass.TEXT
-    "date", "datetime", "timestamp" -> TypeClass.TEMPORAL
-    "time" -> TypeClass.TIME
-    "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> TypeClass.BINARY
-    "uuid" -> TypeClass.UUID
-    "enum" -> TypeClass.enum(columnType)
+internal fun mysqlJoinClass(dataType: String, columnType: String): JoinClass? = when (dataType.lowercase()) {
+    "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> JoinClass.NUMBER
+    "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> JoinClass.TEXT
+    "date", "datetime", "timestamp" -> JoinClass.TEMPORAL
+    "time" -> JoinClass.TIME
+    "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> JoinClass.BINARY
+    "uuid" -> JoinClass.UUID
+    "enum" -> JoinClass.enum(columnType)
     else -> null
 }
 
@@ -309,7 +309,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             ) { rs -> rs.getString(1) }.toSet()
         }
 
-    private fun tableMeta(variant: Variant, schema: String, table: String): JoinTableMeta {
+    private fun tableMeta(variant: Variant, schema: String, table: String): TableMeta {
         data class Col(val name: String, val type: String, val comment: String?, val collation: String?, val columnType: String)
         val columns = query(
             dataSource,
@@ -323,15 +323,15 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         ) { rs -> Col(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)) }
         val (pkColumns, fkColumns) = keyMetadata(variant, schema, table)
         val jsonColumns = mariadbJsonColumns(variant, schema, table)
-        return JoinTableMeta(
+        return TableMeta(
             table,
             columns.map { c ->
                 val isJson = c.name in jsonColumns
-                JoinColMeta(
+                ColMeta(
                     name = c.name,
                     // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
                     type = if (isJson) "json" else c.columnType,
-                    cls = if (isJson) null else mysqlTypeClass(c.type, c.columnType),
+                    joinClass = if (isJson) null else mysqlJoinClass(c.type, c.columnType),
                     collation = c.collation?.takeIf { it.isNotEmpty() },
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],
@@ -346,7 +346,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val realSchema = resolveSchema(variant, schema)
         val allowed = allowedTables(variant, realSchema)
         val names = spec.tableNames()
-        val metas = HashMap<String, JoinTableMeta>()
+        val metas = HashMap<String, TableMeta>()
         for (name in names) {
             if (name in metas) continue
             if (name !in allowed) throw BadJoinException("unknown table \"$name\"")

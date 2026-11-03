@@ -1,4 +1,4 @@
-import type { Column, JoinClass } from "../core/types.js";
+import type { ClassedColumn, Column, JoinClass } from "../core/types.js";
 
 // Mirrors json-tree.ts's UUID scalar test; kept local so this leaf stays
 // unit-testable without a runtime import.
@@ -69,7 +69,7 @@ const TYPE_ALIASES: Record<string, ColumnTypeClass> = {
 
 // Only the parenthesised groups go, so `numeric(10,2)[]` stays an array and
 // `timestamp(3) with time zone` keeps its zone.
-function typeKey(rawType: string): string {
+function baseTypeName(rawType: string): string {
   return rawType
     .toLowerCase()
     .replace(/\([^)]*\)/g, "")
@@ -78,10 +78,10 @@ function typeKey(rawType: string): string {
     .trim();
 }
 
-export function columnTypeClass(rawType: string): ColumnTypeClass | null {
+export function typeNameClass(rawType: string): ColumnTypeClass | null {
   // MySQL's boolean is tinyint(1); only the display width tells it apart.
   if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
-  return TYPE_ALIASES[typeKey(rawType)] ?? null;
+  return TYPE_ALIASES[baseTypeName(rawType)] ?? null;
 }
 
 const FROM_JOIN_CLASS: Partial<Record<JoinClass, ColumnTypeClass>> = {
@@ -93,8 +93,8 @@ const FROM_JOIN_CLASS: Partial<Record<JoinClass, ColumnTypeClass>> = {
 
 // The type name first; the server's join class covers what the name hides,
 // such as a Postgres domain over integer, whose `type` is the domain's name.
-export function cellTypeClass(col: Pick<Column, "type" | "class">): ColumnTypeClass | null {
-  return columnTypeClass(col.type) ?? (col.class ? (FROM_JOIN_CLASS[col.class] ?? null) : null);
+export function columnTypeClass(col: ClassedColumn): ColumnTypeClass | null {
+  return typeNameClass(col.type) ?? (col.class ? (FROM_JOIN_CLASS[col.class] ?? null) : null);
 }
 
 const TYPE_CLASS_CSS: Partial<Record<ColumnTypeClass, string>> = {
@@ -117,7 +117,7 @@ function isTextType(type: string): boolean {
 // A column renders as a JSON tree when the backend typed it as JSON, or when
 // it is a plain string type and the value itself leads with { or [.
 export function rendersAsJson(col: Column, raw: string): boolean {
-  const type = typeKey(col.type);
+  const type = baseTypeName(col.type);
   if (TYPE_ALIASES[type] === "json") return true;
   // The class covers a text type whose name hides it, such as a domain over varchar.
   return (isTextType(type) || col.class === "text") && /^\s*[[{]/.test(raw);
@@ -126,7 +126,7 @@ export function rendersAsJson(col: Column, raw: string): boolean {
 // A value that won't parse is only worth flagging when the backend actually
 // typed the column as JSON; a shape-detected guess that misses is expected.
 export function warnBadJsonCell(col: Column, err: unknown): void {
-  if (columnTypeClass(col.type) === "json") {
+  if (typeNameClass(col.type) === "json") {
     console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
   }
 }
@@ -188,8 +188,8 @@ function edgeMarks(run: string, side: "leading" | "trailing"): Node[] {
 }
 
 function typedValue(col: Column, raw: string): Node {
-  const klass = cellTypeClass(col);
-  if (klass === "date") {
+  const typeClass = columnTypeClass(col);
+  if (typeClass === "date") {
     // No `datetime` attribute: the engine's text cast isn't a valid HTML
     // datetime value on any backend.
     const time = document.createElement("time");
@@ -200,12 +200,12 @@ function typedValue(col: Column, raw: string): Node {
   // An unbucketed type (SQLite "unknown"/"TEXT", Postgres "text", …) with a
   // UUID-shaped value still gets the uuid colour — the pattern is specific
   // enough to trust, and json-tree.ts colours nested UUID strings the same way.
-  let cls: string | undefined;
-  if (klass) cls = TYPE_CLASS_CSS[klass];
-  else if (UUID_RE.test(raw)) cls = "cell-type-uuid";
-  if (cls) {
+  let cssClass: string | undefined;
+  if (typeClass) cssClass = TYPE_CLASS_CSS[typeClass];
+  else if (UUID_RE.test(raw)) cssClass = "cell-type-uuid";
+  if (cssClass) {
     const span = document.createElement("span");
-    span.className = cls;
+    span.className = cssClass;
     span.textContent = raw;
     return span;
   }

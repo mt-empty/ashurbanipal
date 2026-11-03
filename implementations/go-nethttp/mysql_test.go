@@ -487,17 +487,17 @@ func TestMySQLJoinDifferingTextCollationsAreABadJoin(t *testing.T) {
 	}
 }
 
-func TestMySQLTypeClass(t *testing.T) {
+func TestMySQLJoinClass(t *testing.T) {
 	num, txt, temporal, uuid := classNumber, classText, classTemporal, classUUID
 	enum := classEnum("enum('a','b')")
 	for _, c := range []struct {
 		dataType, columnType string
-		want                 *typeClass
+		want                 *joinClass
 	}{
 		{"bigint", "bigint", &num}, {"VARCHAR", "varchar(20)", &txt}, {"datetime", "datetime", &temporal},
 		{"enum", "enum('a','b')", &enum}, {"json", "json", nil}, {"double", "double", nil}, {"uuid", "uuid", &uuid},
 	} {
-		got := mysqlTypeClass(c.dataType, c.columnType)
+		got := mysqlJoinClass(c.dataType, c.columnType)
 		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
 			t.Errorf("%s: got %v want %v", c.dataType, got, c.want)
 		}

@@ -31,6 +31,9 @@ export type Column =
   | (ColumnBase & { key: "pk"; references?: ColumnRef })
   | (ColumnBase & { key: "fk"; references: ColumnRef });
 
+/** The part of a column that decides its join class and display bucket. */
+export type ClassedColumn = Pick<Column, "type" | "class" | "enum_type">;
+
 export interface Row {
   [column: string]: string | null;
 }

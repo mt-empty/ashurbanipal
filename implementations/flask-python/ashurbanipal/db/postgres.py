@@ -16,11 +16,11 @@ from ..join import (
     UUID,
     ColMeta,
     Dialect,
+    JoinClass,
     JoinData,
     JoinOpts,
     JoinSpec,
     TableMeta,
-    TypeClass,
     build_select,
     enum_class,
     plan_join,
@@ -100,7 +100,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def type_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> TypeClass | None:
+def join_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> JoinClass | None:
     """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
     if data_type in ("smallint", "integer", "bigint", "numeric"):
         return NUMBER
@@ -292,9 +292,7 @@ class PgSource(DbSource):
 
                 # The join route's lookup, so both routes report the same columns; its
                 # names are the live catalog's, so they also serve as the allow-list.
-                columns = [
-                    c.column_info() for c in self._join_table_meta(cur, resolved_schema, table, oid).columns
-                ]
+                columns = [c.column_info() for c in self._table_meta(cur, resolved_schema, table, oid).columns]
                 column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
@@ -347,7 +345,7 @@ class PgSource(DbSource):
 
                 return TableData(columns=columns, rows=rows, total_approx=total_approx)
 
-    def _join_table_meta(self, cur: psycopg.Cursor, schema: str, table: str, oid: int) -> TableMeta:
+    def _table_meta(self, cur: psycopg.Cursor, schema: str, table: str, oid: int) -> TableMeta:
         """Column metadata of a table already cleared by `_readable_table_oid`, which supplies `oid`."""
         # information_schema.columns drives the list (column privileges, order);
         # pg_attribute adds the full type spelling and the comment, both keyed by
@@ -374,7 +372,7 @@ class PgSource(DbSource):
                 ColMeta(
                     name=name,
                     type_name=full_type,
-                    cls=type_class(data_type, udt_schema, udt_name, is_enum),
+                    join_class=join_class(data_type, udt_schema, udt_name, is_enum),
                     key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                     references=fk_columns.get(name),
                     comment=comment,
@@ -396,7 +394,7 @@ class PgSource(DbSource):
                     if name not in metas:
                         try:
                             oid = self._readable_table_oid(cur, resolved_schema, name)
-                            metas[name] = self._join_table_meta(cur, resolved_schema, name, oid)
+                            metas[name] = self._table_meta(cur, resolved_schema, name, oid)
                         except NotAllowed as e:
                             raise unknown_join_table(e, name) from None
                 plan = plan_join(spec, [metas[n] for n in names], opts)

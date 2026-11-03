@@ -38,7 +38,7 @@ class ColumnInfo:
     references: ColumnRef | None = None
     comment: str | None = None
     # The §5.11.2 join class (`class` on the wire); None when not joinable.
-    class_name: str | None = None
+    join_class: str | None = None
     # The enumerated type's identity; set only when the class is enum.
     enum_type: str | None = None
 

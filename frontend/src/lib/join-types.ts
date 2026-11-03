@@ -1,12 +1,10 @@
-import type { Column, JoinClass } from "../core/types.js";
+import type { ClassedColumn, Column, JoinClass } from "../core/types.js";
 
 // ==== Join pair checks (spec/protocol.md §5.11.2) ====
 // The server reports each column's join class, so the form greys the pairs
 // it would reject by type: a different class, two different enumerated types
 // (`enum_type`), or a column with no class at all. A MySQL collation clash
 // between two text columns is still only caught by the server.
-
-type Typed = Pick<Column, "type" | "class" | "enum_type">;
 
 const LABEL: Record<JoinClass, string> = {
   number: "number",
@@ -28,20 +26,20 @@ export interface JoinMismatch {
 }
 
 // A full type can be long (MySQL `enum('a','b',…)`), so notes cut it to fit a menu row.
-export const shortType = (type: string): string => (type.length > 24 ? `${type.slice(0, 23)}…` : type);
+export const truncateType = (type: string): string => (type.length > 24 ? `${type.slice(0, 23)}…` : type);
 
 // Why column `candidate` cannot pair with `other`, or null when it can.
-export function joinMismatch(candidate: Typed, other: Typed): JoinMismatch | null {
+export function joinMismatch(candidate: ClassedColumn, other: ClassedColumn): JoinMismatch | null {
   const blocked = unjoinableReason(candidate) ?? unjoinableReason(other);
   if (blocked) {
-    const type = shortType(candidate.class ? other.type : candidate.type);
+    const type = truncateType(candidate.class ? other.type : candidate.type);
     return { note: blocked, message: `${type} columns cannot be joined. Pick another column.` };
   }
   const a = candidate.class as JoinClass;
   const b = other.class as JoinClass;
   if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
-  const left = shortType(candidate.type);
-  const right = shortType(other.type);
+  const left = truncateType(candidate.type);
+  const right = truncateType(other.type);
   return {
     note: `${left} ≠ ${right}`,
     message:
@@ -52,13 +50,13 @@ export function joinMismatch(candidate: Typed, other: Typed): JoinMismatch | nul
 }
 
 // A column that cannot join anything, whatever the other side is.
-export function unjoinableReason(column: Typed): string | null {
-  return column.class ? null : `${shortType(column.type)}: not joinable`;
+export function unjoinableReason(column: ClassedColumn): string | null {
+  return column.class ? null : `${truncateType(column.type)}: not joinable`;
 }
 
 // The note a menu row shows for `column` when the other side is `other` (or
 // nothing picked yet); a non-null note means the row is greyed.
-export function pairNote(column: Typed, other: Typed | undefined): string | null {
+export function pairNote(column: ClassedColumn, other: ClassedColumn | undefined): string | null {
   return other === undefined ? unjoinableReason(column) : (joinMismatch(column, other)?.note ?? null);
 }
 

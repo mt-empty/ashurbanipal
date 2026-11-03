@@ -16,7 +16,7 @@ import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-ds
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
 import { columnKey } from "./join-view.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
-import { columnKeyOf, tableMeta } from "./table-meta.js";
+import { keyDescriptionOf, tableMeta } from "./table-meta.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
@@ -258,7 +258,7 @@ function updateFilterSuggestions(): void {
         label: columnKey(c),
         insert: columnKey(c),
         note: c.type,
-        key: columnKeyOf(c, meta),
+        key: keyDescriptionOf(c, meta),
       })),
     );
   } else if (ctx.expect === "operator") {

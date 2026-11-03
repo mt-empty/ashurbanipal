@@ -21,11 +21,11 @@ from ..join import (
     UUID,
     ColMeta,
     Dialect,
+    JoinClass,
     JoinData,
     JoinOpts,
     JoinSpec,
     TableMeta,
-    TypeClass,
     build_select,
     plan_join,
 )
@@ -147,7 +147,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def type_class(declared: str) -> TypeClass | None:
+def join_class(declared: str) -> JoinClass | None:
     """Recognised names first, then SQLite's own affinity rules
     (`docs/adapter-decisions.md` §5.11).
     """
@@ -210,7 +210,7 @@ class SqliteSource(DbSource):
         cur.execute(f"select cid, name from pragma_table_info({quote_ident(table)}) order by cid")
         return [row[1] for row in cur.fetchall()]
 
-    def _join_table_meta(self, cur: sqlite3.Cursor, table: str) -> TableMeta:
+    def _table_meta(self, cur: sqlite3.Cursor, table: str) -> TableMeta:
         """`table` must already be allow-listed: it is spliced into the pragma call."""
         pk_columns, fk_columns = self._key_metadata(cur, table)
         cur.execute(f"select cid, name, type from pragma_table_info({quote_ident(table)}) order by cid")
@@ -221,7 +221,7 @@ class SqliteSource(DbSource):
                     name=col,
                     # A declared type can be empty (""); a stable label beats emitting "".
                     type_name=declared or "unknown",
-                    cls=type_class(declared or ""),
+                    join_class=join_class(declared or ""),
                     key=(KeyKind.PK if col in pk_columns else (KeyKind.FK if col in fk_columns else None)),
                     references=fk_columns.get(col),
                 )
@@ -307,7 +307,7 @@ class SqliteSource(DbSource):
 
                 # The join route's lookup, so both routes report the same columns; its
                 # names are the live catalog's, so they also serve as the allow-list.
-                columns = [c.column_info() for c in self._join_table_meta(cur, table).columns]
+                columns = [c.column_info() for c in self._table_meta(cur, table).columns]
                 column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
@@ -371,7 +371,7 @@ class SqliteSource(DbSource):
                         continue
                     if name not in allowed:
                         raise BadJoin(f"unknown table {name!r}")
-                    metas[name] = self._join_table_meta(cur, name)
+                    metas[name] = self._table_meta(cur, name)
                 plan = plan_join(spec, [metas[n] for n in names], opts)
 
                 # The statement is built from catalog names and generated

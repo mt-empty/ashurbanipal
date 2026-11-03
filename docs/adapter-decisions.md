@@ -238,7 +238,7 @@ constraints; there is no per-partition dedup to do.
 
 ## §5.11 — table join (`/api/tables/join`)
 
-Protocol property: each `on` pair joins columns of one type class
+Protocol property: each `on` pair joins columns of one join class
 (`spec/protocol.md` §5.11.2), checked from the catalog before the
 statement runs, with a 400 naming the pair. The classes are engine-neutral;
 how a native type reaches a class is not. A type with no class is not

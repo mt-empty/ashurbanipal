@@ -4,18 +4,18 @@ import type { Condition } from "../filter.js";
 import {
   BadJoinError,
   buildJoinSelect,
+  type ColMeta,
   columnInfo,
-  type JoinColMeta,
+  type JoinClass,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
   type JoinSpec,
-  type JoinTableMeta,
   joinColumnInfos,
   joinRows,
   joinTableNames,
   planJoin,
-  type TypeClass,
+  type TableMeta,
 } from "../join.js";
 import {
   type ColumnInfo,
@@ -119,7 +119,7 @@ const MARIADB_JSON_COLUMNS_SQL =
   "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-export function mysqlTypeClass(dataType: string, columnType: string): TypeClass | undefined {
+export function mysqlJoinClass(dataType: string, columnType: string): JoinClass | undefined {
   switch (dataType.toLowerCase()) {
     case "tinyint":
     case "smallint":
@@ -153,7 +153,7 @@ export function mysqlTypeClass(dataType: string, columnType: string): TypeClass 
     case "uuid":
       return { kind: "uuid" };
     case "enum":
-      return { kind: "enum", id: columnType };
+      return { kind: "enum", enumType: columnType };
     default:
       return undefined;
   }
@@ -419,7 +419,7 @@ export class MySqlSource implements DbSource {
     schema: string,
     table: string,
     timeoutMs: number,
-  ): Promise<JoinTableMeta> {
+  ): Promise<TableMeta> {
     const rows = await queryRows(
       conn,
       timedSelect(
@@ -433,12 +433,12 @@ export class MySqlSource implements DbSource {
     );
     const { pkColumns, fkColumns } = await this.keyMetadataInTx(conn, variant, schema, table, timeoutMs);
     const jsonColumns = await this.mariadbJsonColumns(conn, variant, schema, table, timeoutMs);
-    const columns = rows.map((r): JoinColMeta => {
+    const columns = rows.map((r): ColMeta => {
       const name = r.column_name as string;
-      const col: JoinColMeta = jsonColumns.has(name)
+      const col: ColMeta = jsonColumns.has(name)
         ? { name, type: "json", class: undefined }
         : // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
-          { name, type: String(r.column_type), class: mysqlTypeClass(r.data_type as string, String(r.column_type)) };
+          { name, type: String(r.column_type), class: mysqlJoinClass(r.data_type as string, String(r.column_type)) };
       if (r.collation_name) col.collation = r.collation_name as string;
       if (pkColumns.has(name)) {
         col.key = "pk";
@@ -459,7 +459,7 @@ export class MySqlSource implements DbSource {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       const allowed = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
       const names = joinTableNames(spec);
-      const metas = new Map<string, JoinTableMeta>();
+      const metas = new Map<string, TableMeta>();
       for (const name of names) {
         if (metas.has(name)) continue;
         if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
@@ -467,7 +467,7 @@ export class MySqlSource implements DbSource {
       }
       const plan = planJoin(
         spec,
-        names.map((n) => metas.get(n) as JoinTableMeta),
+        names.map((n) => metas.get(n) as TableMeta),
         opts,
       );
 

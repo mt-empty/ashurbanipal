@@ -301,8 +301,8 @@ def _table_to_dict(t) -> dict:
 
 def _column_to_dict(c) -> dict:
     d = {"name": c.name, "type": c.type_name}
-    if c.class_name is not None:
-        d["class"] = c.class_name
+    if c.join_class is not None:
+        d["class"] = c.join_class
     if c.enum_type is not None:
         d["enum_type"] = c.enum_type
     if c.key is not None:

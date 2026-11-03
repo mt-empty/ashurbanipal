@@ -143,25 +143,25 @@ export function parseJoin(raw: string): JoinSpec {
 }
 
 /**
- * Comparison class of a column type (spec/protocol.md §5.11.2). `id`
+ * Comparison class of a column type (spec/protocol.md §5.11.2). `enumType`
  * carries an enumerated type's identity; `untyped` is a SQLite column with
  * no declared type and pairs only with itself.
  */
-export interface TypeClass {
+export interface JoinClass {
   kind: JoinClassName;
-  id?: string;
+  enumType?: string;
 }
 
-const classKey = (c: TypeClass): string => `${c.kind}:${c.id ?? ""}`;
+const classKey = (c: JoinClass): string => `${c.kind}:${c.enumType ?? ""}`;
 
 /** The type's first word, so neither a user type such as `realm_kind`, a MySQL `set('real')`, nor a float array (which fails as an array) counts. */
 export const isFloatType = (type: string): boolean => /^\s*(real|double|float\d*)\b/i.test(type) && !type.includes("[");
 
 /** One column as the live catalog reports it. */
-export interface JoinColMeta {
+export interface ColMeta {
   name: string;
   type: string;
-  class?: TypeClass;
+  class?: JoinClass;
   /** Set where two text collations can clash (MySQL). */
   collation?: string;
   key?: KeyKind;
@@ -169,9 +169,9 @@ export interface JoinColMeta {
   comment?: string;
 }
 
-export interface JoinTableMeta {
+export interface TableMeta {
   name: string;
-  columns: JoinColMeta[];
+  columns: ColMeta[];
 }
 
 export interface JoinOpts {
@@ -211,7 +211,7 @@ interface ResolvedCondition {
 
 /** A request resolved against the catalog; every name in SQL text comes from `tables`, never the request. */
 export interface JoinPlan {
-  tables: JoinTableMeta[];
+  tables: TableMeta[];
   left: boolean[];
   /** Per join entry: [left position, left column, right column]. */
   ons: [number, number, number][][];
@@ -223,27 +223,27 @@ export interface JoinPlan {
   descending: boolean;
 }
 
-function columnIndex(table: JoinTableMeta, column: string): number {
+function columnIndex(table: TableMeta, column: string): number {
   const i = table.columns.findIndex((c) => c.name === column);
   if (i < 0) throw new NotAllowedError(`column "${column}"`, "column");
   return i;
 }
 
 // A name inside the join value: a miss is a bad join, not unknown_column.
-function joinColumnIndex(table: JoinTableMeta, column: string): number {
+function joinColumnIndex(table: TableMeta, column: string): number {
   const i = table.columns.findIndex((c) => c.name === column);
   if (i < 0) throw new BadJoinError(`${table.name} has no column "${column}"`);
   return i;
 }
 
-const describe = (t: JoinTableMeta, c: JoinColMeta): string => `${t.name}.${c.name} (${c.type})`;
+const describe = (t: TableMeta, c: ColMeta): string => `${t.name}.${c.name} (${c.type})`;
 
-function unjoinable(position: number, t: JoinTableMeta, c: JoinColMeta): BadJoinError {
+function unjoinable(position: number, t: TableMeta, c: ColMeta): BadJoinError {
   const why = isFloatType(c.type) ? ": floating-point values are not compared exactly" : "";
   return new BadJoinError(`join ${position} on: ${describe(t, c)} cannot be used in a join${why}`);
 }
 
-function checkPair(position: number, lt: JoinTableMeta, lc: JoinColMeta, rt: JoinTableMeta, rc: JoinColMeta): void {
+function checkPair(position: number, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta): void {
   if (!lc.class) throw unjoinable(position, lt, lc);
   if (!rc.class) throw unjoinable(position, rt, rc);
   if (classKey(lc.class) !== classKey(rc.class)) {
@@ -276,7 +276,7 @@ export function assignJoinLabels(names: string[], joins: number[]): string[] {
 }
 
 /** Resolves a request against the catalog; `tables[i]` is the metadata of position i. */
-export function planJoin(spec: JoinSpec, tables: JoinTableMeta[], opts: JoinOpts): JoinPlan {
+export function planJoin(spec: JoinSpec, tables: TableMeta[], opts: JoinOpts): JoinPlan {
   const left: boolean[] = [];
   const ons: [number, number, number][][] = [];
   spec.joins.forEach((entry, i) => {
@@ -394,10 +394,10 @@ export function buildJoinSelect(
 }
 
 /** The §5.4.1 shape of a column. */
-export function columnInfo(col: JoinColMeta): ColumnInfo {
+export function columnInfo(col: ColMeta): ColumnInfo {
   const info: ColumnInfo = { name: col.name, type: col.type };
   if (col.class) info.class = col.class.kind;
-  if (col.class?.id) info.enum_type = col.class.id;
+  if (col.class?.enumType) info.enum_type = col.class.enumType;
   if (col.key) info.key = col.key;
   if (col.references) info.references = col.references;
   if (col.comment) info.comment = col.comment;

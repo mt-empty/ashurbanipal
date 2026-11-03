@@ -4,18 +4,18 @@ import type { Condition } from "../filter.js";
 import {
   BadJoinError,
   buildJoinSelect,
+  type ColMeta,
   columnInfo,
-  type JoinColMeta,
+  type JoinClass,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
   type JoinSpec,
-  type JoinTableMeta,
   joinColumnInfos,
   joinRows,
   joinTableNames,
   planJoin,
-  type TypeClass,
+  type TableMeta,
 } from "../join.js";
 import {
   type ColumnInfo,
@@ -182,7 +182,7 @@ const JOIN_DIALECT: JoinDialect = {
 };
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
-export function sqliteTypeClass(declared: string): TypeClass | undefined {
+export function sqliteJoinClass(declared: string): JoinClass | undefined {
   const upper = declared.trim().toUpperCase();
   if (upper === "") return { kind: "untyped" };
   const base = (upper.split("(")[0] as string).trim();
@@ -240,18 +240,18 @@ function buildWhereClauseSqlite(conditions: Condition[], columnNames: string[]):
 }
 
 // `table` must already be allow-listed: it is spliced into the pragma call.
-async function joinTableMeta(db: Database, table: string): Promise<JoinTableMeta> {
+async function tableMeta(db: Database, table: string): Promise<TableMeta> {
   const declared = await dbAll<{ cid: number; name: string; type: string }>(
     db,
     `select cid, name, type from pragma_table_info(${quoteIdent(table)}) order by cid`,
   );
   const { pkColumns, fkColumns } = await keyMetadata(db, table);
-  const columns = declared.map((ct): JoinColMeta => {
-    const col: JoinColMeta = {
+  const columns = declared.map((ct): ColMeta => {
+    const col: ColMeta = {
       name: ct.name,
       // A declared type can be empty (""); a stable label beats emitting "".
       type: ct.type || "unknown",
-      class: sqliteTypeClass(ct.type ?? ""),
+      class: sqliteJoinClass(ct.type ?? ""),
     };
     if (pkColumns.has(ct.name)) {
       col.key = "pk";
@@ -298,15 +298,15 @@ export class SqliteSource implements DbSource {
     return bounded(this.db, timeoutMs, async () => {
       const allowed = await allowedTablesUnbounded(this.db);
       const names = joinTableNames(spec);
-      const metas = new Map<string, JoinTableMeta>();
+      const metas = new Map<string, TableMeta>();
       for (const name of names) {
         if (metas.has(name)) continue;
         if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
-        metas.set(name, await joinTableMeta(this.db, name));
+        metas.set(name, await tableMeta(this.db, name));
       }
       const plan = planJoin(
         spec,
-        names.map((n) => metas.get(n) as JoinTableMeta),
+        names.map((n) => metas.get(n) as TableMeta),
         opts,
       );
 
@@ -333,9 +333,9 @@ export class SqliteSource implements DbSource {
 
     // The join route's lookup, so both routes report the same columns; its
     // names are the live catalog's, so they also serve as the allow-list.
-    const columns: ColumnInfo[] = (
-      await bounded(this.db, timeoutMs, () => joinTableMeta(this.db, realTable))
-    ).columns.map(columnInfo);
+    const columns: ColumnInfo[] = (await bounded(this.db, timeoutMs, () => tableMeta(this.db, realTable))).columns.map(
+      columnInfo,
+    );
     const columnNames = columns.map((c) => c.name);
     let sort: string | undefined;
     if (opts.sort !== undefined) {

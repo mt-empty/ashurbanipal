@@ -79,7 +79,7 @@ test("toWire expands alias.* items that leave a table out of the select list", (
   assert.ok(wire.columns.every((c) => c.join !== 2));
 });
 
-test("join pair checks follow the server's class, and the type for enums", () => {
+test("join pair checks follow the server's class, and the enum_type for enums", () => {
   const uuid = { type: "uuid", class: "uuid" as const };
   const int = { type: "integer", class: "number" as const };
   const big = { type: "bigint", class: "number" as const };

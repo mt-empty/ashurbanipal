@@ -24,7 +24,7 @@ export function tableMeta(table: string | null): TableMeta | undefined {
   return table === null ? undefined : metas.get(scopeIdentity(table))?.meta;
 }
 
-export function columnKeyOf(col: Column, meta: TableMeta | undefined): KeyDescription | null {
+export function keyDescriptionOf(col: Column, meta: TableMeta | undefined): KeyDescription | null {
   return keyDescription(col, meta?.compositeFkOf.get(col.name));
 }
 

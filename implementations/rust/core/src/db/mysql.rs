@@ -12,7 +12,7 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
-    self, ColMeta, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta, TypeClass,
+    self, ColMeta, Dialect, IlikeStyle, JoinClass, JoinData, JoinOpts, JoinSpec, TableMeta,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -121,20 +121,20 @@ const MARIADB_JSON_COLUMNS_SQL: &str = "constraint_name from information_schema.
        and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
-fn type_class(data_type: &str, column_type: &str) -> Option<TypeClass> {
+fn join_class(data_type: &str, column_type: &str) -> Option<JoinClass> {
     match data_type.to_ascii_lowercase().as_str() {
         "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" | "decimal"
-        | "numeric" => Some(TypeClass::Number),
+        | "numeric" => Some(JoinClass::Number),
         "char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" => {
-            Some(TypeClass::Text)
+            Some(JoinClass::Text)
         }
-        "date" | "datetime" | "timestamp" => Some(TypeClass::Temporal),
-        "time" => Some(TypeClass::Time),
+        "date" | "datetime" | "timestamp" => Some(JoinClass::Temporal),
+        "time" => Some(JoinClass::Time),
         "binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" => {
-            Some(TypeClass::Binary)
+            Some(JoinClass::Binary)
         }
-        "uuid" => Some(TypeClass::Uuid),
-        "enum" => Some(TypeClass::Enum(column_type.to_string())),
+        "uuid" => Some(JoinClass::Uuid),
+        "enum" => Some(JoinClass::Enum(column_type.to_string())),
         _ => None,
     }
 }
@@ -315,7 +315,7 @@ impl MySqlSource {
                     let (type_name, class) = if json_columns.contains(&name) {
                         ("json".to_string(), None)
                     } else {
-                        let class = type_class(&data_type, &column_type);
+                        let class = join_class(&data_type, &column_type);
                         (column_type, class)
                     };
                     let (key, references) = if pk_columns.contains(&name) {
@@ -1492,17 +1492,17 @@ mod tests {
     }
 
     #[test]
-    fn type_classes_follow_data_type() {
-        use TypeClass::*;
-        assert_eq!(type_class("bigint", "bigint"), Some(Number));
-        assert_eq!(type_class("VARCHAR", "varchar(20)"), Some(Text));
-        assert_eq!(type_class("datetime", "datetime"), Some(Temporal));
+    fn join_classes_follow_data_type() {
+        use JoinClass::*;
+        assert_eq!(join_class("bigint", "bigint"), Some(Number));
+        assert_eq!(join_class("VARCHAR", "varchar(20)"), Some(Text));
+        assert_eq!(join_class("datetime", "datetime"), Some(Temporal));
         assert_eq!(
-            type_class("enum", "enum('a','b')"),
+            join_class("enum", "enum('a','b')"),
             Some(Enum("enum('a','b')".into()))
         );
-        assert_eq!(type_class("json", "json"), None);
-        assert_eq!(type_class("double", "double"), None);
-        assert_eq!(type_class("uuid", "uuid"), Some(Uuid));
+        assert_eq!(join_class("json", "json"), None);
+        assert_eq!(join_class("double", "double"), None);
+        assert_eq!(join_class("uuid", "uuid"), Some(Uuid));
     }
 }

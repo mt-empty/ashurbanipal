@@ -38,10 +38,10 @@ var pgJoinDialect = joinDialect{
 	ilike:    ilikeNative,
 }
 
-// pgTypeClass maps information_schema types to spec/protocol.md §5.11.2
+// pgJoinClass maps information_schema types to spec/protocol.md §5.11.2
 // classes (docs/adapter-decisions.md §5.11).
-func pgTypeClass(dataType, udtSchema, udtName string, isEnum bool) *typeClass {
-	var c typeClass
+func pgJoinClass(dataType, udtSchema, udtName string, isEnum bool) *joinClass {
+	var c joinClass
 	switch dataType {
 	case "smallint", "integer", "bigint", "numeric":
 		c = classNumber
@@ -268,9 +268,9 @@ func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, ta
 	return pkColumns, fkColumns, nil
 }
 
-// joinTableMeta reads a table already cleared by readableTableOID, which
+// tableMeta reads a table already cleared by readableTableOID, which
 // supplies oid.
-func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, table string, oid int) (joinTableMeta, error) {
+func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, table string, oid int) (tableMeta, error) {
 	metaCtx, cancel := c.bounded(ctx)
 	defer cancel()
 	// information_schema.columns drives the list (column privileges, order);
@@ -289,31 +289,31 @@ func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, 
 		 where c.table_schema = $1 and c.table_name = $2
 		 order by c.ordinal_position`, schema, table, oid)
 	if err != nil {
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
-	meta := joinTableMeta{name: table}
+	meta := tableMeta{name: table}
 	for rows.Next() {
 		var name, dataType, udtSchema, udtName, fullType string
 		var isEnum bool
 		var comment sql.NullString
 		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum, &fullType, &comment); err != nil {
 			rows.Close()
-			return joinTableMeta{}, err
+			return tableMeta{}, err
 		}
-		meta.columns = append(meta.columns, joinColMeta{
-			name: name, typeName: fullType, class: pgTypeClass(dataType, udtSchema, udtName, isEnum),
+		meta.columns = append(meta.columns, colMeta{
+			name: name, typeName: fullType, class: pgJoinClass(dataType, udtSchema, udtName, isEnum),
 			comment: comment.String,
 		})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	rows.Close()
 
 	pk, fk, err := c.keyMetadata(ctx, tx, schema, table)
 	if err != nil {
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	for i := range meta.columns {
 		col := &meta.columns[i]
@@ -336,7 +336,7 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 		return JoinData{}, err
 	}
 	names := spec.TableNames()
-	metas := map[string]joinTableMeta{}
+	metas := map[string]tableMeta{}
 	for _, name := range names {
 		if _, ok := metas[name]; ok {
 			continue
@@ -345,13 +345,13 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 		if err != nil {
 			return JoinData{}, unknownJoinTable(err)
 		}
-		meta, err := c.joinTableMeta(ctx, tx, realSchema, name, oid)
+		meta, err := c.tableMeta(ctx, tx, realSchema, name, oid)
 		if err != nil {
 			return JoinData{}, unknownJoinTable(err)
 		}
 		metas[name] = meta
 	}
-	tables := make([]joinTableMeta, len(names))
+	tables := make([]tableMeta, len(names))
 	for i, name := range names {
 		tables[i] = metas[name]
 	}
@@ -541,12 +541,12 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 
 	// The join route's lookup, so both routes report the same columns; its
 	// names are the live catalog's, so they also serve as the allow-list.
-	meta, err := c.joinTableMeta(ctx, tx, realSchema, realTable, oid)
+	meta, err := c.tableMeta(ctx, tx, realSchema, realTable, oid)
 	if err != nil {
 		return TableData{}, err
 	}
 	columns := meta.columnInfos()
-	columnNames := meta.names()
+	columnNames := meta.columnNames()
 
 	var sort *string
 	if opts.Sort != nil {

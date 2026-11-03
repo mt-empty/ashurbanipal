@@ -57,12 +57,12 @@ var sqliteJoinDialect = joinDialect{
 	ilike:    ilikeLike,
 }
 
-// sqliteTypeClass maps a declared type to a spec/protocol.md §5.11.2 class:
+// sqliteJoinClass maps a declared type to a spec/protocol.md §5.11.2 class:
 // recognised names first, then SQLite's affinity rules
 // (docs/adapter-decisions.md §5.11).
-func sqliteTypeClass(declared string) *typeClass {
+func sqliteJoinClass(declared string) *joinClass {
 	upper := strings.ToUpper(strings.TrimSpace(declared))
-	var c typeClass
+	var c joinClass
 	switch base := strings.TrimSpace(strings.SplitN(upper, "(", 2)[0]); {
 	case upper == "":
 		c = classUntyped
@@ -90,40 +90,40 @@ func sqliteTypeClass(declared string) *typeClass {
 	return &c
 }
 
-func (c *SQLiteSource) joinTableMeta(ctx context.Context, q queryer, table string) (joinTableMeta, error) {
+func (c *SQLiteSource) tableMeta(ctx context.Context, q queryer, table string) (tableMeta, error) {
 	metaCtx, cancel := c.bounded(ctx)
 	rows, err := q.QueryContext(metaCtx,
 		fmt.Sprintf("select cid, name, type from pragma_table_info(%s) order by cid", quoteIdent(table)))
 	if err != nil {
 		cancel()
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
-	meta := joinTableMeta{name: table}
+	meta := tableMeta{name: table}
 	for rows.Next() {
 		var cid int64
 		var name, declared string
 		if err := rows.Scan(&cid, &name, &declared); err != nil {
 			rows.Close()
 			cancel()
-			return joinTableMeta{}, err
+			return tableMeta{}, err
 		}
 		typeName := declared
 		if typeName == "" {
 			typeName = "unknown"
 		}
-		meta.columns = append(meta.columns, joinColMeta{name: name, typeName: typeName, class: sqliteTypeClass(declared)})
+		meta.columns = append(meta.columns, colMeta{name: name, typeName: typeName, class: sqliteJoinClass(declared)})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		cancel()
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	rows.Close()
 	cancel()
 
 	pk, fk, err := c.keyMetadata(ctx, q, table)
 	if err != nil {
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	for i := range meta.columns {
 		col := &meta.columns[i]
@@ -150,7 +150,7 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 	}
 
 	names := spec.TableNames()
-	metas := map[string]joinTableMeta{}
+	metas := map[string]tableMeta{}
 	for _, name := range names {
 		if _, ok := metas[name]; ok {
 			continue
@@ -158,13 +158,13 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 		if _, ok := findExact(allowed, name); !ok {
 			return JoinData{}, badJoin("unknown table %q", name)
 		}
-		meta, err := c.joinTableMeta(ctx, conn, name)
+		meta, err := c.tableMeta(ctx, conn, name)
 		if err != nil {
 			return JoinData{}, err
 		}
 		metas[name] = meta
 	}
-	tables := make([]joinTableMeta, len(names))
+	tables := make([]tableMeta, len(names))
 	for i, name := range names {
 		tables[i] = metas[name]
 	}
@@ -435,12 +435,12 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 
 	// The join route's lookup, so both routes report the same columns; its
 	// names are the live catalog's, so they also serve as the allow-list.
-	meta, err := c.joinTableMeta(ctx, c.db, realTable)
+	meta, err := c.tableMeta(ctx, c.db, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
 	columns := meta.columnInfos()
-	columnNames := meta.names()
+	columnNames := meta.columnNames()
 	var sort *string
 	if opts.Sort != nil {
 		found, ok := findExact(columnNames, *opts.Sort)

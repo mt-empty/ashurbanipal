@@ -2,8 +2,8 @@
 // of the seeded sources. Catalog routes replay what PostgresSource answered;
 // /tables/data filters, sorts, and pages the snapshot rows in JS.
 import snapshotData from "virtual:demo-snapshot";
-import type { Column, FilterCondition, FilterOp } from "../../core/types.js";
-import { cellTypeClass } from "../../lib/format.js";
+import type { ClassedColumn, FilterCondition, FilterOp } from "../../core/types.js";
+import { columnTypeClass } from "../../lib/format.js";
 import { SIBLINGS, SIBLINGS_INSTANCE } from "../siblings.js";
 import { type ApiResponse, json, problem } from "../wire.js";
 import type { Snapshot, SnapshotSource, SnapshotTable } from "./snapshot-types.js";
@@ -36,13 +36,13 @@ function tableIn(params: URLSearchParams): { table: SnapshotTable } | ApiRespons
 // Compares by native type, not spec/protocol.md §5.4.2's text-cast
 // lexicographic quirk ("10" < "9") — a demo should show filtering work.
 // Nulls sort as greater than any value: Postgres's NULLS LAST ascending.
-function typedCompare(col: Pick<Column, "type" | "class">, a: Cell, b: Cell): number {
+function typedCompare(col: ClassedColumn, a: Cell, b: Cell): number {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
   if (b === null) return -1;
-  const cls = cellTypeClass(col);
-  if (cls === "number") return Number(a) - Number(b);
-  if (cls === "date") return new Date(a).getTime() - new Date(b).getTime();
+  const typeClass = columnTypeClass(col);
+  if (typeClass === "number") return Number(a) - Number(b);
+  if (typeClass === "date") return new Date(a).getTime() - new Date(b).getTime();
   return a < b ? -1 : a > b ? 1 : 0;
 }
 const VALID_OPS = new Set<FilterOp>(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
@@ -53,7 +53,7 @@ function likeToRegExp(pattern: string, ci: boolean): RegExp {
     .replace(/_/g, ".");
   return new RegExp(`^${escaped}$`, ci ? "i" : "");
 }
-function matches(col: Pick<Column, "type" | "class">, cell: Cell, cond: FilterCondition): boolean {
+function matches(col: ClassedColumn, cell: Cell, cond: FilterCondition): boolean {
   let result: boolean;
   switch (cond.op) {
     case "IS NULL":

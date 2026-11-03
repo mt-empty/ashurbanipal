@@ -11,7 +11,7 @@ use super::{
 };
 use crate::filter::{Condition, Logic};
 use crate::join::{
-    self, ColMeta, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta, TypeClass,
+    self, ColMeta, Dialect, IlikeStyle, JoinClass, JoinData, JoinOpts, JoinSpec, TableMeta,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -88,24 +88,24 @@ const JOIN_DIALECT: Dialect = Dialect {
 };
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
-fn type_class(
+fn join_class(
     data_type: &str,
     udt_schema: &str,
     udt_name: &str,
     is_enum: bool,
-) -> Option<TypeClass> {
+) -> Option<JoinClass> {
     match data_type {
-        "smallint" | "integer" | "bigint" | "numeric" => Some(TypeClass::Number),
-        "character varying" | "character" | "text" => Some(TypeClass::Text),
-        "uuid" => Some(TypeClass::Uuid),
-        "boolean" => Some(TypeClass::Boolean),
-        "bytea" => Some(TypeClass::Binary),
+        "smallint" | "integer" | "bigint" | "numeric" => Some(JoinClass::Number),
+        "character varying" | "character" | "text" => Some(JoinClass::Text),
+        "uuid" => Some(JoinClass::Uuid),
+        "boolean" => Some(JoinClass::Boolean),
+        "bytea" => Some(JoinClass::Binary),
         "date" | "timestamp without time zone" | "timestamp with time zone" => {
-            Some(TypeClass::Temporal)
+            Some(JoinClass::Temporal)
         }
-        "time without time zone" | "time with time zone" => Some(TypeClass::Time),
-        "USER-DEFINED" if is_enum => Some(TypeClass::Enum(format!("{udt_schema}.{udt_name}"))),
-        "USER-DEFINED" if udt_name == "citext" => Some(TypeClass::Text),
+        "time without time zone" | "time with time zone" => Some(JoinClass::Time),
+        "USER-DEFINED" if is_enum => Some(JoinClass::Enum(format!("{udt_schema}.{udt_name}"))),
+        "USER-DEFINED" if udt_name == "citext" => Some(JoinClass::Text),
         _ => None,
     }
 }
@@ -395,7 +395,7 @@ impl PgPoolSource {
 
     /// Column metadata of a table already cleared by `readable_table_oid_in_tx`,
     /// which supplies `oid`.
-    async fn join_table_meta_in_tx(
+    async fn table_meta_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
@@ -439,7 +439,7 @@ impl PgPoolSource {
                             (None, None)
                         };
                         ColMeta {
-                            class: type_class(&data_type, &udt_schema, &udt_name, is_enum),
+                            class: join_class(&data_type, &udt_schema, &udt_name, is_enum),
                             collation: None,
                             comment,
                             key,
@@ -656,7 +656,7 @@ impl DbSource for PgPoolSource {
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
         let columns: Vec<ColumnInfo> = self
-            .join_table_meta_in_tx(&mut tx, &schema, &table, oid)
+            .table_meta_in_tx(&mut tx, &schema, &table, oid)
             .await?
             .columns
             .into_iter()
@@ -760,7 +760,7 @@ impl DbSource for PgPoolSource {
                     .await
                     .map_err(join::unknown_join_table)?;
                 let meta = self
-                    .join_table_meta_in_tx(&mut tx, &schema, name, oid)
+                    .table_meta_in_tx(&mut tx, &schema, name, oid)
                     .await
                     .map_err(join::unknown_join_table)?;
                 metas.insert(name, meta);

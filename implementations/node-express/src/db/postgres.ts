@@ -3,18 +3,18 @@ import { assertSafeTimeoutMs, mapSelectDenied, NotAllowedError, quoteIdent } fro
 import { buildWhereClause } from "../filter.js";
 import {
   buildJoinSelect,
+  type ColMeta,
   columnInfo,
-  type JoinColMeta,
+  type JoinClass,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
   type JoinSpec,
-  type JoinTableMeta,
   joinColumnInfos,
   joinRows,
   joinTableNames,
   planJoin,
-  type TypeClass,
+  type TableMeta,
   unknownJoinTable,
 } from "../join.js";
 import {
@@ -44,12 +44,12 @@ const JOIN_DIALECT: JoinDialect = {
 };
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-export function pgTypeClass(
+export function pgJoinClass(
   dataType: string,
   udtSchema: string,
   udtName: string,
   isEnum: boolean,
-): TypeClass | undefined {
+): JoinClass | undefined {
   switch (dataType) {
     case "smallint":
     case "integer":
@@ -74,7 +74,7 @@ export function pgTypeClass(
     case "time with time zone":
       return { kind: "time" };
     case "USER-DEFINED":
-      if (isEnum) return { kind: "enum", id: `${udtSchema}.${udtName}` };
+      if (isEnum) return { kind: "enum", enumType: `${udtSchema}.${udtName}` };
       if (udtName === "citext") return { kind: "text" };
       return undefined;
     default:
@@ -291,7 +291,7 @@ export class PostgresSource implements DbSource {
   }
 
   // Column metadata of a table already cleared by readableTableOid, which supplies `oid`.
-  private async joinTableMeta(client: PoolClient, schema: string, table: string, oid: number): Promise<JoinTableMeta> {
+  private async tableMeta(client: PoolClient, schema: string, table: string, oid: number): Promise<TableMeta> {
     const { rows } = await client.query<{
       column_name: string;
       data_type: string;
@@ -318,11 +318,11 @@ export class PostgresSource implements DbSource {
       [schema, table, oid],
     );
     const { pkColumns, fkColumns } = await this.keyMetadata(client, schema, table);
-    const columns = rows.map((r): JoinColMeta => {
-      const col: JoinColMeta = {
+    const columns = rows.map((r): ColMeta => {
+      const col: ColMeta = {
         name: r.column_name,
         type: r.full_type,
-        class: pgTypeClass(r.data_type, r.udt_schema, r.udt_name, r.is_enum),
+        class: pgJoinClass(r.data_type, r.udt_schema, r.udt_name, r.is_enum),
       };
       if (pkColumns.has(r.column_name)) {
         col.key = "pk";
@@ -341,19 +341,19 @@ export class PostgresSource implements DbSource {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const names = joinTableNames(spec);
-      const metas = new Map<string, JoinTableMeta>();
+      const metas = new Map<string, TableMeta>();
       for (const name of names) {
         if (metas.has(name)) continue;
         try {
           const oid = await this.readableTableOid(client, realSchema, name);
-          metas.set(name, await this.joinTableMeta(client, realSchema, name, oid));
+          metas.set(name, await this.tableMeta(client, realSchema, name, oid));
         } catch (err) {
           throw unknownJoinTable(err, name);
         }
       }
       const plan = planJoin(
         spec,
-        names.map((n) => metas.get(n) as JoinTableMeta),
+        names.map((n) => metas.get(n) as TableMeta),
         opts,
       );
 
@@ -378,9 +378,7 @@ export class PostgresSource implements DbSource {
 
       // The join route's lookup, so both routes report the same columns; its
       // names are the live catalog's, so they also serve as the allow-list.
-      const columns: ColumnInfo[] = (await this.joinTableMeta(client, realSchema, realTable, oid)).columns.map(
-        columnInfo,
-      );
+      const columns: ColumnInfo[] = (await this.tableMeta(client, realSchema, realTable, oid)).columns.map(columnInfo);
       const columnNames = columns.map((c) => c.name);
 
       let sort: string | undefined;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pgTypeClass } from "../src/db/postgres.js";
+import { pgJoinClass } from "../src/db/postgres.js";
 import { FilterError, isQueryTimeout, NotAllowedError } from "../src/errors.js";
 import { parseFilter, parseFilterForJoin } from "../src/filter.js";
 import {
@@ -7,23 +7,23 @@ import {
   BadJoinError,
   BadParamError,
   buildJoinSelect,
+  type ColMeta,
   isFloatType,
-  type JoinColMeta,
   type JoinDialect,
   type JoinOpts,
-  type JoinTableMeta,
   parseJoin,
   planJoin,
+  type TableMeta,
 } from "../src/join.js";
 
-const uuid = (name: string): JoinColMeta => ({ name, type: "uuid", class: { kind: "uuid" } });
-const text = (name: string): JoinColMeta => ({ name, type: "text", class: { kind: "text" } });
+const uuid = (name: string): ColMeta => ({ name, type: "uuid", class: { kind: "uuid" } });
+const text = (name: string): ColMeta => ({ name, type: "text", class: { kind: "text" } });
 
-const orders = (): JoinTableMeta => ({
+const orders = (): TableMeta => ({
   name: "orders",
   columns: [uuid("id"), uuid("user_id"), text("status"), { name: "tags", type: "ARRAY" }],
 });
-const users = (): JoinTableMeta => ({ name: "users", columns: [uuid("id"), text("email")] });
+const users = (): TableMeta => ({ name: "users", columns: [uuid("id"), text("email")] });
 
 const opts = (over: Partial<JoinOpts> = {}): JoinOpts => ({
   limit: 10,
@@ -109,7 +109,7 @@ describe("planJoin", () => {
   });
 
   it("pairs enums only within one type and rejects differing collations", () => {
-    const e = (id: string): JoinColMeta => ({ name: "e", type: "USER-DEFINED", class: { kind: "enum", id } });
+    const e = (id: string): ColMeta => ({ name: "e", type: "USER-DEFINED", class: { kind: "enum", enumType: id } });
     const spec = parseJoin(
       '{"table":"x","joins":[{"type":"inner","table":"y","on":[{"left":{"join":0,"column":"e"},"right":"e"}]}]}',
     );
@@ -211,15 +211,15 @@ describe("isQueryTimeout", () => {
   });
 });
 
-describe("pgTypeClass", () => {
+describe("pgJoinClass", () => {
   it("maps information_schema types to classes", () => {
-    expect(pgTypeClass("integer", "", "", false)).toEqual({ kind: "number" });
-    expect(pgTypeClass("numeric", "", "", false)).toEqual({ kind: "number" });
-    expect(pgTypeClass("timestamp with time zone", "", "", false)).toEqual({ kind: "temporal" });
-    expect(pgTypeClass("USER-DEFINED", "public", "mood", true)).toEqual({ kind: "enum", id: "public.mood" });
-    expect(pgTypeClass("USER-DEFINED", "public", "geometry", false)).toBeUndefined();
+    expect(pgJoinClass("integer", "", "", false)).toEqual({ kind: "number" });
+    expect(pgJoinClass("numeric", "", "", false)).toEqual({ kind: "number" });
+    expect(pgJoinClass("timestamp with time zone", "", "", false)).toEqual({ kind: "temporal" });
+    expect(pgJoinClass("USER-DEFINED", "public", "mood", true)).toEqual({ kind: "enum", enumType: "public.mood" });
+    expect(pgJoinClass("USER-DEFINED", "public", "geometry", false)).toBeUndefined();
     for (const t of ["ARRAY", "jsonb", "json", "double precision", "money"]) {
-      expect(pgTypeClass(t, "", "", false), t).toBeUndefined();
+      expect(pgJoinClass(t, "", "", false), t).toBeUndefined();
     }
   });
 });
