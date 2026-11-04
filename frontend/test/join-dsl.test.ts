@@ -101,6 +101,16 @@ test("join pair checks follow the server's class, and the enum_type for enums", 
     "order_status cannot be joined to ticket_status: they are different enumerated types.",
   );
   assert.equal(joinMismatch(status, text)?.note, "order_status ≠ text");
+  // Two text columns pair unless both report a collation and they differ.
+  const ci = { type: "varchar(20)", class: "text" as const, collation: "utf8mb4_0900_ai_ci" };
+  const bin = { type: "varchar(20)", class: "text" as const, collation: "utf8mb4_bin" };
+  assert.equal(joinMismatch(ci, ci), null);
+  assert.equal(joinMismatch(ci, text), null);
+  assert.equal(joinMismatch(ci, bin)?.note, "different collations");
+  assert.equal(
+    joinMismatch(ci, bin)?.message,
+    "varchar(20) and varchar(20) use different text collations (utf8mb4_0900_ai_ci and utf8mb4_bin).",
+  );
   assert.equal(joinMismatch(jsonb, text)?.note, "jsonb: not joinable");
   assert.equal(joinMismatch(text, jsonb)?.message, "jsonb columns cannot be joined. Pick another column.");
   assert.equal(unjoinableReason({ type: "double precision", class: "float" }), "double precision: not joinable");

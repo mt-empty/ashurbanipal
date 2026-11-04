@@ -273,6 +273,13 @@ per-engine source is in `spec/openapi.yaml`.
   Two `enum` columns join only when their `enum_type` values are equal. It is
   an identifier to compare, never to display: `type` names a domain over an
   enum by the domain's name, while `enum_type` names the enum beneath it.
+- `collation` — the column's collation, sent where two text columns can clash
+  in a comparison and omitted otherwise. MySQL/MariaDB: the catalog's
+  `collation_name` for each text column. Postgres: an explicit column
+  collation (`name`, or `schema.name` outside `pg_catalog`); omitted for the
+  database default, which yields to an explicit collation in a comparison.
+  SQLite: never sent. Two `text` columns join only when the two collations
+  they report, if both report one, are equal (§5.11.2).
 - `key` — `"pk"` or `"fk"`. A column that is simultaneously its own
   table's primary key *and* a foreign key (the 1:1 "detail table" shape,
   e.g. `order_extra.order_id integer primary key references orders(id)`)
@@ -814,6 +821,10 @@ the statement; a mismatch or a column that cannot be joined → 400
 | `array`    | array types; **not joinable** |
 | `other`    | any type not named above (`money`, `interval`, `inet`, `xml`, geometric types, extension types, ...); **not joinable** |
 
+Two `text` columns that both report a `collation` (§5.4.1) MUST report the
+same one; otherwise the pair is a 400 `invalid_join` naming it, because the
+engine would refuse the comparison.
+
 The per-engine mapping from native types to classes, and any engine that
 cannot meet this check exactly, is in `docs/adapter-decisions.md`. The `ON`
 comparison uses the columns' native types, not the text cast of §5.4.2.
@@ -836,7 +847,7 @@ comparison uses the columns' native types, not the text cast of §5.4.2.
 
 - Each `columns` entry carries `name`, `type`, `join`, `table` and
   `column`, plus the §5.4.1 `class` and the optional §5.4.1 fields `enum_type`,
-  `key`, `references`, `comment` as they apply to that column in its own table. `type` and those fields
+  `collation`, `key`, `references`, `comment` as they apply to that column in its own table. `type` and those fields
   MUST equal what §5.4.1 reports for the column. `name` is a **label**
   unique within the response: the column's own name when that is unique
   among the returned columns, otherwise `{column}_{join}`, with a numeric

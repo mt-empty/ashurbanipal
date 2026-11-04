@@ -35,6 +35,8 @@ export interface ColumnInfo {
   class: ColumnClassName;
   /** The enumerated type's identity; set only when `class` is "enum". */
   enum_type?: string;
+  /** The collation where two text columns can clash (spec/protocol.md §5.4.1). */
+  collation?: string;
   key?: KeyKind;
   references?: ColumnRef;
   comment?: string;

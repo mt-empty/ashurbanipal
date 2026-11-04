@@ -241,7 +241,7 @@ type colMeta struct {
 	name       string
 	typeName   string
 	class      columnClass
-	collation  *string // set where two text collations can clash (MySQL)
+	collation  *string // set where two text collations can clash (spec/protocol.md §5.4.1)
 	key        KeyKind
 	references *ColumnRef
 	comment    string
@@ -249,9 +249,16 @@ type colMeta struct {
 
 func (c colMeta) columnInfo() ColumnInfo {
 	return ColumnInfo{
-		Name: c.name, Type: c.typeName, Class: c.class.kind, EnumType: c.class.enumType,
+		Name: c.name, Type: c.typeName, Class: c.class.kind, EnumType: c.class.enumType, Collation: c.collationName(),
 		Key: c.key, References: c.references, Comment: c.comment,
 	}
+}
+
+func (c colMeta) collationName() string {
+	if c.collation == nil {
+		return ""
+	}
+	return *c.collation
 }
 
 type tableMeta struct {
@@ -300,8 +307,9 @@ type JoinColumnInfo struct {
 	Join       int        `json:"join"`
 	Table      string     `json:"table"`
 	Column     string     `json:"column"`
-	Class      string     `json:"class,omitempty"`
+	Class      string     `json:"class"`
 	EnumType   string     `json:"enum_type,omitempty"`
+	Collation  string     `json:"collation,omitempty"`
 	Key        KeyKind    `json:"key,omitempty"`
 	References *ColumnRef `json:"references,omitempty"`
 	Comment    string     `json:"comment,omitempty"`
@@ -619,7 +627,8 @@ func (p *joinPlan) columnInfos() []JoinColumnInfo {
 		c := t.columns[s[1]]
 		out[i] = JoinColumnInfo{
 			Name: p.labels[i], Type: c.typeName, Join: s[0], Table: t.name, Column: c.name,
-			Class: c.class.kind, EnumType: c.class.enumType, Key: c.key, References: c.references, Comment: c.comment,
+			Class: c.class.kind, EnumType: c.class.enumType, Collation: c.collationName(),
+			Key: c.key, References: c.references, Comment: c.comment,
 		}
 	}
 	return out

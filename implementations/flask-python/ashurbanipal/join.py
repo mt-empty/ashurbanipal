@@ -181,7 +181,7 @@ class ColMeta:
     name: str
     type_name: str
     column_class: ColumnClass
-    collation: str | None = None  # set where two text collations can clash (MySQL)
+    collation: str | None = None  # set where two text collations can clash (`spec/protocol.md` §5.4.1)
     key: KeyKind | None = None
     references: ColumnRef | None = None
     comment: str | None = None
@@ -196,6 +196,7 @@ class ColMeta:
             comment=self.comment,
             column_class=self.column_class.kind,
             enum_type=self.column_class.enum_type or None,
+            collation=self.collation,
         )
 
 
@@ -248,6 +249,7 @@ class JoinColumnInfo:
     references: ColumnRef | None = None
     comment: str | None = None
     enum_type: str | None = None
+    collation: str | None = None
 
 
 @dataclass
@@ -294,6 +296,7 @@ class JoinPlan:
                     comment=c.comment,
                     column_class=c.column_class,
                     enum_type=c.enum_type,
+                    collation=c.collation,
                 )
             )
         return out

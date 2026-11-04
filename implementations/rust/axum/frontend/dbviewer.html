@@ -3491,9 +3491,16 @@ function joinMismatch(candidate, other) {
   }
   const a = candidate.class;
   const b = other.class;
-  if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   const left = truncateType(candidate.type);
   const right = truncateType(other.type);
+  const [x, y] = [candidate.collation, other.collation];
+  if (a === "text" && b === "text" && x && y && x !== y) {
+    return {
+      note: "different collations",
+      message: `${left} and ${right} use different text collations (${x} and ${y}).`
+    };
+  }
+  if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   return {
     note: `${left} \u2260 ${right}`,
     message: a === b ? `${left} cannot be joined to ${right}: they are different enumerated types.` : `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`

@@ -168,7 +168,7 @@ export interface ColMeta {
   name: string;
   type: string;
   class: ColumnClass;
-  /** Set where two text collations can clash (MySQL). */
+  /** Set where two text collations can clash (spec/protocol.md §5.4.1). */
   collation?: string;
   key?: KeyKind;
   references?: ColumnRef;
@@ -403,6 +403,7 @@ export function buildJoinSelect(
 export function columnInfo(col: ColMeta): ColumnInfo {
   const info: ColumnInfo = { name: col.name, type: col.type, class: col.class.kind };
   if (col.class.enumType) info.enum_type = col.class.enumType;
+  if (col.collation) info.collation = col.collation;
   if (col.key) info.key = col.key;
   if (col.references) info.references = col.references;
   if (col.comment) info.comment = col.comment;

@@ -88,6 +88,32 @@ class JoinIntegrationTest {
         }
     }
 
+    // Postgres rejects a comparison of two different explicit collations, while
+    // the default collation yields to an explicit one; the metadata reports only
+    // the explicit ones.
+    @Test
+    fun `text columns with clashing collations do not join`() {
+        val s = "ashb_test_spring_join_collation"
+        withSchema(
+            s,
+            "create table $s.a (id int primary key, c text collate \"C\", p text collate \"POSIX\", d text)",
+            "create table $s.b (id int primary key, c text collate \"C\", p text collate \"C\", d text)",
+            "insert into $s.a values (1, 'x', 'x', 'x')",
+            "insert into $s.b values (1, 'x', 'x', 'x')",
+        ) {
+            val (source, ds) = source(5)
+            ds.use {
+                val table = source.queryTable(s, "a", QueryOpts(10, 0, null, false, null))
+                assertEquals(listOf(null, "C", "POSIX", null), table.columns.map { it.collation })
+                for ((left, right) in listOf("c" to "c", "c" to "d", "d" to "c", "d" to "d")) {
+                    assertEquals(1, source.queryJoin(s, pair("a", left, "b", right), opts).rows.size, "$left to $right")
+                }
+                val clash = assertThrows(BadJoinException::class.java) { source.queryJoin(s, pair("a", "p", "b", "p"), opts) }
+                assertTrue(clash.message!!.contains("different text collations"), clash.message)
+            }
+        }
+    }
+
     @Test
     fun `a slow join is a query timeout and releases the connection`() {
         val s = "ashb_test_spring_join_slow"

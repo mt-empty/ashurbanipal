@@ -60,6 +60,7 @@ data class JoinColumnInfo(
     @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("enum_type") val enumType: String? = null,
+    @JsonInclude(JsonInclude.Include.NON_NULL) val collation: String? = null,
 )
 
 data class JoinData(
@@ -177,7 +178,7 @@ data class ColumnClass(val kind: String, val enumType: String = "") {
 /** Classes whose columns cannot be joined (§5.11.2). */
 private val NOT_JOINABLE = setOf(ColumnClass.FLOAT, ColumnClass.JSON, ColumnClass.ARRAY, ColumnClass.OTHER)
 
-/** One column as the live catalog reports it. [collation] is set where two text collations can clash (MySQL). */
+/** One column as the live catalog reports it. [collation] is set where two text collations can clash (§5.4.1). */
 data class ColMeta(
     val name: String,
     val type: String,
@@ -188,7 +189,10 @@ data class ColMeta(
     val comment: String? = null,
 ) {
     /** The §5.4.1 shape of this column. */
-    fun columnInfo() = ColumnInfo(name, type, columnClass.kind, key, references, comment, columnClass.enumType.takeIf { it.isNotEmpty() })
+    fun columnInfo() = ColumnInfo(
+        name, type, columnClass.kind, key, references, comment,
+        columnClass.enumType.takeIf { it.isNotEmpty() }, collation,
+    )
 }
 
 data class TableMeta(val name: String, val columns: List<ColMeta>) {
@@ -224,7 +228,7 @@ class JoinPlan internal constructor(
     fun columnInfos(): List<JoinColumnInfo> = selection.mapIndexed { i, (pos, col) ->
         val t = tables[pos]
         val c = t.columns[col].columnInfo()
-        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.columnClass, c.key, c.references, c.comment, c.enumType)
+        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.columnClass, c.key, c.references, c.comment, c.enumType, c.collation)
     }
 
     /** Keys positional result rows by label and trims the extra row asked for `has_more`. */

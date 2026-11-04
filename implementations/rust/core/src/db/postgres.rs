@@ -401,34 +401,61 @@ impl PgPoolSource {
         oid: i32,
     ) -> Result<TableMeta, DbError> {
         // information_schema.columns drives the list (column privileges, order);
-        // pg_attribute adds the full type spelling and the comment, both keyed
-        // by attnum, which can diverge from ordinal_position after a drop.
-        let columns =
-            sqlx::query_as::<_, (String, String, String, String, bool, String, Option<String>)>(
-                "select c.column_name, c.data_type, c.udt_schema, c.udt_name, \
+        // pg_attribute adds the full type spelling, comment and collation, keyed
+        // by attnum, which can diverge from ordinal_position after a drop. The
+        // default collation (oid 100) is left out: it yields to an explicit one
+        // in a comparison, so it never clashes.
+        let columns = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                String,
+                bool,
+                String,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
+            "select c.column_name, c.data_type, c.udt_schema, c.udt_name, \
                     exists (select 1 from pg_type t \
                             join pg_namespace n on n.oid = t.typnamespace \
                             where n.nspname = c.udt_schema and t.typname = c.udt_name \
                               and t.typtype = 'e'), \
                     format_type(a.atttypid, a.atttypmod), \
-                    col_description(a.attrelid, a.attnum::int) \
+                    col_description(a.attrelid, a.attnum::int), \
+                    (select case when n.nspname = 'pg_catalog' then co.collname \
+                                 else n.nspname || '.' || co.collname end \
+                       from pg_collation co \
+                       join pg_namespace n on n.oid = co.collnamespace \
+                      where co.oid = a.attcollation and a.attcollation not in (0, 100)) \
              from information_schema.columns c \
              join pg_attribute a on a.attrelid = $3 and a.attname = c.column_name \
              where c.table_schema = $1 and c.table_name = $2 \
              order by c.ordinal_position",
-            )
-            .bind(schema)
-            .bind(table)
-            .bind(oid)
-            .fetch_all(&mut **tx)
-            .await?;
+        )
+        .bind(schema)
+        .bind(table)
+        .bind(oid)
+        .fetch_all(&mut **tx)
+        .await?;
         let (pk_columns, fk_columns) = self.key_metadata_in_tx(tx, schema, table).await?;
         Ok(TableMeta {
             name: table.to_string(),
             columns: columns
                 .into_iter()
                 .map(
-                    |(name, data_type, udt_schema, udt_name, is_enum, type_name, comment)| {
+                    |(
+                        name,
+                        data_type,
+                        udt_schema,
+                        udt_name,
+                        is_enum,
+                        type_name,
+                        comment,
+                        collation,
+                    )| {
                         let (key, references) = if pk_columns.contains(&name) {
                             (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
                         } else if let Some(r) = fk_columns.get(&name) {
@@ -438,7 +465,7 @@ impl PgPoolSource {
                         };
                         ColMeta {
                             class: column_class(&data_type, &udt_schema, &udt_name, is_enum),
-                            collation: None,
+                            collation,
                             comment,
                             key,
                             references,

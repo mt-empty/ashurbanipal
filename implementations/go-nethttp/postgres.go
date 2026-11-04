@@ -275,8 +275,10 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 	metaCtx, cancel := c.bounded(ctx)
 	defer cancel()
 	// information_schema.columns drives the list (column privileges, order);
-	// pg_attribute adds the full type spelling and the comment, both keyed by
-	// attnum, which can diverge from ordinal_position after a drop.
+	// pg_attribute adds the full type spelling, comment and collation, keyed by
+	// attnum, which can diverge from ordinal_position after a drop. The default
+	// collation (oid 100) is left out: it yields to an explicit one in a
+	// comparison, so it never clashes.
 	rows, err := tx.QueryContext(metaCtx,
 		`select c.column_name, c.data_type, c.udt_schema, c.udt_name,
 		        exists (select 1 from pg_type t
@@ -284,7 +286,12 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 		                where n.nspname = c.udt_schema and t.typname = c.udt_name
 		                  and t.typtype = 'e'),
 		        format_type(a.atttypid, a.atttypmod),
-		        col_description(a.attrelid, a.attnum::int)
+		        col_description(a.attrelid, a.attnum::int),
+		        (select case when n.nspname = 'pg_catalog' then co.collname
+		                     else n.nspname || '.' || co.collname end
+		           from pg_collation co
+		           join pg_namespace n on n.oid = co.collnamespace
+		          where co.oid = a.attcollation and a.attcollation not in (0, 100))
 		 from information_schema.columns c
 		 join pg_attribute a on a.attrelid = $3 and a.attname = c.column_name
 		 where c.table_schema = $1 and c.table_name = $2
@@ -296,15 +303,19 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 	for rows.Next() {
 		var name, dataType, udtSchema, udtName, fullType string
 		var isEnum bool
-		var comment sql.NullString
-		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum, &fullType, &comment); err != nil {
+		var comment, collation sql.NullString
+		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum, &fullType, &comment, &collation); err != nil {
 			rows.Close()
 			return tableMeta{}, err
 		}
-		meta.columns = append(meta.columns, colMeta{
+		col := colMeta{
 			name: name, typeName: fullType, class: pgColumnClass(dataType, udtSchema, udtName, isEnum),
 			comment: comment.String,
-		})
+		}
+		if collation.Valid {
+			col.collation = &collation.String
+		}
+		meta.columns = append(meta.columns, col)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()

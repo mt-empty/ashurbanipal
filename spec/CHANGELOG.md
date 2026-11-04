@@ -81,3 +81,11 @@ types that used to have no class. A column that cannot be joined is now
 domain over `json` reports `json`, so the bundled UI renders it as JSON. This
 is not additive, and lands with every port, the conformance runner and the
 bundled UI changed together, under §7's alpha exception.
+
+Column metadata (§5.4.1, and §5.11.4's join columns) gained an optional
+`collation`. MySQL/MariaDB and Postgres report it where two text columns can
+clash, and §5.11.2 now states the rule the MySQL ports already applied: two
+`text` columns that both report a collation must report the same one, or the
+pair is a 400 `invalid_join`. Postgres had no such check, so a clash there was
+a 500 when the join ran. This lands with every port, the conformance runner
+and the bundled UI changed together, under §7's alpha exception.

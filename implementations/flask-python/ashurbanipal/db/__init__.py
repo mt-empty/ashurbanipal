@@ -41,6 +41,8 @@ class ColumnInfo:
     comment: str | None = None
     # The enumerated type's identity; set only when the class is enum.
     enum_type: str | None = None
+    # The collation where two text columns can clash (spec/protocol.md §5.4.1).
+    collation: str | None = None
 
 
 @dataclass

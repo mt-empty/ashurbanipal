@@ -58,6 +58,9 @@ pub struct ColumnInfo {
     /// The enumerated type's identity; set only when `class` is enum.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_type: Option<String>,
+    /// The column's collation where two text columns can clash (§5.4.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<KeyKind>,
     #[serde(skip_serializing_if = "Option::is_none")]

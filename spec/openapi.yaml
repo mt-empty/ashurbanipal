@@ -682,6 +682,14 @@ components:
             Present only when class is enum: the enumerated type's identity
             (Postgres schema.name; MySQL the column's enum(...) definition).
             Two enum columns join only when their enum_type values are equal.
+        collation:
+          type: string
+          description: >
+            The column's collation where two text columns can clash in a
+            comparison (MySQL/MariaDB the catalog collation_name; Postgres an
+            explicit column collation, omitted for the database default;
+            never sent on SQLite). Two text columns join only when the
+            collations they report are equal.
         key:
           type: string
           enum: [pk, fk]

@@ -407,7 +407,16 @@ def _pair(left: str, left_col: str, right: str, right_col: str):
 @pytest.fixture
 def join_schemas():
     types, slow = "ashb_test_flask_join_types", "ashb_test_flask_join_slow"
+    collation = "ashb_test_flask_join_collation"
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
+        conn.execute(f"drop schema if exists {collation} cascade; create schema {collation}")
+        conn.execute(
+            f"create table {collation}.a "
+            '(id int primary key, c text collate "C", p text collate "POSIX", d text); '
+            f'create table {collation}.b (id int primary key, c text collate "C", p text collate "C", d text); '
+            f"insert into {collation}.a values (1, 'x', 'x', 'x'); "
+            f"insert into {collation}.b values (1, 'x', 'x', 'x');"
+        )
         conn.execute(f"drop schema if exists {types} cascade; create schema {types}")
         conn.execute(f"drop schema if exists {slow} cascade; create schema {slow}")
         conn.execute(
@@ -423,13 +432,16 @@ def join_schemas():
             f"create table {slow}.a as select g as id, g % 2 as k from generate_series(1, 20000) g; "
             f"create table {slow}.b as select g as id, g % 2 as k from generate_series(1, 20000) g;"
         )
-    yield types, slow
+    yield types, slow, collation
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
-        conn.execute(f"drop schema if exists {types} cascade; drop schema if exists {slow} cascade")
+        conn.execute(
+            f"drop schema if exists {types} cascade; drop schema if exists {slow} cascade; "
+            f"drop schema if exists {collation} cascade"
+        )
 
 
 def test_join_enums_pair_only_within_one_type_and_arrays_never_join(source, join_schemas) -> None:
-    types, _ = join_schemas
+    types, _, _ = join_schemas
     opts = JoinOpts(limit=10, offset=0, timeout_secs=5)
     assert len(source.query_join(types, _pair("a", "m", "b", "m"), opts).rows) == 1
     with pytest.raises(BadJoin):
@@ -442,7 +454,7 @@ def test_join_enums_pair_only_within_one_type_and_arrays_never_join(source, join
 def test_a_slow_join_is_a_query_timeout_and_releases_the_connection(source, join_schemas) -> None:
     import time
 
-    _, slow = join_schemas
+    _, slow, _ = join_schemas
     started = time.monotonic()
     with pytest.raises(QueryTimeout):
         source.query_join(
@@ -453,3 +465,16 @@ def test_a_slow_join_is_a_query_timeout_and_releases_the_connection(source, join
     assert time.monotonic() - started < 5
     ok = source.query_join(slow, _pair("a", "id", "b", "id"), JoinOpts(limit=10, offset=0, timeout_secs=5))
     assert len(ok.rows) == 10 and ok.has_more is True
+
+
+def test_text_columns_with_clashing_collations_do_not_join(source, join_schemas) -> None:
+    # Postgres rejects two different explicit collations, while the default
+    # collation yields to an explicit one; the metadata reports only the explicit ones.
+    _, _, collation = join_schemas
+    opts = JoinOpts(limit=10, offset=0, timeout_secs=5)
+    table = source.query_table(collation, "a", QueryOpts(limit=10, offset=0, timeout_secs=5))
+    assert [c.collation for c in table.columns] == [None, "C", "POSIX", None]
+    for left, right in (("c", "c"), ("c", "d"), ("d", "c"), ("d", "d")):
+        assert len(source.query_join(collation, _pair("a", left, "b", right), opts).rows) == 1, (left, right)
+    with pytest.raises(BadJoin, match="different text collations"):
+        source.query_join(collation, _pair("a", "p", "b", "p"), opts)

@@ -220,7 +220,7 @@ pub struct ColMeta {
     pub name: String,
     pub type_name: String,
     pub class: ColumnClass,
-    /// Set on engines where two text collations can clash (MySQL).
+    /// Set where two text collations can clash (`spec/protocol.md` §5.4.1).
     pub collation: Option<String>,
     pub key: Option<KeyKind>,
     pub references: Option<ColumnRef>,
@@ -233,6 +233,7 @@ impl From<ColMeta> for ColumnInfo {
             name: c.name,
             type_name: c.type_name,
             enum_type: c.class.enum_type(),
+            collation: c.collation,
             class: c.class,
             key: c.key,
             references: c.references,
@@ -259,6 +260,8 @@ pub struct JoinColumnInfo {
     pub class: ColumnClass,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<KeyKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -330,6 +333,7 @@ impl Plan {
                     column: c.name.clone(),
                     class: c.class.clone(),
                     enum_type: c.class.enum_type(),
+                    collation: c.collation.clone(),
                     key: c.key,
                     references: c.references.clone(),
                     comment: c.comment.clone(),

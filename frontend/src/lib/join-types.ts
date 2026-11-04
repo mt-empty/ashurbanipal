@@ -3,8 +3,8 @@ import type { ClassedColumn, Column, ColumnClass } from "../core/types.js";
 // ==== Join pair checks (spec/protocol.md §5.11.2) ====
 // The server reports each column's column class, so the form greys the pairs
 // it would reject by type: a different class, two different enumerated types
-// (`enum_type`), or a class that cannot be joined at all. A MySQL collation
-// clash between two text columns is still only caught by the server.
+// (`enum_type`), two text columns with different `collation`s, or a class that
+// cannot be joined at all.
 
 const NOT_JOINABLE: ReadonlySet<ColumnClass> = new Set(["float", "json", "array", "other"]);
 
@@ -44,9 +44,16 @@ export function joinMismatch(candidate: ClassedColumn, other: ClassedColumn): Jo
   }
   const a = candidate.class;
   const b = other.class;
-  if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   const left = truncateType(candidate.type);
   const right = truncateType(other.type);
+  const [x, y] = [candidate.collation, other.collation];
+  if (a === "text" && b === "text" && x && y && x !== y) {
+    return {
+      note: "different collations",
+      message: `${left} and ${right} use different text collations (${x} and ${y}).`,
+    };
+  }
+  if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   return {
     note: `${left} ≠ ${right}`,
     message:

@@ -220,7 +220,6 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData =
         inReadOnlyTransaction { queryTableInTransaction(schema, table, opts) }
 
-    /** Column metadata of a table already cleared by [requireTable]. */
     /** Column metadata of a table already cleared by [readableTableOid], which supplies [oid]. */
     private fun tableMeta(schema: String, table: String, oid: Long): TableMeta {
         data class Col(
@@ -231,10 +230,13 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             val isEnum: Boolean,
             val fullType: String,
             val comment: String?,
+            val collation: String?,
         )
         // information_schema.columns drives the list (column privileges, order);
-        // pg_attribute adds the full type spelling and the comment, both keyed by
-        // attnum, which can diverge from ordinal_position after a drop.
+        // pg_attribute adds the full type spelling, comment and collation, keyed
+        // by attnum, which can diverge from ordinal_position after a drop. The
+        // default collation (oid 100) is left out: it yields to an explicit one
+        // in a comparison, so it never clashes.
         val columns = jdbcTemplate.query(
             "select c.column_name, c.data_type, c.udt_schema, c.udt_name, " +
                 "       exists (select 1 from pg_type t " +
@@ -242,7 +244,12 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
                 "               where n.nspname = c.udt_schema and t.typname = c.udt_name " +
                 "                 and t.typtype = 'e'), " +
                 "       format_type(a.atttypid, a.atttypmod), " +
-                "       col_description(a.attrelid, a.attnum::int) " +
+                "       col_description(a.attrelid, a.attnum::int), " +
+                "       (select case when n.nspname = 'pg_catalog' then co.collname " +
+                "                    else n.nspname || '.' || co.collname end " +
+                "          from pg_collation co " +
+                "          join pg_namespace n on n.oid = co.collnamespace " +
+                "         where co.oid = a.attcollation and a.attcollation not in (0, 100)) " +
                 "from information_schema.columns c " +
                 "join pg_attribute a on a.attrelid = ? and a.attname = c.column_name " +
                 "where c.table_schema = ? and c.table_name = ? " +
@@ -250,7 +257,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             RowMapper { rs, _ ->
                 Col(
                     rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
-                    rs.getBoolean(5), rs.getString(6), rs.getString(7),
+                    rs.getBoolean(5), rs.getString(6), rs.getString(7), rs.getString(8),
                 )
             },
             oid,
@@ -265,6 +272,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
                     name = c.name,
                     type = c.fullType,
                     columnClass = pgColumnClass(c.type, c.udtSchema, c.udtName, c.isEnum),
+                    collation = c.collation,
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],
                     comment = c.comment,

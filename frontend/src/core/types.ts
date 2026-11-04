@@ -27,6 +27,8 @@ interface ColumnBase {
   class: ColumnClass;
   // The enumerated type's identity; set only when class is "enum".
   enum_type?: string;
+  // The collation where two text columns can clash (spec/protocol.md §5.4.1).
+  collation?: string;
   comment?: string;
   // Join responses only (spec/protocol.md §5.11.4): `name` is a unique label;
   // these locate the column. Never parse the label.
@@ -45,7 +47,7 @@ export type Column =
   | (ColumnBase & { key: "fk"; references: ColumnRef });
 
 /** The part of a column that decides its column class and display bucket. */
-export type ClassedColumn = Pick<Column, "type" | "class" | "enum_type">;
+export type ClassedColumn = Pick<Column, "type" | "class" | "enum_type" | "collation">;
 
 export interface Row {
   [column: string]: string | null;

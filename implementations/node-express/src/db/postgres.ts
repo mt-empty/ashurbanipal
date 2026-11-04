@@ -303,17 +303,25 @@ export class PostgresSource implements DbSource {
       is_enum: boolean;
       full_type: string;
       comment: string | null;
+      collation: string | null;
     }>(
       // information_schema.columns drives the list (column privileges, order);
-      // pg_attribute adds the full type spelling and the comment, both keyed by
-      // attnum, which can diverge from ordinal_position after a drop.
+      // pg_attribute adds the full type spelling, comment and collation, keyed
+      // by attnum, which can diverge from ordinal_position after a drop. The
+      // default collation (oid 100) is left out: it yields to an explicit one
+      // in a comparison, so it never clashes.
       `select c.column_name, c.data_type, c.udt_schema, c.udt_name,
               exists (select 1 from pg_type t
                       join pg_namespace n on n.oid = t.typnamespace
                       where n.nspname = c.udt_schema and t.typname = c.udt_name
                         and t.typtype = 'e') as is_enum,
               format_type(a.atttypid, a.atttypmod) as full_type,
-              col_description(a.attrelid, a.attnum::int) as comment
+              col_description(a.attrelid, a.attnum::int) as comment,
+              (select case when n.nspname = 'pg_catalog' then co.collname
+                           else n.nspname || '.' || co.collname end
+                 from pg_collation co
+                 join pg_namespace n on n.oid = co.collnamespace
+                where co.oid = a.attcollation and a.attcollation not in (0, 100)) as collation
        from information_schema.columns c
        join pg_attribute a on a.attrelid = $3 and a.attname = c.column_name
        where c.table_schema = $1 and c.table_name = $2
@@ -327,6 +335,7 @@ export class PostgresSource implements DbSource {
         type: r.full_type,
         class: pgColumnClass(r.data_type, r.udt_schema, r.udt_name, r.is_enum),
       };
+      if (r.collation) col.collation = r.collation;
       if (pkColumns.has(r.column_name)) {
         col.key = "pk";
         if (fkColumns.has(r.column_name)) col.references = fkColumns.get(r.column_name);

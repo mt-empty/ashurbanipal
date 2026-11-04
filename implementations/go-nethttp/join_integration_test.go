@@ -70,6 +70,44 @@ func TestJoinEnumsPairOnlyWithinOneTypeAndArraysNeverJoin(t *testing.T) {
 	}
 }
 
+// Postgres rejects a comparison of two different explicit collations, while
+// the default collation yields to an explicit one; the metadata reports only
+// the explicit ones.
+func TestTextColumnsWithClashingCollationsDoNotJoin(t *testing.T) {
+	const schema = "ashb_test_go_join_collation"
+	setupSchemaDDL(t, schema, fmt.Sprintf(
+		`create table %[1]s.a (id int primary key, c text collate "C", p text collate "POSIX", d text);
+		 create table %[1]s.b (id int primary key, c text collate "C", p text collate "C", d text);
+		 insert into %[1]s.a values (1, 'x', 'x', 'x');
+		 insert into %[1]s.b values (1, 'x', 'x', 'x');`, schema))
+	source := pgSource(t, 5)
+	ctx := context.Background()
+	s := schema
+
+	table, err := source.QueryTable(ctx, &s, "a", QueryOpts{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range table.Columns {
+		got = append(got, c.Collation)
+	}
+	if fmt.Sprint(got) != fmt.Sprint([]string{"", "C", "POSIX", ""}) {
+		t.Errorf("collations = %q", got)
+	}
+
+	for _, pair := range [][2]string{{"c", "c"}, {"c", "d"}, {"d", "c"}, {"d", "d"}} {
+		data, err := source.QueryJoin(ctx, &s, pairJoin(t, "a", pair[0], "b", pair[1]), JoinOpts{Limit: 10})
+		if err != nil || len(data.Rows) != 1 {
+			t.Errorf("%s to %s: %v %+v", pair[0], pair[1], err, data)
+		}
+	}
+	_, err = source.QueryJoin(ctx, &s, pairJoin(t, "a", "p", "b", "p"), JoinOpts{Limit: 10})
+	if bad, ok := err.(*BadJoinError); !ok || !strings.Contains(bad.Reason, "different text collations") {
+		t.Errorf("want a collation clash, got %v", err)
+	}
+}
+
 func TestSlowJoinIsAQueryTimeoutAndReleasesTheConnection(t *testing.T) {
 	const schema = "ashb_test_go_join_slow"
 	setupSchemaDDL(t, schema, fmt.Sprintf(
