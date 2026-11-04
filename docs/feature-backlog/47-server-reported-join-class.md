@@ -28,7 +28,9 @@ cannot be right everywhere:
 ## 2. Wire change
 
 - A §5.4.1 column entry gains an optional `class`: one of the §5.11.2
-  class names. It is absent when the column is not joinable.
+  class names. It is absent when the column is not joinable. (Since
+  2026-11-04 it is always present, and the list gains `float`, `json`,
+  `array` and `other` for the types that had no class.)
 - Join response columns (§5.11.4) carry it too: they already must report
   the same §5.4.1 fields as `/tables/data`.
 - **Open question: enums.** An enum joins only to the same enumerated
@@ -65,3 +67,10 @@ cannot be right everywhere:
 ## 6. Out of scope
 
 - Changing which types may join (the §5.11.2 table).
+
+Follow-ups that shipped on 2026-11-04, in the same PR: `class` for every
+column, a separate `collation` field for the text-collation clash, and a 400
+`unsortable_column` for a sort on a Postgres `json`, `xml` or geometric
+column (`spec/CHANGELOG.md`). The other column facts the page guesses
+(`generated`, `identity`, `nullable`, `default`, enum labels, and an `engine`
+field) stay with stories 22 and 23, as separate named fields.
