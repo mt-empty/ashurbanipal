@@ -265,11 +265,11 @@ class SqliteSourceTest {
     // no named column, and until fixed keyMetadata doesn't resolve it the
     // way referencedBy now does.
     @Test
-    fun `query table reports each column's join class`() {
+    fun `query table reports each column's column class`() {
         val ds = dataSourceFor("create table t (id integer primary key, label text, meta json, loose)")
         try {
             val data = SqliteSource(ds, 5).queryTable(null, "t", QueryOpts(10, 0, null, false, null))
-            assertEquals(listOf("number", "text", null, "untyped"), data.columns.map { it.joinClass })
+            assertEquals(listOf("number", "text", null, "untyped"), data.columns.map { it.columnClass })
         } finally {
             ds.close()
         }

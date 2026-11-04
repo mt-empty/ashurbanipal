@@ -150,7 +150,7 @@ impl JoinSpec {
 /// Engine-neutral comparison class of a column type (`spec/protocol.md`
 /// §5.11.2). Each backend maps its native types onto these.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JoinClass {
+pub enum ColumnClass {
     Number,
     Text,
     Uuid,
@@ -164,33 +164,33 @@ pub enum JoinClass {
     Untyped,
 }
 
-impl JoinClass {
+impl ColumnClass {
     /// The class name on the wire (`spec/protocol.md` §5.4.1); an enum's
     /// identity travels separately as `enum_type`.
     fn wire_name(&self) -> &'static str {
         match self {
-            JoinClass::Number => "number",
-            JoinClass::Text => "text",
-            JoinClass::Uuid => "uuid",
-            JoinClass::Boolean => "boolean",
-            JoinClass::Temporal => "temporal",
-            JoinClass::Time => "time",
-            JoinClass::Binary => "binary",
-            JoinClass::Enum(_) => "enum",
-            JoinClass::Untyped => "untyped",
+            ColumnClass::Number => "number",
+            ColumnClass::Text => "text",
+            ColumnClass::Uuid => "uuid",
+            ColumnClass::Boolean => "boolean",
+            ColumnClass::Temporal => "temporal",
+            ColumnClass::Time => "time",
+            ColumnClass::Binary => "binary",
+            ColumnClass::Enum(_) => "enum",
+            ColumnClass::Untyped => "untyped",
         }
     }
 
     /// The enumerated type's identity, which two enum columns must share to join.
     pub fn enum_type(&self) -> Option<String> {
         match self {
-            JoinClass::Enum(id) => Some(id.clone()),
+            ColumnClass::Enum(id) => Some(id.clone()),
             _ => None,
         }
     }
 }
 
-impl Serialize for JoinClass {
+impl Serialize for ColumnClass {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.wire_name())
     }
@@ -201,7 +201,7 @@ impl Serialize for JoinClass {
 pub struct ColMeta {
     pub name: String,
     pub type_name: String,
-    pub class: Option<JoinClass>,
+    pub class: Option<ColumnClass>,
     /// Set on engines where two text collations can clash (MySQL).
     pub collation: Option<String>,
     pub key: Option<KeyKind>,
@@ -214,7 +214,7 @@ impl From<ColMeta> for ColumnInfo {
         ColumnInfo {
             name: c.name,
             type_name: c.type_name,
-            enum_type: c.class.as_ref().and_then(JoinClass::enum_type),
+            enum_type: c.class.as_ref().and_then(ColumnClass::enum_type),
             class: c.class,
             key: c.key,
             references: c.references,
@@ -239,7 +239,7 @@ pub struct JoinColumnInfo {
     pub table: String,
     pub column: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub class: Option<JoinClass>,
+    pub class: Option<ColumnClass>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -312,7 +312,7 @@ impl Plan {
                     table: table.name.clone(),
                     column: c.name.clone(),
                     class: c.class.clone(),
-                    enum_type: c.class.as_ref().and_then(JoinClass::enum_type),
+                    enum_type: c.class.as_ref().and_then(ColumnClass::enum_type),
                     key: c.key,
                     references: c.references.clone(),
                     comment: c.comment.clone(),
@@ -400,7 +400,7 @@ fn check_pair(
             describe(rt, rc)
         )));
     }
-    if *a == JoinClass::Text {
+    if *a == ColumnClass::Text {
         if let (Some(x), Some(y)) = (&lc.collation, &rc.collation) {
             if x != y {
                 return Err(DbError::BadJoin(format!(
@@ -665,7 +665,7 @@ pub fn build_select(plan: &Plan, d: &Dialect, schema: Option<&str>) -> (String, 
 mod tests {
     use super::*;
 
-    fn col(name: &str, ty: &str, class: Option<JoinClass>) -> ColMeta {
+    fn col(name: &str, ty: &str, class: Option<ColumnClass>) -> ColMeta {
         ColMeta {
             name: name.into(),
             type_name: ty.into(),
@@ -681,9 +681,9 @@ mod tests {
         TableMeta {
             name: "orders".into(),
             columns: vec![
-                col("id", "uuid", Some(JoinClass::Uuid)),
-                col("user_id", "uuid", Some(JoinClass::Uuid)),
-                col("status", "text", Some(JoinClass::Text)),
+                col("id", "uuid", Some(ColumnClass::Uuid)),
+                col("user_id", "uuid", Some(ColumnClass::Uuid)),
+                col("status", "text", Some(ColumnClass::Text)),
                 col("tags", "ARRAY", None),
             ],
         }
@@ -693,8 +693,8 @@ mod tests {
         TableMeta {
             name: "users".into(),
             columns: vec![
-                col("id", "uuid", Some(JoinClass::Uuid)),
-                col("email", "text", Some(JoinClass::Text)),
+                col("id", "uuid", Some(ColumnClass::Uuid)),
+                col("email", "text", Some(ColumnClass::Text)),
             ],
         }
     }
@@ -841,13 +841,13 @@ mod tests {
         a.columns[2] = col(
             "status",
             "USER-DEFINED",
-            Some(JoinClass::Enum("public.status".into())),
+            Some(ColumnClass::Enum("public.status".into())),
         );
         let mut b = users();
         b.columns[1] = col(
             "kind",
             "USER-DEFINED",
-            Some(JoinClass::Enum("public.kind".into())),
+            Some(ColumnClass::Enum("public.kind".into())),
         );
         let mut spec = JoinSpec::parse(JOIN).unwrap();
         spec.joins[0].on[0].left.column = "status".into();
@@ -860,7 +860,7 @@ mod tests {
         same.columns[1] = col(
             "kind",
             "USER-DEFINED",
-            Some(JoinClass::Enum("public.status".into())),
+            Some(ColumnClass::Enum("public.status".into())),
         );
         assert!(plan(&spec, vec![a, same], &opts()).is_ok());
     }

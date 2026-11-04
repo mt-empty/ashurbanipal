@@ -38,10 +38,10 @@ var pgJoinDialect = joinDialect{
 	ilike:    ilikeNative,
 }
 
-// pgJoinClass maps information_schema types to spec/protocol.md §5.11.2
+// pgColumnClass maps information_schema types to spec/protocol.md §5.11.2
 // classes (docs/adapter-decisions.md §5.11).
-func pgJoinClass(dataType, udtSchema, udtName string, isEnum bool) *joinClass {
-	var c joinClass
+func pgColumnClass(dataType, udtSchema, udtName string, isEnum bool) *columnClass {
+	var c columnClass
 	switch dataType {
 	case "smallint", "integer", "bigint", "numeric":
 		c = classNumber
@@ -301,7 +301,7 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 			return tableMeta{}, err
 		}
 		meta.columns = append(meta.columns, colMeta{
-			name: name, typeName: fullType, class: pgJoinClass(dataType, udtSchema, udtName, isEnum),
+			name: name, typeName: fullType, class: pgColumnClass(dataType, udtSchema, udtName, isEnum),
 			comment: comment.String,
 		})
 	}

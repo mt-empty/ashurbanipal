@@ -16,17 +16,17 @@ private val JOIN_DIALECT = JoinDialect(
 )
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun pgJoinClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): JoinClass? = when (dataType) {
-    "smallint", "integer", "bigint", "numeric" -> JoinClass.NUMBER
-    "character varying", "character", "text" -> JoinClass.TEXT
-    "uuid" -> JoinClass.UUID
-    "boolean" -> JoinClass.BOOLEAN
-    "bytea" -> JoinClass.BINARY
-    "date", "timestamp without time zone", "timestamp with time zone" -> JoinClass.TEMPORAL
-    "time without time zone", "time with time zone" -> JoinClass.TIME
+internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): ColumnClass? = when (dataType) {
+    "smallint", "integer", "bigint", "numeric" -> ColumnClass.NUMBER
+    "character varying", "character", "text" -> ColumnClass.TEXT
+    "uuid" -> ColumnClass.UUID
+    "boolean" -> ColumnClass.BOOLEAN
+    "bytea" -> ColumnClass.BINARY
+    "date", "timestamp without time zone", "timestamp with time zone" -> ColumnClass.TEMPORAL
+    "time without time zone", "time with time zone" -> ColumnClass.TIME
     "USER-DEFINED" -> when {
-        isEnum -> JoinClass.enum("$udtSchema.$udtName")
-        udtName == "citext" -> JoinClass.TEXT
+        isEnum -> ColumnClass.enum("$udtSchema.$udtName")
+        udtName == "citext" -> ColumnClass.TEXT
         else -> null
     }
     else -> null
@@ -261,7 +261,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
                 ColMeta(
                     name = c.name,
                     type = c.fullType,
-                    joinClass = pgJoinClass(c.type, c.udtSchema, c.udtName, c.isEnum),
+                    columnClass = pgColumnClass(c.type, c.udtSchema, c.udtName, c.isEnum),
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],
                     comment = c.comment,

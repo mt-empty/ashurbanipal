@@ -57,12 +57,12 @@ var sqliteJoinDialect = joinDialect{
 	ilike:    ilikeLike,
 }
 
-// sqliteJoinClass maps a declared type to a spec/protocol.md §5.11.2 class:
+// sqliteColumnClass maps a declared type to a spec/protocol.md §5.11.2 class:
 // recognised names first, then SQLite's affinity rules
 // (docs/adapter-decisions.md §5.11).
-func sqliteJoinClass(declared string) *joinClass {
+func sqliteColumnClass(declared string) *columnClass {
 	upper := strings.ToUpper(strings.TrimSpace(declared))
-	var c joinClass
+	var c columnClass
 	switch base := strings.TrimSpace(strings.SplitN(upper, "(", 2)[0]); {
 	case upper == "":
 		c = classUntyped
@@ -111,7 +111,7 @@ func (c *SQLiteSource) tableMeta(ctx context.Context, q queryer, table string) (
 		if typeName == "" {
 			typeName = "unknown"
 		}
-		meta.columns = append(meta.columns, colMeta{name: name, typeName: typeName, class: sqliteJoinClass(declared)})
+		meta.columns = append(meta.columns, colMeta{name: name, typeName: typeName, class: sqliteColumnClass(declared)})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()

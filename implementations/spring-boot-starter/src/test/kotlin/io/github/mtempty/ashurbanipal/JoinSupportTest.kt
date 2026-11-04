@@ -11,19 +11,19 @@ import java.sql.SQLTimeoutException
 
 /** `spec/protocol.md` §5.11 parsing, planning and SQL building; no database needed. */
 class JoinSupportTest {
-    private fun col(name: String, type: String, joinClass: JoinClass?) = ColMeta(name, type, joinClass)
+    private fun col(name: String, type: String, columnClass: ColumnClass?) = ColMeta(name, type, columnClass)
 
     private fun orders() = TableMeta(
         "orders",
         listOf(
-            col("id", "uuid", JoinClass.UUID),
-            col("user_id", "uuid", JoinClass.UUID),
-            col("status", "text", JoinClass.TEXT),
+            col("id", "uuid", ColumnClass.UUID),
+            col("user_id", "uuid", ColumnClass.UUID),
+            col("status", "text", ColumnClass.TEXT),
             col("tags", "ARRAY", null),
         ),
     )
 
-    private fun users() = TableMeta("users", listOf(col("id", "uuid", JoinClass.UUID), col("email", "text", JoinClass.TEXT)))
+    private fun users() = TableMeta("users", listOf(col("id", "uuid", ColumnClass.UUID), col("email", "text", ColumnClass.TEXT)))
 
     private fun opts(
         sort: String? = null,
@@ -98,12 +98,12 @@ class JoinSupportTest {
 
     @Test
     fun `enums pair only within one type and text collations must match`() {
-        fun enumTable(name: String, id: String) = TableMeta(name, listOf(col("e", "USER-DEFINED", JoinClass.enum(id))))
+        fun enumTable(name: String, id: String) = TableMeta(name, listOf(col("e", "USER-DEFINED", ColumnClass.enum(id))))
         val spec = JoinSpec("x", listOf(JoinEntry(false, "y", listOf(OnPair(ColumnPos(0, "e"), "e")))))
         planJoin(spec, listOf(enumTable("x", "a"), enumTable("y", "a")), opts())
         assertThrows(BadJoinException::class.java) { planJoin(spec, listOf(enumTable("x", "a"), enumTable("y", "b")), opts()) }
 
-        fun textTable(name: String, collation: String) = TableMeta(name, listOf(ColMeta("e", "varchar", JoinClass.TEXT, collation)))
+        fun textTable(name: String, collation: String) = TableMeta(name, listOf(ColMeta("e", "varchar", ColumnClass.TEXT, collation)))
         val ex = assertThrows(BadJoinException::class.java) {
             planJoin(spec, listOf(textTable("x", "utf8mb4_bin"), textTable("y", "utf8mb4_general_ci")), opts())
         }
@@ -157,22 +157,22 @@ class JoinSupportTest {
     }
 
     @Test
-    fun `join classes follow the engine's catalog types`() {
-        assertEquals(JoinClass.NUMBER, pgJoinClass("integer", "", "", false))
-        assertEquals(JoinClass.enum("public.mood"), pgJoinClass("USER-DEFINED", "public", "mood", true))
-        for (t in listOf("ARRAY", "jsonb", "json", "double precision", "money")) assertNull(pgJoinClass(t, "", "", false), t)
+    fun `column classes follow the engine's catalog types`() {
+        assertEquals(ColumnClass.NUMBER, pgColumnClass("integer", "", "", false))
+        assertEquals(ColumnClass.enum("public.mood"), pgColumnClass("USER-DEFINED", "public", "mood", true))
+        for (t in listOf("ARRAY", "jsonb", "json", "double precision", "money")) assertNull(pgColumnClass(t, "", "", false), t)
 
-        assertEquals(JoinClass.NUMBER, mysqlJoinClass("bigint", "bigint"))
-        assertEquals(JoinClass.TEXT, mysqlJoinClass("VARCHAR", "varchar(20)"))
-        assertEquals(JoinClass.enum("enum('a','b')"), mysqlJoinClass("enum", "enum('a','b')"))
-        assertNull(mysqlJoinClass("json", "json"))
-        assertNull(mysqlJoinClass("double", "double"))
+        assertEquals(ColumnClass.NUMBER, mysqlColumnClass("bigint", "bigint"))
+        assertEquals(ColumnClass.TEXT, mysqlColumnClass("VARCHAR", "varchar(20)"))
+        assertEquals(ColumnClass.enum("enum('a','b')"), mysqlColumnClass("enum", "enum('a','b')"))
+        assertNull(mysqlColumnClass("json", "json"))
+        assertNull(mysqlColumnClass("double", "double"))
 
-        assertEquals(JoinClass.NUMBER, sqliteJoinClass("DECIMAL(10,2)"))
-        assertEquals(JoinClass.TEXT, sqliteJoinClass("VARCHAR(20)"))
-        assertEquals(JoinClass.UUID, sqliteJoinClass("UUID"))
-        assertEquals(JoinClass.UNTYPED, sqliteJoinClass(""))
-        for (t in listOf("REAL", "DOUBLE PRECISION", "JSON")) assertNull(sqliteJoinClass(t), t)
+        assertEquals(ColumnClass.NUMBER, sqliteColumnClass("DECIMAL(10,2)"))
+        assertEquals(ColumnClass.TEXT, sqliteColumnClass("VARCHAR(20)"))
+        assertEquals(ColumnClass.UUID, sqliteColumnClass("UUID"))
+        assertEquals(ColumnClass.UNTYPED, sqliteColumnClass(""))
+        for (t in listOf("REAL", "DOUBLE PRECISION", "JSON")) assertNull(sqliteColumnClass(t), t)
     }
 
     @Test

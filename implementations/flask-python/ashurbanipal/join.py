@@ -144,7 +144,7 @@ def parse_join(raw: str) -> JoinSpec:
 
 
 @dataclass(frozen=True)
-class JoinClass:
+class ColumnClass:
     """Comparison class of a column type (`spec/protocol.md` §5.11.2). `enum_type`
     carries an enumerated type's identity; `untyped` is a SQLite column with
     no declared type and pairs only with itself.
@@ -154,18 +154,18 @@ class JoinClass:
     enum_type: str = ""
 
 
-NUMBER = JoinClass("number")
-TEXT = JoinClass("text")
-UUID = JoinClass("uuid")
-BOOLEAN = JoinClass("boolean")
-TEMPORAL = JoinClass("temporal")
-TIME = JoinClass("time")
-BINARY = JoinClass("binary")
-UNTYPED = JoinClass("untyped")
+NUMBER = ColumnClass("number")
+TEXT = ColumnClass("text")
+UUID = ColumnClass("uuid")
+BOOLEAN = ColumnClass("boolean")
+TEMPORAL = ColumnClass("temporal")
+TIME = ColumnClass("time")
+BINARY = ColumnClass("binary")
+UNTYPED = ColumnClass("untyped")
 
 
-def enum_class(identity: str) -> JoinClass:
-    return JoinClass("enum", identity)
+def enum_class(identity: str) -> ColumnClass:
+    return ColumnClass("enum", identity)
 
 
 @dataclass
@@ -174,7 +174,7 @@ class ColMeta:
 
     name: str
     type_name: str
-    join_class: JoinClass | None = None
+    column_class: ColumnClass | None = None
     collation: str | None = None  # set where two text collations can clash (MySQL)
     key: KeyKind | None = None
     references: ColumnRef | None = None
@@ -188,8 +188,8 @@ class ColMeta:
             key=self.key,
             references=self.references,
             comment=self.comment,
-            join_class=self.join_class.kind if self.join_class else None,
-            enum_type=(self.join_class.enum_type or None) if self.join_class else None,
+            column_class=self.column_class.kind if self.column_class else None,
+            enum_type=(self.column_class.enum_type or None) if self.column_class else None,
         )
 
 
@@ -240,7 +240,7 @@ class JoinColumnInfo:
     key: KeyKind | None = None
     references: ColumnRef | None = None
     comment: str | None = None
-    join_class: str | None = None
+    column_class: str | None = None
     enum_type: str | None = None
 
 
@@ -286,7 +286,7 @@ class JoinPlan:
                     key=c.key,
                     references=c.references,
                     comment=c.comment,
-                    join_class=c.join_class,
+                    column_class=c.column_class,
                     enum_type=c.enum_type,
                 )
             )
@@ -318,13 +318,13 @@ def _unjoinable(position: int, t: TableMeta, c: ColMeta) -> BadJoin:
 
 
 def _check_pair(position: int, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta) -> None:
-    if lc.join_class is None:
+    if lc.column_class is None:
         raise _unjoinable(position, lt, lc)
-    if rc.join_class is None:
+    if rc.column_class is None:
         raise _unjoinable(position, rt, rc)
-    if lc.join_class != rc.join_class:
+    if lc.column_class != rc.column_class:
         raise BadJoin(f"join {position} on: {_describe(lt, lc)} cannot be joined to {_describe(rt, rc)}")
-    if lc.join_class == TEXT and lc.collation and rc.collation and lc.collation != rc.collation:
+    if lc.column_class == TEXT and lc.collation and rc.collation and lc.collation != rc.collation:
         raise BadJoin(
             f"join {position} on: {_describe(lt, lc)} and {_describe(rt, rc)} "
             f"use different text collations ({lc.collation} and {rc.collation})"

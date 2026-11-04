@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pgJoinClass } from "../src/db/postgres.js";
+import { pgColumnClass } from "../src/db/postgres.js";
 import { FilterError, isQueryTimeout, NotAllowedError } from "../src/errors.js";
 import { parseFilter, parseFilterForJoin } from "../src/filter.js";
 import {
@@ -211,15 +211,15 @@ describe("isQueryTimeout", () => {
   });
 });
 
-describe("pgJoinClass", () => {
+describe("pgColumnClass", () => {
   it("maps information_schema types to classes", () => {
-    expect(pgJoinClass("integer", "", "", false)).toEqual({ kind: "number" });
-    expect(pgJoinClass("numeric", "", "", false)).toEqual({ kind: "number" });
-    expect(pgJoinClass("timestamp with time zone", "", "", false)).toEqual({ kind: "temporal" });
-    expect(pgJoinClass("USER-DEFINED", "public", "mood", true)).toEqual({ kind: "enum", enumType: "public.mood" });
-    expect(pgJoinClass("USER-DEFINED", "public", "geometry", false)).toBeUndefined();
+    expect(pgColumnClass("integer", "", "", false)).toEqual({ kind: "number" });
+    expect(pgColumnClass("numeric", "", "", false)).toEqual({ kind: "number" });
+    expect(pgColumnClass("timestamp with time zone", "", "", false)).toEqual({ kind: "temporal" });
+    expect(pgColumnClass("USER-DEFINED", "public", "mood", true)).toEqual({ kind: "enum", enumType: "public.mood" });
+    expect(pgColumnClass("USER-DEFINED", "public", "geometry", false)).toBeUndefined();
     for (const t of ["ARRAY", "jsonb", "json", "double precision", "money"]) {
-      expect(pgJoinClass(t, "", "", false), t).toBeUndefined();
+      expect(pgColumnClass(t, "", "", false), t).toBeUndefined();
     }
   });
 });

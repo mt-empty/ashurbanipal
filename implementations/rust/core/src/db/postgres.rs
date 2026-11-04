@@ -11,7 +11,7 @@ use super::{
 };
 use crate::filter::{Condition, Logic};
 use crate::join::{
-    self, ColMeta, Dialect, IlikeStyle, JoinClass, JoinData, JoinOpts, JoinSpec, TableMeta,
+    self, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -88,24 +88,24 @@ const JOIN_DIALECT: Dialect = Dialect {
 };
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
-fn join_class(
+fn column_class(
     data_type: &str,
     udt_schema: &str,
     udt_name: &str,
     is_enum: bool,
-) -> Option<JoinClass> {
+) -> Option<ColumnClass> {
     match data_type {
-        "smallint" | "integer" | "bigint" | "numeric" => Some(JoinClass::Number),
-        "character varying" | "character" | "text" => Some(JoinClass::Text),
-        "uuid" => Some(JoinClass::Uuid),
-        "boolean" => Some(JoinClass::Boolean),
-        "bytea" => Some(JoinClass::Binary),
+        "smallint" | "integer" | "bigint" | "numeric" => Some(ColumnClass::Number),
+        "character varying" | "character" | "text" => Some(ColumnClass::Text),
+        "uuid" => Some(ColumnClass::Uuid),
+        "boolean" => Some(ColumnClass::Boolean),
+        "bytea" => Some(ColumnClass::Binary),
         "date" | "timestamp without time zone" | "timestamp with time zone" => {
-            Some(JoinClass::Temporal)
+            Some(ColumnClass::Temporal)
         }
-        "time without time zone" | "time with time zone" => Some(JoinClass::Time),
-        "USER-DEFINED" if is_enum => Some(JoinClass::Enum(format!("{udt_schema}.{udt_name}"))),
-        "USER-DEFINED" if udt_name == "citext" => Some(JoinClass::Text),
+        "time without time zone" | "time with time zone" => Some(ColumnClass::Time),
+        "USER-DEFINED" if is_enum => Some(ColumnClass::Enum(format!("{udt_schema}.{udt_name}"))),
+        "USER-DEFINED" if udt_name == "citext" => Some(ColumnClass::Text),
         _ => None,
     }
 }
@@ -439,7 +439,7 @@ impl PgPoolSource {
                             (None, None)
                         };
                         ColMeta {
-                            class: join_class(&data_type, &udt_schema, &udt_name, is_enum),
+                            class: column_class(&data_type, &udt_schema, &udt_name, is_enum),
                             collation: None,
                             comment,
                             key,

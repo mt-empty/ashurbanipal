@@ -201,33 +201,33 @@ func ParseJoin(raw string) (JoinSpec, error) {
 	return spec, nil
 }
 
-// joinClass is the comparison class of a column type (spec/protocol.md
+// columnClass is the comparison class of a column type (spec/protocol.md
 // §5.11.2). enumType carries an enumerated type's identity.
-type joinClass struct {
+type columnClass struct {
 	kind     string
 	enumType string
 }
 
 var (
-	classNumber   = joinClass{kind: "number"}
-	classText     = joinClass{kind: "text"}
-	classUUID     = joinClass{kind: "uuid"}
-	classBoolean  = joinClass{kind: "boolean"}
-	classTemporal = joinClass{kind: "temporal"}
-	classTime     = joinClass{kind: "time"}
-	classBinary   = joinClass{kind: "binary"}
+	classNumber   = columnClass{kind: "number"}
+	classText     = columnClass{kind: "text"}
+	classUUID     = columnClass{kind: "uuid"}
+	classBoolean  = columnClass{kind: "boolean"}
+	classTemporal = columnClass{kind: "temporal"}
+	classTime     = columnClass{kind: "time"}
+	classBinary   = columnClass{kind: "binary"}
 	// classUntyped is a SQLite column with no declared type; it pairs only
 	// with itself.
-	classUntyped = joinClass{kind: "untyped"}
+	classUntyped = columnClass{kind: "untyped"}
 )
 
-func classEnum(enumType string) joinClass { return joinClass{kind: "enum", enumType: enumType} }
+func classEnum(enumType string) columnClass { return columnClass{kind: "enum", enumType: enumType} }
 
 // colMeta is one column as the live catalog reports it.
 type colMeta struct {
 	name       string
 	typeName   string
-	class      *joinClass
+	class      *columnClass
 	collation  *string // set where two text collations can clash (MySQL)
 	key        KeyKind
 	references *ColumnRef

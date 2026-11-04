@@ -20,8 +20,8 @@ from ..join import (
     UNTYPED,
     UUID,
     ColMeta,
+    ColumnClass,
     Dialect,
-    JoinClass,
     JoinData,
     JoinOpts,
     JoinSpec,
@@ -147,7 +147,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def join_class(declared: str) -> JoinClass | None:
+def column_class(declared: str) -> ColumnClass | None:
     """Recognised names first, then SQLite's own affinity rules
     (`docs/adapter-decisions.md` §5.11).
     """
@@ -221,7 +221,7 @@ class SqliteSource(DbSource):
                     name=col,
                     # A declared type can be empty (""); a stable label beats emitting "".
                     type_name=declared or "unknown",
-                    join_class=join_class(declared or ""),
+                    column_class=column_class(declared or ""),
                     key=(KeyKind.PK if col in pk_columns else (KeyKind.FK if col in fk_columns else None)),
                     references=fk_columns.get(col),
                 )

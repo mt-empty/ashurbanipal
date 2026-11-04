@@ -1,6 +1,6 @@
 import mysql, { type Pool } from "mysql2/promise";
 import { afterAll, describe, expect, it } from "vitest";
-import { MySqlSource, mysqlJoinClass, timedSelect, type Variant } from "../../src/db/mysql.js";
+import { MySqlSource, mysqlColumnClass, timedSelect, type Variant } from "../../src/db/mysql.js";
 import type { QueryOpts } from "../../src/db/types.js";
 import { isQueryTimeout, NotAllowedError } from "../../src/errors.js";
 import { BadJoinError, parseJoin } from "../../src/join.js";
@@ -268,12 +268,12 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       );
     });
 
-    it("joins: join classes follow data_type", () => {
-      expect(mysqlJoinClass("bigint", "bigint")).toEqual({ kind: "number" });
-      expect(mysqlJoinClass("VARCHAR", "varchar(20)")).toEqual({ kind: "text" });
-      expect(mysqlJoinClass("enum", "enum('a','b')")).toEqual({ kind: "enum", enumType: "enum('a','b')" });
-      expect(mysqlJoinClass("json", "json")).toBeUndefined();
-      expect(mysqlJoinClass("double", "double")).toBeUndefined();
+    it("joins: column classes follow data_type", () => {
+      expect(mysqlColumnClass("bigint", "bigint")).toEqual({ kind: "number" });
+      expect(mysqlColumnClass("VARCHAR", "varchar(20)")).toEqual({ kind: "text" });
+      expect(mysqlColumnClass("enum", "enum('a','b')")).toEqual({ kind: "enum", enumType: "enum('a','b')" });
+      expect(mysqlColumnClass("json", "json")).toBeUndefined();
+      expect(mysqlColumnClass("double", "double")).toBeUndefined();
     });
 
     // The load-bearing regression test PR #26 (Rust) and the Go port both

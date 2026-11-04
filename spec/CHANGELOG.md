@@ -57,7 +57,7 @@ it lands in place under §7's alpha exception, with every port, the
 conformance runner, and the bundled UI changed together.
 
 Column metadata (§5.4.1, and §5.11.4's join columns) gained `class`: the
-§5.11.2 join class the server already checks `on` pairs with, omitted for a
+§5.11.2 column class the server already checks `on` pairs with, omitted for a
 column that cannot be joined. §5.11.2 gained the `untyped` class every port
 already applied to SQLite columns with no declared type, and says that two
 `enum` columns join only when their new `enum_type` field, the enumerated

@@ -532,11 +532,11 @@ async fn reported_column(srv: &TestServer, table: &str, name: &str) -> serde_jso
         .clone()
 }
 
-/// P5.4.1-CLASS: each column reports the §5.11.2 join class the server
+/// P5.4.1-CLASS: each column reports the §5.11.2 column class the server
 /// checks join pairs with, and none when it cannot be joined; only an enum
 /// column carries `enum_type`.
 #[tokio::test]
-async fn columns_report_their_join_class() {
+async fn columns_report_their_column_class() {
     let srv = TestServer::spawn().await;
     let (id_class, status_class) = match Backend::current() {
         Backend::Postgres => ("uuid", "enum"),

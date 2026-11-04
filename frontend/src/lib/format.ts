@@ -1,4 +1,4 @@
-import type { ClassedColumn, Column, JoinClass } from "../core/types.js";
+import type { ClassedColumn, Column, ColumnClass } from "../core/types.js";
 
 // Mirrors json-tree.ts's UUID scalar test; kept local so this leaf stays
 // unit-testable without a runtime import.
@@ -32,9 +32,9 @@ export const APPROX_COUNT_TITLE =
 // hits Postgres interval/point/inet/int4range/line/lseg, none of them
 // numbers. `date` covers plain dates and timestamps alike — nothing
 // renders them differently.
-export type ColumnTypeClass = "number" | "bool" | "date" | "uuid" | "json";
+export type DisplayBucket = "number" | "bool" | "date" | "uuid" | "json";
 
-const TYPE_ALIASES: Record<string, ColumnTypeClass> = {
+const TYPE_ALIASES: Record<string, DisplayBucket> = {
   smallint: "number",
   integer: "number",
   int: "number",
@@ -78,26 +78,26 @@ function baseTypeName(rawType: string): string {
     .trim();
 }
 
-export function typeNameClass(rawType: string): ColumnTypeClass | null {
+export function typeNameClass(rawType: string): DisplayBucket | null {
   // MySQL's boolean is tinyint(1); only the display width tells it apart.
   if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
   return TYPE_ALIASES[baseTypeName(rawType)] ?? null;
 }
 
-const FROM_JOIN_CLASS: Partial<Record<JoinClass, ColumnTypeClass>> = {
+const FROM_COLUMN_CLASS: Partial<Record<ColumnClass, DisplayBucket>> = {
   number: "number",
   temporal: "date",
   uuid: "uuid",
   boolean: "bool",
 };
 
-// The type name first; the server's join class covers what the name hides,
+// The type name first; the server's column class covers what the name hides,
 // such as a Postgres domain over integer, whose `type` is the domain's name.
-export function columnTypeClass(col: ClassedColumn): ColumnTypeClass | null {
-  return typeNameClass(col.type) ?? (col.class ? (FROM_JOIN_CLASS[col.class] ?? null) : null);
+export function columnTypeClass(col: ClassedColumn): DisplayBucket | null {
+  return typeNameClass(col.type) ?? (col.class ? (FROM_COLUMN_CLASS[col.class] ?? null) : null);
 }
 
-const TYPE_CLASS_CSS: Partial<Record<ColumnTypeClass, string>> = {
+const TYPE_CLASS_CSS: Partial<Record<DisplayBucket, string>> = {
   number: "cell-type-number",
   bool: "cell-type-bool",
   uuid: "cell-type-uuid",

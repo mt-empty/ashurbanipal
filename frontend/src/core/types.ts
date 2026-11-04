@@ -5,13 +5,13 @@ export interface ColumnRef {
 }
 
 // spec/protocol.md §5.11.2: the class the server checks join pairs with.
-export type JoinClass = "number" | "text" | "uuid" | "boolean" | "temporal" | "time" | "binary" | "enum" | "untyped";
+export type ColumnClass = "number" | "text" | "uuid" | "boolean" | "temporal" | "time" | "binary" | "enum" | "untyped";
 
 interface ColumnBase {
   name: string;
   type: string;
   // Absent when the column cannot be joined.
-  class?: JoinClass;
+  class?: ColumnClass;
   // The enumerated type's identity; set only when class is "enum".
   enum_type?: string;
   comment?: string;
@@ -31,7 +31,7 @@ export type Column =
   | (ColumnBase & { key: "pk"; references?: ColumnRef })
   | (ColumnBase & { key: "fk"; references: ColumnRef });
 
-/** The part of a column that decides its join class and display bucket. */
+/** The part of a column that decides its column class and display bucket. */
 export type ClassedColumn = Pick<Column, "type" | "class" | "enum_type">;
 
 export interface Row {

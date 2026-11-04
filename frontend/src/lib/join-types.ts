@@ -1,12 +1,12 @@
-import type { ClassedColumn, Column, JoinClass } from "../core/types.js";
+import type { ClassedColumn, Column, ColumnClass } from "../core/types.js";
 
 // ==== Join pair checks (spec/protocol.md §5.11.2) ====
-// The server reports each column's join class, so the form greys the pairs
+// The server reports each column's column class, so the form greys the pairs
 // it would reject by type: a different class, two different enumerated types
 // (`enum_type`), or a column with no class at all. A MySQL collation clash
 // between two text columns is still only caught by the server.
 
-const LABEL: Record<JoinClass, string> = {
+const LABEL: Record<ColumnClass, string> = {
   number: "number",
   text: "text",
   uuid: "uuid",
@@ -35,8 +35,8 @@ export function joinMismatch(candidate: ClassedColumn, other: ClassedColumn): Jo
     const type = truncateType(candidate.class ? other.type : candidate.type);
     return { note: blocked, message: `${type} columns cannot be joined. Pick another column.` };
   }
-  const a = candidate.class as JoinClass;
-  const b = other.class as JoinClass;
+  const a = candidate.class as ColumnClass;
+  const b = other.class as ColumnClass;
   if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   const left = truncateType(candidate.type);
   const right = truncateType(other.type);

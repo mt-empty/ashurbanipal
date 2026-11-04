@@ -58,7 +58,7 @@ data class JoinColumnInfo(
     @JsonInclude(JsonInclude.Include.NON_NULL) val key: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
-    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("class") val joinClass: String? = null,
+    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("class") val columnClass: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("enum_type") val enumType: String? = null,
 )
 
@@ -156,17 +156,17 @@ fun parseJoin(raw: String): JoinSpec {
  * an enumerated type's identity; `untyped` is a SQLite column with no declared
  * type and pairs only with itself.
  */
-data class JoinClass(val kind: String, val enumType: String = "") {
+data class ColumnClass(val kind: String, val enumType: String = "") {
     companion object {
-        val NUMBER = JoinClass("number")
-        val TEXT = JoinClass("text")
-        val UUID = JoinClass("uuid")
-        val BOOLEAN = JoinClass("boolean")
-        val TEMPORAL = JoinClass("temporal")
-        val TIME = JoinClass("time")
-        val BINARY = JoinClass("binary")
-        val UNTYPED = JoinClass("untyped")
-        fun enum(identity: String) = JoinClass("enum", identity)
+        val NUMBER = ColumnClass("number")
+        val TEXT = ColumnClass("text")
+        val UUID = ColumnClass("uuid")
+        val BOOLEAN = ColumnClass("boolean")
+        val TEMPORAL = ColumnClass("temporal")
+        val TIME = ColumnClass("time")
+        val BINARY = ColumnClass("binary")
+        val UNTYPED = ColumnClass("untyped")
+        fun enum(identity: String) = ColumnClass("enum", identity)
     }
 }
 
@@ -174,14 +174,14 @@ data class JoinClass(val kind: String, val enumType: String = "") {
 data class ColMeta(
     val name: String,
     val type: String,
-    val joinClass: JoinClass?,
+    val columnClass: ColumnClass?,
     val collation: String? = null,
     val key: String? = null,
     val references: ColumnRef? = null,
     val comment: String? = null,
 ) {
     /** The §5.4.1 shape of this column. */
-    fun columnInfo() = ColumnInfo(name, type, key, references, comment, joinClass?.kind, joinClass?.enumType?.takeIf { it.isNotEmpty() })
+    fun columnInfo() = ColumnInfo(name, type, key, references, comment, columnClass?.kind, columnClass?.enumType?.takeIf { it.isNotEmpty() })
 }
 
 data class TableMeta(val name: String, val columns: List<ColMeta>) {
@@ -217,7 +217,7 @@ class JoinPlan internal constructor(
     fun columnInfos(): List<JoinColumnInfo> = selection.mapIndexed { i, (pos, col) ->
         val t = tables[pos]
         val c = t.columns[col].columnInfo()
-        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.key, c.references, c.comment, c.joinClass, c.enumType)
+        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.key, c.references, c.comment, c.columnClass, c.enumType)
     }
 
     /** Keys positional result rows by label and trims the extra row asked for `has_more`. */
@@ -243,12 +243,12 @@ private fun unjoinable(position: Int, t: TableMeta, c: ColMeta): BadJoinExceptio
 }
 
 private fun checkPair(position: Int, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta) {
-    val leftJoinClass = lc.joinClass ?: throw unjoinable(position, lt, lc)
-    val rightJoinClass = rc.joinClass ?: throw unjoinable(position, rt, rc)
-    if (leftJoinClass != rightJoinClass) {
+    val leftColumnClass = lc.columnClass ?: throw unjoinable(position, lt, lc)
+    val rightColumnClass = rc.columnClass ?: throw unjoinable(position, rt, rc)
+    if (leftColumnClass != rightColumnClass) {
         throw BadJoinException("join $position on: ${describe(lt, lc)} cannot be joined to ${describe(rt, rc)}")
     }
-    if (leftJoinClass == JoinClass.TEXT && lc.collation != null && rc.collation != null && lc.collation != rc.collation) {
+    if (leftColumnClass == ColumnClass.TEXT && lc.collation != null && rc.collation != null && lc.collation != rc.collation) {
         throw BadJoinException(
             "join $position on: ${describe(lt, lc)} and ${describe(rt, rc)} use different text collations (${lc.collation} and ${rc.collation})",
         )

@@ -114,14 +114,14 @@ private const val MARIADB_JSON_COLUMNS_SQL =
         "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun mysqlJoinClass(dataType: String, columnType: String): JoinClass? = when (dataType.lowercase()) {
-    "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> JoinClass.NUMBER
-    "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> JoinClass.TEXT
-    "date", "datetime", "timestamp" -> JoinClass.TEMPORAL
-    "time" -> JoinClass.TIME
-    "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> JoinClass.BINARY
-    "uuid" -> JoinClass.UUID
-    "enum" -> JoinClass.enum(columnType)
+internal fun mysqlColumnClass(dataType: String, columnType: String): ColumnClass? = when (dataType.lowercase()) {
+    "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> ColumnClass.NUMBER
+    "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> ColumnClass.TEXT
+    "date", "datetime", "timestamp" -> ColumnClass.TEMPORAL
+    "time" -> ColumnClass.TIME
+    "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> ColumnClass.BINARY
+    "uuid" -> ColumnClass.UUID
+    "enum" -> ColumnClass.enum(columnType)
     else -> null
 }
 
@@ -331,7 +331,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
                     name = c.name,
                     // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
                     type = if (isJson) "json" else c.columnType,
-                    joinClass = if (isJson) null else mysqlJoinClass(c.type, c.columnType),
+                    columnClass = if (isJson) null else mysqlColumnClass(c.type, c.columnType),
                     collation = c.collation?.takeIf { it.isNotEmpty() },
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],

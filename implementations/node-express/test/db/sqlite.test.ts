@@ -1,6 +1,6 @@
 import { Database } from "sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { partialIndexPredicate, SqliteSource, sqliteJoinClass } from "../../src/db/sqlite.js";
+import { partialIndexPredicate, SqliteSource, sqliteColumnClass } from "../../src/db/sqlite.js";
 import type { QueryOpts } from "../../src/db/types.js";
 import { isQueryTimeout, NotAllowedError } from "../../src/errors.js";
 import { BadJoinError, type JoinSpec, parseJoin } from "../../src/join.js";
@@ -177,7 +177,7 @@ describe("SqliteSource", () => {
   // bug — pragma_foreign_key_list.to is NULL for "REFERENCES parent" with
   // no named column, and until fixed keyMetadata doesn't resolve it the
   // way referencedBy now does.
-  it("query_table reports each column's join class", async () => {
+  it("query_table reports each column's column class", async () => {
     db = await new Promise<Database>((resolve, reject) => {
       const conn = new Database(":memory:", (err) => {
         if (err) return reject(err);
@@ -431,15 +431,15 @@ describe("SqliteSource.queryJoin", () => {
   });
 });
 
-describe("sqliteJoinClass", () => {
+describe("sqliteColumnClass", () => {
   it("classes follow declared names, then affinity", () => {
-    expect(sqliteJoinClass("INTEGER")).toEqual({ kind: "number" });
-    expect(sqliteJoinClass("DECIMAL(10,2)")).toEqual({ kind: "number" });
-    expect(sqliteJoinClass("VARCHAR(20)")).toEqual({ kind: "text" });
-    expect(sqliteJoinClass("BLOB")).toEqual({ kind: "binary" });
-    expect(sqliteJoinClass("UUID")).toEqual({ kind: "uuid" });
-    expect(sqliteJoinClass("TIMESTAMP(6)")).toEqual({ kind: "temporal" });
-    expect(sqliteJoinClass("")).toEqual({ kind: "untyped" });
-    for (const t of ["REAL", "DOUBLE PRECISION", "JSON"]) expect(sqliteJoinClass(t), t).toBeUndefined();
+    expect(sqliteColumnClass("INTEGER")).toEqual({ kind: "number" });
+    expect(sqliteColumnClass("DECIMAL(10,2)")).toEqual({ kind: "number" });
+    expect(sqliteColumnClass("VARCHAR(20)")).toEqual({ kind: "text" });
+    expect(sqliteColumnClass("BLOB")).toEqual({ kind: "binary" });
+    expect(sqliteColumnClass("UUID")).toEqual({ kind: "uuid" });
+    expect(sqliteColumnClass("TIMESTAMP(6)")).toEqual({ kind: "temporal" });
+    expect(sqliteColumnClass("")).toEqual({ kind: "untyped" });
+    for (const t of ["REAL", "DOUBLE PRECISION", "JSON"]) expect(sqliteColumnClass(t), t).toBeUndefined();
   });
 });

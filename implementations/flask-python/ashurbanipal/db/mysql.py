@@ -15,8 +15,8 @@ from ..join import (
     TIME,
     UUID,
     ColMeta,
+    ColumnClass,
     Dialect,
-    JoinClass,
     JoinData,
     JoinOpts,
     JoinSpec,
@@ -141,7 +141,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def join_class(data_type: str, column_type: str) -> JoinClass | None:
+def column_class(data_type: str, column_type: str) -> ColumnClass | None:
     """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
     t = data_type.lower()
     if t in ("tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric"):
@@ -445,7 +445,7 @@ class MySqlSource(DbSource):
                     name=name,
                     # column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
                     type_name="json" if name in json_columns else column_type,
-                    join_class=None if name in json_columns else join_class(data_type, column_type),
+                    column_class=None if name in json_columns else column_class(data_type, column_type),
                     collation=collation or None,
                     key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                     references=fk_columns.get(name),

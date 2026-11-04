@@ -131,10 +131,10 @@ var mysqlJoinDialect = joinDialect{
 	ilike:    ilikeLoweredLike,
 }
 
-// mysqlJoinClass maps information_schema types to spec/protocol.md
+// mysqlColumnClass maps information_schema types to spec/protocol.md
 // §5.11.2 classes (docs/adapter-decisions.md §5.11).
-func mysqlJoinClass(dataType, columnType string) *joinClass {
-	var c joinClass
+func mysqlColumnClass(dataType, columnType string) *columnClass {
+	var c columnClass
 	switch strings.ToLower(dataType) {
 	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric":
 		c = classNumber
@@ -413,7 +413,7 @@ func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVa
 			return tableMeta{}, err
 		}
 		// column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
-		col := colMeta{name: name, typeName: columnType, class: mysqlJoinClass(dataType, columnType), comment: comment}
+		col := colMeta{name: name, typeName: columnType, class: mysqlColumnClass(dataType, columnType), comment: comment}
 		if jsonColumns[name] {
 			col.typeName, col.class = "json", nil
 		}

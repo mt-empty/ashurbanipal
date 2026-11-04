@@ -1,4 +1,11 @@
-import { type ColumnInfo, type ColumnRef, type JoinClassName, type KeyKind, opSql, opTakesValue } from "./db/types.js";
+import {
+  type ColumnClassName,
+  type ColumnInfo,
+  type ColumnRef,
+  type KeyKind,
+  opSql,
+  opTakesValue,
+} from "./db/types.js";
 import { FilterError, NotAllowedError } from "./errors.js";
 import type { Condition } from "./filter.js";
 
@@ -147,12 +154,12 @@ export function parseJoin(raw: string): JoinSpec {
  * carries an enumerated type's identity; `untyped` is a SQLite column with
  * no declared type and pairs only with itself.
  */
-export interface JoinClass {
-  kind: JoinClassName;
+export interface ColumnClass {
+  kind: ColumnClassName;
   enumType?: string;
 }
 
-const classKey = (c: JoinClass): string => `${c.kind}:${c.enumType ?? ""}`;
+const classKey = (c: ColumnClass): string => `${c.kind}:${c.enumType ?? ""}`;
 
 /** The type's first word, so neither a user type such as `realm_kind`, a MySQL `set('real')`, nor a float array (which fails as an array) counts. */
 export const isFloatType = (type: string): boolean => /^\s*(real|double|float\d*)\b/i.test(type) && !type.includes("[");
@@ -161,7 +168,7 @@ export const isFloatType = (type: string): boolean => /^\s*(real|double|float\d*
 export interface ColMeta {
   name: string;
   type: string;
-  class?: JoinClass;
+  class?: ColumnClass;
   /** Set where two text collations can clash (MySQL). */
   collation?: string;
   key?: KeyKind;
@@ -190,7 +197,7 @@ export interface JoinColumnInfo {
   join: number;
   table: string;
   column: string;
-  class?: JoinClassName;
+  class?: ColumnClassName;
   enum_type?: string;
   key?: KeyKind;
   references?: ColumnRef;

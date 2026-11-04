@@ -212,11 +212,11 @@ def test_query_table_resolves_shorthand_fk_with_no_named_parent_column() -> None
         Path(path).unlink()
 
 
-def test_query_table_reports_each_columns_join_class() -> None:
+def test_query_table_reports_each_columns_column_class() -> None:
     path = _tmp_sqlite_path("create table t (id integer primary key, label text, meta json, loose);")
     try:
         data = SqliteSource(path).query_table(None, "t", QueryOpts(limit=10, offset=0, timeout_secs=5))
-        assert [c.join_class for c in data.columns] == ["number", "text", None, "untyped"]
+        assert [c.column_class for c in data.columns] == ["number", "text", None, "untyped"]
         wire = [_column_to_dict(c) for c in data.columns]
         assert wire[0]["class"] == "number"
         assert "class" not in wire[2], "a JSON column carries no class"

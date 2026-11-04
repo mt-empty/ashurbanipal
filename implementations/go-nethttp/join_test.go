@@ -243,11 +243,11 @@ func TestWriteErrorNamesTimeoutsAndBadJoins(t *testing.T) {
 	}
 }
 
-func TestPgJoinClass(t *testing.T) {
+func TestPgColumnClass(t *testing.T) {
 	cases := []struct {
 		dataType, schema, udt string
 		enum                  bool
-		want                  *joinClass
+		want                  *columnClass
 	}{
 		{"integer", "", "", false, &classNumber},
 		{"numeric", "", "", false, &classNumber},
@@ -259,16 +259,16 @@ func TestPgJoinClass(t *testing.T) {
 		{"double precision", "", "", false, nil},
 	}
 	for _, c := range cases {
-		got := pgJoinClass(c.dataType, c.schema, c.udt, c.enum)
+		got := pgColumnClass(c.dataType, c.schema, c.udt, c.enum)
 		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
 			t.Errorf("%s: got %v want %v", c.dataType, got, c.want)
 		}
 	}
-	e := pgJoinClass("USER-DEFINED", "public", "mood", true)
+	e := pgColumnClass("USER-DEFINED", "public", "mood", true)
 	if e == nil || *e != classEnum("public.mood") {
 		t.Errorf("enum class = %v", e)
 	}
-	if pgJoinClass("USER-DEFINED", "public", "geometry", false) != nil {
+	if pgColumnClass("USER-DEFINED", "public", "geometry", false) != nil {
 		t.Error("an unknown user-defined type is not joinable")
 	}
 }

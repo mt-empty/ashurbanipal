@@ -15,8 +15,8 @@ from ..join import (
     TIME,
     UUID,
     ColMeta,
+    ColumnClass,
     Dialect,
-    JoinClass,
     JoinData,
     JoinOpts,
     JoinSpec,
@@ -100,7 +100,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def join_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> JoinClass | None:
+def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> ColumnClass | None:
     """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
     if data_type in ("smallint", "integer", "bigint", "numeric"):
         return NUMBER
@@ -372,7 +372,7 @@ class PgSource(DbSource):
                 ColMeta(
                     name=name,
                     type_name=full_type,
-                    join_class=join_class(data_type, udt_schema, udt_name, is_enum),
+                    column_class=column_class(data_type, udt_schema, udt_name, is_enum),
                     key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                     references=fk_columns.get(name),
                     comment=comment,

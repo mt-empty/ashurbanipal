@@ -261,7 +261,7 @@ type and enum name (for example `character varying(20)`, `numeric(10,2)`,
 `text[]`, `order_status`, MySQL `tinyint(1)` or `enum('a','b')`); the
 per-engine source is in `spec/openapi.yaml`.
 
-- `class` — the column's §5.11.2 join class (`number`, `text`, `uuid`,
+- `class` — the column's §5.11.2 column class (`number`, `text`, `uuid`,
   `boolean`, `temporal`, `time`, `binary`, `enum` or `untyped`), the same
   one the server checks `on` pairs with. Omitted when the column is not
   joinable. A client deciding which pairs can join reads this rather than
@@ -851,7 +851,7 @@ the columns' native types, not the text cast of §5.4.2.
 - The statement is built with generated aliases for tables and columns;
   no request text becomes an alias or label. Values are bound parameters.
 - A timed-out join is a 500 with `code: "query_timeout"` (§2, §6).
-- See `docs/adapter-decisions.md` for per-engine join classes, text
+- See `docs/adapter-decisions.md` for per-engine column classes, text
   collation handling, and accepted gaps.
 
 ## 6. Server invariants

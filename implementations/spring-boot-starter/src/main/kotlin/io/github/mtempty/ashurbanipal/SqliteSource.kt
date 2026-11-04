@@ -77,21 +77,21 @@ private val JOIN_DIALECT = JoinDialect(
 )
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
-internal fun sqliteJoinClass(declared: String): JoinClass? {
+internal fun sqliteColumnClass(declared: String): ColumnClass? {
     val upper = declared.trim().uppercase()
-    if (upper.isEmpty()) return JoinClass.UNTYPED
+    if (upper.isEmpty()) return ColumnClass.UNTYPED
     val base = upper.substringBefore('(').trim()
     return when {
-        base == "UUID" -> JoinClass.UUID
-        base == "BOOLEAN" || base == "BOOL" -> JoinClass.BOOLEAN
-        base == "DATE" || base == "DATETIME" || base.startsWith("TIMESTAMP") -> JoinClass.TEMPORAL
-        base == "TIME" -> JoinClass.TIME
+        base == "UUID" -> ColumnClass.UUID
+        base == "BOOLEAN" || base == "BOOL" -> ColumnClass.BOOLEAN
+        base == "DATE" || base == "DATETIME" || base.startsWith("TIMESTAMP") -> ColumnClass.TEMPORAL
+        base == "TIME" -> ColumnClass.TIME
         base == "JSON" || base == "JSONB" -> null
-        "INT" in upper -> JoinClass.NUMBER
-        "CHAR" in upper || "CLOB" in upper || "TEXT" in upper -> JoinClass.TEXT
-        "BLOB" in upper -> JoinClass.BINARY
+        "INT" in upper -> ColumnClass.NUMBER
+        "CHAR" in upper || "CLOB" in upper || "TEXT" in upper -> ColumnClass.TEXT
+        "BLOB" in upper -> ColumnClass.BINARY
         "REAL" in upper || "FLOA" in upper || "DOUB" in upper -> null
-        else -> JoinClass.NUMBER
+        else -> ColumnClass.NUMBER
     }
 }
 
@@ -152,7 +152,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
                     name = col,
                     // A declared type can be empty (""); a stable label beats emitting "".
                     type = declared.ifEmpty { "unknown" },
-                    joinClass = sqliteJoinClass(declared),
+                    columnClass = sqliteColumnClass(declared),
                     key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
                     references = fkColumns[col],
                 )

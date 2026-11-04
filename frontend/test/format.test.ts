@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  type ColumnTypeClass,
   columnTypeClass,
+  type DisplayBucket,
   edgeWhitespace,
   rendersAsJson,
   typeNameClass,
@@ -13,7 +13,7 @@ import {
 // small render class. It must cover Postgres, MySQL, and SQLite vocabularies
 // without a bare-substring match that would mis-bucket Postgres geometry /
 // network / range types.
-const CASES: [string, ColumnTypeClass | null][] = [
+const CASES: [string, DisplayBucket | null][] = [
   // Postgres data_type spellings
   ["integer", "number"],
   ["bigint", "number"],
@@ -155,7 +155,7 @@ test("edgeWhitespace stays linear on a long inner run", () => {
   assert.ok(performance.now() - started < 200);
 });
 
-test("columnTypeClass falls back to the server's join class when the type name is unknown", () => {
+test("columnTypeClass falls back to the server's column class when the type name is unknown", () => {
   assert.equal(columnTypeClass({ type: "positive_int", class: "number" }), "number");
   assert.equal(columnTypeClass({ type: "event_time", class: "temporal" }), "date");
   assert.equal(columnTypeClass({ type: "tinyint(1)", class: "number" }), "bool");

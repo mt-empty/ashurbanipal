@@ -673,7 +673,7 @@ components:
           type: string
           enum: [number, text, uuid, boolean, temporal, time, binary, enum, untyped]
           description: >
-            The column's join class (spec/protocol.md §5.11.2), the same one
+            The column's column class (spec/protocol.md §5.11.2), the same one
             the server checks join pairs with; omitted when the column is
             not joinable.
         enum_type:

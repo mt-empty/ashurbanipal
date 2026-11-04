@@ -4,8 +4,8 @@ import { buildWhereClause } from "../filter.js";
 import {
   buildJoinSelect,
   type ColMeta,
+  type ColumnClass,
   columnInfo,
-  type JoinClass,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
@@ -44,12 +44,12 @@ const JOIN_DIALECT: JoinDialect = {
 };
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-export function pgJoinClass(
+export function pgColumnClass(
   dataType: string,
   udtSchema: string,
   udtName: string,
   isEnum: boolean,
-): JoinClass | undefined {
+): ColumnClass | undefined {
   switch (dataType) {
     case "smallint":
     case "integer":
@@ -322,7 +322,7 @@ export class PostgresSource implements DbSource {
       const col: ColMeta = {
         name: r.column_name,
         type: r.full_type,
-        class: pgJoinClass(r.data_type, r.udt_schema, r.udt_name, r.is_enum),
+        class: pgColumnClass(r.data_type, r.udt_schema, r.udt_name, r.is_enum),
       };
       if (pkColumns.has(r.column_name)) {
         col.key = "pk";

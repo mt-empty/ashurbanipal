@@ -5,8 +5,8 @@ import {
   BadJoinError,
   buildJoinSelect,
   type ColMeta,
+  type ColumnClass,
   columnInfo,
-  type JoinClass,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
@@ -182,7 +182,7 @@ const JOIN_DIALECT: JoinDialect = {
 };
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
-export function sqliteJoinClass(declared: string): JoinClass | undefined {
+export function sqliteColumnClass(declared: string): ColumnClass | undefined {
   const upper = declared.trim().toUpperCase();
   if (upper === "") return { kind: "untyped" };
   const base = (upper.split("(")[0] as string).trim();
@@ -251,7 +251,7 @@ async function tableMeta(db: Database, table: string): Promise<TableMeta> {
       name: ct.name,
       // A declared type can be empty (""); a stable label beats emitting "".
       type: ct.type || "unknown",
-      class: sqliteJoinClass(ct.type ?? ""),
+      class: sqliteColumnClass(ct.type ?? ""),
     };
     if (pkColumns.has(ct.name)) {
       col.key = "pk";

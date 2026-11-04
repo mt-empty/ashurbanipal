@@ -5,8 +5,8 @@ import {
   BadJoinError,
   buildJoinSelect,
   type ColMeta,
+  type ColumnClass,
   columnInfo,
-  type JoinClass,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
@@ -119,7 +119,7 @@ const MARIADB_JSON_COLUMNS_SQL =
   "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-export function mysqlJoinClass(dataType: string, columnType: string): JoinClass | undefined {
+export function mysqlColumnClass(dataType: string, columnType: string): ColumnClass | undefined {
   switch (dataType.toLowerCase()) {
     case "tinyint":
     case "smallint":
@@ -438,7 +438,7 @@ export class MySqlSource implements DbSource {
       const col: ColMeta = jsonColumns.has(name)
         ? { name, type: "json", class: undefined }
         : // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
-          { name, type: String(r.column_type), class: mysqlJoinClass(r.data_type as string, String(r.column_type)) };
+          { name, type: String(r.column_type), class: mysqlColumnClass(r.data_type as string, String(r.column_type)) };
       if (r.collation_name) col.collation = r.collation_name as string;
       if (pkColumns.has(name)) {
         col.key = "pk";
