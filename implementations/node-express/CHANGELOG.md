@@ -5,6 +5,30 @@ Notable changes to the Node/Express port. Format follows
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.13.0] - 2026-11-04
+
+### Features
+
+- *(demo)* Live PGlite demo, SQL-seeded synthetic demo, Pages via Actions (#224)
+- *(frontend)* Let the join form change its start table (#227)
+- *(frontend)* Link composite foreign keys, show column keys and types, hide buttons that cannot work (#231)
+- *(frontend)* Show keys, types and comments in the record view, tell key cells apart, and clear the sort (#232)
+- *(frontend)* Mark null, empty text and edge whitespace in cells (#233)
+- *(protocol)* [**breaking**] Report each column's join class and full type (#234)
+
+### Bug Fixes
+
+- *(frontend)* Copy rows as exact JSON and only guess JSON in text columns (#230)
+- *(frontend)* Make source and schema dropdown options readable in dark theme (#243)
+
+### Refactor
+
+- *(node-express)* Split the API routes into a framework-free handleApi (#225)
+
+### Documentation
+
+- Rewrite the port READMEs for library users (#226)
+
 ## [0.12.0] - 2026-10-30
 
 ### Bug Fixes

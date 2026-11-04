@@ -77,7 +77,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), PgPool
 <details><summary>Spring Boot</summary>
 
 ```yaml
-# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.12.0")
+# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.13.0")
 ashurbanipal:
   enabled: true   # Postgres is the default backend
 ```
@@ -133,7 +133,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), MySqlS
 <details><summary>Spring Boot</summary>
 
 ```yaml
-# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.12.0")
+# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.13.0")
 ashurbanipal:
   enabled: true
   sources:
@@ -194,7 +194,7 @@ App::new().service(service(app_state(config, vec![("primary".to_string(), Sqlite
 <details><summary>Spring Boot</summary>
 
 ```yaml
-# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.12.0")
+# implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.13.0")
 ashurbanipal:
   enabled: true
   sources:

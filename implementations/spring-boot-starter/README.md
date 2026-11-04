@@ -9,7 +9,7 @@ Requires Java 21+ and Spring Boot 4 (Spring MVC). It does not work on Spring Boo
 Gradle:
 
 ```kotlin
-implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.12.0")
+implementation("io.github.mt-empty:ashurbanipal-spring-boot-starter:0.13.0")
 ```
 
 Maven:
@@ -18,7 +18,7 @@ Maven:
 <dependency>
   <groupId>io.github.mt-empty</groupId>
   <artifactId>ashurbanipal-spring-boot-starter</artifactId>
-  <version>0.12.0</version>
+  <version>0.13.0</version>
 </dependency>
 ```
 
