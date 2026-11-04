@@ -37,6 +37,14 @@ class JoinSupportTest {
     private val pg = JoinDialect(::quoteIdent, { "$it::text" }, "native")
 
     @Test
+    fun `only a text column reports its collation`() {
+        val text = ColMeta("name", "varchar(20)", ColumnClass.TEXT, collation = "utf8mb4_bin")
+        val doc = ColMeta("doc", "json", ColumnClass.JSON, collation = "utf8mb4_bin")
+        assertEquals("utf8mb4_bin", text.columnInfo().collation)
+        assertEquals(null, doc.columnInfo().collation)
+    }
+
+    @Test
     fun `parses a valid join`() {
         val spec = parseJoin(join)
         assertEquals(listOf("orders", "users"), spec.tableNames())

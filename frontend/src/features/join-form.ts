@@ -122,14 +122,14 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         return {
           value: `${p}|${c.name}`,
           label: `${nameAt(p)}.${c.name}`,
-          note: note ?? c.type,
+          note: note ?? truncateType(c.type),
           blocked: note !== null,
         };
       }),
     );
     const rightOptions = columnsAt(pos).map((c) => {
       const note = pairNote(c, leftCol);
-      return { value: c.name, label: c.name, note: note ?? c.type, blocked: note !== null };
+      return { value: c.name, label: c.name, note: note ?? truncateType(c.type), blocked: note !== null };
     });
     const parts: Node[] = [
       el("span", "j-kw", first ? "on" : "and"),

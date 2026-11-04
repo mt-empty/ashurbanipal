@@ -196,7 +196,7 @@ class ColMeta:
             comment=self.comment,
             column_class=self.column_class.kind,
             enum_type=self.column_class.enum_type or None,
-            collation=self.collation,
+            collation=self.collation if self.column_class == TEXT else None,
         )
 
 

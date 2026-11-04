@@ -93,6 +93,7 @@ and the bundled UI changed together, under §7's alpha exception.
 A `sort` on a column whose type the engine cannot order (Postgres `json`,
 `xml` and the geometric types) is now a 400 with the new code
 `unsortable_column` (§2, §5.4, §5.11.3), where every port returned a 500
-`database_error`. A new error code is additive, so this stands under v1; it
-lands with every port, the conformance runner and the bundled UI changed
-together.
+`database_error`. The new code is additive, but the status of a request that
+already existed changes from 500 to 400, so this is not. It lands with every
+port, the conformance runner and the bundled UI changed together, under §7's
+alpha exception.

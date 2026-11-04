@@ -28,6 +28,18 @@ func testOrdersUsers() []tableMeta {
 const testJoinJSON = `{"table":"orders","joins":[{"type":"left","table":"users",
 	"on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}`
 
+func TestOnlyATextColumnReportsItsCollation(t *testing.T) {
+	bin := "utf8mb4_bin"
+	text := colMeta{name: "name", typeName: "varchar(20)", class: classText, collation: &bin}
+	doc := colMeta{name: "doc", typeName: "json", class: classJSON, collation: &bin}
+	if got := text.columnInfo().Collation; got != bin {
+		t.Errorf("text collation = %q", got)
+	}
+	if got := doc.columnInfo().Collation; got != "" {
+		t.Errorf("a json column reported collation %q", got)
+	}
+}
+
 func TestParseJoinAcceptsAValidJoin(t *testing.T) {
 	spec, err := ParseJoin(testJoinJSON)
 	if err != nil {

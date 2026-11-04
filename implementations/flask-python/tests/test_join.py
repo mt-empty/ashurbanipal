@@ -158,6 +158,13 @@ def test_plan_join_rejects_unknown_names_hostile_names_and_incompatible_pairs() 
         plan_join(floaty, [orders, _users()], _opts())
 
 
+def test_only_a_text_column_reports_its_collation() -> None:
+    text = ColMeta(name="name", type_name="varchar(20)", column_class=TEXT, collation="utf8mb4_bin")
+    doc = ColMeta(name="doc", type_name="json", column_class=JSON, collation="utf8mb4_bin")
+    assert text.column_info().collation == "utf8mb4_bin"
+    assert doc.column_info().collation is None
+
+
 def test_enums_pair_only_within_one_type_and_collations_must_match() -> None:
     spec = parse_join(
         json.dumps(

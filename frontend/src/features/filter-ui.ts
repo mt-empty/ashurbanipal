@@ -14,6 +14,7 @@ import {
 import type { CommonValue, FilterCondition } from "../core/types.js";
 import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
+import { truncateType } from "../lib/join-types.js";
 import { columnKey } from "./join-view.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
 import { keyDescriptionOf, tableMeta } from "./table-meta.js";
@@ -257,7 +258,7 @@ function updateFilterSuggestions(): void {
       columns.map((c) => ({
         label: columnKey(c),
         insert: columnKey(c),
-        note: c.type,
+        note: truncateType(c.type),
         key: keyDescriptionOf(c, meta),
       })),
     );

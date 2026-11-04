@@ -192,6 +192,11 @@ impl ColumnClass {
         }
     }
 
+    /// The collation to send: only a text column's can clash in a comparison.
+    pub fn wire_collation(&self, collation: Option<&String>) -> Option<String> {
+        collation.filter(|_| *self == ColumnClass::Text).cloned()
+    }
+
     fn is_joinable(&self) -> bool {
         !matches!(
             self,
@@ -233,7 +238,7 @@ impl From<ColMeta> for ColumnInfo {
             name: c.name,
             type_name: c.type_name,
             enum_type: c.class.enum_type(),
-            collation: c.collation,
+            collation: c.class.wire_collation(c.collation.as_ref()),
             class: c.class,
             key: c.key,
             references: c.references,
@@ -333,7 +338,7 @@ impl Plan {
                     column: c.name.clone(),
                     class: c.class.clone(),
                     enum_type: c.class.enum_type(),
-                    collation: c.collation.clone(),
+                    collation: c.class.wire_collation(c.collation.as_ref()),
                     key: c.key,
                     references: c.references.clone(),
                     comment: c.comment.clone(),
@@ -795,6 +800,19 @@ mod tests {
             plan(&array, vec![orders(), users()], &opts()),
             Err(DbError::BadJoin(_))
         ));
+    }
+
+    #[test]
+    fn only_a_text_column_reports_its_collation() {
+        let mut text = col("name", "varchar(20)", ColumnClass::Text);
+        text.collation = Some("utf8mb4_bin".into());
+        let mut doc = col("doc", "json", ColumnClass::Json);
+        doc.collation = Some("utf8mb4_bin".into());
+        assert_eq!(
+            ColumnInfo::from(text).collation.as_deref(),
+            Some("utf8mb4_bin")
+        );
+        assert_eq!(ColumnInfo::from(doc).collation, None);
     }
 
     #[test]

@@ -221,7 +221,8 @@ async function runLoad({
   replaceHistory = false,
   askNextPage = false,
   reason,
-}: LoadDataOpts & { reason: LoadReason }): Promise<void> {
+  notice,
+}: LoadDataOpts & { reason: LoadReason; notice?: unknown }): Promise<void> {
   if (!auto) {
     clearError();
     clearJoinNotice();
@@ -264,11 +265,11 @@ async function runLoad({
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
     // A column the engine cannot order: drop the sort so the page shows rows in
     // a state it can reload, then say why.
+    // The reload says why only once its rows are in view, so a view switched
+    // to meanwhile, or a different failure, keeps its own banner.
     if (!next && code === "unsortable_column") {
       setSort(null);
-      await runLoad({ resetScroll, highlightNew, replaceHistory, reason });
-      reportError(failedLoadError(e, view, next));
-      return;
+      return runLoad({ resetScroll, highlightNew, replaceHistory, reason, notice: failedLoadError(e, view, next) });
     }
     reportError(failedLoadError(e, view, next));
     return;
@@ -354,4 +355,5 @@ async function runLoad({
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "instant" : "smooth" });
   }
+  if (notice !== undefined) reportError(notice);
 }

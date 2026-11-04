@@ -3,7 +3,7 @@ import type { Column } from "../core/types.js";
 import { type Draft, draftToDef } from "../lib/join-draft.js";
 import { type JoinParse, parseJoin, printJoin, quoteJoinName } from "../lib/join-dsl.js";
 import { type JoinCompletion, type JoinToken, joinCompletionAt, tokenizeJoinText } from "../lib/join-tokens.js";
-import { findForeignKey, joinMismatch, pairNote } from "../lib/join-types.js";
+import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
 import {
   cachedColumns,
   catalogVersion,
@@ -190,7 +190,7 @@ export function mountJoinSql(onChange: () => void): JoinSql {
         return {
           label: c.name,
           insert: `${quoteJoinName(c.name)} `,
-          note: note ?? c.type,
+          note: note ?? truncateType(c.type),
           ...(note === null && indexed?.has(c.name) ? { tag: "indexed" } : {}),
           ...(note !== null ? { blocked: true } : {}),
         };

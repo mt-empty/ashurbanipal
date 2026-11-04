@@ -8,6 +8,7 @@ import {
   BadParamError,
   buildJoinSelect,
   type ColMeta,
+  columnInfo,
   type JoinDialect,
   type JoinOpts,
   parseJoin,
@@ -156,6 +157,15 @@ describe("planJoin", () => {
     ).toThrow(FilterError);
     expect(() => planJoin(spec, [orders(), users()], opts({ sortJoin: 1 }))).toThrow(BadParamError);
     expect(() => planJoin(spec, [orders(), users()], opts({ sort: "email" }))).toThrow(NotAllowedError);
+  });
+});
+
+describe("columnInfo", () => {
+  it("reports a collation only for a text column", () => {
+    const named: ColMeta = { name: "name", type: "varchar(20)", class: { kind: "text" }, collation: "utf8mb4_bin" };
+    const doc: ColMeta = { name: "doc", type: "json", class: { kind: "json" }, collation: "utf8mb4_bin" };
+    expect(columnInfo(named).collation).toBe("utf8mb4_bin");
+    expect(columnInfo(doc).collation).toBeUndefined();
   });
 });
 

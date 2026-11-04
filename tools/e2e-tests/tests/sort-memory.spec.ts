@@ -96,6 +96,17 @@ test("a sort on a column with no ordering is dropped and the banner says why", a
   await expect(page.locator("#error")).toBeEmpty();
 });
 
+test("the unsortable-column banner does not follow a switch to another table", async ({ page }) => {
+  await refuseSort(page, "price");
+  await gotoApp(page);
+  await selectTable(page, "products");
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
+  await selectTable(page, "users");
+  await waitForIdle(page);
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect(page.locator('th[data-col="email"]')).toBeVisible();
+});
+
 test("a stale remembered sort is dropped without discarding a shared link's filter", async ({ page }) => {
   // Two stale-risk inputs at once: the visitor's own stored sort names a
   // dead column, while the link's ?filter= is perfectly valid. The sort is

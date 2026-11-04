@@ -4207,14 +4207,14 @@ function mountJoinForm(root, onChange) {
         return {
           value: `${p}|${c.name}`,
           label: `${nameAt(p)}.${c.name}`,
-          note: note ?? c.type,
+          note: note ?? truncateType(c.type),
           blocked: note !== null
         };
       })
     );
     const rightOptions = columnsAt(pos).map((c) => {
       const note = pairNote(c, leftCol);
-      return { value: c.name, label: c.name, note: note ?? c.type, blocked: note !== null };
+      return { value: c.name, label: c.name, note: note ?? truncateType(c.type), blocked: note !== null };
     });
     const parts = [
       el("span", "j-kw", first ? "on" : "and"),
@@ -4910,7 +4910,7 @@ function mountJoinSql(onChange) {
       return {
         label: c.name,
         insert: `${quoteJoinName(c.name)} `,
-        note: note ?? c.type,
+        note: note ?? truncateType(c.type),
         ...note === null && indexed?.has(c.name) ? { tag: "indexed" } : {},
         ...note !== null ? { blocked: true } : {}
       };
@@ -5679,7 +5679,7 @@ function updateFilterSuggestions() {
       columns.map((c) => ({
         label: columnKey(c),
         insert: columnKey(c),
-        note: c.type,
+        note: truncateType(c.type),
         key: keyDescriptionOf(c, meta)
       }))
     );
@@ -6820,7 +6820,8 @@ async function runLoad({
   next,
   replaceHistory = false,
   askNextPage = false,
-  reason
+  reason,
+  notice
 }) {
   if (!auto) {
     clearError();
@@ -6857,9 +6858,7 @@ async function runLoad({
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
     if (!next && code === "unsortable_column") {
       setSort(null);
-      await runLoad({ resetScroll, highlightNew, replaceHistory, reason });
-      reportError(failedLoadError(e, view, next));
-      return;
+      return runLoad({ resetScroll, highlightNew, replaceHistory, reason, notice: failedLoadError(e, view, next) });
     }
     reportError(failedLoadError(e, view, next));
     return;
@@ -6920,6 +6919,7 @@ async function runLoad({
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "instant" : "smooth" });
   }
+  if (notice !== void 0) reportError(notice);
 }
 
 // src/features/theme.ts

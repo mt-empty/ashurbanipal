@@ -195,7 +195,7 @@ a 400 `unsortable_column` (`spec/protocol.md` §5.4, §5.11.3), never a 500.
 
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
-| Postgres | The `order by` fails with SQLSTATE `42883` ("could not identify an ordering operator") for `json`, `xml`, `jsonpath` and the geometric types; `jsonb`, ranges, `tsvector` and `interval` sort. A `42883` is mapped only when the request has a `sort`, in both the data and join routes | The filter path casts to text, so it cannot raise `42883` itself. |
+| Postgres | The `order by` fails with SQLSTATE `42883` ("could not identify an ordering operator") for `json`, `xml`, `jsonpath` and the geometric types; `jsonb`, ranges, `tsvector` and `interval` sort. A `42883` is mapped only when the request has a `sort`, in both the data and join routes | The filter path casts to text, so it cannot raise `42883` itself. A `42883` from another part of a join statement, such as an `ON` pair of one class with no cross-type operator, is reported as `unsortable_column` too when the request sorts (accepted gap). |
 | MySQL/MariaDB | None: every type orders (`json` as JSON, geometry by bytes) | |
 | SQLite   | None: every storage class orders | |
 

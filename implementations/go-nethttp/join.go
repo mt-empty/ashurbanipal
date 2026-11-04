@@ -264,8 +264,10 @@ func (c colMeta) columnInfo() ColumnInfo {
 	}
 }
 
+// collationName is the collation to send: only a text column's can clash in a
+// comparison.
 func (c colMeta) collationName() string {
-	if c.collation == nil {
+	if c.collation == nil || c.class != classText {
 		return ""
 	}
 	return *c.collation

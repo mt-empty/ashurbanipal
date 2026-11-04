@@ -194,7 +194,7 @@ data class ColMeta(
     /** The §5.4.1 shape of this column. */
     fun columnInfo() = ColumnInfo(
         name, type, columnClass.kind, key, references, comment,
-        columnClass.enumType.takeIf { it.isNotEmpty() }, collation,
+        columnClass.enumType.takeIf { it.isNotEmpty() }, collation.takeIf { columnClass == ColumnClass.TEXT },
     )
 }
 
