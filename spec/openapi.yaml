@@ -656,7 +656,7 @@ components:
 
     ColumnInfo:
       type: object
-      required: [name, type]
+      required: [name, type, class]
       properties:
         name:
           type: string
@@ -671,11 +671,11 @@ components:
             "unknown" when none). Informational, never used to build SQL.
         class:
           type: string
-          enum: [number, text, uuid, boolean, temporal, time, binary, enum, untyped]
+          enum: [number, text, uuid, boolean, temporal, time, binary, enum, untyped, float, json, array, other]
           description: >
             The column's column class (spec/protocol.md §5.11.2), the same one
-            the server checks join pairs with; omitted when the column is
-            not joinable.
+            the server checks join pairs with. Always present; float, json,
+            array and other columns cannot be joined.
         enum_type:
           type: string
           description: >

@@ -88,7 +88,7 @@ test("join pair checks follow the server's class, and the enum_type for enums", 
   const ticket = { type: "ticket_status", class: "enum" as const, enum_type: "public.ticket_status" };
   // A domain over order_status shows its own name but is the same enum underneath.
   const open = { type: "open_status", class: "enum" as const, enum_type: "public.order_status" };
-  const jsonb = { type: "jsonb" };
+  const jsonb = { type: "jsonb", class: "json" as const };
   assert.equal(joinMismatch(uuid, uuid), null);
   assert.equal(joinMismatch(int, big), null);
   assert.equal(joinMismatch(status, status), null);
@@ -103,10 +103,10 @@ test("join pair checks follow the server's class, and the enum_type for enums", 
   assert.equal(joinMismatch(status, text)?.note, "order_status ≠ text");
   assert.equal(joinMismatch(jsonb, text)?.note, "jsonb: not joinable");
   assert.equal(joinMismatch(text, jsonb)?.message, "jsonb columns cannot be joined. Pick another column.");
-  assert.equal(unjoinableReason({ type: "double precision" }), "double precision: not joinable");
+  assert.equal(unjoinableReason({ type: "double precision", class: "float" }), "double precision: not joinable");
   assert.equal(unjoinableReason(uuid), null);
   assert.equal(
-    unjoinableReason({ type: "set('pending','completed','cancelled')" }),
+    unjoinableReason({ type: "set('pending','completed','cancelled')", class: "other" }),
     "set('pending','complete…: not joinable",
   );
 });
@@ -144,7 +144,7 @@ test("a foreign key is found in either direction and greyed notes follow the oth
     leftColumn: "id",
     rightColumn: "user_id",
   });
-  assert.equal(pairNote({ type: "jsonb" }, undefined), "jsonb: not joinable");
+  assert.equal(pairNote({ type: "jsonb", class: "json" }, undefined), "jsonb: not joinable");
   assert.equal(pairNote({ type: "text", class: "text" }, users[0]), "text ≠ uuid");
   assert.equal(pairNote(users[0], users[0]), null);
 });

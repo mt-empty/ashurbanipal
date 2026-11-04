@@ -11,7 +11,7 @@ import java.sql.SQLTimeoutException
 
 /** `spec/protocol.md` §5.11 parsing, planning and SQL building; no database needed. */
 class JoinSupportTest {
-    private fun col(name: String, type: String, columnClass: ColumnClass?) = ColMeta(name, type, columnClass)
+    private fun col(name: String, type: String, columnClass: ColumnClass) = ColMeta(name, type, columnClass)
 
     private fun orders() = TableMeta(
         "orders",
@@ -19,7 +19,7 @@ class JoinSupportTest {
             col("id", "uuid", ColumnClass.UUID),
             col("user_id", "uuid", ColumnClass.UUID),
             col("status", "text", ColumnClass.TEXT),
-            col("tags", "ARRAY", null),
+            col("tags", "ARRAY", ColumnClass.ARRAY),
         ),
     )
 
@@ -86,7 +86,7 @@ class JoinSupportTest {
         val array = spec.copy(joins = listOf(spec.joins[0].copy(on = listOf(OnPair(ColumnPos(0, "tags"), "id")))))
         assertThrows(BadJoinException::class.java) { planJoin(array, listOf(orders(), users()), opts()) }
 
-        val withScore = orders().let { it.copy(columns = it.columns + col("score", "double precision", null)) }
+        val withScore = orders().let { it.copy(columns = it.columns + col("score", "double precision", ColumnClass.FLOAT)) }
         val float = spec.copy(joins = listOf(spec.joins[0].copy(on = listOf(OnPair(ColumnPos(0, "score"), "id")))))
         val fex = assertThrows(BadJoinException::class.java) { planJoin(float, listOf(withScore, users()), opts()) }
         assertTrue(
@@ -160,19 +160,28 @@ class JoinSupportTest {
     fun `column classes follow the engine's catalog types`() {
         assertEquals(ColumnClass.NUMBER, pgColumnClass("integer", "", "", false))
         assertEquals(ColumnClass.enum("public.mood"), pgColumnClass("USER-DEFINED", "public", "mood", true))
-        for (t in listOf("ARRAY", "jsonb", "json", "double precision", "money")) assertNull(pgColumnClass(t, "", "", false), t)
+        assertEquals(ColumnClass.ARRAY, pgColumnClass("ARRAY", "", "", false))
+        assertEquals(ColumnClass.JSON, pgColumnClass("jsonb", "", "", false))
+        assertEquals(ColumnClass.JSON, pgColumnClass("json", "", "", false))
+        assertEquals(ColumnClass.FLOAT, pgColumnClass("double precision", "", "", false))
+        assertEquals(ColumnClass.FLOAT, pgColumnClass("real", "", "", false))
+        assertEquals(ColumnClass.OTHER, pgColumnClass("money", "", "", false))
+        assertEquals(ColumnClass.OTHER, pgColumnClass("USER-DEFINED", "public", "geometry", false))
 
         assertEquals(ColumnClass.NUMBER, mysqlColumnClass("bigint", "bigint"))
         assertEquals(ColumnClass.TEXT, mysqlColumnClass("VARCHAR", "varchar(20)"))
         assertEquals(ColumnClass.enum("enum('a','b')"), mysqlColumnClass("enum", "enum('a','b')"))
-        assertNull(mysqlColumnClass("json", "json"))
-        assertNull(mysqlColumnClass("double", "double"))
+        assertEquals(ColumnClass.JSON, mysqlColumnClass("json", "json"))
+        assertEquals(ColumnClass.FLOAT, mysqlColumnClass("double", "double"))
+        assertEquals(ColumnClass.OTHER, mysqlColumnClass("set", "set('a','b')"))
 
         assertEquals(ColumnClass.NUMBER, sqliteColumnClass("DECIMAL(10,2)"))
         assertEquals(ColumnClass.TEXT, sqliteColumnClass("VARCHAR(20)"))
         assertEquals(ColumnClass.UUID, sqliteColumnClass("UUID"))
         assertEquals(ColumnClass.UNTYPED, sqliteColumnClass(""))
-        for (t in listOf("REAL", "DOUBLE PRECISION", "JSON")) assertNull(sqliteColumnClass(t), t)
+        assertEquals(ColumnClass.FLOAT, sqliteColumnClass("REAL"))
+        assertEquals(ColumnClass.FLOAT, sqliteColumnClass("DOUBLE PRECISION"))
+        assertEquals(ColumnClass.JSON, sqliteColumnClass("JSON"))
     }
 
     @Test
@@ -185,15 +194,5 @@ class JoinSupportTest {
         assertTrue(isQueryTimeout(RuntimeException("wrapped", SQLException("canceling statement", "57014"))))
         assertFalse(isQueryTimeout(SQLException("permission denied", "42501")))
         assertFalse(isQueryTimeout(RuntimeException("boom")))
-    }
-
-    @Test
-    fun `float types are told apart from names that contain the word`() {
-        for (t in listOf("real", "double precision", "float", "float8", "float(7,4)", "DOUBLE")) {
-            assertTrue(isFloatType(t), t)
-        }
-        for (t in listOf("realm_kind", "numeric(10,2)", "text", "float_kind", "my_real", "set('real','virtual')", "double precision[]")) {
-            assertFalse(isFloatType(t), t)
-        }
     }
 }

@@ -269,7 +269,7 @@ class SqliteSourceTest {
         val ds = dataSourceFor("create table t (id integer primary key, label text, meta json, loose)")
         try {
             val data = SqliteSource(ds, 5).queryTable(null, "t", QueryOpts(10, 0, null, false, null))
-            assertEquals(listOf("number", "text", null, "untyped"), data.columns.map { it.columnClass })
+            assertEquals(listOf("number", "text", "json", "untyped"), data.columns.map { it.columnClass })
         } finally {
             ds.close()
         }

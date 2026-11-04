@@ -77,7 +77,7 @@ private val JOIN_DIALECT = JoinDialect(
 )
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
-internal fun sqliteColumnClass(declared: String): ColumnClass? {
+internal fun sqliteColumnClass(declared: String): ColumnClass {
     val upper = declared.trim().uppercase()
     if (upper.isEmpty()) return ColumnClass.UNTYPED
     val base = upper.substringBefore('(').trim()
@@ -86,11 +86,11 @@ internal fun sqliteColumnClass(declared: String): ColumnClass? {
         base == "BOOLEAN" || base == "BOOL" -> ColumnClass.BOOLEAN
         base == "DATE" || base == "DATETIME" || base.startsWith("TIMESTAMP") -> ColumnClass.TEMPORAL
         base == "TIME" -> ColumnClass.TIME
-        base == "JSON" || base == "JSONB" -> null
+        base == "JSON" || base == "JSONB" -> ColumnClass.JSON
         "INT" in upper -> ColumnClass.NUMBER
         "CHAR" in upper || "CLOB" in upper || "TEXT" in upper -> ColumnClass.TEXT
         "BLOB" in upper -> ColumnClass.BINARY
-        "REAL" in upper || "FLOA" in upper || "DOUB" in upper -> null
+        "REAL" in upper || "FLOA" in upper || "DOUB" in upper -> ColumnClass.FLOAT
         else -> ColumnClass.NUMBER
     }
 }

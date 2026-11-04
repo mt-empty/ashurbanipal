@@ -416,7 +416,7 @@ Query params:
 }
 ```
 
-Each column entry is `{name, type}` plus optional metadata, all schema-catalog
+Each column entry is `{name, type, class}` plus optional metadata, all schema-catalog
 reads (never data queries, same cost class as `/table-counts`): `key`
 (`"pk"` \| `"fk"`) and, for `"fk"`, `references` (the target table/column) —
 sourced from `information_schema.table_constraints`/`key_column_usage`;

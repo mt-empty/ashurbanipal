@@ -11,18 +11,16 @@ import (
 )
 
 func uuidCol(name string) colMeta {
-	c := classUUID
-	return colMeta{name: name, typeName: "uuid", class: &c}
+	return colMeta{name: name, typeName: "uuid", class: classUUID}
 }
 
 func textCol(name string) colMeta {
-	c := classText
-	return colMeta{name: name, typeName: "text", class: &c}
+	return colMeta{name: name, typeName: "text", class: classText}
 }
 
 func testOrdersUsers() []tableMeta {
 	return []tableMeta{
-		{name: "orders", columns: []colMeta{uuidCol("id"), uuidCol("user_id"), textCol("status"), {name: "tags", typeName: "ARRAY"}}},
+		{name: "orders", columns: []colMeta{uuidCol("id"), uuidCol("user_id"), textCol("status"), {name: "tags", typeName: "ARRAY", class: classArray}}},
 		{name: "users", columns: []colMeta{uuidCol("id"), textCol("email")}},
 	}
 }
@@ -111,7 +109,7 @@ func TestPlanJoinRejectsUnknownNamesAndIncompatiblePairs(t *testing.T) {
 	}
 
 	metas := testOrdersUsers()
-	metas[0].columns = append(metas[0].columns, colMeta{name: "score", typeName: "double precision"})
+	metas[0].columns = append(metas[0].columns, colMeta{name: "score", typeName: "double precision", class: classFloat})
 	float := spec
 	float.Joins = []JoinEntry{{Table: "users", On: []OnPair{{Left: ColumnPos{Join: 0, Column: "score"}, Right: "id"}}}}
 	_, err = planJoin(float, metas, JoinOpts{})
@@ -124,8 +122,8 @@ func TestPlanJoinRejectsUnknownNamesAndIncompatiblePairs(t *testing.T) {
 func TestPlanJoinEnumsPairOnlyWithinOneType(t *testing.T) {
 	enumA, enumB := classEnum("public.a"), classEnum("public.b")
 	tables := []tableMeta{
-		{name: "x", columns: []colMeta{{name: "e", typeName: "USER-DEFINED", class: &enumA}}},
-		{name: "y", columns: []colMeta{{name: "e", typeName: "USER-DEFINED", class: &enumA}, {name: "f", typeName: "USER-DEFINED", class: &enumB}}},
+		{name: "x", columns: []colMeta{{name: "e", typeName: "USER-DEFINED", class: enumA}}},
+		{name: "y", columns: []colMeta{{name: "e", typeName: "USER-DEFINED", class: enumA}, {name: "f", typeName: "USER-DEFINED", class: enumB}}},
 	}
 	spec := JoinSpec{Table: "x", Joins: []JoinEntry{{Table: "y", On: []OnPair{{Left: ColumnPos{Column: "e"}, Right: "e"}}}}}
 	if _, err := planJoin(spec, tables, JoinOpts{}); err != nil {
@@ -247,29 +245,27 @@ func TestPgColumnClass(t *testing.T) {
 	cases := []struct {
 		dataType, schema, udt string
 		enum                  bool
-		want                  *columnClass
+		want                  columnClass
 	}{
-		{"integer", "", "", false, &classNumber},
-		{"numeric", "", "", false, &classNumber},
-		{"character varying", "", "", false, &classText},
-		{"uuid", "", "", false, &classUUID},
-		{"timestamp with time zone", "", "", false, &classTemporal},
-		{"ARRAY", "", "", false, nil},
-		{"jsonb", "", "", false, nil},
-		{"double precision", "", "", false, nil},
+		{"integer", "", "", false, classNumber},
+		{"numeric", "", "", false, classNumber},
+		{"character varying", "", "", false, classText},
+		{"uuid", "", "", false, classUUID},
+		{"timestamp with time zone", "", "", false, classTemporal},
+		{"ARRAY", "", "", false, classArray},
+		{"json", "", "", false, classJSON},
+		{"jsonb", "", "", false, classJSON},
+		{"double precision", "", "", false, classFloat},
+		{"real", "", "", false, classFloat},
+		{"money", "", "", false, classOther},
+		{"USER-DEFINED", "public", "citext", false, classText},
+		{"USER-DEFINED", "public", "geometry", false, classOther},
+		{"USER-DEFINED", "public", "mood", true, classEnum("public.mood")},
 	}
 	for _, c := range cases {
-		got := pgColumnClass(c.dataType, c.schema, c.udt, c.enum)
-		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+		if got := pgColumnClass(c.dataType, c.schema, c.udt, c.enum); got != c.want {
 			t.Errorf("%s: got %v want %v", c.dataType, got, c.want)
 		}
-	}
-	e := pgColumnClass("USER-DEFINED", "public", "mood", true)
-	if e == nil || *e != classEnum("public.mood") {
-		t.Errorf("enum class = %v", e)
-	}
-	if pgColumnClass("USER-DEFINED", "public", "geometry", false) != nil {
-		t.Error("an unknown user-defined type is not joinable")
 	}
 }
 
@@ -279,18 +275,5 @@ func TestParseFilterRejectsAKeyInAnotherCase(t *testing.T) {
 	}
 	if _, err := ParseFilter(`[{"column":"a","op":"IS NULL"}]`); err != nil {
 		t.Errorf("the documented keys must still parse: %v", err)
-	}
-}
-
-func TestFloatTypesAreToldApartFromNamesThatContainTheWord(t *testing.T) {
-	for _, typ := range []string{"real", "double precision", "float", "float8", "float(7,4)", "DOUBLE"} {
-		if !isFloatType(typ) {
-			t.Errorf("%q is a float type", typ)
-		}
-	}
-	for _, typ := range []string{"realm_kind", "numeric(10,2)", "text", "float_kind", "my_real", "set('real','virtual')", "double precision[]"} {
-		if isFloatType(typ) {
-			t.Errorf("%q is not a float type", typ)
-		}
 	}
 }

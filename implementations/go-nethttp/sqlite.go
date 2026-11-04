@@ -60,34 +60,31 @@ var sqliteJoinDialect = joinDialect{
 // sqliteColumnClass maps a declared type to a spec/protocol.md §5.11.2 class:
 // recognised names first, then SQLite's affinity rules
 // (docs/adapter-decisions.md §5.11).
-func sqliteColumnClass(declared string) *columnClass {
+func sqliteColumnClass(declared string) columnClass {
 	upper := strings.ToUpper(strings.TrimSpace(declared))
-	var c columnClass
 	switch base := strings.TrimSpace(strings.SplitN(upper, "(", 2)[0]); {
 	case upper == "":
-		c = classUntyped
+		return classUntyped
 	case base == "UUID":
-		c = classUUID
+		return classUUID
 	case base == "BOOLEAN" || base == "BOOL":
-		c = classBoolean
+		return classBoolean
 	case base == "DATE" || base == "DATETIME" || strings.HasPrefix(base, "TIMESTAMP"):
-		c = classTemporal
+		return classTemporal
 	case base == "TIME":
-		c = classTime
+		return classTime
 	case base == "JSON" || base == "JSONB":
-		return nil
+		return classJSON
 	case strings.Contains(upper, "INT"):
-		c = classNumber
+		return classNumber
 	case strings.Contains(upper, "CHAR") || strings.Contains(upper, "CLOB") || strings.Contains(upper, "TEXT"):
-		c = classText
+		return classText
 	case strings.Contains(upper, "BLOB"):
-		c = classBinary
+		return classBinary
 	case strings.Contains(upper, "REAL") || strings.Contains(upper, "FLOA") || strings.Contains(upper, "DOUB"):
-		return nil
-	default:
-		c = classNumber
+		return classFloat
 	}
-	return &c
+	return classNumber
 }
 
 func (c *SQLiteSource) tableMeta(ctx context.Context, q queryer, table string) (tableMeta, error) {

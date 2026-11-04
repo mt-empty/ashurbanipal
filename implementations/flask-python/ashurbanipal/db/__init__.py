@@ -34,11 +34,11 @@ class ColumnRef:
 class ColumnInfo:
     name: str
     type_name: str
+    # The §5.4.1 column class (`class` on the wire).
+    column_class: str
     key: KeyKind | None = None
     references: ColumnRef | None = None
     comment: str | None = None
-    # The §5.11.2 column class (`class` on the wire); None when not joinable.
-    column_class: str | None = None
     # The enumerated type's identity; set only when the class is enum.
     enum_type: str | None = None
 

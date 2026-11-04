@@ -8,7 +8,6 @@ emits SQL from catalog names and generated aliases only.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -145,7 +144,7 @@ def parse_join(raw: str) -> JoinSpec:
 
 @dataclass(frozen=True)
 class ColumnClass:
-    """Comparison class of a column type (`spec/protocol.md` §5.11.2). `enum_type`
+    """Class of a column type (`spec/protocol.md` §5.4.1, §5.11.2). `enum_type`
     carries an enumerated type's identity; `untyped` is a SQLite column with
     no declared type and pairs only with itself.
     """
@@ -162,6 +161,13 @@ TEMPORAL = ColumnClass("temporal")
 TIME = ColumnClass("time")
 BINARY = ColumnClass("binary")
 UNTYPED = ColumnClass("untyped")
+FLOAT = ColumnClass("float")
+JSON = ColumnClass("json")
+ARRAY = ColumnClass("array")
+OTHER = ColumnClass("other")
+
+# Classes whose columns cannot be joined (§5.11.2).
+_NOT_JOINABLE = frozenset({FLOAT, JSON, ARRAY, OTHER})
 
 
 def enum_class(identity: str) -> ColumnClass:
@@ -174,7 +180,7 @@ class ColMeta:
 
     name: str
     type_name: str
-    column_class: ColumnClass | None = None
+    column_class: ColumnClass
     collation: str | None = None  # set where two text collations can clash (MySQL)
     key: KeyKind | None = None
     references: ColumnRef | None = None
@@ -188,8 +194,8 @@ class ColMeta:
             key=self.key,
             references=self.references,
             comment=self.comment,
-            column_class=self.column_class.kind if self.column_class else None,
-            enum_type=(self.column_class.enum_type or None) if self.column_class else None,
+            column_class=self.column_class.kind,
+            enum_type=self.column_class.enum_type or None,
         )
 
 
@@ -237,10 +243,10 @@ class JoinColumnInfo:
     join: int
     table: str
     column: str
+    column_class: str
     key: KeyKind | None = None
     references: ColumnRef | None = None
     comment: str | None = None
-    column_class: str | None = None
     enum_type: str | None = None
 
 
@@ -303,24 +309,15 @@ def _describe(t: TableMeta, c: ColMeta) -> str:
     return f"{t.name}.{c.name} ({c.type_name})"
 
 
-_FLOAT_FIRST_WORD = re.compile(r"\s*(real|double|float\d*)\b", re.I)
-
-
-def is_float_type(type_name: str) -> bool:
-    """The type's first word, so neither a user type such as `realm_kind`, a MySQL
-    `set('real')`, nor a float array (which fails as an array) counts."""
-    return bool(_FLOAT_FIRST_WORD.match(type_name)) and "[" not in type_name
-
-
 def _unjoinable(position: int, t: TableMeta, c: ColMeta) -> BadJoin:
-    why = ": floating-point values are not compared exactly" if is_float_type(c.type_name) else ""
+    why = ": floating-point values are not compared exactly" if c.column_class == FLOAT else ""
     return BadJoin(f"join {position} on: {_describe(t, c)} cannot be used in a join{why}")
 
 
 def _check_pair(position: int, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta) -> None:
-    if lc.column_class is None:
+    if lc.column_class in _NOT_JOINABLE:
         raise _unjoinable(position, lt, lc)
-    if rc.column_class is None:
+    if rc.column_class in _NOT_JOINABLE:
         raise _unjoinable(position, rt, rc)
     if lc.column_class != rc.column_class:
         raise BadJoin(f"join {position} on: {_describe(lt, lc)} cannot be joined to {_describe(rt, rc)}")

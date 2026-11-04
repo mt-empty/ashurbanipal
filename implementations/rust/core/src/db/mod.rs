@@ -53,9 +53,8 @@ pub struct ColumnInfo {
     pub name: String,
     #[serde(rename = "type")]
     pub type_name: String,
-    /// The §5.11.2 column class; absent when the column cannot be joined.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub class: Option<ColumnClass>,
+    /// The §5.4.1 column class.
+    pub class: ColumnClass,
     /// The enumerated type's identity; set only when `class` is enum.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_type: Option<String>,

@@ -40,36 +40,37 @@ var pgJoinDialect = joinDialect{
 
 // pgColumnClass maps information_schema types to spec/protocol.md §5.11.2
 // classes (docs/adapter-decisions.md §5.11).
-func pgColumnClass(dataType, udtSchema, udtName string, isEnum bool) *columnClass {
-	var c columnClass
+func pgColumnClass(dataType, udtSchema, udtName string, isEnum bool) columnClass {
 	switch dataType {
 	case "smallint", "integer", "bigint", "numeric":
-		c = classNumber
+		return classNumber
 	case "character varying", "character", "text":
-		c = classText
+		return classText
 	case "uuid":
-		c = classUUID
+		return classUUID
 	case "boolean":
-		c = classBoolean
+		return classBoolean
 	case "bytea":
-		c = classBinary
+		return classBinary
 	case "date", "timestamp without time zone", "timestamp with time zone":
-		c = classTemporal
+		return classTemporal
 	case "time without time zone", "time with time zone":
-		c = classTime
+		return classTime
+	case "real", "double precision":
+		return classFloat
+	case "json", "jsonb":
+		return classJSON
+	case "ARRAY":
+		return classArray
 	case "USER-DEFINED":
 		switch {
 		case isEnum:
-			c = classEnum(udtSchema + "." + udtName)
+			return classEnum(udtSchema + "." + udtName)
 		case udtName == "citext":
-			c = classText
-		default:
-			return nil
+			return classText
 		}
-	default:
-		return nil
 	}
-	return &c
+	return classOther
 }
 
 func (c *PostgresSource) bounded(ctx context.Context) (context.Context, context.CancelFunc) {

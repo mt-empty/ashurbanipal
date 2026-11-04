@@ -133,27 +133,28 @@ var mysqlJoinDialect = joinDialect{
 
 // mysqlColumnClass maps information_schema types to spec/protocol.md
 // §5.11.2 classes (docs/adapter-decisions.md §5.11).
-func mysqlColumnClass(dataType, columnType string) *columnClass {
-	var c columnClass
+func mysqlColumnClass(dataType, columnType string) columnClass {
 	switch strings.ToLower(dataType) {
 	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric":
-		c = classNumber
+		return classNumber
 	case "char", "varchar", "tinytext", "text", "mediumtext", "longtext":
-		c = classText
+		return classText
 	case "date", "datetime", "timestamp":
-		c = classTemporal
+		return classTemporal
 	case "time":
-		c = classTime
+		return classTime
 	case "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob":
-		c = classBinary
+		return classBinary
 	case "uuid":
-		c = classUUID
+		return classUUID
 	case "enum":
-		c = classEnum(columnType)
-	default:
-		return nil
+		return classEnum(columnType)
+	case "float", "double":
+		return classFloat
+	case "json":
+		return classJSON
 	}
-	return &c
+	return classOther
 }
 
 func (c *MySQLSource) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -415,7 +416,7 @@ func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVa
 		// column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
 		col := colMeta{name: name, typeName: columnType, class: mysqlColumnClass(dataType, columnType), comment: comment}
 		if jsonColumns[name] {
-			col.typeName, col.class = "json", nil
+			col.typeName, col.class = "json", classJSON
 		}
 		if collation.Valid {
 			cl := collation.String

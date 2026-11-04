@@ -114,7 +114,7 @@ private const val MARIADB_JSON_COLUMNS_SQL =
         "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun mysqlColumnClass(dataType: String, columnType: String): ColumnClass? = when (dataType.lowercase()) {
+internal fun mysqlColumnClass(dataType: String, columnType: String): ColumnClass = when (dataType.lowercase()) {
     "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> ColumnClass.NUMBER
     "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> ColumnClass.TEXT
     "date", "datetime", "timestamp" -> ColumnClass.TEMPORAL
@@ -122,7 +122,9 @@ internal fun mysqlColumnClass(dataType: String, columnType: String): ColumnClass
     "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> ColumnClass.BINARY
     "uuid" -> ColumnClass.UUID
     "enum" -> ColumnClass.enum(columnType)
-    else -> null
+    "float", "double" -> ColumnClass.FLOAT
+    "json" -> ColumnClass.JSON
+    else -> ColumnClass.OTHER
 }
 
 /** MySQL/MariaDB [DbSource] (`spec/protocol.md` §5). */
@@ -331,7 +333,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
                     name = c.name,
                     // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
                     type = if (isJson) "json" else c.columnType,
-                    columnClass = if (isJson) null else mysqlColumnClass(c.type, c.columnType),
+                    columnClass = if (isJson) ColumnClass.JSON else mysqlColumnClass(c.type, c.columnType),
                     collation = c.collation?.takeIf { it.isNotEmpty() },
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],

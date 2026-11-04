@@ -4,14 +4,27 @@ export interface ColumnRef {
   column: string;
 }
 
-// spec/protocol.md §5.11.2: the class the server checks join pairs with.
-export type ColumnClass = "number" | "text" | "uuid" | "boolean" | "temporal" | "time" | "binary" | "enum" | "untyped";
+// spec/protocol.md §5.4.1, §5.11.2: the server's class for a column, the one it
+// checks join pairs with. `float`, `json`, `array` and `other` cannot be joined.
+export type ColumnClass =
+  | "number"
+  | "text"
+  | "uuid"
+  | "boolean"
+  | "temporal"
+  | "time"
+  | "binary"
+  | "enum"
+  | "untyped"
+  | "float"
+  | "json"
+  | "array"
+  | "other";
 
 interface ColumnBase {
   name: string;
   type: string;
-  // Absent when the column cannot be joined.
-  class?: ColumnClass;
+  class: ColumnClass;
   // The enumerated type's identity; set only when class is "enum".
   enum_type?: string;
   comment?: string;

@@ -662,7 +662,7 @@ async fn oversize_join_is_rejected() {
 }
 
 /// P5.11-COMPATIBILITY: a pair across classes is a 400 `invalid_join`;
-/// `json`/`jsonb` columns are never joinable.
+/// columns of class `float`, `json`, `array` and `other` are never joinable.
 #[tokio::test]
 async fn incompatible_column_pairs_are_rejected() {
     let srv = TestServer::spawn().await;
@@ -685,6 +685,16 @@ async fn incompatible_column_pairs_are_rejected() {
         }
         NotJoinableColumns::NotSeeded => {}
     }
+
+    let float_pair = json!({
+        "table": "products",
+        "joins": [{
+            "type": "inner", "table": "products",
+            "on": [{"left": {"join": 0, "column": "weight_kg"}, "right": "weight_kg"}]
+        }]
+    });
+    let resp = get_join(&srv, &float_pair, &[]).await;
+    assert_problem_code(resp, 400, "invalid_join", "float to float").await;
 }
 
 /// P5.11-ENUM-IDENTITY: two enum columns join only when they share one

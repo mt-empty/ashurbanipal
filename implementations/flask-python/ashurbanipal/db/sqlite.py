@@ -13,6 +13,8 @@ from ..filter import Condition
 from ..join import (
     BINARY,
     BOOLEAN,
+    FLOAT,
+    JSON,
     NUMBER,
     TEMPORAL,
     TEXT,
@@ -147,7 +149,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def column_class(declared: str) -> ColumnClass | None:
+def column_class(declared: str) -> ColumnClass:
     """Recognised names first, then SQLite's own affinity rules
     (`docs/adapter-decisions.md` §5.11).
     """
@@ -164,7 +166,7 @@ def column_class(declared: str) -> ColumnClass | None:
     if base == "TIME":
         return TIME
     if base in ("JSON", "JSONB"):
-        return None
+        return JSON
     if "INT" in upper:
         return NUMBER
     if "CHAR" in upper or "CLOB" in upper or "TEXT" in upper:
@@ -172,7 +174,7 @@ def column_class(declared: str) -> ColumnClass | None:
     if "BLOB" in upper:
         return BINARY
     if "REAL" in upper or "FLOA" in upper or "DOUB" in upper:
-        return None
+        return FLOAT
     return NUMBER
 
 

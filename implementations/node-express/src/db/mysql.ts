@@ -119,7 +119,7 @@ const MARIADB_JSON_COLUMNS_SQL =
   "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-export function mysqlColumnClass(dataType: string, columnType: string): ColumnClass | undefined {
+export function mysqlColumnClass(dataType: string, columnType: string): ColumnClass {
   switch (dataType.toLowerCase()) {
     case "tinyint":
     case "smallint":
@@ -154,8 +154,13 @@ export function mysqlColumnClass(dataType: string, columnType: string): ColumnCl
       return { kind: "uuid" };
     case "enum":
       return { kind: "enum", enumType: columnType };
+    case "float":
+    case "double":
+      return { kind: "float" };
+    case "json":
+      return { kind: "json" };
     default:
-      return undefined;
+      return { kind: "other" };
   }
 }
 
@@ -436,7 +441,7 @@ export class MySqlSource implements DbSource {
     const columns = rows.map((r): ColMeta => {
       const name = r.column_name as string;
       const col: ColMeta = jsonColumns.has(name)
-        ? { name, type: "json", class: undefined }
+        ? { name, type: "json", class: { kind: "json" } }
         : // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
           { name, type: String(r.column_type), class: mysqlColumnClass(r.data_type as string, String(r.column_type)) };
       if (r.collation_name) col.collation = r.collation_name as string;

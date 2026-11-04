@@ -44,12 +44,7 @@ const JOIN_DIALECT: JoinDialect = {
 };
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-export function pgColumnClass(
-  dataType: string,
-  udtSchema: string,
-  udtName: string,
-  isEnum: boolean,
-): ColumnClass | undefined {
+export function pgColumnClass(dataType: string, udtSchema: string, udtName: string, isEnum: boolean): ColumnClass {
   switch (dataType) {
     case "smallint":
     case "integer":
@@ -73,12 +68,20 @@ export function pgColumnClass(
     case "time without time zone":
     case "time with time zone":
       return { kind: "time" };
+    case "real":
+    case "double precision":
+      return { kind: "float" };
+    case "json":
+    case "jsonb":
+      return { kind: "json" };
+    case "ARRAY":
+      return { kind: "array" };
     case "USER-DEFINED":
       if (isEnum) return { kind: "enum", enumType: `${udtSchema}.${udtName}` };
       if (udtName === "citext") return { kind: "text" };
-      return undefined;
+      return { kind: "other" };
     default:
-      return undefined;
+      return { kind: "other" };
   }
 }
 

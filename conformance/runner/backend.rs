@@ -107,7 +107,7 @@ pub enum ExpressionIndexes {
     NotSeeded,
 }
 
-/// Whether the dialect's seed has a column of a type `/api/tables/join`
+/// Whether the dialect's seed has a column of a class `/api/tables/join`
 /// (§5.11.2) never joins: `users.metadata` is `jsonb` / `json`.
 pub enum NotJoinableColumns {
     Seeded,

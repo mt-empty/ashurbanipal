@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 )
 
@@ -201,8 +200,10 @@ func ParseJoin(raw string) (JoinSpec, error) {
 	return spec, nil
 }
 
-// columnClass is the comparison class of a column type (spec/protocol.md
+// columnClass is the class of a column type (spec/protocol.md §5.4.1,
 // §5.11.2). enumType carries an enumerated type's identity.
+//
+// The float, json, array and other classes cannot be joined.
 type columnClass struct {
 	kind     string
 	enumType string
@@ -219,7 +220,19 @@ var (
 	// classUntyped is a SQLite column with no declared type; it pairs only
 	// with itself.
 	classUntyped = columnClass{kind: "untyped"}
+	classFloat   = columnClass{kind: "float"}
+	classJSON    = columnClass{kind: "json"}
+	classArray   = columnClass{kind: "array"}
+	classOther   = columnClass{kind: "other"}
 )
+
+func (c columnClass) joinable() bool {
+	switch c {
+	case classFloat, classJSON, classArray, classOther:
+		return false
+	}
+	return true
+}
 
 func classEnum(enumType string) columnClass { return columnClass{kind: "enum", enumType: enumType} }
 
@@ -227,25 +240,16 @@ func classEnum(enumType string) columnClass { return columnClass{kind: "enum", e
 type colMeta struct {
 	name       string
 	typeName   string
-	class      *columnClass
+	class      columnClass
 	collation  *string // set where two text collations can clash (MySQL)
 	key        KeyKind
 	references *ColumnRef
 	comment    string
 }
 
-// wireClass is the class and, for an enum, its identity as the wire carries them.
-func (c colMeta) wireClass() (class, enumType string) {
-	if c.class == nil {
-		return "", ""
-	}
-	return c.class.kind, c.class.enumType
-}
-
 func (c colMeta) columnInfo() ColumnInfo {
-	class, enumType := c.wireClass()
 	return ColumnInfo{
-		Name: c.name, Type: c.typeName, Class: class, EnumType: enumType,
+		Name: c.name, Type: c.typeName, Class: c.class.kind, EnumType: c.class.enumType,
 		Key: c.key, References: c.references, Comment: c.comment,
 	}
 }
@@ -345,33 +349,25 @@ func describeCol(t tableMeta, c colMeta) string {
 	return fmt.Sprintf("%s.%s (%s)", t.name, c.name, c.typeName)
 }
 
-// The type's first word, so neither a user type such as realm_kind, a MySQL
-// set('real'), nor a float array (which fails as an array) counts.
-var floatTypeRe = regexp.MustCompile(`(?i)^\s*(real|double|float\d*)\b`)
-
-func isFloatType(typeName string) bool {
-	return floatTypeRe.MatchString(typeName) && !strings.Contains(typeName, "[")
-}
-
 func unjoinable(position int, t tableMeta, c colMeta) error {
 	why := ""
-	if isFloatType(c.typeName) {
+	if c.class == classFloat {
 		why = ": floating-point values are not compared exactly"
 	}
 	return badJoin("join %d on: %s cannot be used in a join%s", position, describeCol(t, c), why)
 }
 
 func checkJoinPair(position int, lt tableMeta, lc colMeta, rt tableMeta, rc colMeta) error {
-	if lc.class == nil {
+	if !lc.class.joinable() {
 		return unjoinable(position, lt, lc)
 	}
-	if rc.class == nil {
+	if !rc.class.joinable() {
 		return unjoinable(position, rt, rc)
 	}
-	if *lc.class != *rc.class {
+	if lc.class != rc.class {
 		return badJoin("join %d on: %s cannot be joined to %s", position, describeCol(lt, lc), describeCol(rt, rc))
 	}
-	if *lc.class == classText && lc.collation != nil && rc.collation != nil && *lc.collation != *rc.collation {
+	if lc.class == classText && lc.collation != nil && rc.collation != nil && *lc.collation != *rc.collation {
 		return badJoin("join %d on: %s and %s use different text collations (%s and %s)",
 			position, describeCol(lt, lc), describeCol(rt, rc), *lc.collation, *rc.collation)
 	}
@@ -621,10 +617,9 @@ func (p *joinPlan) columnInfos() []JoinColumnInfo {
 	for i, s := range p.selection {
 		t := p.tables[s[0]]
 		c := t.columns[s[1]]
-		class, enumType := c.wireClass()
 		out[i] = JoinColumnInfo{
 			Name: p.labels[i], Type: c.typeName, Join: s[0], Table: t.name, Column: c.name,
-			Class: class, EnumType: enumType, Key: c.key, References: c.references, Comment: c.comment,
+			Class: c.class.kind, EnumType: c.class.enumType, Key: c.key, References: c.references, Comment: c.comment,
 		}
 	}
 	return out

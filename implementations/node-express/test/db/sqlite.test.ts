@@ -187,8 +187,7 @@ describe("SqliteSource", () => {
       });
     });
     const data = await new SqliteSource(db).queryTable(undefined, "t", baseOpts, 5000);
-    expect(data.columns.map((c) => c.class)).toEqual(["number", "text", undefined, "untyped"]);
-    expect("class" in data.columns[2], "a JSON column carries no class").toBe(false);
+    expect(data.columns.map((c) => c.class)).toEqual(["number", "text", "json", "untyped"]);
   });
 
   it("query_table resolves a shorthand FK with no named parent column", async () => {
@@ -440,6 +439,8 @@ describe("sqliteColumnClass", () => {
     expect(sqliteColumnClass("UUID")).toEqual({ kind: "uuid" });
     expect(sqliteColumnClass("TIMESTAMP(6)")).toEqual({ kind: "temporal" });
     expect(sqliteColumnClass("")).toEqual({ kind: "untyped" });
-    for (const t of ["REAL", "DOUBLE PRECISION", "JSON"]) expect(sqliteColumnClass(t), t).toBeUndefined();
+    expect(sqliteColumnClass("REAL")).toEqual({ kind: "float" });
+    expect(sqliteColumnClass("DOUBLE PRECISION")).toEqual({ kind: "float" });
+    expect(sqliteColumnClass("JSON")).toEqual({ kind: "json" });
   });
 });

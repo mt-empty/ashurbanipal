@@ -21,8 +21,13 @@ from ashurbanipal.db.sqlite import SqliteSource
 from ashurbanipal.db.sqlite import column_class as sqlite_column_class
 from ashurbanipal.filter import Condition, FilterError, parse, parse_for_join
 from ashurbanipal.join import (
+    ARRAY,
+    FLOAT,
+    JSON,
     NUMBER,
+    OTHER,
     TEXT,
+    UNTYPED,
     UUID,
     ColMeta,
     Dialect,
@@ -31,7 +36,6 @@ from ashurbanipal.join import (
     assign_labels,
     build_select,
     enum_class,
-    is_float_type,
     parse_join,
     plan_join,
 )
@@ -65,7 +69,7 @@ def _orders() -> TableMeta:
             _col("id", "uuid", UUID),
             _col("user_id", "uuid", UUID),
             _col("status", "text", TEXT),
-            _col("tags", "ARRAY", None),
+            _col("tags", "ARRAY", ARRAY),
         ],
     )
 
@@ -147,7 +151,7 @@ def test_plan_join_rejects_unknown_names_hostile_names_and_incompatible_pairs() 
 
     floaty = parse_join(JOIN.replace('"column": "user_id"', '"column": "score"'))
     orders = _orders()
-    orders.columns.append(_col("score", "double precision", None))
+    orders.columns.append(_col("score", "double precision", FLOAT))
     with pytest.raises(
         BadJoin, match=r"orders\.score \(double precision\).*floating-point values are not compared exactly"
     ):
@@ -229,14 +233,23 @@ def test_join_key_in_a_filter_is_only_accepted_by_parse_for_join() -> None:
 def test_column_classes() -> None:
     assert pg_column_class("integer", "", "", False) == NUMBER
     assert pg_column_class("USER-DEFINED", "public", "mood", True) == enum_class("public.mood")
-    for t in ("ARRAY", "jsonb", "json", "double precision", "money"):
-        assert pg_column_class(t, "", "", False) is None, t
+    for t, expected in (
+        ("ARRAY", ARRAY),
+        ("jsonb", JSON),
+        ("json", JSON),
+        ("double precision", FLOAT),
+        ("real", FLOAT),
+        ("money", OTHER),
+    ):
+        assert pg_column_class(t, "", "", False) == expected, t
+    assert pg_column_class("USER-DEFINED", "public", "geometry", False) == OTHER
     assert sqlite_column_class("DECIMAL(10,2)") == NUMBER
     assert sqlite_column_class("VARCHAR(20)") == TEXT
     assert sqlite_column_class("UUID") == UUID
-    assert sqlite_column_class("") is not None
-    for t in ("REAL", "DOUBLE PRECISION", "JSON"):
-        assert sqlite_column_class(t) is None, t
+    assert sqlite_column_class("") == UNTYPED
+    assert sqlite_column_class("REAL") == FLOAT
+    assert sqlite_column_class("DOUBLE PRECISION") == FLOAT
+    assert sqlite_column_class("JSON") == JSON
 
 
 class _Timeout(Exception):
@@ -395,18 +408,3 @@ def test_errors_use_problem_json_with_informative_titles(client) -> None:
         "/__ashurbanipal/api/tables/data?table=users&filter=" + quote('[{"join":0,"column":"id","op":"IS NULL"}]')
     )
     assert data_with_join.get_json()["code"] == "invalid_filter"
-
-
-def test_float_types_are_told_apart_from_names_that_contain_the_word() -> None:
-    for t in ["real", "double precision", "float", "float8", "float(7,4)", "DOUBLE"]:
-        assert is_float_type(t), t
-    for t in [
-        "realm_kind",
-        "numeric(10,2)",
-        "text",
-        "float_kind",
-        "my_real",
-        "set('real','virtual')",
-        "double precision[]",
-    ]:
-        assert not is_float_type(t), t

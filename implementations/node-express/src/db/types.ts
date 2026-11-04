@@ -13,7 +13,7 @@ export interface ColumnRef {
   schema?: string;
 }
 
-/** A §5.11.2 column class, as `class` carries it on the wire. */
+/** A §5.4.1 column class, as `class` carries it on the wire. `float`, `json`, `array` and `other` cannot be joined. */
 export type ColumnClassName =
   | "number"
   | "text"
@@ -23,13 +23,16 @@ export type ColumnClassName =
   | "time"
   | "binary"
   | "enum"
-  | "untyped";
+  | "untyped"
+  | "float"
+  | "json"
+  | "array"
+  | "other";
 
 export interface ColumnInfo {
   name: string;
   type: string;
-  /** Absent when the column cannot be joined. */
-  class?: ColumnClassName;
+  class: ColumnClassName;
   /** The enumerated type's identity; set only when `class` is "enum". */
   enum_type?: string;
   key?: KeyKind;

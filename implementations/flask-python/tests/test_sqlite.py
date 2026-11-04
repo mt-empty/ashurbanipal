@@ -216,10 +216,10 @@ def test_query_table_reports_each_columns_column_class() -> None:
     path = _tmp_sqlite_path("create table t (id integer primary key, label text, meta json, loose);")
     try:
         data = SqliteSource(path).query_table(None, "t", QueryOpts(limit=10, offset=0, timeout_secs=5))
-        assert [c.column_class for c in data.columns] == ["number", "text", None, "untyped"]
+        assert [c.column_class for c in data.columns] == ["number", "text", "json", "untyped"]
         wire = [_column_to_dict(c) for c in data.columns]
         assert wire[0]["class"] == "number"
-        assert "class" not in wire[2], "a JSON column carries no class"
+        assert wire[2]["class"] == "json"
     finally:
         Path(path).unlink()
 

@@ -73,3 +73,11 @@ to the engine's full spelling: Postgres `format_type()` instead of
 `character varying(20)` and `numeric(10,2)`; MySQL `COLUMN_TYPE` instead of
 `DATA_TYPE`, so a boolean reads `tinyint(1)`. SQLite is unchanged. This is not
 additive, and lands under the same alpha exception.
+
+Column metadata (§5.4.1, and §5.11.4's join columns) now always carries
+`class`, and the class list gained `float`, `json`, `array` and `other`: the
+types that used to have no class. A column that cannot be joined is now
+`float`, `json`, `array` or `other` instead of having `class` omitted, and a
+domain over `json` reports `json`, so the bundled UI renders it as JSON. This
+is not additive, and lands with every port, the conformance runner and the
+bundled UI changed together, under §7's alpha exception.

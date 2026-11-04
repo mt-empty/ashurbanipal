@@ -5,7 +5,6 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -580,21 +579,18 @@ func TestSQLiteJoinFilterSortAndRejections(t *testing.T) {
 }
 
 func TestSQLiteColumnClassFollowsDeclaredNamesThenAffinity(t *testing.T) {
-	num, txt, blob, uuid, temporal, tm, untyped := classNumber, classText, classBinary, classUUID, classTemporal, classTime, classUntyped
-	boolean := classBoolean
 	cases := []struct {
 		declared string
-		want     *columnClass
+		want     columnClass
 	}{
-		{"INTEGER", &num}, {"bigint", &num}, {"DECIMAL(10,2)", &num},
-		{"VARCHAR(20)", &txt}, {"TEXT", &txt}, {"BLOB", &blob},
-		{"REAL", nil}, {"DOUBLE PRECISION", nil}, {"JSON", nil},
-		{"UUID", &uuid}, {"BOOLEAN", &boolean}, {"DATETIME", &temporal},
-		{"TIMESTAMP(6)", &temporal}, {"TIME", &tm}, {"", &untyped},
+		{"INTEGER", classNumber}, {"bigint", classNumber}, {"DECIMAL(10,2)", classNumber},
+		{"VARCHAR(20)", classText}, {"TEXT", classText}, {"BLOB", classBinary},
+		{"REAL", classFloat}, {"DOUBLE PRECISION", classFloat}, {"JSON", classJSON},
+		{"UUID", classUUID}, {"BOOLEAN", classBoolean}, {"DATETIME", classTemporal},
+		{"TIMESTAMP(6)", classTemporal}, {"TIME", classTime}, {"", classUntyped},
 	}
 	for _, c := range cases {
-		got := sqliteColumnClass(c.declared)
-		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+		if got := sqliteColumnClass(c.declared); got != c.want {
 			t.Errorf("%q: got %v want %v", c.declared, got, c.want)
 		}
 	}
@@ -617,12 +613,8 @@ func TestSQLiteQueryTableReportsEachColumnsColumnClass(t *testing.T) {
 	for _, c := range data.Columns {
 		got = append(got, c.Class)
 	}
-	want := []string{"number", "text", "", "untyped"}
+	want := []string{"number", "text", "json", "untyped"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("classes = %q, want %q", got, want)
-	}
-	raw, _ := json.Marshal(data.Columns[2])
-	if strings.Contains(string(raw), `"class"`) {
-		t.Errorf("a JSON column carries no class: %s", raw)
 	}
 }

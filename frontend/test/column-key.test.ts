@@ -16,17 +16,26 @@ const location: ConstraintFk = {
 };
 
 test("keyDescription labels primary, foreign and composite foreign keys", () => {
-  assert.equal(keyDescription({ name: "note", type: "text" }), null);
-  assert.deepEqual(keyDescription({ name: "id", type: "uuid", key: "pk" }), { icon: "🔑", label: "primary key" });
-  assert.deepEqual(keyDescription({ name: "user_id", type: "uuid", key: "fk", references: users }), {
+  assert.equal(keyDescription({ name: "note", type: "text", class: "text" }), null);
+  assert.deepEqual(keyDescription({ name: "id", type: "uuid", class: "uuid", key: "pk" }), {
+    icon: "🔑",
+    label: "primary key",
+  });
+  assert.deepEqual(keyDescription({ name: "user_id", type: "uuid", class: "uuid", key: "fk", references: users }), {
     icon: "🔗",
     label: "foreign key, references users.id",
   });
   assert.deepEqual(
-    keyDescription({ name: "user_id", type: "uuid", key: "pk", references: { ...users, schema: "auth" } }),
+    keyDescription({
+      name: "user_id",
+      type: "uuid",
+      class: "uuid",
+      key: "pk",
+      references: { ...users, schema: "auth" },
+    }),
     { icon: "🔑", label: "primary key, also references auth.users.id" },
   );
-  assert.deepEqual(keyDescription({ name: "bin_code", type: "text" }, location), {
+  assert.deepEqual(keyDescription({ name: "bin_code", type: "text", class: "text" }, location), {
     icon: "🔗",
     label: "part of foreign key (warehouse_code, bin_code) → inventory_locations(warehouse_code, bin_code)",
   });

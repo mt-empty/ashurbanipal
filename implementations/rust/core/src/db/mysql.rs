@@ -121,21 +121,21 @@ const MARIADB_JSON_COLUMNS_SQL: &str = "constraint_name from information_schema.
        and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
-fn column_class(data_type: &str, column_type: &str) -> Option<ColumnClass> {
+fn column_class(data_type: &str, column_type: &str) -> ColumnClass {
     match data_type.to_ascii_lowercase().as_str() {
         "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" | "decimal"
-        | "numeric" => Some(ColumnClass::Number),
-        "char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" => {
-            Some(ColumnClass::Text)
-        }
-        "date" | "datetime" | "timestamp" => Some(ColumnClass::Temporal),
-        "time" => Some(ColumnClass::Time),
+        | "numeric" => ColumnClass::Number,
+        "char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" => ColumnClass::Text,
+        "date" | "datetime" | "timestamp" => ColumnClass::Temporal,
+        "time" => ColumnClass::Time,
         "binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" => {
-            Some(ColumnClass::Binary)
+            ColumnClass::Binary
         }
-        "uuid" => Some(ColumnClass::Uuid),
-        "enum" => Some(ColumnClass::Enum(column_type.to_string())),
-        _ => None,
+        "uuid" => ColumnClass::Uuid,
+        "enum" => ColumnClass::Enum(column_type.to_string()),
+        "float" | "double" => ColumnClass::Float,
+        "json" => ColumnClass::Json,
+        _ => ColumnClass::Other,
     }
 }
 
@@ -313,7 +313,7 @@ impl MySqlSource {
                     // column_type keeps what data_type drops: `tinyint(1)`,
                     // `int unsigned`, an enum's members.
                     let (type_name, class) = if json_columns.contains(&name) {
-                        ("json".to_string(), None)
+                        ("json".to_string(), ColumnClass::Json)
                     } else {
                         let class = column_class(&data_type, &column_type);
                         (column_type, class)
@@ -1494,15 +1494,16 @@ mod tests {
     #[test]
     fn column_classes_follow_data_type() {
         use ColumnClass::*;
-        assert_eq!(column_class("bigint", "bigint"), Some(Number));
-        assert_eq!(column_class("VARCHAR", "varchar(20)"), Some(Text));
-        assert_eq!(column_class("datetime", "datetime"), Some(Temporal));
+        assert_eq!(column_class("bigint", "bigint"), Number);
+        assert_eq!(column_class("VARCHAR", "varchar(20)"), Text);
+        assert_eq!(column_class("datetime", "datetime"), Temporal);
         assert_eq!(
             column_class("enum", "enum('a','b')"),
-            Some(Enum("enum('a','b')".into()))
+            Enum("enum('a','b')".into())
         );
-        assert_eq!(column_class("json", "json"), None);
-        assert_eq!(column_class("double", "double"), None);
-        assert_eq!(column_class("uuid", "uuid"), Some(Uuid));
+        assert_eq!(column_class("json", "json"), Json);
+        assert_eq!(column_class("double", "double"), Float);
+        assert_eq!(column_class("uuid", "uuid"), Uuid);
+        assert_eq!(column_class("geometry", "geometry"), Other);
     }
 }

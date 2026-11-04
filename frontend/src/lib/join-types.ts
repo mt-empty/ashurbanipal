@@ -3,8 +3,10 @@ import type { ClassedColumn, Column, ColumnClass } from "../core/types.js";
 // ==== Join pair checks (spec/protocol.md §5.11.2) ====
 // The server reports each column's column class, so the form greys the pairs
 // it would reject by type: a different class, two different enumerated types
-// (`enum_type`), or a column with no class at all. A MySQL collation clash
-// between two text columns is still only caught by the server.
+// (`enum_type`), or a class that cannot be joined at all. A MySQL collation
+// clash between two text columns is still only caught by the server.
+
+const NOT_JOINABLE: ReadonlySet<ColumnClass> = new Set(["float", "json", "array", "other"]);
 
 const LABEL: Record<ColumnClass, string> = {
   number: "number",
@@ -16,6 +18,10 @@ const LABEL: Record<ColumnClass, string> = {
   binary: "binary",
   enum: "enum",
   untyped: "untyped",
+  float: "float",
+  json: "json",
+  array: "array",
+  other: "other",
 };
 
 export interface JoinMismatch {
@@ -30,13 +36,14 @@ export const truncateType = (type: string): string => (type.length > 24 ? `${typ
 
 // Why column `candidate` cannot pair with `other`, or null when it can.
 export function joinMismatch(candidate: ClassedColumn, other: ClassedColumn): JoinMismatch | null {
-  const blocked = unjoinableReason(candidate) ?? unjoinableReason(other);
+  const candidateReason = unjoinableReason(candidate);
+  const blocked = candidateReason ?? unjoinableReason(other);
   if (blocked) {
-    const type = truncateType(candidate.class ? other.type : candidate.type);
+    const type = truncateType(candidateReason ? candidate.type : other.type);
     return { note: blocked, message: `${type} columns cannot be joined. Pick another column.` };
   }
-  const a = candidate.class as ColumnClass;
-  const b = other.class as ColumnClass;
+  const a = candidate.class;
+  const b = other.class;
   if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   const left = truncateType(candidate.type);
   const right = truncateType(other.type);
@@ -51,7 +58,7 @@ export function joinMismatch(candidate: ClassedColumn, other: ClassedColumn): Jo
 
 // A column that cannot join anything, whatever the other side is.
 export function unjoinableReason(column: ClassedColumn): string | null {
-  return column.class ? null : `${truncateType(column.type)}: not joinable`;
+  return NOT_JOINABLE.has(column.class) ? `${truncateType(column.type)}: not joinable` : null;
 }
 
 // The note a menu row shows for `column` when the other side is `other` (or

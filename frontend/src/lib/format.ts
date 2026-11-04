@@ -89,12 +89,14 @@ const FROM_COLUMN_CLASS: Partial<Record<ColumnClass, DisplayBucket>> = {
   temporal: "date",
   uuid: "uuid",
   boolean: "bool",
+  float: "number",
+  json: "json",
 };
 
 // The type name first; the server's column class covers what the name hides,
 // such as a Postgres domain over integer, whose `type` is the domain's name.
 export function columnTypeClass(col: ClassedColumn): DisplayBucket | null {
-  return typeNameClass(col.type) ?? (col.class ? (FROM_COLUMN_CLASS[col.class] ?? null) : null);
+  return typeNameClass(col.type) ?? FROM_COLUMN_CLASS[col.class] ?? null;
 }
 
 const TYPE_CLASS_CSS: Partial<Record<DisplayBucket, string>> = {
@@ -118,7 +120,7 @@ function isTextType(type: string): boolean {
 // it is a plain string type and the value itself leads with { or [.
 export function rendersAsJson(col: Column, raw: string): boolean {
   const type = baseTypeName(col.type);
-  if (TYPE_ALIASES[type] === "json") return true;
+  if (columnTypeClass(col) === "json") return true;
   // The class covers a text type whose name hides it, such as a domain over varchar.
   return (isTextType(type) || col.class === "text") && /^\s*[[{]/.test(raw);
 }
@@ -126,7 +128,7 @@ export function rendersAsJson(col: Column, raw: string): boolean {
 // A value that won't parse is only worth flagging when the backend actually
 // typed the column as JSON; a shape-detected guess that misses is expected.
 export function warnBadJsonCell(col: Column, err: unknown): void {
-  if (typeNameClass(col.type) === "json") {
+  if (columnTypeClass(col) === "json") {
     console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
   }
 }

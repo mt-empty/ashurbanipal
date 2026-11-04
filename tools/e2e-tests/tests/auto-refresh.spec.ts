@@ -9,8 +9,8 @@ type Row = [number, string];
 function payload(rows: Row[]) {
   return {
     columns: [
-      { name: "id", type: "integer", key: "pk" },
-      { name: "label", type: "text" },
+      { name: "id", type: "integer", class: "number", key: "pk" },
+      { name: "label", type: "text", class: "text" },
     ],
     rows: rows.map(([id, label]) => ({ id: String(id), label })),
     total_approx: rows.length,

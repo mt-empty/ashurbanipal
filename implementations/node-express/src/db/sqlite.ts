@@ -182,7 +182,7 @@ const JOIN_DIALECT: JoinDialect = {
 };
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
-export function sqliteColumnClass(declared: string): ColumnClass | undefined {
+export function sqliteColumnClass(declared: string): ColumnClass {
   const upper = declared.trim().toUpperCase();
   if (upper === "") return { kind: "untyped" };
   const base = (upper.split("(")[0] as string).trim();
@@ -190,11 +190,11 @@ export function sqliteColumnClass(declared: string): ColumnClass | undefined {
   if (base === "BOOLEAN" || base === "BOOL") return { kind: "boolean" };
   if (base === "DATE" || base === "DATETIME" || base.startsWith("TIMESTAMP")) return { kind: "temporal" };
   if (base === "TIME") return { kind: "time" };
-  if (base === "JSON" || base === "JSONB") return undefined;
+  if (base === "JSON" || base === "JSONB") return { kind: "json" };
   if (upper.includes("INT")) return { kind: "number" };
   if (upper.includes("CHAR") || upper.includes("CLOB") || upper.includes("TEXT")) return { kind: "text" };
   if (upper.includes("BLOB")) return { kind: "binary" };
-  if (upper.includes("REAL") || upper.includes("FLOA") || upper.includes("DOUB")) return undefined;
+  if (upper.includes("REAL") || upper.includes("FLOA") || upper.includes("DOUB")) return { kind: "float" };
   return { kind: "number" };
 }
 

@@ -8,7 +8,6 @@ import {
   BadParamError,
   buildJoinSelect,
   type ColMeta,
-  isFloatType,
   type JoinDialect,
   type JoinOpts,
   parseJoin,
@@ -21,7 +20,7 @@ const text = (name: string): ColMeta => ({ name, type: "text", class: { kind: "t
 
 const orders = (): TableMeta => ({
   name: "orders",
-  columns: [uuid("id"), uuid("user_id"), text("status"), { name: "tags", type: "ARRAY" }],
+  columns: [uuid("id"), uuid("user_id"), text("status"), { name: "tags", type: "ARRAY", class: { kind: "array" } }],
 });
 const users = (): TableMeta => ({ name: "users", columns: [uuid("id"), text("email")] });
 
@@ -102,7 +101,7 @@ describe("planJoin", () => {
     const float = parseJoin(JOIN);
     float.joins[0].on[0].left.column = "score";
     const o = orders();
-    o.columns.push({ name: "score", type: "double precision" });
+    o.columns.push({ name: "score", type: "double precision", class: { kind: "float" } });
     expect(() => planJoin(float, [o, users()], opts())).toThrow(
       /orders\.score \(double precision\).*floating-point values are not compared exactly/,
     );
@@ -217,26 +216,17 @@ describe("pgColumnClass", () => {
     expect(pgColumnClass("numeric", "", "", false)).toEqual({ kind: "number" });
     expect(pgColumnClass("timestamp with time zone", "", "", false)).toEqual({ kind: "temporal" });
     expect(pgColumnClass("USER-DEFINED", "public", "mood", true)).toEqual({ kind: "enum", enumType: "public.mood" });
-    expect(pgColumnClass("USER-DEFINED", "public", "geometry", false)).toBeUndefined();
-    for (const t of ["ARRAY", "jsonb", "json", "double precision", "money"]) {
-      expect(pgColumnClass(t, "", "", false), t).toBeUndefined();
+    expect(pgColumnClass("USER-DEFINED", "public", "geometry", false)).toEqual({ kind: "other" });
+    expect(pgColumnClass("USER-DEFINED", "public", "citext", false)).toEqual({ kind: "text" });
+    for (const [t, kind] of [
+      ["ARRAY", "array"],
+      ["jsonb", "json"],
+      ["json", "json"],
+      ["double precision", "float"],
+      ["real", "float"],
+      ["money", "other"],
+    ] as const) {
+      expect(pgColumnClass(t, "", "", false), t).toEqual({ kind });
     }
-  });
-});
-
-describe("isFloatType", () => {
-  it("matches float types by whole word, not names that contain one", () => {
-    for (const t of ["real", "double precision", "float", "float8", "float(7,4)", "DOUBLE"])
-      expect(isFloatType(t), t).toBe(true);
-    for (const t of [
-      "realm_kind",
-      "numeric(10,2)",
-      "text",
-      "float_kind",
-      "my_real",
-      "set('real','virtual')",
-      "double precision[]",
-    ])
-      expect(isFloatType(t), t).toBe(false);
   });
 });

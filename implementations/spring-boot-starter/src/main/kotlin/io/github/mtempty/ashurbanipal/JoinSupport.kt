@@ -55,10 +55,10 @@ data class JoinColumnInfo(
     val join: Int,
     val table: String,
     val column: String,
+    @JsonProperty("class") val columnClass: String,
     @JsonInclude(JsonInclude.Include.NON_NULL) val key: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
-    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("class") val columnClass: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("enum_type") val enumType: String? = null,
 )
 
@@ -152,7 +152,7 @@ fun parseJoin(raw: String): JoinSpec {
 }
 
 /**
- * Comparison class of a column type (`spec/protocol.md` §5.11.2). [enumType] carries
+ * Class of a column type (`spec/protocol.md` §5.4.1, §5.11.2). [enumType] carries
  * an enumerated type's identity; `untyped` is a SQLite column with no declared
  * type and pairs only with itself.
  */
@@ -166,22 +166,29 @@ data class ColumnClass(val kind: String, val enumType: String = "") {
         val TIME = ColumnClass("time")
         val BINARY = ColumnClass("binary")
         val UNTYPED = ColumnClass("untyped")
+        val FLOAT = ColumnClass("float")
+        val JSON = ColumnClass("json")
+        val ARRAY = ColumnClass("array")
+        val OTHER = ColumnClass("other")
         fun enum(identity: String) = ColumnClass("enum", identity)
     }
 }
+
+/** Classes whose columns cannot be joined (§5.11.2). */
+private val NOT_JOINABLE = setOf(ColumnClass.FLOAT, ColumnClass.JSON, ColumnClass.ARRAY, ColumnClass.OTHER)
 
 /** One column as the live catalog reports it. [collation] is set where two text collations can clash (MySQL). */
 data class ColMeta(
     val name: String,
     val type: String,
-    val columnClass: ColumnClass?,
+    val columnClass: ColumnClass,
     val collation: String? = null,
     val key: String? = null,
     val references: ColumnRef? = null,
     val comment: String? = null,
 ) {
     /** The §5.4.1 shape of this column. */
-    fun columnInfo() = ColumnInfo(name, type, key, references, comment, columnClass?.kind, columnClass?.enumType?.takeIf { it.isNotEmpty() })
+    fun columnInfo() = ColumnInfo(name, type, columnClass.kind, key, references, comment, columnClass.enumType.takeIf { it.isNotEmpty() })
 }
 
 data class TableMeta(val name: String, val columns: List<ColMeta>) {
@@ -217,7 +224,7 @@ class JoinPlan internal constructor(
     fun columnInfos(): List<JoinColumnInfo> = selection.mapIndexed { i, (pos, col) ->
         val t = tables[pos]
         val c = t.columns[col].columnInfo()
-        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.key, c.references, c.comment, c.columnClass, c.enumType)
+        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.columnClass, c.key, c.references, c.comment, c.enumType)
     }
 
     /** Keys positional result rows by label and trims the extra row asked for `has_more`. */
@@ -232,19 +239,16 @@ class JoinPlan internal constructor(
 
 private fun describe(t: TableMeta, c: ColMeta) = "${t.name}.${c.name} (${c.type})"
 
-private val FLOAT_FIRST_WORD = Regex("""^\s*(real|double|float\d*)\b""", RegexOption.IGNORE_CASE)
-
-/** The type's first word, so neither a user type such as `realm_kind`, a MySQL `set('real')`, nor a float array (which fails as an array) counts. */
-internal fun isFloatType(type: String) = FLOAT_FIRST_WORD.containsMatchIn(type) && '[' !in type
-
 private fun unjoinable(position: Int, t: TableMeta, c: ColMeta): BadJoinException {
-    val why = if (isFloatType(c.type)) ": floating-point values are not compared exactly" else ""
+    val why = if (c.columnClass == ColumnClass.FLOAT) ": floating-point values are not compared exactly" else ""
     return BadJoinException("join $position on: ${describe(t, c)} cannot be used in a join$why")
 }
 
 private fun checkPair(position: Int, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta) {
-    val leftColumnClass = lc.columnClass ?: throw unjoinable(position, lt, lc)
-    val rightColumnClass = rc.columnClass ?: throw unjoinable(position, rt, rc)
+    val leftColumnClass = lc.columnClass
+    val rightColumnClass = rc.columnClass
+    if (leftColumnClass in NOT_JOINABLE) throw unjoinable(position, lt, lc)
+    if (rightColumnClass in NOT_JOINABLE) throw unjoinable(position, rt, rc)
     if (leftColumnClass != rightColumnClass) {
         throw BadJoinException("join $position on: ${describe(lt, lc)} cannot be joined to ${describe(rt, rc)}")
     }

@@ -92,7 +92,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.4.1-FK-METADATA` | `key`/`references` for FK columns | `table_data::foreign_key_columns_report_key_and_references` |
 | `P5.4.1-COMMENT-OMITTED` | `comment` omitted when absent | `table_data::column_comments_are_present_only_where_seeded` |
 | `P5.4.1-TYPE` | `type` is the engine's full spelling (length, precision, array element, enum name) | `table_data::columns_report_the_engines_full_type` |
-| `P5.4.1-CLASS` | `class` is the §5.11.2 column class, omitted for a column that cannot be joined; only an enum carries `enum_type` | `table_data::columns_report_their_column_class` |
+| `P5.4.1-CLASS` | `class` is always present and is the §5.11.2 column class (`float`, `json`, `array`, `other` included); only an enum carries `enum_type` | `table_data::columns_report_their_column_class` |
 | `P5.4.1-COMPOSITE-FK-OMITTED` | Composite FKs omit `key`/`references` entirely | `table_data::composite_foreign_key_columns_omit_key_metadata` |
 
 ### §5.4.2 Filter JSON AST
@@ -226,7 +226,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.11-NAMES-EXACT` | Tables and columns in `join`, `columns`, `sort` and `filter` matched exactly; injection-shaped input → 400, never reaches SQL; `invalid_join` for names in `join`, `unknown_column` for `sort` and `filter` | `join::unknown_and_malicious_names_are_rejected` |
 | `P5.11-JOIN-STRUCTURE` | Forward/self `on` position, pair count, join type, operator key, empty or duplicate `columns`, more than 4 tables, malformed `join` (including deep nesting and keys in another case) → 400 `invalid_join`; absent `join` → `invalid_parameter` | `join::invalid_join_structures_are_rejected`, `join::malformed_join_values_are_rejected`, `join::join_keys_are_matched_exactly`, `join::missing_join_is_an_invalid_parameter` |
 | `P5.11-JOIN-BOUND` | An oversize `join` is a 400 `invalid_join`, never truncated | `join::oversize_join_is_rejected` |
-| `P5.11-COMPATIBILITY` | A pair across column classes, or a `json`/`jsonb` column, → 400 `invalid_join` | `join::incompatible_column_pairs_are_rejected` |
+| `P5.11-COMPATIBILITY` | A pair across column classes, or a column of class `float`, `json`, `array` or `other`, → 400 `invalid_join` | `join::incompatible_column_pairs_are_rejected` |
 | `P5.11-SAME-CLASS` | Exact numerics of different widths join | `join::same_class_pairs_with_different_types_join` |
 | `P5.11-ENUM-IDENTITY` | Two enum columns join only when they share one enumerated type (Postgres seed) | `join::enum_columns_join_only_to_the_same_enum` |
 | `P5.11-SORT-PARAMS` | `sort_join` needs `sort` and a real position, and bad `order`, → `invalid_parameter`; unknown sort column → `unknown_column` | `join::sort_parameters_are_validated` |

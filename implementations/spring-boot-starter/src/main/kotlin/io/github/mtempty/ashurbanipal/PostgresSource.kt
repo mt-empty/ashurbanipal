@@ -16,7 +16,7 @@ private val JOIN_DIALECT = JoinDialect(
 )
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): ColumnClass? = when (dataType) {
+internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): ColumnClass = when (dataType) {
     "smallint", "integer", "bigint", "numeric" -> ColumnClass.NUMBER
     "character varying", "character", "text" -> ColumnClass.TEXT
     "uuid" -> ColumnClass.UUID
@@ -27,9 +27,12 @@ internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String,
     "USER-DEFINED" -> when {
         isEnum -> ColumnClass.enum("$udtSchema.$udtName")
         udtName == "citext" -> ColumnClass.TEXT
-        else -> null
+        else -> ColumnClass.OTHER
     }
-    else -> null
+    "real", "double precision" -> ColumnClass.FLOAT
+    "json", "jsonb" -> ColumnClass.JSON
+    "ARRAY" -> ColumnClass.ARRAY
+    else -> ColumnClass.OTHER
 }
 
 /** Postgres [DbSource]; queryTimeout bounds catalog and data operations (`spec/protocol.md` §6). */

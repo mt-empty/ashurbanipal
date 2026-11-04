@@ -261,11 +261,13 @@ type and enum name (for example `character varying(20)`, `numeric(10,2)`,
 `text[]`, `order_status`, MySQL `tinyint(1)` or `enum('a','b')`); the
 per-engine source is in `spec/openapi.yaml`.
 
-- `class` — the column's §5.11.2 column class (`number`, `text`, `uuid`,
-  `boolean`, `temporal`, `time`, `binary`, `enum` or `untyped`), the same
-  one the server checks `on` pairs with. Omitted when the column is not
-  joinable. A client deciding which pairs can join reads this rather than
-  guessing from `type`.
+- `class` — the column's §5.11.2 column class: `number`, `text`, `uuid`,
+  `boolean`, `temporal`, `time`, `binary`, `enum`, `untyped`, `float`,
+  `json`, `array` or `other`. Always present. It is the server's verdict on
+  how the column's values behave, and the same one it checks `on` pairs
+  with; `float`, `json`, `array` and `other` columns cannot be joined. A
+  client reads this rather than guessing from `type`, which names a domain
+  by its own name while `class` follows the type beneath it.
 - `enum_type` — present only when `class` is `enum`: the enumerated type's
   identity (Postgres `schema.name`, MySQL the column's `enum(…)` definition).
   Two `enum` columns join only when their `enum_type` values are equal. It is
@@ -791,8 +793,9 @@ Response:
 
 #### 5.11.2 Column compatibility
 
-Each `on` pair MUST join columns of the same **class**. The server checks
-this from the catalog types before running the statement; a mismatch → 400
+Each `on` pair MUST join columns of the same **class**, and that class MUST
+be joinable. The server checks this from the catalog types before running
+the statement; a mismatch or a column that cannot be joined → 400
 `invalid_join` whose `title` names the pair and both types.
 
 | Class      | Types                                                    |
@@ -806,12 +809,14 @@ this from the catalog types before running the statement; a mismatch → 400
 | `binary`   | byte-string types                                        |
 | `enum`     | an enumerated type; joinable only to a column of the same enumerated type, which §5.4.1 reports as an equal `enum_type` |
 | `untyped`  | a column with no declared type (SQLite); joinable only to another such column |
+| `float`    | floating-point types; **not joinable**, because they are not compared exactly |
+| `json`     | `json`/`jsonb` and a domain over them; **not joinable** |
+| `array`    | array types; **not joinable** |
+| `other`    | any type not named above (`money`, `interval`, `inet`, `xml`, geometric types, extension types, ...); **not joinable** |
 
-Every other type is not joinable, including `json`/`jsonb`, arrays,
-floating-point types, and types with no class above. The per-engine
-mapping from native types to classes, and any engine that cannot meet this
-check exactly, is in `docs/adapter-decisions.md`. The `ON` comparison uses
-the columns' native types, not the text cast of §5.4.2.
+The per-engine mapping from native types to classes, and any engine that
+cannot meet this check exactly, is in `docs/adapter-decisions.md`. The `ON`
+comparison uses the columns' native types, not the text cast of §5.4.2.
 
 #### 5.11.3 Filter and sort
 
@@ -830,8 +835,8 @@ the columns' native types, not the text cast of §5.4.2.
 #### 5.11.4 Response
 
 - Each `columns` entry carries `name`, `type`, `join`, `table` and
-  `column`, plus the optional §5.4.1 fields `class`, `enum_type`, `key`, `references`,
-  `comment` as they apply to that column in its own table. `type` and those fields
+  `column`, plus the §5.4.1 `class` and the optional §5.4.1 fields `enum_type`,
+  `key`, `references`, `comment` as they apply to that column in its own table. `type` and those fields
   MUST equal what §5.4.1 reports for the column. `name` is a **label**
   unique within the response: the column's own name when that is unique
   among the returned columns, otherwise `{column}_{join}`, with a numeric

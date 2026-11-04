@@ -7,9 +7,13 @@ from psycopg.types.string import TextLoader
 
 from ..filter import Condition
 from ..join import (
+    ARRAY,
     BINARY,
     BOOLEAN,
+    FLOAT,
+    JSON,
     NUMBER,
+    OTHER,
     TEMPORAL,
     TEXT,
     TIME,
@@ -100,7 +104,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> ColumnClass | None:
+def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> ColumnClass:
     """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
     if data_type in ("smallint", "integer", "bigint", "numeric"):
         return NUMBER
@@ -116,12 +120,18 @@ def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) 
         return TEMPORAL
     if data_type in ("time without time zone", "time with time zone"):
         return TIME
+    if data_type in ("real", "double precision"):
+        return FLOAT
+    if data_type in ("json", "jsonb"):
+        return JSON
+    if data_type == "ARRAY":
+        return ARRAY
     if data_type == "USER-DEFINED":
         if is_enum:
             return enum_class(f"{udt_schema}.{udt_name}")
         if udt_name == "citext":
             return TEXT
-    return None
+    return OTHER
 
 
 class PgSource(DbSource):

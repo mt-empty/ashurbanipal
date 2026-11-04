@@ -88,25 +88,23 @@ const JOIN_DIALECT: Dialect = Dialect {
 };
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
-fn column_class(
-    data_type: &str,
-    udt_schema: &str,
-    udt_name: &str,
-    is_enum: bool,
-) -> Option<ColumnClass> {
+fn column_class(data_type: &str, udt_schema: &str, udt_name: &str, is_enum: bool) -> ColumnClass {
     match data_type {
-        "smallint" | "integer" | "bigint" | "numeric" => Some(ColumnClass::Number),
-        "character varying" | "character" | "text" => Some(ColumnClass::Text),
-        "uuid" => Some(ColumnClass::Uuid),
-        "boolean" => Some(ColumnClass::Boolean),
-        "bytea" => Some(ColumnClass::Binary),
+        "smallint" | "integer" | "bigint" | "numeric" => ColumnClass::Number,
+        "character varying" | "character" | "text" => ColumnClass::Text,
+        "uuid" => ColumnClass::Uuid,
+        "boolean" => ColumnClass::Boolean,
+        "bytea" => ColumnClass::Binary,
         "date" | "timestamp without time zone" | "timestamp with time zone" => {
-            Some(ColumnClass::Temporal)
+            ColumnClass::Temporal
         }
-        "time without time zone" | "time with time zone" => Some(ColumnClass::Time),
-        "USER-DEFINED" if is_enum => Some(ColumnClass::Enum(format!("{udt_schema}.{udt_name}"))),
-        "USER-DEFINED" if udt_name == "citext" => Some(ColumnClass::Text),
-        _ => None,
+        "time without time zone" | "time with time zone" => ColumnClass::Time,
+        "real" | "double precision" => ColumnClass::Float,
+        "json" | "jsonb" => ColumnClass::Json,
+        "ARRAY" => ColumnClass::Array,
+        "USER-DEFINED" if is_enum => ColumnClass::Enum(format!("{udt_schema}.{udt_name}")),
+        "USER-DEFINED" if udt_name == "citext" => ColumnClass::Text,
+        _ => ColumnClass::Other,
     }
 }
 
@@ -941,6 +939,41 @@ impl DbSource for PgPoolSource {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn column_classes_follow_data_type() {
+        use ColumnClass::*;
+        for (data_type, expected) in [
+            ("integer", Number),
+            ("numeric", Number),
+            ("timestamp with time zone", Temporal),
+            ("real", Float),
+            ("double precision", Float),
+            ("json", Json),
+            ("jsonb", Json),
+            ("ARRAY", Array),
+            ("money", Other),
+            ("interval", Other),
+        ] {
+            assert_eq!(
+                column_class(data_type, "", "", false),
+                expected,
+                "{data_type}"
+            );
+        }
+        assert_eq!(
+            column_class("USER-DEFINED", "public", "mood", true),
+            Enum("public.mood".into())
+        );
+        assert_eq!(
+            column_class("USER-DEFINED", "public", "citext", false),
+            Text
+        );
+        assert_eq!(
+            column_class("USER-DEFINED", "public", "geometry", false),
+            Other
+        );
+    }
+
     use super::*;
     use crate::filter;
 

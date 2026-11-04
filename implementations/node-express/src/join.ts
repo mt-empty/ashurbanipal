@@ -150,7 +150,7 @@ export function parseJoin(raw: string): JoinSpec {
 }
 
 /**
- * Comparison class of a column type (spec/protocol.md §5.11.2). `enumType`
+ * Class of a column type (spec/protocol.md §5.4.1, §5.11.2). `enumType`
  * carries an enumerated type's identity; `untyped` is a SQLite column with
  * no declared type and pairs only with itself.
  */
@@ -161,14 +161,13 @@ export interface ColumnClass {
 
 const classKey = (c: ColumnClass): string => `${c.kind}:${c.enumType ?? ""}`;
 
-/** The type's first word, so neither a user type such as `realm_kind`, a MySQL `set('real')`, nor a float array (which fails as an array) counts. */
-export const isFloatType = (type: string): boolean => /^\s*(real|double|float\d*)\b/i.test(type) && !type.includes("[");
+const NOT_JOINABLE = new Set<ColumnClassName>(["float", "json", "array", "other"]);
 
 /** One column as the live catalog reports it. */
 export interface ColMeta {
   name: string;
   type: string;
-  class?: ColumnClass;
+  class: ColumnClass;
   /** Set where two text collations can clash (MySQL). */
   collation?: string;
   key?: KeyKind;
@@ -197,7 +196,7 @@ export interface JoinColumnInfo {
   join: number;
   table: string;
   column: string;
-  class?: ColumnClassName;
+  class: ColumnClassName;
   enum_type?: string;
   key?: KeyKind;
   references?: ColumnRef;
@@ -246,13 +245,13 @@ function joinColumnIndex(table: TableMeta, column: string): number {
 const describe = (t: TableMeta, c: ColMeta): string => `${t.name}.${c.name} (${c.type})`;
 
 function unjoinable(position: number, t: TableMeta, c: ColMeta): BadJoinError {
-  const why = isFloatType(c.type) ? ": floating-point values are not compared exactly" : "";
+  const why = c.class.kind === "float" ? ": floating-point values are not compared exactly" : "";
   return new BadJoinError(`join ${position} on: ${describe(t, c)} cannot be used in a join${why}`);
 }
 
 function checkPair(position: number, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta): void {
-  if (!lc.class) throw unjoinable(position, lt, lc);
-  if (!rc.class) throw unjoinable(position, rt, rc);
+  if (NOT_JOINABLE.has(lc.class.kind)) throw unjoinable(position, lt, lc);
+  if (NOT_JOINABLE.has(rc.class.kind)) throw unjoinable(position, rt, rc);
   if (classKey(lc.class) !== classKey(rc.class)) {
     throw new BadJoinError(`join ${position} on: ${describe(lt, lc)} cannot be joined to ${describe(rt, rc)}`);
   }
@@ -402,9 +401,8 @@ export function buildJoinSelect(
 
 /** The §5.4.1 shape of a column. */
 export function columnInfo(col: ColMeta): ColumnInfo {
-  const info: ColumnInfo = { name: col.name, type: col.type };
-  if (col.class) info.class = col.class.kind;
-  if (col.class?.enumType) info.enum_type = col.class.enumType;
+  const info: ColumnInfo = { name: col.name, type: col.type, class: col.class.kind };
+  if (col.class.enumType) info.enum_type = col.class.enumType;
   if (col.key) info.key = col.key;
   if (col.references) info.references = col.references;
   if (col.comment) info.comment = col.comment;

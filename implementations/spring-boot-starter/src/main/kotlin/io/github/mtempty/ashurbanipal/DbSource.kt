@@ -63,11 +63,11 @@ data class ColumnRef(
 data class ColumnInfo(
     val name: String,
     val type: String,
+    /** The §5.4.1 column class. */
+    @JsonProperty("class") val columnClass: String,
     @JsonInclude(JsonInclude.Include.NON_NULL) val key: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
-    /** The §5.11.2 column class; null when the column cannot be joined. */
-    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("class") val columnClass: String? = null,
     /** The enumerated type's identity; set only when the class is enum. */
     @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("enum_type") val enumType: String? = null,
 )

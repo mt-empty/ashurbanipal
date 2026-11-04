@@ -532,44 +532,39 @@ async fn reported_column(srv: &TestServer, table: &str, name: &str) -> serde_jso
         .clone()
 }
 
-/// P5.4.1-CLASS: each column reports the §5.11.2 column class the server
-/// checks join pairs with, and none when it cannot be joined; only an enum
-/// column carries `enum_type`.
+/// P5.4.1-CLASS: every column reports a §5.11.2 column class, the one the
+/// server checks join pairs with; only an enum column carries `enum_type`.
 #[tokio::test]
 async fn columns_report_their_column_class() {
     let srv = TestServer::spawn().await;
-    let (id_class, status_class) = match Backend::current() {
+    let backend = Backend::current();
+    let (id_class, status_class) = match backend {
         Backend::Postgres => ("uuid", "enum"),
         Backend::Mysql | Backend::Sqlite => ("number", "text"),
     };
-    let metadata_class = match Backend::current().not_joinable_columns() {
-        NotJoinableColumns::Seeded => None,
-        NotJoinableColumns::NotSeeded => Some(serde_json::json!("text")),
+    let metadata_class = match backend.not_joinable_columns() {
+        NotJoinableColumns::Seeded => "json",
+        NotJoinableColumns::NotSeeded => "text",
     };
-    let status_enum_type =
-        (status_class == "enum").then(|| serde_json::json!("public.order_status"));
-    for (table, name, expected, enum_type) in [
-        (
-            "orders",
-            "total_cents",
-            Some(serde_json::json!("number")),
-            None,
-        ),
-        ("orders", "id", Some(serde_json::json!(id_class)), None),
-        (
-            "orders",
-            "status",
-            Some(serde_json::json!(status_class)),
-            status_enum_type,
-        ),
-        ("users", "metadata", metadata_class, None),
-    ] {
+    let mut expected = vec![
+        ("orders", "total_cents", "number"),
+        ("orders", "id", id_class),
+        ("orders", "status", status_class),
+        ("users", "metadata", metadata_class),
+        ("products", "weight_kg", "float"),
+    ];
+    if backend == Backend::Postgres {
+        expected.push(("orders", "tags", "array"));
+        expected.push(("events", "ip_address", "other"));
+    }
+    for (table, name, class) in expected {
         let col = reported_column(&srv, table, name).await;
         assert_exact(
             col.get("class").cloned(),
-            expected,
+            Some(serde_json::json!(class)),
             &format!("{table}.{name} class"),
         );
+        let enum_type = (class == "enum").then(|| serde_json::json!("public.order_status"));
         assert_exact(
             col.get("enum_type").cloned(),
             enum_type,

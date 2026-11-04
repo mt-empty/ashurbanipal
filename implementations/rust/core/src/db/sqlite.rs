@@ -208,31 +208,31 @@ fn partial_index_predicate(sql: &str) -> Option<String> {
 
 /// `spec/protocol.md` §5.11.2: recognised names first, then SQLite's own
 /// affinity rules (`docs/adapter-decisions.md` §5.11).
-fn column_class(declared: &str) -> Option<ColumnClass> {
+fn column_class(declared: &str) -> ColumnClass {
     let upper = declared.trim().to_ascii_uppercase();
     if upper.is_empty() {
-        return Some(ColumnClass::Untyped);
+        return ColumnClass::Untyped;
     }
     let base = upper.split('(').next().unwrap_or("").trim();
     match base {
-        "UUID" => return Some(ColumnClass::Uuid),
-        "BOOLEAN" | "BOOL" => return Some(ColumnClass::Boolean),
-        "DATE" | "DATETIME" => return Some(ColumnClass::Temporal),
-        "TIME" => return Some(ColumnClass::Time),
-        "JSON" | "JSONB" => return None,
-        _ if base.starts_with("TIMESTAMP") => return Some(ColumnClass::Temporal),
+        "UUID" => return ColumnClass::Uuid,
+        "BOOLEAN" | "BOOL" => return ColumnClass::Boolean,
+        "DATE" | "DATETIME" => return ColumnClass::Temporal,
+        "TIME" => return ColumnClass::Time,
+        "JSON" | "JSONB" => return ColumnClass::Json,
+        _ if base.starts_with("TIMESTAMP") => return ColumnClass::Temporal,
         _ => {}
     }
     if upper.contains("INT") {
-        Some(ColumnClass::Number)
+        ColumnClass::Number
     } else if upper.contains("CHAR") || upper.contains("CLOB") || upper.contains("TEXT") {
-        Some(ColumnClass::Text)
+        ColumnClass::Text
     } else if upper.contains("BLOB") {
-        Some(ColumnClass::Binary)
+        ColumnClass::Binary
     } else if upper.contains("REAL") || upper.contains("FLOA") || upper.contains("DOUB") {
-        None
+        ColumnClass::Float
     } else {
-        Some(ColumnClass::Number)
+        ColumnClass::Number
     }
 }
 
@@ -1062,18 +1062,15 @@ mod tests {
         assert_eq!(
             classes,
             [
-                Some(ColumnClass::Number),
-                Some(ColumnClass::Text),
-                None,
-                Some(ColumnClass::Untyped)
+                ColumnClass::Number,
+                ColumnClass::Text,
+                ColumnClass::Json,
+                ColumnClass::Untyped
             ]
         );
         let wire = serde_json::to_value(&data.columns).unwrap();
         assert_eq!(wire[0]["class"], "number");
-        assert!(
-            wire[2].get("class").is_none(),
-            "a JSON column carries no class"
-        );
+        assert_eq!(wire[2]["class"], "json");
         assert_eq!(wire[3]["type"], "unknown");
     }
 
@@ -1393,21 +1390,21 @@ mod tests {
     fn column_classes_follow_declared_names_then_affinity() {
         use ColumnClass::*;
         for (declared, expected) in [
-            ("INTEGER", Some(Number)),
-            ("bigint", Some(Number)),
-            ("DECIMAL(10,2)", Some(Number)),
-            ("VARCHAR(20)", Some(Text)),
-            ("TEXT", Some(Text)),
-            ("BLOB", Some(Binary)),
-            ("REAL", None),
-            ("DOUBLE PRECISION", None),
-            ("UUID", Some(Uuid)),
-            ("BOOLEAN", Some(Boolean)),
-            ("DATETIME", Some(Temporal)),
-            ("TIMESTAMP(6)", Some(Temporal)),
-            ("TIME", Some(Time)),
-            ("JSON", None),
-            ("", Some(Untyped)),
+            ("INTEGER", Number),
+            ("bigint", Number),
+            ("DECIMAL(10,2)", Number),
+            ("VARCHAR(20)", Text),
+            ("TEXT", Text),
+            ("BLOB", Binary),
+            ("REAL", Float),
+            ("DOUBLE PRECISION", Float),
+            ("UUID", Uuid),
+            ("BOOLEAN", Boolean),
+            ("DATETIME", Temporal),
+            ("TIMESTAMP(6)", Temporal),
+            ("TIME", Time),
+            ("JSON", Json),
+            ("", Untyped),
         ] {
             assert_eq!(column_class(declared), expected, "{declared:?}");
         }

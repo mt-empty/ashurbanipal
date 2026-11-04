@@ -272,8 +272,9 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       expect(mysqlColumnClass("bigint", "bigint")).toEqual({ kind: "number" });
       expect(mysqlColumnClass("VARCHAR", "varchar(20)")).toEqual({ kind: "text" });
       expect(mysqlColumnClass("enum", "enum('a','b')")).toEqual({ kind: "enum", enumType: "enum('a','b')" });
-      expect(mysqlColumnClass("json", "json")).toBeUndefined();
-      expect(mysqlColumnClass("double", "double")).toBeUndefined();
+      expect(mysqlColumnClass("json", "json")).toEqual({ kind: "json" });
+      expect(mysqlColumnClass("double", "double")).toEqual({ kind: "float" });
+      expect(mysqlColumnClass("set", "set('a','b')")).toEqual({ kind: "other" });
     });
 
     // The load-bearing regression test PR #26 (Rust) and the Go port both

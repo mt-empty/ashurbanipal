@@ -147,8 +147,9 @@ impl JoinSpec {
     }
 }
 
-/// Engine-neutral comparison class of a column type (`spec/protocol.md`
-/// §5.11.2). Each backend maps its native types onto these.
+/// Engine-neutral class of a column type (`spec/protocol.md` §5.4.1,
+/// §5.11.2). Each backend maps its native types onto these; `Float`, `Json`,
+/// `Array` and `Other` cannot be joined.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColumnClass {
     Number,
@@ -162,6 +163,12 @@ pub enum ColumnClass {
     Enum(String),
     /// A SQLite column with no declared type; pairs only with itself.
     Untyped,
+    /// Floating point: not compared exactly.
+    Float,
+    Json,
+    Array,
+    /// Any type not named above.
+    Other,
 }
 
 impl ColumnClass {
@@ -178,7 +185,18 @@ impl ColumnClass {
             ColumnClass::Binary => "binary",
             ColumnClass::Enum(_) => "enum",
             ColumnClass::Untyped => "untyped",
+            ColumnClass::Float => "float",
+            ColumnClass::Json => "json",
+            ColumnClass::Array => "array",
+            ColumnClass::Other => "other",
         }
+    }
+
+    fn is_joinable(&self) -> bool {
+        !matches!(
+            self,
+            ColumnClass::Float | ColumnClass::Json | ColumnClass::Array | ColumnClass::Other
+        )
     }
 
     /// The enumerated type's identity, which two enum columns must share to join.
@@ -201,7 +219,7 @@ impl Serialize for ColumnClass {
 pub struct ColMeta {
     pub name: String,
     pub type_name: String,
-    pub class: Option<ColumnClass>,
+    pub class: ColumnClass,
     /// Set on engines where two text collations can clash (MySQL).
     pub collation: Option<String>,
     pub key: Option<KeyKind>,
@@ -214,7 +232,7 @@ impl From<ColMeta> for ColumnInfo {
         ColumnInfo {
             name: c.name,
             type_name: c.type_name,
-            enum_type: c.class.as_ref().and_then(ColumnClass::enum_type),
+            enum_type: c.class.enum_type(),
             class: c.class,
             key: c.key,
             references: c.references,
@@ -238,8 +256,7 @@ pub struct JoinColumnInfo {
     pub join: usize,
     pub table: String,
     pub column: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub class: Option<ColumnClass>,
+    pub class: ColumnClass,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -312,7 +329,7 @@ impl Plan {
                     table: table.name.clone(),
                     column: c.name.clone(),
                     class: c.class.clone(),
-                    enum_type: c.class.as_ref().and_then(ColumnClass::enum_type),
+                    enum_type: c.class.enum_type(),
                     key: c.key,
                     references: c.references.clone(),
                     comment: c.comment.clone(),
@@ -350,24 +367,8 @@ fn describe(table: &TableMeta, col: &ColMeta) -> String {
     format!("{}.{} ({})", table.name, col.name, col.type_name)
 }
 
-/// The type's first word, so neither a user type such as `realm_kind`, a
-/// MySQL `set('real')`, nor a float array (which fails as an array) counts.
-fn is_float_type(type_name: &str) -> bool {
-    let t = type_name.trim().to_lowercase();
-    let first = t
-        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .next()
-        .unwrap_or("");
-    !t.contains('[')
-        && (first == "real"
-            || first == "double"
-            || first
-                .strip_prefix("float")
-                .is_some_and(|d| d.chars().all(|c| c.is_ascii_digit())))
-}
-
 fn unjoinable(position: usize, table: &TableMeta, col: &ColMeta) -> DbError {
-    let why = if is_float_type(&col.type_name) {
+    let why = if col.class == ColumnClass::Float {
         ": floating-point values are not compared exactly"
     } else {
         ""
@@ -385,14 +386,12 @@ fn check_pair(
     rt: &TableMeta,
     rc: &ColMeta,
 ) -> Result<(), DbError> {
-    let (Some(a), Some(b)) = (&lc.class, &rc.class) else {
-        let bad = if lc.class.is_none() {
-            (lt, lc)
-        } else {
-            (rt, rc)
-        };
-        return Err(unjoinable(position, bad.0, bad.1));
-    };
+    for (table, col) in [(lt, lc), (rt, rc)] {
+        if !col.class.is_joinable() {
+            return Err(unjoinable(position, table, col));
+        }
+    }
+    let (a, b) = (&lc.class, &rc.class);
     if a != b {
         return Err(DbError::BadJoin(format!(
             "join {position} on: {} cannot be joined to {}",
@@ -665,7 +664,7 @@ pub fn build_select(plan: &Plan, d: &Dialect, schema: Option<&str>) -> (String, 
 mod tests {
     use super::*;
 
-    fn col(name: &str, ty: &str, class: Option<ColumnClass>) -> ColMeta {
+    fn col(name: &str, ty: &str, class: ColumnClass) -> ColMeta {
         ColMeta {
             name: name.into(),
             type_name: ty.into(),
@@ -681,10 +680,10 @@ mod tests {
         TableMeta {
             name: "orders".into(),
             columns: vec![
-                col("id", "uuid", Some(ColumnClass::Uuid)),
-                col("user_id", "uuid", Some(ColumnClass::Uuid)),
-                col("status", "text", Some(ColumnClass::Text)),
-                col("tags", "ARRAY", None),
+                col("id", "uuid", ColumnClass::Uuid),
+                col("user_id", "uuid", ColumnClass::Uuid),
+                col("status", "text", ColumnClass::Text),
+                col("tags", "ARRAY", ColumnClass::Array),
             ],
         }
     }
@@ -693,8 +692,8 @@ mod tests {
         TableMeta {
             name: "users".into(),
             columns: vec![
-                col("id", "uuid", Some(ColumnClass::Uuid)),
-                col("email", "text", Some(ColumnClass::Text)),
+                col("id", "uuid", ColumnClass::Uuid),
+                col("email", "text", ColumnClass::Text),
             ],
         }
     }
@@ -795,34 +794,10 @@ mod tests {
     }
 
     #[test]
-    fn float_types_are_told_apart_from_names_that_contain_the_word() {
-        for t in [
-            "real",
-            "double precision",
-            "float",
-            "float8",
-            "float(7,4)",
-            "DOUBLE",
-        ] {
-            assert!(is_float_type(t), "{t}");
-        }
-        for t in [
-            "realm_kind",
-            "numeric(10,2)",
-            "text",
-            "float_kind",
-            "my_real",
-            "set('real','virtual')",
-            "double precision[]",
-        ] {
-            assert!(!is_float_type(t), "{t}");
-        }
-    }
-
-    #[test]
     fn a_float_key_says_why_it_cannot_join() {
         let mut o = orders();
-        o.columns.push(col("score", "double precision", None));
+        o.columns
+            .push(col("score", "double precision", ColumnClass::Float));
         let mut spec = JoinSpec::parse(JOIN).unwrap();
         spec.joins[0].on[0].left.column = "score".into();
         let Err(DbError::BadJoin(msg)) = plan(&spec, vec![o, users()], &opts()) else {
@@ -841,13 +816,13 @@ mod tests {
         a.columns[2] = col(
             "status",
             "USER-DEFINED",
-            Some(ColumnClass::Enum("public.status".into())),
+            ColumnClass::Enum("public.status".into()),
         );
         let mut b = users();
         b.columns[1] = col(
             "kind",
             "USER-DEFINED",
-            Some(ColumnClass::Enum("public.kind".into())),
+            ColumnClass::Enum("public.kind".into()),
         );
         let mut spec = JoinSpec::parse(JOIN).unwrap();
         spec.joins[0].on[0].left.column = "status".into();
@@ -860,7 +835,7 @@ mod tests {
         same.columns[1] = col(
             "kind",
             "USER-DEFINED",
-            Some(ColumnClass::Enum("public.status".into())),
+            ColumnClass::Enum("public.status".into()),
         );
         assert!(plan(&spec, vec![a, same], &opts()).is_ok());
     }
