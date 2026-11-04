@@ -12,6 +12,7 @@ import {
   markStoredSortVerified,
   markViewShown,
   pruneHiddenColumns,
+  setSort,
   startTable,
   state,
   tableDataPath,
@@ -261,6 +262,14 @@ async function runLoad({
     const retry = next && dropStaleSort(next, code);
     if (retry) return runLoad({ next: retry, resetScroll, highlightNew, replaceHistory, reason });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
+    // A column the engine cannot order: drop the sort so the page shows rows in
+    // a state it can reload, then say why.
+    if (!next && code === "unsortable_column") {
+      setSort(null);
+      await runLoad({ resetScroll, highlightNew, replaceHistory, reason });
+      reportError(failedLoadError(e, view, next));
+      return;
+    }
     reportError(failedLoadError(e, view, next));
     return;
   }

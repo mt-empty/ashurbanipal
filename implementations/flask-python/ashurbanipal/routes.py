@@ -25,6 +25,7 @@ from .db import (
     NotAllowedKind,
     QueryOpts,
     QueryTimeout,
+    Unsortable,
 )
 from .embed import DBVIEWER_HTML, DBVIEWER_HTML_GZIP
 from .join import JoinOpts, parse_join
@@ -91,6 +92,8 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
             return _problem_response(400, "invalid_join", f"invalid join: {err}")
         if isinstance(err, BadParam):
             return _problem_response(400, "invalid_parameter", f"invalid parameter: {err}")
+        if isinstance(err, Unsortable):
+            return _problem_response(400, "unsortable_column", f"cannot sort by {err}: its type has no ordering")
         if isinstance(err, QueryTimeout):
             return _problem_response(500, "query_timeout", "query timed out")
         return _problem_response(500, "database_error", f"database error: {err}")

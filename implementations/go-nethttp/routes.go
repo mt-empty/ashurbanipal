@@ -201,7 +201,8 @@ func httpProblemError(w http.ResponseWriter, status int, code, title string) {
 // writeError maps a DbSource error to the wire's error codes
 // (spec/protocol.md §2): a *NotAllowedError carries its own kind/code; a
 // *FilterError is always invalid_filter; a *BadJoinError is invalid_join; a
-// *BadParamError is invalid_parameter; a statement stopped by the query timeout is
+// *BadParamError is invalid_parameter; an *UnsortableError is
+// unsortable_column; a statement stopped by the query timeout is
 // query_timeout (500); anything else is a database failure (database_error,
 // 500) (docs/adapter-decisions.md §6).
 func writeError(w http.ResponseWriter, err error) {
@@ -223,6 +224,11 @@ func writeError(w http.ResponseWriter, err error) {
 	var badParam *BadParamError
 	if errors.As(err, &badParam) {
 		httpProblemError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
+		return
+	}
+	var unsortable *UnsortableError
+	if errors.As(err, &unsortable) {
+		httpProblemError(w, http.StatusBadRequest, "unsortable_column", err.Error())
 		return
 	}
 	if isQueryTimeout(err) {

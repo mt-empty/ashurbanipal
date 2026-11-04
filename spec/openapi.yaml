@@ -215,7 +215,9 @@ paths:
           description: >
             Single column name, validated against the table's real
             columns; unknown column yields 400. Ordering uses the
-            column's native type ordering.
+            column's native type ordering; a column whose type has none
+            (Postgres json, xml, geometric types) yields 400
+            unsortable_column.
           schema:
             type: string
           examples:
@@ -441,7 +443,8 @@ paths:
           required: false
           description: >
             Column name of the table at `sort_join`; unknown column yields
-            400. Ordering uses the column's native type ordering.
+            400, and a column whose type has no ordering yields 400
+            unsortable_column. Ordering uses the column's native type ordering.
           schema:
             type: string
         - name: sort_join
@@ -1188,5 +1191,6 @@ components:
             - invalid_join
             - invalid_parameter
             - not_readable
+            - unsortable_column
             - database_error
             - query_timeout

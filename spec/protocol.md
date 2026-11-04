@@ -84,7 +84,8 @@ interpreted as described in RFC 2119.
   - **400** — client error: `unknown_source`, `unknown_schema`,
     `unknown_table`, `unknown_column`, `invalid_filter`, `invalid_join`
     (anything wrong with §5.11's `join` value), `invalid_parameter` (e.g.
-    `order` not `asc`/`desc`), or `not_readable`
+    `order` not `asc`/`desc`), `unsortable_column` (a `sort` on a column whose
+    type has no ordering, §5.4), or `not_readable`
     — a table that cleared §5.2's allow-list but the connected role cannot
     actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
   - **500** — server error: `database_error`, or `query_timeout` (§6).
@@ -215,7 +216,7 @@ Paginated, filtered, sorted rows for a single table.
 | `filter` | no       | URL-encoded JSON AST, see §5.4.2.                             |
 | `limit`  | no       | Clamped, never an error — see below.                          |
 | `offset` | no       | Clamped, never an error — see below.                          |
-| `sort`   | no       | Single column name; MUST be validated against the table's real columns; unknown column → 400. |
+| `sort`   | no       | Single column name; MUST be validated against the table's real columns; unknown column → 400. A column whose type has no ordering → 400 `unsortable_column`. |
 | `order`  | no       | `asc` \| `desc`, default `asc`; any other value → 400.        |
 
 - **`limit` clamping**: the effective limit is the requested value clamped
@@ -231,7 +232,9 @@ Paginated, filtered, sorted rows for a single table.
   rejected, same as `limit`.
 - **Sort semantics**: ordering MUST use the column's native type ordering
   (e.g. numeric columns sort numerically), not the text rendering of the
-  serialized values.
+  serialized values. A column whose type the engine cannot order (Postgres
+  `json`, `xml` and the geometric types) → 400 `unsortable_column`, never a
+  500; MySQL/MariaDB and SQLite order every type.
 
 Response:
 
@@ -839,8 +842,8 @@ comparison uses the columns' native types, not the text cast of §5.4.2.
 - The comparison is applied to that column cast to text, exactly as §5.4.2.
   Conditions are combined as §5.4.2 specifies.
 - On §5.4, a condition that carries `join` → 400 `invalid_filter`.
-- `sort` orders by the native type of the column at `sort_join`, as §5.4.
-  The column need not be in `columns`. No tie-break is added beyond
+- `sort` orders by the native type of the column at `sort_join`, as §5.4,
+  including its 400 `unsortable_column`. The column need not be in `columns`. No tie-break is added beyond
   `sort`; paging over ties is as stable as §5.4's.
 
 #### 5.11.4 Response

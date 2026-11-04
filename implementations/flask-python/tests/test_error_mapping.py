@@ -19,6 +19,7 @@ from ashurbanipal.db import (
     NotAllowed,
     NotAllowedKind,
     QueryTimeout,
+    Unsortable,
 )
 from ashurbanipal.routes import router
 
@@ -109,3 +110,12 @@ def test_bad_join_is_a_400_invalid_join() -> None:
     body = json.loads(resp.data)
     assert body["code"] == "invalid_join"
     assert "orders.status (text)" in body["title"]
+
+
+def test_unsortable_column_is_a_400_with_its_own_code() -> None:
+    resp = _client(Unsortable("doc")).get(_JOIN)
+    assert resp.status_code == 400
+    assert resp.content_type == "application/problem+json"
+    body = json.loads(resp.data)
+    assert body["code"] == "unsortable_column"
+    assert body["title"] == "cannot sort by doc: its type has no ordering"

@@ -222,6 +222,10 @@ class BadParam(DbError):
     """A request parameter outside its allowed values. Maps to 400 invalid_parameter."""
 
 
+class Unsortable(DbError):
+    """A sort on a column whose type has no ordering. Maps to 400 unsortable_column."""
+
+
 class DatabaseError(DbError):
     """The underlying driver raised (connection failure, syntax error, ...)."""
 

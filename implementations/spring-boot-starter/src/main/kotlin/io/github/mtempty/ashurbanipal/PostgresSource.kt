@@ -311,6 +311,9 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             if (sqlState == "22021" || sqlState == "22P05") {
                 throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
             }
+            // With a sort, an undefined function is the sort column's type having no
+            // ordering operator (json, xml, geometric types).
+            if (sqlState == "42883" && opts.sort != null) throw UnsortableException(opts.sort)
             throw e
         }
         plan.joinData(rows, opts.limit)
@@ -360,6 +363,9 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             if (sqlState == "22021" || sqlState == "22P05") {
                 throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
             }
+            // With a sort, an undefined function is the sort column's type having no
+            // ordering operator (json, xml, geometric types).
+            if (sqlState == "42883" && opts.sort != null) throw UnsortableException(opts.sort)
             throw e
         }
 

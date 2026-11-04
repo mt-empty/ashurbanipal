@@ -11,6 +11,7 @@ import type {
   TableData,
   TableInfo,
 } from "../src/db/types.js";
+import { UnsortableError } from "../src/errors.js";
 import { API_PATHS, handleApi, type NamedSource } from "../src/handlers.js";
 import type { JoinData, JoinOpts } from "../src/join.js";
 
@@ -125,6 +126,19 @@ describe("handleApi", () => {
     const [, table, queryOpts] = source.calls[0].args as [string, string, QueryOpts];
     expect(table).toBe("t");
     expect(queryOpts).toMatchObject({ limit: opts.limits.maxPageSize, offset: 0, descending: true });
+  });
+
+  it("maps a sort on an unorderable column to a 400 unsortable_column", async () => {
+    const source = new RecordingSource();
+    source.queryTable = async () => {
+      throw new UnsortableError("doc");
+    };
+    const r = await call([{ name: "primary", source }], "/tables/data", { table: "t", sort: "doc" });
+    expect(r.status).toBe(400);
+    expect(JSON.parse(r.body)).toMatchObject({
+      code: "unsortable_column",
+      title: "cannot sort by doc: its type has no ordering",
+    });
   });
 
   it("rejects a non-numeric sort_join on /tables/join", async () => {

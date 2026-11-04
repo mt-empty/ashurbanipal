@@ -35,6 +35,16 @@ type BadParamError struct {
 
 func (e *BadParamError) Error() string { return "invalid parameter: " + e.Reason }
 
+// UnsortableError is a sort on a column whose type has no ordering; 400
+// unsortable_column.
+type UnsortableError struct {
+	Column string
+}
+
+func (e *UnsortableError) Error() string {
+	return fmt.Sprintf("cannot sort by %s: its type has no ordering", e.Column)
+}
+
 // unknownJoinTable reports a table named in the join value as a bad join;
 // not_readable stays as it is.
 func unknownJoinTable(err error) error {

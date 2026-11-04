@@ -9,6 +9,7 @@ use sqlx::{Executor, PgPool};
 const SCHEMA_TYPES: &str = "ashb_test_join_types";
 const SCHEMA_SLOW: &str = "ashb_test_join_slow";
 const SCHEMA_COLLATION: &str = "ashb_test_join_collation";
+const SCHEMA_SORT: &str = "ashb_test_join_sort";
 
 async fn setup(schema: &str, ddl: &str) -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
@@ -190,6 +191,71 @@ async fn text_columns_with_clashing_collations_do_not_join() {
         matches!(&clash, Err(DbError::BadJoin(m)) if m.contains("different text collations")),
         "expected a collation clash, got {clash:?}"
     );
+
+    teardown(&pool, s).await;
+}
+
+// A `json`, `xml` or geometric column has no ordering operator, so a sort on
+// it is a 400 `unsortable_column`, not a 500; `jsonb` sorts, and a domain over
+// it reports the `json` class.
+#[tokio::test]
+async fn sorting_an_unorderable_column_is_a_client_error() {
+    let s = SCHEMA_SORT;
+    let pool = setup(
+        s,
+        &format!(
+            "create domain {s}.settings as jsonb; \
+             create table {s}.a (id int primary key, doc json, bag jsonb, dom {s}.settings); \
+             create table {s}.b (id int primary key); \
+             insert into {s}.a values (1, '{{}}', '{{}}', '{{}}'), (2, '[]', '[]', '[]'); \
+             insert into {s}.b values (1);"
+        ),
+    )
+    .await;
+    let source = PgPoolSource::new(pool.clone());
+    let sorted_by = |column: &str| QueryOpts {
+        sort: Some(column.into()),
+        ..table_opts()
+    };
+
+    let err = source
+        .query_table(Some(s), "a", sorted_by("doc"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, DbError::Unsortable(c) if c == "doc"),
+        "{err:?}"
+    );
+    assert_eq!(
+        err.problem(),
+        (
+            400,
+            "unsortable_column",
+            "cannot sort by doc: its type has no ordering".to_string()
+        )
+    );
+
+    let mut join_opts = opts(5);
+    join_opts.sort = Some("doc".into());
+    join_opts.sort_join = Some(0);
+    let err = source
+        .query_join(Some(s), &on("a", "id", "b", "id"), join_opts)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, DbError::Unsortable(_)), "{err:?}");
+
+    for column in ["bag", "dom", "id"] {
+        source
+            .query_table(Some(s), "a", sorted_by(column))
+            .await
+            .unwrap_or_else(|e| panic!("sorting by {column}: {e:?}"));
+    }
+    let table = source
+        .query_table(Some(s), "a", table_opts())
+        .await
+        .unwrap();
+    let wire = serde_json::to_value(&table.columns).unwrap();
+    assert_eq!(wire[3]["class"], "json");
 
     teardown(&pool, s).await;
 }

@@ -89,3 +89,10 @@ clash, and §5.11.2 now states the rule the MySQL ports already applied: two
 pair is a 400 `invalid_join`. Postgres had no such check, so a clash there was
 a 500 when the join ran. This lands with every port, the conformance runner
 and the bundled UI changed together, under §7's alpha exception.
+
+A `sort` on a column whose type the engine cannot order (Postgres `json`,
+`xml` and the geometric types) is now a 400 with the new code
+`unsortable_column` (§2, §5.4, §5.11.3), where every port returned a 500
+`database_error`. A new error code is additive, so this stands under v1; it
+lands with every port, the conformance runner and the bundled UI changed
+together.

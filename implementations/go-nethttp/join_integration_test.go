@@ -3,6 +3,7 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -105,6 +106,49 @@ func TestTextColumnsWithClashingCollationsDoNotJoin(t *testing.T) {
 	_, err = source.QueryJoin(ctx, &s, pairJoin(t, "a", "p", "b", "p"), JoinOpts{Limit: 10})
 	if bad, ok := err.(*BadJoinError); !ok || !strings.Contains(bad.Reason, "different text collations") {
 		t.Errorf("want a collation clash, got %v", err)
+	}
+}
+
+// A json, xml or geometric column has no ordering operator, so a sort on it is
+// a 400 unsortable_column, not a 500; jsonb sorts, and a domain over it reports
+// the json class.
+func TestSortingAnUnorderableColumnIsAClientError(t *testing.T) {
+	const schema = "ashb_test_go_join_sort"
+	setupSchemaDDL(t, schema, fmt.Sprintf(
+		`create domain %[1]s.settings as jsonb;
+		 create table %[1]s.a (id int primary key, doc json, bag jsonb, dom %[1]s.settings);
+		 create table %[1]s.b (id int primary key);
+		 insert into %[1]s.a values (1, '{}', '{}', '{}'), (2, '[]', '[]', '[]');
+		 insert into %[1]s.b values (1);`, schema))
+	source := pgSource(t, 5)
+	ctx := context.Background()
+	s := schema
+	doc, join0 := "doc", 0
+
+	_, err := source.QueryTable(ctx, &s, "a", QueryOpts{Limit: 10, Sort: &doc})
+	var unsortable *UnsortableError
+	if !errors.As(err, &unsortable) || unsortable.Column != "doc" {
+		t.Fatalf("table sort on json: got %v", err)
+	}
+	_, err = source.QueryJoin(ctx, &s, pairJoin(t, "a", "id", "b", "id"), JoinOpts{Limit: 10, Sort: &doc, SortJoin: &join0})
+	if !errors.As(err, &unsortable) {
+		t.Fatalf("join sort on json: got %v", err)
+	}
+	rec := httptest.NewRecorder()
+	writeError(rec, err)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"unsortable_column"`) {
+		t.Errorf("response = %d %s", rec.Code, rec.Body)
+	}
+
+	for _, column := range []string{"bag", "dom", "id"} {
+		c := column
+		if _, err := source.QueryTable(ctx, &s, "a", QueryOpts{Limit: 10, Sort: &c}); err != nil {
+			t.Errorf("sorting by %s: %v", column, err)
+		}
+	}
+	table, err := source.QueryTable(ctx, &s, "a", QueryOpts{Limit: 10})
+	if err != nil || table.Columns[3].Class != "json" {
+		t.Errorf("domain over jsonb: %v %+v", err, table.Columns)
 	}
 }
 

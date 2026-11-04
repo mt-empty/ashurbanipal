@@ -49,6 +49,7 @@ from . import (
     Structure,
     TableData,
     TableInfo,
+    Unsortable,
     group_referenced_by,
     no_default_schema,
     quote_ident,
@@ -330,6 +331,12 @@ class PgSource(DbSource):
                     # report it as NotAllowed(NOT_READABLE) (400), not a
                     # driver 500.
                     raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                except psycopg.errors.UndefinedFunction as exc:
+                    # With a sort, an undefined function is the sort column's type
+                    # having no ordering operator (json, xml, geometric types).
+                    if sort is None:
+                        raise
+                    raise Unsortable(sort) from exc
                 except psycopg.DataError as exc:
                     # psycopg's str dumper rejects a NUL byte client-side (no
                     # SQLSTATE, unlike other drivers' server-side rejection);
@@ -424,6 +431,10 @@ class PgSource(DbSource):
                     cur.execute(f"select {body}", (*values, opts.limit + 1, opts.offset))
                 except psycopg.errors.InsufficientPrivilege as exc:
                     raise NotAllowed(f"table {spec.table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                except psycopg.errors.UndefinedFunction as exc:
+                    if opts.sort is None:
+                        raise
+                    raise Unsortable(opts.sort) from exc
                 except psycopg.DataError as exc:
                     raise FilterParseError(f"value invalid for this backend: {exc}") from exc
                 rows, has_more = plan.rows_from(

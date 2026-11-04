@@ -6855,6 +6855,12 @@ async function runLoad({
     const retry = next && dropStaleSort(next, code);
     if (retry) return runLoad({ next: retry, resetScroll, highlightNew, replaceHistory, reason });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
+    if (!next && code === "unsortable_column") {
+      setSort(null);
+      await runLoad({ resetScroll, highlightNew, replaceHistory, reason });
+      reportError(failedLoadError(e, view, next));
+      return;
+    }
     reportError(failedLoadError(e, view, next));
     return;
   }

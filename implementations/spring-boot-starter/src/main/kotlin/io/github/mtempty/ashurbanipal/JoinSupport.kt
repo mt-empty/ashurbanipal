@@ -20,6 +20,9 @@ const val MAX_JOIN_PAIRS = 3
  */
 class BadJoinException(message: String) : RuntimeException("invalid join: $message")
 
+/** A sort on a column whose type has no ordering (`spec/protocol.md` §5.4); 400 `unsortable_column`. */
+class UnsortableException(column: String) : RuntimeException("cannot sort by $column: its type has no ordering")
+
 /** A table named in the join value is part of the join, so a miss is a bad join; `not_readable` stays as it is. */
 internal inline fun <T> joinTable(name: String, block: () -> T): T =
     try {

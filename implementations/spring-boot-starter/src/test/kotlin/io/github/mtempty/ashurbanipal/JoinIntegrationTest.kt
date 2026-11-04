@@ -114,6 +114,34 @@ class JoinIntegrationTest {
         }
     }
 
+    // A json, xml or geometric column has no ordering operator, so a sort on it
+    // is a 400 unsortable_column, not a 500; jsonb sorts, and a domain over it
+    // reports the json class.
+    @Test
+    fun `sorting an unorderable column is a client error`() {
+        val s = "ashb_test_spring_join_sort"
+        withSchema(
+            s,
+            "create domain $s.settings as jsonb",
+            "create table $s.a (id int primary key, doc json, bag jsonb, dom $s.settings)",
+            "create table $s.b (id int primary key)",
+            "insert into $s.a values (1, '{}', '{}', '{}'), (2, '[]', '[]', '[]')",
+            "insert into $s.b values (1)",
+        ) {
+            val (source, ds) = source(5)
+            ds.use {
+                fun page(sort: String? = null) = QueryOpts(10, 0, sort, false, null)
+                val tableErr = assertThrows(UnsortableException::class.java) { source.queryTable(s, "a", page("doc")) }
+                assertEquals("cannot sort by doc: its type has no ordering", tableErr.message)
+                assertThrows(UnsortableException::class.java) {
+                    source.queryJoin(s, pair("a", "id", "b", "id"), opts.copy(sort = "doc", sortJoin = 0))
+                }
+                for (column in listOf("bag", "dom", "id")) source.queryTable(s, "a", page(column))
+                assertEquals("json", source.queryTable(s, "a", page()).columns[3].columnClass)
+            }
+        }
+    }
+
     @Test
     fun `a slow join is a query timeout and releases the connection`() {
         val s = "ashb_test_spring_join_slow"

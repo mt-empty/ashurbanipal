@@ -573,8 +573,10 @@ impl PgPoolSource {
 /// firing) to `QueryTimeout`, and a filter value Postgres's text encoding
 /// rejects (e.g. a NUL byte) to `FilterParse` — all → a defined
 /// `spec/protocol.md` §2 code, never a raw 500 (`docs/adapter-decisions.md`
-/// §5.4.2 has the cross-backend filter-value rationale).
-fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
+/// §5.4.2 has the cross-backend filter-value rationale). When the request
+/// sorts, an "undefined function" error (SQLSTATE 42883) is the sort column's
+/// type having no ordering operator (`json`, `xml`, geometric types).
+fn map_select_denied(e: sqlx::Error, table: &str, sort: Option<&str>) -> DbError {
     if let sqlx::Error::Database(db) = &e {
         match db.code().as_deref() {
             Some("42501") => {
@@ -584,6 +586,11 @@ fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
                 )
             }
             Some("57014") => return DbError::QueryTimeout,
+            Some("42883") => {
+                if let Some(column) = sort {
+                    return DbError::Unsortable(column.to_string());
+                }
+            }
             Some("22021") | Some("22P05") => {
                 return DbError::FilterParse(format!(
                     "value invalid for this backend: {}",
@@ -745,7 +752,7 @@ impl DbSource for PgPoolSource {
         let pg_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, &table))?;
+            .map_err(|e| map_select_denied(e, &table, opts.sort.as_deref()))?;
         let total_approx = sqlx::query_scalar::<_, i64>(
             "select reltuples::bigint from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
@@ -806,7 +813,7 @@ impl DbSource for PgPoolSource {
         let mut pg_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, &spec.table))?;
+            .map_err(|e| map_select_denied(e, &spec.table, opts.sort.as_deref()))?;
         tx.commit().await?;
 
         let has_more = pg_rows.len() > opts.limit as usize;

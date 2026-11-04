@@ -188,6 +188,17 @@ so `_conformance_meta` comes first and `order_extra` before `orders`:
 | MySQL/MariaDB | `order by cast(table_name as binary)`, and the same for schema names. MariaDB's catalog collation (`utf8mb3_general_ci`) folds case, so `_` sorts after every letter and a plain `order by` would put `orders` before `order_extra` and `_conformance_meta` last |
 | SQLite   | `order by name`: `BINARY` is the default collation |
 
+## §5.4 — sort on a column with no ordering (`unsortable_column`)
+
+Protocol property: a `sort` on a column whose type the engine cannot order is
+a 400 `unsortable_column` (`spec/protocol.md` §5.4, §5.11.3), never a 500.
+
+| Backend  | Mechanism | Notes |
+|----------|-----------|-------|
+| Postgres | The `order by` fails with SQLSTATE `42883` ("could not identify an ordering operator") for `json`, `xml`, `jsonpath` and the geometric types; `jsonb`, ranges, `tsvector` and `interval` sort. A `42883` is mapped only when the request has a `sort`, in both the data and join routes | The filter path casts to text, so it cannot raise `42883` itself. |
+| MySQL/MariaDB | None: every type orders (`json` as JSON, geometry by bytes) | |
+| SQLite   | None: every storage class orders | |
+
 ## §5.4.1 — forward FK/PK column metadata (`key_metadata`)
 
 Protocol property: for a given `table`, each column's `key`

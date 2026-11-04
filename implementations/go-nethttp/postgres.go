@@ -384,12 +384,12 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 	defer cancel()
 	rows, err := tx.QueryContext(queryCtx, "select "+body, args...)
 	if err != nil {
-		return JoinData{}, mapSelectDenied(err, spec.Table)
+		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort)
 	}
 	defer rows.Close()
 	out, hasMore, err := scanJoinRows(rows, plan.labels, opts.Limit)
 	if err != nil {
-		return JoinData{}, mapSelectDenied(err, spec.Table)
+		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort)
 	}
 	rows.Close()
 	if err := tx.Commit(); err != nil {
@@ -516,11 +516,17 @@ func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]Cou
 // rejects tables the role can't SELECT, so this only catches the edge. It
 // also maps a filter value Postgres's text encoding rejects (SQLSTATE
 // 22021/22P05) to a FilterError, also 400, never a raw 500
-// (docs/adapter-decisions.md §5.4.2 has the cross-backend rationale).
-func mapSelectDenied(err error, table string) error {
+// (docs/adapter-decisions.md §5.4.2 has the cross-backend rationale). When the
+// request sorts, an "undefined function" error (SQLSTATE 42883) is the sort
+// column's type having no ordering operator (json, xml, geometric types).
+func mapSelectDenied(err error, table string, sort *string) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
+		case "42883":
+			if sort != nil {
+				return &UnsortableError{Column: *sort}
+			}
 		case "42501":
 			return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
 		case "22021", "22P05":
@@ -616,7 +622,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, query, args...)
 	if err != nil {
-		return TableData{}, mapSelectDenied(err, realTable)
+		return TableData{}, mapSelectDenied(err, realTable, sort)
 	}
 	defer rows.Close()
 

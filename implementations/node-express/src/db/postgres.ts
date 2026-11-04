@@ -375,7 +375,7 @@ export class PostgresSource implements DbSource {
       const { rows } = await client
         .query(`select ${body}`, [opts.limit + 1, opts.offset, ...values])
         .catch((err: unknown) => {
-          throw mapSelectDenied(err, spec.table);
+          throw mapSelectDenied(err, spec.table, opts.sort);
         });
       const out = joinRows(plan, rows as Record<string, unknown>[], opts.limit, cellToJson);
       return { columns: joinColumnInfos(plan), rows: out.rows, has_more: out.hasMore };
@@ -431,7 +431,7 @@ export class PostgresSource implements DbSource {
       const args: unknown[] = [opts.limit, opts.offset, ...filterValues];
 
       const { rows: dataRows } = await client.query(query, args).catch((err: unknown) => {
-        throw mapSelectDenied(err, realTable);
+        throw mapSelectDenied(err, realTable, opts.sort);
       });
       const outRows: Record<string, string | null>[] = dataRows.map((row: Record<string, unknown>) => {
         const out: Record<string, string | null> = {};

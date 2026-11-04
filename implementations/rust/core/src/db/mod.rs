@@ -246,6 +246,9 @@ pub enum DbError {
     /// A request parameter outside the allowed values. Maps to
     /// `invalid_parameter`.
     BadParameter(String),
+    /// A `sort` on a column whose type has no ordering (`spec/protocol.md`
+    /// §5.4). Maps to `unsortable_column`.
+    Unsortable(String),
     /// The engine's own timeout signal (`impl From<sqlx::Error>`).
     QueryTimeout,
     Sqlx(sqlx::Error),
@@ -271,6 +274,7 @@ impl DbError {
             Self::FilterParse(_) => (400, "invalid_filter"),
             Self::BadJoin(_) => (400, "invalid_join"),
             Self::BadParameter(_) => (400, "invalid_parameter"),
+            Self::Unsortable(_) => (400, "unsortable_column"),
             Self::QueryTimeout => (500, "query_timeout"),
             Self::Sqlx(_) => (500, "database_error"),
         };
@@ -285,6 +289,9 @@ impl std::fmt::Display for DbError {
             Self::FilterParse(reason) => write!(f, "invalid filter: {reason}"),
             Self::BadJoin(reason) => write!(f, "invalid join: {reason}"),
             Self::BadParameter(reason) => write!(f, "invalid parameter: {reason}"),
+            Self::Unsortable(column) => {
+                write!(f, "cannot sort by {column}: its type has no ordering")
+            }
             Self::QueryTimeout => write!(f, "query timed out"),
             Self::Sqlx(e) => write!(f, "database error: {e}"),
         }

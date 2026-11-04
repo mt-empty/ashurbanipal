@@ -12,7 +12,7 @@ from flask import Flask
 from psycopg.conninfo import make_conninfo
 
 from ashurbanipal import Config, router
-from ashurbanipal.db import BadJoin, FilterParseError, KeyKind, NotAllowed, QueryOpts, QueryTimeout
+from ashurbanipal.db import BadJoin, FilterParseError, KeyKind, NotAllowed, QueryOpts, QueryTimeout, Unsortable
 from ashurbanipal.db.postgres import PgSource
 from ashurbanipal.filter import Condition
 from ashurbanipal.join import JoinOpts, parse_join
@@ -408,7 +408,16 @@ def _pair(left: str, left_col: str, right: str, right_col: str):
 def join_schemas():
     types, slow = "ashb_test_flask_join_types", "ashb_test_flask_join_slow"
     collation = "ashb_test_flask_join_collation"
+    sorting = "ashb_test_flask_join_sort"
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
+        conn.execute(f"drop schema if exists {sorting} cascade; create schema {sorting}")
+        conn.execute(
+            f"create domain {sorting}.settings as jsonb; "
+            f"create table {sorting}.a (id int primary key, doc json, bag jsonb, dom {sorting}.settings); "
+            f"create table {sorting}.b (id int primary key); "
+            f"insert into {sorting}.a values (1, '{{}}', '{{}}', '{{}}'), (2, '[]', '[]', '[]'); "
+            f"insert into {sorting}.b values (1);"
+        )
         conn.execute(f"drop schema if exists {collation} cascade; create schema {collation}")
         conn.execute(
             f"create table {collation}.a "
@@ -432,16 +441,16 @@ def join_schemas():
             f"create table {slow}.a as select g as id, g % 2 as k from generate_series(1, 20000) g; "
             f"create table {slow}.b as select g as id, g % 2 as k from generate_series(1, 20000) g;"
         )
-    yield types, slow, collation
+    yield types, slow, collation, sorting
     with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
         conn.execute(
             f"drop schema if exists {types} cascade; drop schema if exists {slow} cascade; "
-            f"drop schema if exists {collation} cascade"
+            f"drop schema if exists {collation} cascade; drop schema if exists {sorting} cascade"
         )
 
 
 def test_join_enums_pair_only_within_one_type_and_arrays_never_join(source, join_schemas) -> None:
-    types, _, _ = join_schemas
+    types, _, _, _ = join_schemas
     opts = JoinOpts(limit=10, offset=0, timeout_secs=5)
     assert len(source.query_join(types, _pair("a", "m", "b", "m"), opts).rows) == 1
     with pytest.raises(BadJoin):
@@ -454,7 +463,7 @@ def test_join_enums_pair_only_within_one_type_and_arrays_never_join(source, join
 def test_a_slow_join_is_a_query_timeout_and_releases_the_connection(source, join_schemas) -> None:
     import time
 
-    _, slow, _ = join_schemas
+    _, slow, _, _ = join_schemas
     started = time.monotonic()
     with pytest.raises(QueryTimeout):
         source.query_join(
@@ -470,7 +479,7 @@ def test_a_slow_join_is_a_query_timeout_and_releases_the_connection(source, join
 def test_text_columns_with_clashing_collations_do_not_join(source, join_schemas) -> None:
     # Postgres rejects two different explicit collations, while the default
     # collation yields to an explicit one; the metadata reports only the explicit ones.
-    _, _, collation = join_schemas
+    _, _, collation, _ = join_schemas
     opts = JoinOpts(limit=10, offset=0, timeout_secs=5)
     table = source.query_table(collation, "a", QueryOpts(limit=10, offset=0, timeout_secs=5))
     assert [c.collation for c in table.columns] == [None, "C", "POSIX", None]
@@ -478,3 +487,18 @@ def test_text_columns_with_clashing_collations_do_not_join(source, join_schemas)
         assert len(source.query_join(collation, _pair("a", left, "b", right), opts).rows) == 1, (left, right)
     with pytest.raises(BadJoin, match="different text collations"):
         source.query_join(collation, _pair("a", "p", "b", "p"), opts)
+
+
+def test_sorting_an_unorderable_column_is_a_client_error(source, join_schemas) -> None:
+    # A json, xml or geometric column has no ordering operator: a sort on it is a
+    # 400 unsortable_column, not a 500; jsonb sorts, and a domain over it reports json.
+    _, _, _, sorting = join_schemas
+    page = {"limit": 10, "offset": 0, "timeout_secs": 5}
+    with pytest.raises(Unsortable) as table_err:
+        source.query_table(sorting, "a", QueryOpts(sort="doc", **page))
+    assert str(table_err.value) == "doc"
+    with pytest.raises(Unsortable):
+        source.query_join(sorting, _pair("a", "id", "b", "id"), JoinOpts(sort="doc", sort_join=0, **page))
+    for column in ("bag", "dom", "id"):
+        source.query_table(sorting, "a", QueryOpts(sort=column, **page))
+    assert source.query_table(sorting, "a", QueryOpts(**page)).columns[3].column_class == "json"
