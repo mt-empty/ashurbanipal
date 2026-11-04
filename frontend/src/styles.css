@@ -115,6 +115,9 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
 #source-select, #schema-select { border: none; background: transparent; font: inherit;
                                  color: inherit; padding: .1rem; cursor: pointer;
                                  max-width: 12rem; text-overflow: ellipsis; }
+/* The transparent select background is inherited by the popup list in some
+   browsers, leaving light-on-light text in dark theme; pin the options. */
+#source-select option, #schema-select option { background: Canvas; color: CanvasText; }
 
 /* ==== Table chips ==== */
 #tables-bar { margin-top: var(--gap-lg); }
