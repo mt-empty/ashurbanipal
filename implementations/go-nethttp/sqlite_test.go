@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -577,23 +578,43 @@ func TestSQLiteJoinFilterSortAndRejections(t *testing.T) {
 	}
 }
 
-func TestSQLiteTypeClassFollowsDeclaredNamesThenAffinity(t *testing.T) {
-	num, txt, blob, uuid, temporal, tm, untyped := classNumber, classText, classBinary, classUUID, classTemporal, classTime, classUntyped
-	boolean := classBoolean
+func TestSQLiteColumnClassFollowsDeclaredNamesThenAffinity(t *testing.T) {
 	cases := []struct {
 		declared string
-		want     *typeClass
+		want     columnClass
 	}{
-		{"INTEGER", &num}, {"bigint", &num}, {"DECIMAL(10,2)", &num},
-		{"VARCHAR(20)", &txt}, {"TEXT", &txt}, {"BLOB", &blob},
-		{"REAL", nil}, {"DOUBLE PRECISION", nil}, {"JSON", nil},
-		{"UUID", &uuid}, {"BOOLEAN", &boolean}, {"DATETIME", &temporal},
-		{"TIMESTAMP(6)", &temporal}, {"TIME", &tm}, {"", &untyped},
+		{"INTEGER", classNumber}, {"bigint", classNumber}, {"DECIMAL(10,2)", classNumber},
+		{"VARCHAR(20)", classText}, {"TEXT", classText}, {"BLOB", classBinary},
+		{"REAL", classFloat}, {"DOUBLE PRECISION", classFloat}, {"JSON", classJSON},
+		{"UUID", classUUID}, {"BOOLEAN", classBoolean}, {"DATETIME", classTemporal},
+		{"TIMESTAMP(6)", classTemporal}, {"TIME", classTime}, {"", classUntyped},
 	}
 	for _, c := range cases {
-		got := sqliteTypeClass(c.declared)
-		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+		if got := sqliteColumnClass(c.declared); got != c.want {
 			t.Errorf("%q: got %v want %v", c.declared, got, c.want)
 		}
+	}
+}
+
+func TestSQLiteQueryTableReportsEachColumnsColumnClass(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "classes.db"))
+	if err != nil {
+		t.Fatalf("opening sqlite db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(`create table t (id integer primary key, label text, meta json, loose)`); err != nil {
+		t.Fatalf("creating schema: %v", err)
+	}
+	data, err := NewSQLiteSource(db, 5).QueryTable(context.Background(), nil, "t", QueryOpts{Limit: 10})
+	if err != nil {
+		t.Fatalf("QueryTable: %v", err)
+	}
+	var got []string
+	for _, c := range data.Columns {
+		got = append(got, c.Class)
+	}
+	want := []string{"number", "text", "json", "untyped"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("classes = %q, want %q", got, want)
 	}
 }

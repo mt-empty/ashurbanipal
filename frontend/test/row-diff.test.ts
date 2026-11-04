@@ -7,8 +7,8 @@ import { collectNewRowKeys, rowKey } from "../src/lib/row-diff.ts";
 // covered end-to-end by refresh-highlight.spec.ts). Pure since the split: the
 // "same view" test and the previous payload are store.ts's to hold.
 
-const pk = (name: string): Column => ({ name, type: "int4", key: "pk" });
-const plain = (name: string): Column => ({ name, type: "text" });
+const pk = (name: string): Column => ({ name, type: "int4", class: "number", key: "pk" });
+const plain = (name: string): Column => ({ name, type: "text", class: "text" });
 const data = (columns: Column[], rows: Row[]): ViewData => ({ columns, rows, total_approx: rows.length });
 
 test("rowKey follows pkNames order and is stable for equal values", () => {

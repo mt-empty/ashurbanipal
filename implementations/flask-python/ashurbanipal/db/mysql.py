@@ -9,25 +9,27 @@ import pymysql
 from ..filter import Condition
 from ..join import (
     BINARY,
+    FLOAT,
+    JSON,
     NUMBER,
+    OTHER,
     TEMPORAL,
     TEXT,
     TIME,
     UUID,
     ColMeta,
+    ColumnClass,
     Dialect,
     JoinData,
     JoinOpts,
     JoinSpec,
     TableMeta,
-    TypeClass,
     build_select,
     enum_class,
     plan_join,
 )
 from . import (
     BadJoin,
-    ColumnInfo,
     ColumnPair,
     ColumnRef,
     ConstraintCheck,
@@ -142,7 +144,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def type_class(data_type: str, column_type: str) -> TypeClass | None:
+def column_class(data_type: str, column_type: str) -> ColumnClass:
     """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
     t = data_type.lower()
     if t in ("tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric"):
@@ -159,7 +161,11 @@ def type_class(data_type: str, column_type: str) -> TypeClass | None:
         return UUID
     if t == "enum":
         return enum_class(column_type)
-    return None
+    if t in ("float", "double"):
+        return FLOAT
+    if t == "json":
+        return JSON
+    return OTHER
 
 
 class MySqlSource(DbSource):
@@ -358,7 +364,11 @@ class MySqlSource(DbSource):
                 if table not in tables:
                     raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
 
-                column_names = self._allowed_columns(cur, variant, resolved_schema, table, timeout)
+                # The join route's lookup, so both routes report the same columns; its
+                # names are the live catalog's, so they also serve as the allow-list.
+                meta = self._table_meta(cur, variant, resolved_schema, table, timeout)
+                columns = [c.column_info() for c in meta.columns]
+                column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
                     if opts.sort not in column_names:
@@ -366,19 +376,6 @@ class MySqlSource(DbSource):
                     sort = opts.sort
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
-
-                # The join route's lookup, so both routes report the same column types.
-                meta = self._table_meta(cur, variant, resolved_schema, table, timeout)
-                columns = [
-                    ColumnInfo(
-                        name=c.name,
-                        type_name=c.type_name,
-                        key=c.key,
-                        references=c.references,
-                        comment=c.comment,
-                    )
-                    for c in meta.columns
-                ]
 
                 select_list = ", ".join(f"CAST({_quote_ident(c.name)} AS CHAR)" for c in columns)
                 order_clause = ""
@@ -453,8 +450,9 @@ class MySqlSource(DbSource):
             columns=[
                 ColMeta(
                     name=name,
-                    type_name="json" if name in json_columns else data_type,
-                    cls=None if name in json_columns else type_class(data_type, column_type),
+                    # column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
+                    type_name="json" if name in json_columns else column_type,
+                    column_class=JSON if name in json_columns else column_class(data_type, column_type),
                     collation=collation or None,
                     key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                     references=fk_columns.get(name),

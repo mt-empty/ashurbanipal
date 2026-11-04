@@ -14,9 +14,10 @@ import {
 import type { CommonValue, FilterCondition } from "../core/types.js";
 import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
+import { truncateType } from "../lib/join-types.js";
 import { columnKey } from "./join-view.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
-import { columnKeyOf, tableMeta } from "./table-meta.js";
+import { keyDescriptionOf, tableMeta } from "./table-meta.js";
 
 export function submitFilter(text: string): void {
   let ast: FilterCondition[] = [];
@@ -257,8 +258,8 @@ function updateFilterSuggestions(): void {
       columns.map((c) => ({
         label: columnKey(c),
         insert: columnKey(c),
-        note: c.type,
-        key: columnKeyOf(c, meta),
+        note: truncateType(c.type),
+        key: keyDescriptionOf(c, meta),
       })),
     );
   } else if (ctx.expect === "operator") {

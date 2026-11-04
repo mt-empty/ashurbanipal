@@ -1,7 +1,7 @@
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresSource } from "../src/db/postgres.js";
-import { isQueryTimeout } from "../src/errors.js";
+import { isQueryTimeout, UnsortableError } from "../src/errors.js";
 import { BadJoinError, type JoinOpts, type JoinSpec, parseJoin } from "../src/join.js";
 
 // Postgres catalog types the conformance seed cannot vary: enum identity,
@@ -30,6 +30,8 @@ function pairJoin(left: string, leftCol: string, right: string, rightCol: string
 maybeDescribe("join against live Postgres", () => {
   const types = "ashb_test_node_join_types";
   const slow = "ashb_test_node_join_slow";
+  const collation = "ashb_test_node_join_collation";
+  const sorting = "ashb_test_node_join_sort";
   let pool: Pool;
   let source: PostgresSource;
 
@@ -44,6 +46,19 @@ maybeDescribe("join against live Postgres", () => {
       create table ${types}.b (id int primary key, m ${types}.mood, z ${types}.size, tags text[], n bigint);
       insert into ${types}.a values (1, 'ok', 's', '{x}', 1.0);
       insert into ${types}.b values (1, 'ok', 's', '{x}', 1);`);
+    await pool.query(`drop schema if exists ${collation} cascade; create schema ${collation};`);
+    await pool.query(`
+      create table ${collation}.a (id int primary key, c text collate "C", p text collate "POSIX", d text);
+      create table ${collation}.b (id int primary key, c text collate "C", p text collate "C", d text);
+      insert into ${collation}.a values (1, 'x', 'x', 'x');
+      insert into ${collation}.b values (1, 'x', 'x', 'x');`);
+    await pool.query(`drop schema if exists ${sorting} cascade; create schema ${sorting};`);
+    await pool.query(`
+      create domain ${sorting}.settings as jsonb;
+      create table ${sorting}.a (id int primary key, doc json, bag jsonb, dom ${sorting}.settings);
+      create table ${sorting}.b (id int primary key);
+      insert into ${sorting}.a values (1, '{}', '{}', '{}'), (2, '[]', '[]', '[]');
+      insert into ${sorting}.b values (1);`);
     await pool.query(`drop schema if exists ${slow} cascade; create schema ${slow};`);
     await pool.query(`
       create table ${slow}.a as select g as id, g % 2 as k from generate_series(1, 20000) g;
@@ -51,7 +66,9 @@ maybeDescribe("join against live Postgres", () => {
   });
 
   afterAll(async () => {
-    await pool.query(`drop schema if exists ${types} cascade; drop schema if exists ${slow} cascade;`);
+    await pool.query(
+      `drop schema if exists ${types} cascade; drop schema if exists ${collation} cascade; drop schema if exists ${sorting} cascade; drop schema if exists ${slow} cascade;`,
+    );
     await pool.end();
   });
 
@@ -66,6 +83,49 @@ maybeDescribe("join against live Postgres", () => {
     );
     const mixed = await source.queryJoin(types, pairJoin("a", "n", "b", "n"), opts(), 5000);
     expect(mixed.rows).toHaveLength(1);
+  });
+
+  // Postgres rejects a comparison of two different explicit collations, while
+  // the default collation yields to an explicit one; the metadata reports only
+  // the explicit ones.
+  it("reports explicit collations and refuses a pair that would clash", async () => {
+    const table = await source.queryTable(
+      collation,
+      "a",
+      { limit: 10, offset: 0, descending: false, filter: [] },
+      5000,
+    );
+    expect(table.columns.map((c) => c.collation)).toEqual([undefined, "C", "POSIX", undefined]);
+    for (const [l, r] of [
+      ["c", "c"],
+      ["c", "d"],
+      ["d", "c"],
+      ["d", "d"],
+    ] as const) {
+      const joined = await source.queryJoin(collation, pairJoin("a", l, "b", r), opts(), 5000);
+      expect(joined.rows, `${l} to ${r}`).toHaveLength(1);
+    }
+    await expect(source.queryJoin(collation, pairJoin("a", "p", "b", "p"), opts(), 5000)).rejects.toThrow(
+      /different text collations/,
+    );
+  });
+
+  // A json, xml or geometric column has no ordering operator, so a sort on it is
+  // a 400 unsortable_column, not a 500; jsonb sorts, and a domain over it reports
+  // the json class.
+  it("rejects a sort on an unorderable column as a client error", async () => {
+    const tableOpts = { limit: 10, offset: 0, descending: false, filter: [] };
+    await expect(source.queryTable(sorting, "a", { ...tableOpts, sort: "doc" }, 5000)).rejects.toBeInstanceOf(
+      UnsortableError,
+    );
+    await expect(
+      source.queryJoin(sorting, pairJoin("a", "id", "b", "id"), opts({ sort: "doc", sortJoin: 0 }), 5000),
+    ).rejects.toBeInstanceOf(UnsortableError);
+    for (const column of ["bag", "dom", "id"]) {
+      await source.queryTable(sorting, "a", { ...tableOpts, sort: column }, 5000);
+    }
+    const table = await source.queryTable(sorting, "a", tableOpts, 5000);
+    expect(table.columns[3].class).toBe("json");
   });
 
   it("names a slow join a query timeout and keeps the pool usable", async () => {

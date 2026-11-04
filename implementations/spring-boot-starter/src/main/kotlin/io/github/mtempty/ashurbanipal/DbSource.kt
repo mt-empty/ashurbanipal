@@ -63,9 +63,15 @@ data class ColumnRef(
 data class ColumnInfo(
     val name: String,
     val type: String,
+    /** The §5.4.1 column class. */
+    @JsonProperty("class") val columnClass: String,
     @JsonInclude(JsonInclude.Include.NON_NULL) val key: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
+    /** The enumerated type's identity; set only when the class is enum. */
+    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("enum_type") val enumType: String? = null,
+    /** The collation where two text columns can clash (§5.4.1). */
+    @JsonInclude(JsonInclude.Include.NON_NULL) val collation: String? = null,
 )
 data class TableData(val columns: List<ColumnInfo>, val rows: List<LinkedHashMap<String, String?>>, val totalApprox: Long)
 data class CommonValueEntry(val value: String, val freq: Float)

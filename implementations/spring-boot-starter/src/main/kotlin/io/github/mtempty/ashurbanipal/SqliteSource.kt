@@ -77,21 +77,21 @@ private val JOIN_DIALECT = JoinDialect(
 )
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
-internal fun sqliteTypeClass(declared: String): TypeClass? {
+internal fun sqliteColumnClass(declared: String): ColumnClass {
     val upper = declared.trim().uppercase()
-    if (upper.isEmpty()) return TypeClass.UNTYPED
+    if (upper.isEmpty()) return ColumnClass.UNTYPED
     val base = upper.substringBefore('(').trim()
     return when {
-        base == "UUID" -> TypeClass.UUID
-        base == "BOOLEAN" || base == "BOOL" -> TypeClass.BOOLEAN
-        base == "DATE" || base == "DATETIME" || base.startsWith("TIMESTAMP") -> TypeClass.TEMPORAL
-        base == "TIME" -> TypeClass.TIME
-        base == "JSON" || base == "JSONB" -> null
-        "INT" in upper -> TypeClass.NUMBER
-        "CHAR" in upper || "CLOB" in upper || "TEXT" in upper -> TypeClass.TEXT
-        "BLOB" in upper -> TypeClass.BINARY
-        "REAL" in upper || "FLOA" in upper || "DOUB" in upper -> null
-        else -> TypeClass.NUMBER
+        base == "UUID" -> ColumnClass.UUID
+        base == "BOOLEAN" || base == "BOOL" -> ColumnClass.BOOLEAN
+        base == "DATE" || base == "DATETIME" || base.startsWith("TIMESTAMP") -> ColumnClass.TEMPORAL
+        base == "TIME" -> ColumnClass.TIME
+        base == "JSON" || base == "JSONB" -> ColumnClass.JSON
+        "INT" in upper -> ColumnClass.NUMBER
+        "CHAR" in upper || "CLOB" in upper || "TEXT" in upper -> ColumnClass.TEXT
+        "BLOB" in upper -> ColumnClass.BINARY
+        "REAL" in upper || "FLOA" in upper || "DOUB" in upper -> ColumnClass.FLOAT
+        else -> ColumnClass.NUMBER
     }
 }
 
@@ -139,10 +139,28 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
     private fun requireTable(table: String): String =
         allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
-    /** Composite FKs are dropped, mirroring [PostgresSource]/[MySqlSource]. */
-    private fun keyMetadata(table: String): Pair<List<String>, Map<String, ColumnRef>> =
-        bounded(queryTimeoutSecs) { conn -> keyMetadataOn(conn, table) }
+    /** [table] must already be allow-listed: it is spliced into the pragma call. */
+    private fun tableMeta(conn: Connection, table: String): TableMeta {
+        val (pk, fkColumns) = keyMetadataOn(conn, table)
+        val quoted = quoteIdent(table)
+        return TableMeta(
+            table,
+            query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
+                rs.getString(2) to (rs.getString(3) ?: "")
+            }.map { (col, declared) ->
+                ColMeta(
+                    name = col,
+                    // A declared type can be empty (""); a stable label beats emitting "".
+                    type = declared.ifEmpty { "unknown" },
+                    columnClass = sqliteColumnClass(declared),
+                    key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
+                    references = fkColumns[col],
+                )
+            },
+        )
+    }
 
+    /** Composite FKs are dropped rather than risk mislabeling which columns pair up. */
     private fun keyMetadataOn(conn: Connection, table: String): Pair<List<String>, Map<String, ColumnRef>> {
         val quoted = quoteIdent(table)
         val cols = query(conn, "select cid, name, pk from pragma_table_info($quoted) order by cid") { rs ->
@@ -202,26 +220,11 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         return bounded(queryTimeoutSecs) { conn ->
             val allowed = allowedTablesOn(conn)
             val names = spec.tableNames()
-            val metas = HashMap<String, JoinTableMeta>()
+            val metas = HashMap<String, TableMeta>()
             for (name in names) {
                 if (name in metas) continue
                 if (name !in allowed) throw BadJoinException("unknown table \"$name\"")
-                val quoted = quoteIdent(name)
-                val (pk, fkColumns) = keyMetadataOn(conn, name)
-                metas[name] = JoinTableMeta(
-                    name,
-                    query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
-                        rs.getString(2) to (rs.getString(3) ?: "")
-                    }.map { (col, declared) ->
-                        JoinColMeta(
-                            name = col,
-                            type = declared.ifEmpty { "unknown" },
-                            cls = sqliteTypeClass(declared),
-                            key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
-                            references = fkColumns[col],
-                        )
-                    },
-                )
+                metas[name] = tableMeta(conn, name)
             }
             val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
 
@@ -239,34 +242,17 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData {
         checkSchema(schema)
         val realTable = requireTable(table)
-        val columnNames = allowedColumns(realTable)
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        val columns = bounded(queryTimeoutSecs) { conn -> tableMeta(conn, realTable) }.columns.map { it.columnInfo() }
+        val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
         val whereClause = opts.filter?.let { buildWhereClauseSqlite(it, columnNames) } ?: WhereClause("", emptyList())
-        val (pkColumns, fkColumns) = keyMetadata(realTable)
-
         val quotedTable = quoteIdent(realTable)
-        val columnTypes = bounded(queryTimeoutSecs) { conn ->
-            query(conn, "select cid, name, type from pragma_table_info($quotedTable) order by cid") { rs ->
-                rs.getString(2) to rs.getString(3)
-            }
-        }
-
-        val columns = columnTypes.map { (name, typeName) ->
-            val key: String?
-            val references: ColumnRef?
-            when {
-                pkColumns.contains(name) -> { key = "pk"; references = fkColumns[name] }
-                fkColumns.containsKey(name) -> { key = "fk"; references = fkColumns[name] }
-                else -> { key = null; references = null }
-            }
-            // SQLite's declared column types can be empty (dynamic typing);
-            // fall back to a stable label rather than emitting "".
-            ColumnInfo(name, typeName?.takeIf { it.isNotEmpty() } ?: "unknown", key, references, null)
-        }
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdent(it.name)} AS TEXT)" }
         val orderClause = sort?.let {

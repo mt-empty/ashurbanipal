@@ -1,18 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { ColumnClass } from "../src/core/types.ts";
 import {
-  type ColumnTypeClass,
   columnTypeClass,
+  type DisplayBucket,
   edgeWhitespace,
   rendersAsJson,
+  typeNameClass,
   whitespaceTitle,
 } from "../src/lib/format.ts";
 
-// columnTypeClass buckets the DB engine's own catalog type spelling into a
+// typeNameClass buckets the DB engine's own catalog type spelling into a
 // small render class. It must cover Postgres, MySQL, and SQLite vocabularies
 // without a bare-substring match that would mis-bucket Postgres geometry /
 // network / range types.
-const CASES: [string, ColumnTypeClass | null][] = [
+const CASES: [string, DisplayBucket | null][] = [
   // Postgres data_type spellings
   ["integer", "number"],
   ["bigint", "number"],
@@ -36,7 +38,7 @@ const CASES: [string, ColumnTypeClass | null][] = [
   ["bytea", null],
   // MySQL DATA_TYPE spellings
   ["int", "number"],
-  ["tinyint", "number"], // bool-vs-int isn't on the wire; accepted gap
+  ["tinyint", "number"],
   ["mediumint", "number"],
   ["decimal", "number"],
   ["double", "number"],
@@ -59,44 +61,59 @@ const CASES: [string, ColumnTypeClass | null][] = [
   ["varchar(255)", null],
   ["  Integer ", "number"],
   ["TIMESTAMP(6)", "date"],
+  // full spellings: Postgres format_type, MySQL COLUMN_TYPE
+  ["tinyint(1)", "bool"],
+  ["TINYINT(1)", "bool"],
+  ["tinyint(4)", "number"],
+  ["int unsigned", "number"],
+  ["bigint(20) unsigned zerofill", "number"],
+  ["decimal(10,2)", "number"],
+  ["timestamp(3) with time zone", "date"],
+  ["datetime(6)", "date"],
+  ["character varying(255)", null],
+  ["numeric(10,2)[]", null],
+  ["order_status", null],
+  ["enum('a','b')", null],
 ];
 
 for (const [input, expected] of CASES) {
   test(`${JSON.stringify(input)} -> ${expected}`, () => {
-    assert.equal(columnTypeClass(input), expected);
+    assert.equal(typeNameClass(input), expected);
   });
 }
 
 // rendersAsJson: declared JSON always; a plain string type by value shape;
 // never another type whose text form leads with { or [.
-const JSON_CASES: [string, string, boolean][] = [
-  ["jsonb", '{"a":1}', true],
-  ["json", "not json", true], // declared type wins; the render path degrades
-  ["text", '{"a":1}', true],
-  ["unknown", "[1,2]", true],
-  ["text", "plain", false],
-  ["integer", "[1]", false],
-  ["ARRAY", "{a,b}", false],
-  ["text[]", "{a,b}", false],
-  ["integer[]", '{"1","2"}', false],
-  ["int4range", "[1,10)", false],
-  ["int4multirange", "{[1,3)}", false],
-  ["path", "[(0,0),(1,1)]", false],
-  ["varchar(255)", '{"a":1}', true],
-  ["TEXT", "[1]", true],
-  ["", "{}", true],
-  ["citext", '{"a":1}', true],
-  ["VARYING CHARACTER(20)", "[1]", true],
-  ["NVARCHAR2(40)", "[1]", true],
-  ["numeric", "[1.5,2.5]", false],
-  ["numrange", "[1.5,2.5]", false],
-  ["USER-DEFINED", "[1.5,2.5]", false],
-  ["_text", "{a,b}", false],
+const JSON_CASES: [string, ColumnClass, string, boolean][] = [
+  ["jsonb", "json", '{"a":1}', true],
+  ["json", "json", "not json", true], // declared type wins; the render path degrades
+  ["text", "text", '{"a":1}', true],
+  ["unknown", "untyped", "[1,2]", true],
+  ["text", "text", "plain", false],
+  ["integer", "number", "[1]", false],
+  ["ARRAY", "array", "{a,b}", false],
+  ["text[]", "array", "{a,b}", false],
+  ["integer[]", "array", '{"1","2"}', false],
+  ["int4range", "other", "[1,10)", false],
+  ["int4multirange", "other", "{[1,3)}", false],
+  ["path", "other", "[(0,0),(1,1)]", false],
+  ["varchar(255)", "text", '{"a":1}', true],
+  ["TEXT", "text", "[1]", true],
+  ["", "untyped", "{}", true],
+  ["character varying(255)", "text", '{"a":1}', true],
+  ["character varying(255)[]", "array", "{a,b}", false],
+  ["citext", "text", '{"a":1}', true],
+  ["VARYING CHARACTER(20)", "text", "[1]", true],
+  ["NVARCHAR2(40)", "text", "[1]", true],
+  ["numeric", "number", "[1.5,2.5]", false],
+  ["numrange", "other", "[1.5,2.5]", false],
+  ["USER-DEFINED", "other", "[1.5,2.5]", false],
+  ["_text", "array", "{a,b}", false],
 ];
 
-for (const [type, raw, expected] of JSON_CASES) {
+for (const [type, cls, raw, expected] of JSON_CASES) {
   test(`rendersAsJson(${JSON.stringify(type)}, ${JSON.stringify(raw)}) -> ${expected}`, () => {
-    assert.equal(rendersAsJson({ name: "c", type }, raw), expected);
+    assert.equal(rendersAsJson({ name: "c", type, class: cls }, raw), expected);
   });
 }
 
@@ -137,4 +154,23 @@ test("edgeWhitespace stays linear on a long inner run", () => {
   const started = performance.now();
   assert.equal(edgeWhitespace(raw).core, raw);
   assert.ok(performance.now() - started < 200);
+});
+
+test("columnTypeClass falls back to the server's column class when the type name is unknown", () => {
+  assert.equal(columnTypeClass({ type: "positive_int", class: "number" }), "number");
+  assert.equal(columnTypeClass({ type: "event_time", class: "temporal" }), "date");
+  assert.equal(columnTypeClass({ type: "tinyint(1)", class: "number" }), "bool");
+  assert.equal(columnTypeClass({ type: "label", class: "text" }), null);
+  assert.equal(columnTypeClass({ type: "mystery", class: "other" }), null);
+  assert.equal(columnTypeClass({ type: "settings", class: "json" }), "json");
+  assert.equal(columnTypeClass({ type: "weight", class: "float" }), "number");
+});
+
+test("a domain over json renders as JSON through its class", () => {
+  assert.equal(rendersAsJson({ name: "c", type: "settings", class: "json" }, '{"a":1}'), true);
+});
+
+test("a text domain still gets JSON shape detection through its class", () => {
+  assert.equal(rendersAsJson({ name: "c", type: "settings_text", class: "text" }, '{"a":1}'), true);
+  assert.equal(rendersAsJson({ name: "c", type: "positive_int", class: "number" }, "[1]"), false);
 });

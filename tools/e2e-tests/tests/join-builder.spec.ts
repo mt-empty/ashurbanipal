@@ -176,6 +176,18 @@ test("an incompatible pair is refused in the text before any request", async ({ 
   expect(requests).toBe(0);
 });
 
+test("two different enums are refused in the text, the same enum is not", async ({ page }) => {
+  await openJoinOverlay(page);
+  await writeSql(page, "FROM orders o JOIN support_tickets t ON t.status = o.status");
+  await expect(page.locator("#join-sql-error")).toHaveText(
+    "Line 1: ticket_status cannot be joined to order_status: they are different enumerated types.",
+  );
+  await expect(page.locator("#join-run")).toBeDisabled();
+
+  await writeSql(page, "FROM orders o JOIN orders p ON p.status = o.status");
+  await expect(page.locator("#join-sql-error")).toBeEmpty();
+});
+
 test("an unknown table is caught before any request, with a suggestion", async ({ page }) => {
   await openJoinOverlay(page);
   await writeSql(page, "FROM orders o JOIN user u ON o.user_id = u.id");

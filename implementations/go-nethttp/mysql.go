@@ -131,29 +131,30 @@ var mysqlJoinDialect = joinDialect{
 	ilike:    ilikeLoweredLike,
 }
 
-// mysqlTypeClass maps information_schema types to spec/protocol.md
+// mysqlColumnClass maps information_schema types to spec/protocol.md
 // §5.11.2 classes (docs/adapter-decisions.md §5.11).
-func mysqlTypeClass(dataType, columnType string) *typeClass {
-	var c typeClass
+func mysqlColumnClass(dataType, columnType string) columnClass {
 	switch strings.ToLower(dataType) {
 	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric":
-		c = classNumber
+		return classNumber
 	case "char", "varchar", "tinytext", "text", "mediumtext", "longtext":
-		c = classText
+		return classText
 	case "date", "datetime", "timestamp":
-		c = classTemporal
+		return classTemporal
 	case "time":
-		c = classTime
+		return classTime
 	case "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob":
-		c = classBinary
+		return classBinary
 	case "uuid":
-		c = classUUID
+		return classUUID
 	case "enum":
-		c = classEnum(columnType)
-	default:
-		return nil
+		return classEnum(columnType)
+	case "float", "double":
+		return classFloat
+	case "json":
+		return classJSON
 	}
-	return &c
+	return classOther
 }
 
 func (c *MySQLSource) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -389,10 +390,10 @@ func (c *MySQLSource) mariadbJSONColumns(ctx context.Context, tx queryer, varian
 	return out, rows.Err()
 }
 
-func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (joinTableMeta, error) {
+func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (tableMeta, error) {
 	jsonColumns, err := c.mariadbJSONColumns(ctx, tx, variant, schema, table)
 	if err != nil {
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	metaCtx, cancel := c.bounded(ctx)
 	defer cancel()
@@ -402,19 +403,20 @@ func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVa
 		 where table_schema = ? and table_name = ?
 		 order by ordinal_position`), schema, table)
 	if err != nil {
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
-	meta := joinTableMeta{name: table}
+	meta := tableMeta{name: table}
 	for rows.Next() {
 		var name, dataType, comment, columnType string
 		var collation sql.NullString
 		if err := rows.Scan(&name, &dataType, &comment, &collation, &columnType); err != nil {
 			rows.Close()
-			return joinTableMeta{}, err
+			return tableMeta{}, err
 		}
-		col := joinColMeta{name: name, typeName: dataType, class: mysqlTypeClass(dataType, columnType), comment: comment}
+		// column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
+		col := colMeta{name: name, typeName: columnType, class: mysqlColumnClass(dataType, columnType), comment: comment}
 		if jsonColumns[name] {
-			col.typeName, col.class = "json", nil
+			col.typeName, col.class = "json", classJSON
 		}
 		if collation.Valid {
 			cl := collation.String
@@ -424,13 +426,13 @@ func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVa
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	rows.Close()
 
 	pk, fk, err := c.keyMetadataInTx(ctx, tx, variant, schema, table)
 	if err != nil {
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	for i := range meta.columns {
 		col := &meta.columns[i]
@@ -460,7 +462,7 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 		return JoinData{}, err
 	}
 	names := spec.TableNames()
-	metas := map[string]joinTableMeta{}
+	metas := map[string]tableMeta{}
 	for _, name := range names {
 		if _, ok := metas[name]; ok {
 			continue
@@ -474,7 +476,7 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 		}
 		metas[name] = meta
 	}
-	tables := make([]joinTableMeta, len(names))
+	tables := make([]tableMeta, len(names))
 	for i, name := range names {
 		tables[i] = metas[name]
 	}
@@ -665,10 +667,14 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 		return TableData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 
-	columnNames, err := c.allowedColumnsInTx(ctx, tx, variant, realSchema, realTable)
+	// The join route's lookup, so both routes report the same columns; its
+	// names are the live catalog's, so they also serve as the allow-list.
+	meta, err := c.tableMeta(ctx, tx, variant, realSchema, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
+	columns := meta.columnInfos()
+	columnNames := meta.columnNames()
 	var sort *string
 	if opts.Sort != nil {
 		found, ok := findExact(columnNames, *opts.Sort)
@@ -685,16 +691,6 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 		if err != nil {
 			return TableData{}, err
 		}
-	}
-
-	// The join route's lookup, so both routes report the same column types.
-	meta, err := c.tableMeta(ctx, tx, variant, realSchema, realTable)
-	if err != nil {
-		return TableData{}, err
-	}
-	columns := make([]ColumnInfo, 0, len(meta.columns))
-	for _, cm := range meta.columns {
-		columns = append(columns, ColumnInfo{Name: cm.name, Type: cm.typeName, Key: cm.key, References: cm.references, Comment: cm.comment})
 	}
 
 	selectParts := make([]string, len(columns))

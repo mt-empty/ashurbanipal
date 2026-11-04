@@ -10,7 +10,7 @@ import { copyButton, eqButton, fkLink, keyIcon, typeChip } from "./column-parts.
 import { applyFilter } from "./filter-ui.js";
 import { columnKey, displayName, tableGroups } from "./join-view.js";
 import { renderReferencedBy } from "./referenced-by.js";
-import { columnKeyOf, type TableMeta, tableMeta } from "./table-meta.js";
+import { keyDescriptionOf, type TableMeta, tableMeta } from "./table-meta.js";
 import { navigateWithSeededFilter } from "./view-history.js";
 
 // ---- record / vertical view: one already-fetched row as a stacked
@@ -99,7 +99,7 @@ function buildRecordEntries(columns: Column[], row: Row, ctx: RecordContext): No
       nodes.push(heading);
     }
     for (const col of group.columns) {
-      const key = columnKeyOf(col, meta);
+      const key = keyDescriptionOf(col, meta);
       const dt = el("dt");
       const name = el("span", "record-name", displayName(col));
       name.title = columnKey(col, def);
@@ -120,7 +120,7 @@ function buildRecordEntries(columns: Column[], row: Row, ctx: RecordContext): No
 // Nested exactly when the record view draws it as a tree, so copy matches
 // what is on screen. Invalid JSON stays a string, so the copy is still a
 // usable document.
-function isValidJsonColumn(col: Column, raw: string): boolean {
+function parsesAsJsonCell(col: Column, raw: string): boolean {
   if (!rendersAsJson(col, raw)) return false;
   try {
     JSON.parse(raw);
@@ -135,7 +135,7 @@ function recordAsJson(columns: Column[], row: Row): string {
   return recordJson(
     columns.map((col) => {
       const raw = row[col.name];
-      return { name: col.name, raw, json: raw != null && isValidJsonColumn(col, raw) };
+      return { name: col.name, raw, json: raw != null && parsesAsJsonCell(col, raw) };
     }),
   );
 }
@@ -152,7 +152,7 @@ function recordAsInsert(table: string, columns: Column[], row: Row): string {
 // MySQL/SQLite, and a quoted string inserts fine into a bool column on all three.
 function sqlLiteral(col: Column, raw: string | null): string {
   if (raw == null) return "NULL";
-  if (columnTypeClass(col.type) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
+  if (columnTypeClass(col) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
   return `'${raw.replace(/'/g, "''")}'`;
 }
 

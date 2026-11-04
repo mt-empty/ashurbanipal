@@ -487,18 +487,16 @@ func TestMySQLJoinDifferingTextCollationsAreABadJoin(t *testing.T) {
 	}
 }
 
-func TestMySQLTypeClass(t *testing.T) {
-	num, txt, temporal, uuid := classNumber, classText, classTemporal, classUUID
-	enum := classEnum("enum('a','b')")
+func TestMySQLColumnClass(t *testing.T) {
 	for _, c := range []struct {
 		dataType, columnType string
-		want                 *typeClass
+		want                 columnClass
 	}{
-		{"bigint", "bigint", &num}, {"VARCHAR", "varchar(20)", &txt}, {"datetime", "datetime", &temporal},
-		{"enum", "enum('a','b')", &enum}, {"json", "json", nil}, {"double", "double", nil}, {"uuid", "uuid", &uuid},
+		{"bigint", "bigint", classNumber}, {"VARCHAR", "varchar(20)", classText}, {"datetime", "datetime", classTemporal},
+		{"enum", "enum('a','b')", classEnum("enum('a','b')")}, {"json", "json", classJSON}, {"double", "double", classFloat},
+		{"uuid", "uuid", classUUID}, {"set", "set('a','b')", classOther},
 	} {
-		got := mysqlTypeClass(c.dataType, c.columnType)
-		if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
+		if got := mysqlColumnClass(c.dataType, c.columnType); got != c.want {
 			t.Errorf("%s: got %v want %v", c.dataType, got, c.want)
 		}
 	}

@@ -12,7 +12,7 @@ import {
   setTableAt,
 } from "../lib/join-draft.js";
 import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
-import { findForeignKey, joinMismatch, pairNote } from "../lib/join-types.js";
+import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
 import { createDropdown, lastDropdownLabel } from "./dropdown.js";
 import { cachedColumns, tableColumns } from "./join-catalog.js";
 import { listedTableNames, tableChipCount } from "./table-chips.js";
@@ -45,13 +45,12 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   const tableAt = (pos: number): string => (pos === 0 ? draft.table : draft.joins[pos - 1].table);
   const nameAt = (pos: number): string => (pos === 0 ? draft.alias : draft.joins[pos - 1].alias).trim() || tableAt(pos);
   const columnsAt = (pos: number): Column[] => cachedColumns(tableAt(pos)) ?? [];
-  const typeOf = (pos: number, column: string): string | undefined =>
-    columnsAt(pos).find((c) => c.name === column)?.type;
+  const columnOf = (pos: number, column: string): Column | undefined => columnsAt(pos).find((c) => c.name === column);
 
   const mismatch = (pos: number, pair: DraftPair) => {
-    const left = typeOf(pair.leftJoin, pair.leftColumn);
-    const right = typeOf(pos, pair.rightColumn);
-    return left && right ? joinMismatch(left, right) : null;
+    const leftCol = columnOf(pair.leftJoin, pair.leftColumn);
+    const rightCol = columnOf(pos, pair.rightColumn);
+    return leftCol && rightCol ? joinMismatch(leftCol, rightCol) : null;
   };
 
   function foreignKey(pos: number): DraftPair | null {
@@ -115,22 +114,22 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     const first = k === 0;
     const which = first ? "" : ` pair ${k + 1}`;
     const clash = mismatch(pos, pair);
-    const rightType = typeOf(pos, pair.rightColumn);
-    const leftType = typeOf(pair.leftJoin, pair.leftColumn);
+    const rightCol = columnOf(pos, pair.rightColumn);
+    const leftCol = columnOf(pair.leftJoin, pair.leftColumn);
     const leftOptions = Array.from({ length: pos }, (_, p) => p).flatMap((p) =>
       columnsAt(p).map((c) => {
-        const note = pairNote(c.type, rightType);
+        const note = pairNote(c, rightCol);
         return {
           value: `${p}|${c.name}`,
           label: `${nameAt(p)}.${c.name}`,
-          note: note ?? c.type,
+          note: note ?? truncateType(c.type),
           blocked: note !== null,
         };
       }),
     );
     const rightOptions = columnsAt(pos).map((c) => {
-      const note = pairNote(c.type, leftType);
-      return { value: c.name, label: c.name, note: note ?? c.type, blocked: note !== null };
+      const note = pairNote(c, leftCol);
+      return { value: c.name, label: c.name, note: note ?? truncateType(c.type), blocked: note !== null };
     });
     const parts: Node[] = [
       el("span", "j-kw", first ? "on" : "and"),
@@ -163,7 +162,9 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         },
       }),
     ];
-    if (leftType && rightType && !clash) parts.push(el("span", "j-ok", `${leftType} = ${rightType} ✓`));
+    if (leftCol && rightCol && !clash) {
+      parts.push(el("span", "j-ok", `${truncateType(leftCol.type)} = ${truncateType(rightCol.type)} ✓`));
+    }
     if (!first) {
       parts.push(
         textButton("✕", "j-rm", `remove column pair from join ${pos}`, () => {

@@ -8,11 +8,10 @@ emits SQL from catalog names and generated aliases only.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .db import OP_SQL, BadJoin, BadParam, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
+from .db import OP_SQL, BadJoin, BadParam, ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
 from .filter import Condition, load_json
 
@@ -144,28 +143,35 @@ def parse_join(raw: str) -> JoinSpec:
 
 
 @dataclass(frozen=True)
-class TypeClass:
-    """Comparison class of a column type (`spec/protocol.md` §5.11.2). `id`
+class ColumnClass:
+    """Class of a column type (`spec/protocol.md` §5.4.1, §5.11.2). `enum_type`
     carries an enumerated type's identity; `untyped` is a SQLite column with
     no declared type and pairs only with itself.
     """
 
     kind: str
-    id: str = ""
+    enum_type: str = ""
 
 
-NUMBER = TypeClass("number")
-TEXT = TypeClass("text")
-UUID = TypeClass("uuid")
-BOOLEAN = TypeClass("boolean")
-TEMPORAL = TypeClass("temporal")
-TIME = TypeClass("time")
-BINARY = TypeClass("binary")
-UNTYPED = TypeClass("untyped")
+NUMBER = ColumnClass("number")
+TEXT = ColumnClass("text")
+UUID = ColumnClass("uuid")
+BOOLEAN = ColumnClass("boolean")
+TEMPORAL = ColumnClass("temporal")
+TIME = ColumnClass("time")
+BINARY = ColumnClass("binary")
+UNTYPED = ColumnClass("untyped")
+FLOAT = ColumnClass("float")
+JSON = ColumnClass("json")
+ARRAY = ColumnClass("array")
+OTHER = ColumnClass("other")
+
+# Classes whose columns cannot be joined (§5.11.2).
+_NOT_JOINABLE = frozenset({FLOAT, JSON, ARRAY, OTHER})
 
 
-def enum_class(identity: str) -> TypeClass:
-    return TypeClass("enum", identity)
+def enum_class(identity: str) -> ColumnClass:
+    return ColumnClass("enum", identity)
 
 
 @dataclass
@@ -174,11 +180,24 @@ class ColMeta:
 
     name: str
     type_name: str
-    cls: TypeClass | None = None
-    collation: str | None = None  # set where two text collations can clash (MySQL)
+    column_class: ColumnClass
+    collation: str | None = None  # set where two text collations can clash (`spec/protocol.md` §5.4.1)
     key: KeyKind | None = None
     references: ColumnRef | None = None
     comment: str | None = None
+
+    def column_info(self) -> ColumnInfo:
+        """The §5.4.1 shape of this column."""
+        return ColumnInfo(
+            name=self.name,
+            type_name=self.type_name,
+            key=self.key,
+            references=self.references,
+            comment=self.comment,
+            column_class=self.column_class.kind,
+            enum_type=self.column_class.enum_type or None,
+            collation=self.collation if self.column_class == TEXT else None,
+        )
 
 
 @dataclass
@@ -225,9 +244,12 @@ class JoinColumnInfo:
     join: int
     table: str
     column: str
+    column_class: str
     key: KeyKind | None = None
     references: ColumnRef | None = None
     comment: str | None = None
+    enum_type: str | None = None
+    collation: str | None = None
 
 
 @dataclass
@@ -261,7 +283,7 @@ class JoinPlan:
         out = []
         for (pos, col), label in zip(self.selection, self.labels, strict=True):
             t = self.tables[pos]
-            c = t.columns[col]
+            c = t.columns[col].column_info()
             out.append(
                 JoinColumnInfo(
                     name=label,
@@ -272,6 +294,9 @@ class JoinPlan:
                     key=c.key,
                     references=c.references,
                     comment=c.comment,
+                    column_class=c.column_class,
+                    enum_type=c.enum_type,
+                    collation=c.collation,
                 )
             )
         return out
@@ -288,22 +313,18 @@ def _describe(t: TableMeta, c: ColMeta) -> str:
 
 
 def _unjoinable(position: int, t: TableMeta, c: ColMeta) -> BadJoin:
-    why = (
-        ": floating-point values are not compared exactly"
-        if re.search(r"real|float|double", c.type_name, re.I)
-        else ""
-    )
+    why = ": floating-point values are not compared exactly" if c.column_class == FLOAT else ""
     return BadJoin(f"join {position} on: {_describe(t, c)} cannot be used in a join{why}")
 
 
 def _check_pair(position: int, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta) -> None:
-    if lc.cls is None:
+    if lc.column_class in _NOT_JOINABLE:
         raise _unjoinable(position, lt, lc)
-    if rc.cls is None:
+    if rc.column_class in _NOT_JOINABLE:
         raise _unjoinable(position, rt, rc)
-    if lc.cls != rc.cls:
+    if lc.column_class != rc.column_class:
         raise BadJoin(f"join {position} on: {_describe(lt, lc)} cannot be joined to {_describe(rt, rc)}")
-    if lc.cls == TEXT and lc.collation and rc.collation and lc.collation != rc.collation:
+    if lc.column_class == TEXT and lc.collation and rc.collation and lc.collation != rc.collation:
         raise BadJoin(
             f"join {position} on: {_describe(lt, lc)} and {_describe(rt, rc)} "
             f"use different text collations ({lc.collation} and {rc.collation})"

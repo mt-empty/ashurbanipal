@@ -3,17 +3,18 @@ import { assertSafeTimeoutMs, mapSelectDenied, NotAllowedError, quoteIdent } fro
 import { buildWhereClause } from "../filter.js";
 import {
   buildJoinSelect,
-  type JoinColMeta,
+  type ColMeta,
+  type ColumnClass,
+  columnInfo,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
   type JoinSpec,
-  type JoinTableMeta,
   joinColumnInfos,
   joinRows,
   joinTableNames,
   planJoin,
-  type TypeClass,
+  type TableMeta,
   unknownJoinTable,
 } from "../join.js";
 import {
@@ -43,12 +44,7 @@ const JOIN_DIALECT: JoinDialect = {
 };
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-export function pgTypeClass(
-  dataType: string,
-  udtSchema: string,
-  udtName: string,
-  isEnum: boolean,
-): TypeClass | undefined {
+export function pgColumnClass(dataType: string, udtSchema: string, udtName: string, isEnum: boolean): ColumnClass {
   switch (dataType) {
     case "smallint":
     case "integer":
@@ -72,29 +68,21 @@ export function pgTypeClass(
     case "time without time zone":
     case "time with time zone":
       return { kind: "time" };
+    case "real":
+    case "double precision":
+      return { kind: "float" };
+    case "json":
+    case "jsonb":
+      return { kind: "json" };
+    case "ARRAY":
+      return { kind: "array" };
     case "USER-DEFINED":
-      if (isEnum) return { kind: "enum", id: `${udtSchema}.${udtName}` };
+      if (isEnum) return { kind: "enum", enumType: `${udtSchema}.${udtName}` };
       if (udtName === "citext") return { kind: "text" };
-      return undefined;
+      return { kind: "other" };
     default:
-      return undefined;
+      return { kind: "other" };
   }
-}
-
-// attnum survives dropped columns; ordinal_position does not.
-async function columnComments(client: PoolClient, schema: string, table: string): Promise<Map<string, string>> {
-  const { rows } = await client.query<{ attname: string; comment: string | null }>(
-    `select a.attname::text, col_description(a.attrelid, a.attnum::int) as comment
-     from pg_attribute a
-     join pg_class c on c.oid = a.attrelid
-     join pg_namespace n on n.oid = c.relnamespace
-     where n.nspname = $1 and c.relname = $2
-       and a.attnum > 0 and not a.attisdropped`,
-    [schema, table],
-  );
-  const comments = new Map<string, string>();
-  for (const row of rows) if (row.comment !== null) comments.set(row.attname, row.comment);
-  return comments;
 }
 
 /** Postgres `DbSource`; `SET LOCAL` scopes query timeouts (`spec/protocol.md` §6). */
@@ -305,33 +293,49 @@ export class PostgresSource implements DbSource {
     });
   }
 
-  // Column metadata of a table already cleared by readableTableOid.
-  private async joinTableMeta(client: PoolClient, schema: string, table: string): Promise<JoinTableMeta> {
+  // Column metadata of a table already cleared by readableTableOid, which supplies `oid`.
+  private async tableMeta(client: PoolClient, schema: string, table: string, oid: number): Promise<TableMeta> {
     const { rows } = await client.query<{
       column_name: string;
       data_type: string;
       udt_schema: string;
       udt_name: string;
       is_enum: boolean;
+      full_type: string;
+      comment: string | null;
+      collation: string | null;
     }>(
+      // information_schema.columns drives the list (column privileges, order);
+      // pg_attribute adds the full type spelling, comment and collation, keyed
+      // by attnum, which can diverge from ordinal_position after a drop. The
+      // default collation (oid 100) is left out: it yields to an explicit one
+      // in a comparison, so it never clashes.
       `select c.column_name, c.data_type, c.udt_schema, c.udt_name,
               exists (select 1 from pg_type t
                       join pg_namespace n on n.oid = t.typnamespace
                       where n.nspname = c.udt_schema and t.typname = c.udt_name
-                        and t.typtype = 'e') as is_enum
+                        and t.typtype = 'e') as is_enum,
+              format_type(a.atttypid, a.atttypmod) as full_type,
+              col_description(a.attrelid, a.attnum::int) as comment,
+              (select case when n.nspname = 'pg_catalog' then co.collname
+                           else n.nspname || '.' || co.collname end
+                 from pg_collation co
+                 join pg_namespace n on n.oid = co.collnamespace
+                where co.oid = a.attcollation and a.attcollation not in (0, 100)) as collation
        from information_schema.columns c
+       join pg_attribute a on a.attrelid = $3 and a.attname = c.column_name
        where c.table_schema = $1 and c.table_name = $2
        order by c.ordinal_position`,
-      [schema, table],
+      [schema, table, oid],
     );
-    const comments = await columnComments(client, schema, table);
     const { pkColumns, fkColumns } = await this.keyMetadata(client, schema, table);
-    const columns = rows.map((r): JoinColMeta => {
-      const col: JoinColMeta = {
+    const columns = rows.map((r): ColMeta => {
+      const col: ColMeta = {
         name: r.column_name,
-        type: r.data_type,
-        class: pgTypeClass(r.data_type, r.udt_schema, r.udt_name, r.is_enum),
+        type: r.full_type,
+        class: pgColumnClass(r.data_type, r.udt_schema, r.udt_name, r.is_enum),
       };
+      if (r.collation) col.collation = r.collation;
       if (pkColumns.has(r.column_name)) {
         col.key = "pk";
         if (fkColumns.has(r.column_name)) col.references = fkColumns.get(r.column_name);
@@ -339,8 +343,7 @@ export class PostgresSource implements DbSource {
         col.key = "fk";
         col.references = fkColumns.get(r.column_name);
       }
-      const comment = comments.get(r.column_name);
-      if (comment !== undefined) col.comment = comment;
+      if (r.comment !== null) col.comment = r.comment;
       return col;
     });
     return { name: table, columns };
@@ -350,19 +353,19 @@ export class PostgresSource implements DbSource {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const names = joinTableNames(spec);
-      const metas = new Map<string, JoinTableMeta>();
+      const metas = new Map<string, TableMeta>();
       for (const name of names) {
         if (metas.has(name)) continue;
         try {
-          await this.readableTableOid(client, realSchema, name);
-          metas.set(name, await this.joinTableMeta(client, realSchema, name));
+          const oid = await this.readableTableOid(client, realSchema, name);
+          metas.set(name, await this.tableMeta(client, realSchema, name, oid));
         } catch (err) {
           throw unknownJoinTable(err, name);
         }
       }
       const plan = planJoin(
         spec,
-        names.map((n) => metas.get(n) as JoinTableMeta),
+        names.map((n) => metas.get(n) as TableMeta),
         opts,
       );
 
@@ -372,7 +375,7 @@ export class PostgresSource implements DbSource {
       const { rows } = await client
         .query(`select ${body}`, [opts.limit + 1, opts.offset, ...values])
         .catch((err: unknown) => {
-          throw mapSelectDenied(err, spec.table);
+          throw mapSelectDenied(err, spec.table, opts.sort);
         });
       const out = joinRows(plan, rows as Record<string, unknown>[], opts.limit, cellToJson);
       return { columns: joinColumnInfos(plan), rows: out.rows, has_more: out.hasMore };
@@ -382,10 +385,13 @@ export class PostgresSource implements DbSource {
   async queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-      await this.readableTableOid(client, realSchema, table);
+      const oid = await this.readableTableOid(client, realSchema, table);
       const realTable = table;
 
-      const columnNames = await this.allowedColumns(client, realSchema, realTable);
+      // The join route's lookup, so both routes report the same columns; its
+      // names are the live catalog's, so they also serve as the allow-list.
+      const columns: ColumnInfo[] = (await this.tableMeta(client, realSchema, realTable, oid)).columns.map(columnInfo);
+      const columnNames = columns.map((c) => c.name);
 
       let sort: string | undefined;
       if (opts.sort !== undefined) {
@@ -402,31 +408,6 @@ export class PostgresSource implements DbSource {
         whereClause = built.where;
         filterValues = built.values;
       }
-
-      const { rows: columnTypeRows } = await client.query<{ column_name: string; data_type: string }>(
-        `select column_name, data_type from information_schema.columns
-         where table_schema = $1 and table_name = $2
-         order by ordinal_position`,
-        [realSchema, realTable],
-      );
-
-      const comments = await columnComments(client, realSchema, realTable);
-
-      const { pkColumns, fkColumns } = await this.keyMetadata(client, realSchema, realTable);
-
-      const columns: ColumnInfo[] = columnTypeRows.map((ct) => {
-        const col: ColumnInfo = { name: ct.column_name, type: ct.data_type };
-        if (pkColumns.has(ct.column_name)) {
-          col.key = "pk";
-          if (fkColumns.has(ct.column_name)) col.references = fkColumns.get(ct.column_name);
-        } else if (fkColumns.has(ct.column_name)) {
-          col.key = "fk";
-          col.references = fkColumns.get(ct.column_name);
-        }
-        const comment = comments.get(ct.column_name);
-        if (comment !== undefined) col.comment = comment;
-        return col;
-      });
 
       const selectList = columns.map((col) => `${quoteIdent(col.name)}::text`).join(", ");
 
@@ -450,7 +431,7 @@ export class PostgresSource implements DbSource {
       const args: unknown[] = [opts.limit, opts.offset, ...filterValues];
 
       const { rows: dataRows } = await client.query(query, args).catch((err: unknown) => {
-        throw mapSelectDenied(err, realTable);
+        throw mapSelectDenied(err, realTable, opts.sort);
       });
       const outRows: Record<string, string | null>[] = dataRows.map((row: Record<string, unknown>) => {
         const out: Record<string, string | null> = {};

@@ -11,7 +11,7 @@ use super::{
 };
 use crate::filter::{Condition, Logic};
 use crate::join::{
-    self, ColMeta, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta, TypeClass,
+    self, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -88,25 +88,23 @@ const JOIN_DIALECT: Dialect = Dialect {
 };
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
-fn type_class(
-    data_type: &str,
-    udt_schema: &str,
-    udt_name: &str,
-    is_enum: bool,
-) -> Option<TypeClass> {
+fn column_class(data_type: &str, udt_schema: &str, udt_name: &str, is_enum: bool) -> ColumnClass {
     match data_type {
-        "smallint" | "integer" | "bigint" | "numeric" => Some(TypeClass::Number),
-        "character varying" | "character" | "text" => Some(TypeClass::Text),
-        "uuid" => Some(TypeClass::Uuid),
-        "boolean" => Some(TypeClass::Boolean),
-        "bytea" => Some(TypeClass::Binary),
+        "smallint" | "integer" | "bigint" | "numeric" => ColumnClass::Number,
+        "character varying" | "character" | "text" => ColumnClass::Text,
+        "uuid" => ColumnClass::Uuid,
+        "boolean" => ColumnClass::Boolean,
+        "bytea" => ColumnClass::Binary,
         "date" | "timestamp without time zone" | "timestamp with time zone" => {
-            Some(TypeClass::Temporal)
+            ColumnClass::Temporal
         }
-        "time without time zone" | "time with time zone" => Some(TypeClass::Time),
-        "USER-DEFINED" if is_enum => Some(TypeClass::Enum(format!("{udt_schema}.{udt_name}"))),
-        "USER-DEFINED" if udt_name == "citext" => Some(TypeClass::Text),
-        _ => None,
+        "time without time zone" | "time with time zone" => ColumnClass::Time,
+        "real" | "double precision" => ColumnClass::Float,
+        "json" | "jsonb" => ColumnClass::Json,
+        "ARRAY" => ColumnClass::Array,
+        "USER-DEFINED" if is_enum => ColumnClass::Enum(format!("{udt_schema}.{udt_name}")),
+        "USER-DEFINED" if udt_name == "citext" => ColumnClass::Text,
+        _ => ColumnClass::Other,
     }
 }
 
@@ -393,77 +391,89 @@ impl PgPoolSource {
         Ok(rows)
     }
 
-    /// Joins through pg_attribute/pg_class directly: col_description is
-    /// keyed by attnum, which can diverge from ordinal_position once a
-    /// column has been dropped.
-    async fn column_comments_in_tx(
+    /// Column metadata of a table already cleared by `readable_table_oid_in_tx`,
+    /// which supplies `oid`.
+    async fn table_meta_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
         table: &str,
-    ) -> Result<HashMap<String, String>, DbError> {
-        Ok(sqlx::query_as::<_, (String, Option<String>)>(
-            "select a.attname::text, col_description(a.attrelid, a.attnum::int) \
-             from pg_attribute a \
-             join pg_class c on c.oid = a.attrelid \
-             join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = $1 and c.relname = $2 \
-               and a.attnum > 0 and not a.attisdropped",
-        )
-        .bind(schema)
-        .bind(table)
-        .fetch_all(&mut **tx)
-        .await?
-        .into_iter()
-        .filter_map(|(name, comment)| comment.map(|c| (name, c)))
-        .collect())
-    }
-
-    /// Column metadata of a table already cleared by `readable_table_oid_in_tx`.
-    async fn join_table_meta_in_tx(
-        &self,
-        tx: &mut Transaction<'_, Postgres>,
-        schema: &str,
-        table: &str,
+        oid: i32,
     ) -> Result<TableMeta, DbError> {
-        let columns = sqlx::query_as::<_, (String, String, String, String, bool)>(
+        // information_schema.columns drives the list (column privileges, order);
+        // pg_attribute adds the full type spelling, comment and collation, keyed
+        // by attnum, which can diverge from ordinal_position after a drop. The
+        // default collation (oid 100) is left out: it yields to an explicit one
+        // in a comparison, so it never clashes.
+        let columns = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                String,
+                bool,
+                String,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
             "select c.column_name, c.data_type, c.udt_schema, c.udt_name, \
                     exists (select 1 from pg_type t \
                             join pg_namespace n on n.oid = t.typnamespace \
                             where n.nspname = c.udt_schema and t.typname = c.udt_name \
-                              and t.typtype = 'e') \
+                              and t.typtype = 'e'), \
+                    format_type(a.atttypid, a.atttypmod), \
+                    col_description(a.attrelid, a.attnum::int), \
+                    (select case when n.nspname = 'pg_catalog' then co.collname \
+                                 else n.nspname || '.' || co.collname end \
+                       from pg_collation co \
+                       join pg_namespace n on n.oid = co.collnamespace \
+                      where co.oid = a.attcollation and a.attcollation not in (0, 100)) \
              from information_schema.columns c \
+             join pg_attribute a on a.attrelid = $3 and a.attname = c.column_name \
              where c.table_schema = $1 and c.table_name = $2 \
              order by c.ordinal_position",
         )
         .bind(schema)
         .bind(table)
+        .bind(oid)
         .fetch_all(&mut **tx)
         .await?;
-        let comments = self.column_comments_in_tx(tx, schema, table).await?;
         let (pk_columns, fk_columns) = self.key_metadata_in_tx(tx, schema, table).await?;
         Ok(TableMeta {
             name: table.to_string(),
             columns: columns
                 .into_iter()
-                .map(|(name, type_name, udt_schema, udt_name, is_enum)| {
-                    let (key, references) = if pk_columns.contains(&name) {
-                        (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                    } else if let Some(r) = fk_columns.get(&name) {
-                        (Some(KeyKind::Fk), Some(r.clone()))
-                    } else {
-                        (None, None)
-                    };
-                    ColMeta {
-                        class: type_class(&type_name, &udt_schema, &udt_name, is_enum),
-                        collation: None,
-                        comment: comments.get(&name).cloned(),
-                        key,
-                        references,
-                        type_name,
+                .map(
+                    |(
                         name,
-                    }
-                })
+                        data_type,
+                        udt_schema,
+                        udt_name,
+                        is_enum,
+                        type_name,
+                        comment,
+                        collation,
+                    )| {
+                        let (key, references) = if pk_columns.contains(&name) {
+                            (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
+                        } else if let Some(r) = fk_columns.get(&name) {
+                            (Some(KeyKind::Fk), Some(r.clone()))
+                        } else {
+                            (None, None)
+                        };
+                        ColMeta {
+                            class: column_class(&data_type, &udt_schema, &udt_name, is_enum),
+                            collation,
+                            comment,
+                            key,
+                            references,
+                            type_name,
+                            name,
+                        }
+                    },
+                )
                 .collect(),
         })
     }
@@ -563,8 +573,10 @@ impl PgPoolSource {
 /// firing) to `QueryTimeout`, and a filter value Postgres's text encoding
 /// rejects (e.g. a NUL byte) to `FilterParse` — all → a defined
 /// `spec/protocol.md` §2 code, never a raw 500 (`docs/adapter-decisions.md`
-/// §5.4.2 has the cross-backend filter-value rationale).
-fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
+/// §5.4.2 has the cross-backend filter-value rationale). When the request
+/// sorts, an "undefined function" error (SQLSTATE 42883) is the sort column's
+/// type having no ordering operator (`json`, `xml`, geometric types).
+fn map_select_denied(e: sqlx::Error, table: &str, sort: Option<&str>) -> DbError {
     if let sqlx::Error::Database(db) = &e {
         match db.code().as_deref() {
             Some("42501") => {
@@ -574,6 +586,11 @@ fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
                 )
             }
             Some("57014") => return DbError::QueryTimeout,
+            Some("42883") => {
+                if let Some(column) = sort {
+                    return DbError::Unsortable(column.to_string());
+                }
+            }
             Some("22021") | Some("22P05") => {
                 return DbError::FilterParse(format!(
                     "value invalid for this backend: {}",
@@ -663,11 +680,21 @@ impl DbSource for PgPoolSource {
     ) -> Result<TableData, DbError> {
         let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        self.readable_table_oid_in_tx(&mut tx, &schema, table)
+        let oid = self
+            .readable_table_oid_in_tx(&mut tx, &schema, table)
             .await?;
         let table = table.to_string();
 
-        let column_names = self.allowed_columns_in_tx(&mut tx, &schema, &table).await?;
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        let columns: Vec<ColumnInfo> = self
+            .table_meta_in_tx(&mut tx, &schema, &table, oid)
+            .await?
+            .columns
+            .into_iter()
+            .map(ColumnInfo::from)
+            .collect();
+        let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
@@ -688,38 +715,6 @@ impl DbSource for PgPoolSource {
             Some(filter) => build_where_clause(filter, &column_names)?,
             None => (String::new(), Vec::new()),
         };
-
-        let column_types = sqlx::query_as::<_, (String, String)>(
-            "select column_name, data_type from information_schema.columns \
-             where table_schema = $1 and table_name = $2 \
-             order by ordinal_position",
-        )
-        .bind(&schema)
-        .bind(&table)
-        .fetch_all(&mut *tx)
-        .await?;
-        let column_comments = self.column_comments_in_tx(&mut tx, &schema, &table).await?;
-        let (pk_columns, fk_columns) = self.key_metadata_in_tx(&mut tx, &schema, &table).await?;
-        let columns: Vec<ColumnInfo> = column_types
-            .into_iter()
-            .map(|(name, type_name)| {
-                let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                } else if let Some(r) = fk_columns.get(&name) {
-                    (Some(KeyKind::Fk), Some(r.clone()))
-                } else {
-                    (None, None)
-                };
-                let comment = column_comments.get(&name).cloned();
-                ColumnInfo {
-                    name,
-                    type_name,
-                    key,
-                    references,
-                    comment,
-                }
-            })
-            .collect();
 
         let select_list = columns
             .iter()
@@ -757,7 +752,7 @@ impl DbSource for PgPoolSource {
         let pg_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, &table))?;
+            .map_err(|e| map_select_denied(e, &table, opts.sort.as_deref()))?;
         let total_approx = sqlx::query_scalar::<_, i64>(
             "select reltuples::bigint from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
@@ -792,11 +787,12 @@ impl DbSource for PgPoolSource {
         let mut metas: HashMap<&str, TableMeta> = HashMap::new();
         for name in &names {
             if !metas.contains_key(name) {
-                self.readable_table_oid_in_tx(&mut tx, &schema, name)
+                let oid = self
+                    .readable_table_oid_in_tx(&mut tx, &schema, name)
                     .await
                     .map_err(join::unknown_join_table)?;
                 let meta = self
-                    .join_table_meta_in_tx(&mut tx, &schema, name)
+                    .table_meta_in_tx(&mut tx, &schema, name, oid)
                     .await
                     .map_err(join::unknown_join_table)?;
                 metas.insert(name, meta);
@@ -817,7 +813,7 @@ impl DbSource for PgPoolSource {
         let mut pg_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, &spec.table))?;
+            .map_err(|e| map_select_denied(e, &spec.table, opts.sort.as_deref()))?;
         tx.commit().await?;
 
         let has_more = pg_rows.len() > opts.limit as usize;
@@ -977,6 +973,41 @@ impl DbSource for PgPoolSource {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn column_classes_follow_data_type() {
+        use ColumnClass::*;
+        for (data_type, expected) in [
+            ("integer", Number),
+            ("numeric", Number),
+            ("timestamp with time zone", Temporal),
+            ("real", Float),
+            ("double precision", Float),
+            ("json", Json),
+            ("jsonb", Json),
+            ("ARRAY", Array),
+            ("money", Other),
+            ("interval", Other),
+        ] {
+            assert_eq!(
+                column_class(data_type, "", "", false),
+                expected,
+                "{data_type}"
+            );
+        }
+        assert_eq!(
+            column_class("USER-DEFINED", "public", "mood", true),
+            Enum("public.mood".into())
+        );
+        assert_eq!(
+            column_class("USER-DEFINED", "public", "citext", false),
+            Text
+        );
+        assert_eq!(
+            column_class("USER-DEFINED", "public", "geometry", false),
+            Other
+        );
+    }
+
     use super::*;
     use crate::filter;
 

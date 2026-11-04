@@ -11,7 +11,7 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
-    self, ColMeta, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta, TypeClass,
+    self, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta,
 };
 
 /// Catalog/metadata queries need a fixed bounded timeout.
@@ -91,20 +91,6 @@ impl SqliteSource {
         })
         .await
     }
-
-    /// Composite FKs are dropped rather than risk mislabeling which
-    /// referencing column pairs with which referenced column, mirroring
-    /// `postgres::PgPoolSource::key_metadata`.
-    async fn key_metadata(
-        &self,
-        table: &str,
-    ) -> Result<(Vec<String>, HashMap<String, ColumnRef>), DbError> {
-        let table = table.to_string();
-        self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-            key_metadata_on(conn, &table).await
-        })
-        .await
-    }
 }
 
 /// `table` must already be allow-listed: it is spliced into the pragma calls.
@@ -119,6 +105,8 @@ async fn allowed_tables_on(conn: &mut sqlx::SqliteConnection) -> Result<Vec<Stri
     .await?)
 }
 
+/// Composite FKs are dropped rather than risk mislabeling which referencing
+/// column pairs with which referenced column.
 async fn key_metadata_on(
     conn: &mut sqlx::SqliteConnection,
     table: &str,
@@ -220,31 +208,31 @@ fn partial_index_predicate(sql: &str) -> Option<String> {
 
 /// `spec/protocol.md` §5.11.2: recognised names first, then SQLite's own
 /// affinity rules (`docs/adapter-decisions.md` §5.11).
-fn type_class(declared: &str) -> Option<TypeClass> {
+fn column_class(declared: &str) -> ColumnClass {
     let upper = declared.trim().to_ascii_uppercase();
     if upper.is_empty() {
-        return Some(TypeClass::Untyped);
+        return ColumnClass::Untyped;
     }
     let base = upper.split('(').next().unwrap_or("").trim();
     match base {
-        "UUID" => return Some(TypeClass::Uuid),
-        "BOOLEAN" | "BOOL" => return Some(TypeClass::Boolean),
-        "DATE" | "DATETIME" => return Some(TypeClass::Temporal),
-        "TIME" => return Some(TypeClass::Time),
-        "JSON" | "JSONB" => return None,
-        _ if base.starts_with("TIMESTAMP") => return Some(TypeClass::Temporal),
+        "UUID" => return ColumnClass::Uuid,
+        "BOOLEAN" | "BOOL" => return ColumnClass::Boolean,
+        "DATE" | "DATETIME" => return ColumnClass::Temporal,
+        "TIME" => return ColumnClass::Time,
+        "JSON" | "JSONB" => return ColumnClass::Json,
+        _ if base.starts_with("TIMESTAMP") => return ColumnClass::Temporal,
         _ => {}
     }
     if upper.contains("INT") {
-        Some(TypeClass::Number)
+        ColumnClass::Number
     } else if upper.contains("CHAR") || upper.contains("CLOB") || upper.contains("TEXT") {
-        Some(TypeClass::Text)
+        ColumnClass::Text
     } else if upper.contains("BLOB") {
-        Some(TypeClass::Binary)
+        ColumnClass::Binary
     } else if upper.contains("REAL") || upper.contains("FLOA") || upper.contains("DOUB") {
-        None
+        ColumnClass::Float
     } else {
-        Some(TypeClass::Number)
+        ColumnClass::Number
     }
 }
 
@@ -259,10 +247,7 @@ const JOIN_DIALECT: Dialect = Dialect {
     ilike: IlikeStyle::Like,
 };
 
-async fn join_table_meta(
-    conn: &mut sqlx::SqliteConnection,
-    table: &str,
-) -> Result<TableMeta, DbError> {
+async fn table_meta(conn: &mut sqlx::SqliteConnection, table: &str) -> Result<TableMeta, DbError> {
     let quoted = quote_ident(table);
     let columns = sqlx::query_as::<_, (i64, String, String)>(sqlx::AssertSqlSafe(format!(
         "select cid, name, type from pragma_table_info({quoted}) order by cid"
@@ -283,7 +268,7 @@ async fn join_table_meta(
                     (None, None)
                 };
                 ColMeta {
-                    class: type_class(&declared),
+                    class: column_class(&declared),
                     collation: None,
                     comment: None,
                     key,
@@ -423,7 +408,19 @@ impl DbSource for SqliteSource {
             .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
             .clone();
 
-        let column_names = self.allowed_columns(&table).await?;
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        let meta_table = table.clone();
+        let columns: Vec<ColumnInfo> = self
+            .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
+                table_meta(conn, &meta_table).await
+            })
+            .await?
+            .columns
+            .into_iter()
+            .map(ColumnInfo::from)
+            .collect();
+        let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
@@ -444,47 +441,6 @@ impl DbSource for SqliteSource {
             Some(filter) => build_where_clause(filter, &column_names)?,
             None => (String::new(), Vec::new()),
         };
-
-        let (pk_columns, fk_columns) = self.key_metadata(&table).await?;
-        let pragma_table = quote_ident(&table);
-        let column_types: Vec<(String, String)> = self
-            .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-                let rows =
-                    sqlx::query_as::<_, (i64, String, String)>(sqlx::AssertSqlSafe(format!(
-                        "select cid, name, type from pragma_table_info({pragma_table}) \
-                         order by cid"
-                    )))
-                    .fetch_all(&mut *conn)
-                    .await?;
-                Ok(rows.into_iter().map(|(_, name, ty)| (name, ty)).collect())
-            })
-            .await?;
-
-        let columns: Vec<ColumnInfo> = column_types
-            .into_iter()
-            .map(|(name, type_name)| {
-                let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                } else if let Some(r) = fk_columns.get(&name) {
-                    (Some(KeyKind::Fk), Some(r.clone()))
-                } else {
-                    (None, None)
-                };
-                ColumnInfo {
-                    name,
-                    // SQLite's declared column types can be empty ("");
-                    // fall back to a stable label rather than emitting "".
-                    type_name: if type_name.is_empty() {
-                        "unknown".to_string()
-                    } else {
-                        type_name
-                    },
-                    key,
-                    references,
-                    comment: None,
-                }
-            })
-            .collect();
 
         let select_list = columns
             .iter()
@@ -554,7 +510,7 @@ impl DbSource for SqliteSource {
                 if !allowed.iter().any(|t| t == name) {
                     return Err(DbError::BadJoin(format!("unknown table {name:?}")));
                 }
-                metas.insert(name, join_table_meta(conn, name).await?);
+                metas.insert(name, table_meta(conn, name).await?);
             }
             let tables = names.iter().map(|n| metas[n].clone()).collect();
             let plan = join::plan(spec, tables, &opts)?;
@@ -1077,7 +1033,48 @@ mod tests {
         );
     }
 
-    // Same shorthand-FK bug, forward direction: `key_metadata` (which
+    #[tokio::test]
+    async fn query_table_reports_each_columns_column_class() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "create table t (id integer primary key, label text, meta json, loose);".to_string(),
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let source = SqliteSource::new(pool);
+        let data = source
+            .query_table(
+                None,
+                "t",
+                QueryOpts {
+                    limit: 10,
+                    offset: 0,
+                    sort: None,
+                    descending: false,
+                    timeout_secs: 5,
+                    filter: None,
+                },
+            )
+            .await
+            .unwrap();
+        let classes: Vec<_> = data.columns.iter().map(|c| c.class.clone()).collect();
+        assert_eq!(
+            classes,
+            [
+                ColumnClass::Number,
+                ColumnClass::Text,
+                ColumnClass::Json,
+                ColumnClass::Untyped
+            ]
+        );
+        let wire = serde_json::to_value(&data.columns).unwrap();
+        assert_eq!(wire[0]["class"], "number");
+        assert_eq!(wire[2]["class"], "json");
+        assert_eq!(wire[3]["type"], "unknown");
+    }
+
+    // Same shorthand-FK bug, forward direction: `key_metadata_on` (which
     // supplies `query_table`'s per-column `references`) shares
     // `referenced_by`'s pre-fix bug — `pragma_foreign_key_list.to` is NULL
     // for `REFERENCES parent` with no named column, and until fixed
@@ -1390,26 +1387,26 @@ mod tests {
     }
 
     #[test]
-    fn type_classes_follow_declared_names_then_affinity() {
-        use TypeClass::*;
+    fn column_classes_follow_declared_names_then_affinity() {
+        use ColumnClass::*;
         for (declared, expected) in [
-            ("INTEGER", Some(Number)),
-            ("bigint", Some(Number)),
-            ("DECIMAL(10,2)", Some(Number)),
-            ("VARCHAR(20)", Some(Text)),
-            ("TEXT", Some(Text)),
-            ("BLOB", Some(Binary)),
-            ("REAL", None),
-            ("DOUBLE PRECISION", None),
-            ("UUID", Some(Uuid)),
-            ("BOOLEAN", Some(Boolean)),
-            ("DATETIME", Some(Temporal)),
-            ("TIMESTAMP(6)", Some(Temporal)),
-            ("TIME", Some(Time)),
-            ("JSON", None),
-            ("", Some(Untyped)),
+            ("INTEGER", Number),
+            ("bigint", Number),
+            ("DECIMAL(10,2)", Number),
+            ("VARCHAR(20)", Text),
+            ("TEXT", Text),
+            ("BLOB", Binary),
+            ("REAL", Float),
+            ("DOUBLE PRECISION", Float),
+            ("UUID", Uuid),
+            ("BOOLEAN", Boolean),
+            ("DATETIME", Temporal),
+            ("TIMESTAMP(6)", Temporal),
+            ("TIME", Time),
+            ("JSON", Json),
+            ("", Untyped),
         ] {
-            assert_eq!(type_class(declared), expected, "{declared:?}");
+            assert_eq!(column_class(declared), expected, "{declared:?}");
         }
     }
 }

@@ -306,6 +306,10 @@ class AshurbanipalController(
     fun handleBadJoin(e: BadJoinException): ResponseEntity<ProblemDetails> =
         problemResponse(HttpStatus.BAD_REQUEST, "invalid_join", e.message ?: "bad request")
 
+    @ExceptionHandler(UnsortableException::class)
+    fun handleUnsortable(e: UnsortableException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.BAD_REQUEST, "unsortable_column", e.message ?: "bad request")
+
     @ExceptionHandler(DataAccessException::class)
     fun handleDatabaseError(e: DataAccessException): ResponseEntity<ProblemDetails> =
         if (isQueryTimeout(e)) queryTimeoutResponse()

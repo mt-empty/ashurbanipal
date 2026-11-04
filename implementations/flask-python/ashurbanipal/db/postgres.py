@@ -7,27 +7,30 @@ from psycopg.types.string import TextLoader
 
 from ..filter import Condition
 from ..join import (
+    ARRAY,
     BINARY,
     BOOLEAN,
+    FLOAT,
+    JSON,
     NUMBER,
+    OTHER,
     TEMPORAL,
     TEXT,
     TIME,
     UUID,
     ColMeta,
+    ColumnClass,
     Dialect,
     JoinData,
     JoinOpts,
     JoinSpec,
     TableMeta,
-    TypeClass,
     build_select,
     enum_class,
     plan_join,
     unknown_join_table,
 )
 from . import (
-    ColumnInfo,
     ColumnPair,
     ColumnRef,
     ConstraintCheck,
@@ -46,6 +49,7 @@ from . import (
     Structure,
     TableData,
     TableInfo,
+    Unsortable,
     group_referenced_by,
     no_default_schema,
     quote_ident,
@@ -101,7 +105,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def type_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> TypeClass | None:
+def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> ColumnClass:
     """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
     if data_type in ("smallint", "integer", "bigint", "numeric"):
         return NUMBER
@@ -117,26 +121,18 @@ def type_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) ->
         return TEMPORAL
     if data_type in ("time without time zone", "time with time zone"):
         return TIME
+    if data_type in ("real", "double precision"):
+        return FLOAT
+    if data_type in ("json", "jsonb"):
+        return JSON
+    if data_type == "ARRAY":
+        return ARRAY
     if data_type == "USER-DEFINED":
         if is_enum:
             return enum_class(f"{udt_schema}.{udt_name}")
         if udt_name == "citext":
             return TEXT
-    return None
-
-
-def _column_comments(cur, schema: str, table: str) -> dict[str, str]:
-    # attnum survives dropped columns; ordinal_position does not.
-    cur.execute(
-        "select a.attname::text, col_description(a.attrelid, a.attnum::int) "
-        "from pg_attribute a "
-        "join pg_class c on c.oid = a.attrelid "
-        "join pg_namespace n on n.oid = c.relnamespace "
-        "where n.nspname = %s and c.relname = %s "
-        "  and a.attnum > 0 and not a.attisdropped",
-        (schema, table),
-    )
-    return {name: comment for name, comment in cur.fetchall() if comment is not None}
+    return OTHER
 
 
 class PgSource(DbSource):
@@ -303,9 +299,12 @@ class PgSource(DbSource):
                 cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
 
                 resolved_schema = self._resolve_schema(cur, schema)
-                self._readable_table_oid(cur, resolved_schema, table)
+                oid = self._readable_table_oid(cur, resolved_schema, table)
 
-                column_names = self._allowed_columns(cur, resolved_schema, table)
+                # The join route's lookup, so both routes report the same columns; its
+                # names are the live catalog's, so they also serve as the allow-list.
+                columns = [c.column_info() for c in self._table_meta(cur, resolved_schema, table, oid).columns]
+                column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
                     if opts.sort not in column_names:
@@ -313,28 +312,6 @@ class PgSource(DbSource):
                     sort = opts.sort
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
-
-                cur.execute(
-                    "select column_name, data_type from information_schema.columns "
-                    "where table_schema = %s and table_name = %s "
-                    "order by ordinal_position",
-                    (resolved_schema, table),
-                )
-                column_types = list(cur.fetchall())
-
-                column_comments = _column_comments(cur, resolved_schema, table)
-
-                pk_columns, fk_columns = self._key_metadata(cur, resolved_schema, table)
-                columns = [
-                    ColumnInfo(
-                        name=name,
-                        type_name=type_name,
-                        key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
-                        references=fk_columns.get(name),
-                        comment=column_comments.get(name),
-                    )
-                    for name, type_name in column_types
-                ]
 
                 select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
                 order_clause = ""
@@ -354,6 +331,12 @@ class PgSource(DbSource):
                     # report it as NotAllowed(NOT_READABLE) (400), not a
                     # driver 500.
                     raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                except psycopg.errors.UndefinedFunction as exc:
+                    # With a sort, an undefined function is the sort column's type
+                    # having no ordering operator (json, xml, geometric types).
+                    if sort is None:
+                        raise
+                    raise Unsortable(sort) from exc
                 except psycopg.DataError as exc:
                     # psycopg's str dumper rejects a NUL byte client-side (no
                     # SQLSTATE, unlike other drivers' server-side rejection);
@@ -379,34 +362,47 @@ class PgSource(DbSource):
 
                 return TableData(columns=columns, rows=rows, total_approx=total_approx)
 
-    def _join_table_meta(self, cur: psycopg.Cursor, schema: str, table: str) -> TableMeta:
-        """Column metadata of a table already cleared by `_readable_table_oid`."""
+    def _table_meta(self, cur: psycopg.Cursor, schema: str, table: str, oid: int) -> TableMeta:
+        """Column metadata of a table already cleared by `_readable_table_oid`, which supplies `oid`."""
+        # information_schema.columns drives the list (column privileges, order);
+        # pg_attribute adds the full type spelling, comment and collation, keyed
+        # by attnum, which can diverge from ordinal_position after a drop. The
+        # default collation (oid 100) is left out: it yields to an explicit one
+        # in a comparison, so it never clashes.
         cur.execute(
             "select c.column_name, c.data_type, c.udt_schema, c.udt_name, "
             "       exists (select 1 from pg_type t "
             "               join pg_namespace n on n.oid = t.typnamespace "
             "               where n.nspname = c.udt_schema and t.typname = c.udt_name "
-            "                 and t.typtype = 'e') "
+            "                 and t.typtype = 'e'), "
+            "       format_type(a.atttypid, a.atttypmod), "
+            "       col_description(a.attrelid, a.attnum::int), "
+            "       (select case when n.nspname = 'pg_catalog' then co.collname "
+            "                    else n.nspname || '.' || co.collname end "
+            "          from pg_collation co "
+            "          join pg_namespace n on n.oid = co.collnamespace "
+            "         where co.oid = a.attcollation and a.attcollation not in (0, 100)) "
             "from information_schema.columns c "
+            "join pg_attribute a on a.attrelid = %s and a.attname = c.column_name "
             "where c.table_schema = %s and c.table_name = %s "
             "order by c.ordinal_position",
-            (schema, table),
+            (oid, schema, table),
         )
         column_rows = list(cur.fetchall())
-        comments = _column_comments(cur, schema, table)
         pk_columns, fk_columns = self._key_metadata(cur, schema, table)
         return TableMeta(
             name=table,
             columns=[
                 ColMeta(
                     name=name,
-                    type_name=data_type,
-                    cls=type_class(data_type, udt_schema, udt_name, is_enum),
+                    type_name=full_type,
+                    column_class=column_class(data_type, udt_schema, udt_name, is_enum),
                     key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                     references=fk_columns.get(name),
-                    comment=comments.get(name),
+                    collation=collation,
+                    comment=comment,
                 )
-                for name, data_type, udt_schema, udt_name, is_enum in column_rows
+                for name, data_type, udt_schema, udt_name, is_enum, full_type, comment, collation in column_rows
             ],
         )
 
@@ -422,8 +418,8 @@ class PgSource(DbSource):
                 for name in names:
                     if name not in metas:
                         try:
-                            self._readable_table_oid(cur, resolved_schema, name)
-                            metas[name] = self._join_table_meta(cur, resolved_schema, name)
+                            oid = self._readable_table_oid(cur, resolved_schema, name)
+                            metas[name] = self._table_meta(cur, resolved_schema, name, oid)
                         except NotAllowed as e:
                             raise unknown_join_table(e, name) from None
                 plan = plan_join(spec, [metas[n] for n in names], opts)
@@ -435,6 +431,10 @@ class PgSource(DbSource):
                     cur.execute(f"select {body}", (*values, opts.limit + 1, opts.offset))
                 except psycopg.errors.InsufficientPrivilege as exc:
                     raise NotAllowed(f"table {spec.table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                except psycopg.errors.UndefinedFunction as exc:
+                    if opts.sort is None:
+                        raise
+                    raise Unsortable(opts.sort) from exc
                 except psycopg.DataError as exc:
                     raise FilterParseError(f"value invalid for this backend: {exc}") from exc
                 rows, has_more = plan.rows_from(

@@ -169,7 +169,8 @@ Two components, same as the original concept:
     and a SQL mode that edit the same definition
     (`frontend/src/features/join-dialog.ts`). The Form lists each table's
     columns with their types, greys the ones that cannot pair with the other
-    side and says why, and suggests a foreign key match. The SQL mode is a
+    side (by the `class`, `enum_type` and `collation` each column reports, the
+    server's own type check) and says why, and suggests a foreign key match. The SQL mode is a
     restricted subset (`spec/join-dsl.md`) with the filter box's colouring and
     suggestions; it is parsed in the browser into the structured `join` object
     of `GET /tables/join`, so no SQL text reaches the server. The result is the
@@ -404,17 +405,17 @@ Query params:
 ```json
 {
   "columns": [
-    { "name": "id", "type": "uuid", "key": "pk" },
-    { "name": "user_id", "type": "uuid", "key": "fk", "references": { "table": "users", "column": "id" } },
-    { "name": "status", "type": "text", "comment": "Order lifecycle state." },
-    { "name": "created_at", "type": "timestamptz" }
+    { "name": "id", "type": "uuid", "class": "uuid", "key": "pk" },
+    { "name": "user_id", "type": "uuid", "class": "uuid", "key": "fk", "references": { "table": "users", "column": "id" } },
+    { "name": "status", "type": "order_status", "class": "enum", "comment": "Order lifecycle state." },
+    { "name": "created_at", "type": "timestamp with time zone", "class": "temporal" }
   ],
   "rows": [ { "id": "...", "user_id": "...", "status": "...", "created_at": "..." } ],
   "total_approx": 108234
 }
 ```
 
-Each column entry is `{name, type}` plus optional metadata, all schema-catalog
+Each column entry is `{name, type, class}` plus optional metadata, all schema-catalog
 reads (never data queries, same cost class as `/table-counts`): `key`
 (`"pk"` \| `"fk"`) and, for `"fk"`, `references` (the target table/column) —
 sourced from `information_schema.table_constraints`/`key_column_usage`;

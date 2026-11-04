@@ -84,7 +84,8 @@ interpreted as described in RFC 2119.
   - **400** — client error: `unknown_source`, `unknown_schema`,
     `unknown_table`, `unknown_column`, `invalid_filter`, `invalid_join`
     (anything wrong with §5.11's `join` value), `invalid_parameter` (e.g.
-    `order` not `asc`/`desc`), or `not_readable`
+    `order` not `asc`/`desc`), `unsortable_column` (a `sort` on a column whose
+    type has no ordering, §5.4), or `not_readable`
     — a table that cleared §5.2's allow-list but the connected role cannot
     actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
   - **500** — server error: `database_error`, or `query_timeout` (§6).
@@ -215,7 +216,7 @@ Paginated, filtered, sorted rows for a single table.
 | `filter` | no       | URL-encoded JSON AST, see §5.4.2.                             |
 | `limit`  | no       | Clamped, never an error — see below.                          |
 | `offset` | no       | Clamped, never an error — see below.                          |
-| `sort`   | no       | Single column name; MUST be validated against the table's real columns; unknown column → 400. |
+| `sort`   | no       | Single column name; MUST be validated against the table's real columns; unknown column → 400. A column whose type has no ordering → 400 `unsortable_column`. |
 | `order`  | no       | `asc` \| `desc`, default `asc`; any other value → 400.        |
 
 - **`limit` clamping**: the effective limit is the requested value clamped
@@ -231,18 +232,20 @@ Paginated, filtered, sorted rows for a single table.
   rejected, same as `limit`.
 - **Sort semantics**: ordering MUST use the column's native type ordering
   (e.g. numeric columns sort numerically), not the text rendering of the
-  serialized values.
+  serialized values. A column whose type the engine cannot order (Postgres
+  `json`, `xml` and the geometric types) → 400 `unsortable_column`, never a
+  500; MySQL/MariaDB and SQLite order every type.
 
 Response:
 
 ```json
 {
   "columns": [
-    { "name": "id", "type": "uuid", "key": "pk" },
-    { "name": "user_id", "type": "uuid", "key": "fk",
+    { "name": "id", "type": "uuid", "class": "uuid", "key": "pk" },
+    { "name": "user_id", "type": "uuid", "class": "uuid", "key": "fk",
       "references": { "table": "users", "column": "id" } },
-    { "name": "status", "type": "text", "comment": "Order lifecycle state." },
-    { "name": "created_at", "type": "timestamp with time zone" }
+    { "name": "status", "type": "text", "class": "text", "comment": "Order lifecycle state." },
+    { "name": "created_at", "type": "timestamp with time zone", "class": "temporal" }
   ],
   "rows": [
     { "id": "7d9…", "user_id": "18d…", "status": "completed",
@@ -255,8 +258,31 @@ Response:
 #### 5.4.1 Column metadata
 
 Each `columns` entry is `{name, type}` plus optional fields, all sourced
-from schema catalogs (never data queries):
+from schema catalogs (never data queries). `type` is the engine's full
+spelling of the column's type, keeping its length, precision, array element
+type and enum name (for example `character varying(20)`, `numeric(10,2)`,
+`text[]`, `order_status`, MySQL `tinyint(1)` or `enum('a','b')`); the
+per-engine source is in `spec/openapi.yaml`.
 
+- `class` — the column's §5.11.2 column class: `number`, `text`, `uuid`,
+  `boolean`, `temporal`, `time`, `binary`, `enum`, `untyped`, `float`,
+  `json`, `array` or `other`. Always present. It is the server's verdict on
+  how the column's values behave, and the same one it checks `on` pairs
+  with; `float`, `json`, `array` and `other` columns cannot be joined. A
+  client reads this rather than guessing from `type`, which names a domain
+  by its own name while `class` follows the type beneath it.
+- `enum_type` — present only when `class` is `enum`: the enumerated type's
+  identity (Postgres `schema.name`, MySQL the column's `enum(…)` definition).
+  Two `enum` columns join only when their `enum_type` values are equal. It is
+  an identifier to compare, never to display: `type` names a domain over an
+  enum by the domain's name, while `enum_type` names the enum beneath it.
+- `collation` — the column's collation, sent where two text columns can clash
+  in a comparison and omitted otherwise. MySQL/MariaDB: the catalog's
+  `collation_name` for each text column. Postgres: an explicit column
+  collation (`name`, or `schema.name` outside `pg_catalog`); omitted for the
+  database default, which yields to an explicit collation in a comparison.
+  SQLite: never sent. Two `text` columns join only when the two collations
+  they report, if both report one, are equal (§5.11.2).
 - `key` — `"pk"` or `"fk"`. A column that is simultaneously its own
   table's primary key *and* a foreign key (the 1:1 "detail table" shape,
   e.g. `order_extra.order_id integer primary key references orders(id)`)
@@ -735,8 +761,8 @@ Response:
 ```json
 {
   "columns": [
-    { "name": "id", "join": 0, "table": "orders", "column": "id", "type": "uuid", "key": "pk" },
-    { "name": "full_name", "join": 1, "table": "users", "column": "full_name", "type": "text" }
+    { "name": "id", "join": 0, "table": "orders", "column": "id", "type": "uuid", "class": "uuid", "key": "pk" },
+    { "name": "full_name", "join": 1, "table": "users", "column": "full_name", "type": "text", "class": "text" }
   ],
   "rows": [
     { "id": "7d9…", "full_name": "Ada Lovelace" },
@@ -777,8 +803,9 @@ Response:
 
 #### 5.11.2 Column compatibility
 
-Each `on` pair MUST join columns of the same **class**. The server checks
-this from the catalog types before running the statement; a mismatch → 400
+Each `on` pair MUST join columns of the same **class**, and that class MUST
+be joinable. The server checks this from the catalog types before running
+the statement; a mismatch or a column that cannot be joined → 400
 `invalid_join` whose `title` names the pair and both types.
 
 | Class      | Types                                                    |
@@ -790,13 +817,20 @@ this from the catalog types before running the statement; a mismatch → 400
 | `temporal` | `date` and timestamp types, with or without time zone    |
 | `time`     | time-of-day types                                        |
 | `binary`   | byte-string types                                        |
-| `enum`     | an enumerated type; joinable only to a column of the same enumerated type |
+| `enum`     | an enumerated type; joinable only to a column of the same enumerated type, which §5.4.1 reports as an equal `enum_type` |
+| `untyped`  | a column with no declared type (SQLite); joinable only to another such column |
+| `float`    | floating-point types; **not joinable**, because they are not compared exactly |
+| `json`     | `json`/`jsonb` and a domain over them; **not joinable** |
+| `array`    | array types; **not joinable** |
+| `other`    | any type not named above (`money`, `interval`, `inet`, `xml`, geometric types, extension types, ...); **not joinable** |
 
-Every other type is not joinable, including `json`/`jsonb`, arrays,
-floating-point types, and types with no class above. The per-engine
-mapping from native types to classes, and any engine that cannot meet this
-check exactly, is in `docs/adapter-decisions.md`. The `ON` comparison uses
-the columns' native types, not the text cast of §5.4.2.
+Two `text` columns that both report a `collation` (§5.4.1) MUST report the
+same one; otherwise the pair is a 400 `invalid_join` naming it, because the
+engine would refuse the comparison.
+
+The per-engine mapping from native types to classes, and any engine that
+cannot meet this check exactly, is in `docs/adapter-decisions.md`. The `ON`
+comparison uses the columns' native types, not the text cast of §5.4.2.
 
 #### 5.11.3 Filter and sort
 
@@ -808,15 +842,15 @@ the columns' native types, not the text cast of §5.4.2.
 - The comparison is applied to that column cast to text, exactly as §5.4.2.
   Conditions are combined as §5.4.2 specifies.
 - On §5.4, a condition that carries `join` → 400 `invalid_filter`.
-- `sort` orders by the native type of the column at `sort_join`, as §5.4.
-  The column need not be in `columns`. No tie-break is added beyond
+- `sort` orders by the native type of the column at `sort_join`, as §5.4,
+  including its 400 `unsortable_column`. The column need not be in `columns`. No tie-break is added beyond
   `sort`; paging over ties is as stable as §5.4's.
 
 #### 5.11.4 Response
 
 - Each `columns` entry carries `name`, `type`, `join`, `table` and
-  `column`, plus the optional §5.4.1 fields `key`, `references`, `comment`
-  as they apply to that column in its own table. `type` and those fields
+  `column`, plus the §5.4.1 `class` and the optional §5.4.1 fields `enum_type`,
+  `collation`, `key`, `references`, `comment` as they apply to that column in its own table. `type` and those fields
   MUST equal what §5.4.1 reports for the column. `name` is a **label**
   unique within the response: the column's own name when that is unique
   among the returned columns, otherwise `{column}_{join}`, with a numeric
@@ -836,7 +870,7 @@ the columns' native types, not the text cast of §5.4.2.
 - The statement is built with generated aliases for tables and columns;
   no request text becomes an alias or label. Values are bound parameters.
 - A timed-out join is a 500 with `code: "query_timeout"` (§2, §6).
-- See `docs/adapter-decisions.md` for per-engine type classes, text
+- See `docs/adapter-decisions.md` for per-engine column classes, text
   collation handling, and accepted gaps.
 
 ## 6. Server invariants

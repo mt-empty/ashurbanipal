@@ -121,6 +121,9 @@ func newStructure() Structure {
 type ColumnInfo struct {
 	Name       string     `json:"name"`
 	Type       string     `json:"type"`
+	Class      string     `json:"class"`               // the §5.4.1 column class
+	EnumType   string     `json:"enum_type,omitempty"` // the enumerated type's identity; set only for class enum
+	Collation  string     `json:"collation,omitempty"` // the collation where two text columns can clash
 	Key        KeyKind    `json:"key,omitempty"`
 	References *ColumnRef `json:"references,omitempty"`
 	Comment    string     `json:"comment,omitempty"`

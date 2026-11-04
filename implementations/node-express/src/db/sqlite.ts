@@ -4,17 +4,18 @@ import type { Condition } from "../filter.js";
 import {
   BadJoinError,
   buildJoinSelect,
-  type JoinColMeta,
+  type ColMeta,
+  type ColumnClass,
+  columnInfo,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
   type JoinSpec,
-  type JoinTableMeta,
   joinColumnInfos,
   joinRows,
   joinTableNames,
   planJoin,
-  type TypeClass,
+  type TableMeta,
 } from "../join.js";
 import {
   type ColumnInfo,
@@ -126,17 +127,9 @@ async function allowedColumns(db: Database, table: string, timeoutMs: number): P
   return rows.map((r) => r.name);
 }
 
-// Composite FKs are omitted rather than risk mislabeling columns (spec/protocol.md §5.4.1).
+// Composite FKs are omitted rather than risk mislabeling columns (spec/protocol.md
+// §5.4.1). The caller owns the deadline.
 async function keyMetadata(
-  db: Database,
-  table: string,
-  timeoutMs: number,
-): Promise<{ pkColumns: Set<string>; fkColumns: Map<string, ColumnRef> }> {
-  return bounded(db, timeoutMs, () => keyMetadataUnbounded(db, table));
-}
-
-// The caller owns the deadline (queryJoin runs every lookup under one).
-async function keyMetadataUnbounded(
   db: Database,
   table: string,
 ): Promise<{ pkColumns: Set<string>; fkColumns: Map<string, ColumnRef> }> {
@@ -189,7 +182,7 @@ const JOIN_DIALECT: JoinDialect = {
 };
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
-export function sqliteTypeClass(declared: string): TypeClass | undefined {
+export function sqliteColumnClass(declared: string): ColumnClass {
   const upper = declared.trim().toUpperCase();
   if (upper === "") return { kind: "untyped" };
   const base = (upper.split("(")[0] as string).trim();
@@ -197,11 +190,11 @@ export function sqliteTypeClass(declared: string): TypeClass | undefined {
   if (base === "BOOLEAN" || base === "BOOL") return { kind: "boolean" };
   if (base === "DATE" || base === "DATETIME" || base.startsWith("TIMESTAMP")) return { kind: "temporal" };
   if (base === "TIME") return { kind: "time" };
-  if (base === "JSON" || base === "JSONB") return undefined;
+  if (base === "JSON" || base === "JSONB") return { kind: "json" };
   if (upper.includes("INT")) return { kind: "number" };
   if (upper.includes("CHAR") || upper.includes("CLOB") || upper.includes("TEXT")) return { kind: "text" };
   if (upper.includes("BLOB")) return { kind: "binary" };
-  if (upper.includes("REAL") || upper.includes("FLOA") || upper.includes("DOUB")) return undefined;
+  if (upper.includes("REAL") || upper.includes("FLOA") || upper.includes("DOUB")) return { kind: "float" };
   return { kind: "number" };
 }
 
@@ -246,6 +239,32 @@ function buildWhereClauseSqlite(conditions: Condition[], columnNames: string[]):
   return { where: ` where ${clause}`, values };
 }
 
+// `table` must already be allow-listed: it is spliced into the pragma call.
+async function tableMeta(db: Database, table: string): Promise<TableMeta> {
+  const declared = await dbAll<{ cid: number; name: string; type: string }>(
+    db,
+    `select cid, name, type from pragma_table_info(${quoteIdent(table)}) order by cid`,
+  );
+  const { pkColumns, fkColumns } = await keyMetadata(db, table);
+  const columns = declared.map((ct): ColMeta => {
+    const col: ColMeta = {
+      name: ct.name,
+      // A declared type can be empty (""); a stable label beats emitting "".
+      type: ct.type || "unknown",
+      class: sqliteColumnClass(ct.type ?? ""),
+    };
+    if (pkColumns.has(ct.name)) {
+      col.key = "pk";
+      if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
+    } else if (fkColumns.has(ct.name)) {
+      col.key = "fk";
+      col.references = fkColumns.get(ct.name);
+    }
+    return col;
+  });
+  return { name: table, columns };
+}
+
 /** SQLite implementation; see docs/adapter-decisions.md for protocol differences. */
 export class SqliteSource implements DbSource {
   constructor(private readonly db: Database) {}
@@ -279,35 +298,15 @@ export class SqliteSource implements DbSource {
     return bounded(this.db, timeoutMs, async () => {
       const allowed = await allowedTablesUnbounded(this.db);
       const names = joinTableNames(spec);
-      const metas = new Map<string, JoinTableMeta>();
+      const metas = new Map<string, TableMeta>();
       for (const name of names) {
         if (metas.has(name)) continue;
         if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
-        const declared = await dbAll<{ cid: number; name: string; type: string }>(
-          this.db,
-          `select cid, name, type from pragma_table_info(${quoteIdent(name)}) order by cid`,
-        );
-        const { pkColumns, fkColumns } = await keyMetadataUnbounded(this.db, name);
-        const columns = declared.map((ct): JoinColMeta => {
-          const col: JoinColMeta = {
-            name: ct.name,
-            type: ct.type || "unknown",
-            class: sqliteTypeClass(ct.type ?? ""),
-          };
-          if (pkColumns.has(ct.name)) {
-            col.key = "pk";
-            if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
-          } else if (fkColumns.has(ct.name)) {
-            col.key = "fk";
-            col.references = fkColumns.get(ct.name);
-          }
-          return col;
-        });
-        metas.set(name, { name, columns });
+        metas.set(name, await tableMeta(this.db, name));
       }
       const plan = planJoin(
         spec,
-        names.map((n) => metas.get(n) as JoinTableMeta),
+        names.map((n) => metas.get(n) as TableMeta),
         opts,
       );
 
@@ -332,7 +331,12 @@ export class SqliteSource implements DbSource {
       throw new NotAllowedError(`table "${table}"`, "table");
     }
 
-    const columnNames = await allowedColumns(this.db, realTable, timeoutMs);
+    // The join route's lookup, so both routes report the same columns; its
+    // names are the live catalog's, so they also serve as the allow-list.
+    const columns: ColumnInfo[] = (await bounded(this.db, timeoutMs, () => tableMeta(this.db, realTable))).columns.map(
+      columnInfo,
+    );
+    const columnNames = columns.map((c) => c.name);
     let sort: string | undefined;
     if (opts.sort !== undefined) {
       sort = findExact(columnNames, opts.sort);
@@ -342,32 +346,7 @@ export class SqliteSource implements DbSource {
     }
 
     const { where: whereClause, values: filterValues } = buildWhereClauseSqlite(opts.filter, columnNames);
-    const { pkColumns, fkColumns } = await keyMetadata(this.db, realTable, timeoutMs);
-
     const quotedTable = quoteIdent(realTable);
-    const columnTypes = await bounded(this.db, timeoutMs, () =>
-      dbAll<{ cid: number; name: string; type: string }>(
-        this.db,
-        `select cid, name, type from pragma_table_info(${quotedTable}) order by cid`,
-      ),
-    );
-
-    const columns: ColumnInfo[] = columnTypes.map((ct) => {
-      const col: ColumnInfo = {
-        name: ct.name,
-        // SQLite's declared column types can be empty (""); fall back to
-        // a stable label rather than emitting "".
-        type: ct.type || "unknown",
-      };
-      if (pkColumns.has(ct.name)) {
-        col.key = "pk";
-        if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
-      } else if (fkColumns.has(ct.name)) {
-        col.key = "fk";
-        col.references = fkColumns.get(ct.name);
-      }
-      return col;
-    });
 
     // Aliased back to the real column name: an un-aliased CAST(...)
     // expression's result-set label is the literal expression text on

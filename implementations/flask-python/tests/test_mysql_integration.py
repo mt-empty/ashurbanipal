@@ -312,12 +312,13 @@ def test_join_differing_text_collations_are_a_bad_join(seeded) -> None:
         seeded.source.query_join(None, spec, JoinOpts(limit=10, offset=0, timeout_secs=5))
 
 
-def test_join_type_classes() -> None:
-    from ashurbanipal.db.mysql import type_class
-    from ashurbanipal.join import NUMBER, TEXT, enum_class
+def test_join_column_classes() -> None:
+    from ashurbanipal.db.mysql import column_class
+    from ashurbanipal.join import FLOAT, JSON, NUMBER, OTHER, TEXT, enum_class
 
-    assert type_class("bigint", "bigint") == NUMBER
-    assert type_class("VARCHAR", "varchar(20)") == TEXT
-    assert type_class("enum", "enum('a','b')") == enum_class("enum('a','b')")
-    assert type_class("json", "json") is None
-    assert type_class("double", "double") is None
+    assert column_class("bigint", "bigint") == NUMBER
+    assert column_class("VARCHAR", "varchar(20)") == TEXT
+    assert column_class("enum", "enum('a','b')") == enum_class("enum('a','b')")
+    assert column_class("json", "json") == JSON
+    assert column_class("double", "double") == FLOAT
+    assert column_class("set", "set('a','b')") == OTHER

@@ -36,7 +36,11 @@ class FakeDbSource implements DbSource {
   }
 
   async queryTable(_schema: string | undefined, table: string, _opts: QueryOpts): Promise<TableData> {
-    return { columns: [{ name: "label", type: "text" }], rows: [{ label: `${this.label}:${table}` }], total_approx: 1 };
+    return {
+      columns: [{ name: "label", type: "text", class: "text" }],
+      rows: [{ label: `${this.label}:${table}` }],
+      total_approx: 1,
+    };
   }
 
   async commonValues(): Promise<CommonValueEntry[]> {

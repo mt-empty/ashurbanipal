@@ -25,6 +25,7 @@ from .db import (
     NotAllowedKind,
     QueryOpts,
     QueryTimeout,
+    Unsortable,
 )
 from .embed import DBVIEWER_HTML, DBVIEWER_HTML_GZIP
 from .join import JoinOpts, parse_join
@@ -91,6 +92,8 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
             return _problem_response(400, "invalid_join", f"invalid join: {err}")
         if isinstance(err, BadParam):
             return _problem_response(400, "invalid_parameter", f"invalid parameter: {err}")
+        if isinstance(err, Unsortable):
+            return _problem_response(400, "unsortable_column", f"cannot sort by {err}: its type has no ordering")
         if isinstance(err, QueryTimeout):
             return _problem_response(500, "query_timeout", "query timed out")
         return _problem_response(500, "database_error", f"database error: {err}")
@@ -300,7 +303,11 @@ def _table_to_dict(t) -> dict:
 
 
 def _column_to_dict(c) -> dict:
-    d = {"name": c.name, "type": c.type_name}
+    d = {"name": c.name, "type": c.type_name, "class": c.column_class}
+    if c.enum_type is not None:
+        d["enum_type"] = c.enum_type
+    if c.collation is not None:
+        d["collation"] = c.collation
     if c.key is not None:
         d["key"] = c.key.value
     if c.references is not None:

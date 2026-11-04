@@ -22,7 +22,7 @@ import { switchToLeftJoin } from "./join-dialog.js";
 import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands, tableGroups } from "./join-view.js";
 import { openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
-import { columnKeyOf, type TableMeta, tableMeta } from "./table-meta.js";
+import { keyDescriptionOf, type TableMeta, tableMeta } from "./table-meta.js";
 import { navigateWithSeededFilter } from "./view-history.js";
 
 // The columns and view the grid last rendered; the columns menu, the counts,
@@ -77,7 +77,7 @@ export function renderHeader(columns: Column[]): void {
     const nameEl = el("button", "col-name sort-btn", displayName(col));
     nameEl.type = "button";
     nameEl.title = col.comment ? `${fullName} — ${col.comment}` : fullName;
-    const key = columnKeyOf(col, meta);
+    const key = keyDescriptionOf(col, meta);
     if (key) {
       head.append(keyIcon(key), nameEl, " ");
       // Layers onto the accessible name rather than replacing the key
@@ -385,7 +385,7 @@ let menuShape = "";
 export function renderColumnMenu(): void {
   const groups = columnGroups(columnsInView);
   const meta = tableMeta(tableInView());
-  const keys = new Map(columnsInView.map((c) => [c.name, columnKeyOf(c, meta)]));
+  const keys = new Map(columnsInView.map((c) => [c.name, keyDescriptionOf(c, meta)]));
   const shape = JSON.stringify([
     groups.map((g) => [g.band, g.label, g.columns.map((c) => [c.name, columnKey(c), c.type])]),
     [...keys],

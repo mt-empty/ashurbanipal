@@ -1,4 +1,11 @@
-import { type ColumnRef, type KeyKind, opSql, opTakesValue } from "./db/types.js";
+import {
+  type ColumnClassName,
+  type ColumnInfo,
+  type ColumnRef,
+  type KeyKind,
+  opSql,
+  opTakesValue,
+} from "./db/types.js";
 import { FilterError, NotAllowedError } from "./errors.js";
 import type { Condition } from "./filter.js";
 
@@ -143,32 +150,34 @@ export function parseJoin(raw: string): JoinSpec {
 }
 
 /**
- * Comparison class of a column type (spec/protocol.md §5.11.2). `id`
+ * Class of a column type (spec/protocol.md §5.4.1, §5.11.2). `enumType`
  * carries an enumerated type's identity; `untyped` is a SQLite column with
  * no declared type and pairs only with itself.
  */
-export interface TypeClass {
-  kind: "number" | "text" | "uuid" | "boolean" | "temporal" | "time" | "binary" | "enum" | "untyped";
-  id?: string;
+export interface ColumnClass {
+  kind: ColumnClassName;
+  enumType?: string;
 }
 
-const classKey = (c: TypeClass): string => `${c.kind}:${c.id ?? ""}`;
+const classKey = (c: ColumnClass): string => `${c.kind}:${c.enumType ?? ""}`;
+
+const NOT_JOINABLE = new Set<ColumnClassName>(["float", "json", "array", "other"]);
 
 /** One column as the live catalog reports it. */
-export interface JoinColMeta {
+export interface ColMeta {
   name: string;
   type: string;
-  class?: TypeClass;
-  /** Set where two text collations can clash (MySQL). */
+  class: ColumnClass;
+  /** Set where two text collations can clash (spec/protocol.md §5.4.1). */
   collation?: string;
   key?: KeyKind;
   references?: ColumnRef;
   comment?: string;
 }
 
-export interface JoinTableMeta {
+export interface TableMeta {
   name: string;
-  columns: JoinColMeta[];
+  columns: ColMeta[];
 }
 
 export interface JoinOpts {
@@ -187,6 +196,9 @@ export interface JoinColumnInfo {
   join: number;
   table: string;
   column: string;
+  class: ColumnClassName;
+  collation?: string;
+  enum_type?: string;
   key?: KeyKind;
   references?: ColumnRef;
   comment?: string;
@@ -206,7 +218,7 @@ interface ResolvedCondition {
 
 /** A request resolved against the catalog; every name in SQL text comes from `tables`, never the request. */
 export interface JoinPlan {
-  tables: JoinTableMeta[];
+  tables: TableMeta[];
   left: boolean[];
   /** Per join entry: [left position, left column, right column]. */
   ons: [number, number, number][][];
@@ -218,29 +230,29 @@ export interface JoinPlan {
   descending: boolean;
 }
 
-function columnIndex(table: JoinTableMeta, column: string): number {
+function columnIndex(table: TableMeta, column: string): number {
   const i = table.columns.findIndex((c) => c.name === column);
   if (i < 0) throw new NotAllowedError(`column "${column}"`, "column");
   return i;
 }
 
 // A name inside the join value: a miss is a bad join, not unknown_column.
-function joinColumnIndex(table: JoinTableMeta, column: string): number {
+function joinColumnIndex(table: TableMeta, column: string): number {
   const i = table.columns.findIndex((c) => c.name === column);
   if (i < 0) throw new BadJoinError(`${table.name} has no column "${column}"`);
   return i;
 }
 
-const describe = (t: JoinTableMeta, c: JoinColMeta): string => `${t.name}.${c.name} (${c.type})`;
+const describe = (t: TableMeta, c: ColMeta): string => `${t.name}.${c.name} (${c.type})`;
 
-function unjoinable(position: number, t: JoinTableMeta, c: JoinColMeta): BadJoinError {
-  const why = /real|float|double/i.test(c.type) ? ": floating-point values are not compared exactly" : "";
+function unjoinable(position: number, t: TableMeta, c: ColMeta): BadJoinError {
+  const why = c.class.kind === "float" ? ": floating-point values are not compared exactly" : "";
   return new BadJoinError(`join ${position} on: ${describe(t, c)} cannot be used in a join${why}`);
 }
 
-function checkPair(position: number, lt: JoinTableMeta, lc: JoinColMeta, rt: JoinTableMeta, rc: JoinColMeta): void {
-  if (!lc.class) throw unjoinable(position, lt, lc);
-  if (!rc.class) throw unjoinable(position, rt, rc);
+function checkPair(position: number, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta): void {
+  if (NOT_JOINABLE.has(lc.class.kind)) throw unjoinable(position, lt, lc);
+  if (NOT_JOINABLE.has(rc.class.kind)) throw unjoinable(position, rt, rc);
   if (classKey(lc.class) !== classKey(rc.class)) {
     throw new BadJoinError(`join ${position} on: ${describe(lt, lc)} cannot be joined to ${describe(rt, rc)}`);
   }
@@ -271,7 +283,7 @@ export function assignJoinLabels(names: string[], joins: number[]): string[] {
 }
 
 /** Resolves a request against the catalog; `tables[i]` is the metadata of position i. */
-export function planJoin(spec: JoinSpec, tables: JoinTableMeta[], opts: JoinOpts): JoinPlan {
+export function planJoin(spec: JoinSpec, tables: TableMeta[], opts: JoinOpts): JoinPlan {
   const left: boolean[] = [];
   const ons: [number, number, number][][] = [];
   spec.joins.forEach((entry, i) => {
@@ -388,15 +400,22 @@ export function buildJoinSelect(
   return { body: sql, values };
 }
 
+/** The §5.4.1 shape of a column. */
+export function columnInfo(col: ColMeta): ColumnInfo {
+  const info: ColumnInfo = { name: col.name, type: col.type, class: col.class.kind };
+  if (col.class.enumType) info.enum_type = col.class.enumType;
+  if (col.collation && col.class.kind === "text") info.collation = col.collation;
+  if (col.key) info.key = col.key;
+  if (col.references) info.references = col.references;
+  if (col.comment) info.comment = col.comment;
+  return info;
+}
+
 export function joinColumnInfos(plan: JoinPlan): JoinColumnInfo[] {
   return plan.selection.map(([p, c], i) => {
     const t = plan.tables[p];
-    const col = t.columns[c];
-    const info: JoinColumnInfo = { name: plan.labels[i], type: col.type, join: p, table: t.name, column: col.name };
-    if (col.key) info.key = col.key;
-    if (col.references) info.references = col.references;
-    if (col.comment) info.comment = col.comment;
-    return info;
+    const { name, ...rest } = columnInfo(t.columns[c]);
+    return { name: plan.labels[i], ...rest, join: p, table: t.name, column: name };
   });
 }
 

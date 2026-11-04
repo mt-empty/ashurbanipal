@@ -57,73 +57,70 @@ var sqliteJoinDialect = joinDialect{
 	ilike:    ilikeLike,
 }
 
-// sqliteTypeClass maps a declared type to a spec/protocol.md §5.11.2 class:
+// sqliteColumnClass maps a declared type to a spec/protocol.md §5.11.2 class:
 // recognised names first, then SQLite's affinity rules
 // (docs/adapter-decisions.md §5.11).
-func sqliteTypeClass(declared string) *typeClass {
+func sqliteColumnClass(declared string) columnClass {
 	upper := strings.ToUpper(strings.TrimSpace(declared))
-	var c typeClass
 	switch base := strings.TrimSpace(strings.SplitN(upper, "(", 2)[0]); {
 	case upper == "":
-		c = classUntyped
+		return classUntyped
 	case base == "UUID":
-		c = classUUID
+		return classUUID
 	case base == "BOOLEAN" || base == "BOOL":
-		c = classBoolean
+		return classBoolean
 	case base == "DATE" || base == "DATETIME" || strings.HasPrefix(base, "TIMESTAMP"):
-		c = classTemporal
+		return classTemporal
 	case base == "TIME":
-		c = classTime
+		return classTime
 	case base == "JSON" || base == "JSONB":
-		return nil
+		return classJSON
 	case strings.Contains(upper, "INT"):
-		c = classNumber
+		return classNumber
 	case strings.Contains(upper, "CHAR") || strings.Contains(upper, "CLOB") || strings.Contains(upper, "TEXT"):
-		c = classText
+		return classText
 	case strings.Contains(upper, "BLOB"):
-		c = classBinary
+		return classBinary
 	case strings.Contains(upper, "REAL") || strings.Contains(upper, "FLOA") || strings.Contains(upper, "DOUB"):
-		return nil
-	default:
-		c = classNumber
+		return classFloat
 	}
-	return &c
+	return classNumber
 }
 
-func (c *SQLiteSource) joinTableMeta(ctx context.Context, q queryer, table string) (joinTableMeta, error) {
+func (c *SQLiteSource) tableMeta(ctx context.Context, q queryer, table string) (tableMeta, error) {
 	metaCtx, cancel := c.bounded(ctx)
 	rows, err := q.QueryContext(metaCtx,
 		fmt.Sprintf("select cid, name, type from pragma_table_info(%s) order by cid", quoteIdent(table)))
 	if err != nil {
 		cancel()
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
-	meta := joinTableMeta{name: table}
+	meta := tableMeta{name: table}
 	for rows.Next() {
 		var cid int64
 		var name, declared string
 		if err := rows.Scan(&cid, &name, &declared); err != nil {
 			rows.Close()
 			cancel()
-			return joinTableMeta{}, err
+			return tableMeta{}, err
 		}
 		typeName := declared
 		if typeName == "" {
 			typeName = "unknown"
 		}
-		meta.columns = append(meta.columns, joinColMeta{name: name, typeName: typeName, class: sqliteTypeClass(declared)})
+		meta.columns = append(meta.columns, colMeta{name: name, typeName: typeName, class: sqliteColumnClass(declared)})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		cancel()
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	rows.Close()
 	cancel()
 
 	pk, fk, err := c.keyMetadata(ctx, q, table)
 	if err != nil {
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	for i := range meta.columns {
 		col := &meta.columns[i]
@@ -150,7 +147,7 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 	}
 
 	names := spec.TableNames()
-	metas := map[string]joinTableMeta{}
+	metas := map[string]tableMeta{}
 	for _, name := range names {
 		if _, ok := metas[name]; ok {
 			continue
@@ -158,13 +155,13 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 		if _, ok := findExact(allowed, name); !ok {
 			return JoinData{}, badJoin("unknown table %q", name)
 		}
-		meta, err := c.joinTableMeta(ctx, conn, name)
+		meta, err := c.tableMeta(ctx, conn, name)
 		if err != nil {
 			return JoinData{}, err
 		}
 		metas[name] = meta
 	}
-	tables := make([]joinTableMeta, len(names))
+	tables := make([]tableMeta, len(names))
 	for i, name := range names {
 		tables[i] = metas[name]
 	}
@@ -433,10 +430,14 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 		return TableData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
 	}
 
-	columnNames, err := c.allowedColumns(ctx, realTable)
+	// The join route's lookup, so both routes report the same columns; its
+	// names are the live catalog's, so they also serve as the allow-list.
+	meta, err := c.tableMeta(ctx, c.db, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
+	columns := meta.columnInfos()
+	columnNames := meta.columnNames()
 	var sort *string
 	if opts.Sort != nil {
 		found, ok := findExact(columnNames, *opts.Sort)
@@ -453,59 +454,6 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 		if err != nil {
 			return TableData{}, err
 		}
-	}
-
-	pkColumns, fkColumns, err := c.keyMetadata(ctx, c.db, realTable)
-	if err != nil {
-		return TableData{}, err
-	}
-
-	typeCtx, typeCancel := c.bounded(ctx)
-	typeRows, err := c.db.QueryContext(typeCtx,
-		fmt.Sprintf("select cid, name, type from pragma_table_info(%s) order by cid", quoteIdent(realTable)))
-	if err != nil {
-		typeCancel()
-		return TableData{}, err
-	}
-	type colType struct{ name, typ string }
-	var columnTypes []colType
-	for typeRows.Next() {
-		var cid int64
-		var ct colType
-		if err := typeRows.Scan(&cid, &ct.name, &ct.typ); err != nil {
-			typeRows.Close()
-			typeCancel()
-			return TableData{}, err
-		}
-		columnTypes = append(columnTypes, ct)
-	}
-	if err := typeRows.Err(); err != nil {
-		typeRows.Close()
-		typeCancel()
-		return TableData{}, err
-	}
-	typeRows.Close()
-	typeCancel()
-
-	columns := make([]ColumnInfo, 0, len(columnTypes))
-	for _, ct := range columnTypes {
-		col := ColumnInfo{Name: ct.name, Type: ct.typ}
-		// SQLite's declared column types can be empty (dynamic typing);
-		// fall back to a stable label rather than emitting "".
-		if col.Type == "" {
-			col.Type = "unknown"
-		}
-		if ref, ok := fkColumns[ct.name]; ok {
-			r := ref
-			col.References = &r
-		}
-		switch {
-		case pkColumns[ct.name]:
-			col.Key = KeyPK
-		case col.References != nil:
-			col.Key = KeyFK
-		}
-		columns = append(columns, col)
 	}
 
 	selectParts := make([]string, len(columns))

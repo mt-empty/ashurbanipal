@@ -1,6 +1,6 @@
 import type { ResolvedLimits } from "./config.js";
 import type { DbSource } from "./db/types.js";
-import { FilterError, isQueryTimeout, NOT_ALLOWED_CODE, NotAllowedError } from "./errors.js";
+import { FilterError, isQueryTimeout, NOT_ALLOWED_CODE, NotAllowedError, UnsortableError } from "./errors.js";
 import { type Condition, parseFilter, parseFilterForJoin } from "./filter.js";
 import { BadJoinError, BadParamError, parseJoin } from "./join.js";
 
@@ -234,7 +234,7 @@ function problem(status: number, code: string, title: string): ApiResult {
 // Maps a DbSource/filter error to the wire's error taxonomy
 // (spec/protocol.md §2): NotAllowedError's kind picks the exact
 // unknown_*/not_readable code; FilterError is always invalid_filter;
-// BadJoinError is invalid_join; a bad parameter is invalid_parameter; a statement stopped by the query
+// BadJoinError is invalid_join; a bad parameter is invalid_parameter; UnsortableError is unsortable_column; a statement stopped by the query
 // timeout is query_timeout; anything else is a database failure (500). Status code + code are the
 // contract — `title` wording is implementation-defined.
 function errorResult(err: unknown): ApiResult {
@@ -242,6 +242,7 @@ function errorResult(err: unknown): ApiResult {
   if (err instanceof FilterError) return problem(400, "invalid_filter", err.message);
   if (err instanceof BadJoinError) return problem(400, "invalid_join", err.message);
   if (err instanceof BadParamError) return problem(400, "invalid_parameter", err.message);
+  if (err instanceof UnsortableError) return problem(400, "unsortable_column", err.message);
   if (isQueryTimeout(err)) return problem(500, "query_timeout", "query timed out");
   const message = err instanceof Error ? err.message : String(err);
   return problem(500, "database_error", `database error: ${message}`);

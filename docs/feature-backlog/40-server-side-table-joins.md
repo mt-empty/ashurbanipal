@@ -182,8 +182,10 @@ Conformance cases, run on all five ports and all three engines:
   non-unique column can repeat or skip rows between pages. Record it as an
   accepted gap in `docs/adapter-decisions.md`.
 - **MySQL text collations.** Compare `collation_name` of text pairs before
-  building the query and answer 400 naming the pair. Error 1267 maps to the
-  same 400 as a fallback.
+  building the query and answer 400 naming the pair. (Since 2026-11-04 the
+  collation is a wire field, `collation` in §5.4.1, and Postgres is checked
+  too. No port maps error 1267 as a fallback: one that gets past the check
+  is a 500, an accepted gap in `docs/adapter-decisions.md`.)
 - **SQLite typing.** The class comes from the declared type by affinity
   rules. An empty declared type is its own class and pairs only with
   itself. Note the weaker guarantee in `docs/adapter-decisions.md`.

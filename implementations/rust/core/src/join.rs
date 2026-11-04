@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::{ColumnRef, DbError, KeyKind, NotAllowedKind};
+use crate::db::{ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowedKind};
 use crate::filter::{Condition, FilterOp, Logic};
 
 pub const MAX_JOIN_BYTES: usize = 8192;
@@ -147,10 +147,11 @@ impl JoinSpec {
     }
 }
 
-/// Engine-neutral comparison class of a column type (`spec/protocol.md`
-/// §5.11.2). Each backend maps its native types onto these.
+/// Engine-neutral class of a column type (`spec/protocol.md` §5.4.1,
+/// §5.11.2). Each backend maps its native types onto these; `Float`, `Json`,
+/// `Array` and `Other` cannot be joined.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeClass {
+pub enum ColumnClass {
     Number,
     Text,
     Uuid,
@@ -162,6 +163,60 @@ pub enum TypeClass {
     Enum(String),
     /// A SQLite column with no declared type; pairs only with itself.
     Untyped,
+    /// Floating point: not compared exactly.
+    Float,
+    Json,
+    Array,
+    /// Any type not named above.
+    Other,
+}
+
+impl ColumnClass {
+    /// The class name on the wire (`spec/protocol.md` §5.4.1); an enum's
+    /// identity travels separately as `enum_type`.
+    fn wire_name(&self) -> &'static str {
+        match self {
+            ColumnClass::Number => "number",
+            ColumnClass::Text => "text",
+            ColumnClass::Uuid => "uuid",
+            ColumnClass::Boolean => "boolean",
+            ColumnClass::Temporal => "temporal",
+            ColumnClass::Time => "time",
+            ColumnClass::Binary => "binary",
+            ColumnClass::Enum(_) => "enum",
+            ColumnClass::Untyped => "untyped",
+            ColumnClass::Float => "float",
+            ColumnClass::Json => "json",
+            ColumnClass::Array => "array",
+            ColumnClass::Other => "other",
+        }
+    }
+
+    /// The collation to send: only a text column's can clash in a comparison.
+    pub fn wire_collation(&self, collation: Option<&String>) -> Option<String> {
+        collation.filter(|_| *self == ColumnClass::Text).cloned()
+    }
+
+    fn is_joinable(&self) -> bool {
+        !matches!(
+            self,
+            ColumnClass::Float | ColumnClass::Json | ColumnClass::Array | ColumnClass::Other
+        )
+    }
+
+    /// The enumerated type's identity, which two enum columns must share to join.
+    pub fn enum_type(&self) -> Option<String> {
+        match self {
+            ColumnClass::Enum(id) => Some(id.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl Serialize for ColumnClass {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.wire_name())
+    }
 }
 
 /// One column as the live catalog reports it.
@@ -169,12 +224,27 @@ pub enum TypeClass {
 pub struct ColMeta {
     pub name: String,
     pub type_name: String,
-    pub class: Option<TypeClass>,
-    /// Set on engines where two text collations can clash (MySQL).
+    pub class: ColumnClass,
+    /// Set where two text collations can clash (`spec/protocol.md` §5.4.1).
     pub collation: Option<String>,
     pub key: Option<KeyKind>,
     pub references: Option<ColumnRef>,
     pub comment: Option<String>,
+}
+
+impl From<ColMeta> for ColumnInfo {
+    fn from(c: ColMeta) -> Self {
+        ColumnInfo {
+            name: c.name,
+            type_name: c.type_name,
+            enum_type: c.class.enum_type(),
+            collation: c.class.wire_collation(c.collation.as_ref()),
+            class: c.class,
+            key: c.key,
+            references: c.references,
+            comment: c.comment,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -192,6 +262,11 @@ pub struct JoinColumnInfo {
     pub join: usize,
     pub table: String,
     pub column: String,
+    pub class: ColumnClass,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enum_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<KeyKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -261,6 +336,9 @@ impl Plan {
                     join: pos,
                     table: table.name.clone(),
                     column: c.name.clone(),
+                    class: c.class.clone(),
+                    enum_type: c.class.enum_type(),
+                    collation: c.class.wire_collation(c.collation.as_ref()),
                     key: c.key,
                     references: c.references.clone(),
                     comment: c.comment.clone(),
@@ -299,8 +377,7 @@ fn describe(table: &TableMeta, col: &ColMeta) -> String {
 }
 
 fn unjoinable(position: usize, table: &TableMeta, col: &ColMeta) -> DbError {
-    let t = col.type_name.to_lowercase();
-    let why = if ["real", "float", "double"].iter().any(|f| t.contains(f)) {
+    let why = if col.class == ColumnClass::Float {
         ": floating-point values are not compared exactly"
     } else {
         ""
@@ -318,14 +395,12 @@ fn check_pair(
     rt: &TableMeta,
     rc: &ColMeta,
 ) -> Result<(), DbError> {
-    let (Some(a), Some(b)) = (&lc.class, &rc.class) else {
-        let bad = if lc.class.is_none() {
-            (lt, lc)
-        } else {
-            (rt, rc)
-        };
-        return Err(unjoinable(position, bad.0, bad.1));
-    };
+    for (table, col) in [(lt, lc), (rt, rc)] {
+        if !col.class.is_joinable() {
+            return Err(unjoinable(position, table, col));
+        }
+    }
+    let (a, b) = (&lc.class, &rc.class);
     if a != b {
         return Err(DbError::BadJoin(format!(
             "join {position} on: {} cannot be joined to {}",
@@ -333,7 +408,7 @@ fn check_pair(
             describe(rt, rc)
         )));
     }
-    if *a == TypeClass::Text {
+    if *a == ColumnClass::Text {
         if let (Some(x), Some(y)) = (&lc.collation, &rc.collation) {
             if x != y {
                 return Err(DbError::BadJoin(format!(
@@ -598,7 +673,7 @@ pub fn build_select(plan: &Plan, d: &Dialect, schema: Option<&str>) -> (String, 
 mod tests {
     use super::*;
 
-    fn col(name: &str, ty: &str, class: Option<TypeClass>) -> ColMeta {
+    fn col(name: &str, ty: &str, class: ColumnClass) -> ColMeta {
         ColMeta {
             name: name.into(),
             type_name: ty.into(),
@@ -614,10 +689,10 @@ mod tests {
         TableMeta {
             name: "orders".into(),
             columns: vec![
-                col("id", "uuid", Some(TypeClass::Uuid)),
-                col("user_id", "uuid", Some(TypeClass::Uuid)),
-                col("status", "text", Some(TypeClass::Text)),
-                col("tags", "ARRAY", None),
+                col("id", "uuid", ColumnClass::Uuid),
+                col("user_id", "uuid", ColumnClass::Uuid),
+                col("status", "text", ColumnClass::Text),
+                col("tags", "ARRAY", ColumnClass::Array),
             ],
         }
     }
@@ -626,8 +701,8 @@ mod tests {
         TableMeta {
             name: "users".into(),
             columns: vec![
-                col("id", "uuid", Some(TypeClass::Uuid)),
-                col("email", "text", Some(TypeClass::Text)),
+                col("id", "uuid", ColumnClass::Uuid),
+                col("email", "text", ColumnClass::Text),
             ],
         }
     }
@@ -728,9 +803,23 @@ mod tests {
     }
 
     #[test]
+    fn only_a_text_column_reports_its_collation() {
+        let mut text = col("name", "varchar(20)", ColumnClass::Text);
+        text.collation = Some("utf8mb4_bin".into());
+        let mut doc = col("doc", "json", ColumnClass::Json);
+        doc.collation = Some("utf8mb4_bin".into());
+        assert_eq!(
+            ColumnInfo::from(text).collation.as_deref(),
+            Some("utf8mb4_bin")
+        );
+        assert_eq!(ColumnInfo::from(doc).collation, None);
+    }
+
+    #[test]
     fn a_float_key_says_why_it_cannot_join() {
         let mut o = orders();
-        o.columns.push(col("score", "double precision", None));
+        o.columns
+            .push(col("score", "double precision", ColumnClass::Float));
         let mut spec = JoinSpec::parse(JOIN).unwrap();
         spec.joins[0].on[0].left.column = "score".into();
         let Err(DbError::BadJoin(msg)) = plan(&spec, vec![o, users()], &opts()) else {
@@ -749,13 +838,13 @@ mod tests {
         a.columns[2] = col(
             "status",
             "USER-DEFINED",
-            Some(TypeClass::Enum("public.status".into())),
+            ColumnClass::Enum("public.status".into()),
         );
         let mut b = users();
         b.columns[1] = col(
             "kind",
             "USER-DEFINED",
-            Some(TypeClass::Enum("public.kind".into())),
+            ColumnClass::Enum("public.kind".into()),
         );
         let mut spec = JoinSpec::parse(JOIN).unwrap();
         spec.joins[0].on[0].left.column = "status".into();
@@ -768,7 +857,7 @@ mod tests {
         same.columns[1] = col(
             "kind",
             "USER-DEFINED",
-            Some(TypeClass::Enum("public.status".into())),
+            ColumnClass::Enum("public.status".into()),
         );
         assert!(plan(&spec, vec![a, same], &opts()).is_ok());
     }

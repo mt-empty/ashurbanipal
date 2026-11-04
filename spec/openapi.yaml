@@ -215,7 +215,9 @@ paths:
           description: >
             Single column name, validated against the table's real
             columns; unknown column yields 400. Ordering uses the
-            column's native type ordering.
+            column's native type ordering; a column whose type has none
+            (Postgres json, xml, geometric types) yields 400
+            unsortable_column.
           schema:
             type: string
           examples:
@@ -441,7 +443,8 @@ paths:
           required: false
           description: >
             Column name of the table at `sort_join`; unknown column yields
-            400. Ordering uses the column's native type ordering.
+            400, and a column whose type has no ordering yields 400
+            unsortable_column. Ordering uses the column's native type ordering.
           schema:
             type: string
         - name: sort_join
@@ -656,18 +659,40 @@ components:
 
     ColumnInfo:
       type: object
-      required: [name, type]
+      required: [name, type, class]
       properties:
         name:
           type: string
         type:
           type: string
           description: >
-            The column's type name as the backing engine's own catalog
-            reports it (Postgres information_schema.columns.data_type;
-            MySQL information_schema.COLUMNS.DATA_TYPE; SQLite the declared
-            type, or "unknown" when none). Informational only — never used
-            to build SQL.
+            The column's full type as the backing engine spells it, keeping
+            length, precision, array element type and enum name (Postgres
+            format_type(atttypid, atttypmod), e.g. "numeric(10,2)",
+            "text[]", "order_status"; MySQL information_schema.COLUMNS.COLUMN_TYPE,
+            e.g. "tinyint(1)", "enum('a','b')"; SQLite the declared type, or
+            "unknown" when none). Informational, never used to build SQL.
+        class:
+          type: string
+          enum: [number, text, uuid, boolean, temporal, time, binary, enum, untyped, float, json, array, other]
+          description: >
+            The column's column class (spec/protocol.md §5.11.2), the same one
+            the server checks join pairs with. Always present; float, json,
+            array and other columns cannot be joined.
+        enum_type:
+          type: string
+          description: >
+            Present only when class is enum: the enumerated type's identity
+            (Postgres schema.name; MySQL the column's enum(...) definition).
+            Two enum columns join only when their enum_type values are equal.
+        collation:
+          type: string
+          description: >
+            The column's collation where two text columns can clash in a
+            comparison (MySQL/MariaDB the catalog collation_name; Postgres an
+            explicit column collation, omitted for the database default;
+            never sent on SQLite). Two text columns join only when the
+            collations they report are equal.
         key:
           type: string
           enum: [pk, fk]
@@ -1166,5 +1191,6 @@ components:
             - invalid_join
             - invalid_parameter
             - not_readable
+            - unsortable_column
             - database_error
             - query_timeout

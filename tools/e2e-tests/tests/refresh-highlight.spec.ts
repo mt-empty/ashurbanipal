@@ -11,8 +11,8 @@ type Cell = number | string;
 function payload(rows: Cell[][]) {
   return {
     columns: [
-      { name: "id", type: "integer", key: "pk" },
-      { name: "label", type: "text" },
+      { name: "id", type: "integer", class: "number", key: "pk" },
+      { name: "label", type: "text", class: "text" },
     ],
     rows: rows.map(([id, label]) => ({ id: String(id), label: String(label) })),
     total_approx: rows.length,
@@ -23,8 +23,8 @@ function payloadNoPk(rows: Cell[][]) {
   return {
     ...payload(rows),
     columns: [
-      { name: "id", type: "integer" },
-      { name: "label", type: "text" },
+      { name: "id", type: "integer", class: "number" },
+      { name: "label", type: "text", class: "text" },
     ],
   };
 }

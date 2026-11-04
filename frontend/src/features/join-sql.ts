@@ -3,7 +3,7 @@ import type { Column } from "../core/types.js";
 import { type Draft, draftToDef } from "../lib/join-draft.js";
 import { type JoinParse, parseJoin, printJoin, quoteJoinName } from "../lib/join-dsl.js";
 import { type JoinCompletion, type JoinToken, joinCompletionAt, tokenizeJoinText } from "../lib/join-tokens.js";
-import { findForeignKey, joinMismatch, pairNote } from "../lib/join-types.js";
+import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
 import {
   cachedColumns,
   catalogVersion,
@@ -101,11 +101,11 @@ export function mountJoinSql(onChange: () => void): JoinSql {
   const field = $<HTMLTextAreaElement>("join-sql");
   const hlText = $("join-sql-hl-text");
 
-  // Column types are known for the tables whose columns were read; an unknown pair is allowed.
+  // Known for the tables whose columns were read; an unknown pair is allowed.
   const pairCheck = (a: { table: string; column: string }, b: { table: string; column: string }): string | null => {
-    const at = cachedColumns(a.table)?.find((c) => c.name === a.column)?.type;
-    const bt = cachedColumns(b.table)?.find((c) => c.name === b.column)?.type;
-    return at && bt ? (joinMismatch(at, bt)?.message ?? null) : null;
+    const ac = cachedColumns(a.table)?.find((c) => c.name === a.column);
+    const bc = cachedColumns(b.table)?.find((c) => c.name === b.column);
+    return ac && bc ? (joinMismatch(ac, bc)?.message ?? null) : null;
   };
   // Highlight, dialog and suggestions all ask on each keystroke; parse once per text and catalog.
   let memo: { text: string; version: number; result: JoinParse } | null = null;
@@ -181,16 +181,16 @@ export function mountJoinSql(onChange: () => void): JoinSql {
         if (document.activeElement === field) void update();
       });
     const otherTable = ctx.otherSide ? tableOf(ctx, ctx.otherSide.qualifier) : undefined;
-    const otherType = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column)?.type;
+    const other = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column);
     const starts = startsWith(ctx);
     return columns
       .filter((c) => starts(c.name))
       .map((c: Column) => {
-        const note = pairNote(c.type, otherType);
+        const note = pairNote(c, other);
         return {
           label: c.name,
           insert: `${quoteJoinName(c.name)} `,
-          note: note ?? c.type,
+          note: note ?? truncateType(c.type),
           ...(note === null && indexed?.has(c.name) ? { tag: "indexed" } : {}),
           ...(note !== null ? { blocked: true } : {}),
         };

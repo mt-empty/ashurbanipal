@@ -13,9 +13,30 @@ export interface ColumnRef {
   schema?: string;
 }
 
+/** A §5.4.1 column class, as `class` carries it on the wire. `float`, `json`, `array` and `other` cannot be joined. */
+export type ColumnClassName =
+  | "number"
+  | "text"
+  | "uuid"
+  | "boolean"
+  | "temporal"
+  | "time"
+  | "binary"
+  | "enum"
+  | "untyped"
+  | "float"
+  | "json"
+  | "array"
+  | "other";
+
 export interface ColumnInfo {
   name: string;
   type: string;
+  class: ColumnClassName;
+  /** The enumerated type's identity; set only when `class` is "enum". */
+  enum_type?: string;
+  /** The collation where two text columns can clash (spec/protocol.md §5.4.1). */
+  collation?: string;
   key?: KeyKind;
   references?: ColumnRef;
   comment?: string;

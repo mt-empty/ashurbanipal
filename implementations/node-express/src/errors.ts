@@ -61,6 +61,14 @@ export class FilterError extends Error {
   }
 }
 
+/** A sort on a column whose type has no ordering (spec/protocol.md §5.4). Maps to 400 unsortable_column. */
+export class UnsortableError extends Error {
+  constructor(column: string) {
+    super(`cannot sort by ${column}: its type has no ordering`);
+    this.name = "UnsortableError";
+  }
+}
+
 /**
  * The allow-list already rejects tables the role can't SELECT, so a
  * `permission denied` (SQLSTATE 42501) reaching the row fetch is a
@@ -68,10 +76,13 @@ export class FilterError extends Error {
  * the raw driver error surface as a 500. Also maps a filter value
  * Postgres's text encoding rejects (SQLSTATE 22021/22P05) to FilterError,
  * also 400, never a raw 500 (docs/adapter-decisions.md §5.4.2 has the
- * cross-backend rationale).
+ * cross-backend rationale). When the request sorts, an "undefined function"
+ * error (SQLSTATE 42883) is the sort column's type having no ordering operator
+ * (json, xml, geometric types).
  */
-export function mapSelectDenied(err: unknown, table: string): unknown {
+export function mapSelectDenied(err: unknown, table: string, sort?: string): unknown {
   const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
+  if (code === "42883" && sort !== undefined) return new UnsortableError(sort);
   if (code === "42501") {
     return new NotAllowedError(`table "${table}"`, "not_readable");
   }

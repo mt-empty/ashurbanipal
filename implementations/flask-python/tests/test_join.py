@@ -16,13 +16,18 @@ from flask import Flask
 
 from ashurbanipal.config import Config
 from ashurbanipal.db import BadJoin, BadParam, FilterParseError, NotAllowed, QueryTimeout, wrap_driver_errors
-from ashurbanipal.db.postgres import type_class as pg_type_class
+from ashurbanipal.db.postgres import column_class as pg_column_class
 from ashurbanipal.db.sqlite import SqliteSource
-from ashurbanipal.db.sqlite import type_class as sqlite_type_class
+from ashurbanipal.db.sqlite import column_class as sqlite_column_class
 from ashurbanipal.filter import Condition, FilterError, parse, parse_for_join
 from ashurbanipal.join import (
+    ARRAY,
+    FLOAT,
+    JSON,
     NUMBER,
+    OTHER,
     TEXT,
+    UNTYPED,
     UUID,
     ColMeta,
     Dialect,
@@ -53,8 +58,8 @@ _PG = Dialect(
 )
 
 
-def _col(name: str, type_name: str, cls) -> ColMeta:
-    return ColMeta(name=name, type_name=type_name, cls=cls)
+def _col(name: str, type_name: str, column_class) -> ColMeta:
+    return ColMeta(name=name, type_name=type_name, column_class=column_class)
 
 
 def _orders() -> TableMeta:
@@ -64,7 +69,7 @@ def _orders() -> TableMeta:
             _col("id", "uuid", UUID),
             _col("user_id", "uuid", UUID),
             _col("status", "text", TEXT),
-            _col("tags", "ARRAY", None),
+            _col("tags", "ARRAY", ARRAY),
         ],
     )
 
@@ -146,11 +151,18 @@ def test_plan_join_rejects_unknown_names_hostile_names_and_incompatible_pairs() 
 
     floaty = parse_join(JOIN.replace('"column": "user_id"', '"column": "score"'))
     orders = _orders()
-    orders.columns.append(_col("score", "double precision", None))
+    orders.columns.append(_col("score", "double precision", FLOAT))
     with pytest.raises(
         BadJoin, match=r"orders\.score \(double precision\).*floating-point values are not compared exactly"
     ):
         plan_join(floaty, [orders, _users()], _opts())
+
+
+def test_only_a_text_column_reports_its_collation() -> None:
+    text = ColMeta(name="name", type_name="varchar(20)", column_class=TEXT, collation="utf8mb4_bin")
+    doc = ColMeta(name="doc", type_name="json", column_class=JSON, collation="utf8mb4_bin")
+    assert text.column_info().collation == "utf8mb4_bin"
+    assert doc.column_info().collation is None
 
 
 def test_enums_pair_only_within_one_type_and_collations_must_match() -> None:
@@ -174,7 +186,7 @@ def test_enums_pair_only_within_one_type_and_collations_must_match() -> None:
         plan_join(spec, [enum_table("x", "a"), enum_table("y", "b")], _opts())
 
     def text_table(name: str, collation: str) -> TableMeta:
-        return TableMeta(name, [ColMeta(name="e", type_name="varchar", cls=TEXT, collation=collation)])
+        return TableMeta(name, [ColMeta(name="e", type_name="varchar", column_class=TEXT, collation=collation)])
 
     with pytest.raises(BadJoin, match="collation"):
         plan_join(spec, [text_table("x", "utf8mb4_bin"), text_table("y", "utf8mb4_general_ci")], _opts())
@@ -225,17 +237,26 @@ def test_join_key_in_a_filter_is_only_accepted_by_parse_for_join() -> None:
         parse_for_join('[{"join": -1, "column": "email", "op": "IS NULL"}]')
 
 
-def test_type_classes() -> None:
-    assert pg_type_class("integer", "", "", False) == NUMBER
-    assert pg_type_class("USER-DEFINED", "public", "mood", True) == enum_class("public.mood")
-    for t in ("ARRAY", "jsonb", "json", "double precision", "money"):
-        assert pg_type_class(t, "", "", False) is None, t
-    assert sqlite_type_class("DECIMAL(10,2)") == NUMBER
-    assert sqlite_type_class("VARCHAR(20)") == TEXT
-    assert sqlite_type_class("UUID") == UUID
-    assert sqlite_type_class("") is not None
-    for t in ("REAL", "DOUBLE PRECISION", "JSON"):
-        assert sqlite_type_class(t) is None, t
+def test_column_classes() -> None:
+    assert pg_column_class("integer", "", "", False) == NUMBER
+    assert pg_column_class("USER-DEFINED", "public", "mood", True) == enum_class("public.mood")
+    for t, expected in (
+        ("ARRAY", ARRAY),
+        ("jsonb", JSON),
+        ("json", JSON),
+        ("double precision", FLOAT),
+        ("real", FLOAT),
+        ("money", OTHER),
+    ):
+        assert pg_column_class(t, "", "", False) == expected, t
+    assert pg_column_class("USER-DEFINED", "public", "geometry", False) == OTHER
+    assert sqlite_column_class("DECIMAL(10,2)") == NUMBER
+    assert sqlite_column_class("VARCHAR(20)") == TEXT
+    assert sqlite_column_class("UUID") == UUID
+    assert sqlite_column_class("") == UNTYPED
+    assert sqlite_column_class("REAL") == FLOAT
+    assert sqlite_column_class("DOUBLE PRECISION") == FLOAT
+    assert sqlite_column_class("JSON") == JSON
 
 
 class _Timeout(Exception):

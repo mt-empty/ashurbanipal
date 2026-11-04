@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 )
 
@@ -35,6 +34,16 @@ type BadParamError struct {
 }
 
 func (e *BadParamError) Error() string { return "invalid parameter: " + e.Reason }
+
+// UnsortableError is a sort on a column whose type has no ordering; 400
+// unsortable_column.
+type UnsortableError struct {
+	Column string
+}
+
+func (e *UnsortableError) Error() string {
+	return fmt.Sprintf("cannot sort by %s: its type has no ordering", e.Column)
+}
 
 // unknownJoinTable reports a table named in the join value as a bad join;
 // not_readable stays as it is.
@@ -201,45 +210,91 @@ func ParseJoin(raw string) (JoinSpec, error) {
 	return spec, nil
 }
 
-// typeClass is the comparison class of a column type (spec/protocol.md
-// §5.11.2). id carries an enumerated type's identity.
-type typeClass struct {
-	kind string
-	id   string
+// columnClass is the class of a column type (spec/protocol.md §5.4.1,
+// §5.11.2). enumType carries an enumerated type's identity.
+//
+// The float, json, array and other classes cannot be joined.
+type columnClass struct {
+	kind     string
+	enumType string
 }
 
 var (
-	classNumber   = typeClass{kind: "number"}
-	classText     = typeClass{kind: "text"}
-	classUUID     = typeClass{kind: "uuid"}
-	classBoolean  = typeClass{kind: "boolean"}
-	classTemporal = typeClass{kind: "temporal"}
-	classTime     = typeClass{kind: "time"}
-	classBinary   = typeClass{kind: "binary"}
+	classNumber   = columnClass{kind: "number"}
+	classText     = columnClass{kind: "text"}
+	classUUID     = columnClass{kind: "uuid"}
+	classBoolean  = columnClass{kind: "boolean"}
+	classTemporal = columnClass{kind: "temporal"}
+	classTime     = columnClass{kind: "time"}
+	classBinary   = columnClass{kind: "binary"}
 	// classUntyped is a SQLite column with no declared type; it pairs only
 	// with itself.
-	classUntyped = typeClass{kind: "untyped"}
+	classUntyped = columnClass{kind: "untyped"}
+	classFloat   = columnClass{kind: "float"}
+	classJSON    = columnClass{kind: "json"}
+	classArray   = columnClass{kind: "array"}
+	classOther   = columnClass{kind: "other"}
 )
 
-func classEnum(id string) typeClass { return typeClass{kind: "enum", id: id} }
+func (c columnClass) joinable() bool {
+	switch c {
+	case classFloat, classJSON, classArray, classOther:
+		return false
+	}
+	return true
+}
 
-// joinColMeta is one column as the live catalog reports it.
-type joinColMeta struct {
+func classEnum(enumType string) columnClass { return columnClass{kind: "enum", enumType: enumType} }
+
+// colMeta is one column as the live catalog reports it.
+type colMeta struct {
 	name       string
 	typeName   string
-	class      *typeClass
-	collation  *string // set where two text collations can clash (MySQL)
+	class      columnClass
+	collation  *string // set where two text collations can clash (spec/protocol.md §5.4.1)
 	key        KeyKind
 	references *ColumnRef
 	comment    string
 }
 
-type joinTableMeta struct {
-	name    string
-	columns []joinColMeta
+func (c colMeta) columnInfo() ColumnInfo {
+	return ColumnInfo{
+		Name: c.name, Type: c.typeName, Class: c.class.kind, EnumType: c.class.enumType, Collation: c.collationName(),
+		Key: c.key, References: c.references, Comment: c.comment,
+	}
 }
 
-func (t joinTableMeta) index(column string) (int, error) {
+// collationName is the collation to send: only a text column's can clash in a
+// comparison.
+func (c colMeta) collationName() string {
+	if c.collation == nil || c.class != classText {
+		return ""
+	}
+	return *c.collation
+}
+
+type tableMeta struct {
+	name    string
+	columns []colMeta
+}
+
+func (t tableMeta) columnNames() []string {
+	out := make([]string, len(t.columns))
+	for i, c := range t.columns {
+		out[i] = c.name
+	}
+	return out
+}
+
+func (t tableMeta) columnInfos() []ColumnInfo {
+	out := make([]ColumnInfo, len(t.columns))
+	for i, c := range t.columns {
+		out[i] = c.columnInfo()
+	}
+	return out
+}
+
+func (t tableMeta) index(column string) (int, error) {
 	for i, c := range t.columns {
 		if c.name == column {
 			return i, nil
@@ -249,7 +304,7 @@ func (t joinTableMeta) index(column string) (int, error) {
 }
 
 // joinIndex is index for a name inside the join value, where a miss is a bad join.
-func (t joinTableMeta) joinIndex(column string) (int, error) {
+func (t tableMeta) joinIndex(column string) (int, error) {
 	i, err := t.index(column)
 	if err != nil {
 		return 0, badJoin("%s has no column %q", t.name, column)
@@ -264,6 +319,9 @@ type JoinColumnInfo struct {
 	Join       int        `json:"join"`
 	Table      string     `json:"table"`
 	Column     string     `json:"column"`
+	Class      string     `json:"class"`
+	EnumType   string     `json:"enum_type,omitempty"`
+	Collation  string     `json:"collation,omitempty"`
 	Key        KeyKind    `json:"key,omitempty"`
 	References *ColumnRef `json:"references,omitempty"`
 	Comment    string     `json:"comment,omitempty"`
@@ -297,7 +355,7 @@ type joinOn struct{ leftPos, leftCol, rightCol int }
 // joinPlan is a request resolved against the catalog. Everything that
 // reaches SQL text in buildJoinSelect comes from tables, never the request.
 type joinPlan struct {
-	tables     []joinTableMeta
+	tables     []tableMeta
 	left       []bool
 	ons        [][]joinOn
 	selection  [][2]int // (position, column index)
@@ -307,31 +365,29 @@ type joinPlan struct {
 	descending bool
 }
 
-func describeCol(t joinTableMeta, c joinColMeta) string {
+func describeCol(t tableMeta, c colMeta) string {
 	return fmt.Sprintf("%s.%s (%s)", t.name, c.name, c.typeName)
 }
 
-var floatTypeRe = regexp.MustCompile(`(?i)real|float|double`)
-
-func unjoinable(position int, t joinTableMeta, c joinColMeta) error {
+func unjoinable(position int, t tableMeta, c colMeta) error {
 	why := ""
-	if floatTypeRe.MatchString(c.typeName) {
+	if c.class == classFloat {
 		why = ": floating-point values are not compared exactly"
 	}
 	return badJoin("join %d on: %s cannot be used in a join%s", position, describeCol(t, c), why)
 }
 
-func checkJoinPair(position int, lt joinTableMeta, lc joinColMeta, rt joinTableMeta, rc joinColMeta) error {
-	if lc.class == nil {
+func checkJoinPair(position int, lt tableMeta, lc colMeta, rt tableMeta, rc colMeta) error {
+	if !lc.class.joinable() {
 		return unjoinable(position, lt, lc)
 	}
-	if rc.class == nil {
+	if !rc.class.joinable() {
 		return unjoinable(position, rt, rc)
 	}
-	if *lc.class != *rc.class {
+	if lc.class != rc.class {
 		return badJoin("join %d on: %s cannot be joined to %s", position, describeCol(lt, lc), describeCol(rt, rc))
 	}
-	if *lc.class == classText && lc.collation != nil && rc.collation != nil && *lc.collation != *rc.collation {
+	if lc.class == classText && lc.collation != nil && rc.collation != nil && *lc.collation != *rc.collation {
 		return badJoin("join %d on: %s and %s use different text collations (%s and %s)",
 			position, describeCol(lt, lc), describeCol(rt, rc), *lc.collation, *rc.collation)
 	}
@@ -371,7 +427,7 @@ func assignJoinLabels(names []string, joins []int) []string {
 
 // planJoin resolves a request against the catalog; tables[i] is the
 // metadata of position i.
-func planJoin(spec JoinSpec, tables []joinTableMeta, opts JoinOpts) (*joinPlan, error) {
+func planJoin(spec JoinSpec, tables []tableMeta, opts JoinOpts) (*joinPlan, error) {
 	p := &joinPlan{tables: tables, descending: opts.Descending}
 	for i, entry := range spec.Joins {
 		position := i + 1
@@ -583,6 +639,7 @@ func (p *joinPlan) columnInfos() []JoinColumnInfo {
 		c := t.columns[s[1]]
 		out[i] = JoinColumnInfo{
 			Name: p.labels[i], Type: c.typeName, Join: s[0], Table: t.name, Column: c.name,
+			Class: c.class.kind, EnumType: c.class.enumType, Collation: c.collationName(),
 			Key: c.key, References: c.references, Comment: c.comment,
 		}
 	}

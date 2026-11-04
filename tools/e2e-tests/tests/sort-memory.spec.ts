@@ -1,5 +1,5 @@
 import { expect, test } from "./support/fixtures";
-import { gotoApp, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
+import { gotoApp, refuseSort, rejectSort, selectTable, tableKey, uiState, waitForIdle } from "./support/helpers";
 
 test("a table keeps the sort last chosen on it when you leave and come back", async ({ page }) => {
   await gotoApp(page);
@@ -74,6 +74,37 @@ test("a remembered sort column the backend rejects is dropped and the view recov
   await expect(page.locator('thead th[data-col]:not([aria-sort="none"])')).toHaveCount(0);
 
   expect((await uiState(page)).sortByTable[tableKey("products")]).toBeUndefined();
+});
+
+test("a sort on a column with no ordering is dropped and the banner says why", async ({ page }) => {
+  await refuseSort(page, "price");
+  await gotoApp(page);
+  await selectTable(page, "products");
+
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
+  await waitForIdle(page);
+
+  await expect(page.locator("#error")).toHaveText("cannot sort by price: its type has no ordering");
+  await expect(page.locator("#tbody tr").first()).toBeVisible();
+  await expect(page.locator('thead th[data-col]:not([aria-sort="none"])')).toHaveCount(0);
+  expect((await uiState(page)).sortByTable[tableKey("products")]).toBeUndefined();
+
+  // The page recovered, so the next click on another column sorts as usual.
+  await page.locator('th[data-col="name"]').click({ position: { x: 6, y: 6 } });
+  await waitForIdle(page);
+  await expect(page.locator('th[data-col="name"]')).toHaveAttribute("aria-sort", "ascending");
+  await expect(page.locator("#error")).toBeEmpty();
+});
+
+test("the unsortable-column banner does not follow a switch to another table", async ({ page }) => {
+  await refuseSort(page, "price");
+  await gotoApp(page);
+  await selectTable(page, "products");
+  await page.locator('th[data-col="price"]').click({ position: { x: 6, y: 6 } });
+  await selectTable(page, "users");
+  await waitForIdle(page);
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect(page.locator('th[data-col="email"]')).toBeVisible();
 });
 
 test("a stale remembered sort is dropped without discarding a shared link's filter", async ({ page }) => {

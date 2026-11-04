@@ -12,7 +12,7 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
-    self, ColMeta, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta, TypeClass,
+    self, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -121,21 +121,21 @@ const MARIADB_JSON_COLUMNS_SQL: &str = "constraint_name from information_schema.
        and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
-fn type_class(data_type: &str, column_type: &str) -> Option<TypeClass> {
+fn column_class(data_type: &str, column_type: &str) -> ColumnClass {
     match data_type.to_ascii_lowercase().as_str() {
         "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" | "decimal"
-        | "numeric" => Some(TypeClass::Number),
-        "char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" => {
-            Some(TypeClass::Text)
-        }
-        "date" | "datetime" | "timestamp" => Some(TypeClass::Temporal),
-        "time" => Some(TypeClass::Time),
+        | "numeric" => ColumnClass::Number,
+        "char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" => ColumnClass::Text,
+        "date" | "datetime" | "timestamp" => ColumnClass::Temporal,
+        "time" => ColumnClass::Time,
         "binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" => {
-            Some(TypeClass::Binary)
+            ColumnClass::Binary
         }
-        "uuid" => Some(TypeClass::Uuid),
-        "enum" => Some(TypeClass::Enum(column_type.to_string())),
-        _ => None,
+        "uuid" => ColumnClass::Uuid,
+        "enum" => ColumnClass::Enum(column_type.to_string()),
+        "float" | "double" => ColumnClass::Float,
+        "json" => ColumnClass::Json,
+        _ => ColumnClass::Other,
     }
 }
 
@@ -309,12 +309,14 @@ impl MySqlSource {
             name: table.to_string(),
             columns: columns
                 .into_iter()
-                .map(|(name, type_name, comment, collation, column_type)| {
+                .map(|(name, data_type, comment, collation, column_type)| {
+                    // column_type keeps what data_type drops: `tinyint(1)`,
+                    // `int unsigned`, an enum's members.
                     let (type_name, class) = if json_columns.contains(&name) {
-                        ("json".to_string(), None)
+                        ("json".to_string(), ColumnClass::Json)
                     } else {
-                        let class = type_class(&type_name, &column_type);
-                        (type_name, class)
+                        let class = column_class(&data_type, &column_type);
+                        (column_type, class)
                     };
                     let (key, references) = if pk_columns.contains(&name) {
                         (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
@@ -571,9 +573,16 @@ impl DbSource for MySqlSource {
             .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
             .clone();
 
-        let column_names = self
-            .allowed_columns_in_tx(&mut tx, variant, &schema, &table, timeout)
-            .await?;
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        let columns: Vec<ColumnInfo> = self
+            .table_meta_in_tx(&mut tx, variant, &schema, &table, timeout)
+            .await?
+            .columns
+            .into_iter()
+            .map(ColumnInfo::from)
+            .collect();
+        let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
@@ -594,21 +603,6 @@ impl DbSource for MySqlSource {
             Some(filter) => build_where_clause(filter, &column_names)?,
             None => (String::new(), Vec::new()),
         };
-
-        // The join route's lookup, so both routes report the same column types.
-        let columns: Vec<ColumnInfo> = self
-            .table_meta_in_tx(&mut tx, variant, &schema, &table, timeout)
-            .await?
-            .columns
-            .into_iter()
-            .map(|c| ColumnInfo {
-                name: c.name,
-                type_name: c.type_name,
-                key: c.key,
-                references: c.references,
-                comment: c.comment,
-            })
-            .collect();
 
         let select_list = columns
             .iter()
@@ -1498,17 +1492,18 @@ mod tests {
     }
 
     #[test]
-    fn type_classes_follow_data_type() {
-        use TypeClass::*;
-        assert_eq!(type_class("bigint", "bigint"), Some(Number));
-        assert_eq!(type_class("VARCHAR", "varchar(20)"), Some(Text));
-        assert_eq!(type_class("datetime", "datetime"), Some(Temporal));
+    fn column_classes_follow_data_type() {
+        use ColumnClass::*;
+        assert_eq!(column_class("bigint", "bigint"), Number);
+        assert_eq!(column_class("VARCHAR", "varchar(20)"), Text);
+        assert_eq!(column_class("datetime", "datetime"), Temporal);
         assert_eq!(
-            type_class("enum", "enum('a','b')"),
-            Some(Enum("enum('a','b')".into()))
+            column_class("enum", "enum('a','b')"),
+            Enum("enum('a','b')".into())
         );
-        assert_eq!(type_class("json", "json"), None);
-        assert_eq!(type_class("double", "double"), None);
-        assert_eq!(type_class("uuid", "uuid"), Some(Uuid));
+        assert_eq!(column_class("json", "json"), Json);
+        assert_eq!(column_class("double", "double"), Float);
+        assert_eq!(column_class("uuid", "uuid"), Uuid);
+        assert_eq!(column_class("geometry", "geometry"), Other);
     }
 }

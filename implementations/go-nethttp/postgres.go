@@ -38,38 +38,39 @@ var pgJoinDialect = joinDialect{
 	ilike:    ilikeNative,
 }
 
-// pgTypeClass maps information_schema types to spec/protocol.md §5.11.2
+// pgColumnClass maps information_schema types to spec/protocol.md §5.11.2
 // classes (docs/adapter-decisions.md §5.11).
-func pgTypeClass(dataType, udtSchema, udtName string, isEnum bool) *typeClass {
-	var c typeClass
+func pgColumnClass(dataType, udtSchema, udtName string, isEnum bool) columnClass {
 	switch dataType {
 	case "smallint", "integer", "bigint", "numeric":
-		c = classNumber
+		return classNumber
 	case "character varying", "character", "text":
-		c = classText
+		return classText
 	case "uuid":
-		c = classUUID
+		return classUUID
 	case "boolean":
-		c = classBoolean
+		return classBoolean
 	case "bytea":
-		c = classBinary
+		return classBinary
 	case "date", "timestamp without time zone", "timestamp with time zone":
-		c = classTemporal
+		return classTemporal
 	case "time without time zone", "time with time zone":
-		c = classTime
+		return classTime
+	case "real", "double precision":
+		return classFloat
+	case "json", "jsonb":
+		return classJSON
+	case "ARRAY":
+		return classArray
 	case "USER-DEFINED":
 		switch {
 		case isEnum:
-			c = classEnum(udtSchema + "." + udtName)
+			return classEnum(udtSchema + "." + udtName)
 		case udtName == "citext":
-			c = classText
-		default:
-			return nil
+			return classText
 		}
-	default:
-		return nil
 	}
-	return &c
+	return classOther
 }
 
 func (c *PostgresSource) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -268,82 +269,67 @@ func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, ta
 	return pkColumns, fkColumns, nil
 }
 
-// pgColumnComments joins pg_attribute/pg_class directly: col_description is
-// keyed by attnum, which can diverge from ordinal_position once a column has
-// been dropped.
-func pgColumnComments(ctx context.Context, q queryer, schema, table string) (map[string]string, error) {
-	rows, err := q.QueryContext(ctx,
-		`select a.attname::text, col_description(a.attrelid, a.attnum::int)
-		 from pg_attribute a
-		 join pg_class c on c.oid = a.attrelid
-		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = $1 and c.relname = $2
-		   and a.attnum > 0 and not a.attisdropped`, schema, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	comments := map[string]string{}
-	for rows.Next() {
-		var name string
-		var comment sql.NullString
-		if err := rows.Scan(&name, &comment); err != nil {
-			return nil, err
-		}
-		if comment.Valid {
-			comments[name] = comment.String
-		}
-	}
-	return comments, rows.Err()
-}
-
-// joinTableMeta reads a table already cleared by readableTableOID.
-func (c *PostgresSource) joinTableMeta(ctx context.Context, tx queryer, schema, table string) (joinTableMeta, error) {
+// tableMeta reads a table already cleared by readableTableOID, which
+// supplies oid.
+func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, table string, oid int) (tableMeta, error) {
 	metaCtx, cancel := c.bounded(ctx)
 	defer cancel()
+	// information_schema.columns drives the list (column privileges, order);
+	// pg_attribute adds the full type spelling, comment and collation, keyed by
+	// attnum, which can diverge from ordinal_position after a drop. The default
+	// collation (oid 100) is left out: it yields to an explicit one in a
+	// comparison, so it never clashes.
 	rows, err := tx.QueryContext(metaCtx,
 		`select c.column_name, c.data_type, c.udt_schema, c.udt_name,
 		        exists (select 1 from pg_type t
 		                join pg_namespace n on n.oid = t.typnamespace
 		                where n.nspname = c.udt_schema and t.typname = c.udt_name
-		                  and t.typtype = 'e')
+		                  and t.typtype = 'e'),
+		        format_type(a.atttypid, a.atttypmod),
+		        col_description(a.attrelid, a.attnum::int),
+		        (select case when n.nspname = 'pg_catalog' then co.collname
+		                     else n.nspname || '.' || co.collname end
+		           from pg_collation co
+		           join pg_namespace n on n.oid = co.collnamespace
+		          where co.oid = a.attcollation and a.attcollation not in (0, 100))
 		 from information_schema.columns c
+		 join pg_attribute a on a.attrelid = $3 and a.attname = c.column_name
 		 where c.table_schema = $1 and c.table_name = $2
-		 order by c.ordinal_position`, schema, table)
+		 order by c.ordinal_position`, schema, table, oid)
 	if err != nil {
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
-	meta := joinTableMeta{name: table}
+	meta := tableMeta{name: table}
 	for rows.Next() {
-		var name, dataType, udtSchema, udtName string
+		var name, dataType, udtSchema, udtName, fullType string
 		var isEnum bool
-		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum); err != nil {
+		var comment, collation sql.NullString
+		if err := rows.Scan(&name, &dataType, &udtSchema, &udtName, &isEnum, &fullType, &comment, &collation); err != nil {
 			rows.Close()
-			return joinTableMeta{}, err
+			return tableMeta{}, err
 		}
-		meta.columns = append(meta.columns, joinColMeta{
-			name: name, typeName: dataType, class: pgTypeClass(dataType, udtSchema, udtName, isEnum),
-		})
+		col := colMeta{
+			name: name, typeName: fullType, class: pgColumnClass(dataType, udtSchema, udtName, isEnum),
+			comment: comment.String,
+		}
+		if collation.Valid {
+			col.collation = &collation.String
+		}
+		meta.columns = append(meta.columns, col)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	rows.Close()
 
-	comments, err := pgColumnComments(metaCtx, tx, schema, table)
-	if err != nil {
-		return joinTableMeta{}, err
-	}
-
 	pk, fk, err := c.keyMetadata(ctx, tx, schema, table)
 	if err != nil {
-		return joinTableMeta{}, err
+		return tableMeta{}, err
 	}
 	for i := range meta.columns {
 		col := &meta.columns[i]
 		col.key, col.references = joinKeyOf(col.name, pk, fk)
-		col.comment = comments[col.name]
 	}
 	return meta, nil
 }
@@ -362,21 +348,22 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 		return JoinData{}, err
 	}
 	names := spec.TableNames()
-	metas := map[string]joinTableMeta{}
+	metas := map[string]tableMeta{}
 	for _, name := range names {
 		if _, ok := metas[name]; ok {
 			continue
 		}
-		if _, err := c.readableTableOID(ctx, tx, realSchema, name); err != nil {
+		oid, err := c.readableTableOID(ctx, tx, realSchema, name)
+		if err != nil {
 			return JoinData{}, unknownJoinTable(err)
 		}
-		meta, err := c.joinTableMeta(ctx, tx, realSchema, name)
+		meta, err := c.tableMeta(ctx, tx, realSchema, name, oid)
 		if err != nil {
 			return JoinData{}, unknownJoinTable(err)
 		}
 		metas[name] = meta
 	}
-	tables := make([]joinTableMeta, len(names))
+	tables := make([]tableMeta, len(names))
 	for i, name := range names {
 		tables[i] = metas[name]
 	}
@@ -397,12 +384,12 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 	defer cancel()
 	rows, err := tx.QueryContext(queryCtx, "select "+body, args...)
 	if err != nil {
-		return JoinData{}, mapSelectDenied(err, spec.Table)
+		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort)
 	}
 	defer rows.Close()
 	out, hasMore, err := scanJoinRows(rows, plan.labels, opts.Limit)
 	if err != nil {
-		return JoinData{}, mapSelectDenied(err, spec.Table)
+		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort)
 	}
 	rows.Close()
 	if err := tx.Commit(); err != nil {
@@ -529,11 +516,17 @@ func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]Cou
 // rejects tables the role can't SELECT, so this only catches the edge. It
 // also maps a filter value Postgres's text encoding rejects (SQLSTATE
 // 22021/22P05) to a FilterError, also 400, never a raw 500
-// (docs/adapter-decisions.md §5.4.2 has the cross-backend rationale).
-func mapSelectDenied(err error, table string) error {
+// (docs/adapter-decisions.md §5.4.2 has the cross-backend rationale). When the
+// request sorts, an "undefined function" error (SQLSTATE 42883) is the sort
+// column's type having no ordering operator (json, xml, geometric types).
+func mapSelectDenied(err error, table string, sort *string) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
+		case "42883":
+			if sort != nil {
+				return &UnsortableError{Column: *sort}
+			}
 		case "42501":
 			return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
 		case "22021", "22P05":
@@ -558,15 +551,20 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 		return TableData{}, err
 	}
 
-	if _, err := c.readableTableOID(ctx, tx, realSchema, table); err != nil {
+	oid, err := c.readableTableOID(ctx, tx, realSchema, table)
+	if err != nil {
 		return TableData{}, err
 	}
 	realTable := table
 
-	columnNames, err := c.allowedColumns(ctx, tx, realSchema, realTable)
+	// The join route's lookup, so both routes report the same columns; its
+	// names are the live catalog's, so they also serve as the allow-list.
+	meta, err := c.tableMeta(ctx, tx, realSchema, realTable, oid)
 	if err != nil {
 		return TableData{}, err
 	}
+	columns := meta.columnInfos()
+	columnNames := meta.columnNames()
 
 	var sort *string
 	if opts.Sort != nil {
@@ -584,63 +582,6 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 		if err != nil {
 			return TableData{}, err
 		}
-	}
-
-	metaCtx, metaCancel := c.bounded(ctx)
-	columnTypeRows, err := tx.QueryContext(metaCtx,
-		`select column_name, data_type from information_schema.columns
-		 where table_schema = $1 and table_name = $2
-		 order by ordinal_position`, realSchema, realTable)
-	if err != nil {
-		metaCancel()
-		return TableData{}, err
-	}
-	type colType struct{ name, typ string }
-	var columnTypes []colType
-	for columnTypeRows.Next() {
-		var ct colType
-		if err := columnTypeRows.Scan(&ct.name, &ct.typ); err != nil {
-			columnTypeRows.Close()
-			metaCancel()
-			return TableData{}, err
-		}
-		columnTypes = append(columnTypes, ct)
-	}
-	if err := columnTypeRows.Err(); err != nil {
-		columnTypeRows.Close()
-		metaCancel()
-		return TableData{}, err
-	}
-	columnTypeRows.Close()
-
-	columnComments, err := pgColumnComments(metaCtx, tx, realSchema, realTable)
-	if err != nil {
-		metaCancel()
-		return TableData{}, err
-	}
-	metaCancel()
-
-	pkColumns, fkColumns, err := c.keyMetadata(ctx, tx, realSchema, realTable)
-	if err != nil {
-		return TableData{}, err
-	}
-
-	columns := make([]ColumnInfo, 0, len(columnTypes))
-	for _, ct := range columnTypes {
-		col := ColumnInfo{Name: ct.name, Type: ct.typ}
-		if ref, ok := fkColumns[ct.name]; ok {
-			col.References = &ref
-		}
-		switch {
-		case pkColumns[ct.name]:
-			col.Key = KeyPK
-		case col.References != nil:
-			col.Key = KeyFK
-		}
-		if comment, ok := columnComments[ct.name]; ok {
-			col.Comment = comment
-		}
-		columns = append(columns, col)
 	}
 
 	selectParts := make([]string, len(columns))
@@ -681,7 +622,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, query, args...)
 	if err != nil {
-		return TableData{}, mapSelectDenied(err, realTable)
+		return TableData{}, mapSelectDenied(err, realTable, sort)
 	}
 	defer rows.Close()
 

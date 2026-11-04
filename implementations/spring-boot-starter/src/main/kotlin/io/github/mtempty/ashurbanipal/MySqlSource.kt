@@ -114,15 +114,17 @@ private const val MARIADB_JSON_COLUMNS_SQL =
         "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun mysqlTypeClass(dataType: String, columnType: String): TypeClass? = when (dataType.lowercase()) {
-    "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> TypeClass.NUMBER
-    "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> TypeClass.TEXT
-    "date", "datetime", "timestamp" -> TypeClass.TEMPORAL
-    "time" -> TypeClass.TIME
-    "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> TypeClass.BINARY
-    "uuid" -> TypeClass.UUID
-    "enum" -> TypeClass.enum(columnType)
-    else -> null
+internal fun mysqlColumnClass(dataType: String, columnType: String): ColumnClass = when (dataType.lowercase()) {
+    "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> ColumnClass.NUMBER
+    "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> ColumnClass.TEXT
+    "date", "datetime", "timestamp" -> ColumnClass.TEMPORAL
+    "time" -> ColumnClass.TIME
+    "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> ColumnClass.BINARY
+    "uuid" -> ColumnClass.UUID
+    "enum" -> ColumnClass.enum(columnType)
+    "float", "double" -> ColumnClass.FLOAT
+    "json" -> ColumnClass.JSON
+    else -> ColumnClass.OTHER
 }
 
 /** MySQL/MariaDB [DbSource] (`spec/protocol.md` §5). */
@@ -309,7 +311,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             ) { rs -> rs.getString(1) }.toSet()
         }
 
-    private fun tableMeta(variant: Variant, schema: String, table: String): JoinTableMeta {
+    private fun tableMeta(variant: Variant, schema: String, table: String): TableMeta {
         data class Col(val name: String, val type: String, val comment: String?, val collation: String?, val columnType: String)
         val columns = query(
             dataSource,
@@ -323,14 +325,15 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         ) { rs -> Col(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)) }
         val (pkColumns, fkColumns) = keyMetadata(variant, schema, table)
         val jsonColumns = mariadbJsonColumns(variant, schema, table)
-        return JoinTableMeta(
+        return TableMeta(
             table,
             columns.map { c ->
                 val isJson = c.name in jsonColumns
-                JoinColMeta(
+                ColMeta(
                     name = c.name,
-                    type = if (isJson) "json" else c.type,
-                    cls = if (isJson) null else mysqlTypeClass(c.type, c.columnType),
+                    // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
+                    type = if (isJson) "json" else c.columnType,
+                    columnClass = if (isJson) ColumnClass.JSON else mysqlColumnClass(c.type, c.columnType),
                     collation = c.collation?.takeIf { it.isNotEmpty() },
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],
@@ -345,7 +348,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val realSchema = resolveSchema(variant, schema)
         val allowed = allowedTables(variant, realSchema)
         val names = spec.tableNames()
-        val metas = HashMap<String, JoinTableMeta>()
+        val metas = HashMap<String, TableMeta>()
         for (name in names) {
             if (name in metas) continue
             if (name !in allowed) throw BadJoinException("unknown table \"$name\"")
@@ -375,18 +378,16 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val variant = variant()
         val realSchema = resolveSchema(variant, schema)
         val realTable = requireTable(variant, realSchema, table)
-        val columnNames = allowedColumns(variant, realSchema, realTable)
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        val columns = tableMeta(variant, realSchema, realTable).columns.map { it.columnInfo() }
+        val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
         val whereClause = opts.filter?.let { buildWhereClauseMysql(it, columnNames) } ?: WhereClause("", emptyList())
-
-        // The join route's lookup, so both routes report the same column types.
-        val columns = tableMeta(variant, realSchema, realTable).columns.map {
-            ColumnInfo(it.name, it.type, it.key, it.references, it.comment)
-        }
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdentMysql(it.name)} AS CHAR)" }
         val orderClause = sort?.let {

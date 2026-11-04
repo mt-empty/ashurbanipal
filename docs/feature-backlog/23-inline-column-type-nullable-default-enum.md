@@ -48,6 +48,18 @@ Divergence in what "type" and "enum" mean across the three belongs in
   raw string, bucket it tolerantly in the frontend); if this story adds a
   popover, the same `<code>`-wrapped raw type and the same `columnTypeClass`
   helper apply.
+- **Shape of the new fields (decided 2026-11-04).** JDBC
+  (`getColumnTypeName` beside `getColumnType`), Metabase (`base_type`,
+  `effective_type`, `semantic_type`), Arrow (the logical type in field
+  metadata over the physical type) and Frictionless Table Schema (`type`
+  plus `format`) all send the engine's native name beside a small closed
+  vocabulary. `type` + `class` is that pair, and `class` is now sent for
+  every column (story 47). `nullable`, `default` and `enum_values` therefore
+  arrive as separate named optional fields, each meaning what its name says.
+  A traits bag (`{sortable, generated, ...}`) was rejected, and so was one
+  field whose meaning depends on another, such as a generic "compare token":
+  each trait would still cost five ports and conformance, so a bag only hides
+  the growth. `collation` was the first such field.
 - §5.4.1 or §5.10? Story 26 put indexes and constraints on the lazy §5.10
   route so `/tables/data` stays cheap on every page. These fields are the
   same kind of per-table data, so §5.10 is the likely home unless the grid

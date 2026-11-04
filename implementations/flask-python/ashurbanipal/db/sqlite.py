@@ -13,6 +13,8 @@ from ..filter import Condition
 from ..join import (
     BINARY,
     BOOLEAN,
+    FLOAT,
+    JSON,
     NUMBER,
     TEMPORAL,
     TEXT,
@@ -20,18 +22,17 @@ from ..join import (
     UNTYPED,
     UUID,
     ColMeta,
+    ColumnClass,
     Dialect,
     JoinData,
     JoinOpts,
     JoinSpec,
     TableMeta,
-    TypeClass,
     build_select,
     plan_join,
 )
 from . import (
     BadJoin,
-    ColumnInfo,
     ColumnPair,
     ColumnRef,
     ConstraintFk,
@@ -148,7 +149,7 @@ _JOIN_DIALECT = Dialect(
 )
 
 
-def type_class(declared: str) -> TypeClass | None:
+def column_class(declared: str) -> ColumnClass:
     """Recognised names first, then SQLite's own affinity rules
     (`docs/adapter-decisions.md` §5.11).
     """
@@ -165,7 +166,7 @@ def type_class(declared: str) -> TypeClass | None:
     if base == "TIME":
         return TIME
     if base in ("JSON", "JSONB"):
-        return None
+        return JSON
     if "INT" in upper:
         return NUMBER
     if "CHAR" in upper or "CLOB" in upper or "TEXT" in upper:
@@ -173,7 +174,7 @@ def type_class(declared: str) -> TypeClass | None:
     if "BLOB" in upper:
         return BINARY
     if "REAL" in upper or "FLOA" in upper or "DOUB" in upper:
-        return None
+        return FLOAT
     return NUMBER
 
 
@@ -210,6 +211,25 @@ class SqliteSource(DbSource):
         # PRAGMA cannot bind table names; callers supply an allow-listed table.
         cur.execute(f"select cid, name from pragma_table_info({quote_ident(table)}) order by cid")
         return [row[1] for row in cur.fetchall()]
+
+    def _table_meta(self, cur: sqlite3.Cursor, table: str) -> TableMeta:
+        """`table` must already be allow-listed: it is spliced into the pragma call."""
+        pk_columns, fk_columns = self._key_metadata(cur, table)
+        cur.execute(f"select cid, name, type from pragma_table_info({quote_ident(table)}) order by cid")
+        return TableMeta(
+            name=table,
+            columns=[
+                ColMeta(
+                    name=col,
+                    # A declared type can be empty (""); a stable label beats emitting "".
+                    type_name=declared or "unknown",
+                    column_class=column_class(declared or ""),
+                    key=(KeyKind.PK if col in pk_columns else (KeyKind.FK if col in fk_columns else None)),
+                    references=fk_columns.get(col),
+                )
+                for _, col, declared in cur.fetchall()
+            ],
+        )
 
     def _key_metadata(self, cur: sqlite3.Cursor, table: str) -> tuple[list[str], dict[str, ColumnRef]]:
         quoted = quote_ident(table)
@@ -287,7 +307,10 @@ class SqliteSource(DbSource):
                 if table not in tables:
                     raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
 
-                column_names = self._allowed_columns(cur, table)
+                # The join route's lookup, so both routes report the same columns; its
+                # names are the live catalog's, so they also serve as the allow-list.
+                columns = [c.column_info() for c in self._table_meta(cur, table).columns]
+                column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
                     if opts.sort not in column_names:
@@ -296,28 +319,7 @@ class SqliteSource(DbSource):
 
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
-                pk_columns, fk_columns = self._key_metadata(cur, table)
                 quoted_table = quote_ident(table)
-                cur.execute(f"select cid, name, type from pragma_table_info({quoted_table}) order by cid")
-                columns = []
-                for _, name, type_name in cur.fetchall():
-                    if name in pk_columns:
-                        key = KeyKind.PK
-                    elif name in fk_columns:
-                        key = KeyKind.FK
-                    else:
-                        key = None
-                    columns.append(
-                        ColumnInfo(
-                            name=name,
-                            # SQLite's declared column types can be empty (""),
-                            # fall back to a stable label rather than emitting "".
-                            type_name=type_name or "unknown",
-                            key=key,
-                            references=fk_columns.get(name),
-                            comment=None,
-                        )
-                    )
             finally:
                 self._clear_bound(conn)
 
@@ -371,25 +373,7 @@ class SqliteSource(DbSource):
                         continue
                     if name not in allowed:
                         raise BadJoin(f"unknown table {name!r}")
-                    pk_columns, fk_columns = self._key_metadata(cur, name)
-                    cur.execute(f"select cid, name, type from pragma_table_info({quote_ident(name)}) order by cid")
-                    metas[name] = TableMeta(
-                        name=name,
-                        columns=[
-                            ColMeta(
-                                name=col,
-                                type_name=declared or "unknown",
-                                cls=type_class(declared or ""),
-                                key=(
-                                    KeyKind.PK
-                                    if col in pk_columns
-                                    else (KeyKind.FK if col in fk_columns else None)
-                                ),
-                                references=fk_columns.get(col),
-                            )
-                            for _, col, declared in cur.fetchall()
-                        ],
-                    )
+                    metas[name] = self._table_meta(cur, name)
                 plan = plan_join(spec, [metas[n] for n in names], opts)
 
                 # The statement is built from catalog names and generated

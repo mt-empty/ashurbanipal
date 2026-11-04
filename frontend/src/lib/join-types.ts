@@ -1,45 +1,14 @@
-import type { Column } from "../core/types.js";
+import type { ClassedColumn, Column, ColumnClass } from "../core/types.js";
 
-// ==== Join type hints (spec/protocol.md §5.11.2) ====
-// Which column types a join can pair, so the form can grey the ones that
-// cannot. Only a hint: the page does not know the engine, so native type
-// names are matched across Postgres, MySQL/MariaDB and SQLite together, and
-// a type this table does not know is allowed. The server is the authority.
+// ==== Join pair checks (spec/protocol.md §5.11.2) ====
+// The server reports each column's column class, so the form greys the pairs
+// it would reject by type: a different class, two different enumerated types
+// (`enum_type`), two text columns with different `collation`s, or a class that
+// cannot be joined at all.
 
-type JoinClass = "number" | "text" | "uuid" | "boolean" | "temporal" | "time" | "binary" | "enum" | "custom";
+const NOT_JOINABLE: ReadonlySet<ColumnClass> = new Set(["float", "json", "array", "other"]);
 
-const CLASS_OF: Record<string, JoinClass> = {};
-function assign(cls: JoinClass, names: string): void {
-  for (const n of names.split(",")) CLASS_OF[n] = cls;
-}
-assign("number", "smallint,integer,bigint,int,int2,int4,int8,tinyint,mediumint,numeric,decimal");
-assign("text", "character varying,character,char,varchar,text,tinytext,mediumtext,longtext,citext,clob");
-assign("uuid", "uuid");
-assign("boolean", "boolean,bool");
-assign("temporal", "date,datetime,timestamp,timestamp without time zone,timestamp with time zone");
-assign("time", "time,time without time zone,time with time zone");
-assign("binary", "bytea,binary,varbinary,tinyblob,blob,mediumblob,longblob");
-assign("enum", "enum");
-// Postgres reports every enum (and citext) as USER-DEFINED; the page cannot tell which.
-assign("custom", "user-defined");
-
-const NOT_JOINABLE = new Set([
-  "json",
-  "jsonb",
-  "array",
-  "real",
-  "double precision",
-  "float",
-  "double",
-  "money",
-  "interval",
-  "set",
-  "bit",
-  "year",
-  "inet",
-]);
-
-const LABEL: Record<JoinClass, string> = {
+const LABEL: Record<ColumnClass, string> = {
   number: "number",
   text: "text",
   uuid: "uuid",
@@ -48,17 +17,12 @@ const LABEL: Record<JoinClass, string> = {
   time: "time",
   binary: "binary",
   enum: "enum",
-  // Postgres reports an enum (or citext) as USER-DEFINED, and an enum is far the likelier.
-  custom: "enum",
+  untyped: "untyped",
+  float: "float",
+  json: "json",
+  array: "array",
+  other: "other",
 };
-
-function classOf(type: string): JoinClass | "none" | null {
-  const t = type.toLowerCase();
-  if (NOT_JOINABLE.has(t) || t.endsWith("[]")) return "none";
-  return CLASS_OF[t] ?? null;
-}
-
-const shown = (type: string): string => (type.toLowerCase() === "user-defined" ? "enum" : type);
 
 export interface JoinMismatch {
   // Short, for a menu row: `text ≠ uuid`, `jsonb: not joinable`.
@@ -67,33 +31,47 @@ export interface JoinMismatch {
   message: string;
 }
 
-// Why a column of type `candidate` cannot pair with one of type `other`, or null
-// when it can or the page cannot tell.
-export function joinMismatch(candidate: string, other: string): JoinMismatch | null {
-  const a = classOf(candidate);
-  const b = classOf(other);
-  if (a === "none" || b === "none") {
-    const type = shown(a === "none" ? candidate : other);
-    return { note: `${type}: not joinable`, message: `${type} columns cannot be joined. Pick another column.` };
+// A full type can be long (MySQL `enum('a','b',…)`), so notes cut it to fit a menu row.
+export const truncateType = (type: string): string => (type.length > 24 ? `${type.slice(0, 23)}…` : type);
+
+// Why column `candidate` cannot pair with `other`, or null when it can.
+export function joinMismatch(candidate: ClassedColumn, other: ClassedColumn): JoinMismatch | null {
+  const candidateReason = unjoinableReason(candidate);
+  const blocked = candidateReason ?? unjoinableReason(other);
+  if (blocked) {
+    const type = truncateType(candidateReason ? candidate.type : other.type);
+    return { note: blocked, message: `${type} columns cannot be joined. Pick another column.` };
   }
-  if (a === null || b === null || a === b) return null;
-  // A custom type may be citext, which pairs with text.
-  if ((a === "custom" && b === "text") || (a === "text" && b === "custom")) return null;
+  const a = candidate.class;
+  const b = other.class;
+  const left = truncateType(candidate.type);
+  const right = truncateType(other.type);
+  const [x, y] = [candidate.collation, other.collation];
+  if (a === "text" && b === "text" && x && y && x !== y) {
+    return {
+      note: "different collations",
+      message: `${left} and ${right} use different text collations (${x} and ${y}).`,
+    };
+  }
+  if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   return {
-    note: `${shown(candidate)} ≠ ${shown(other)}`,
-    message: `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`,
+    note: `${left} ≠ ${right}`,
+    message:
+      a === b
+        ? `${left} cannot be joined to ${right}: they are different enumerated types.`
+        : `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`,
   };
 }
 
 // A column that cannot join anything, whatever the other side is.
-export function unjoinableReason(type: string): string | null {
-  return classOf(type) === "none" ? `${shown(type)}: not joinable` : null;
+export function unjoinableReason(column: ClassedColumn): string | null {
+  return NOT_JOINABLE.has(column.class) ? `${truncateType(column.type)}: not joinable` : null;
 }
 
-// The note a menu row shows for a column of `type` when the other side has
-// `otherType` (or nothing picked yet); a non-null note means the row is greyed.
-export function pairNote(type: string, otherType: string | undefined): string | null {
-  return otherType === undefined ? unjoinableReason(type) : (joinMismatch(type, otherType)?.note ?? null);
+// The note a menu row shows for `column` when the other side is `other` (or
+// nothing picked yet); a non-null note means the row is greyed.
+export function pairNote(column: ClassedColumn, other: ClassedColumn | undefined): string | null {
+  return other === undefined ? unjoinableReason(column) : (joinMismatch(column, other)?.note ?? null);
 }
 
 export interface ForeignKeyPair {

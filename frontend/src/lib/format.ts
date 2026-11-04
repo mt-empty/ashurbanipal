@@ -1,4 +1,4 @@
-import type { Column } from "../core/types.js";
+import type { ClassedColumn, Column, ColumnClass } from "../core/types.js";
 
 // Mirrors json-tree.ts's UUID scalar test; kept local so this leaf stays
 // unit-testable without a runtime import.
@@ -24,16 +24,17 @@ export const APPROX_COUNT_TITLE =
   "~ = approximate, from the backend's own statistics, not a live count; " +
   "? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
 
-// col.type is the DB engine's own catalog spelling (Postgres data_type,
-// MySQL DATA_TYPE, SQLite declared type or "unknown"), so bucketing folds
-// case, strips a length/precision suffix, and matches a closed alias set.
+// col.type is the DB engine's full spelling (Postgres format_type, MySQL
+// COLUMN_TYPE, SQLite declared type or "unknown"), so bucketing folds case,
+// drops length/precision groups and MySQL's unsigned/zerofill, and matches a
+// closed alias set.
 // An explicit set, never substring matching: "int" as a substring also
 // hits Postgres interval/point/inet/int4range/line/lseg, none of them
 // numbers. `date` covers plain dates and timestamps alike — nothing
 // renders them differently.
-export type ColumnTypeClass = "number" | "bool" | "date" | "uuid" | "json";
+export type DisplayBucket = "number" | "bool" | "date" | "uuid" | "json";
 
-const TYPE_ALIASES: Record<string, ColumnTypeClass> = {
+const TYPE_ALIASES: Record<string, DisplayBucket> = {
   smallint: "number",
   integer: "number",
   int: "number",
@@ -66,18 +67,39 @@ const TYPE_ALIASES: Record<string, ColumnTypeClass> = {
   jsonb: "json",
 };
 
-function typeKey(rawType: string): string {
+// Only the parenthesised groups go, so `numeric(10,2)[]` stays an array and
+// `timestamp(3) with time zone` keeps its zone.
+function baseTypeName(rawType: string): string {
   return rawType
     .toLowerCase()
-    .replace(/\s*\(.*$/, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\b(unsigned|signed|zerofill)\b/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-export function columnTypeClass(rawType: string): ColumnTypeClass | null {
-  return TYPE_ALIASES[typeKey(rawType)] ?? null;
+export function typeNameClass(rawType: string): DisplayBucket | null {
+  // MySQL's boolean is tinyint(1); only the display width tells it apart.
+  if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
+  return TYPE_ALIASES[baseTypeName(rawType)] ?? null;
 }
 
-const TYPE_CLASS_CSS: Partial<Record<ColumnTypeClass, string>> = {
+const FROM_COLUMN_CLASS: Partial<Record<ColumnClass, DisplayBucket>> = {
+  number: "number",
+  temporal: "date",
+  uuid: "uuid",
+  boolean: "bool",
+  float: "number",
+  json: "json",
+};
+
+// The type name first; the server's column class covers what the name hides,
+// such as a Postgres domain over integer, whose `type` is the domain's name.
+export function columnTypeClass(col: ClassedColumn): DisplayBucket | null {
+  return typeNameClass(col.type) ?? FROM_COLUMN_CLASS[col.class] ?? null;
+}
+
+const TYPE_CLASS_CSS: Partial<Record<DisplayBucket, string>> = {
   number: "cell-type-number",
   bool: "cell-type-bool",
   uuid: "cell-type-uuid",
@@ -97,15 +119,16 @@ function isTextType(type: string): boolean {
 // A column renders as a JSON tree when the backend typed it as JSON, or when
 // it is a plain string type and the value itself leads with { or [.
 export function rendersAsJson(col: Column, raw: string): boolean {
-  const type = typeKey(col.type);
-  if (TYPE_ALIASES[type] === "json") return true;
-  return isTextType(type) && /^\s*[[{]/.test(raw);
+  const type = baseTypeName(col.type);
+  if (columnTypeClass(col) === "json") return true;
+  // The class covers a text type whose name hides it, such as a domain over varchar.
+  return (isTextType(type) || col.class === "text") && /^\s*[[{]/.test(raw);
 }
 
 // A value that won't parse is only worth flagging when the backend actually
 // typed the column as JSON; a shape-detected guess that misses is expected.
 export function warnBadJsonCell(col: Column, err: unknown): void {
-  if (columnTypeClass(col.type) === "json") {
+  if (columnTypeClass(col) === "json") {
     console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
   }
 }
@@ -167,8 +190,8 @@ function edgeMarks(run: string, side: "leading" | "trailing"): Node[] {
 }
 
 function typedValue(col: Column, raw: string): Node {
-  const klass = columnTypeClass(col.type);
-  if (klass === "date") {
+  const typeClass = columnTypeClass(col);
+  if (typeClass === "date") {
     // No `datetime` attribute: the engine's text cast isn't a valid HTML
     // datetime value on any backend.
     const time = document.createElement("time");
@@ -179,12 +202,12 @@ function typedValue(col: Column, raw: string): Node {
   // An unbucketed type (SQLite "unknown"/"TEXT", Postgres "text", …) with a
   // UUID-shaped value still gets the uuid colour — the pattern is specific
   // enough to trust, and json-tree.ts colours nested UUID strings the same way.
-  let cls: string | undefined;
-  if (klass) cls = TYPE_CLASS_CSS[klass];
-  else if (UUID_RE.test(raw)) cls = "cell-type-uuid";
-  if (cls) {
+  let cssClass: string | undefined;
+  if (typeClass) cssClass = TYPE_CLASS_CSS[typeClass];
+  else if (UUID_RE.test(raw)) cssClass = "cell-type-uuid";
+  if (cssClass) {
     const span = document.createElement("span");
-    span.className = cls;
+    span.className = cssClass;
     span.textContent = raw;
     return span;
   }

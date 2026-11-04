@@ -20,6 +20,9 @@ const val MAX_JOIN_PAIRS = 3
  */
 class BadJoinException(message: String) : RuntimeException("invalid join: $message")
 
+/** A sort on a column whose type has no ordering (`spec/protocol.md` §5.4); 400 `unsortable_column`. */
+class UnsortableException(column: String) : RuntimeException("cannot sort by $column: its type has no ordering")
+
 /** A table named in the join value is part of the join, so a miss is a bad join; `not_readable` stays as it is. */
 internal inline fun <T> joinTable(name: String, block: () -> T): T =
     try {
@@ -55,9 +58,12 @@ data class JoinColumnInfo(
     val join: Int,
     val table: String,
     val column: String,
+    @JsonProperty("class") val columnClass: String,
     @JsonInclude(JsonInclude.Include.NON_NULL) val key: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
+    @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("enum_type") val enumType: String? = null,
+    @JsonInclude(JsonInclude.Include.NON_NULL) val collation: String? = null,
 )
 
 data class JoinData(
@@ -150,36 +156,49 @@ fun parseJoin(raw: String): JoinSpec {
 }
 
 /**
- * Comparison class of a column type (`spec/protocol.md` §5.11.2). [id] carries
+ * Class of a column type (`spec/protocol.md` §5.4.1, §5.11.2). [enumType] carries
  * an enumerated type's identity; `untyped` is a SQLite column with no declared
  * type and pairs only with itself.
  */
-data class TypeClass(val kind: String, val id: String = "") {
+data class ColumnClass(val kind: String, val enumType: String = "") {
     companion object {
-        val NUMBER = TypeClass("number")
-        val TEXT = TypeClass("text")
-        val UUID = TypeClass("uuid")
-        val BOOLEAN = TypeClass("boolean")
-        val TEMPORAL = TypeClass("temporal")
-        val TIME = TypeClass("time")
-        val BINARY = TypeClass("binary")
-        val UNTYPED = TypeClass("untyped")
-        fun enum(identity: String) = TypeClass("enum", identity)
+        val NUMBER = ColumnClass("number")
+        val TEXT = ColumnClass("text")
+        val UUID = ColumnClass("uuid")
+        val BOOLEAN = ColumnClass("boolean")
+        val TEMPORAL = ColumnClass("temporal")
+        val TIME = ColumnClass("time")
+        val BINARY = ColumnClass("binary")
+        val UNTYPED = ColumnClass("untyped")
+        val FLOAT = ColumnClass("float")
+        val JSON = ColumnClass("json")
+        val ARRAY = ColumnClass("array")
+        val OTHER = ColumnClass("other")
+        fun enum(identity: String) = ColumnClass("enum", identity)
     }
 }
 
-/** One column as the live catalog reports it. [collation] is set where two text collations can clash (MySQL). */
-data class JoinColMeta(
+/** Classes whose columns cannot be joined (§5.11.2). */
+private val NOT_JOINABLE = setOf(ColumnClass.FLOAT, ColumnClass.JSON, ColumnClass.ARRAY, ColumnClass.OTHER)
+
+/** One column as the live catalog reports it. [collation] is set where two text collations can clash (§5.4.1). */
+data class ColMeta(
     val name: String,
     val type: String,
-    val cls: TypeClass?,
+    val columnClass: ColumnClass,
     val collation: String? = null,
     val key: String? = null,
     val references: ColumnRef? = null,
     val comment: String? = null,
-)
+) {
+    /** The §5.4.1 shape of this column. */
+    fun columnInfo() = ColumnInfo(
+        name, type, columnClass.kind, key, references, comment,
+        columnClass.enumType.takeIf { it.isNotEmpty() }, collation.takeIf { columnClass == ColumnClass.TEXT },
+    )
+}
 
-data class JoinTableMeta(val name: String, val columns: List<JoinColMeta>) {
+data class TableMeta(val name: String, val columns: List<ColMeta>) {
     fun index(column: String): Int {
         val i = columns.indexOfFirst { it.name == column }
         if (i < 0) throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
@@ -198,7 +217,7 @@ internal data class ResolvedCondition(val cond: Condition, val pos: Int, val col
 
 /** A request resolved against the catalog; every name in SQL text comes from [tables], never the request. */
 class JoinPlan internal constructor(
-    val tables: List<JoinTableMeta>,
+    val tables: List<TableMeta>,
     internal val left: List<Boolean>,
     /** Per join entry: (left position, left column, right column). */
     internal val ons: List<List<Triple<Int, Int, Int>>>,
@@ -211,8 +230,8 @@ class JoinPlan internal constructor(
 ) {
     fun columnInfos(): List<JoinColumnInfo> = selection.mapIndexed { i, (pos, col) ->
         val t = tables[pos]
-        val c = t.columns[col]
-        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.key, c.references, c.comment)
+        val c = t.columns[col].columnInfo()
+        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.columnClass, c.key, c.references, c.comment, c.enumType, c.collation)
     }
 
     /** Keys positional result rows by label and trims the extra row asked for `has_more`. */
@@ -225,22 +244,22 @@ class JoinPlan internal constructor(
     }
 }
 
-private fun describe(t: JoinTableMeta, c: JoinColMeta) = "${t.name}.${c.name} (${c.type})"
+private fun describe(t: TableMeta, c: ColMeta) = "${t.name}.${c.name} (${c.type})"
 
-private val FLOAT_TYPE = Regex("real|float|double", RegexOption.IGNORE_CASE)
-
-private fun unjoinable(position: Int, t: JoinTableMeta, c: JoinColMeta): BadJoinException {
-    val why = if (FLOAT_TYPE.containsMatchIn(c.type)) ": floating-point values are not compared exactly" else ""
+private fun unjoinable(position: Int, t: TableMeta, c: ColMeta): BadJoinException {
+    val why = if (c.columnClass == ColumnClass.FLOAT) ": floating-point values are not compared exactly" else ""
     return BadJoinException("join $position on: ${describe(t, c)} cannot be used in a join$why")
 }
 
-private fun checkPair(position: Int, lt: JoinTableMeta, lc: JoinColMeta, rt: JoinTableMeta, rc: JoinColMeta) {
-    val lcls = lc.cls ?: throw unjoinable(position, lt, lc)
-    val rcls = rc.cls ?: throw unjoinable(position, rt, rc)
-    if (lcls != rcls) {
+private fun checkPair(position: Int, lt: TableMeta, lc: ColMeta, rt: TableMeta, rc: ColMeta) {
+    val leftColumnClass = lc.columnClass
+    val rightColumnClass = rc.columnClass
+    if (leftColumnClass in NOT_JOINABLE) throw unjoinable(position, lt, lc)
+    if (rightColumnClass in NOT_JOINABLE) throw unjoinable(position, rt, rc)
+    if (leftColumnClass != rightColumnClass) {
         throw BadJoinException("join $position on: ${describe(lt, lc)} cannot be joined to ${describe(rt, rc)}")
     }
-    if (lcls == TypeClass.TEXT && lc.collation != null && rc.collation != null && lc.collation != rc.collation) {
+    if (leftColumnClass == ColumnClass.TEXT && lc.collation != null && rc.collation != null && lc.collation != rc.collation) {
         throw BadJoinException(
             "join $position on: ${describe(lt, lc)} and ${describe(rt, rc)} use different text collations (${lc.collation} and ${rc.collation})",
         )
@@ -263,7 +282,7 @@ internal fun assignJoinLabels(names: List<String>, joins: List<Int>): List<Strin
 }
 
 /** Resolves a request against the catalog; `tables[i]` is the metadata of position i. */
-fun planJoin(spec: JoinSpec, tables: List<JoinTableMeta>, opts: JoinOpts): JoinPlan {
+fun planJoin(spec: JoinSpec, tables: List<TableMeta>, opts: JoinOpts): JoinPlan {
     val ons = spec.joins.mapIndexed { i, entry ->
         val position = i + 1
         entry.on.map { pair ->

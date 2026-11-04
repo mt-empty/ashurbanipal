@@ -50,7 +50,7 @@ locale- and timezone-independent and consistent across implementations.
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
 | Postgres | `column::text` in the select list | Postgres's own cast; locale/timezone-independent by construction. |
-| MySQL    | `CAST(column AS CHAR)` in the select list | Same property, different syntax — MySQL has no `::` operator and no `TEXT` cast target (`CHAR` is the cast target for a text representation). The `type` metadata label comes from `information_schema.COLUMNS.DATA_TYPE`, which is bare `tinyint` for a `TINYINT(1)` boolean column — the `(1)` that marks it a bool lives only in `COLUMN_TYPE`, which is not sent — so the frontend renders MySQL booleans as numbers (accepted gap). |
+| MySQL    | `CAST(column AS CHAR)` in the select list | Same property, different syntax — MySQL has no `::` operator and no `TEXT` cast target (`CHAR` is the cast target for a text representation). The `type` metadata label is `information_schema.COLUMNS.COLUMN_TYPE` (`tinyint(1)`, `int unsigned`, `enum('a','b')`), so the frontend can tell a `TINYINT(1)` boolean from a number. |
 | SQLite   | `CAST(column AS TEXT)` in the select list | Same property, different syntax — SQLite has no `::` cast operator. SQLite's declared column types can be the empty string (dynamic typing); `sqlite.rs::query_table` falls back to the literal `"unknown"` type-name label rather than emitting `""`. |
 
 Both mechanisms satisfy the same requirement: the cast is server-side SQL,
@@ -188,6 +188,17 @@ so `_conformance_meta` comes first and `order_extra` before `orders`:
 | MySQL/MariaDB | `order by cast(table_name as binary)`, and the same for schema names. MariaDB's catalog collation (`utf8mb3_general_ci`) folds case, so `_` sorts after every letter and a plain `order by` would put `orders` before `order_extra` and `_conformance_meta` last |
 | SQLite   | `order by name`: `BINARY` is the default collation |
 
+## §5.4 — sort on a column with no ordering (`unsortable_column`)
+
+Protocol property: a `sort` on a column whose type the engine cannot order is
+a 400 `unsortable_column` (`spec/protocol.md` §5.4, §5.11.3), never a 500.
+
+| Backend  | Mechanism | Notes |
+|----------|-----------|-------|
+| Postgres | The `order by` fails with SQLSTATE `42883` ("could not identify an ordering operator") for `json`, `xml`, `jsonpath` and the geometric types; `jsonb`, ranges, `tsvector` and `interval` sort. A `42883` is mapped only when the request has a `sort`, in both the data and join routes | The filter path casts to text, so it cannot raise `42883` itself. A `42883` from another part of a join statement, such as an `ON` pair of one class with no cross-type operator, is reported as `unsortable_column` too when the request sorts (accepted gap). |
+| MySQL/MariaDB | None: every type orders (`json` as JSON, geometry by bytes) | |
+| SQLite   | None: every storage class orders | |
+
 ## §5.4.1 — forward FK/PK column metadata (`key_metadata`)
 
 Protocol property: for a given `table`, each column's `key`
@@ -238,17 +249,18 @@ constraints; there is no per-partition dedup to do.
 
 ## §5.11 — table join (`/api/tables/join`)
 
-Protocol property: each `on` pair joins columns of one type class
+Protocol property: each `on` pair joins columns of one column class
 (`spec/protocol.md` §5.11.2), checked from the catalog before the
 statement runs, with a 400 naming the pair. The classes are engine-neutral;
-how a native type reaches a class is not. A type with no class is not
-joinable.
+how a native type reaches a class is not. The `float`, `json`, `array` and
+`other` classes are not joinable. `/tables/data` and the join route report each column's class
+(§5.4.1 `class`) from the same lookup, so the browser never re-derives it.
 
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
-| Postgres | `information_schema.columns.data_type`, plus `udt_name`/`udt_schema` for `USER-DEFINED`. `number`: `smallint`, `integer`, `bigint`, `numeric`. `text`: `character varying`, `character`, `text`, and the `citext` extension type. `uuid`, `boolean`, `bytea` map to their own classes. `temporal`: `date`, `timestamp without time zone`, `timestamp with time zone`. `time`: `time without time zone`, `time with time zone`. `enum`: a `USER-DEFINED` type whose `pg_type.typtype` is `e`; two enum columns pair only when `(udt_schema, udt_name)` match | `ARRAY`, `json`, `jsonb`, `real`, `double precision`, `money`, `interval` and every other type have no class. Tables are gated by `readable_table_oid_in_tx`, as §5.4. |
-| MySQL/MariaDB | `information_schema.columns.data_type` and `column_type`. `number`: `tinyint`, `smallint`, `mediumint`, `int`, `bigint`, `decimal`. `text`: `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`. `temporal`: `date`, `datetime`, `timestamp`. `time`: `time`. `binary`: `binary`, `varbinary`, and the `*blob` types. `uuid`: MariaDB's native `uuid` type. `enum`: `enum` columns pair only when `column_type` is identical | No `boolean` class: `boolean` is `tinyint(1)` and is a `number`. `json`, `set`, `bit`, `float`, `double`, `year`, geometry types have no class. MariaDB has no JSON type: a JSON column is `longtext` with a column check `json_valid(\`col\`)`, so a column with exactly that check reports type `json` and has no class. Two `text` columns with different `collation_name` are rejected with a 400 naming the pair, before the statement runs, because the engine would raise "illegal mix of collations"; error 1267 maps to the same 400 as a fallback. |
-| SQLite   | The declared type, matched case-insensitively. Recognised names first: `uuid` → `uuid`; `boolean`, `bool` → `boolean`; `date`, `datetime`, `timestamp` → `temporal`; `time` → `time`; `json` → no class. Then SQLite's own affinity rules: contains `INT` → `number`; contains `CHAR`, `CLOB` or `TEXT` → `text`; contains `BLOB` → `binary`; contains `REAL`, `FLOA` or `DOUB` → no class; any other non-empty type (`NUMERIC`, `DECIMAL`) → `number`. An empty declared type has no affinity and pairs only with another empty declared type | Types are affinities, not enforced: a pair that passes the check can still hold mismatched values, which simply match no rows. This is a weaker guarantee than on the other engines and an accepted gap. |
+| Postgres | `information_schema.columns.data_type`, plus `udt_name`/`udt_schema` for `USER-DEFINED`; the reported `type` is `format_type(atttypid, atttypmod)` instead, which keeps lengths, precision, array element types and the enum's own name. `number`: `smallint`, `integer`, `bigint`, `numeric`. `text`: `character varying`, `character`, `text`, and the `citext` extension type. `uuid`, `boolean`, `bytea` map to their own classes. `temporal`: `date`, `timestamp without time zone`, `timestamp with time zone`. `time`: `time without time zone`, `time with time zone`. `enum`: a `USER-DEFINED` type whose `pg_type.typtype` is `e`; two enum columns pair only when `(udt_schema, udt_name)` match, reported as `enum_type` `schema.name` (a domain over an enum reports the enum beneath it) | `real`, `double precision` → `float`; `json`, `jsonb` → `json` (a domain reports its base type, so a domain over `jsonb` is `json`); `ARRAY` → `array`; `money`, `interval`, `inet`, `xml`, geometric types and every other type → `other`. Two `text` columns that carry different explicit collations are rejected like on MySQL, because Postgres raises SQLSTATE `42P22`; the `collation` is `pg_attribute.attcollation` through `pg_collation`, and the database default (oid 100) is not reported because it yields to an explicit one. Tables are gated by `readable_table_oid_in_tx`, as §5.4. |
+| MySQL/MariaDB | `information_schema.columns.data_type` and `column_type`. `number`: `tinyint`, `smallint`, `mediumint`, `int`, `bigint`, `decimal`. `text`: `char`, `varchar`, `tinytext`, `text`, `mediumtext`, `longtext`. `temporal`: `date`, `datetime`, `timestamp`. `time`: `time`. `binary`: `binary`, `varbinary`, and the `*blob` types. `uuid`: MariaDB's native `uuid` type. `enum`: `enum` columns pair only when `column_type` is identical; it is reported as both `type` and `enum_type` | No `boolean` class: `boolean` is `tinyint(1)` and is a `number`. `float`, `double` → `float`; `json` → `json`; `set`, `bit`, `year`, geometry types → `other`. MariaDB has no JSON type: a JSON column is `longtext` with a column check `json_valid(\`col\`)`, so a column with exactly that check reports type `json` and class `json`. Two `text` columns with different `collation_name`, reported as `collation`, are rejected with a 400 naming the pair, before the statement runs, because the engine would raise "illegal mix of collations". An error 1267 that gets past this check is a 500 (accepted gap). |
+| SQLite   | The declared type, matched case-insensitively. Recognised names first: `uuid` → `uuid`; `boolean`, `bool` → `boolean`; `date`, `datetime`, `timestamp` → `temporal`; `time` → `time`; `json`, `jsonb` → `json`. Then SQLite's own affinity rules: contains `INT` → `number`; contains `CHAR`, `CLOB` or `TEXT` → `text`; contains `BLOB` → `binary`; contains `REAL`, `FLOA` or `DOUB` → `float`; any other non-empty type (`NUMERIC`, `DECIMAL`) → `number`. An empty declared type has no affinity and pairs only with another empty declared type. No `collation` is reported: a column's collation is in no pragma, and SQLite resolves a clash silently (the left operand's collation wins) instead of raising an error | Types are affinities, not enforced: a pair that passes the check can still hold mismatched values, which simply match no rows. This is a weaker guarantee than on the other engines and an accepted gap. |
 
 **Statement shape.** `ON` compares the columns' native types, not the text
 cast that filters use. Filters on joined columns keep the §5.4.2 cast.

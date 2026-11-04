@@ -1269,15 +1269,16 @@ function buildApiReference() {
         example_request: `${base}/tables/data?table=users&filter=${exampleFilter}&limit=20&sort=created_at&order=desc`,
         example_response: {
           columns: [
-            { name: "id", type: "uuid", key: "pk" },
-            { name: "user_id", type: "uuid", key: "fk", references: { table: "users", column: "id" } },
+            { name: "id", type: "uuid", class: "uuid", key: "pk" },
+            { name: "user_id", type: "uuid", class: "uuid", key: "fk", references: { table: "users", column: "id" } },
             {
               name: "order_id",
               type: "integer",
+              class: "number",
               key: "pk",
               references: { table: "orders", column: "id", schema: "public" }
             },
-            { name: "status", type: "text" }
+            { name: "status", type: "text", class: "text" }
           ],
           rows: [{ id: "...", user_id: "...", order_id: "...", status: "active" }],
           total_approx: 108234
@@ -1340,7 +1341,7 @@ function buildApiReference() {
       {
         method: "GET",
         path: `${base}/tables/join`,
-        summary: "Rows of up to 4 tables joined server-side (INNER or LEFT, equality on 1-3 column pairs per join), read-only. Every table and column name is checked against the live catalog; each pair must join columns of one type class (number, text, uuid, boolean, temporal, time, binary, enum), so floats, json and arrays cannot be joined. Positions: the start table is 0 and `joins[]` entries are 1..n; a `left` reference may only point at an earlier position. The response has `has_more` and never a total. A column carries `join`, `table` and `column` beside a unique `name` label (never parse the label); rows are keyed by label and a LEFT-join miss is null. Anything wrong with `join` itself (shape, an unknown table or column, an incompatible pair, the size limit) is a 400 with `code: invalid_join`; a bad `filter`, `sort` or `order` keeps its usual code. A join that runs over the query timeout is a 500 with `code: query_timeout`.",
+        summary: "Rows of up to 4 tables joined server-side (INNER or LEFT, equality on 1-3 column pairs per join), read-only. Every table and column name is checked against the live catalog; each pair must join columns of one column class (number, text, uuid, boolean, temporal, time, binary, enum, untyped), reported as each column's `class` in /tables/data, where two enums must also have an equal `enum_type`; columns of class float, json, array or other cannot be joined. Positions: the start table is 0 and `joins[]` entries are 1..n; a `left` reference may only point at an earlier position. The response has `has_more` and never a total. A column carries `join`, `table` and `column` beside a unique `name` label (never parse the label); rows are keyed by label and a LEFT-join miss is null. Anything wrong with `join` itself (shape, an unknown table or column, an incompatible pair, the size limit) is a 400 with `code: invalid_join`; a bad `filter`, `sort` or `order` keeps its usual code. A join that runs over the query timeout is a 500 with `code: query_timeout`.",
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
           { name: "schema", required: false, notes: "same as GET /tables; every table of the join is in it" },
@@ -1362,8 +1363,8 @@ function buildApiReference() {
         ],
         example_response: {
           columns: [
-            { name: "id", join: 0, table: "orders", column: "id", type: "uuid", key: "pk" },
-            { name: "full_name", join: 1, table: "users", column: "full_name", type: "text" }
+            { name: "id", join: 0, table: "orders", column: "id", type: "uuid", class: "uuid", key: "pk" },
+            { name: "full_name", join: 1, table: "users", column: "full_name", type: "text", class: "text" }
           ],
           rows: [{ id: "...", full_name: "Ada Lovelace" }],
           has_more: true
@@ -2605,11 +2606,23 @@ var TYPE_ALIASES = {
   json: "json",
   jsonb: "json"
 };
-function typeKey(rawType) {
-  return rawType.toLowerCase().replace(/\s*\(.*$/, "").trim();
+function baseTypeName(rawType) {
+  return rawType.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\b(unsigned|signed|zerofill)\b/g, "").replace(/\s+/g, " ").trim();
 }
-function columnTypeClass(rawType) {
-  return TYPE_ALIASES[typeKey(rawType)] ?? null;
+function typeNameClass(rawType) {
+  if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
+  return TYPE_ALIASES[baseTypeName(rawType)] ?? null;
+}
+var FROM_COLUMN_CLASS = {
+  number: "number",
+  temporal: "date",
+  uuid: "uuid",
+  boolean: "bool",
+  float: "number",
+  json: "json"
+};
+function columnTypeClass(col) {
+  return typeNameClass(col.type) ?? FROM_COLUMN_CLASS[col.class] ?? null;
 }
 var TYPE_CLASS_CSS = {
   number: "cell-type-number",
@@ -2621,12 +2634,12 @@ function isTextType(type) {
   return type === "" || type === "unknown" || /char|clob|text/.test(type);
 }
 function rendersAsJson(col, raw) {
-  const type = typeKey(col.type);
-  if (TYPE_ALIASES[type] === "json") return true;
-  return isTextType(type) && /^\s*[[{]/.test(raw);
+  const type = baseTypeName(col.type);
+  if (columnTypeClass(col) === "json") return true;
+  return (isTextType(type) || col.class === "text") && /^\s*[[{]/.test(raw);
 }
 function warnBadJsonCell(col, err) {
-  if (columnTypeClass(col.type) === "json") {
+  if (columnTypeClass(col) === "json") {
     console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
   }
 }
@@ -2672,19 +2685,19 @@ function edgeMarks(run, side) {
   });
 }
 function typedValue(col, raw) {
-  const klass = columnTypeClass(col.type);
-  if (klass === "date") {
+  const typeClass = columnTypeClass(col);
+  if (typeClass === "date") {
     const time = document.createElement("time");
     time.textContent = raw;
     time.className = "cell-type-date";
     return time;
   }
-  let cls;
-  if (klass) cls = TYPE_CLASS_CSS[klass];
-  else if (UUID_RE.test(raw)) cls = "cell-type-uuid";
-  if (cls) {
+  let cssClass;
+  if (typeClass) cssClass = TYPE_CLASS_CSS[typeClass];
+  else if (UUID_RE.test(raw)) cssClass = "cell-type-uuid";
+  if (cssClass) {
     const span = document.createElement("span");
-    span.className = cls;
+    span.className = cssClass;
     span.textContent = raw;
     return span;
   }
@@ -2768,12 +2781,12 @@ function buildFallbackNote(swaps, table, label) {
     { text: " " },
     ...placeSegments(label)
   ];
-  const shown2 = named.flatMap((s) => s.got === null ? [] : [[{ code: s.got }]]);
-  if (shown2.length === 0) {
+  const shown = named.flatMap((s) => s.got === null ? [] : [[{ code: s.got }]]);
+  if (shown.length === 0) {
     out.push({ text: filterDropped ? ". Your filter was removed." : "." });
     return out;
   }
-  out.push({ text: ". Showing " }, ...joinWith(shown2, " / "), {
+  out.push({ text: ". Showing " }, ...joinWith(shown, " / "), {
     text: filterDropped ? " instead, without your filter." : " instead."
   });
   return out;
@@ -3452,34 +3465,7 @@ function joinCompletionAt(text) {
 }
 
 // src/lib/join-types.ts
-var CLASS_OF = {};
-function assign(cls, names) {
-  for (const n of names.split(",")) CLASS_OF[n] = cls;
-}
-assign("number", "smallint,integer,bigint,int,int2,int4,int8,tinyint,mediumint,numeric,decimal");
-assign("text", "character varying,character,char,varchar,text,tinytext,mediumtext,longtext,citext,clob");
-assign("uuid", "uuid");
-assign("boolean", "boolean,bool");
-assign("temporal", "date,datetime,timestamp,timestamp without time zone,timestamp with time zone");
-assign("time", "time,time without time zone,time with time zone");
-assign("binary", "bytea,binary,varbinary,tinyblob,blob,mediumblob,longblob");
-assign("enum", "enum");
-assign("custom", "user-defined");
-var NOT_JOINABLE = /* @__PURE__ */ new Set([
-  "json",
-  "jsonb",
-  "array",
-  "real",
-  "double precision",
-  "float",
-  "double",
-  "money",
-  "interval",
-  "set",
-  "bit",
-  "year",
-  "inet"
-]);
+var NOT_JOINABLE = /* @__PURE__ */ new Set(["float", "json", "array", "other"]);
 var LABEL = {
   number: "number",
   text: "text",
@@ -3489,34 +3475,42 @@ var LABEL = {
   time: "time",
   binary: "binary",
   enum: "enum",
-  // Postgres reports an enum (or citext) as USER-DEFINED, and an enum is far the likelier.
-  custom: "enum"
+  untyped: "untyped",
+  float: "float",
+  json: "json",
+  array: "array",
+  other: "other"
 };
-function classOf(type) {
-  const t = type.toLowerCase();
-  if (NOT_JOINABLE.has(t) || t.endsWith("[]")) return "none";
-  return CLASS_OF[t] ?? null;
-}
-var shown = (type) => type.toLowerCase() === "user-defined" ? "enum" : type;
+var truncateType = (type) => type.length > 24 ? `${type.slice(0, 23)}\u2026` : type;
 function joinMismatch(candidate, other) {
-  const a = classOf(candidate);
-  const b = classOf(other);
-  if (a === "none" || b === "none") {
-    const type = shown(a === "none" ? candidate : other);
-    return { note: `${type}: not joinable`, message: `${type} columns cannot be joined. Pick another column.` };
+  const candidateReason = unjoinableReason(candidate);
+  const blocked = candidateReason ?? unjoinableReason(other);
+  if (blocked) {
+    const type = truncateType(candidateReason ? candidate.type : other.type);
+    return { note: blocked, message: `${type} columns cannot be joined. Pick another column.` };
   }
-  if (a === null || b === null || a === b) return null;
-  if (a === "custom" && b === "text" || a === "text" && b === "custom") return null;
+  const a = candidate.class;
+  const b = other.class;
+  const left = truncateType(candidate.type);
+  const right = truncateType(other.type);
+  const [x, y] = [candidate.collation, other.collation];
+  if (a === "text" && b === "text" && x && y && x !== y) {
+    return {
+      note: "different collations",
+      message: `${left} and ${right} use different text collations (${x} and ${y}).`
+    };
+  }
+  if (a === b && (a !== "enum" || candidate.enum_type === other.enum_type)) return null;
   return {
-    note: `${shown(candidate)} \u2260 ${shown(other)}`,
-    message: `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`
+    note: `${left} \u2260 ${right}`,
+    message: a === b ? `${left} cannot be joined to ${right}: they are different enumerated types.` : `${LABEL[a]} cannot be joined to ${LABEL[b]}. Pick columns of the same kind.`
   };
 }
-function unjoinableReason(type) {
-  return classOf(type) === "none" ? `${shown(type)}: not joinable` : null;
+function unjoinableReason(column) {
+  return NOT_JOINABLE.has(column.class) ? `${truncateType(column.type)}: not joinable` : null;
 }
-function pairNote(type, otherType) {
-  return otherType === void 0 ? unjoinableReason(type) : joinMismatch(type, otherType)?.note ?? null;
+function pairNote(column, other) {
+  return other === void 0 ? unjoinableReason(column) : joinMismatch(column, other)?.note ?? null;
 }
 function findForeignKey(earlier, table, own2) {
   for (const [at, e] of earlier.entries()) {
@@ -3581,9 +3575,9 @@ function closeMenu2() {
 var search = () => $("dd-pop-search");
 function renderRows(opts, query) {
   const list = $("dd-pop-list");
-  const shown2 = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
+  const shown = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
   list.replaceChildren(
-    ...shown2.map((o) => {
+    ...shown.map((o) => {
       const row2 = el("button");
       row2.type = "button";
       row2.className = "dd-row";
@@ -3609,7 +3603,7 @@ function renderRows(opts, query) {
       return row2;
     })
   );
-  if (shown2.length === 0) {
+  if (shown.length === 0) {
     const none = el("p", "dd-none", `Nothing matches ${query.trim()}.`);
     list.appendChild(none);
   }
@@ -3902,10 +3896,10 @@ function updateTablesCap() {
   }
   for (const e of hidden) e.li.hidden = true;
   active?.li.classList.add("pulled");
-  const shown2 = entries.filter((e) => !hidden.has(e) && e !== active);
+  const shown = entries.filter((e) => !hidden.has(e) && e !== active);
   tablesMore.textContent = `+ ${hidden.size} more`;
-  while (tablesMoreItem.offsetTop > lastLineTop && shown2.length) {
-    const last = shown2.pop();
+  while (tablesMoreItem.offsetTop > lastLineTop && shown.length) {
+    const last = shown.pop();
     last.li.hidden = true;
     hidden.add(last);
     tablesMore.textContent = `+ ${hidden.size} more`;
@@ -4148,11 +4142,11 @@ function mountJoinForm(root, onChange) {
   const tableAt = (pos) => pos === 0 ? draft.table : draft.joins[pos - 1].table;
   const nameAt = (pos) => (pos === 0 ? draft.alias : draft.joins[pos - 1].alias).trim() || tableAt(pos);
   const columnsAt = (pos) => cachedColumns(tableAt(pos)) ?? [];
-  const typeOf = (pos, column) => columnsAt(pos).find((c) => c.name === column)?.type;
+  const columnOf = (pos, column) => columnsAt(pos).find((c) => c.name === column);
   const mismatch = (pos, pair) => {
-    const left = typeOf(pair.leftJoin, pair.leftColumn);
-    const right = typeOf(pos, pair.rightColumn);
-    return left && right ? joinMismatch(left, right) : null;
+    const leftCol = columnOf(pair.leftJoin, pair.leftColumn);
+    const rightCol = columnOf(pos, pair.rightColumn);
+    return leftCol && rightCol ? joinMismatch(leftCol, rightCol) : null;
   };
   function foreignKey(pos) {
     const earlier = Array.from({ length: pos }, (_, p) => ({ table: tableAt(p), columns: columnsAt(p) }));
@@ -4205,22 +4199,22 @@ function mountJoinForm(root, onChange) {
     const first = k === 0;
     const which = first ? "" : ` pair ${k + 1}`;
     const clash = mismatch(pos, pair);
-    const rightType = typeOf(pos, pair.rightColumn);
-    const leftType = typeOf(pair.leftJoin, pair.leftColumn);
+    const rightCol = columnOf(pos, pair.rightColumn);
+    const leftCol = columnOf(pair.leftJoin, pair.leftColumn);
     const leftOptions = Array.from({ length: pos }, (_, p) => p).flatMap(
       (p) => columnsAt(p).map((c) => {
-        const note = pairNote(c.type, rightType);
+        const note = pairNote(c, rightCol);
         return {
           value: `${p}|${c.name}`,
           label: `${nameAt(p)}.${c.name}`,
-          note: note ?? c.type,
+          note: note ?? truncateType(c.type),
           blocked: note !== null
         };
       })
     );
     const rightOptions = columnsAt(pos).map((c) => {
-      const note = pairNote(c.type, leftType);
-      return { value: c.name, label: c.name, note: note ?? c.type, blocked: note !== null };
+      const note = pairNote(c, leftCol);
+      return { value: c.name, label: c.name, note: note ?? truncateType(c.type), blocked: note !== null };
     });
     const parts = [
       el("span", "j-kw", first ? "on" : "and"),
@@ -4253,7 +4247,9 @@ function mountJoinForm(root, onChange) {
         }
       })
     ];
-    if (leftType && rightType && !clash) parts.push(el("span", "j-ok", `${leftType} = ${rightType} \u2713`));
+    if (leftCol && rightCol && !clash) {
+      parts.push(el("span", "j-ok", `${truncateType(leftCol.type)} = ${truncateType(rightCol.type)} \u2713`));
+    }
     if (!first) {
       parts.push(
         textButton("\u2715", "j-rm", `remove column pair from join ${pos}`, () => {
@@ -4843,9 +4839,9 @@ function mountJoinSql(onChange) {
   const field = $("join-sql");
   const hlText = $("join-sql-hl-text");
   const pairCheck = (a, b) => {
-    const at = cachedColumns(a.table)?.find((c) => c.name === a.column)?.type;
-    const bt = cachedColumns(b.table)?.find((c) => c.name === b.column)?.type;
-    return at && bt ? joinMismatch(at, bt)?.message ?? null : null;
+    const ac = cachedColumns(a.table)?.find((c) => c.name === a.column);
+    const bc = cachedColumns(b.table)?.find((c) => c.name === b.column);
+    return ac && bc ? joinMismatch(ac, bc)?.message ?? null : null;
   };
   let memo = null;
   const parse = () => {
@@ -4863,8 +4859,8 @@ function mountJoinSql(onChange) {
     const error = result && "error" in result && result.error.index < text.trimEnd().length ? result.error : null;
     const tokens = tokenizeJoinText(text);
     const [from, to] = error ? errorSpan(text, tokens, error.index, error.code) : [-1, -1];
-    const shown2 = tokens.map((t) => t.kind === "punct" ? { ...t, kind: "op" } : t);
-    hlText.replaceChildren(...tokenSpans(text, shown2, (t) => t.kind !== "space" && t.start >= from && t.start < to));
+    const shown = tokens.map((t) => t.kind === "punct" ? { ...t, kind: "op" } : t);
+    hlText.replaceChildren(...tokenSpans(text, shown, (t) => t.kind !== "space" && t.start >= from && t.start < to));
     hlText.append("\n");
   }
   attachOverlayHighlight(field, render6);
@@ -4907,14 +4903,14 @@ function mountJoinSql(onChange) {
         if (document.activeElement === field) void update2();
       });
     const otherTable = ctx.otherSide ? tableOf(ctx, ctx.otherSide.qualifier) : void 0;
-    const otherType = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column)?.type;
+    const other = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column);
     const starts = startsWith(ctx);
     return columns.filter((c) => starts(c.name)).map((c) => {
-      const note = pairNote(c.type, otherType);
+      const note = pairNote(c, other);
       return {
         label: c.name,
         insert: `${quoteJoinName(c.name)} `,
-        note: note ?? c.type,
+        note: note ?? truncateType(c.type),
         ...note === null && indexed?.has(c.name) ? { tag: "indexed" } : {},
         ...note !== null ? { blocked: true } : {}
       };
@@ -5454,7 +5450,7 @@ var metas = /* @__PURE__ */ new Map();
 function tableMeta(table) {
   return table === null ? void 0 : metas.get(scopeIdentity(table))?.meta;
 }
-function columnKeyOf(col, meta) {
+function keyDescriptionOf(col, meta) {
   return keyDescription(col, meta?.compositeFkOf.get(col.name));
 }
 function referrerCount(entries) {
@@ -5683,8 +5679,8 @@ function updateFilterSuggestions() {
       columns.map((c) => ({
         label: columnKey(c),
         insert: columnKey(c),
-        note: c.type,
-        key: columnKeyOf(c, meta)
+        note: truncateType(c.type),
+        key: keyDescriptionOf(c, meta)
       }))
     );
   } else if (ctx.expect === "operator") {
@@ -6283,7 +6279,7 @@ function buildRecordEntries(columns, row2, ctx) {
       nodes.push(heading);
     }
     for (const col of group.columns) {
-      const key = columnKeyOf(col, meta);
+      const key = keyDescriptionOf(col, meta);
       const dt = el("dt");
       const name = el("span", "record-name", displayName(col));
       name.title = columnKey(col, def);
@@ -6299,7 +6295,7 @@ function buildRecordEntries(columns, row2, ctx) {
   }
   return nodes;
 }
-function isValidJsonColumn(col, raw) {
+function parsesAsJsonCell(col, raw) {
   if (!rendersAsJson(col, raw)) return false;
   try {
     JSON.parse(raw);
@@ -6313,7 +6309,7 @@ function recordAsJson(columns, row2) {
   return recordJson(
     columns.map((col) => {
       const raw = row2[col.name];
-      return { name: col.name, raw, json: raw != null && isValidJsonColumn(col, raw) };
+      return { name: col.name, raw, json: raw != null && parsesAsJsonCell(col, raw) };
     })
   );
 }
@@ -6326,7 +6322,7 @@ VALUES (${vals});`;
 }
 function sqlLiteral(col, raw) {
   if (raw == null) return "NULL";
-  if (columnTypeClass(col.type) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
+  if (columnTypeClass(col) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
   return `'${raw.replace(/'/g, "''")}'`;
 }
 function openRecordView(columns, rows, index, def) {
@@ -6401,7 +6397,7 @@ function renderHeader(columns) {
     const nameEl = el("button", "col-name sort-btn", displayName(col));
     nameEl.type = "button";
     nameEl.title = col.comment ? `${fullName} \u2014 ${col.comment}` : fullName;
-    const key = columnKeyOf(col, meta);
+    const key = keyDescriptionOf(col, meta);
     if (key) {
       head.append(keyIcon(key), nameEl, " ");
       th.setAttribute("aria-label", col.comment ? `${label}, ${key.label}, ${col.comment}` : `${label}, ${key.label}`);
@@ -6540,8 +6536,8 @@ function sortedColumn() {
 }
 var rowsMeta = "";
 function writeRowMeta() {
-  const { shown: shown2, total } = counts;
-  $("row-meta").textContent = `${rowsMeta} \xB7 ${shown2 < total ? `${shown2} of ${total}` : total} columns`;
+  const { shown, total } = counts;
+  $("row-meta").textContent = `${rowsMeta} \xB7 ${shown < total ? `${shown} of ${total}` : total} columns`;
 }
 var sortArrow = () => state.order === "desc" ? "\u2193" : "\u2191";
 function hideColumnNotes() {
@@ -6549,8 +6545,8 @@ function hideColumnNotes() {
   $("all-hidden").hidden = true;
 }
 function syncColumnChrome() {
-  const { hidden, shown: shown2, total } = counts;
-  $("columns-btn").textContent = shown2 < total ? `columns (${total - shown2} hidden)` : "columns";
+  const { hidden, shown, total } = counts;
+  $("columns-btn").textContent = shown < total ? `columns (${total - shown} hidden)` : "columns";
   const sorted = sortedColumn();
   for (const item of $("columns-pop-list").querySelectorAll("label[data-name]")) {
     const name = item.dataset.name;
@@ -6570,10 +6566,10 @@ function syncColumnChrome() {
     $("sort-note-dir").textContent = sortArrow();
     $("sort-note-show").hidden = !hidden.has(sorted.name);
   }
-  $("all-hidden").hidden = total === 0 || shown2 > 0;
+  $("all-hidden").hidden = total === 0 || shown > 0;
   $("all-hidden-text").textContent = `All ${total} columns are hidden.`;
   const emptyCell = $("tbody").querySelector("tr.empty > td");
-  if (emptyCell) emptyCell.colSpan = shown2 + 1;
+  if (emptyCell) emptyCell.colSpan = shown + 1;
 }
 $("sort-note-clear").onclick = () => {
   setSort(null);
@@ -6634,7 +6630,7 @@ var menuShape = "";
 function renderColumnMenu() {
   const groups = columnGroups(columnsInView);
   const meta = tableMeta(tableInView());
-  const keys = new Map(columnsInView.map((c) => [c.name, columnKeyOf(c, meta)]));
+  const keys = new Map(columnsInView.map((c) => [c.name, keyDescriptionOf(c, meta)]));
   const shape = JSON.stringify([
     groups.map((g) => [g.band, g.label, g.columns.map((c) => [c.name, columnKey(c), c.type])]),
     [...keys]
@@ -6652,9 +6648,9 @@ function buildRowActionCell(columns, rows, index) {
   return td;
 }
 function renderRows2(data, newRowKeys, pkNames = []) {
-  const { hidden, shown: shown2 } = counts;
+  const { hidden, shown } = counts;
   if (data.rows.length === 0) {
-    renderEmptyState(shown2 + 1);
+    renderEmptyState(shown + 1);
     return;
   }
   const ctx = { hidden, meta: tableMeta(tableInView()) };
@@ -6824,7 +6820,8 @@ async function runLoad({
   next,
   replaceHistory = false,
   askNextPage = false,
-  reason
+  reason,
+  notice
 }) {
   if (!auto) {
     clearError();
@@ -6859,6 +6856,10 @@ async function runLoad({
     const retry = next && dropStaleSort(next, code);
     if (retry) return runLoad({ next: retry, resetScroll, highlightNew, replaceHistory, reason });
     if (view.kind === "join" && e instanceof ApiError && reportJoinFailure(e, view.def, next, replaceHistory)) return;
+    if (!next && code === "unsortable_column") {
+      setSort(null);
+      return runLoad({ resetScroll, highlightNew, replaceHistory, reason, notice: failedLoadError(e, view, next) });
+    }
     reportError(failedLoadError(e, view, next));
     return;
   }
@@ -6918,6 +6919,7 @@ async function runLoad({
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "instant" : "smooth" });
   }
+  if (notice !== void 0) reportError(notice);
 }
 
 // src/features/theme.ts

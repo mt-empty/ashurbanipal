@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pgTypeClass } from "../src/db/postgres.js";
+import { pgColumnClass } from "../src/db/postgres.js";
 import { FilterError, isQueryTimeout, NotAllowedError } from "../src/errors.js";
 import { parseFilter, parseFilterForJoin } from "../src/filter.js";
 import {
@@ -7,22 +7,23 @@ import {
   BadJoinError,
   BadParamError,
   buildJoinSelect,
-  type JoinColMeta,
+  type ColMeta,
+  columnInfo,
   type JoinDialect,
   type JoinOpts,
-  type JoinTableMeta,
   parseJoin,
   planJoin,
+  type TableMeta,
 } from "../src/join.js";
 
-const uuid = (name: string): JoinColMeta => ({ name, type: "uuid", class: { kind: "uuid" } });
-const text = (name: string): JoinColMeta => ({ name, type: "text", class: { kind: "text" } });
+const uuid = (name: string): ColMeta => ({ name, type: "uuid", class: { kind: "uuid" } });
+const text = (name: string): ColMeta => ({ name, type: "text", class: { kind: "text" } });
 
-const orders = (): JoinTableMeta => ({
+const orders = (): TableMeta => ({
   name: "orders",
-  columns: [uuid("id"), uuid("user_id"), text("status"), { name: "tags", type: "ARRAY" }],
+  columns: [uuid("id"), uuid("user_id"), text("status"), { name: "tags", type: "ARRAY", class: { kind: "array" } }],
 });
-const users = (): JoinTableMeta => ({ name: "users", columns: [uuid("id"), text("email")] });
+const users = (): TableMeta => ({ name: "users", columns: [uuid("id"), text("email")] });
 
 const opts = (over: Partial<JoinOpts> = {}): JoinOpts => ({
   limit: 10,
@@ -101,14 +102,14 @@ describe("planJoin", () => {
     const float = parseJoin(JOIN);
     float.joins[0].on[0].left.column = "score";
     const o = orders();
-    o.columns.push({ name: "score", type: "double precision" });
+    o.columns.push({ name: "score", type: "double precision", class: { kind: "float" } });
     expect(() => planJoin(float, [o, users()], opts())).toThrow(
       /orders\.score \(double precision\).*floating-point values are not compared exactly/,
     );
   });
 
   it("pairs enums only within one type and rejects differing collations", () => {
-    const e = (id: string): JoinColMeta => ({ name: "e", type: "USER-DEFINED", class: { kind: "enum", id } });
+    const e = (id: string): ColMeta => ({ name: "e", type: "USER-DEFINED", class: { kind: "enum", enumType: id } });
     const spec = parseJoin(
       '{"table":"x","joins":[{"type":"inner","table":"y","on":[{"left":{"join":0,"column":"e"},"right":"e"}]}]}',
     );
@@ -156,6 +157,15 @@ describe("planJoin", () => {
     ).toThrow(FilterError);
     expect(() => planJoin(spec, [orders(), users()], opts({ sortJoin: 1 }))).toThrow(BadParamError);
     expect(() => planJoin(spec, [orders(), users()], opts({ sort: "email" }))).toThrow(NotAllowedError);
+  });
+});
+
+describe("columnInfo", () => {
+  it("reports a collation only for a text column", () => {
+    const named: ColMeta = { name: "name", type: "varchar(20)", class: { kind: "text" }, collation: "utf8mb4_bin" };
+    const doc: ColMeta = { name: "doc", type: "json", class: { kind: "json" }, collation: "utf8mb4_bin" };
+    expect(columnInfo(named).collation).toBe("utf8mb4_bin");
+    expect(columnInfo(doc).collation).toBeUndefined();
   });
 });
 
@@ -210,15 +220,23 @@ describe("isQueryTimeout", () => {
   });
 });
 
-describe("pgTypeClass", () => {
+describe("pgColumnClass", () => {
   it("maps information_schema types to classes", () => {
-    expect(pgTypeClass("integer", "", "", false)).toEqual({ kind: "number" });
-    expect(pgTypeClass("numeric", "", "", false)).toEqual({ kind: "number" });
-    expect(pgTypeClass("timestamp with time zone", "", "", false)).toEqual({ kind: "temporal" });
-    expect(pgTypeClass("USER-DEFINED", "public", "mood", true)).toEqual({ kind: "enum", id: "public.mood" });
-    expect(pgTypeClass("USER-DEFINED", "public", "geometry", false)).toBeUndefined();
-    for (const t of ["ARRAY", "jsonb", "json", "double precision", "money"]) {
-      expect(pgTypeClass(t, "", "", false), t).toBeUndefined();
+    expect(pgColumnClass("integer", "", "", false)).toEqual({ kind: "number" });
+    expect(pgColumnClass("numeric", "", "", false)).toEqual({ kind: "number" });
+    expect(pgColumnClass("timestamp with time zone", "", "", false)).toEqual({ kind: "temporal" });
+    expect(pgColumnClass("USER-DEFINED", "public", "mood", true)).toEqual({ kind: "enum", enumType: "public.mood" });
+    expect(pgColumnClass("USER-DEFINED", "public", "geometry", false)).toEqual({ kind: "other" });
+    expect(pgColumnClass("USER-DEFINED", "public", "citext", false)).toEqual({ kind: "text" });
+    for (const [t, kind] of [
+      ["ARRAY", "array"],
+      ["jsonb", "json"],
+      ["json", "json"],
+      ["double precision", "float"],
+      ["real", "float"],
+      ["money", "other"],
+    ] as const) {
+      expect(pgColumnClass(t, "", "", false), t).toEqual({ kind });
     }
   });
 });

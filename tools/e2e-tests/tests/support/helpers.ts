@@ -140,6 +140,12 @@ export const rejectSort = (page: Page, col: string) =>
     route.fulfill(problem(400, `not allowed: column "${col}"`, "unknown_column")),
   );
 
+/** Answers data requests sorted by `col` with the backend's 400 for a column whose type has no ordering. */
+export const refuseSort = (page: Page, col: string) =>
+  page.route(dataWith("sort", col), (route) =>
+    route.fulfill(problem(400, `cannot sort by ${col}: its type has no ordering`, "unsortable_column")),
+  );
+
 /** Holds every request `match` accepts until the returned function is
  * called, then answers each with `finish` (by default, sends it on). */
 export async function holdRequests(

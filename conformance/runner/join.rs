@@ -174,7 +174,15 @@ async fn column_metadata_is_carried_per_table() {
                 .iter()
                 .find(|c| c["join"] == pos && c["column"] == col["name"])
                 .unwrap();
-            for field in ["type", "key", "references", "comment"] {
+            for field in [
+                "type",
+                "class",
+                "enum_type",
+                "collation",
+                "key",
+                "references",
+                "comment",
+            ] {
                 assert_exact(
                     joined.get(field),
                     col.get(field),
@@ -662,7 +670,7 @@ async fn oversize_join_is_rejected() {
 }
 
 /// P5.11-COMPATIBILITY: a pair across classes is a 400 `invalid_join`;
-/// `json`/`jsonb` columns are never joinable.
+/// columns of class `float`, `json`, `array` and `other` are never joinable.
 #[tokio::test]
 async fn incompatible_column_pairs_are_rejected() {
     let srv = TestServer::spawn().await;
@@ -685,6 +693,40 @@ async fn incompatible_column_pairs_are_rejected() {
         }
         NotJoinableColumns::NotSeeded => {}
     }
+
+    let float_pair = json!({
+        "table": "products",
+        "joins": [{
+            "type": "inner", "table": "products",
+            "on": [{"left": {"join": 0, "column": "weight_kg"}, "right": "weight_kg"}]
+        }]
+    });
+    let resp = get_join(&srv, &float_pair, &[]).await;
+    assert_problem_code(resp, 400, "invalid_join", "float to float").await;
+}
+
+/// P5.11-ENUM-IDENTITY: two enum columns join only when they share one
+/// enumerated type. Only the Postgres seed has enums.
+#[tokio::test]
+async fn enum_columns_join_only_to_the_same_enum() {
+    let srv = TestServer::spawn().await;
+    if Backend::current() != Backend::Postgres {
+        return;
+    }
+    let status_join_to = |table: &str| {
+        json!({
+            "table": "orders",
+            "joins": [{
+                "type": "inner", "table": table,
+                "on": [{"left": {"join": 0, "column": "status"}, "right": "status"}]
+            }],
+            "columns": [{"join": 0, "column": "id"}]
+        })
+    };
+    let resp = get_join(&srv, &status_join_to("support_tickets"), &[]).await;
+    assert_problem_code(resp, 400, "invalid_join", "order_status to ticket_status").await;
+    let resp = get_join(&srv, &status_join_to("orders"), &[("limit", "1".into())]).await;
+    assert_status(&resp, 200, "order_status to order_status");
 }
 
 /// P5.11-SAME-CLASS: an exact numeric pair joins even when the

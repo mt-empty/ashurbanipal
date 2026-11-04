@@ -34,9 +34,15 @@ class ColumnRef:
 class ColumnInfo:
     name: str
     type_name: str
+    # The §5.4.1 column class (`class` on the wire).
+    column_class: str
     key: KeyKind | None = None
     references: ColumnRef | None = None
     comment: str | None = None
+    # The enumerated type's identity; set only when the class is enum.
+    enum_type: str | None = None
+    # The collation where two text columns can clash (spec/protocol.md §5.4.1).
+    collation: str | None = None
 
 
 @dataclass
@@ -214,6 +220,10 @@ class BadJoin(DbError):
 
 class BadParam(DbError):
     """A request parameter outside its allowed values. Maps to 400 invalid_parameter."""
+
+
+class Unsortable(DbError):
+    """A sort on a column whose type has no ordering. Maps to 400 unsortable_column."""
 
 
 class DatabaseError(DbError):

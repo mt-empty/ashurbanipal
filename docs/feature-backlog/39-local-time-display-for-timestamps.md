@@ -26,7 +26,9 @@ browser's time zone.
 - `frontend/src/lib/format.ts:28-60` — `date`, `timestamp`, `timestamptz`,
   `datetime` and the two long spellings all map to one `"date"` class.
   The comment at `:28-30` says nothing renders them differently. Only
-  some of these values can carry a local time, so this needs a split.
+  some of these values can carry a local time, so this needs a split. The
+  server's `class: temporal` is coarser still (it covers `date` and both
+  timestamp spellings), so the native `type` string stays the input here.
 - `frontend/src/lib/format.ts:97-106` — `formatCellValue` is the one place
   a date cell is built. Grid (`grid.ts:173`) and record view
   (`record-view.ts:32`) both call it. It prints the raw text in a

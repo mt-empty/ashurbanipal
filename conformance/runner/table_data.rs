@@ -1,5 +1,5 @@
 use crate::assert::{assert_exact, assert_problem_code, assert_row_estimate, assert_status};
-use crate::backend::{Backend, Comments};
+use crate::backend::{Backend, Comments, NotJoinableColumns};
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
 
@@ -508,5 +508,94 @@ async fn malicious_sort_value_against_a_valid_table_is_rejected_cleanly() {
             .unwrap();
         // Representative site for `unknown_column`.
         assert_problem_code(resp, 400, "unknown_column", &format!("sort={evil:?}")).await;
+    }
+}
+
+/// The named column of `table` as `/api/tables/data` reports it.
+async fn reported_column(srv: &TestServer, table: &str, name: &str) -> serde_json::Value {
+    let body: serde_json::Value = srv
+        .client()
+        .get(srv.url("/api/tables/data"))
+        .query(&[("table", table), ("limit", "1")])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    body["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == name)
+        .unwrap_or_else(|| panic!("{table} has no {name} column"))
+        .clone()
+}
+
+/// P5.4.1-CLASS: every column reports a §5.11.2 column class, the one the
+/// server checks join pairs with; only an enum column carries `enum_type`.
+#[tokio::test]
+async fn columns_report_their_column_class() {
+    let srv = TestServer::spawn().await;
+    let backend = Backend::current();
+    let (id_class, status_class) = match backend {
+        Backend::Postgres => ("uuid", "enum"),
+        Backend::Mysql | Backend::Sqlite => ("number", "text"),
+    };
+    let metadata_class = match backend.not_joinable_columns() {
+        NotJoinableColumns::Seeded => "json",
+        NotJoinableColumns::NotSeeded => "text",
+    };
+    let mut expected = vec![
+        ("orders", "total_cents", "number"),
+        ("orders", "id", id_class),
+        ("orders", "status", status_class),
+        ("users", "metadata", metadata_class),
+        ("products", "weight_kg", "float"),
+    ];
+    if backend == Backend::Postgres {
+        expected.push(("orders", "tags", "array"));
+        expected.push(("events", "ip_address", "other"));
+    }
+    for (table, name, class) in expected {
+        let col = reported_column(&srv, table, name).await;
+        assert_exact(
+            col.get("class").cloned(),
+            Some(serde_json::json!(class)),
+            &format!("{table}.{name} class"),
+        );
+        let enum_type = (class == "enum").then(|| serde_json::json!("public.order_status"));
+        assert_exact(
+            col.get("enum_type").cloned(),
+            enum_type,
+            &format!("{table}.{name} enum_type"),
+        );
+    }
+}
+
+/// P5.4.1-TYPE: `type` is the engine's full spelling, keeping the length,
+/// precision, array element type or enum name a bare data type drops.
+#[tokio::test]
+async fn columns_report_the_engines_full_type() {
+    let srv = TestServer::spawn().await;
+    let expected: &[(&str, &str, &str)] = match Backend::current() {
+        Backend::Postgres => &[
+            ("orders", "discount_pct", "numeric(5,2)"),
+            ("orders", "tags", "text[]"),
+            ("orders", "status", "order_status"),
+        ],
+        Backend::Mysql => &[
+            ("orders", "discount_pct", "decimal(5,2)"),
+            ("users", "is_active", "tinyint(1)"),
+        ],
+        Backend::Sqlite => &[("users", "is_active", "INTEGER")],
+    };
+    for (table, name, ty) in expected {
+        let col = reported_column(&srv, table, name).await;
+        assert_exact(
+            col["type"].clone(),
+            serde_json::json!(ty),
+            &format!("{table}.{name} type"),
+        );
     }
 }

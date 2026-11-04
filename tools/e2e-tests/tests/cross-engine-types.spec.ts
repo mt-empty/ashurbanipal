@@ -10,15 +10,15 @@ import { gotoApp, selectTable } from "./support/helpers";
 
 const payload = {
   columns: [
-    { name: "n", type: "int" }, // MySQL
-    { name: "amount", type: "DECIMAL(10,2)" }, // SQLite-style, with precision suffix
-    { name: "ts", type: "datetime" }, // MySQL
-    { name: "flag", type: "BOOLEAN" }, // SQLite-style
-    { name: "doc", type: "json" }, // MySQL
-    { name: "opaque_doc", type: "unknown" }, // SQLite dynamic-typed, brace-leading value
-    { name: "opaque_scalar", type: "unknown" }, // SQLite dynamic-typed, bare scalar
-    { name: "opaque_id", type: "unknown" }, // SQLite dynamic-typed, UUID-shaped value
-    { name: "label", type: "VARCHAR(20)" },
+    { name: "n", type: "int", class: "number" }, // MySQL
+    { name: "amount", type: "DECIMAL(10,2)", class: "number" }, // SQLite-style, with precision suffix
+    { name: "ts", type: "datetime", class: "temporal" }, // MySQL
+    { name: "flag", type: "BOOLEAN", class: "boolean" }, // SQLite-style
+    { name: "doc", type: "json", class: "json" }, // MySQL
+    { name: "opaque_doc", type: "unknown", class: "untyped" }, // SQLite dynamic-typed, brace-leading value
+    { name: "opaque_scalar", type: "unknown", class: "untyped" }, // SQLite dynamic-typed, bare scalar
+    { name: "opaque_id", type: "unknown", class: "untyped" }, // SQLite dynamic-typed, UUID-shaped value
+    { name: "label", type: "VARCHAR(20)", class: "text" },
   ],
   rows: [
     {

@@ -55,3 +55,45 @@ default source. An absent `schema` on a connection with no default is now a
 400 `unknown_schema` on every port. The entry-shape change is not additive;
 it lands in place under §7's alpha exception, with every port, the
 conformance runner, and the bundled UI changed together.
+
+Column metadata (§5.4.1, and §5.11.4's join columns) gained `class`: the
+§5.11.2 column class the server already checks `on` pairs with, omitted for a
+column that cannot be joined. §5.11.2 gained the `untyped` class every port
+already applied to SQLite columns with no declared type, and says that two
+`enum` columns join only when their new `enum_type` field, the enumerated
+type's identity, is equal. The bundled UI
+now greys join pairs by `class` instead of guessing from type names. This
+lands with every port, the conformance runner, and the bundled UI changed
+together, under §7's alpha exception.
+
+In the same release, `type` (§5.4.1) changed from the bare catalog data type
+to the engine's full spelling: Postgres `format_type()` instead of
+`information_schema.columns.data_type`, so `USER-DEFINED`, `ARRAY`,
+`character varying` and `numeric` become the enum's name, `text[]`,
+`character varying(20)` and `numeric(10,2)`; MySQL `COLUMN_TYPE` instead of
+`DATA_TYPE`, so a boolean reads `tinyint(1)`. SQLite is unchanged. This is not
+additive, and lands under the same alpha exception.
+
+Column metadata (§5.4.1, and §5.11.4's join columns) now always carries
+`class`, and the class list gained `float`, `json`, `array` and `other`: the
+types that used to have no class. A column that cannot be joined is now
+`float`, `json`, `array` or `other` instead of having `class` omitted, and a
+domain over `json` reports `json`, so the bundled UI renders it as JSON. This
+is not additive, and lands with every port, the conformance runner and the
+bundled UI changed together, under §7's alpha exception.
+
+Column metadata (§5.4.1, and §5.11.4's join columns) gained an optional
+`collation`. MySQL/MariaDB and Postgres report it where two text columns can
+clash, and §5.11.2 now states the rule the MySQL ports already applied: two
+`text` columns that both report a collation must report the same one, or the
+pair is a 400 `invalid_join`. Postgres had no such check, so a clash there was
+a 500 when the join ran. This lands with every port, the conformance runner
+and the bundled UI changed together, under §7's alpha exception.
+
+A `sort` on a column whose type the engine cannot order (Postgres `json`,
+`xml` and the geometric types) is now a 400 with the new code
+`unsortable_column` (§2, §5.4, §5.11.3), where every port returned a 500
+`database_error`. The new code is additive, but the status of a request that
+already existed changes from 500 to 400, so this is not. It lands with every
+port, the conformance runner and the bundled UI changed together, under §7's
+alpha exception.

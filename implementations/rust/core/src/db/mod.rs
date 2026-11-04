@@ -17,7 +17,7 @@ pub use sqlite::SqliteSource;
 use serde::Serialize;
 
 use crate::filter::{Condition, FilterOp};
-use crate::join::{JoinData, JoinOpts, JoinSpec};
+use crate::join::{ColumnClass, JoinData, JoinOpts, JoinSpec};
 
 #[derive(Debug, Clone)]
 pub struct QueryOpts {
@@ -53,6 +53,14 @@ pub struct ColumnInfo {
     pub name: String,
     #[serde(rename = "type")]
     pub type_name: String,
+    /// The §5.4.1 column class.
+    pub class: ColumnClass,
+    /// The enumerated type's identity; set only when `class` is enum.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enum_type: Option<String>,
+    /// The column's collation where two text columns can clash (§5.4.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<KeyKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -238,6 +246,9 @@ pub enum DbError {
     /// A request parameter outside the allowed values. Maps to
     /// `invalid_parameter`.
     BadParameter(String),
+    /// A `sort` on a column whose type has no ordering (`spec/protocol.md`
+    /// §5.4). Maps to `unsortable_column`.
+    Unsortable(String),
     /// The engine's own timeout signal (`impl From<sqlx::Error>`).
     QueryTimeout,
     Sqlx(sqlx::Error),
@@ -263,6 +274,7 @@ impl DbError {
             Self::FilterParse(_) => (400, "invalid_filter"),
             Self::BadJoin(_) => (400, "invalid_join"),
             Self::BadParameter(_) => (400, "invalid_parameter"),
+            Self::Unsortable(_) => (400, "unsortable_column"),
             Self::QueryTimeout => (500, "query_timeout"),
             Self::Sqlx(_) => (500, "database_error"),
         };
@@ -277,6 +289,9 @@ impl std::fmt::Display for DbError {
             Self::FilterParse(reason) => write!(f, "invalid filter: {reason}"),
             Self::BadJoin(reason) => write!(f, "invalid join: {reason}"),
             Self::BadParameter(reason) => write!(f, "invalid parameter: {reason}"),
+            Self::Unsortable(column) => {
+                write!(f, "cannot sort by {column}: its type has no ordering")
+            }
             Self::QueryTimeout => write!(f, "query timed out"),
             Self::Sqlx(e) => write!(f, "database error: {e}"),
         }

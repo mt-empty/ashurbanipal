@@ -16,20 +16,23 @@ private val JOIN_DIALECT = JoinDialect(
 )
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun pgTypeClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): TypeClass? = when (dataType) {
-    "smallint", "integer", "bigint", "numeric" -> TypeClass.NUMBER
-    "character varying", "character", "text" -> TypeClass.TEXT
-    "uuid" -> TypeClass.UUID
-    "boolean" -> TypeClass.BOOLEAN
-    "bytea" -> TypeClass.BINARY
-    "date", "timestamp without time zone", "timestamp with time zone" -> TypeClass.TEMPORAL
-    "time without time zone", "time with time zone" -> TypeClass.TIME
+internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): ColumnClass = when (dataType) {
+    "smallint", "integer", "bigint", "numeric" -> ColumnClass.NUMBER
+    "character varying", "character", "text" -> ColumnClass.TEXT
+    "uuid" -> ColumnClass.UUID
+    "boolean" -> ColumnClass.BOOLEAN
+    "bytea" -> ColumnClass.BINARY
+    "date", "timestamp without time zone", "timestamp with time zone" -> ColumnClass.TEMPORAL
+    "time without time zone", "time with time zone" -> ColumnClass.TIME
     "USER-DEFINED" -> when {
-        isEnum -> TypeClass.enum("$udtSchema.$udtName")
-        udtName == "citext" -> TypeClass.TEXT
-        else -> null
+        isEnum -> ColumnClass.enum("$udtSchema.$udtName")
+        udtName == "citext" -> ColumnClass.TEXT
+        else -> ColumnClass.OTHER
     }
-    else -> null
+    "real", "double precision" -> ColumnClass.FLOAT
+    "json", "jsonb" -> ColumnClass.JSON
+    "ARRAY" -> ColumnClass.ARRAY
+    else -> ColumnClass.OTHER
 }
 
 /** Postgres [DbSource]; queryTimeout bounds catalog and data operations (`spec/protocol.md` §6). */
@@ -217,34 +220,62 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData =
         inReadOnlyTransaction { queryTableInTransaction(schema, table, opts) }
 
-    /** Column metadata of a table already cleared by [requireTable]. */
-    private fun joinTableMeta(schema: String, table: String): JoinTableMeta {
-        data class Col(val name: String, val type: String, val udtSchema: String, val udtName: String, val isEnum: Boolean)
+    /** Column metadata of a table already cleared by [readableTableOid], which supplies [oid]. */
+    private fun tableMeta(schema: String, table: String, oid: Long): TableMeta {
+        data class Col(
+            val name: String,
+            val type: String,
+            val udtSchema: String,
+            val udtName: String,
+            val isEnum: Boolean,
+            val fullType: String,
+            val comment: String?,
+            val collation: String?,
+        )
+        // information_schema.columns drives the list (column privileges, order);
+        // pg_attribute adds the full type spelling, comment and collation, keyed
+        // by attnum, which can diverge from ordinal_position after a drop. The
+        // default collation (oid 100) is left out: it yields to an explicit one
+        // in a comparison, so it never clashes.
         val columns = jdbcTemplate.query(
             "select c.column_name, c.data_type, c.udt_schema, c.udt_name, " +
                 "       exists (select 1 from pg_type t " +
                 "               join pg_namespace n on n.oid = t.typnamespace " +
                 "               where n.nspname = c.udt_schema and t.typname = c.udt_name " +
-                "                 and t.typtype = 'e') " +
+                "                 and t.typtype = 'e'), " +
+                "       format_type(a.atttypid, a.atttypmod), " +
+                "       col_description(a.attrelid, a.attnum::int), " +
+                "       (select case when n.nspname = 'pg_catalog' then co.collname " +
+                "                    else n.nspname || '.' || co.collname end " +
+                "          from pg_collation co " +
+                "          join pg_namespace n on n.oid = co.collnamespace " +
+                "         where co.oid = a.attcollation and a.attcollation not in (0, 100)) " +
                 "from information_schema.columns c " +
+                "join pg_attribute a on a.attrelid = ? and a.attname = c.column_name " +
                 "where c.table_schema = ? and c.table_name = ? " +
                 "order by c.ordinal_position",
-            RowMapper { rs, _ -> Col(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getBoolean(5)) },
+            RowMapper { rs, _ ->
+                Col(
+                    rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                    rs.getBoolean(5), rs.getString(6), rs.getString(7), rs.getString(8),
+                )
+            },
+            oid,
             schema,
             table,
         )
-        val comments = columnComments(schema, table)
         val (pkColumns, fkColumns) = keyMetadata(schema, table)
-        return JoinTableMeta(
+        return TableMeta(
             table,
             columns.map { c ->
-                JoinColMeta(
+                ColMeta(
                     name = c.name,
-                    type = c.type,
-                    cls = pgTypeClass(c.type, c.udtSchema, c.udtName, c.isEnum),
+                    type = c.fullType,
+                    columnClass = pgColumnClass(c.type, c.udtSchema, c.udtName, c.isEnum),
+                    collation = c.collation,
                     key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                     references = fkColumns[c.name],
-                    comment = comments[c.name],
+                    comment = c.comment,
                 )
             },
         )
@@ -253,12 +284,11 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
     override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
         val realSchema = resolveSchema(schema)
         val names = spec.tableNames()
-        val metas = HashMap<String, JoinTableMeta>()
+        val metas = HashMap<String, TableMeta>()
         for (name in names) {
             if (name in metas) continue
             metas[name] = joinTable(name) {
-                requireTable(realSchema, name)
-                joinTableMeta(realSchema, name)
+                tableMeta(realSchema, name, readableTableOid(realSchema, name))
             }
         }
         val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
@@ -281,28 +311,22 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             if (sqlState == "22021" || sqlState == "22P05") {
                 throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
             }
+            // With a sort, an undefined function is the sort column's type having no
+            // ordering operator (json, xml, geometric types).
+            if (sqlState == "42883" && opts.sort != null) throw UnsortableException(opts.sort)
             throw e
         }
         plan.joinData(rows, opts.limit)
     }
 
-    /** `pg_attribute` (not `information_schema`) because attnum survives dropped columns; ordinal_position does not. */
-    private fun columnComments(schema: String, table: String): Map<String, String> = jdbcTemplate.query(
-        "select a.attname::text, col_description(a.attrelid, a.attnum::int) " +
-            "from pg_attribute a " +
-            "join pg_class c on c.oid = a.attrelid " +
-            "join pg_namespace n on n.oid = c.relnamespace " +
-            "where n.nspname = ? and c.relname = ? " +
-            "  and a.attnum > 0 and not a.attisdropped",
-        RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
-        schema,
-        table,
-    ).filter { it.second != null }.associate { it.first to it.second!! }
-
     private fun queryTableInTransaction(schema: String?, table: String, opts: QueryOpts): TableData {
         val realSchema = resolveSchema(schema)
-        val realTable = requireTable(realSchema, table)
-        val columnNames = allowedColumns(realSchema, realTable)
+        val oid = readableTableOid(realSchema, table)
+        val realTable = table
+        // The join route's lookup, so both routes report the same columns; its
+        // names are the live catalog's, so they also serve as the allow-list.
+        val columns = tableMeta(realSchema, realTable, oid).columns.map { it.columnInfo() }
+        val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
@@ -310,37 +334,6 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
         val whereClause = opts.filter?.let { filterValidator.buildWhereClause(it, columnNames) }
             ?: WhereClause("", emptyList())
-
-        val columnTypes = jdbcTemplate.query(
-            "select column_name, data_type from information_schema.columns " +
-                "where table_schema = ? and table_name = ? " +
-                "order by ordinal_position",
-            RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
-            realSchema,
-            realTable,
-        )
-        val columnComments = columnComments(realSchema, realTable)
-
-        val (pkColumns, fkColumns) = keyMetadata(realSchema, realTable)
-        val columns = columnTypes.map { (name, typeName) ->
-            val key: String?
-            val references: ColumnRef?
-            when {
-                pkColumns.contains(name) -> {
-                    key = "pk"
-                    references = fkColumns[name]
-                }
-                fkColumns.containsKey(name) -> {
-                    key = "fk"
-                    references = fkColumns[name]
-                }
-                else -> {
-                    key = null
-                    references = null
-                }
-            }
-            ColumnInfo(name, typeName, key, references, columnComments[name])
-        }
 
         val selectList = columns.joinToString(", ") { "${quoteIdent(it.name)}::text" }
         // Qualify the source column so ORDER BY keeps its native type.
@@ -370,6 +363,9 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             if (sqlState == "22021" || sqlState == "22P05") {
                 throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
             }
+            // With a sort, an undefined function is the sort column's type having no
+            // ordering operator (json, xml, geometric types).
+            if (sqlState == "42883" && opts.sort != null) throw UnsortableException(opts.sort)
             throw e
         }
 

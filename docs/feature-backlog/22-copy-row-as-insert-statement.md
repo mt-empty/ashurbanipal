@@ -50,7 +50,10 @@ and the three diverge (Postgres `integer`/`boolean`, MySQL
 
 - Include generated / identity columns, or emit a column list that omits
   them with a toggle? (Shipped: all columns; `Column` carries no
-  generated flag.)
+  generated flag.) A pasted INSERT that lists a generated column fails when
+  run. Fixing it needs a catalog read in each port; if picked up, `generated`
+  and `identity` are separate named optional fields on §5.4.1, per the
+  field-shape decision in story 23 §4, not a traits bag.
 - Multi-row form ("copy all N visible rows as INSERTs"). Not built.
 - Very wide rows / large text cells — copied in full regardless of
   on-screen truncation (matches the cell viewer).
@@ -63,4 +66,9 @@ and the three diverge (Postgres `integer`/`boolean`, MySQL
   reliable proxy (the whole reason §3's detection is loose-match +
   value-shape gated, not type-name-keyed). Doing this properly means a
   protocol addition wired through all five ports and conformance, not a
-  frontend-only change — a separate, larger story if picked up.
+  frontend-only change — a separate, larger story if picked up. It would
+  also reverse §5.8's rule that a response MUST NOT say which engine a
+  source uses (`spec/protocol.md` §5.8, `docs/design.md` §5), so that
+  decision comes first. JDBC's `getDatabaseProductName` is the precedent for
+  one field per source; the page should read it only for quoting and
+  literals.
