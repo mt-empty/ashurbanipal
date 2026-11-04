@@ -33,3 +33,4 @@ implementations/spring-boot-starter/**/.kotlin/
 
 # Live GitHub Pages demo: built at deploy time (frontend:build-demo-live), never committed
 docs/demo/live/
+erase-practice/*

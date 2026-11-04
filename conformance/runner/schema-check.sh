@@ -30,6 +30,9 @@
 # just surfacing as a warning instead of a check result. Not a regression
 # if it appears; don't chase it.
 #
+# ASHURBANIPAL_SCHEMA_CHECK_SEED pins schemathesis's generator seed; unset
+# means a fresh random seed per run.
+#
 # Usage: conformance/runner/schema-check.sh [extra schemathesis args]
 set -euo pipefail
 
@@ -75,8 +78,14 @@ else
     MOUNT_ROOT="http://localhost:$PORT/__ashurbanipal"
 fi
 
+SEED_ARGS=()
+if [ -n "${ASHURBANIPAL_SCHEMA_CHECK_SEED:-}" ]; then
+    SEED_ARGS=(--seed "$ASHURBANIPAL_SCHEMA_CHECK_SEED")
+fi
+
 "$VENV/bin/schemathesis" run "$SCHEMA" \
     -u "$MOUNT_ROOT/api" \
+    ${SEED_ARGS[@]+"${SEED_ARGS[@]}"} \
     --checks all \
     --exclude-checks positive_data_acceptance \
     --max-examples "${ASHURBANIPAL_SCHEMA_CHECK_EXAMPLES:-100}" \
