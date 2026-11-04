@@ -44,6 +44,11 @@ on:
         description: "ASHURBANIPAL_CONFORMANCE_URL schema-check.sh runs against"
         required: true
         type: string
+      seed:
+        description: "Optional schemathesis --seed; empty means a random seed per run"
+        required: false
+        type: string
+        default: ""
 
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
@@ -136,6 +141,7 @@ jobs:
       - name: Run schemathesis against it (layer 2, shape)
         env:
           ASHURBANIPAL_CONFORMANCE_URL: ${{ inputs.conformance-url }}
+          ASHURBANIPAL_SCHEMA_CHECK_SEED: ${{ inputs.seed }}
         run: bash conformance/runner/schema-check.sh
 
       - name: Stop the demo
