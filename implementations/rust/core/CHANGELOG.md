@@ -5,6 +5,17 @@ Notable changes to the `ashurbanipal` core crate (framework-agnostic config, `Db
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.13.0] - 2026-11-04
+
+### Features
+
+- *(rust)* Mix database backends in one router via Source (#228)
+- *(protocol)* [**breaking**] Report each column's join class and full type (#234)
+
+### Documentation
+
+- Rewrite the port READMEs for library users (#226)
+
 ## [0.12.0] - 2026-10-30
 
 ### Performance
