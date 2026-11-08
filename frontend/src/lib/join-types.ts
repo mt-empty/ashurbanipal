@@ -81,6 +81,12 @@ export interface ForeignKeyPair {
   rightColumn: string;
 }
 
+// Every table of a join is in one schema, so only a same-schema reference
+// (no `references.schema`) can name another table of the join.
+function refersTo(c: Column, table: string): boolean {
+  return c.references?.table === table && c.references.schema === undefined;
+}
+
 // A foreign key between `table` (with columns `own`) and one of the earlier
 // tables, in either direction, as an ON pair; the first match wins.
 export function findForeignKey(
@@ -89,9 +95,9 @@ export function findForeignKey(
   own: readonly Column[],
 ): ForeignKeyPair | null {
   for (const [at, e] of earlier.entries()) {
-    const out = e.columns.find((c) => c.references?.table === table);
+    const out = e.columns.find((c) => refersTo(c, table));
     if (out?.references) return { at, leftColumn: out.name, rightColumn: out.references.column };
-    const back = own.find((c) => c.references?.table === e.table);
+    const back = own.find((c) => refersTo(c, e.table));
     if (back?.references) return { at, leftColumn: back.references.column, rightColumn: back.name };
   }
   return null;

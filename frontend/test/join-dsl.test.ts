@@ -159,6 +159,21 @@ test("a foreign key is found in either direction and greyed notes follow the oth
   assert.equal(pairNote(users[0], users[0]), null);
 });
 
+test("a foreign key into another schema does not match a same-named table in the join", () => {
+  const events = [
+    {
+      name: "handled_by_user_id",
+      type: "uuid",
+      class: "uuid" as const,
+      key: "fk" as const,
+      references: { schema: "public", table: "users", column: "id" },
+    },
+  ];
+  const users = [{ name: "id", type: "uuid", class: "uuid" as const }];
+  assert.equal(findForeignKey([{ table: "shipment_events", columns: events }], "users", users), null);
+  assert.equal(findForeignKey([{ table: "users", columns: users }], "shipment_events", events), null);
+});
+
 test("toWire keeps alias.* items written out of table order as an explicit column list", () => {
   const forward = parseJoin("SELECT o.*, u.* FROM orders o JOIN users u ON o.user_id = u.id", {
     catalog: fixture.catalog,

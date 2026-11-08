@@ -3835,11 +3835,14 @@ function unjoinableReason(column) {
 function pairNote(column, other) {
   return other === void 0 ? unjoinableReason(column) : joinMismatch(column, other)?.note ?? null;
 }
+function refersTo(c, table) {
+  return c.references?.table === table && c.references.schema === void 0;
+}
 function findForeignKey(earlier, table, own2) {
   for (const [at, e] of earlier.entries()) {
-    const out = e.columns.find((c) => c.references?.table === table);
+    const out = e.columns.find((c) => refersTo(c, table));
     if (out?.references) return { at, leftColumn: out.name, rightColumn: out.references.column };
-    const back = own2.find((c) => c.references?.table === e.table);
+    const back = own2.find((c) => refersTo(c, e.table));
     if (back?.references) return { at, leftColumn: back.references.column, rightColumn: back.name };
   }
   return null;

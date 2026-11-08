@@ -14,12 +14,25 @@ referrers in other schemas. But a join stays in one schema
 schema"). So the user can walk from a shipment to its order, but cannot see
 shipments and orders side by side in one grid.
 
-The seed already has the shapes to test against:
+The Postgres seed (`conformance/seed/seed.sql`) already has two
+cross-schema FKs to test against:
 
 - `warehouse.shipments.order_id` → `public.orders.id`
 - `warehouse.shipment_events.handled_by_user_id` → `public.users.id`
-- `users` exists in both `public` and `ashb_test_referenced_by_partitioning`,
-  so a join can name two tables with the same name.
+
+It lacks the rest:
+
+- **No same-named table in two schemas.** Add one, such as
+  `other_schema.users`, so a join can name two tables with the same name.
+  (`ashb_test_referenced_by_partitioning.users` is created and dropped by
+  one Rust test, `referenced_by_partitioning.rs`; it is not in the seed.)
+  This is a `tools/seed-gen` change, so both seed files regenerate and the
+  conformance seed `VERSION` is bumped.
+- **No cross-database data in `conformance/seed/seed.mysql.sql`.** It has
+  no `warehouse` database and no FK across databases; `other_schema` holds
+  only `decoy_items`, with no links. Add the same `warehouse` shapes there,
+  or do this part with story 35 (seed dialect parity).
+- **SQLite has only `main`**, so it can test only the rejections.
 
 ## 2. Decisions so far
 
@@ -29,9 +42,14 @@ The seed already has the shapes to test against:
 - **Every new field is optional.** A request with none of them behaves
   exactly as today.
 - **The join object is self-contained.** The base table and each `joins`
-  entry may carry their own `schema`. This mirrors the join DSL, where
-  `FROM` already takes `schema.table`, and saved joins are stored as that
-  DSL text (`frontend/src/lib/join-saved.ts`).
+  entry may carry their own `schema`. The join DSL gains `schema.table`
+  after `FROM` and `JOIN` to match (§4; today `tableref` takes a bare name
+  only), and saved joins are stored as that DSL text
+  (`frontend/src/lib/join-saved.ts`).
+- **A column's `references.schema` stays relative to its own table**, as
+  §5.4.1 and §5.11.4 already define it. A client resolves an FK target's
+  schema as `references.schema`, else the column's own `schema` (§3), else
+  the scope.
 - **The request's `schema` stays the default.** Any table without its own
   schema resolves in the request's resolved schema, as now.
 - **Every schema name is allow-listed** against §5.7's live list, and every
@@ -64,6 +82,13 @@ Add an optional `schema` to the base and to each `joins` entry:
 - In the response, a `columns` entry gains `schema` only when its table is
   not in the request's resolved schema. This mirrors `references.schema`
   (§5.4.1): present only for the cross-schema case.
+- The two fields have different bases. A column's `schema` is relative to
+  the request's resolved schema; its `references.schema` stays relative to
+  the column's own table (§2). The spec MUST say so. Example, with the
+  request's schema `warehouse`: `public.orders.user_id` carries
+  `schema: "public"` and `references: {table: "users", column: "id"}` with
+  no `schema`, because `users` is in `orders`' own schema. Its target is
+  `public.users`, not `warehouse.users`.
 - §5.11.2 column compatibility is unchanged. All tables share one engine,
   so types compare the same way across schemas.
 
@@ -101,7 +126,14 @@ tableref    = [ ident , "." ] , ident , [ ws , [ "AS" , ws ] , alias ] ;
   design canvas before building (see the "Ashurbanipal UI" canvas).
 - **Column catalog.** `join-catalog.ts` `tableColumns(table)` fetches
   `/tables/data?limit=1` in the current scope only. It must take a schema,
-  and its cache key must include it.
+  and its cache key must include it. The same goes for the index cache in
+  that file (`indexesRead`, keyed by `scopeIdentity(table)`), which composite
+  FK links read.
+- **FK links in the grid.** `fkLink`
+  (`frontend/src/features/column-parts.ts`) passes `references.schema`
+  through as is, so an absent one means the scope. In a join view it must
+  resolve as §2 says, falling back to the column's own `schema`. Otherwise
+  the example in §3 opens `warehouse.users`.
 - **FK suggestions.** `findForeignKey` (`frontend/src/lib/join-types.ts`)
   matches by `references.table` alone and ignores `references.schema`.
   - Today that can suggest a wrong `ON` pair: a cross-schema FK can match
@@ -114,7 +146,7 @@ tableref    = [ ident , "." ] , ident , [ ws , [ "AS" , ws ] , alias ] ;
   saved them from. A cross-schema join shows only in that scope's chips.
 - **URL.** The `join` param holds the canonical text, now with qualifiers
   when needed. `schema` stays the scope.
-- **Filter and sort** keep `alias.column` (`spec/filter-dsl.md` §1). No change.
+- **Filter and sort** keep `alias.column` (`spec/filter-dsl.md` §2 and §3). No change.
 
 ## 7. Touchpoints
 
@@ -124,18 +156,24 @@ tableref    = [ ident , "." ] , ident , [ ws , [ "AS" , ws ] , alias ] ;
   `spec/fixtures/join-parser-tests.json` regenerated from it
 - The five backends: Rust core (axum and actix-web), Go, Node, Flask, Spring
 - `conformance/runner/`: new cases (§8)
+- Seeds (§1): `tools/seed-gen` (regenerating `conformance/seed/seed.sql` and
+  `.devcontainer/db/init/01-seed.sql`), `conformance/seed/seed.mysql.sql`,
+  `conformance/seed/VERSION`
 - `docs/adapter-decisions.md`: §5 rows above
 - `frontend/src/lib/join-dsl.ts`, `join-def.ts`, `join-types.ts`,
   `join-draft.ts`; `frontend/src/features/join-catalog.ts`, `join-form.ts`,
-  `join-sql.ts`, `join-view.ts`
+  `join-sql.ts`, `join-view.ts`, `column-parts.ts`
 - e2e: `join-builder.spec.ts`, `join-result.spec.ts`
 
 ## 8. What "done" means
 
-- Conformance passes on every port against Postgres, and where the port
-  supports them, MySQL and SQLite:
-  - `warehouse.shipments` ⋈ `public.orders` on `order_id = id` returns the
-    joined rows, with `schema` on the `orders` columns only.
+- Conformance passes on every port against Postgres and, where the port
+  supports it, MySQL. SQLite runs only the rejection and no-`schema` cases:
+  - `warehouse.shipments` ⋈ `public.orders` on `order_id = id`, with the
+    request's schema `warehouse`, returns the joined rows, with `schema` on
+    the `orders` columns only.
+  - A join that names two same-named tables from two schemas, one aliased,
+    returns rows from both.
   - A `schema` not in §5.7's list → 400 `invalid_join`.
   - A table not in the named schema → 400 `invalid_join`.
   - An adversarial schema name (quotes, `;`, NUL) → 400, never SQL.
@@ -144,6 +182,8 @@ tableref    = [ ident , "." ] , ident , [ ws , [ "AS" , ws ] , alias ] ;
   mode, and suggests the cross-schema FK pair.
 - `findForeignKey` matches on schema and table, with a unit test for the
   same-name case.
+- An FK link on a joined column from another schema opens the table in
+  that column's schema (the §3 example), with a unit test.
 - The full three-browser e2e suite passes.
 
 ## 9. Related work
@@ -152,7 +192,10 @@ Do story 45 first. It has the server report the default source and schema,
 and keys remembered settings on concrete names. Saved cross-schema joins
 and the column catalog cache both depend on those stable scope keys, and
 unqualified table names in a join resolve in the default schema that story
-45 makes reliable.
+45 makes reliable. Story 45 is done.
+
+Story 35 (conformance seed dialect parity) covers the MySQL seed gap from
+§1. Either do the MySQL cross-database shapes here, or do story 35 first.
 
 ## 10. Out of scope
 
