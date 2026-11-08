@@ -609,6 +609,9 @@ dialog dl dd .cell-ws { white-space: pre-wrap; }
           cursor: pointer; border-radius: 4px; }
 #cv-pop button.cv-value:hover { background: var(--hover); }
 #cv-pop .cv-freq { opacity: .6; }
+/* A set width, so the note neither stretches a wide popover nor wraps word by word in a narrow one. */
+#cv-pop .cv-note { width: 13rem; min-width: 100%; box-sizing: border-box; margin: .2rem 0 0;
+          padding: .3rem .5rem 0; border-top: 1px solid var(--border); opacity: .6; font-size: .85em; }
 
 /* ==== referenced-by (§5.9): incoming-FK list, shared by the PK-cell
    popover and the record-dialog section ==== */
@@ -5467,6 +5470,8 @@ function buildMeta(structure, entries) {
       if (fk.columns.length < 2) continue;
       for (const pair of fk.columns) if (!compositeFkOf.has(pair.from)) compositeFkOf.set(pair.from, fk);
     }
+    const pk = structure.constraints.primary_key?.columns ?? [];
+    if (pk.length === 1) uniqueColumns.add(pk[0]);
     for (const u of structure.constraints.unique) if (u.columns.length === 1) uniqueColumns.add(u.columns[0]);
     for (const i of structure.indexes)
       if (i.unique && !i.predicate && i.columns.length === 1) uniqueColumns.add(i.columns[0]);
@@ -5614,16 +5619,23 @@ function markNoCommonValues(btn) {
   btn.classList.add("cv-none");
   btn.title = "no common values in the statistics";
 }
-function commonValuesButton(table, column) {
+function commonValueSource(col) {
+  if (col.join === void 0) {
+    const table = tableInView();
+    return table === null ? null : { table, column: col.name };
+  }
+  return col.table !== void 0 && col.column !== void 0 ? { table: col.table, column: col.column } : null;
+}
+function commonValuesButton(table, column, filterName) {
   const btn = el("button");
   btn.type = "button";
   btn.className = "common-values-btn";
-  btn.setAttribute("aria-label", `common values for ${column}`);
+  btn.setAttribute("aria-label", `common values for ${filterName}`);
   btn.textContent = "\u25BE";
   if (emptyCommonValues.has(scopeIdentity(table, column))) markNoCommonValues(btn);
   btn.onclick = (e) => {
     e.stopPropagation();
-    showCommonValues(e, table, column);
+    showCommonValues(e, table, column, filterName);
   };
   return btn;
 }
@@ -5659,8 +5671,9 @@ function showFilterSuggestions(ctx, all) {
   }
   suggest.show(matches, ctx.head);
 }
-function isColumn(name) {
-  return name !== null && (getLastPayload()?.columns.some((c) => columnKey(c) === name || c.join === 0 && c.column === name) ?? false);
+function columnNamed(name) {
+  if (name === null) return void 0;
+  return getLastPayload()?.columns.find((c) => columnKey(c) === name || c.join === 0 && c.column === name);
 }
 function updateFilterSuggestions() {
   const input2 = filterInput;
@@ -5672,11 +5685,10 @@ function updateFilterSuggestions() {
   suggest.close();
   if (ctx.partial.startsWith("'")) return;
   const token = suggest.token();
-  const table = tableInView();
   const plain = (labels) => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
     const columns = getLastPayload()?.columns ?? [];
-    const meta = tableMeta(table);
+    const meta = tableMeta(tableInView());
     showFilterSuggestions(
       ctx,
       columns.map((c) => ({
@@ -5687,22 +5699,26 @@ function updateFilterSuggestions() {
       }))
     );
   } else if (ctx.expect === "operator") {
-    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
+    if (columnNamed(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
     showFilterSuggestions(ctx, plain(optionsFor("joiner")));
-  } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column) && table !== null) {
-    commonValuesFor(table, ctx.column).then((values) => {
-      if (token !== suggest.token() || document.activeElement !== input2) return;
-      const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
-      showFilterSuggestions(ctx, rows);
-    });
+  } else if (ctx.expect === "value") {
+    const col = columnNamed(ctx.column);
+    const source = col && commonValueSource(col);
+    if (source) {
+      commonValuesFor(source.table, source.column).then((values) => {
+        if (token !== suggest.token() || document.activeElement !== input2) return;
+        const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
+        showFilterSuggestions(ctx, rows);
+      });
+    }
   }
 }
 filterInput.oninput = updateFilterSuggestions;
 filterInput.onfocus = updateFilterSuggestions;
 var cvAnchor = null;
 var cvRequestToken = 0;
-function renderCommonValues(values, column) {
+function renderCommonValues(values, table, filterName) {
   const list = $("cv-pop-list");
   if (values.length === 0) {
     const p = el("p", "cv-empty", "no common values available");
@@ -5720,13 +5736,14 @@ function renderCommonValues(values, column) {
       btn.append(val, freq);
       btn.onclick = () => {
         $("cv-pop").hidePopover();
-        applyFilter(filterClause(column, "=", v.value));
+        applyFilter(filterClause(filterName, "=", v.value));
       };
       return btn;
     })
   );
+  if (joinInView()) list.append(el("p", "cv-note", `Shares of all rows in ${table}, not indicative of this join`));
 }
-async function showCommonValues(e, table, column) {
+async function showCommonValues(e, table, column, filterName) {
   const btn = e.currentTarget;
   if (cvAnchor) cvAnchor.style.anchorName = "";
   cvAnchor = btn;
@@ -5751,7 +5768,7 @@ async function showCommonValues(e, table, column) {
     emptyCommonValues.add(key);
     markNoCommonValues(btn);
   }
-  renderCommonValues(values, column);
+  renderCommonValues(values, table, filterName);
 }
 
 // src/lib/sibling-matrix.ts
@@ -6381,8 +6398,7 @@ function renderHeader(columns) {
   markGridDrawn();
   countColumns();
   const { hidden } = counts;
-  const table = tableInView();
-  const meta = tableMeta(table);
+  const meta = tableMeta(tableInView());
   const singlePk = columns.filter((c) => c.key === "pk").length === 1;
   const tr = el("tr");
   const actionsTh = el("th", "row-actions");
@@ -6416,8 +6432,13 @@ function renderHeader(columns) {
       setSort(fullName, state.sort === fullName && state.order === "asc" ? "desc" : "asc");
       loadData({ resetScroll: false });
     };
-    const unique = col.key === "pk" && singlePk || meta?.uniqueColumns.has(col.name);
-    if (table !== null && !unique) head.appendChild(commonValuesButton(table, col.name));
+    const source = commonValueSource(col);
+    if (source) {
+      const sourceMeta = tableMeta(source.table);
+      const pkAlone = col.join === void 0 ? singlePk : sourceMeta === void 0;
+      const unique = col.key === "pk" && pkAlone || sourceMeta?.uniqueColumns.has(source.column);
+      if (!unique) head.appendChild(commonValuesButton(source.table, source.column, columnKey(col)));
+    }
     th.append(head, typeChip(col));
     tr.appendChild(th);
   }
@@ -6844,7 +6865,8 @@ async function runLoad({
   const token = nextLoadToken();
   const superseded = () => !isCurrentLoad(token);
   const widthScope = widthScopeOf(view);
-  const metaLoad = view.kind === "table" ? loadTableMeta(view.table) : null;
+  const metaTables = view.kind === "table" ? [view.table] : [...new Set(view.def.tables.map((t) => t.table))];
+  const tableMetaLoad = view.kind === "table" ? loadTableMeta(view.table) : null;
   let data;
   try {
     data = await fetchViewData(req, auto);
@@ -6881,8 +6903,8 @@ async function runLoad({
   updateJoinChrome();
   refreshSavedChips();
   syncUrl(replaceHistory || auto);
-  const metaInView = () => view.kind === "table" ? tableMeta(view.table) : void 0;
-  let drawnMeta;
+  const metaInView = () => metaTables.map((t) => tableMeta(t));
+  let drawnMeta = [];
   const renderTable = () => {
     if (superseded()) return;
     drawnMeta = metaInView();
@@ -6905,8 +6927,8 @@ async function runLoad({
   if (superseded()) return;
   updatePager(data);
   markTiming("rows-rendered", reason);
-  metaLoad?.then(() => {
-    if (!superseded() && metaInView() !== drawnMeta) renderTable();
+  (tableMetaLoad ?? Promise.all(metaTables.map((t) => loadTableMeta(t)))).then(() => {
+    if (!superseded() && metaInView().some((m, i) => m !== drawnMeta[i])) renderTable();
   });
   if (askNextPage && view.kind === "table" && !$("next").disabled) {
     prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);

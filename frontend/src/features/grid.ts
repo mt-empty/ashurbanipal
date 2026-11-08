@@ -16,7 +16,7 @@ import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { rowKey } from "../lib/row-diff.js";
 import { eqButton, fkLink, keyIcon, typeChip } from "./column-parts.js";
 import { columnMinWidth } from "./column-widths.js";
-import { applyFilter, commonValuesButton } from "./filter-ui.js";
+import { applyFilter, commonValueSource, commonValuesButton } from "./filter-ui.js";
 import { markGridDrawn } from "./grid-lock.js";
 import { switchToLeftJoin } from "./join-dialog.js";
 import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands, tableGroups } from "./join-view.js";
@@ -51,9 +51,7 @@ export function renderHeader(columns: Column[]): void {
   markGridDrawn();
   countColumns();
   const { hidden } = counts;
-  // Common values are a per-table query; a join column has no single table to ask.
-  const table = tableInView();
-  const meta = tableMeta(table);
+  const meta = tableMeta(tableInView());
   // Every member of a composite primary key reports key "pk".
   const singlePk = columns.filter((c) => c.key === "pk").length === 1;
   const tr = el("tr");
@@ -95,9 +93,15 @@ export function renderHeader(columns: Column[]): void {
       setSort(fullName, state.sort === fullName && state.order === "asc" ? "desc" : "asc");
       loadData({ resetScroll: false });
     };
-    // A column unique on its own has no common values to show.
-    const unique = (col.key === "pk" && singlePk) || meta?.uniqueColumns.has(col.name);
-    if (table !== null && !unique) head.appendChild(commonValuesButton(table, col.name));
+    const source = commonValueSource(col);
+    if (source) {
+      // A column unique on its own has no common values to show. A join's pk count
+      // spans its tables, so there a pk counts as alone until its table's facts arrive.
+      const sourceMeta = tableMeta(source.table);
+      const pkAlone = col.join === undefined ? singlePk : sourceMeta === undefined;
+      const unique = (col.key === "pk" && pkAlone) || sourceMeta?.uniqueColumns.has(source.column);
+      if (!unique) head.appendChild(commonValuesButton(source.table, source.column, columnKey(col)));
+    }
     th.append(head, typeChip(col));
     tr.appendChild(th);
   }

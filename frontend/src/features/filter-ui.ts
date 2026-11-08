@@ -5,13 +5,14 @@ import {
   applyScopeParams,
   getLastPayload,
   joinAliases,
+  joinInView,
   markFilterVerified,
   scopeIdentity,
   setAppliedFilterAst,
   state,
   tableInView,
 } from "../core/state.js";
-import type { CommonValue, FilterCondition } from "../core/types.js";
+import type { Column, CommonValue, FilterCondition } from "../core/types.js";
 import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
 import { truncateType } from "../lib/join-types.js";
@@ -174,18 +175,29 @@ function markNoCommonValues(btn: HTMLElement): void {
   btn.title = "no common values in the statistics";
 }
 
+// The table and column whose statistics describe a column: the viewed table's
+// own, or a join column's source table. Null when there is no single table.
+export function commonValueSource(col: Column): { table: string; column: string } | null {
+  if (col.join === undefined) {
+    const table = tableInView();
+    return table === null ? null : { table, column: col.name };
+  }
+  return col.table !== undefined && col.column !== undefined ? { table: col.table, column: col.column } : null;
+}
+
 // A focusable control nested in the sortable th — stopPropagation so
-// opening it doesn't also toggle sort.
-export function commonValuesButton(table: string, column: string): HTMLButtonElement {
+// opening it doesn't also toggle sort. `filterName` is what a picked value
+// filters on: the column's `alias.column` in a join view.
+export function commonValuesButton(table: string, column: string, filterName: string): HTMLButtonElement {
   const btn = el("button");
   btn.type = "button";
   btn.className = "common-values-btn";
-  btn.setAttribute("aria-label", `common values for ${column}`);
+  btn.setAttribute("aria-label", `common values for ${filterName}`);
   btn.textContent = "▾";
   if (emptyCommonValues.has(scopeIdentity(table, column))) markNoCommonValues(btn);
   btn.onclick = (e) => {
     e.stopPropagation();
-    showCommonValues(e, table, column);
+    showCommonValues(e, table, column, filterName);
   };
   return btn;
 }
@@ -230,11 +242,9 @@ function showFilterSuggestions(ctx: Completion, all: Suggestion[]): void {
 }
 
 // In a join view a plain name is the start table's column (spec/filter-dsl.md).
-function isColumn(name: string | null): boolean {
-  return (
-    name !== null &&
-    (getLastPayload()?.columns.some((c) => columnKey(c) === name || (c.join === 0 && c.column === name)) ?? false)
-  );
+function columnNamed(name: string | null): Column | undefined {
+  if (name === null) return undefined;
+  return getLastPayload()?.columns.find((c) => columnKey(c) === name || (c.join === 0 && c.column === name));
 }
 
 function updateFilterSuggestions(): void {
@@ -247,12 +257,10 @@ function updateFilterSuggestions(): void {
   suggest.close();
   if (ctx.partial.startsWith("'")) return; // inside a quoted value
   const token = suggest.token();
-  // Common values are a per-table query; a join view has no single table to ask.
-  const table = tableInView();
   const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
     const columns = getLastPayload()?.columns ?? [];
-    const meta = tableMeta(table);
+    const meta = tableMeta(tableInView());
     showFilterSuggestions(
       ctx,
       columns.map((c) => ({
@@ -263,15 +271,19 @@ function updateFilterSuggestions(): void {
       })),
     );
   } else if (ctx.expect === "operator") {
-    if (isColumn(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
+    if (columnNamed(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
     showFilterSuggestions(ctx, plain(optionsFor("joiner")));
-  } else if (ctx.expect === "value" && ctx.column && isColumn(ctx.column) && table !== null) {
-    commonValuesFor(table, ctx.column).then((values) => {
-      if (token !== suggest.token() || document.activeElement !== input) return;
-      const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
-      showFilterSuggestions(ctx, rows);
-    });
+  } else if (ctx.expect === "value") {
+    const col = columnNamed(ctx.column);
+    const source = col && commonValueSource(col);
+    if (source) {
+      commonValuesFor(source.table, source.column).then((values) => {
+        if (token !== suggest.token() || document.activeElement !== input) return;
+        const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
+        showFilterSuggestions(ctx, rows);
+      });
+    }
   }
 }
 
@@ -284,7 +296,8 @@ filterInput.onfocus = updateFilterSuggestions;
 // have. ----
 let cvAnchor: HTMLElement | null = null;
 let cvRequestToken = 0;
-function renderCommonValues(values: CommonValue[], column: string): void {
+// In a join the shares are of the source table's rows, which a note under them says.
+function renderCommonValues(values: CommonValue[], table: string, filterName: string): void {
   const list = $("cv-pop-list");
   if (values.length === 0) {
     const p = el("p", "cv-empty", "no common values available");
@@ -302,14 +315,15 @@ function renderCommonValues(values: CommonValue[], column: string): void {
       btn.append(val, freq);
       btn.onclick = () => {
         $("cv-pop").hidePopover();
-        applyFilter(filterClause(column, "=", v.value));
+        applyFilter(filterClause(filterName, "=", v.value));
       };
       return btn;
     }),
   );
+  if (joinInView()) list.append(el("p", "cv-note", `Shares of all rows in ${table}, not indicative of this join`));
 }
 
-async function showCommonValues(e: MouseEvent, table: string, column: string): Promise<void> {
+async function showCommonValues(e: MouseEvent, table: string, column: string, filterName: string): Promise<void> {
   const btn = e.currentTarget as HTMLElement;
   if (cvAnchor) cvAnchor.style.anchorName = "";
   cvAnchor = btn;
@@ -338,5 +352,5 @@ async function showCommonValues(e: MouseEvent, table: string, column: string): P
     emptyCommonValues.add(key);
     markNoCommonValues(btn);
   }
-  renderCommonValues(values, column);
+  renderCommonValues(values, table, filterName);
 }

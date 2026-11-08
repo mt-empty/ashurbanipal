@@ -243,8 +243,10 @@ async function runLoad({
   const token = nextLoadToken();
   const superseded = () => !isCurrentLoad(token);
   const widthScope = widthScopeOf(view);
-  // Asked beside the rows, so the first draw usually has it already.
-  const metaLoad = view.kind === "table" ? loadTableMeta(view.table) : null;
+  // Asked beside the rows, so the first draw usually has it already. A join asks
+  // after its rows: several lookups sent first would queue it behind them.
+  const metaTables = view.kind === "table" ? [view.table] : [...new Set(view.def.tables.map((t) => t.table))];
+  const tableMetaLoad = view.kind === "table" ? loadTableMeta(view.table) : null;
   let data: ViewData;
   try {
     data = await fetchViewData(req, auto);
@@ -293,8 +295,8 @@ async function runLoad({
   refreshSavedChips();
   // An auto-refresh tick is never a step of the user's own.
   syncUrl(replaceHistory || auto);
-  const metaInView = () => (view.kind === "table" ? tableMeta(view.table) : undefined);
-  let drawnMeta: TableMeta | undefined;
+  const metaInView = () => metaTables.map((t) => tableMeta(t));
+  let drawnMeta: (TableMeta | undefined)[] = [];
   const renderTable = () => {
     // The transition can wait for a frame; a view switch meanwhile owns the grid, and this data is not its join's.
     if (superseded()) return;
@@ -327,9 +329,9 @@ async function runLoad({
   if (superseded()) return;
   updatePager(data);
   markTiming("rows-rendered", reason);
-  // Incoming references and composite FKs change what the grid links.
-  metaLoad?.then(() => {
-    if (!superseded() && metaInView() !== drawnMeta) renderTable();
+  // Incoming references and composite FKs change what the grid links; unique columns, which ▾ it offers.
+  (tableMetaLoad ?? Promise.all(metaTables.map((t) => loadTableMeta(t)))).then(() => {
+    if (!superseded() && metaInView().some((m, i) => m !== drawnMeta[i])) renderTable();
   });
   // Joins are never asked for ahead: one can run up to the query timeout.
   if (askNextPage && view.kind === "table" && !$<HTMLButtonElement>("next").disabled) {

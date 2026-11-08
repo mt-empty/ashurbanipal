@@ -12,7 +12,7 @@ export interface TableMeta {
   referrers: number | null;
   // Multi-column FKs, which §5.4.1 omits from `references`; keyed by member column.
   compositeFkOf: Map<string, ConstraintFk>;
-  // Columns unique on their own, by constraint or full (non-partial) index.
+  // Columns unique on their own, by constraint, primary key or full (non-partial) index.
   uniqueColumns: Set<string>;
 }
 
@@ -40,6 +40,8 @@ function buildMeta(structure: StructureResponse | null, entries: ReferencedByEnt
       if (fk.columns.length < 2) continue;
       for (const pair of fk.columns) if (!compositeFkOf.has(pair.from)) compositeFkOf.set(pair.from, fk);
     }
+    const pk = structure.constraints.primary_key?.columns ?? [];
+    if (pk.length === 1) uniqueColumns.add(pk[0]);
     for (const u of structure.constraints.unique) if (u.columns.length === 1) uniqueColumns.add(u.columns[0]);
     for (const i of structure.indexes)
       if (i.unique && !i.predicate && i.columns.length === 1) uniqueColumns.add(i.columns[0]);

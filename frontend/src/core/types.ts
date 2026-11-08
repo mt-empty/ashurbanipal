@@ -205,8 +205,8 @@ export interface JoinDef {
   columns: JoinColumn[] | null;
 }
 
-// What the page shows. A table view is the only one with a single table that
-// per-table requests (structure, common values, referenced-by) can name.
+// What the page shows. A table view names one table; a join view's per-table
+// requests (structure, common values, referenced-by) name each of its tables.
 export interface TableView {
   readonly kind: "table";
   readonly table: string;
