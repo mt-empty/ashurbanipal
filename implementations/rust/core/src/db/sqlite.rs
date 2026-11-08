@@ -256,6 +256,7 @@ async fn table_meta(conn: &mut sqlx::SqliteConnection, table: &str) -> Result<Ta
     .await?;
     let (pk_columns, fk_columns) = key_metadata_on(conn, table).await?;
     Ok(TableMeta {
+        schema: None,
         name: table.to_string(),
         columns: columns
             .into_iter()
@@ -497,7 +498,9 @@ impl DbSource for SqliteSource {
         opts: JoinOpts,
     ) -> Result<JoinData, DbError> {
         check_schema(schema)?;
-        let names = spec.table_names();
+        let refs = spec.table_refs();
+        join::table_schemas(&refs, ONLY_SCHEMA, &[ONLY_SCHEMA.to_string()])?;
+        let names: Vec<&str> = refs.iter().map(|&(_, name)| name).collect();
         // Catalog lookups and the select share one connection and one
         // deadline (`spec/protocol.md` §5.11.5).
         self.bounded(opts.timeout_secs, async |conn| {
@@ -514,7 +517,7 @@ impl DbSource for SqliteSource {
             }
             let tables = names.iter().map(|n| metas[n].clone()).collect();
             let plan = join::plan(spec, tables, &opts)?;
-            let (body, values) = join::build_select(&plan, &JOIN_DIALECT, None);
+            let (body, values) = join::build_select(&plan, &JOIN_DIALECT);
 
             // AssertSqlSafe: the statement is built from catalog names and
             // generated aliases only; all values are bound.
@@ -528,7 +531,7 @@ impl DbSource for SqliteSource {
             let has_more = sqlite_rows.len() > opts.limit as usize;
             sqlite_rows.truncate(opts.limit as usize);
             Ok(JoinData {
-                columns: plan.columns(),
+                columns: plan.columns(Some(ONLY_SCHEMA)),
                 rows: sqlite_rows
                     .iter()
                     .map(|r| row_to_json(r, plan.labels().iter().map(String::as_str)))

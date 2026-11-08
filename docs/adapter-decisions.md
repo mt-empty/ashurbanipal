@@ -121,7 +121,8 @@ Protocol property: every catalog and data query for one operation is
 scoped to that operation's resolved schema — an absent `schema` param
 resolves to the connection's own default, a present one MUST be validated
 against §5.7's live list before use — never hardcoded to a default such
-as `public`.
+as `public`. A join table's own `schema` is the one exception; see §5.11
+below.
 
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
@@ -273,6 +274,15 @@ engine's order applies.
 **SQLite connection.** The whole operation, catalog lookups and select,
 runs on one connection inside the timeout wrapper, as §6 requires of any
 multi-query operation.
+
+**A table's own `schema` (§5.11.1).** Checked against the §5.7 list in the
+operation's transaction, then each table is spliced as `schema.table`.
+
+| Backend  | Mechanism | Notes |
+|----------|-----------|-------|
+| Postgres | `"schema"."table"` in `FROM`/`JOIN`; each table gated by `readable_table_oid_in_tx` in its own schema | Same `has_table_privilege` gate as a single-schema join. |
+| MySQL/MariaDB | `` `db`.`table` ``: a schema is a database, so a join reads across databases on one server | The table allow-list for each named database comes from `information_schema.tables`, with the same un-gated listing as §5.2/§5.3; a table the role cannot read is the same 1142 → `not_readable` mapping. |
+| SQLite   | `main` only | Any other `schema` is `invalid_join`, like an unknown name. `ATTACH` stays out of scope. |
 
 ## §5.4.2 — request size limits (Spring Boot)
 

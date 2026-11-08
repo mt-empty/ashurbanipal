@@ -48,18 +48,46 @@ export interface OnPair {
 export interface JoinEntry {
   left: boolean;
   table: string;
+  /** Absent means the request's resolved schema. */
+  schema?: string;
   on: OnPair[];
 }
 
 /** Positions: 0 is `table`, 1.. the entries of `joins` in order. */
 export interface JoinSpec {
   table: string;
+  /** Absent means the request's resolved schema. */
+  schema?: string;
   joins: JoinEntry[];
   columns?: ColumnPos[];
 }
 
-export function joinTableNames(spec: JoinSpec): string[] {
-  return [spec.table, ...spec.joins.map((j) => j.table)];
+export interface TableRef {
+  schema?: string;
+  table: string;
+}
+
+export function joinTableRefs(spec: JoinSpec): TableRef[] {
+  return [{ schema: spec.schema, table: spec.table }, ...spec.joins.map((j) => ({ schema: j.schema, table: j.table }))];
+}
+
+/**
+ * Each position's schema: its own, which must be in `listed` (§5.7), or else
+ * `request`. An unlisted one is invalid_join, never unknown_schema, which
+ * belongs to the schema parameter.
+ */
+export function tableSchemas(refs: TableRef[], request: string, listed: string[]): string[] {
+  return refs.map((r) => {
+    if (r.schema === undefined) return request;
+    if (!listed.includes(r.schema)) throw new BadJoinError(`unknown schema "${r.schema}"`);
+    return r.schema;
+  });
+}
+
+function optionalSchema(raw: Record<string, unknown>, what: string): string | undefined {
+  if (raw.schema === undefined) return undefined;
+  if (typeof raw.schema !== "string") throw new BadJoinError(`${what}: schema must be a string`);
+  return raw.schema;
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -97,8 +125,9 @@ export function parseJoin(raw: string): JoinSpec {
     );
   }
   if (!isObject(parsed)) throw new BadJoinError("join must be a JSON object");
-  checkKeys(parsed, ["table", "joins", "columns"], "join");
+  checkKeys(parsed, ["table", "schema", "joins", "columns"], "join");
   if (typeof parsed.table !== "string") throw new BadJoinError("join needs a string table");
+  const schema = optionalSchema(parsed, "join");
   if (!Array.isArray(parsed.joins) || parsed.joins.length === 0) {
     throw new BadJoinError("join needs at least one entry in joins");
   }
@@ -109,11 +138,12 @@ export function parseJoin(raw: string): JoinSpec {
   const joins: JoinEntry[] = parsed.joins.map((rawEntry: unknown, i: number) => {
     const position = i + 1;
     if (!isObject(rawEntry)) throw new BadJoinError(`join ${position} must be an object`);
-    checkKeys(rawEntry, ["type", "table", "on"], `join ${position}`);
+    checkKeys(rawEntry, ["type", "table", "schema", "on"], `join ${position}`);
     if (rawEntry.type !== "inner" && rawEntry.type !== "left") {
       throw new BadJoinError(`join ${position}: type must be "inner" or "left"`);
     }
     if (typeof rawEntry.table !== "string") throw new BadJoinError(`join ${position}: table must be a string`);
+    const entrySchema = optionalSchema(rawEntry, `join ${position}`);
     if (!Array.isArray(rawEntry.on) || rawEntry.on.length === 0 || rawEntry.on.length > MAX_JOIN_PAIRS) {
       throw new BadJoinError(`join ${position}: on needs 1 to ${MAX_JOIN_PAIRS} pairs`);
     }
@@ -129,7 +159,7 @@ export function parseJoin(raw: string): JoinSpec {
       }
       return { left, right: rawPair.right };
     });
-    return { left: rawEntry.type === "left", table: rawEntry.table, on };
+    return { left: rawEntry.type === "left", table: rawEntry.table, schema: entrySchema, on };
   });
 
   let columns: ColumnPos[] | undefined;
@@ -146,7 +176,7 @@ export function parseJoin(raw: string): JoinSpec {
       return pos;
     });
   }
-  return { table: parsed.table, joins, columns };
+  return { table: parsed.table, schema, joins, columns };
 }
 
 /**
@@ -176,6 +206,8 @@ export interface ColMeta {
 }
 
 export interface TableMeta {
+  /** The catalog-checked schema the table is spliced under; absent on SQLite. */
+  schema?: string;
   name: string;
   columns: ColMeta[];
 }
@@ -195,6 +227,7 @@ export interface JoinColumnInfo {
   type: string;
   join: number;
   table: string;
+  schema?: string;
   column: string;
   class: ColumnClassName;
   collation?: string;
@@ -352,16 +385,12 @@ export interface JoinDialect {
  * placeholder order. Numbered dialects reserve $1/$2 for limit and offset;
  * others bind filter values first, then limit, then offset.
  */
-export function buildJoinSelect(
-  plan: JoinPlan,
-  d: JoinDialect,
-  schema: string | undefined,
-): { body: string; values: string[] } {
+export function buildJoinSelect(plan: JoinPlan, d: JoinDialect): { body: string; values: string[] } {
   const alias = (pos: number, col: number): string => `t${pos}.${d.quote(plan.tables[pos].columns[col].name)}`;
   const selectList = plan.selection.map(([p, c], i) => `${d.castText(alias(p, c))} as c${i}`).join(", ");
   const fromItem = (pos: number): string => {
-    const name = d.quote(plan.tables[pos].name);
-    return schema !== undefined ? `${d.quote(schema)}.${name} t${pos}` : `${name} t${pos}`;
+    const { schema, name } = plan.tables[pos];
+    return schema !== undefined ? `${d.quote(schema)}.${d.quote(name)} t${pos}` : `${d.quote(name)} t${pos}`;
   };
 
   let sql = `${selectList} from ${fromItem(0)}`;
@@ -411,11 +440,14 @@ export function columnInfo(col: ColMeta): ColumnInfo {
   return info;
 }
 
-export function joinColumnInfos(plan: JoinPlan): JoinColumnInfo[] {
+/** A column's `schema` is reported only when its table is outside `requestSchema`. */
+export function joinColumnInfos(plan: JoinPlan, requestSchema: string): JoinColumnInfo[] {
   return plan.selection.map(([p, c], i) => {
     const t = plan.tables[p];
     const { name, ...rest } = columnInfo(t.columns[c]);
-    return { name: plan.labels[i], ...rest, join: p, table: t.name, column: name };
+    const info: JoinColumnInfo = { name: plan.labels[i], ...rest, join: p, table: t.name, column: name };
+    if (t.schema !== undefined && t.schema !== requestSchema) info.schema = t.schema;
+    return info;
   });
 }
 

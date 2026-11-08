@@ -28,6 +28,7 @@ from ..join import (
     build_select,
     enum_class,
     plan_join,
+    table_schemas,
     unknown_join_table,
 )
 from . import (
@@ -159,7 +160,10 @@ class PgSource(DbSource):
         return cur.fetchone()[0]
 
     def _resolve_schema(self, cur: psycopg.Cursor, requested: str | None) -> str:
-        schemas = self._list_schemas(cur)
+        return self._resolve_schema_among(cur, self._list_schemas(cur), requested)
+
+    def _resolve_schema_among(self, cur: psycopg.Cursor, schemas: list[str], requested: str | None) -> str:
+        """`_resolve_schema` against a schema list already fetched in this transaction."""
         if requested is not None:
             resolved = requested
         else:
@@ -391,6 +395,7 @@ class PgSource(DbSource):
         column_rows = list(cur.fetchall())
         pk_columns, fk_columns = self._key_metadata(cur, schema, table)
         return TableMeta(
+            schema=schema,
             name=table,
             columns=[
                 ColMeta(
@@ -412,21 +417,25 @@ class PgSource(DbSource):
             conn.adapters.register_loader("text", _LenientTextLoader)
             with conn.cursor() as cur:
                 cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
-                resolved_schema = self._resolve_schema(cur, schema)
-                names = spec.table_names()
-                metas: dict[str, TableMeta] = {}
-                for name in names:
-                    if name not in metas:
+                listed = self._list_schemas(cur)
+                resolved_schema = self._resolve_schema_among(cur, listed, schema)
+                refs = spec.table_refs()
+                schemas = table_schemas(refs, resolved_schema, listed)
+                metas: dict[tuple[str, str], TableMeta] = {}
+                tables = []
+                for key in zip(schemas, (name for _, name in refs), strict=True):
+                    if key not in metas:
                         try:
-                            oid = self._readable_table_oid(cur, resolved_schema, name)
-                            metas[name] = self._table_meta(cur, resolved_schema, name, oid)
+                            oid = self._readable_table_oid(cur, *key)
+                            metas[key] = self._table_meta(cur, *key, oid)
                         except NotAllowed as e:
-                            raise unknown_join_table(e, name) from None
-                plan = plan_join(spec, [metas[n] for n in names], opts)
+                            raise unknown_join_table(e, key[1]) from None
+                    tables.append(metas[key])
+                plan = plan_join(spec, tables, opts)
 
                 # The statement is built from catalog names and generated
                 # aliases only; every value is a bound parameter.
-                body, values = build_select(plan, _JOIN_DIALECT, resolved_schema)
+                body, values = build_select(plan, _JOIN_DIALECT)
                 try:
                     cur.execute(f"select {body}", (*values, opts.limit + 1, opts.offset))
                 except psycopg.errors.InsufficientPrivilege as exc:
@@ -440,7 +449,7 @@ class PgSource(DbSource):
                 rows, has_more = plan.rows_from(
                     cur.fetchall(), opts.limit, lambda v: None if v is None else str(v)
                 )
-                return JoinData(columns=plan.column_infos(), rows=rows, has_more=has_more)
+                return JoinData(columns=plan.column_infos(resolved_schema), rows=rows, has_more=has_more)
 
     @wrap_driver_errors(psycopg.Error)
     def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]:

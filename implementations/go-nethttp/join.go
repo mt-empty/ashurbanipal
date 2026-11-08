@@ -67,26 +67,52 @@ type OnPair struct {
 }
 
 type JoinEntry struct {
-	Left  bool // false is an inner join
-	Table string
-	On    []OnPair
+	Left   bool // false is an inner join
+	Table  string
+	Schema *string // nil means the request's resolved schema
+	On     []OnPair
 }
 
 // JoinSpec is the decoded join parameter. Positions: 0 is Table, 1.. the
 // entries of Joins in order.
 type JoinSpec struct {
 	Table   string
+	Schema  *string // nil means the request's resolved schema
 	Joins   []JoinEntry
 	Columns []ColumnPos // nil means every column of every table
 }
 
-// TableNames returns the table name at each position.
-func (s JoinSpec) TableNames() []string {
-	names := []string{s.Table}
+// TableRef is one position's own schema (nil: the request's) and table.
+type TableRef struct {
+	Schema *string
+	Table  string
+}
+
+// TableRefs returns the schema and table at each position.
+func (s JoinSpec) TableRefs() []TableRef {
+	refs := []TableRef{{Schema: s.Schema, Table: s.Table}}
 	for _, j := range s.Joins {
-		names = append(names, j.Table)
+		refs = append(refs, TableRef{Schema: j.Schema, Table: j.Table})
 	}
-	return names
+	return refs
+}
+
+// tableSchemas resolves each position's schema: its own, which must be in
+// listed (§5.7), or else request. An unlisted one is invalid_join, never
+// unknown_schema, which belongs to the schema parameter.
+func tableSchemas(refs []TableRef, request string, listed []string) ([]string, error) {
+	out := make([]string, len(refs))
+	for i, r := range refs {
+		if r.Schema == nil {
+			out[i] = request
+			continue
+		}
+		if _, ok := findExact(listed, *r.Schema); !ok {
+			return nil, badJoin("unknown schema %q", *r.Schema)
+		}
+		out[i] = *r.Schema
+	}
+	return out, nil
 }
 
 type wireColumnPos struct {
@@ -100,15 +126,30 @@ type wireOnPair struct {
 }
 
 type wireJoinEntry struct {
-	Type  *string      `json:"type"`
-	Table *string      `json:"table"`
-	On    []wireOnPair `json:"on"`
+	Type   *string         `json:"type"`
+	Table  *string         `json:"table"`
+	Schema json.RawMessage `json:"schema"`
+	On     []wireOnPair    `json:"on"`
 }
 
 type wireJoinSpec struct {
 	Table   *string          `json:"table"`
+	Schema  json.RawMessage  `json:"schema"`
 	Joins   []wireJoinEntry  `json:"joins"`
 	Columns *[]wireColumnPos `json:"columns"`
+}
+
+// optionalSchema decodes an own schema: absent is nil, and anything but a
+// JSON string, null included, is a bad join (§5.11.1).
+func optionalSchema(raw json.RawMessage, what string) (*string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	var s *string
+	if err := json.Unmarshal(raw, &s); err != nil || s == nil {
+		return nil, badJoin("%s: schema must be a string", what)
+	}
+	return s, nil
 }
 
 func (w *wireColumnPos) toPos(what string) (ColumnPos, error) {
@@ -122,11 +163,13 @@ func (w *wireColumnPos) toPos(what string) (ColumnPos, error) {
 }
 
 var joinKeys = keyShape{
-	"table": nil,
+	"table":  nil,
+	"schema": nil,
 	"joins": keyShape{
-		"type":  nil,
-		"table": nil,
-		"on":    keyShape{"left": keyShape{"join": nil, "column": nil}, "right": nil},
+		"type":   nil,
+		"table":  nil,
+		"schema": nil,
+		"on":     keyShape{"left": keyShape{"join": nil, "column": nil}, "right": nil},
 	},
 	"columns": keyShape{"join": nil, "column": nil},
 }
@@ -158,13 +201,21 @@ func ParseJoin(raw string) (JoinSpec, error) {
 	if len(w.Joins)+1 > MaxJoinTables {
 		return JoinSpec{}, badJoin("too many tables: %d (max %d)", len(w.Joins)+1, MaxJoinTables)
 	}
-	spec := JoinSpec{Table: *w.Table}
+	schema, err := optionalSchema(w.Schema, "join")
+	if err != nil {
+		return JoinSpec{}, err
+	}
+	spec := JoinSpec{Table: *w.Table, Schema: schema}
 	for i, e := range w.Joins {
 		position := i + 1
 		if e.Type == nil || e.Table == nil {
 			return JoinSpec{}, badJoin("join %d needs type and table", position)
 		}
-		entry := JoinEntry{Table: *e.Table}
+		entrySchema, err := optionalSchema(e.Schema, fmt.Sprintf("join %d", position))
+		if err != nil {
+			return JoinSpec{}, err
+		}
+		entry := JoinEntry{Table: *e.Table, Schema: entrySchema}
 		switch *e.Type {
 		case "inner":
 		case "left":
@@ -274,6 +325,9 @@ func (c colMeta) collationName() string {
 }
 
 type tableMeta struct {
+	// schema is the catalog-checked schema the table is spliced under; ""
+	// on SQLite, which has none above the database.
+	schema  string
 	name    string
 	columns []colMeta
 }
@@ -318,6 +372,7 @@ type JoinColumnInfo struct {
 	Type       string     `json:"type"`
 	Join       int        `json:"join"`
 	Table      string     `json:"table"`
+	Schema     string     `json:"schema,omitempty"`
 	Column     string     `json:"column"`
 	Class      string     `json:"class"`
 	EnumType   string     `json:"enum_type,omitempty"`
@@ -538,7 +593,7 @@ type joinDialect struct {
 // leading select, so MySQL can wrap it in its timeout hint) and the filter
 // values in placeholder order. Numbered dialects reserve $1/$2 for limit and
 // offset; others bind filter values first, then limit, then offset.
-func buildJoinSelect(p *joinPlan, d joinDialect, schema *string) (string, []string) {
+func buildJoinSelect(p *joinPlan, d joinDialect) (string, []string) {
 	alias := func(pos, col int) string {
 		return fmt.Sprintf("t%d.%s", pos, d.quote(p.tables[pos].columns[col].name))
 	}
@@ -547,9 +602,10 @@ func buildJoinSelect(p *joinPlan, d joinDialect, schema *string) (string, []stri
 		parts[i] = fmt.Sprintf("%s as c%d", d.castText(alias(s[0], s[1])), i)
 	}
 	fromItem := func(pos int) string {
-		name := d.quote(p.tables[pos].name)
-		if schema != nil {
-			return fmt.Sprintf("%s.%s t%d", d.quote(*schema), name, pos)
+		t := p.tables[pos]
+		name := d.quote(t.name)
+		if t.schema != "" {
+			return fmt.Sprintf("%s.%s t%d", d.quote(t.schema), name, pos)
 		}
 		return fmt.Sprintf("%s t%d", name, pos)
 	}
@@ -632,13 +688,20 @@ func buildJoinSelect(p *joinPlan, d joinDialect, schema *string) (string, []stri
 	return sb.String(), values
 }
 
-func (p *joinPlan) columnInfos() []JoinColumnInfo {
+// columnInfos reports a column's schema only when its table is outside
+// requestSchema, the operation's resolved schema.
+func (p *joinPlan) columnInfos(requestSchema string) []JoinColumnInfo {
 	out := make([]JoinColumnInfo, len(p.selection))
 	for i, s := range p.selection {
 		t := p.tables[s[0]]
 		c := t.columns[s[1]]
+		schema := ""
+		if t.schema != requestSchema {
+			schema = t.schema
+		}
 		out[i] = JoinColumnInfo{
-			Name: p.labels[i], Type: c.typeName, Join: s[0], Table: t.name, Column: c.name,
+			Schema: schema,
+			Name:   p.labels[i], Type: c.typeName, Join: s[0], Table: t.name, Column: c.name,
 			Class: c.class.kind, EnumType: c.class.enumType, Collation: c.collationName(),
 			Key: c.key, References: c.references, Comment: c.comment,
 		}

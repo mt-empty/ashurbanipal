@@ -38,6 +38,7 @@ from ashurbanipal.join import (
     enum_class,
     parse_join,
     plan_join,
+    table_schemas,
 )
 from ashurbanipal.routes import router
 
@@ -71,11 +72,12 @@ def _orders() -> TableMeta:
             _col("status", "text", TEXT),
             _col("tags", "ARRAY", ARRAY),
         ],
+        schema="public",
     )
 
 
 def _users() -> TableMeta:
-    return TableMeta("users", [_col("id", "uuid", UUID), _col("email", "text", TEXT)])
+    return TableMeta("users", [_col("id", "uuid", UUID), _col("email", "text", TEXT)], schema="public")
 
 
 def _opts(**kw) -> JoinOpts:
@@ -84,7 +86,7 @@ def _opts(**kw) -> JoinOpts:
 
 def test_parse_join_accepts_a_valid_join() -> None:
     spec = parse_join(JOIN)
-    assert spec.table_names() == ["orders", "users"]
+    assert spec.table_refs() == [(None, "orders"), (None, "users")]
     assert spec.joins[0].left is True
 
 
@@ -220,7 +222,7 @@ def test_build_select_uses_catalog_names_and_generated_aliases_only() -> None:
             ],
         ),
     )
-    body, values = build_select(plan, _PG, "public")
+    body, values = build_select(plan, _PG)
     assert body.startswith('t0."id"::text as c0, ')
     assert ' from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"' in body
     assert ' where (t1."email"::text = %s) OR (NOT (t0."status"::text IS NULL))' in body
@@ -415,3 +417,31 @@ def test_errors_use_problem_json_with_informative_titles(client) -> None:
         "/__ashurbanipal/api/tables/data?table=users&filter=" + quote('[{"join":0,"column":"id","op":"IS NULL"}]')
     )
     assert data_with_join.get_json()["code"] == "invalid_filter"
+
+
+def test_each_table_may_name_its_own_schema() -> None:
+    spec = parse_join(
+        '{"table":"shipments","schema":"warehouse","joins":[{"type":"left","table":"orders",'
+        '"schema":"public","on":[{"left":{"join":0,"column":"order_id"},"right":"id"}]}]}'
+    )
+    assert spec.table_refs() == [("warehouse", "shipments"), ("public", "orders")]
+    on = '"on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]'
+    for bad in (
+        f'{{"table":"orders","schema":1,"joins":[{{"type":"left","table":"users",{on}}}]}}',
+        f'{{"table":"orders","schema":null,"joins":[{{"type":"left","table":"users",{on}}}]}}',
+        f'{{"table":"orders","joins":[{{"type":"left","table":"users","schema":["public"],{on}}}]}}',
+    ):
+        with pytest.raises(BadJoin):
+            parse_join(bad)
+    with pytest.raises(BadJoin):
+        table_schemas(spec.table_refs(), "public", ["public"])
+
+
+def test_a_table_in_another_schema_is_spliced_and_reported_under_it() -> None:
+    users = _users()
+    users.schema = "warehouse"
+    plan = plan_join(parse_join(JOIN), [_orders(), users], _opts())
+    body, _ = build_select(plan, _PG)
+    assert ' from "public"."orders" t0 left join "warehouse"."users" t1 ' in body
+    for c in plan.column_infos("public"):
+        assert c.schema == ("warehouse" if c.table == "users" else None), (c.table, c.column)

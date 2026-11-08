@@ -97,3 +97,11 @@ A `sort` on a column whose type the engine cannot order (Postgres `json`,
 already existed changes from 500 to 400, so this is not. It lands with every
 port, the conformance runner and the bundled UI changed together, under §7's
 alpha exception.
+
+`/api/tables/join` (§5.11) can name tables from more than one schema of the
+same source. The base and each `joins` entry take an optional `schema`,
+checked against `/api/schemas` (400 `invalid_join` when unknown), and a
+response column carries `schema` only when its table is not in the
+request's resolved schema; its `references.schema` stays relative to the
+column's own table. Additive — a request without the new field behaves as
+before — so v1 stands.

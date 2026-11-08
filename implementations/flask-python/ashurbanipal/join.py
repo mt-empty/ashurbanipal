@@ -37,6 +37,7 @@ class JoinEntry:
     left: bool  # False is an inner join
     table: str
     on: tuple[OnPair, ...]
+    schema: str | None = None  # None means the request's resolved schema
 
 
 @dataclass(frozen=True)
@@ -46,9 +47,35 @@ class JoinSpec:
     table: str
     joins: tuple[JoinEntry, ...]
     columns: tuple[ColumnPos, ...] | None = None
+    schema: str | None = None  # None means the request's resolved schema
 
-    def table_names(self) -> list[str]:
-        return [self.table, *(j.table for j in self.joins)]
+    def table_refs(self) -> list[tuple[str | None, str]]:
+        """`(own schema, table)` by position."""
+        return [(self.schema, self.table), *((j.schema, j.table) for j in self.joins)]
+
+
+def table_schemas(refs: list[tuple[str | None, str]], request: str, listed: list[str]) -> list[str]:
+    """Each position's schema: its own, which must be in `listed` (§5.7), or
+    else `request`. An unlisted one is invalid_join, never unknown_schema,
+    which belongs to the schema parameter.
+    """
+    out = []
+    for own, _ in refs:
+        if own is None:
+            out.append(request)
+        elif own in listed:
+            out.append(own)
+        else:
+            raise BadJoin(f"unknown schema {own!r}")
+    return out
+
+
+def _optional_schema(obj: dict, what: str) -> str | None:
+    if "schema" not in obj:
+        return None
+    if not isinstance(obj["schema"], str):
+        raise BadJoin(f"{what}: schema must be a string")
+    return obj["schema"]
 
 
 def _is_int(value) -> bool:
@@ -87,9 +114,10 @@ def parse_join(raw: str) -> JoinSpec:
         raise BadJoin(f"join must be a JSON object of the documented shape: {e}") from e
     if not isinstance(parsed, dict):
         raise BadJoin("join must be a JSON object")
-    _check_keys(parsed, {"table", "joins", "columns"}, "join")
+    _check_keys(parsed, {"table", "schema", "joins", "columns"}, "join")
     if not isinstance(parsed.get("table"), str):
         raise BadJoin("join needs a string table")
+    schema = _optional_schema(parsed, "join")
     raw_joins = parsed.get("joins")
     if not isinstance(raw_joins, list) or not raw_joins:
         raise BadJoin("join needs at least one entry in joins")
@@ -101,12 +129,13 @@ def parse_join(raw: str) -> JoinSpec:
         position = i + 1
         if not isinstance(entry, dict):
             raise BadJoin(f"join {position} must be an object")
-        _check_keys(entry, {"type", "table", "on"}, f"join {position}")
+        _check_keys(entry, {"type", "table", "schema", "on"}, f"join {position}")
         kind = entry.get("type")
         if kind not in ("inner", "left"):
             raise BadJoin(f'join {position}: type must be "inner" or "left"')
         if not isinstance(entry.get("table"), str):
             raise BadJoin(f"join {position}: table must be a string")
+        entry_schema = _optional_schema(entry, f"join {position}")
         raw_on = entry.get("on")
         if not isinstance(raw_on, list) or not 1 <= len(raw_on) <= MAX_JOIN_PAIRS:
             raise BadJoin(f"join {position}: on needs 1 to {MAX_JOIN_PAIRS} pairs")
@@ -123,7 +152,7 @@ def parse_join(raw: str) -> JoinSpec:
                     f"join {position}: on.left refers to position {left.join}, which is not an earlier table"
                 )
             pairs.append(OnPair(left=left, right=pair["right"]))
-        joins.append(JoinEntry(left=kind == "left", table=entry["table"], on=tuple(pairs)))
+        joins.append(JoinEntry(left=kind == "left", table=entry["table"], on=tuple(pairs), schema=entry_schema))
 
     columns: tuple[ColumnPos, ...] | None = None
     if "columns" in parsed:
@@ -139,7 +168,7 @@ def parse_join(raw: str) -> JoinSpec:
             seen.add(pos)
             picked.append(pos)
         columns = tuple(picked)
-    return JoinSpec(table=parsed["table"], joins=tuple(joins), columns=columns)
+    return JoinSpec(table=parsed["table"], joins=tuple(joins), columns=columns, schema=schema)
 
 
 @dataclass(frozen=True)
@@ -204,6 +233,8 @@ class ColMeta:
 class TableMeta:
     name: str
     columns: list[ColMeta]
+    # The catalog-checked schema the table is spliced under; None on SQLite.
+    schema: str | None = None
 
     def index(self, column: str) -> int:
         for i, c in enumerate(self.columns):
@@ -250,6 +281,7 @@ class JoinColumnInfo:
     comment: str | None = None
     enum_type: str | None = None
     collation: str | None = None
+    schema: str | None = None
 
 
 @dataclass
@@ -279,7 +311,8 @@ class JoinPlan:
     sort: tuple[int, int] | None = None
     descending: bool = False
 
-    def column_infos(self) -> list[JoinColumnInfo]:
+    def column_infos(self, request_schema: str) -> list[JoinColumnInfo]:
+        """A column's `schema` is reported only when its table is outside `request_schema`."""
         out = []
         for (pos, col), label in zip(self.selection, self.labels, strict=True):
             t = self.tables[pos]
@@ -297,6 +330,7 @@ class JoinPlan:
                     column_class=c.column_class,
                     enum_type=c.enum_type,
                     collation=c.collation,
+                    schema=t.schema if t.schema != request_schema else None,
                 )
             )
         return out
@@ -426,7 +460,7 @@ class Dialect:
     ilike: str  # "native", "like" or "lowered-like"
 
 
-def build_select(plan: JoinPlan, d: Dialect, schema: str | None) -> tuple[str, list[str]]:
+def build_select(plan: JoinPlan, d: Dialect) -> tuple[str, list[str]]:
     """Renders `<select list> from … limit … offset …` (no leading `select`,
     so MySQL can wrap it in its timeout hint) and the filter values in
     placeholder order. Bind the values first, then limit, then offset.
@@ -438,8 +472,9 @@ def build_select(plan: JoinPlan, d: Dialect, schema: str | None) -> tuple[str, l
     select_list = ", ".join(f"{d.cast_text(alias(p, c))} as c{i}" for i, (p, c) in enumerate(plan.selection))
 
     def from_item(pos: int) -> str:
-        name = d.quote(plan.tables[pos].name)
-        return f"{d.quote(schema)}.{name} t{pos}" if schema is not None else f"{name} t{pos}"
+        t = plan.tables[pos]
+        name = d.quote(t.name)
+        return f"{d.quote(t.schema)}.{name} t{pos}" if t.schema is not None else f"{name} t{pos}"
 
     sql = f"{select_list} from {from_item(0)}"
     for i, is_left in enumerate(plan.left):

@@ -338,4 +338,4 @@ INSERT INTO feature_flags (key, enabled, rollout_pct, created_at) VALUES
 ANALYZE;
 
 INSERT INTO _conformance_meta (seed_version, dialect, checksum, generated_at)
-VALUES ('5', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');
+VALUES ('6', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');

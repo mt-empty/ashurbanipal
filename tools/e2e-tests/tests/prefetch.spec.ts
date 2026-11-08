@@ -75,13 +75,7 @@ test("the table list still shows when the row counts fail", async ({ page }) => 
 });
 
 test("Back while an earlier step's table list is on its way asks for the rows once", async ({ page }) => {
-  // Same-named tables in two schemas: warehouse's list also names users.
-  await page.route(tableList("warehouse"), async (route) => {
-    const response = await route.fetch();
-    const body = await response.json();
-    body.tables.push({ name: "users" });
-    await route.fulfill({ response, json: body });
-  });
+  // Same-named tables in two schemas: the seed has users in public and warehouse.
   await gotoApp(page);
   await selectTable(page, "users");
   await selectTable(page, "orders");

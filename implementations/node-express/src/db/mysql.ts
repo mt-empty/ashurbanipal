@@ -13,9 +13,10 @@ import {
   type JoinSpec,
   joinColumnInfos,
   joinRows,
-  joinTableNames,
+  joinTableRefs,
   planJoin,
   type TableMeta,
+  tableSchemas,
 } from "../join.js";
 import {
   type ColumnInfo,
@@ -241,7 +242,23 @@ export class MySqlSource implements DbSource {
     requested: string | undefined,
     timeoutMs: number,
   ): Promise<string> {
-    const schemas = await this.listSchemasInTx(conn, variant, timeoutMs);
+    return this.resolveSchemaAmong(
+      conn,
+      variant,
+      await this.listSchemasInTx(conn, variant, timeoutMs),
+      requested,
+      timeoutMs,
+    );
+  }
+
+  // resolveSchemaInTx against a schema list already fetched in this transaction.
+  private async resolveSchemaAmong(
+    conn: PoolConnection,
+    variant: Variant,
+    schemas: string[],
+    requested: string | undefined,
+    timeoutMs: number,
+  ): Promise<string> {
     let resolved: string;
     if (requested !== undefined) {
       resolved = requested;
@@ -456,29 +473,33 @@ export class MySqlSource implements DbSource {
       if (comment.length > 0) col.comment = comment;
       return col;
     });
-    return { name: table, columns };
+    return { schema, name: table, columns };
   }
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
     return this.withTx(async (conn, variant) => {
-      const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
-      const allowed = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
-      const names = joinTableNames(spec);
+      const listed = await this.listSchemasInTx(conn, variant, timeoutMs);
+      const realSchema = await this.resolveSchemaAmong(conn, variant, listed, schema, timeoutMs);
+      const refs = joinTableRefs(spec);
+      const schemas = tableSchemas(refs, realSchema, listed);
+      const allowed = new Map<string, string[]>();
+      for (const s of new Set(schemas)) allowed.set(s, await this.allowedTablesInTx(conn, variant, s, timeoutMs));
       const metas = new Map<string, TableMeta>();
-      for (const name of names) {
-        if (metas.has(name)) continue;
-        if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
-        metas.set(name, await this.tableMeta(conn, variant, realSchema, name, timeoutMs));
+      const tables: TableMeta[] = [];
+      for (const [i, { table }] of refs.entries()) {
+        const key = JSON.stringify([schemas[i], table]);
+        if (!metas.has(key)) {
+          if (!findExact(allowed.get(schemas[i]) as string[], table))
+            throw new BadJoinError(`unknown table "${table}"`);
+          metas.set(key, await this.tableMeta(conn, variant, schemas[i], table, timeoutMs));
+        }
+        tables.push(metas.get(key) as TableMeta);
       }
-      const plan = planJoin(
-        spec,
-        names.map((n) => metas.get(n) as TableMeta),
-        opts,
-      );
+      const plan = planJoin(spec, tables, opts);
 
       // The statement is built from catalog names and generated aliases
       // only; every value is a bound ? parameter.
-      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT, realSchema);
+      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT);
       const rows = await queryRows(conn, timedSelect(variant, timeoutMs, body), [
         ...values,
         opts.limit + 1,
@@ -487,7 +508,7 @@ export class MySqlSource implements DbSource {
         throw mapSelectDeniedMysql(err, spec.table);
       });
       const out = joinRows(plan, rows, opts.limit, cellToJson);
-      return { columns: joinColumnInfos(plan), rows: out.rows, has_more: out.hasMore };
+      return { columns: joinColumnInfos(plan, realSchema), rows: out.rows, has_more: out.hasMore };
     });
   }
 

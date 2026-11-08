@@ -395,9 +395,11 @@ paths:
       operationId: tableJoin
       summary: Paginated, filtered, sorted rows from joined tables.
       description: >
-        Joins up to 4 tables of one schema with INNER or LEFT joins on
+        Joins up to 4 tables of one source with INNER or LEFT joins on
         column equality, described as a structure (spec/protocol.md
-        §5.11). No SQL text is accepted. The response has no total.
+        §5.11). Each table resolves in the `schema` parameter's schema
+        unless it names its own. No SQL text is accepted. The response
+        has no total.
       parameters:
         - $ref: "#/components/parameters/Source"
         - $ref: "#/components/parameters/Schema"
@@ -408,8 +410,9 @@ paths:
             URL-encoded JSON object (spec/protocol.md §5.11.1). Tables are
             referenced by position: 0 is the base table, 1..n the entries
             of `joins`. At most 4 tables, 1 to 3 `on` pairs per join, and
-            the encoded size is bounded. Unknown names, an incompatible
-            column pair, or a malformed object yield 400 `invalid_join`.
+            the encoded size is bounded. Unknown names (including a
+            table's own `schema`), an incompatible column pair, or a
+            malformed object yield 400 `invalid_join`.
           content:
             application/json:
               schema:
@@ -423,6 +426,16 @@ paths:
                         table: users
                         on:
                           - left: {join: 0, column: user_id}
+                            right: id
+                cross_schema:
+                  value:
+                    table: shipments
+                    joins:
+                      - type: left
+                        table: orders
+                        schema: public
+                        on:
+                          - left: {join: 0, column: order_id}
                             right: id
         - name: filter
           in: query
@@ -1061,6 +1074,8 @@ components:
         table:
           type: string
           description: The base table (position 0).
+        schema:
+          $ref: "#/components/schemas/JoinTableSchema"
         joins:
           type: array
           minItems: 1
@@ -1075,6 +1090,8 @@ components:
                 enum: [inner, left]
               table:
                 type: string
+              schema:
+                $ref: "#/components/schemas/JoinTableSchema"
               on:
                 type: array
                 minItems: 1
@@ -1099,6 +1116,14 @@ components:
           items:
             $ref: "#/components/schemas/JoinColumnRef"
 
+    JoinTableSchema:
+      type: string
+      description: >
+        The schema this table resolves in, matched exactly against
+        /schemas; the table must then be in that schema's /tables list.
+        Absent means the request's resolved schema. Unknown yields 400
+        `invalid_join`.
+
     JoinFilterCondition:
       allOf:
         - $ref: "#/components/schemas/FilterCondition"
@@ -1122,6 +1147,12 @@ components:
               type: integer
             table:
               type: string
+            schema:
+              type: string
+              description: >
+                The table's schema, present only when it is not the
+                request's resolved schema. `references.schema` stays
+                relative to this table's own schema, not the request's.
             column:
               type: string
               description: >

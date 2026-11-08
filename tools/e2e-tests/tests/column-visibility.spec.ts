@@ -105,22 +105,7 @@ test("a stored hidden column the table no longer has is not counted and is dropp
 });
 
 test("hidden columns stay with their schema: a same-named table elsewhere is unaffected", async ({ page }) => {
-  // The seed has no table name in two schemas, so `warehouse` is given a
-  // `users` that serves public.users' rows; the keying is the frontend's alone.
-  await page.route(tableList("warehouse"), async (route) => {
-    const response = await route.fetch();
-    const json = await response.json();
-    await route.fulfill({ response, json: { tables: [...json.tables, { name: "users" }] } });
-  });
-  await page.route("**/api/tables/data*", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get("schema") !== "warehouse" || url.searchParams.get("table") !== "users") {
-      return route.continue();
-    }
-    url.searchParams.set("schema", "public");
-    await route.fulfill({ response: await route.fetch({ url: url.toString() }) });
-  });
-
+  // The seed's warehouse.users shares public.users' name and its `id` column.
   await gotoApp(page);
   await selectTable(page, "users");
   await page.locator("#columns-btn").click();

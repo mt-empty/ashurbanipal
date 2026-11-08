@@ -32,6 +32,12 @@ impl JoinType {
     }
 }
 
+/// An optional field that, when present, must be a string: `null` is a
+/// wrong type (§5.11.1), not an absent value.
+fn present_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ColumnPos {
@@ -52,6 +58,8 @@ pub struct JoinEntry {
     #[serde(rename = "type")]
     pub kind: JoinType,
     pub table: String,
+    #[serde(default, deserialize_with = "present_string")]
+    pub schema: Option<String>,
     pub on: Vec<OnPair>,
 }
 
@@ -61,6 +69,8 @@ pub struct JoinEntry {
 #[serde(deny_unknown_fields)]
 pub struct JoinSpec {
     pub table: String,
+    #[serde(default, deserialize_with = "present_string")]
+    pub schema: Option<String>,
     pub joins: Vec<JoinEntry>,
     #[serde(default)]
     pub columns: Option<Vec<ColumnPos>>,
@@ -139,10 +149,14 @@ impl JoinSpec {
         Ok(spec)
     }
 
-    /// Table names by position.
-    pub fn table_names(&self) -> Vec<&str> {
-        std::iter::once(self.table.as_str())
-            .chain(self.joins.iter().map(|j| j.table.as_str()))
+    /// `(own schema, table)` by position; `None` means the request's schema.
+    pub fn table_refs(&self) -> Vec<(Option<&str>, &str)> {
+        std::iter::once((self.schema.as_deref(), self.table.as_str()))
+            .chain(
+                self.joins
+                    .iter()
+                    .map(|j| (j.schema.as_deref(), j.table.as_str())),
+            )
             .collect()
     }
 }
@@ -249,6 +263,9 @@ impl From<ColMeta> for ColumnInfo {
 
 #[derive(Debug, Clone)]
 pub struct TableMeta {
+    /// The catalog-checked schema the table is spliced under; `None` on an
+    /// engine with no schema above the database (SQLite).
+    pub schema: Option<String>,
     pub name: String,
     pub columns: Vec<ColMeta>,
 }
@@ -261,6 +278,8 @@ pub struct JoinColumnInfo {
     pub type_name: String,
     pub join: usize,
     pub table: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
     pub column: String,
     pub class: ColumnClass,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -323,7 +342,9 @@ impl Plan {
         &self.labels
     }
 
-    pub fn columns(&self) -> Vec<JoinColumnInfo> {
+    /// `request_schema` is the operation's resolved schema; a column's
+    /// `schema` is reported only when its table is elsewhere.
+    pub fn columns(&self, request_schema: Option<&str>) -> Vec<JoinColumnInfo> {
         self.selection
             .iter()
             .zip(&self.labels)
@@ -335,6 +356,10 @@ impl Plan {
                     type_name: c.type_name.clone(),
                     join: pos,
                     table: table.name.clone(),
+                    schema: table
+                        .schema
+                        .clone()
+                        .filter(|s| Some(s.as_str()) != request_schema),
                     column: c.name.clone(),
                     class: c.class.clone(),
                     enum_type: c.class.enum_type(),
@@ -360,6 +385,23 @@ fn column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> {
 fn join_column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> {
     column_index(table, column)
         .map_err(|_| DbError::BadJoin(format!("{} has no column {column:?}", table.name)))
+}
+
+/// The schema each position resolves in: its own, which must be in `listed`
+/// (§5.7), or else `request`. An unlisted one is `invalid_join`, never
+/// `unknown_schema`, which belongs to the `schema` parameter.
+pub(crate) fn table_schemas(
+    refs: &[(Option<&str>, &str)],
+    request: &str,
+    listed: &[String],
+) -> Result<Vec<String>, DbError> {
+    refs.iter()
+        .map(|&(own, _)| match own {
+            None => Ok(request.to_string()),
+            Some(s) if listed.iter().any(|l| l == s) => Ok(s.to_string()),
+            Some(s) => Err(DbError::BadJoin(format!("unknown schema {s:?}"))),
+        })
+        .collect()
 }
 
 /// The same for a table: `not_readable` stays as it is.
@@ -576,7 +618,7 @@ pub enum IlikeStyle {
 /// placeholder order. On numbered dialects `$1`/`$2` are limit and offset
 /// and filter values start at `$3`; otherwise bind filter values first,
 /// then limit, then offset.
-pub fn build_select(plan: &Plan, d: &Dialect, schema: Option<&str>) -> (String, Vec<String>) {
+pub fn build_select(plan: &Plan, d: &Dialect) -> (String, Vec<String>) {
     let q = d.quote;
     let alias =
         |pos: usize, col: usize| format!("t{pos}.{}", q(&plan.tables[pos].columns[col].name));
@@ -590,8 +632,9 @@ pub fn build_select(plan: &Plan, d: &Dialect, schema: Option<&str>) -> (String, 
         .join(", ");
 
     let from_item = |pos: usize| {
-        let name = q(&plan.tables[pos].name);
-        match schema {
+        let table = &plan.tables[pos];
+        let name = q(&table.name);
+        match &table.schema {
             Some(s) => format!("{}.{name} t{pos}", q(s)),
             None => format!("{name} t{pos}"),
         }
@@ -687,6 +730,7 @@ mod tests {
 
     fn orders() -> TableMeta {
         TableMeta {
+            schema: Some("public".into()),
             name: "orders".into(),
             columns: vec![
                 col("id", "uuid", ColumnClass::Uuid),
@@ -699,6 +743,7 @@ mod tests {
 
     fn users() -> TableMeta {
         TableMeta {
+            schema: Some("public".into()),
             name: "users".into(),
             columns: vec![
                 col("id", "uuid", ColumnClass::Uuid),
@@ -734,7 +779,7 @@ mod tests {
     #[test]
     fn parses_a_valid_join() {
         let spec = JoinSpec::parse(JOIN).unwrap();
-        assert_eq!(spec.table_names(), ["orders", "users"]);
+        assert_eq!(spec.table_refs(), [(None, "orders"), (None, "users")]);
         assert_eq!(spec.joins[0].kind, JoinType::Left);
     }
 
@@ -910,7 +955,7 @@ mod tests {
             },
         ]);
         let p = plan(&spec, vec![orders(), users()], &o).unwrap();
-        let (sql, values) = build_select(&p, &dialect(), Some("public"));
+        let (sql, values) = build_select(&p, &dialect());
         assert!(sql.starts_with("t0.\"id\"::text as c0, "), "{sql}");
         assert!(
             sql.contains(
@@ -928,6 +973,49 @@ mod tests {
             "{sql}"
         );
         assert_eq!(values, ["a@b.c"]);
+    }
+
+    #[test]
+    fn each_table_may_name_its_own_schema() {
+        let spec = JoinSpec::parse(
+            r#"{"table":"shipments","schema":"warehouse","joins":[{"type":"left","table":"orders",
+            "schema":"public","on":[{"left":{"join":0,"column":"order_id"},"right":"id"}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            spec.table_refs(),
+            [(Some("warehouse"), "shipments"), (Some("public"), "orders")]
+        );
+        for bad in [
+            r#"{"table":"orders","schema":null,"joins":[{"type":"left","table":"users",
+            "on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}"#,
+            r#"{"table":"orders","schema":1,"joins":[{"type":"left","table":"users",
+            "on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}"#,
+            r#"{"table":"orders","joins":[{"type":"left","table":"users","schema":["public"],
+            "on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}"#,
+        ] {
+            assert!(JoinSpec::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_table_in_another_schema_is_spliced_and_reported_under_it() {
+        let spec = JoinSpec::parse(JOIN).unwrap();
+        let mut u = users();
+        u.schema = Some("warehouse".into());
+        let p = plan(&spec, vec![orders(), u], &opts()).unwrap();
+        let (sql, _) = build_select(&p, &dialect());
+        assert!(
+            sql.contains(" from \"public\".\"orders\" t0 left join \"warehouse\".\"users\" t1 "),
+            "{sql}"
+        );
+        let schemas: Vec<_> = p
+            .columns(Some("public"))
+            .into_iter()
+            .map(|c| (c.table, c.schema))
+            .collect();
+        assert!(schemas.contains(&("orders".into(), None)));
+        assert!(schemas.contains(&("users".into(), Some("warehouse".into()))));
     }
 
     #[test]
