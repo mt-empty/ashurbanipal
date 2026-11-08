@@ -299,7 +299,7 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 	if err != nil {
 		return tableMeta{}, err
 	}
-	meta := tableMeta{name: table}
+	meta := tableMeta{schema: schema, name: table}
 	for rows.Next() {
 		var name, dataType, udtSchema, udtName, fullType string
 		var isEnum bool
@@ -347,25 +347,33 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 	if err != nil {
 		return JoinData{}, err
 	}
-	names := spec.TableNames()
-	metas := map[string]tableMeta{}
-	for _, name := range names {
-		if _, ok := metas[name]; ok {
-			continue
+	refs := spec.TableRefs()
+	var listed []string
+	if spec.namesOwnSchema() {
+		if listed, err = c.allowedSchemas(ctx, tx); err != nil {
+			return JoinData{}, err
 		}
-		oid, err := c.readableTableOID(ctx, tx, realSchema, name)
-		if err != nil {
-			return JoinData{}, unknownJoinTable(err)
-		}
-		meta, err := c.tableMeta(ctx, tx, realSchema, name, oid)
-		if err != nil {
-			return JoinData{}, unknownJoinTable(err)
-		}
-		metas[name] = meta
 	}
-	tables := make([]tableMeta, len(names))
-	for i, name := range names {
-		tables[i] = metas[name]
+	schemas, err := tableSchemas(refs, realSchema, listed)
+	if err != nil {
+		return JoinData{}, err
+	}
+	metas := map[[2]string]tableMeta{}
+	tables := make([]tableMeta, len(refs))
+	for i, ref := range refs {
+		key := [2]string{schemas[i], ref.Table}
+		if _, ok := metas[key]; !ok {
+			oid, err := c.readableTableOID(ctx, tx, schemas[i], ref.Table)
+			if err != nil {
+				return JoinData{}, unknownJoinTable(err)
+			}
+			meta, err := c.tableMeta(ctx, tx, schemas[i], ref.Table, oid)
+			if err != nil {
+				return JoinData{}, unknownJoinTable(err)
+			}
+			metas[key] = meta
+		}
+		tables[i] = metas[key]
 	}
 	plan, err := planJoin(spec, tables, opts)
 	if err != nil {
@@ -374,7 +382,7 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 
 	// The statement is built from catalog names and generated aliases
 	// only; every value is a bound $N parameter.
-	body, values := buildJoinSelect(plan, pgJoinDialect, &realSchema)
+	body, values := buildJoinSelect(plan, pgJoinDialect)
 	args := make([]interface{}, 0, 2+len(values))
 	args = append(args, opts.Limit+1, opts.Offset)
 	for _, v := range values {
@@ -395,7 +403,7 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 	if err := tx.Commit(); err != nil {
 		return JoinData{}, err
 	}
-	return JoinData{Columns: plan.columnInfos(), Rows: out, HasMore: hasMore}, nil
+	return JoinData{Columns: plan.columnInfos(realSchema), Rows: out, HasMore: hasMore}, nil
 }
 
 func (c *PostgresSource) ListSchemas(ctx context.Context) (SchemaListing, error) {

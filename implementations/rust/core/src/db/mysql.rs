@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
@@ -306,6 +307,7 @@ impl MySqlSource {
             .mariadb_json_columns_in_tx(tx, variant, schema, table, timeout_secs)
             .await?;
         Ok(TableMeta {
+            schema: Some(schema.to_string()),
             name: table.to_string(),
             columns: columns
                 .into_iter()
@@ -680,26 +682,40 @@ impl DbSource for MySqlSource {
         let schema = self
             .resolve_schema_in_tx(&mut tx, variant, schema, timeout)
             .await?;
-        let allowed = self
-            .allowed_tables_in_tx(&mut tx, variant, &schema, timeout)
-            .await?;
-        let names = spec.table_names();
-        let mut metas: HashMap<&str, TableMeta> = HashMap::new();
-        for name in &names {
-            if metas.contains_key(name) {
-                continue;
-            }
-            if !allowed.iter().any(|t| t == name) {
-                return Err(DbError::BadJoin(format!("unknown table {name:?}")));
-            }
-            let meta = self
-                .table_meta_in_tx(&mut tx, variant, &schema, name, timeout)
-                .await?;
-            metas.insert(name, meta);
+        let refs = spec.table_refs();
+        let listed = if refs.iter().any(|(own, _)| own.is_some()) {
+            self.list_schemas_in_tx(&mut tx, variant, timeout).await?
+        } else {
+            Vec::new()
+        };
+        let schemas = join::table_schemas(&refs, &schema, &listed)?;
+        let mut allowed: HashMap<&str, Vec<String>> = HashMap::new();
+        let mut metas: HashMap<(&str, &str), TableMeta> = HashMap::new();
+        let mut tables = Vec::with_capacity(refs.len());
+        for (in_schema, &(_, name)) in schemas.iter().zip(&refs) {
+            let meta = match metas.entry((in_schema.as_str(), name)) {
+                Entry::Occupied(e) => e.into_mut(),
+                Entry::Vacant(e) => {
+                    let listing = match allowed.entry(in_schema.as_str()) {
+                        Entry::Occupied(l) => l.into_mut(),
+                        Entry::Vacant(l) => l.insert(
+                            self.allowed_tables_in_tx(&mut tx, variant, in_schema, timeout)
+                                .await?,
+                        ),
+                    };
+                    if !listing.iter().any(|t| t == name) {
+                        return Err(DbError::BadJoin(format!("unknown table {name:?}")));
+                    }
+                    e.insert(
+                        self.table_meta_in_tx(&mut tx, variant, in_schema, name, timeout)
+                            .await?,
+                    )
+                }
+            };
+            tables.push(meta.clone());
         }
-        let tables = names.iter().map(|n| metas[n].clone()).collect();
         let plan = join::plan(spec, tables, &opts)?;
-        let (body, values) = join::build_select(&plan, &JOIN_DIALECT, Some(&schema));
+        let (body, values) = join::build_select(&plan, &JOIN_DIALECT);
 
         // AssertSqlSafe: the statement is built from catalog names and
         // generated aliases only; all values are bound.
@@ -717,7 +733,7 @@ impl DbSource for MySqlSource {
         let has_more = mysql_rows.len() > opts.limit as usize;
         mysql_rows.truncate(opts.limit as usize);
         Ok(JoinData {
-            columns: plan.columns(),
+            columns: plan.columns(Some(&schema)),
             rows: mysql_rows
                 .iter()
                 .map(|r| row_to_json(r, plan.labels().iter().map(String::as_str)))

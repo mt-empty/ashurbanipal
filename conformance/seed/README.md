@@ -81,14 +81,18 @@ plus tables and a second schema added for conformance coverage:
   falsifiable: `decoy_items` must never appear in `/api/tables`, and
   requesting it directly must 400 like any other unknown table.
 - **`warehouse`** — a third schema (`carriers`, `shipments`,
-  `shipment_events`) modeling a fulfillment subsystem, added for richer
-  multi-schema coverage and two cross-schema FK shapes:
+  `shipment_events`, `users`) modeling a fulfillment subsystem, added for
+  richer multi-schema coverage and two cross-schema FK shapes:
   `shipments.order_id` is a lone, required FK into `public.orders`;
   `shipment_events` carries both a same-schema FK (`shipment_id` ->
   `warehouse.shipments`) and a nullable cross-schema one
   (`handled_by_user_id` -> `public.users`) on the same table, so a
   key-metadata query that only follows same-schema FKs can't pass this
-  fixture by coincidence.
+  fixture by coincidence. `warehouse.users` shares only its name and an
+  `id` column with `public.users`: the same-named-table fixture for
+  cross-schema joins (`P5.11-CROSS-SCHEMA-SAME-NAME`). `seed.mysql.sql`
+  has the same `warehouse` tables as a second database, whose two
+  cross-database FKs reference the connection's default database.
 
 Also present: table/column comments (partial, both commented and
 uncommented tables/columns exist on purpose), `jsonb`, `uuid`,

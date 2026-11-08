@@ -13,9 +13,10 @@ import {
   type JoinSpec,
   joinColumnInfos,
   joinRows,
-  joinTableNames,
+  joinTableRefs,
   planJoin,
   type TableMeta,
+  tableSchemas,
 } from "../join.js";
 import {
   type ColumnInfo,
@@ -297,7 +298,9 @@ export class SqliteSource implements DbSource {
     // (spec/protocol.md §5.11.5).
     return bounded(this.db, timeoutMs, async () => {
       const allowed = await allowedTablesUnbounded(this.db);
-      const names = joinTableNames(spec);
+      const refs = joinTableRefs(spec);
+      tableSchemas(refs, ONLY_SCHEMA, [ONLY_SCHEMA]);
+      const names = refs.map((r) => r.table);
       const metas = new Map<string, TableMeta>();
       for (const name of names) {
         if (metas.has(name)) continue;
@@ -312,14 +315,14 @@ export class SqliteSource implements DbSource {
 
       // The statement is built from catalog names and generated aliases
       // only; every value is a bound ? parameter.
-      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT, undefined);
+      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT);
       const rows = await dbAll<Record<string, unknown>>(this.db, `select ${body}`, [
         ...values,
         opts.limit + 1,
         opts.offset,
       ]);
       const out = joinRows(plan, rows, opts.limit, cellToJson);
-      return { columns: joinColumnInfos(plan), rows: out.rows, has_more: out.hasMore };
+      return { columns: joinColumnInfos(plan, ONLY_SCHEMA), rows: out.rows, has_more: out.hasMore };
     });
   }
 

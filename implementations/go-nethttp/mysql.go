@@ -405,7 +405,7 @@ func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVa
 	if err != nil {
 		return tableMeta{}, err
 	}
-	meta := tableMeta{name: table}
+	meta := tableMeta{schema: schema, name: table}
 	for rows.Next() {
 		var name, dataType, comment, columnType string
 		var collation sql.NullString
@@ -457,28 +457,40 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 	if err != nil {
 		return JoinData{}, err
 	}
-	allowed, err := c.allowedTablesInTx(ctx, tx, variant, realSchema)
+	refs := spec.TableRefs()
+	var listed []string
+	if spec.namesOwnSchema() {
+		if listed, err = c.allowedSchemasInTx(ctx, tx, variant); err != nil {
+			return JoinData{}, err
+		}
+	}
+	schemas, err := tableSchemas(refs, realSchema, listed)
 	if err != nil {
 		return JoinData{}, err
 	}
-	names := spec.TableNames()
-	metas := map[string]tableMeta{}
-	for _, name := range names {
-		if _, ok := metas[name]; ok {
-			continue
+	allowed := map[string][]string{}
+	metas := map[[2]string]tableMeta{}
+	tables := make([]tableMeta, len(refs))
+	for i, ref := range refs {
+		key := [2]string{schemas[i], ref.Table}
+		if _, ok := metas[key]; !ok {
+			listing, ok := allowed[schemas[i]]
+			if !ok {
+				if listing, err = c.allowedTablesInTx(ctx, tx, variant, schemas[i]); err != nil {
+					return JoinData{}, err
+				}
+				allowed[schemas[i]] = listing
+			}
+			if _, ok := findExact(listing, ref.Table); !ok {
+				return JoinData{}, badJoin("unknown table %q", ref.Table)
+			}
+			meta, err := c.tableMeta(ctx, tx, variant, schemas[i], ref.Table)
+			if err != nil {
+				return JoinData{}, err
+			}
+			metas[key] = meta
 		}
-		if _, ok := findExact(allowed, name); !ok {
-			return JoinData{}, badJoin("unknown table %q", name)
-		}
-		meta, err := c.tableMeta(ctx, tx, variant, realSchema, name)
-		if err != nil {
-			return JoinData{}, err
-		}
-		metas[name] = meta
-	}
-	tables := make([]tableMeta, len(names))
-	for i, name := range names {
-		tables[i] = metas[name]
+		tables[i] = metas[key]
 	}
 	plan, err := planJoin(spec, tables, opts)
 	if err != nil {
@@ -487,7 +499,7 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 
 	// The statement is built from catalog names and generated aliases
 	// only; every value is a bound ? parameter.
-	body, values := buildJoinSelect(plan, mysqlJoinDialect, &realSchema)
+	body, values := buildJoinSelect(plan, mysqlJoinDialect)
 	args := make([]interface{}, 0, len(values)+2)
 	for _, v := range values {
 		args = append(args, v)
@@ -508,7 +520,7 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 	if err := tx.Commit(); err != nil {
 		return JoinData{}, err
 	}
-	return JoinData{Columns: plan.columnInfos(), Rows: out, HasMore: hasMore}, nil
+	return JoinData{Columns: plan.columnInfos(realSchema), Rows: out, HasMore: hasMore}, nil
 }
 
 func (c *MySQLSource) ListSchemas(ctx context.Context) (SchemaListing, error) {

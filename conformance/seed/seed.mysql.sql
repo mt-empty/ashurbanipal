@@ -11,9 +11,11 @@
 -- treat the "keep in step" note above as the only guard for now.
 --
 -- Apply with: mysql --host=H --port=P --user=U --password=PW DB < this file
--- Idempotent: drops and recreates its own tables (and the other_schema db).
+-- Idempotent: drops and recreates its own tables (and the other_schema and
+-- warehouse dbs).
 
 SET FOREIGN_KEY_CHECKS = 0;
+DROP DATABASE IF EXISTS `warehouse`;
 DROP TABLE IF EXISTS `_conformance_meta`;
 DROP TABLE IF EXISTS `feature_flags`;
 DROP TABLE IF EXISTS `inventory_counts`;
@@ -362,6 +364,93 @@ VALUES
   ('inline_editing',        TRUE,  10,   TIMESTAMP('2026-07-19 00:00:00') - INTERVAL 10 DAY),
   ('sibling_health_badges', TRUE,  75,   TIMESTAMP('2026-07-19 00:00:00') - INTERVAL 5 DAY);
 
+-- ------------------------------------------------------------- warehouse
+-- The cross-database fixture, the counterpart of seed.sql's `warehouse`
+-- schema: its tables reference this database's `orders` and `users`. This
+-- database's name comes from the connection, so those two FKs are built
+-- with DATABASE() in a prepared statement.
+CREATE DATABASE `warehouse`;
+
+CREATE TABLE `warehouse`.`carriers` (
+  `id`            bigint NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `name`          varchar(100) NOT NULL UNIQUE,
+  `contact_email` varchar(200),
+  `is_active`     boolean NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE `warehouse`.`shipments` (
+  `id`              bigint NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `order_id`        bigint NOT NULL,
+  `carrier_id`      bigint,
+  `tracking_number` varchar(30) NOT NULL,
+  `status`          varchar(20) NOT NULL,
+  `shipped_at`      datetime NOT NULL,
+  `delivered_at`    datetime,
+  CONSTRAINT `shipments_carrier_id_fk` FOREIGN KEY (`carrier_id`) REFERENCES `warehouse`.`carriers` (`id`)
+) COMMENT = 'Outbound shipments fulfilling orders placed in the default database.';
+
+CREATE TABLE `warehouse`.`shipment_events` (
+  `id`                 bigint NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `shipment_id`        bigint NOT NULL,
+  `handled_by_user_id` bigint,
+  `event_type`         varchar(30) NOT NULL,
+  `occurred_at`        datetime NOT NULL,
+  `notes`              text,
+  CONSTRAINT `shipment_events_shipment_id_fk` FOREIGN KEY (`shipment_id`) REFERENCES `warehouse`.`shipments` (`id`)
+);
+
+CREATE TABLE `warehouse`.`users` (
+  `id`       bigint NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `username` varchar(50) NOT NULL UNIQUE,
+  `shift`    varchar(10) NOT NULL
+) COMMENT = 'Warehouse floor accounts; not the same table as users.';
+
+SET @home = REPLACE(DATABASE(), '`', '``');
+SET @ddl = CONCAT('ALTER TABLE `warehouse`.`shipments` ADD CONSTRAINT `shipments_order_id_fk` ',
+  'FOREIGN KEY (`order_id`) REFERENCES `', @home, '`.`orders` (`id`)');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+SET @ddl = CONCAT('ALTER TABLE `warehouse`.`shipment_events` ADD CONSTRAINT `shipment_events_handled_by_user_id_fk` ',
+  'FOREIGN KEY (`handled_by_user_id`) REFERENCES `', @home, '`.`users` (`id`)');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+INSERT INTO `warehouse`.`carriers` (`name`, `contact_email`, `is_active`) VALUES
+  ('Northwind Freight', 'ops@northwind.example', TRUE),
+  ('Blue Line Couriers', 'dispatch@blueline.example', TRUE),
+  ('Swift Relay', NULL, FALSE);
+
+INSERT INTO `warehouse`.`shipments` (`order_id`, `carrier_id`, `tracking_number`, `status`, `shipped_at`, `delivered_at`)
+WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 40)
+SELECT
+  n,
+  IF(n MOD 7 = 0, NULL, ((n - 1) MOD 3) + 1),
+  CONCAT('TRK', LPAD(n, 8, '0')),
+  ELT(((n - 1) MOD 4) + 1, 'in_transit', 'delivered', 'delivered', 'returned'),
+  TIMESTAMP('2026-07-19 00:00:00') - INTERVAL (n * 2) DAY,
+  IF(n MOD 4 IN (2, 3), TIMESTAMP('2026-07-19 00:00:00') - INTERVAL (n * 2 - 1) DAY, NULL)
+FROM seq;
+
+INSERT INTO `warehouse`.`shipment_events` (`shipment_id`, `handled_by_user_id`, `event_type`, `occurred_at`, `notes`)
+WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 40)
+SELECT
+  ((n - 1) MOD 20) + 1,
+  IF(n MOD 5 = 0, NULL, ((n - 1) MOD 50) + 1),
+  IF(n <= 20, 'picked', 'dispatched'),
+  TIMESTAMP('2026-07-19 00:00:00') - INTERVAL (100 - n) HOUR,
+  IF(n MOD 6 = 0, 'left at dock', NULL)
+FROM seq;
+
+INSERT INTO `warehouse`.`users` (`username`, `shift`) VALUES
+  ('dock-lead', 'early'),
+  ('picker-01', 'late'),
+  ('picker-02', 'night');
+
+ANALYZE TABLE `warehouse`.`carriers`, `warehouse`.`shipments`,
+  `warehouse`.`shipment_events`, `warehouse`.`users`;
+
 -- MySQL/MariaDB: ANALYZE TABLE refreshes information_schema.tables.table_rows
 -- (InnoDB's estimate). feature_flags is left out on purpose so its estimate
 -- stays NULL -> mapped to -1 by mysql.rs (the §5.3 "never analyzed" case).
@@ -370,4 +459,4 @@ ANALYZE TABLE `users`, `orders`, `order_extra`, `products`, `events`, `sessions`
   `inventory_locations`, `inventory_counts`;
 
 INSERT INTO `_conformance_meta` (`seed_version`, `dialect`, `checksum`, `generated_at`)
-VALUES ('5', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));
+VALUES ('6', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));

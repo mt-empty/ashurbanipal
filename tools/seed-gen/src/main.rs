@@ -231,6 +231,7 @@ fn generate_postgres(rng: &mut StdRng) -> String {
     write_carriers(&mut out, rng);
     let shipped_offsets_mins = write_shipments(&mut out, rng, &orders);
     write_shipment_events(&mut out, rng, &shipped_offsets_mins, &staff_users);
+    write_warehouse_users(&mut out);
 
     out.push_str(
         "\n-- pg_class.reltuples is only populated by ANALYZE/autovacuum; without this,\n\
@@ -253,7 +254,8 @@ fn generate_postgres(rng: &mut StdRng) -> String {
          analyze inventory_counts;\n\
          analyze warehouse.carriers;\n\
          analyze warehouse.shipments;\n\
-         analyze warehouse.shipment_events;\n",
+         analyze warehouse.shipment_events;\n\
+         analyze warehouse.users;\n",
     );
 
     write_conformance_meta(&mut out);
@@ -539,8 +541,15 @@ fn write_warehouse_schema(out: &mut String) {
          \x20   occurred_at timestamptz not null,\n\
          \x20   notes text\n\
          );\n\n\
+         create table warehouse.users (\n\
+         \x20   id bigint generated always as identity primary key,\n\
+         \x20   username text not null unique,\n\
+         \x20   shift varchar(10) not null\n\
+         );\n\n\
          comment on table warehouse.shipments is \
-         'Outbound shipments fulfilling orders placed in the public schema.';\n\n",
+         'Outbound shipments fulfilling orders placed in the public schema.';\n\
+         comment on table warehouse.users is \
+         'Warehouse floor accounts; not the same table as public.users.';\n\n",
     );
 }
 
@@ -1414,6 +1423,17 @@ fn write_carriers(out: &mut String, rng: &mut StdRng) {
         let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
         write!(out, "    ({}, {}, {active}){sep}", q(name), q(&email)).unwrap();
     }
+}
+
+/// `warehouse.users` shares only its name and an `id` column (of another
+/// type) with `public.users`, so a join naming both can tell them apart.
+fn write_warehouse_users(out: &mut String) {
+    out.push_str(
+        "insert into warehouse.users (username, shift) values\n\
+         \x20   ('dock-lead', 'early'),\n\
+         \x20   ('picker-01', 'late'),\n\
+         \x20   ('picker-02', 'night');\n\n",
+    );
 }
 
 const SHIPMENT_STATUS_POOL: [&str; 4] = ["in_transit", "delivered", "delivered", "returned"];

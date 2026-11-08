@@ -27,6 +27,7 @@ from ..join import (
     build_select,
     enum_class,
     plan_join,
+    table_schemas,
 )
 from . import (
     BadJoin,
@@ -446,6 +447,7 @@ class MySqlSource(DbSource):
         pk_columns, fk_columns = self._key_metadata(cur, variant, schema, table, timeout_secs)
         json_columns = self._mariadb_json_columns(cur, variant, schema, table, timeout_secs)
         return TableMeta(
+            schema=schema,
             name=table,
             columns=[
                 ColMeta(
@@ -470,20 +472,25 @@ class MySqlSource(DbSource):
             timeout = opts.timeout_secs
             with conn.cursor() as cur:
                 resolved_schema = self._resolve_schema(cur, variant, schema, timeout)
-                allowed = self._allowed_tables(cur, variant, resolved_schema, timeout)
-                names = spec.table_names()
-                metas: dict[str, TableMeta] = {}
-                for name in names:
-                    if name in metas:
+                refs = spec.table_refs()
+                listed = self._list_schemas(cur, variant, timeout) if spec.names_own_schema() else []
+                schemas = table_schemas(refs, resolved_schema, listed)
+                allowed: dict[str, list[str]] = {}
+                metas: dict[tuple[str, str], TableMeta] = {}
+                for in_schema, (_, name) in zip(schemas, refs, strict=True):
+                    if (in_schema, name) in metas:
                         continue
-                    if name not in allowed:
+                    if in_schema not in allowed:
+                        allowed[in_schema] = self._allowed_tables(cur, variant, in_schema, timeout)
+                    if name not in allowed[in_schema]:
                         raise BadJoin(f"unknown table {name!r}")
-                    metas[name] = self._table_meta(cur, variant, resolved_schema, name, timeout)
-                plan = plan_join(spec, [metas[n] for n in names], opts)
+                    metas[(in_schema, name)] = self._table_meta(cur, variant, in_schema, name, timeout)
+                tables = [metas[(s, n)] for s, (_, n) in zip(schemas, refs, strict=True)]
+                plan = plan_join(spec, tables, opts)
 
                 # The statement is built from catalog names and generated
                 # aliases only; every value is a bound parameter.
-                body, values = build_select(plan, _JOIN_DIALECT, resolved_schema)
+                body, values = build_select(plan, _JOIN_DIALECT)
                 conn.use_unicode = False
                 try:
                     cur.execute(_timed_select(variant, timeout, body), (*values, opts.limit + 1, opts.offset))
@@ -496,7 +503,7 @@ class MySqlSource(DbSource):
                     conn.use_unicode = True
                 rows, has_more = plan.rows_from(mysql_rows, opts.limit, lambda v: _decode_cell(v, conn.encoding))
             conn.commit()
-            return JoinData(columns=plan.column_infos(), rows=rows, has_more=has_more)
+            return JoinData(columns=plan.column_infos(resolved_schema), rows=rows, has_more=has_more)
         finally:
             conn.close()
 

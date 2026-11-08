@@ -219,7 +219,9 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         // select (spec/protocol.md §5.11.5).
         return bounded(queryTimeoutSecs) { conn ->
             val allowed = allowedTablesOn(conn)
-            val names = spec.tableNames()
+            val refs = spec.tableRefs()
+            tableSchemas(refs, ONLY_SCHEMA, listOf(ONLY_SCHEMA))
+            val names = refs.map { it.table }
             val metas = HashMap<String, TableMeta>()
             for (name in names) {
                 if (name in metas) continue
@@ -230,12 +232,12 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
 
             // The statement is built from catalog names and generated aliases
             // only; every value is a bound parameter.
-            val (body, values) = buildJoinSelect(plan, JOIN_DIALECT, null)
+            val (body, values) = buildJoinSelect(plan, JOIN_DIALECT)
             val bindArgs: List<Any?> = values + (opts.limit + 1) + opts.offset
             val rows = query(conn, "select $body", bindArgs) { rs ->
                 List(plan.labels.size) { i -> readCell(rs, i + 1) }
             }
-            plan.joinData(rows, opts.limit)
+            plan.joinData(rows, opts.limit, ONLY_SCHEMA)
         }
     }
 

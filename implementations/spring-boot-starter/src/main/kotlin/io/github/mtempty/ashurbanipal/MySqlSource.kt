@@ -326,8 +326,9 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val (pkColumns, fkColumns) = keyMetadata(variant, schema, table)
         val jsonColumns = mariadbJsonColumns(variant, schema, table)
         return TableMeta(
-            table,
-            columns.map { c ->
+            schema = schema,
+            name = table,
+            columns = columns.map { c ->
                 val isJson = c.name in jsonColumns
                 ColMeta(
                     name = c.name,
@@ -346,19 +347,22 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
         val variant = variant()
         val realSchema = resolveSchema(variant, schema)
-        val allowed = allowedTables(variant, realSchema)
-        val names = spec.tableNames()
-        val metas = HashMap<String, TableMeta>()
-        for (name in names) {
-            if (name in metas) continue
-            if (name !in allowed) throw BadJoinException("unknown table \"$name\"")
-            metas[name] = tableMeta(variant, realSchema, name)
+        val refs = spec.tableRefs()
+        val schemas = tableSchemas(refs, realSchema, if (spec.namesOwnSchema()) listAllowedSchemas(variant) else emptyList())
+        val allowed = HashMap<String, Collection<String>>()
+        val metas = HashMap<Pair<String, String>, TableMeta>()
+        val tables = refs.mapIndexed { i, ref ->
+            metas.getOrPut(schemas[i] to ref.table) {
+                val listing = allowed.getOrPut(schemas[i]) { allowedTables(variant, schemas[i]) }
+                if (ref.table !in listing) throw BadJoinException("unknown table \"${ref.table}\"")
+                tableMeta(variant, schemas[i], ref.table)
+            }
         }
-        val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
+        val plan = planJoin(spec, tables, opts)
 
         // The statement is built from catalog names and generated aliases
         // only; every value is a bound parameter.
-        val (body, values) = buildJoinSelect(plan, JOIN_DIALECT, realSchema)
+        val (body, values) = buildJoinSelect(plan, JOIN_DIALECT)
         val bindArgs: List<Any?> = values + (opts.limit + 1) + opts.offset
         val rows = try {
             query(dataSource, timedSelect(variant, queryTimeoutSecs, body), bindArgs) { rs ->
@@ -371,7 +375,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             }
             throw e
         }
-        plan.joinData(rows, opts.limit)
+        plan.joinData(rows, opts.limit, realSchema)
     }
 
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData = inReadOnlyTransaction {

@@ -13,9 +13,11 @@ import {
   type JoinSpec,
   joinColumnInfos,
   joinRows,
-  joinTableNames,
+  joinTableRefs,
+  namesOwnSchema,
   planJoin,
   type TableMeta,
+  tableSchemas,
 } from "../join.js";
 import {
   type ColumnInfo,
@@ -456,29 +458,36 @@ export class MySqlSource implements DbSource {
       if (comment.length > 0) col.comment = comment;
       return col;
     });
-    return { name: table, columns };
+    return { schema, name: table, columns };
   }
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
     return this.withTx(async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
-      const allowed = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
-      const names = joinTableNames(spec);
+      const refs = joinTableRefs(spec);
+      const listed = namesOwnSchema(spec) ? await this.listSchemasInTx(conn, variant, timeoutMs) : [];
+      const schemas = tableSchemas(refs, realSchema, listed);
+      const allowed = new Map<string, string[]>();
       const metas = new Map<string, TableMeta>();
-      for (const name of names) {
-        if (metas.has(name)) continue;
-        if (!findExact(allowed, name)) throw new BadJoinError(`unknown table "${name}"`);
-        metas.set(name, await this.tableMeta(conn, variant, realSchema, name, timeoutMs));
+      const tables: TableMeta[] = [];
+      for (const [i, { table }] of refs.entries()) {
+        const key = JSON.stringify([schemas[i], table]);
+        if (!metas.has(key)) {
+          let listing = allowed.get(schemas[i]);
+          if (listing === undefined) {
+            listing = await this.allowedTablesInTx(conn, variant, schemas[i], timeoutMs);
+            allowed.set(schemas[i], listing);
+          }
+          if (!findExact(listing, table)) throw new BadJoinError(`unknown table "${table}"`);
+          metas.set(key, await this.tableMeta(conn, variant, schemas[i], table, timeoutMs));
+        }
+        tables.push(metas.get(key) as TableMeta);
       }
-      const plan = planJoin(
-        spec,
-        names.map((n) => metas.get(n) as TableMeta),
-        opts,
-      );
+      const plan = planJoin(spec, tables, opts);
 
       // The statement is built from catalog names and generated aliases
       // only; every value is a bound ? parameter.
-      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT, realSchema);
+      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT);
       const rows = await queryRows(conn, timedSelect(variant, timeoutMs, body), [
         ...values,
         opts.limit + 1,
@@ -487,7 +496,7 @@ export class MySqlSource implements DbSource {
         throw mapSelectDeniedMysql(err, spec.table);
       });
       const out = joinRows(plan, rows, opts.limit, cellToJson);
-      return { columns: joinColumnInfos(plan), rows: out.rows, has_more: out.hasMore };
+      return { columns: joinColumnInfos(plan, realSchema), rows: out.rows, has_more: out.hasMore };
     });
   }
 

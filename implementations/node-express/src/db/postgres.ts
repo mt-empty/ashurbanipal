@@ -12,9 +12,11 @@ import {
   type JoinSpec,
   joinColumnInfos,
   joinRows,
-  joinTableNames,
+  joinTableRefs,
+  namesOwnSchema,
   planJoin,
   type TableMeta,
+  tableSchemas,
   unknownJoinTable,
 } from "../join.js";
 import {
@@ -346,39 +348,41 @@ export class PostgresSource implements DbSource {
       if (r.comment !== null) col.comment = r.comment;
       return col;
     });
-    return { name: table, columns };
+    return { schema, name: table, columns };
   }
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-      const names = joinTableNames(spec);
+      const refs = joinTableRefs(spec);
+      const listed = namesOwnSchema(spec) ? await this.allowedSchemas(client) : [];
+      const schemas = tableSchemas(refs, realSchema, listed);
       const metas = new Map<string, TableMeta>();
-      for (const name of names) {
-        if (metas.has(name)) continue;
-        try {
-          const oid = await this.readableTableOid(client, realSchema, name);
-          metas.set(name, await this.tableMeta(client, realSchema, name, oid));
-        } catch (err) {
-          throw unknownJoinTable(err, name);
+      const tables: TableMeta[] = [];
+      for (const [i, { table }] of refs.entries()) {
+        const key = JSON.stringify([schemas[i], table]);
+        if (!metas.has(key)) {
+          try {
+            const oid = await this.readableTableOid(client, schemas[i], table);
+            metas.set(key, await this.tableMeta(client, schemas[i], table, oid));
+          } catch (err) {
+            throw unknownJoinTable(err, table);
+          }
         }
+        tables.push(metas.get(key) as TableMeta);
       }
-      const plan = planJoin(
-        spec,
-        names.map((n) => metas.get(n) as TableMeta),
-        opts,
-      );
+      const plan = planJoin(spec, tables, opts);
 
       // The statement is built from catalog names and generated aliases
       // only; every value is a bound $N parameter.
-      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT, realSchema);
+      const { body, values } = buildJoinSelect(plan, JOIN_DIALECT);
       const { rows } = await client
         .query(`select ${body}`, [opts.limit + 1, opts.offset, ...values])
         .catch((err: unknown) => {
           throw mapSelectDenied(err, spec.table, opts.sort);
         });
       const out = joinRows(plan, rows as Record<string, unknown>[], opts.limit, cellToJson);
-      return { columns: joinColumnInfos(plan), rows: out.rows, has_more: out.hasMore };
+      return { columns: joinColumnInfos(plan, realSchema), rows: out.rows, has_more: out.hasMore };
     });
   }
 

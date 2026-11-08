@@ -11,19 +11,23 @@ import {
   columnInfo,
   type JoinDialect,
   type JoinOpts,
+  joinColumnInfos,
+  joinTableRefs,
   parseJoin,
   planJoin,
   type TableMeta,
+  tableSchemas,
 } from "../src/join.js";
 
 const uuid = (name: string): ColMeta => ({ name, type: "uuid", class: { kind: "uuid" } });
 const text = (name: string): ColMeta => ({ name, type: "text", class: { kind: "text" } });
 
 const orders = (): TableMeta => ({
+  schema: "public",
   name: "orders",
   columns: [uuid("id"), uuid("user_id"), text("status"), { name: "tags", type: "ARRAY", class: { kind: "array" } }],
 });
-const users = (): TableMeta => ({ name: "users", columns: [uuid("id"), text("email")] });
+const users = (): TableMeta => ({ schema: "public", name: "users", columns: [uuid("id"), text("email")] });
 
 const opts = (over: Partial<JoinOpts> = {}): JoinOpts => ({
   limit: 10,
@@ -190,12 +194,44 @@ describe("buildJoinSelect", () => {
         ],
       }),
     );
-    const { body, values } = buildJoinSelect(plan, pg, "public");
+    const { body, values } = buildJoinSelect(plan, pg);
     expect(body).toContain('t0."id"::text as c0, ');
     expect(body).toContain(' from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"');
     expect(body).toContain(' where (t1."email"::text = $3) OR (NOT (t0."status"::text IS NULL))');
     expect(body).toMatch(/ order by t1\."email" asc limit \$1 offset \$2$/);
     expect(values).toEqual(["a@b.c"]);
+  });
+});
+
+describe("own schema", () => {
+  it("parses per table and rejects a wrong type or an unlisted schema", () => {
+    const spec = parseJoin(
+      '{"table":"shipments","schema":"warehouse","joins":[{"type":"left","table":"orders","schema":"public",' +
+        '"on":[{"left":{"join":0,"column":"order_id"},"right":"id"}]}]}',
+    );
+    expect(joinTableRefs(spec)).toEqual([
+      { schema: "warehouse", table: "shipments" },
+      { schema: "public", table: "orders" },
+    ]);
+    const on = '"on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]';
+    for (const bad of [
+      `{"table":"orders","schema":1,"joins":[{"type":"left","table":"users",${on}}]}`,
+      `{"table":"orders","schema":null,"joins":[{"type":"left","table":"users",${on}}]}`,
+      `{"table":"orders","joins":[{"type":"left","table":"users","schema":["public"],${on}}]}`,
+    ]) {
+      expect(() => parseJoin(bad), bad).toThrow(BadJoinError);
+    }
+    expect(() => tableSchemas(joinTableRefs(spec), "public", ["public"])).toThrow(BadJoinError);
+  });
+
+  it("splices and reports a table in another schema under it", () => {
+    const u = users();
+    u.schema = "warehouse";
+    const plan = planJoin(parseJoin(JOIN), [orders(), u], opts());
+    expect(buildJoinSelect(plan, pg).body).toContain(' from "public"."orders" t0 left join "warehouse"."users" t1 ');
+    for (const c of joinColumnInfos(plan, "public")) {
+      expect(c.schema, `${c.table}.${c.column}`).toBe(c.table === "users" ? "warehouse" : undefined);
+    }
   });
 });
 

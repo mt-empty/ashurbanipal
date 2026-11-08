@@ -21,9 +21,11 @@ class JoinSupportTest {
             col("status", "text", ColumnClass.TEXT),
             col("tags", "ARRAY", ColumnClass.ARRAY),
         ),
+        "public",
     )
 
-    private fun users() = TableMeta("users", listOf(col("id", "uuid", ColumnClass.UUID), col("email", "text", ColumnClass.TEXT)))
+    private fun users() =
+        TableMeta("users", listOf(col("id", "uuid", ColumnClass.UUID), col("email", "text", ColumnClass.TEXT)), "public")
 
     private fun opts(
         sort: String? = null,
@@ -47,7 +49,7 @@ class JoinSupportTest {
     @Test
     fun `parses a valid join`() {
         val spec = parseJoin(join)
-        assertEquals(listOf("orders", "users"), spec.tableNames())
+        assertEquals(listOf(TableRef(null, "orders"), TableRef(null, "users")), spec.tableRefs())
         assertTrue(spec.joins[0].left)
     }
 
@@ -148,12 +150,40 @@ class JoinSupportTest {
                 ),
             ),
         )
-        val (body, values) = buildJoinSelect(plan, pg, "public")
+        val (body, values) = buildJoinSelect(plan, pg)
         assertTrue(body.startsWith("t0.\"id\"::text as c0, "), body)
         assertTrue(body.contains(" from \"public\".\"orders\" t0 left join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\""), body)
         assertTrue(body.contains(" where (t1.\"email\"::text = ?) OR (NOT (t0.\"status\"::text IS NULL))"), body)
         assertTrue(body.endsWith(" order by t1.\"email\" asc limit ? offset ?"), body)
         assertEquals(listOf("a@b.c"), values)
+    }
+
+    @Test
+    fun `each table may name its own schema`() {
+        val spec = parseJoin(
+            """{"table":"shipments","schema":"warehouse","joins":[{"type":"left","table":"orders",
+            "schema":"public","on":[{"left":{"join":0,"column":"order_id"},"right":"id"}]}]}""",
+        )
+        assertEquals(listOf(TableRef("warehouse", "shipments"), TableRef("public", "orders")), spec.tableRefs())
+        val on = """"on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]"""
+        for (bad in listOf(
+            """{"table":"orders","schema":1,"joins":[{"type":"left","table":"users",$on}]}""",
+            """{"table":"orders","schema":null,"joins":[{"type":"left","table":"users",$on}]}""",
+            """{"table":"orders","joins":[{"type":"left","table":"users","schema":["public"],$on}]}""",
+        )) {
+            assertThrows(BadJoinException::class.java, { parseJoin(bad) }, bad)
+        }
+        assertThrows(BadJoinException::class.java) { tableSchemas(spec.tableRefs(), "public", listOf("public")) }
+    }
+
+    @Test
+    fun `a table in another schema is spliced and reported under it`() {
+        val plan = planJoin(parseJoin(join), listOf(orders(), users().copy(schema = "warehouse")), opts())
+        val (body, _) = buildJoinSelect(plan, pg)
+        assertTrue(body.contains(" from \"public\".\"orders\" t0 left join \"warehouse\".\"users\" t1 "), body)
+        for (c in plan.columnInfos("public")) {
+            assertEquals(if (c.table == "users") "warehouse" else null, c.schema, "${c.table}.${c.column}")
+        }
     }
 
     @Test

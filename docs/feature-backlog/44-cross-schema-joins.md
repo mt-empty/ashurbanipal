@@ -1,6 +1,6 @@
 # Cross-schema joins
 
-> **Status:** OPEN · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** extends stories 40 (join route) and 41 (join builder); needs story 45 first
+> **Status:** PARTIAL · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** extends stories 40 (join route) and 41 (join builder); server side done (spec, seeds, conformance, all five ports); frontend (§4, §6) open
 
 Let one join name tables from more than one schema of the same source.
 Read-only, like every join. A join still never crosses a source.
@@ -14,24 +14,15 @@ referrers in other schemas. But a join stays in one schema
 schema"). So the user can walk from a shipment to its order, but cannot see
 shipments and orders side by side in one grid.
 
-The Postgres seed (`conformance/seed/seed.sql`) already has two
-cross-schema FKs to test against:
+The seeds (seed version 6) have the shapes to test against:
 
 - `warehouse.shipments.order_id` → `public.orders.id`
 - `warehouse.shipment_events.handled_by_user_id` → `public.users.id`
-
-It lacks the rest:
-
-- **No same-named table in two schemas.** Add one, such as
-  `other_schema.users`, so a join can name two tables with the same name.
-  (`ashb_test_referenced_by_partitioning.users` is created and dropped by
-  one Rust test, `referenced_by_partitioning.rs`; it is not in the seed.)
-  This is a `tools/seed-gen` change, so both seed files regenerate and the
-  conformance seed `VERSION` is bumped.
-- **No cross-database data in `conformance/seed/seed.mysql.sql`.** It has
-  no `warehouse` database and no FK across databases; `other_schema` holds
-  only `decoy_items`, with no links. Add the same `warehouse` shapes there,
-  or do this part with story 35 (seed dialect parity).
+- `warehouse.users` shares only its name and an `id` column with
+  `public.users`, so a join can name two tables with the same name.
+- `conformance/seed/seed.mysql.sql` has the same `warehouse` tables as a
+  second database, with both FKs reaching the connection's default
+  database.
 - **SQLite has only `main`**, so it can test only the rejections.
 
 ## 2. Decisions so far
@@ -194,8 +185,8 @@ and the column catalog cache both depend on those stable scope keys, and
 unqualified table names in a join resolve in the default schema that story
 45 makes reliable. Story 45 is done.
 
-Story 35 (conformance seed dialect parity) covers the MySQL seed gap from
-§1. Either do the MySQL cross-database shapes here, or do story 35 first.
+The MySQL `warehouse` database was added here rather than through story 35
+(conformance seed dialect parity), which still covers the rest of that seed.
 
 ## 10. Out of scope
 

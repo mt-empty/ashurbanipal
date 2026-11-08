@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use sqlx::postgres::PgRow;
@@ -442,6 +443,7 @@ impl PgPoolSource {
         .await?;
         let (pk_columns, fk_columns) = self.key_metadata_in_tx(tx, schema, table).await?;
         Ok(TableMeta {
+            schema: Some(schema.to_string()),
             name: table.to_string(),
             columns: columns
                 .into_iter()
@@ -783,24 +785,34 @@ impl DbSource for PgPoolSource {
     ) -> Result<JoinData, DbError> {
         let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        let names = spec.table_names();
-        let mut metas: HashMap<&str, TableMeta> = HashMap::new();
-        for name in &names {
-            if !metas.contains_key(name) {
-                let oid = self
-                    .readable_table_oid_in_tx(&mut tx, &schema, name)
-                    .await
-                    .map_err(join::unknown_join_table)?;
-                let meta = self
-                    .table_meta_in_tx(&mut tx, &schema, name, oid)
-                    .await
-                    .map_err(join::unknown_join_table)?;
-                metas.insert(name, meta);
-            }
+        let refs = spec.table_refs();
+        let listed = if refs.iter().any(|(own, _)| own.is_some()) {
+            self.list_schemas_in_tx(&mut tx).await?
+        } else {
+            Vec::new()
+        };
+        let schemas = join::table_schemas(&refs, &schema, &listed)?;
+        let mut metas: HashMap<(&str, &str), TableMeta> = HashMap::new();
+        let mut tables = Vec::with_capacity(refs.len());
+        for (in_schema, &(_, name)) in schemas.iter().zip(&refs) {
+            let meta = match metas.entry((in_schema.as_str(), name)) {
+                Entry::Occupied(e) => e.into_mut(),
+                Entry::Vacant(e) => {
+                    let oid = self
+                        .readable_table_oid_in_tx(&mut tx, in_schema, name)
+                        .await
+                        .map_err(join::unknown_join_table)?;
+                    e.insert(
+                        self.table_meta_in_tx(&mut tx, in_schema, name, oid)
+                            .await
+                            .map_err(join::unknown_join_table)?,
+                    )
+                }
+            };
+            tables.push(meta.clone());
         }
-        let tables = names.iter().map(|n| metas[n].clone()).collect();
         let plan = join::plan(spec, tables, &opts)?;
-        let (body, values) = join::build_select(&plan, &JOIN_DIALECT, Some(&schema));
+        let (body, values) = join::build_select(&plan, &JOIN_DIALECT);
 
         // AssertSqlSafe: the statement is built from catalog names and
         // generated aliases only; all values are bound.
@@ -823,7 +835,7 @@ impl DbSource for PgPoolSource {
             .map(|r| row_to_json(r, plan.labels().iter().map(String::as_str)))
             .collect();
         Ok(JoinData {
-            columns: plan.columns(),
+            columns: plan.columns(Some(&schema)),
             rows,
             has_more,
         })

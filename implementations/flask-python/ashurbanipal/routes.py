@@ -321,7 +321,10 @@ def _column_to_dict(c) -> dict:
 
 
 def _join_column_to_dict(c) -> dict:
-    return {**_column_to_dict(c), "join": c.join, "table": c.table, "column": c.column}
+    out = {**_column_to_dict(c), "join": c.join, "table": c.table, "column": c.column}
+    if c.schema is not None:
+        out["schema"] = c.schema
+    return out
 
 
 def _referenced_by_to_dict(e) -> dict:

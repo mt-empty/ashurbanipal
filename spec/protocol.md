@@ -53,7 +53,9 @@ interpreted as described in RFC 2119.
     connection's default.
   All table listing, validation, metadata, and data queries for one
   operation MUST be scoped to that operation's resolved schema, never
-  hardcoded to a default such as `public`. An operation that performs
+  hardcoded to a default such as `public`. The one exception is a §5.11
+  table that names its own `schema`, checked against §5.7's list in the
+  same transaction. An operation that performs
   multiple queries to produce one response (such as `/tables/data` or
   `/tables/common-values`) MUST resolve the schema once and use that same
   resolved value for every query in the operation, even when its
@@ -723,7 +725,7 @@ Response:
 
 ### 5.11 `GET {mount}/api/tables/join`
 
-Paginated, filtered, sorted rows from several tables of one schema,
+Paginated, filtered, sorted rows from several tables of one source,
 combined by `INNER` or `LEFT` joins the client describes. The client sends
 a structure, never SQL: the server checks every name against the catalog
 and builds the statement itself. A join is not a database object; the
@@ -732,7 +734,7 @@ server keeps no state about it (§6).
 | Param       | Required | Rules                                                      |
 |-------------|----------|------------------------------------------------------------|
 | `source`    | no       | See §1's resolution rules; unrecognized value → 400.       |
-| `schema`    | no       | See §1's resolution rules; unrecognized value → 400. Every table in the join is resolved in this one schema. |
+| `schema`    | no       | See §1's resolution rules; unrecognized value → 400. Every table without its own `schema` (§5.11.1) resolves in this schema. |
 | `join`      | yes      | URL-encoded JSON object, see below.                        |
 | `filter`    | no       | URL-encoded JSON array, §5.4.2, plus an optional `join` position per condition.   |
 | `sort`      | no       | A column name of the table at `sort_join`; unknown column → 400. |
@@ -794,9 +796,16 @@ Response:
   position order then column order. If present it MUST be non-empty, each
   entry MUST be a distinct `{join, column}`, and the response lists
   exactly those columns in that order.
-- Every table MUST match a table from §5.2 and every column MUST match
-  that table's real columns, exactly (case-sensitive); otherwise 400. A
-  table the role cannot `SELECT` is rejected as in §6 (`not_readable`).
+- The base and each `joins` entry MAY carry `schema`, a string naming the
+  schema that table resolves in. Absent means the request's resolved
+  schema. Present, it MUST match an entry from §5.7's live list exactly
+  (case-sensitive); otherwise 400 `invalid_join`, not `unknown_schema`,
+  which stays reserved for the `schema` parameter. A table never resolves
+  in a schema from another source.
+- Every table MUST match a table from §5.2's list for its schema, and every
+  column MUST match that table's real columns, exactly (case-sensitive);
+  otherwise 400. A table the role cannot `SELECT` is rejected as in §6
+  (`not_readable`).
 - Implementations MUST bound the byte length of the URL-decoded `join`
   text and reject oversize values with 400, never a truncated query. The
   bound is 8192 bytes, as §5.4.2's `filter`.
@@ -850,11 +859,20 @@ comparison uses the columns' native types, not the text cast of §5.4.2.
 
 - Each `columns` entry carries `name`, `type`, `join`, `table` and
   `column`, plus the §5.4.1 `class` and the optional §5.4.1 fields `enum_type`,
-  `collation`, `key`, `references`, `comment` as they apply to that column in its own table. `type` and those fields
+  `collation`, `key`, `references`, `comment` as they apply to that column in its own table, and the optional `schema` below. `type` and those fields
   MUST equal what §5.4.1 reports for the column. `name` is a **label**
   unique within the response: the column's own name when that is unique
   among the returned columns, otherwise `{column}_{join}`, with a numeric
   suffix appended if that still collides. Clients MUST NOT parse labels.
+- `schema` — the column's table's schema, present only when that is not the
+  request's resolved schema; omitted otherwise. Its `references.schema`
+  stays relative to the column's own table (§5.4.1), not to the request.
+  Example, with the request's schema `warehouse`: a column from
+  `public.orders` carries `schema: "public"` and, for `user_id`,
+  `references: {table: "users", column: "id"}` with no `schema`, because
+  `users` is in `orders`' own schema. Its target is `public.users`. A client
+  resolves an FK target's schema as `references.schema`, else the column's
+  `schema`, else the request's resolved schema.
 - `rows` are objects keyed by label. Values follow §5.4.3. A column from a
   `LEFT`-joined table with no matching row is `null`.
 - `has_more` is always present. The server fetches one row beyond the
@@ -866,7 +884,10 @@ comparison uses the columns' native types, not the text cast of §5.4.2.
 #### 5.11.5 Execution
 
 - Source and schema are resolved once, and every statement of the
-  operation runs on that one connection and transaction (§6).
+  operation runs on that one connection and transaction (§6). Each table's
+  own `schema` is checked against §5.7's list inside that same
+  transaction, and is quoted with the engine's identifier quoting only
+  after that check, as the request's schema is.
 - The statement is built with generated aliases for tables and columns;
   no request text becomes an alias or label. Values are bound parameters.
 - A timed-out join is a 500 with `code: "query_timeout"` (§2, §6).
@@ -909,7 +930,9 @@ These hold across all routes:
   `'public'`, and MUST reject a `schema` value that isn't on §5.7's live
   list before it reaches SQL text — same allow-list-before-splice
   discipline as this section's first bullet, applied to schema names, not
-  just table/column names. On engines with no schema concept this is
+  just table/column names. The one exception is a §5.11 table that names
+  its own `schema`: that name gets the same §5.7 check, in the same
+  transaction, before it reaches SQL text. On engines with no schema concept this is
   trivially satisfied — see `docs/adapter-decisions.md`.
 - **Statelessness.** No server-side session or cache is required by the
   protocol; all request handling is self-contained.
@@ -931,7 +954,10 @@ These hold across all routes:
   (`/api/tables/referenced-by`) is the third — a wholly new route that
   changes nothing an existing caller observes, so v1 stands again. §5.10
   (`/api/tables/structure`) is the fourth, for the same reason. §5.11
-  (`/api/tables/join`) is the fifth, for the same reason.
+  (`/api/tables/join`) is the fifth, for the same reason. The optional
+  per-table `schema` in §5.11.1's `join` object, and the matching response
+  `schema` (§5.11.4), are the sixth: a request without them behaves exactly
+  as before.
   The §2 change from plain-text error bodies to problem+json *is* a
   serialization change, and would bump the version under the rule above —
   but it landed before any external consumer existed, so this document

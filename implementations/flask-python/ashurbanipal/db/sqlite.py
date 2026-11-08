@@ -30,6 +30,7 @@ from ..join import (
     TableMeta,
     build_select,
     plan_join,
+    table_schemas,
 )
 from . import (
     BadJoin,
@@ -366,7 +367,9 @@ class SqliteSource(DbSource):
             self._bounded(conn, opts.timeout_secs)
             try:
                 allowed = self._allowed_tables(cur)
-                names = spec.table_names()
+                refs = spec.table_refs()
+                table_schemas(refs, ONLY_SCHEMA, [ONLY_SCHEMA])
+                names = [name for _, name in refs]
                 metas: dict[str, TableMeta] = {}
                 for name in names:
                     if name in metas:
@@ -378,14 +381,14 @@ class SqliteSource(DbSource):
 
                 # The statement is built from catalog names and generated
                 # aliases only; every value is a bound parameter.
-                body, values = build_select(plan, _JOIN_DIALECT, None)
+                body, values = build_select(plan, _JOIN_DIALECT)
                 cur.execute(f"select {body}", (*values, opts.limit + 1, opts.offset))
                 rows, has_more = plan.rows_from(
                     cur.fetchall(), opts.limit, lambda v: None if v is None else str(v)
                 )
             finally:
                 self._clear_bound(conn)
-            return JoinData(columns=plan.column_infos(), rows=rows, has_more=has_more)
+            return JoinData(columns=plan.column_infos(ONLY_SCHEMA), rows=rows, has_more=has_more)
         finally:
             conn.close()
 

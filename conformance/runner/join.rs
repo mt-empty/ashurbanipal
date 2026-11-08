@@ -435,7 +435,8 @@ async fn source_and_schema_params_resolve_like_the_other_routes() {
     }
 }
 
-/// P5.11-SCHEMA-ISOLATION: every table resolves in the resolved schema only.
+/// P5.11-SCHEMA-ISOLATION: a table without its own `schema` resolves in the
+/// resolved schema only.
 #[tokio::test]
 async fn tables_resolve_only_in_the_requested_schema() {
     let srv = TestServer::spawn().await;
@@ -449,6 +450,218 @@ async fn tables_resolve_only_in_the_requested_schema() {
     )
     .await;
     assert_problem_code(resp, 400, "invalid_join", "orders is not in other_schema").await;
+}
+
+fn shipments_orders(base_schema: Option<&str>, orders_schema: Option<&str>) -> Value {
+    let mut join = json!({
+        "table": "shipments",
+        "joins": [{
+            "type": "inner", "table": "orders",
+            "on": [{"left": {"join": 0, "column": "order_id"}, "right": "id"}]
+        }]
+    });
+    if let Some(s) = base_schema {
+        join["schema"] = json!(s);
+    }
+    if let Some(s) = orders_schema {
+        join["joins"][0]["schema"] = json!(s);
+    }
+    join
+}
+
+/// The `schema` of every column at `join`, as the response reports it.
+fn column_schemas(body: &Value, join: u64) -> Vec<Value> {
+    body["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["join"] == join)
+        .map(|c| c.get("schema").cloned().unwrap_or(Value::Null))
+        .collect()
+}
+
+/// P5.11-CROSS-SCHEMA: a table may name its own schema. A response column
+/// carries `schema` only when its table is outside the request's schema,
+/// and `references.schema` stays relative to the column's own table.
+#[tokio::test]
+async fn a_joined_table_may_name_its_own_schema() {
+    let srv = TestServer::spawn().await;
+    if matches!(Backend::current().schema_model(), SchemaModel::Single) {
+        return;
+    }
+    let home = Backend::current().default_schema();
+    let args = [
+        ("schema", "warehouse".to_string()),
+        ("sort", "id".into()),
+        ("limit", "5".into()),
+    ];
+    let body = ok_body(&srv, &shipments_orders(None, Some(&home)), &args).await;
+    assert_exact(rows(&body).len(), 5, "inner cross-schema join rows");
+    let (order_id, id) = (label(&body, 0, "order_id"), label(&body, 1, "id"));
+    for row in rows(&body) {
+        assert_exact(&row[&order_id], &row[&id], "shipments.order_id = orders.id");
+    }
+    assert!(
+        column_schemas(&body, 0).iter().all(Value::is_null),
+        "warehouse columns carry no schema: {body:#?}"
+    );
+    assert!(
+        column_schemas(&body, 1).iter().all(|s| *s == json!(home)),
+        "orders columns carry schema {home:?}: {body:#?}"
+    );
+    let user_id = body["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["join"] == 1 && c["column"] == "user_id")
+        .unwrap();
+    assert_exact(
+        user_id["references"]["table"].clone(),
+        json!("users"),
+        "orders.user_id references",
+    );
+    assert!(
+        user_id["references"].get("schema").is_none(),
+        "orders.user_id references users in its own schema: {user_id:#?}"
+    );
+
+    // The base naming its own schema, with the request in the default one.
+    let flipped = ok_body(
+        &srv,
+        &shipments_orders(Some("warehouse"), None),
+        &[("sort", "id".into()), ("limit", "5".into())],
+    )
+    .await;
+    assert_exact(
+        flipped["rows"].clone(),
+        body["rows"].clone(),
+        "same rows from either side",
+    );
+    assert!(
+        column_schemas(&flipped, 0)
+            .iter()
+            .all(|s| *s == json!("warehouse")),
+        "shipments columns carry schema warehouse: {flipped:#?}"
+    );
+    assert!(
+        column_schemas(&flipped, 1).iter().all(Value::is_null),
+        "orders columns carry no schema: {flipped:#?}"
+    );
+}
+
+/// P5.11-CROSS-SCHEMA-SAME-NAME: two tables with one name, from two schemas,
+/// are two different tables in one join.
+#[tokio::test]
+async fn same_named_tables_from_two_schemas_join_as_two_tables() {
+    let srv = TestServer::spawn().await;
+    if matches!(Backend::current().schema_model(), SchemaModel::Single) {
+        return;
+    }
+    let home = Backend::current().default_schema();
+    let join = json!({
+        "table": "shipment_events",
+        "schema": "warehouse",
+        "joins": [
+            {"type": "left", "table": "users",
+             "on": [{"left": {"join": 0, "column": "handled_by_user_id"}, "right": "id"}]},
+            {"type": "left", "table": "users", "schema": "warehouse",
+             "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}
+        ]
+    });
+    let body = ok_body(&srv, &join, &[("limit", "5".into())]).await;
+    let columns = |join: u64| -> Vec<String> {
+        body["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["join"] == join)
+            .map(|c| c["column"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert!(columns(1).contains(&"email".to_string()), "{body:#?}");
+    assert!(columns(2).contains(&"username".to_string()), "{body:#?}");
+    assert!(
+        column_schemas(&body, 1).iter().all(Value::is_null),
+        "{home}.users columns carry no schema: {body:#?}"
+    );
+    assert!(
+        column_schemas(&body, 2)
+            .iter()
+            .all(|s| *s == json!("warehouse")),
+        "warehouse.users columns carry schema warehouse: {body:#?}"
+    );
+}
+
+/// P5.11-CROSS-SCHEMA-DEFAULT: a table naming the request's own schema
+/// behaves as one that names none, and reports no `schema`.
+#[tokio::test]
+async fn naming_the_request_schema_is_the_same_as_naming_none() {
+    let srv = TestServer::spawn().await;
+    let home = Backend::current().default_schema();
+    let args = [("sort", "id".to_string()), ("limit", "5".into())];
+    let implicit = ok_body(&srv, &orders_users("left"), &args).await;
+    let mut named = orders_users("left");
+    named["schema"] = json!(home);
+    named["joins"][0]["schema"] = json!(home);
+    let explicit = ok_body(&srv, &named, &args).await;
+    assert_exact(explicit, implicit, "own schema equal to the request's");
+}
+
+/// P5.11-CROSS-SCHEMA-REJECT: an own `schema` must be a string on the §5.7
+/// list, and the table must be in it; otherwise `invalid_join`, never
+/// `unknown_schema`, and never SQL.
+#[tokio::test]
+async fn unknown_or_malformed_own_schemas_are_rejected() {
+    let srv = TestServer::spawn().await;
+    let hostile = [
+        "no_such_schema",
+        "warehouse\"; drop table users; --",
+        "warehouse'",
+        "Warehouse",
+        "warehouse\u{0}",
+        " warehouse",
+        "",
+    ];
+    for name in hostile {
+        let mut base = orders_users("left");
+        base["schema"] = json!(name);
+        let resp = get_join(&srv, &base, &[]).await;
+        assert_problem_code(resp, 400, "invalid_join", &format!("base schema {name:?}")).await;
+
+        let mut joined = orders_users("left");
+        joined["joins"][0]["schema"] = json!(name);
+        let resp = get_join(&srv, &joined, &[]).await;
+        assert_problem_code(
+            resp,
+            400,
+            "invalid_join",
+            &format!("joined schema {name:?}"),
+        )
+        .await;
+    }
+    for value in [
+        json!(null),
+        json!(1),
+        json!(["warehouse"]),
+        json!({"name": "warehouse"}),
+    ] {
+        let mut base = orders_users("left");
+        base["schema"] = value.clone();
+        let resp = get_join(&srv, &base, &[]).await;
+        assert_problem_code(resp, 400, "invalid_join", &format!("base schema {value}")).await;
+
+        let mut joined = orders_users("left");
+        joined["joins"][0]["schema"] = value.clone();
+        let resp = get_join(&srv, &joined, &[]).await;
+        assert_problem_code(resp, 400, "invalid_join", &format!("joined schema {value}")).await;
+    }
+    // A listed schema that does not hold the table.
+    if matches!(Backend::current().schema_model(), SchemaModel::Namespaced) {
+        let mut misplaced = orders_users("left");
+        misplaced["schema"] = json!("warehouse");
+        let resp = get_join(&srv, &misplaced, &[]).await;
+        assert_problem_code(resp, 400, "invalid_join", "orders is not in warehouse").await;
+    }
 }
 
 /// P5.11-NAMES-EXACT: unknown or injection-shaped names are 400,

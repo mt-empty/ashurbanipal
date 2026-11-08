@@ -146,7 +146,14 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 		return JoinData{}, err
 	}
 
-	names := spec.TableNames()
+	refs := spec.TableRefs()
+	if _, err := tableSchemas(refs, onlySchema, []string{onlySchema}); err != nil {
+		return JoinData{}, err
+	}
+	names := make([]string, len(refs))
+	for i, ref := range refs {
+		names[i] = ref.Table
+	}
 	metas := map[string]tableMeta{}
 	for _, name := range names {
 		if _, ok := metas[name]; ok {
@@ -172,7 +179,7 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 
 	// The statement is built from catalog names and generated aliases
 	// only; every value is a bound ? parameter.
-	body, values := buildJoinSelect(plan, sqliteJoinDialect, nil)
+	body, values := buildJoinSelect(plan, sqliteJoinDialect)
 	args := make([]interface{}, 0, len(values)+2)
 	for _, v := range values {
 		args = append(args, v)
@@ -189,7 +196,7 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 	if err != nil {
 		return JoinData{}, err
 	}
-	return JoinData{Columns: plan.columnInfos(), Rows: out, HasMore: hasMore}, nil
+	return JoinData{Columns: plan.columnInfos(onlySchema), Rows: out, HasMore: hasMore}, nil
 }
 
 // bounded relies on modernc.org/sqlite honoring database/sql context cancellation.

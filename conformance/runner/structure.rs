@@ -303,17 +303,15 @@ async fn check_constraints_are_reported_where_introspectable() {
 }
 
 /// P5.10-CROSS-SCHEMA: an FK into another schema carries the referenced
-/// table's `schema`. MySQL scopes to one database and SQLite has one schema,
-/// so both self-skip.
+/// table's `schema`. Postgres only: SQLite has one schema, and MySQL's
+/// cross-database FKs in the seed are not asserted here yet.
 #[tokio::test]
 async fn cross_schema_foreign_keys_carry_the_referenced_schema() {
     let srv = TestServer::spawn().await;
     if let CrossSchemaReferrers::ScopedToResolvedSchema =
         Backend::current().cross_schema_referrers()
     {
-        eprintln!(
-            "structure: skipping cross-schema check — this backend has no cross-schema FK fixture"
-        );
+        eprintln!("structure: skipping cross-schema check — asserted on Postgres only");
         return;
     }
     let body: Value = srv

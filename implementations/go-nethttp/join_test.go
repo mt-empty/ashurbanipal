@@ -20,8 +20,8 @@ func textCol(name string) colMeta {
 
 func testOrdersUsers() []tableMeta {
 	return []tableMeta{
-		{name: "orders", columns: []colMeta{uuidCol("id"), uuidCol("user_id"), textCol("status"), {name: "tags", typeName: "ARRAY", class: classArray}}},
-		{name: "users", columns: []colMeta{uuidCol("id"), textCol("email")}},
+		{schema: "public", name: "orders", columns: []colMeta{uuidCol("id"), uuidCol("user_id"), textCol("status"), {name: "tags", typeName: "ARRAY", class: classArray}}},
+		{schema: "public", name: "users", columns: []colMeta{uuidCol("id"), textCol("email")}},
 	}
 }
 
@@ -45,8 +45,9 @@ func TestParseJoinAcceptsAValidJoin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(spec.TableNames(), ","); got != "orders,users" {
-		t.Errorf("table names = %s", got)
+	refs := spec.TableRefs()
+	if len(refs) != 2 || refs[0].Table != "orders" || refs[1].Table != "users" || refs[0].Schema != nil || refs[1].Schema != nil {
+		t.Errorf("table refs = %+v", refs)
 	}
 	if !spec.Joins[0].Left {
 		t.Error("type left must set Left")
@@ -187,8 +188,7 @@ func TestBuildJoinSelectUsesCatalogNamesAndGeneratedAliasesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := "public"
-	sqlText, values := buildJoinSelect(plan, pgJoinDialect, &schema)
+	sqlText, values := buildJoinSelect(plan, pgJoinDialect)
 	for _, want := range []string{
 		`t0."id"::text as c0, `,
 		` from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"`,
@@ -287,5 +287,56 @@ func TestParseFilterRejectsAKeyInAnotherCase(t *testing.T) {
 	}
 	if _, err := ParseFilter(`[{"column":"a","op":"IS NULL"}]`); err != nil {
 		t.Errorf("the documented keys must still parse: %v", err)
+	}
+}
+
+func TestEachTableMayNameItsOwnSchema(t *testing.T) {
+	spec, err := ParseJoin(`{"table":"shipments","schema":"warehouse","joins":[{"type":"left","table":"orders",
+		"schema":"public","on":[{"left":{"join":0,"column":"order_id"},"right":"id"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := spec.TableRefs()
+	if *refs[0].Schema != "warehouse" || *refs[1].Schema != "public" {
+		t.Errorf("table refs = %+v", refs)
+	}
+	for _, bad := range []string{
+		`{"table":"orders","schema":null,"joins":[{"type":"left","table":"users","on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}`,
+		`{"table":"orders","joins":[{"type":"left","table":"users","schema":null,"on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}`,
+		`{"table":"orders","schema":1,"joins":[{"type":"left","table":"users","on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}`,
+		`{"table":"orders","joins":[{"type":"left","table":"users","schema":["public"],"on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}`,
+	} {
+		if _, err := ParseJoin(bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	if _, err := tableSchemas(refs, "public", []string{"public"}); err == nil {
+		t.Error("an unlisted own schema must be a bad join")
+	}
+}
+
+func TestATableInAnotherSchemaIsSplicedAndReportedUnderIt(t *testing.T) {
+	spec, err := ParseJoin(testJoinJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables := testOrdersUsers()
+	tables[1].schema = "warehouse"
+	plan, err := planJoin(spec, tables, JoinOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlText, _ := buildJoinSelect(plan, pgJoinDialect)
+	if want := ` from "public"."orders" t0 left join "warehouse"."users" t1 `; !strings.Contains(sqlText, want) {
+		t.Errorf("sql missing %q:\n%s", want, sqlText)
+	}
+	for _, c := range plan.columnInfos("public") {
+		want := ""
+		if c.Table == "users" {
+			want = "warehouse"
+		}
+		if c.Schema != want {
+			t.Errorf("%s.%s schema = %q, want %q", c.Table, c.Column, c.Schema, want)
+		}
 	}
 }

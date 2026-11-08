@@ -266,8 +266,9 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         )
         val (pkColumns, fkColumns) = keyMetadata(schema, table)
         return TableMeta(
-            table,
-            columns.map { c ->
+            schema = schema,
+            name = table,
+            columns = columns.map { c ->
                 ColMeta(
                     name = c.name,
                     type = c.fullType,
@@ -283,19 +284,19 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
         val realSchema = resolveSchema(schema)
-        val names = spec.tableNames()
-        val metas = HashMap<String, TableMeta>()
-        for (name in names) {
-            if (name in metas) continue
-            metas[name] = joinTable(name) {
-                tableMeta(realSchema, name, readableTableOid(realSchema, name))
+        val refs = spec.tableRefs()
+        val schemas = tableSchemas(refs, realSchema, if (spec.namesOwnSchema()) listAllowedSchemas() else emptyList())
+        val metas = HashMap<Pair<String, String>, TableMeta>()
+        val tables = refs.mapIndexed { i, ref ->
+            metas.getOrPut(schemas[i] to ref.table) {
+                joinTable(ref.table) { tableMeta(schemas[i], ref.table, readableTableOid(schemas[i], ref.table)) }
             }
         }
-        val plan = planJoin(spec, names.map { metas.getValue(it) }, opts)
+        val plan = planJoin(spec, tables, opts)
 
         // The statement is built from catalog names and generated aliases
         // only; every value is a bound parameter.
-        val (body, values) = buildJoinSelect(plan, JOIN_DIALECT, realSchema)
+        val (body, values) = buildJoinSelect(plan, JOIN_DIALECT)
         val bindArgs: List<Any> = values + (opts.limit + 1) + opts.offset
         val rows = try {
             jdbcTemplate.query(
@@ -316,7 +317,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             if (sqlState == "42883" && opts.sort != null) throw UnsortableException(opts.sort)
             throw e
         }
-        plan.joinData(rows, opts.limit)
+        plan.joinData(rows, opts.limit, realSchema)
     }
 
     private fun queryTableInTransaction(schema: String?, table: String, opts: QueryOpts): TableData {

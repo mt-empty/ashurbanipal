@@ -267,7 +267,14 @@ create table warehouse.shipment_events (
     notes text
 );
 
+create table warehouse.users (
+    id bigint generated always as identity primary key,
+    username text not null unique,
+    shift varchar(10) not null
+);
+
 comment on table warehouse.shipments is 'Outbound shipments fulfilling orders placed in the public schema.';
+comment on table warehouse.users is 'Warehouse floor accounts; not the same table as public.users.';
 
 insert into users (id, email, full_name, age, is_active, login_count, metadata, last_login_at, created_at) values
     ('8bc78ddc-e82d-49be-8bbf-83708e726b4b', 'may@example.net', 'Elmo Dach', 73, true, 105, '{"role": "admin", "prefs": {"theme": "light"}}'::jsonb, TIMESTAMPTZ '2026-07-19 00:00:00+00' - interval '26476 minutes', TIMESTAMPTZ '2026-07-19 00:00:00+00' - interval '224 days'),
@@ -53536,6 +53543,11 @@ insert into warehouse.shipment_events (shipment_id, handled_by_user_id, event_ty
     (129, NULL, 'out_for_delivery', TIMESTAMPTZ '2026-07-19 00:00:00+00' - interval '91591 minutes', NULL),
     (130, '5b961565-5eb8-44b1-a602-9473c2a58423', 'delivered', TIMESTAMPTZ '2026-07-19 00:00:00+00' - interval '90913 minutes', NULL);
 
+insert into warehouse.users (username, shift) values
+    ('dock-lead', 'early'),
+    ('picker-01', 'late'),
+    ('picker-02', 'night');
+
 
 -- pg_class.reltuples is only populated by ANALYZE/autovacuum; without this,
 -- a freshly seeded dev db shows -1 via /table-counts until autovacuum runs. This
@@ -53558,4 +53570,5 @@ analyze inventory_counts;
 analyze warehouse.carriers;
 analyze warehouse.shipments;
 analyze warehouse.shipment_events;
-insert into _conformance_meta (seed_version, dialect, checksum) values ('5', 'postgres', '5e2c916844cc1dc4');
+analyze warehouse.users;
+insert into _conformance_meta (seed_version, dialect, checksum) values ('6', 'postgres', '661d019ea366a781');

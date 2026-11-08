@@ -159,15 +159,19 @@ function buildApiReference() {
         method: "GET",
         path: `${base}/tables/join`,
         summary:
-          "Rows of up to 4 tables joined server-side (INNER or LEFT, equality on 1-3 column pairs per join), read-only. Every table and column name is checked against the live catalog; each pair must join columns of one column class (number, text, uuid, boolean, temporal, time, binary, enum, untyped), reported as each column's `class` in /tables/data, where two enums must also have an equal `enum_type`; columns of class float, json, array or other cannot be joined. Positions: the start table is 0 and `joins[]` entries are 1..n; a `left` reference may only point at an earlier position. The response has `has_more` and never a total. A column carries `join`, `table` and `column` beside a unique `name` label (never parse the label); rows are keyed by label and a LEFT-join miss is null. Anything wrong with `join` itself (shape, an unknown table or column, an incompatible pair, the size limit) is a 400 with `code: invalid_join`; a bad `filter`, `sort` or `order` keeps its usual code. A join that runs over the query timeout is a 500 with `code: query_timeout`.",
+          "Rows of up to 4 tables joined server-side (INNER or LEFT, equality on 1-3 column pairs per join), read-only. Every table and column name is checked against the live catalog; each pair must join columns of one column class (number, text, uuid, boolean, temporal, time, binary, enum, untyped), reported as each column's `class` in /tables/data, where two enums must also have an equal `enum_type`; columns of class float, json, array or other cannot be joined. Positions: the start table is 0 and `joins[]` entries are 1..n; a `left` reference may only point at an earlier position. The response has `has_more` and never a total. A column carries `join`, `table` and `column` beside a unique `name` label (never parse the label), plus `schema` when its table is outside the request's schema; its `references.schema` stays relative to that table's own schema. Rows are keyed by label and a LEFT-join miss is null. Anything wrong with `join` itself (shape, an unknown schema, table or column, an incompatible pair, the size limit) is a 400 with `code: invalid_join`; a bad `filter`, `sort` or `order` keeps its usual code. A join that runs over the query timeout is a 500 with `code: query_timeout`.",
         params: [
           { name: "source", required: false, notes: "same as GET /schemas" },
-          { name: "schema", required: false, notes: "same as GET /tables; every table of the join is in it" },
+          {
+            name: "schema",
+            required: false,
+            notes: "same as GET /tables; a table of the join without its own `schema` is in it",
+          },
           {
             name: "join",
             required: true,
             notes:
-              'URL-encoded JSON object `{table, joins: [{type: "inner" | "left", table, on: [{left: {join, column}, right}]}], columns?: [{join, column}]}`, at most 8192 bytes',
+              'URL-encoded JSON object `{table, schema?, joins: [{type: "inner" | "left", table, schema?, on: [{left: {join, column}, right}]}], columns?: [{join, column}]}`, at most 8192 bytes; a table\'s own `schema` must be one GET /schemas lists, and the table must be in it',
           },
           {
             name: "filter",

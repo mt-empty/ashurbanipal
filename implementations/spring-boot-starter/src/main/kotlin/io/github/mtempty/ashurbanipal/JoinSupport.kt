@@ -34,13 +34,36 @@ internal inline fun <T> joinTable(name: String, block: () -> T): T =
 data class ColumnPos(val join: Int, val column: String)
 data class OnPair(val left: ColumnPos, val right: String)
 
-/** [left] false is an inner join. */
-data class JoinEntry(val left: Boolean, val table: String, val on: List<OnPair>)
+/** [left] false is an inner join; a null [schema] means the request's resolved schema. */
+data class JoinEntry(val left: Boolean, val table: String, val on: List<OnPair>, val schema: String? = null)
 
-/** Positions: 0 is [table], 1.. the entries of [joins] in order. */
-data class JoinSpec(val table: String, val joins: List<JoinEntry>, val columns: List<ColumnPos>? = null) {
-    fun tableNames(): List<String> = listOf(table) + joins.map { it.table }
+/** One position's own schema (null: the request's) and table. */
+data class TableRef(val schema: String?, val table: String)
+
+/** Positions: 0 is [table], 1.. the entries of [joins] in order; a null [schema] means the request's. */
+data class JoinSpec(
+    val table: String,
+    val joins: List<JoinEntry>,
+    val columns: List<ColumnPos>? = null,
+    val schema: String? = null,
+) {
+    fun tableRefs(): List<TableRef> = listOf(TableRef(schema, table)) + joins.map { TableRef(it.schema, it.table) }
+
+    fun namesOwnSchema(): Boolean = tableRefs().any { it.schema != null }
 }
+
+/**
+ * Each position's schema: its own, which must be in [listed] (§5.7), or else [request]. An unlisted one is
+ * `invalid_join`, never `unknown_schema`, which belongs to the schema parameter.
+ */
+internal fun tableSchemas(refs: List<TableRef>, request: String, listed: List<String>): List<String> =
+    refs.map { r ->
+        when {
+            r.schema == null -> request
+            r.schema in listed -> r.schema
+            else -> throw BadJoinException("unknown schema \"${r.schema}\"")
+        }
+    }
 
 /** Request options other than the `join` object itself. */
 data class JoinOpts(
@@ -59,6 +82,7 @@ data class JoinColumnInfo(
     val table: String,
     val column: String,
     @JsonProperty("class") val columnClass: String,
+    @JsonInclude(JsonInclude.Include.NON_NULL) val schema: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val key: String? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val references: ColumnRef? = null,
     @JsonInclude(JsonInclude.Include.NON_NULL) val comment: String? = null,
@@ -80,6 +104,12 @@ private fun checkKeys(node: JsonNode, allowed: Set<String>, what: String) {
     for (name in node.propertyNames()) {
         if (name !in allowed) throw BadJoinException("$what has unknown field \"$name\"")
     }
+}
+
+private fun optionalSchema(node: JsonNode, what: String): String? {
+    val schema = node.get("schema") ?: return null
+    if (!schema.isString) throw BadJoinException("$what: schema must be a string")
+    return schema.stringValue()
 }
 
 private fun toPos(node: JsonNode?, what: String): ColumnPos {
@@ -104,9 +134,10 @@ fun parseJoin(raw: String): JoinSpec {
         throw BadJoinException("join must be a JSON object of the documented shape: ${e.message}")
     }
     if (root == null || !root.isObject) throw BadJoinException("join must be a JSON object")
-    checkKeys(root, setOf("table", "joins", "columns"), "join")
+    checkKeys(root, setOf("table", "schema", "joins", "columns"), "join")
     val table = root.get("table")
     if (table == null || !table.isString) throw BadJoinException("join needs a string table")
+    val schema = optionalSchema(root, "join")
     val rawJoins = root.get("joins")
     if (rawJoins == null || !rawJoins.isArray || rawJoins.size() == 0) {
         throw BadJoinException("join needs at least one entry in joins")
@@ -118,11 +149,12 @@ fun parseJoin(raw: String): JoinSpec {
     val joins = rawJoins.mapIndexed { i, entry ->
         val position = i + 1
         if (!entry.isObject) throw BadJoinException("join $position must be an object")
-        checkKeys(entry, setOf("type", "table", "on"), "join $position")
+        checkKeys(entry, setOf("type", "table", "schema", "on"), "join $position")
         val type = entry.get("type")?.takeIf { it.isString }?.stringValue()
         if (type != "inner" && type != "left") throw BadJoinException("join $position: type must be \"inner\" or \"left\"")
         val entryTable = entry.get("table")
         if (entryTable == null || !entryTable.isString) throw BadJoinException("join $position: table must be a string")
+        val entrySchema = optionalSchema(entry, "join $position")
         val on = entry.get("on")
         if (on == null || !on.isArray || on.size() == 0 || on.size() > MAX_JOIN_PAIRS) {
             throw BadJoinException("join $position: on needs 1 to $MAX_JOIN_PAIRS pairs")
@@ -138,7 +170,7 @@ fun parseJoin(raw: String): JoinSpec {
             }
             OnPair(left, right.stringValue())
         }
-        JoinEntry(type == "left", entryTable.stringValue(), pairs)
+        JoinEntry(type == "left", entryTable.stringValue(), pairs, entrySchema)
     }
 
     var columns: List<ColumnPos>? = null
@@ -152,7 +184,7 @@ fun parseJoin(raw: String): JoinSpec {
             pos
         }
     }
-    return JoinSpec(table.stringValue(), joins, columns)
+    return JoinSpec(table.stringValue(), joins, columns, schema)
 }
 
 /**
@@ -198,7 +230,8 @@ data class ColMeta(
     )
 }
 
-data class TableMeta(val name: String, val columns: List<ColMeta>) {
+/** [schema] is the catalog-checked schema the table is spliced under; null on SQLite. */
+data class TableMeta(val name: String, val columns: List<ColMeta>, val schema: String? = null) {
     fun index(column: String): Int {
         val i = columns.indexOfFirst { it.name == column }
         if (i < 0) throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
@@ -228,19 +261,23 @@ class JoinPlan internal constructor(
     internal val sort: Pair<Int, Int>?,
     internal val descending: Boolean,
 ) {
-    fun columnInfos(): List<JoinColumnInfo> = selection.mapIndexed { i, (pos, col) ->
+    /** A column's `schema` is reported only when its table is outside [requestSchema]. */
+    fun columnInfos(requestSchema: String): List<JoinColumnInfo> = selection.mapIndexed { i, (pos, col) ->
         val t = tables[pos]
         val c = t.columns[col].columnInfo()
-        JoinColumnInfo(labels[i], c.type, pos, t.name, c.name, c.columnClass, c.key, c.references, c.comment, c.enumType, c.collation)
+        JoinColumnInfo(
+            labels[i], c.type, pos, t.name, c.name, c.columnClass, t.schema?.takeIf { it != requestSchema },
+            c.key, c.references, c.comment, c.enumType, c.collation,
+        )
     }
 
     /** Keys positional result rows by label and trims the extra row asked for `has_more`. */
-    fun joinData(rows: List<List<String?>>, limit: Long): JoinData {
+    fun joinData(rows: List<List<String?>>, limit: Long, requestSchema: String): JoinData {
         val hasMore = rows.size > limit
         val out = rows.take(limit.toInt()).map { row ->
             LinkedHashMap<String, String?>(labels.size).also { map -> labels.forEachIndexed { i, label -> map[label] = row[i] } }
         }
-        return JoinData(columnInfos(), out, hasMore)
+        return JoinData(columnInfos(requestSchema), out, hasMore)
     }
 }
 
@@ -334,11 +371,12 @@ internal class JoinDialect(
  * MySQL can wrap it in its timeout hint) and the filter values in
  * placeholder order. Bind the values first, then limit, then offset.
  */
-internal fun buildJoinSelect(plan: JoinPlan, d: JoinDialect, schema: String?): Pair<String, List<String>> {
+internal fun buildJoinSelect(plan: JoinPlan, d: JoinDialect): Pair<String, List<String>> {
     fun alias(pos: Int, col: Int) = "t$pos.${d.quote(plan.tables[pos].columns[col].name)}"
     fun fromItem(pos: Int): String {
-        val name = d.quote(plan.tables[pos].name)
-        return if (schema != null) "${d.quote(schema)}.$name t$pos" else "$name t$pos"
+        val t = plan.tables[pos]
+        val name = d.quote(t.name)
+        return if (t.schema != null) "${d.quote(t.schema)}.$name t$pos" else "$name t$pos"
     }
 
     val selectList = plan.selection.mapIndexed { i, (p, c) -> "${d.castText(alias(p, c))} as c$i" }.joinToString(", ")
