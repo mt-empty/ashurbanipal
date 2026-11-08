@@ -6,8 +6,7 @@ import {
   enterTable,
   persist,
   setSchema,
-  startsInScope,
-  startTable,
+  startMissingFrom,
   state,
   tableRequest,
   type ViewRequest,
@@ -125,9 +124,7 @@ window.addEventListener("popstate", () => {
   if (state.scope.source === previousSource) {
     // The same scope's table list is the one on screen; only the rows are asked for.
     // An earlier step's list may still be on its way, leaving the chips of another scope.
-    const listed =
-      chipsListScopeInView() &&
-      (!startsInScope(state.view) || listedTableNames().includes(startTable(state.view) ?? ""));
+    const listed = chipsListScopeInView() && !startMissingFrom(state.view, listedTableNames());
     if (state.scope.schema === previousSchema && listed) {
       loadData({ replaceHistory: true, reason: "history" });
       return;

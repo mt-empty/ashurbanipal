@@ -8,8 +8,7 @@ import {
   enterTable,
   scopeIdentity,
   scopeRef,
-  startsInScope,
-  startTable,
+  startMissingFrom,
   state,
   tableDataPath,
   tableNameInView,
@@ -181,9 +180,7 @@ export async function loadTables({
   markTiming("tables-listed");
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back (R5).
-  const view = next ? next.view : state.view;
-  const start = startTable(view);
-  const fellBack = startsInScope(view) && (start === null || !tableNames.includes(start));
+  const fellBack = startMissingFrom(next ? next.view : state.view, tableNames);
   if (fellBack) {
     enterTable(tableNames[0] ?? null);
     applyStoredSort(tableNameInView());

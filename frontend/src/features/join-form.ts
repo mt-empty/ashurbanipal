@@ -1,5 +1,5 @@
 import { el } from "../core/dom.js";
-import { scopeRef, state } from "../core/state.js";
+import { refFor, state } from "../core/state.js";
 import type { Column, TableRef } from "../core/types.js";
 import {
   addJoin,
@@ -11,9 +11,9 @@ import {
   removeJoin,
   setTableAt,
 } from "../lib/join-draft.js";
-import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
+import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES, qualifiedName } from "../lib/join-dsl.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
-import { distinctRefs, near } from "../lib/table-ref.js";
+import { distinctRefs } from "../lib/table-ref.js";
 import { createDropdown, lastDropdownLabel } from "./dropdown.js";
 import { cachedColumns, tableColumns } from "./join-catalog.js";
 import { listedTableNames, tableChipCount } from "./table-chips.js";
@@ -43,10 +43,10 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   let draft: Draft = newDraft("");
   let loadToken = 0;
 
-  const at = (pos: number): Draft | DraftJoin => (pos === 0 ? draft : draft.joins[pos - 1]);
-  const tableAt = (pos: number): string => at(pos).table;
-  const refAt = (pos: number): TableRef => near(scopeRef(), at(pos).schema, at(pos).table);
-  const nameAt = (pos: number): string => at(pos).alias.trim() || tableAt(pos);
+  const slot = (pos: number): Draft | DraftJoin => (pos === 0 ? draft : draft.joins[pos - 1]);
+  const tableAt = (pos: number): string => slot(pos).table;
+  const refAt = (pos: number): TableRef => refFor(slot(pos));
+  const nameAt = (pos: number): string => slot(pos).alias.trim() || tableAt(pos);
   const columnsAt = (pos: number): Column[] => (tableAt(pos) ? (cachedColumns(refAt(pos)) ?? []) : []);
   const columnOf = (pos: number, column: string): Column | undefined => columnsAt(pos).find((c) => c.name === column);
 
@@ -64,10 +64,8 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
 
   // Columns arrive lazily; a table whose lookup fails shows no columns rather than blocking the form.
   async function load(): Promise<void> {
-    const refs = Array.from({ length: draft.joins.length + 1 }, (_, p) => p)
-      .filter((p) => tableAt(p) !== "")
-      .map(refAt);
-    const missing = distinctRefs(refs).filter((r) => !cachedColumns(r));
+    const named = [draft, ...draft.joins].filter((t) => t.table !== "");
+    const missing = distinctRefs(named.map(refFor)).filter((r) => !cachedColumns(r));
     if (missing.length === 0) return;
     const token = ++loadToken;
     const results = await Promise.allSettled(missing.map(tableColumns));
@@ -105,7 +103,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
       ariaLabel,
       options: tableOptions(),
       value: t.schema === undefined ? t.table : "",
-      display: t.table ? (t.schema === undefined ? t.table : `${t.schema}.${t.table}`) : undefined,
+      display: t.table ? qualifiedName(t) : undefined,
       placeholder: "choose a table",
       mono: true,
       searchable: true,

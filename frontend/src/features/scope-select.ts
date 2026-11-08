@@ -2,7 +2,15 @@ import { supersedeLoads } from "../bootstrap/reload.js";
 import { api, nameStartupDefault } from "../core/api.js";
 import { $, populateSelect, reportError } from "../core/dom.js";
 import { markTiming } from "../core/perf-marks.js";
-import { settleSchema, settleSource, sourceQuery, state, switchSchema, switchSource } from "../core/state.js";
+import {
+  manySchemas,
+  settleSchema,
+  settleSource,
+  sourceQuery,
+  state,
+  switchSchema,
+  switchSource,
+} from "../core/state.js";
 import type { SchemasResponse, SourceEntry, SourcesResponse } from "../core/types.js";
 import { syncGridLock } from "./grid-lock.js";
 import { loadTables } from "./table-chips.js";
@@ -85,7 +93,7 @@ export async function loadSchemas(): Promise<boolean> {
   if (schema !== null) populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
   // Re-hidden explicitly: a source switch can land on a source with fewer
   // schemas than the last one, whose selector would otherwise stay up.
-  $("schema-select-wrap").hidden = !state.manySchemas;
+  $("schema-select-wrap").hidden = !manySchemas();
   markTiming("scope-settled");
   return true;
 }

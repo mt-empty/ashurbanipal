@@ -56,7 +56,7 @@ export function effectiveName(t: JoinTable): string {
 }
 
 // `schema.table` as the text writes it, or the bare table name.
-export function qualifiedName(t: JoinTable): string {
+export function qualifiedName(t: { schema?: string; table: string }): string {
   return t.schema === undefined ? t.table : `${t.schema}.${t.table}`;
 }
 

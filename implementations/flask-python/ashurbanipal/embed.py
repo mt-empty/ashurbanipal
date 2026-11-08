@@ -16,7 +16,7 @@ import gzip
 import hashlib
 from pathlib import Path
 
-PINNED_FRONTEND_SHA256 = "18a7ac0c0f288ee581445b876b2cfc739cf798b0cb636746baccd43fdc52170a"
+PINNED_FRONTEND_SHA256 = "069fd8363ac19f5ed1b8d8c3e29d7e3b1b264ee5c94c363c1269550757116b3a"
 
 _FRONTEND_PATH = Path(__file__).resolve().parent / "frontend" / "dbviewer.html"
 

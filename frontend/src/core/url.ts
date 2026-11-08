@@ -1,4 +1,4 @@
-import { scopeParams } from "../lib/table-ref.js";
+import { schemaRef, scopeParams } from "../lib/table-ref.js";
 import { dropRetiredKeys } from "./storage.js";
 import {
   chosenScope,
@@ -95,8 +95,7 @@ export function tableDataPath(req: ViewRequest, scope: SchemaRef): string {
 
 function applyUrlScope(params: URLSearchParams): void {
   const { source, schema } = chosenScope();
-  if (source) params.set("source", source);
-  if (schema) params.set("schema", schema);
+  scopeParams(schemaRef(source, schema), params);
 }
 
 // The params that name a view, shared by syncUrl and chip links.

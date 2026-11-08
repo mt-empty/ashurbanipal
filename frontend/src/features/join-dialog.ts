@@ -1,20 +1,7 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, el } from "../core/dom.js";
-import {
-  applyStoredSort,
-  clearJoin,
-  enterTable,
-  joinInView,
-  joinRequest,
-  persist,
-  startRef,
-  startsInScope,
-  state,
-  tableNameInView,
-  viewIsShown,
-} from "../core/state.js";
+import { clearJoin, joinInView, joinRequest, persist, refFor, startOf, state, viewIsShown } from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
-import { dropScopeSchema } from "../lib/join-def.js";
 import { type Draft, defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
 import { printJoin } from "../lib/join-dsl.js";
 import { tokenizeJoinText } from "../lib/join-tokens.js";
@@ -35,8 +22,8 @@ let mode: "form" | "sql" = "form";
 
 // A new join starts from the table in view, in its own schema.
 function startDraft(): Draft {
-  const start = startRef(state.view);
-  return newDraft(start?.table ?? "", startsInScope(state.view) ? undefined : (start?.schema ?? undefined));
+  const start = startOf(state.view);
+  return newDraft(start?.table ?? "", start?.schema);
 }
 // The form as it was when SQL took over. A half-finished form prints as text
 // that does not parse; until that text is edited, Form goes back to this draft.
@@ -144,11 +131,11 @@ runBtn.onclick = () => {
     $("join-error").textContent = typeof result.error === "string" ? result.error : problem();
     return;
   }
-  // Saved and shown in the same canonical form, so the saved chip matches the view.
-  const def = dropScopeSchema(result.def, state.scope.schema);
+  // Saved as the view will print it, so the saved chip matches the view.
+  const req = joinRequest(result.def);
   const name = $<HTMLInputElement>("join-name").value.trim();
   if (name !== "") {
-    const failure = saveJoin(name, printJoin(def), editingSaved);
+    const failure = saveJoin(name, req.view.text, editingSaved);
     if (failure) {
       $("join-error").textContent = failure;
       return;
@@ -156,7 +143,7 @@ runBtn.onclick = () => {
   }
   committed = true;
   dialog.close();
-  applyJoin(def);
+  loadData({ next: req });
 };
 // Set by Show result, whose join is already loading when the close event arrives.
 let committed = false;
@@ -165,19 +152,13 @@ let committed = false;
 dialog.addEventListener("close", () => {
   if (committed) committed = false;
   else if (joinInView() && !viewIsShown()) {
-    const start = startRef(state.view);
-    if (start && !startsInScope(state.view)) {
-      // The server may have refused the join for its schema; only a listed one is switched to.
-      if (start.schema !== null && state.schemas.includes(start.schema)) openTableUnfiltered(start);
-      else {
-        enterTable(listedTableNames()[0] ?? null);
-        applyStoredSort(tableNameInView());
-        persist();
-        loadData({ replaceHistory: true });
-      }
+    // The server may have refused the join for its schema; only a listed one is switched to.
+    const start = startOf(state.view);
+    if (start?.schema !== undefined && state.schemas.includes(start.schema)) {
+      openTableUnfiltered(refFor(start));
       return;
     }
-    clearJoin();
+    clearJoin(listedTableNames()[0] ?? null);
     persist();
     loadData({ replaceHistory: true });
   }

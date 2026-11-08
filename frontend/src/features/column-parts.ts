@@ -37,15 +37,16 @@ export interface FkLink {
 // member is null, or the filter would not fit. A reference's schema is
 // relative to the column's own table (spec/protocol.md §5.4.1, §5.11.4).
 export function fkLink(col: Column, raw: string, row: Row, meta: TableMeta | undefined): FkLink | null {
+  const ref = col.references;
+  const fk = ref ? undefined : meta?.compositeFkOf.get(col.name);
+  if (!ref && !fk) return null;
   const owner = columnTable(col);
   if (owner === null) return null;
-  const ref = col.references;
   if (ref) {
     const clause = filterClause(ref.column, "=", raw);
     if (filterTooLong(clause)) return null;
     return { title: `go to ${refTarget(ref)} = ${raw}`, target: near(owner, ref.schema, ref.table), clause };
   }
-  const fk = meta?.compositeFkOf.get(col.name);
   if (!fk?.columns.every((c) => row[c.from] != null)) return null;
   const clause = filterClauses(fk.columns.map((c) => ({ column: c.to, value: row[c.from] as string })));
   if (filterTooLong(clause)) return null;

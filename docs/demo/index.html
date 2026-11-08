@@ -2457,7 +2457,7 @@ function near(owner, schema, table) {
   return tableIn(schema === void 0 ? owner : schemaRef(owner.source, schema), table);
 }
 function refKey(ref, ...rest) {
-  return JSON.stringify(["table" in ref ? [ref.source, ref.schema, ref.table] : [ref.source, ref.schema], rest].flat());
+  return JSON.stringify([ref.source, ref.schema, ref.table, ...rest]);
 }
 function distinctRefs(refs) {
   return [...new Map(refs.map((r) => [refKey(r), r])).values()];
@@ -2503,7 +2503,6 @@ var UI_KEY = "ashurbanipal_view";
 var state = {
   scope: { kind: "loading", source: null, schema: null },
   manySources: false,
-  manySchemas: false,
   schemas: [],
   noDefaultSchema: false,
   view: null,
@@ -2525,25 +2524,23 @@ function joinView(written2, previous) {
   const hidden = previous?.kind === "join" && previous.text === text ? previous.hidden : [];
   return { kind: "join", def, text, hidden };
 }
-function startTable(view) {
+function startOf(view) {
   if (view === null) return null;
-  switch (view.kind) {
-    case "table":
-      return view.table;
-    case "join":
-      return startsInScope(view) ? view.def.tables[0].table : null;
-    default: {
-      const _exhaustive = view;
-      return _exhaustive;
-    }
-  }
+  return view.kind === "table" ? { table: view.table } : view.def.tables[0];
 }
 function startsInScope(view) {
-  return view?.kind !== "join" || view.def.tables[0].schema === void 0;
+  return startOf(view)?.schema === void 0;
+}
+function startTable(view) {
+  const start = startOf(view);
+  return start && start.schema === void 0 ? start.table : null;
+}
+function startMissingFrom(view, names) {
+  return startsInScope(view) && !names.includes(startTable(view) ?? "");
 }
 function startRef(view) {
-  if (view === null) return null;
-  return view.kind === "table" ? refInScope(view.table) : joinTableRef(view.def, 0);
+  const start = startOf(view);
+  return start && refFor(start);
 }
 function viewKey(view) {
   if (view === null) return "";
@@ -2552,8 +2549,14 @@ function viewKey(view) {
 function scopeRef() {
   return schemaRef(state.scope.source, state.scope.schema);
 }
+function refFor(t) {
+  return near(scopeRef(), t.schema, t.table);
+}
 function refInScope(table) {
   return tableIn(scopeRef(), table);
+}
+function manySchemas() {
+  return state.schemas.length > 1;
 }
 function tableInView() {
   return state.view?.kind === "table" ? refInScope(state.view.table) : null;
@@ -2561,13 +2564,9 @@ function tableInView() {
 function tableNameInView() {
   return state.view?.kind === "table" ? state.view.table : null;
 }
-function joinTableRef(def, position) {
-  const t = def.tables[position];
-  return near(scopeRef(), t.schema, t.table);
-}
 function columnTable(col) {
   if (col.join === void 0) return tableInView();
-  return col.table === void 0 ? null : near(scopeRef(), col.schema, col.table);
+  return col.table === void 0 ? null : refFor({ schema: col.schema, table: col.table });
 }
 function joinInView() {
   return state.view?.kind === "join" ? state.view : null;
@@ -2586,10 +2585,10 @@ function enterTable(name) {
   }
   state.view = tableView(name);
 }
-function clearJoin() {
+function clearJoin(fallback) {
   const join = joinInView();
   if (!join) return;
-  const table = startTable(join);
+  const table = startTable(join) ?? fallback;
   enterTable(table);
   state.offset = 0;
   applyStoredSort(table);
@@ -2692,7 +2691,7 @@ function scopeIdentity() {
 function chosenScope() {
   return {
     source: state.manySources ? state.scope.source : null,
-    schema: state.manySchemas ? state.scope.schema : null
+    schema: manySchemas() ? state.scope.schema : null
   };
 }
 function tableLabelOf(ref) {
@@ -2700,7 +2699,7 @@ function tableLabelOf(ref) {
 }
 function qualifiedTable(ref) {
   const { schema } = ref;
-  return schema && (state.manySchemas || state.noDefaultSchema) ? `${schema}.${ref.table}` : ref.table;
+  return schema && (manySchemas() || state.noDefaultSchema) ? `${schema}.${ref.table}` : ref.table;
 }
 function tableEntry(map, table) {
   const key = knownScopeKey(table);
@@ -2855,7 +2854,6 @@ function settleSource(source, many) {
 function settleSchema(schema, schemas, noDefault) {
   state.scope = schema === null ? { kind: "failed", source: state.scope.source, schema } : withSchema(state.scope, schema);
   state.schemas = schemas;
-  state.manySchemas = schemas.length > 1;
   state.noDefaultSchema = noDefault;
   if (state.view?.kind === "join") state.view = joinView(state.view.def, state.view);
 }
@@ -2973,8 +2971,7 @@ function tableDataPath(req, scope2) {
 }
 function applyUrlScope(params) {
   const { source, schema } = chosenScope();
-  if (source) params.set("source", source);
-  if (schema) params.set("schema", schema);
+  scopeParams(schemaRef(source, schema), params);
 }
 function viewParams(view) {
   const params = new URLSearchParams({ table: startTable(view) ?? "" });
@@ -4439,9 +4436,7 @@ async function loadTables({
   updateTablesCap();
   markTiming("tables-listed");
   const tableNames = tables.map((t) => t.name);
-  const view = next ? next.view : state.view;
-  const start = startTable(view);
-  const fellBack = startsInScope(view) && (start === null || !tableNames.includes(start));
+  const fellBack = startMissingFrom(next ? next.view : state.view, tableNames);
   if (fellBack) {
     enterTable(tableNames[0] ?? null);
     applyStoredSort(tableNameInView());
@@ -4579,9 +4574,8 @@ function knownCatalog() {
     listedTableNames().map((t) => [t, cachedColumns(refInScope(t))?.map((c) => c.name) ?? null])
   );
 }
-function knownSchemas() {
+function knownSchemas(own2) {
   if (state.schemas.length === 0) return void 0;
-  const own2 = knownCatalog();
   return Object.fromEntries(state.schemas.map((s) => [s, s === state.scope.schema ? own2 : null]));
 }
 function indexedColumns(table) {
@@ -4616,10 +4610,10 @@ var tableOptions = () => listedTableNames().map((t) => ({ value: t, label: t, no
 function mountJoinForm(root, onChange) {
   let draft = newDraft("");
   let loadToken2 = 0;
-  const at = (pos) => pos === 0 ? draft : draft.joins[pos - 1];
-  const tableAt = (pos) => at(pos).table;
-  const refAt = (pos) => near(scopeRef(), at(pos).schema, at(pos).table);
-  const nameAt = (pos) => at(pos).alias.trim() || tableAt(pos);
+  const slot = (pos) => pos === 0 ? draft : draft.joins[pos - 1];
+  const tableAt = (pos) => slot(pos).table;
+  const refAt = (pos) => refFor(slot(pos));
+  const nameAt = (pos) => slot(pos).alias.trim() || tableAt(pos);
   const columnsAt = (pos) => tableAt(pos) ? cachedColumns(refAt(pos)) ?? [] : [];
   const columnOf = (pos, column) => columnsAt(pos).find((c) => c.name === column);
   const mismatch = (pos, pair) => {
@@ -4633,8 +4627,8 @@ function mountJoinForm(root, onChange) {
     return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
   async function load() {
-    const refs = Array.from({ length: draft.joins.length + 1 }, (_, p) => p).filter((p) => tableAt(p) !== "").map(refAt);
-    const missing = distinctRefs(refs).filter((r) => !cachedColumns(r));
+    const named = [draft, ...draft.joins].filter((t) => t.table !== "");
+    const missing = distinctRefs(named.map(refFor)).filter((r) => !cachedColumns(r));
     if (missing.length === 0) return;
     const token = ++loadToken2;
     const results = await Promise.allSettled(missing.map(tableColumns));
@@ -4655,16 +4649,16 @@ function mountJoinForm(root, onChange) {
     onChange();
   };
   const pickTable = (pos, table) => {
-    const at2 = setTableAt(draft, pos, table);
-    const join = draft.joins[at2];
-    if (join && join.table !== "") join.on = [foreignKey(at2 + 1) ?? emptyPair()];
+    const at = setTableAt(draft, pos, table);
+    const join = draft.joins[at];
+    if (join && join.table !== "") join.on = [foreignKey(at + 1) ?? emptyPair()];
     changed(true);
   };
   const tableDropdown = (ariaLabel, t, pos) => createDropdown({
     ariaLabel,
     options: tableOptions(),
     value: t.schema === void 0 ? t.table : "",
-    display: t.table ? t.schema === void 0 ? t.table : `${t.schema}.${t.table}` : void 0,
+    display: t.table ? qualifiedName(t) : void 0,
     placeholder: "choose a table",
     mono: true,
     searchable: true,
@@ -5104,15 +5098,16 @@ function typeChip(col) {
   return chip;
 }
 function fkLink(col, raw, row2, meta) {
+  const ref = col.references;
+  const fk = ref ? void 0 : meta?.compositeFkOf.get(col.name);
+  if (!ref && !fk) return null;
   const owner = columnTable(col);
   if (owner === null) return null;
-  const ref = col.references;
   if (ref) {
     const clause2 = filterClause(ref.column, "=", raw);
     if (filterTooLong(clause2)) return null;
     return { title: `go to ${refTarget(ref)} = ${raw}`, target: near(owner, ref.schema, ref.table), clause: clause2 };
   }
-  const fk = meta?.compositeFkOf.get(col.name);
   if (!fk?.columns.every((c) => row2[c.from] != null)) return null;
   const clause = filterClauses(fk.columns.map((c) => ({ column: c.to, value: row2[c.from] })));
   if (filterTooLong(clause)) return null;
@@ -5281,20 +5276,18 @@ function mountJoinSql(onChange) {
   const field = $("join-sql");
   const hlText = $("join-sql-hl-text");
   const pairCheck = (a, b) => {
-    const ac = cachedColumns(near(scopeRef(), a.schema, a.table))?.find((c) => c.name === a.column);
-    const bc = cachedColumns(near(scopeRef(), b.schema, b.table))?.find((c) => c.name === b.column);
+    const ac = cachedColumns(refFor(a))?.find((c) => c.name === a.column);
+    const bc = cachedColumns(refFor(b))?.find((c) => c.name === b.column);
     return ac && bc ? joinMismatch(ac, bc)?.message ?? null : null;
   };
   let memo = null;
   const parse = () => {
     const text = field.value;
     const version2 = catalogVersion();
-    if (memo?.text !== text || memo.version !== version2)
-      memo = {
-        text,
-        version: version2,
-        result: parseJoin(text, { catalog: knownCatalog(), schemas: knownSchemas(), pairCheck })
-      };
+    if (memo?.text !== text || memo.version !== version2) {
+      const catalog = knownCatalog();
+      memo = { text, version: version2, result: parseJoin(text, { catalog, schemas: knownSchemas(catalog), pairCheck }) };
+    }
     return memo.result;
   };
   function render6() {
@@ -5338,10 +5331,9 @@ function mountJoinSql(onChange) {
     return (name) => name.toLowerCase().startsWith(partial);
   };
   const anyRead = (results) => results.some((r) => r.status === "fulfilled");
-  const declaredRef = (d) => near(scopeRef(), d.schema, d.table);
   const tableOf = (ctx, name) => {
     const d = ctx.declared.find((t) => t.name === name);
-    return d && declaredRef(d);
+    return d && refFor(d);
   };
   async function columnRows(ctx) {
     const table = tableOf(ctx, ctx.qualifier);
@@ -5366,9 +5358,9 @@ function mountJoinSql(onChange) {
       };
     });
   }
-  function foreignKeyClause(ctx, taken, table) {
-    const earlier = ctx.declared.map((d) => ({ table: declaredRef(d), columns: cachedColumns(declaredRef(d)) ?? [] }));
-    const fk = findForeignKey(earlier, refInScope(table), cachedColumns(refInScope(table)) ?? []);
+  function foreignKeyClause(ctx, earlier, taken, table) {
+    const ref = refInScope(table);
+    const fk = findForeignKey(earlier, ref, cachedColumns(ref) ?? []);
     if (!fk) return void 0;
     const alias = aliasFor(table, taken);
     const left = quoteJoinName(ctx.declared[fk.at].name);
@@ -5377,10 +5369,11 @@ function mountJoinSql(onChange) {
   function tableRows(ctx, candidates) {
     const used = new Set(ctx.declared.filter((d) => d.schema === void 0).map((d) => d.table));
     const taken = new Set(ctx.declared.map((d) => d.name));
+    const earlier = ctx.declared.map(refFor).map((table) => ({ table, columns: cachedColumns(table) ?? [] }));
     const withKey = [];
     const rest = [];
     for (const table of candidates) {
-      const clause = used.has(table) ? void 0 : foreignKeyClause(ctx, taken, table);
+      const clause = used.has(table) ? void 0 : foreignKeyClause(ctx, earlier, taken, table);
       if (clause) withKey.push({ label: clause, insert: `${clause} `, tag: "foreign key" });
       else
         rest.push({
@@ -5399,7 +5392,7 @@ function mountJoinSql(onChange) {
     let rows = [];
     if (ctx.expect === "table") {
       const candidates = listedTableNames().filter(startsWith(ctx));
-      const wanted = [...ctx.declared.map(declaredRef), ...candidates.length <= 8 ? candidates.map(refInScope) : []];
+      const wanted = [...ctx.declared.map(refFor), ...candidates.length <= 8 ? candidates.map(refInScope) : []];
       const missing = distinctRefs(wanted).filter((t) => !cachedColumns(t));
       if (missing.length > 0) {
         void Promise.allSettled(missing.map(tableColumns)).then((results) => {
@@ -5423,7 +5416,7 @@ function mountJoinSql(onChange) {
   function prefetch2() {
     const listed = new Set(listedTableNames());
     const named = joinCompletionAt(field.value).declared.filter((d) => d.schema === void 0 && listed.has(d.table));
-    const wanted = distinctRefs(named.map(declaredRef)).filter((t) => !cachedColumns(t));
+    const wanted = distinctRefs(named.map(refFor)).filter((t) => !cachedColumns(t));
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
       if (!anyRead(results)) return;
@@ -5499,7 +5492,7 @@ async function loadSchemas() {
   const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema ?? schemas[0] ?? null;
   settleSchema(schema, schemas, defaultSchema === null);
   if (schema !== null) populateSelect($("schema-select"), schemas, schema);
-  $("schema-select-wrap").hidden = !state.manySchemas;
+  $("schema-select-wrap").hidden = !manySchemas();
   markTiming("scope-settled");
   return true;
 }
@@ -5586,7 +5579,7 @@ window.addEventListener("popstate", () => {
   $("schema-select").value = state.scope.schema ?? "";
   persist();
   if (state.scope.source === previousSource) {
-    const listed = chipsListScopeInView() && (!startsInScope(state.view) || listedTableNames().includes(startTable(state.view) ?? ""));
+    const listed = chipsListScopeInView() && !startMissingFrom(state.view, listedTableNames());
     if (state.scope.schema === previousSchema && listed) {
       loadData({ replaceHistory: true, reason: "history" });
       return;
@@ -5604,8 +5597,8 @@ var sqlTab = $("join-mode-sql");
 var runBtn = $("join-run");
 var mode = "form";
 function startDraft() {
-  const start = startRef(state.view);
-  return newDraft(start?.table ?? "", startsInScope(state.view) ? void 0 : start?.schema ?? void 0);
+  const start = startOf(state.view);
+  return newDraft(start?.table ?? "", start?.schema);
 }
 var handoff = null;
 var untouched = () => handoff !== null && sql.text() === handoff.text;
@@ -5689,10 +5682,10 @@ runBtn.onclick = () => {
     $("join-error").textContent = typeof result.error === "string" ? result.error : problem();
     return;
   }
-  const def = dropScopeSchema(result.def, state.scope.schema);
+  const req = joinRequest(result.def);
   const name = $("join-name").value.trim();
   if (name !== "") {
-    const failure = saveJoin(name, printJoin(def), editingSaved);
+    const failure = saveJoin(name, req.view.text, editingSaved);
     if (failure) {
       $("join-error").textContent = failure;
       return;
@@ -5700,24 +5693,18 @@ runBtn.onclick = () => {
   }
   committed = true;
   dialog.close();
-  applyJoin(def);
+  loadData({ next: req });
 };
 var committed = false;
 dialog.addEventListener("close", () => {
   if (committed) committed = false;
   else if (joinInView() && !viewIsShown()) {
-    const start = startRef(state.view);
-    if (start && !startsInScope(state.view)) {
-      if (start.schema !== null && state.schemas.includes(start.schema)) openTableUnfiltered(start);
-      else {
-        enterTable(listedTableNames()[0] ?? null);
-        applyStoredSort(tableNameInView());
-        persist();
-        loadData({ replaceHistory: true });
-      }
+    const start = startOf(state.view);
+    if (start?.schema !== void 0 && state.schemas.includes(start.schema)) {
+      openTableUnfiltered(refFor(start));
       return;
     }
-    clearJoin();
+    clearJoin(listedTableNames()[0] ?? null);
     persist();
     loadData({ replaceHistory: true });
   }
@@ -7201,7 +7188,7 @@ async function joinPath(def, params) {
   const names = /* @__PURE__ */ new Map();
   await Promise.all(
     tablesToExpand(def).map(async (position) => {
-      const columns = await tableColumns(joinTableRef(def, position)).catch((e) => {
+      const columns = await tableColumns(refFor(def.tables[position])).catch((e) => {
         throw e instanceof ApiError && e.code === "unknown_table" ? new ApiError(e.message, "invalid_join") : e;
       });
       names.set(
@@ -7331,7 +7318,7 @@ async function runLoad({
   const token = nextLoadToken();
   const superseded = () => !isCurrentLoad(token);
   const widthScope = widthScopeOf(view);
-  const metaTables = view.kind === "table" ? [refInScope(view.table)] : distinctRefs(view.def.tables.map((_, i) => joinTableRef(view.def, i)));
+  const metaTables = view.kind === "table" ? [refInScope(view.table)] : distinctRefs(view.def.tables.map(refFor));
   const tableMetaLoad = view.kind === "table" ? loadTableMeta(metaTables[0]) : null;
   let data;
   try {

@@ -19,14 +19,10 @@ export function near(owner: SchemaRef, schema: string | undefined, table: string
   return tableIn(schema === undefined ? owner : schemaRef(owner.source, schema), table);
 }
 
-export function sameTable(a: TableRef, b: TableRef): boolean {
-  return a.source === b.source && a.schema === b.schema && a.table === b.table;
-}
-
 // The one key for a table (and, with `rest`, something of it) within a visit.
 // The JSON array of lib/scope-key.ts's visitKey, so no name can collide.
-export function refKey(ref: SchemaRef | TableRef, ...rest: string[]): string {
-  return JSON.stringify(["table" in ref ? [ref.source, ref.schema, ref.table] : [ref.source, ref.schema], rest].flat());
+export function refKey(ref: TableRef, ...rest: string[]): string {
+  return JSON.stringify([ref.source, ref.schema, ref.table, ...rest]);
 }
 
 export function distinctRefs(refs: readonly TableRef[]): TableRef[] {

@@ -8,11 +8,11 @@ import {
   diffNewRows,
   dropOneStaleInput,
   dropStaleSort,
-  joinTableRef,
   markFilterVerified,
   markStoredSortVerified,
   markViewShown,
   pruneHiddenColumns,
+  refFor,
   refInScope,
   scopeRef,
   setSort,
@@ -94,7 +94,7 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
   await Promise.all(
     tablesToExpand(def).map(async (position) => {
       // A table gone from the catalog is the join's problem, answered in its dialog like the server's invalid_join.
-      const columns = await tableColumns(joinTableRef(def, position)).catch((e: unknown) => {
+      const columns = await tableColumns(refFor(def.tables[position])).catch((e: unknown) => {
         throw e instanceof ApiError && e.code === "unknown_table" ? new ApiError(e.message, "invalid_join") : e;
       });
       names.set(
@@ -251,10 +251,7 @@ async function runLoad({
   const widthScope = widthScopeOf(view);
   // Asked beside the rows, so the first draw usually has it already. A join asks
   // after its rows: several lookups sent first would queue it behind them.
-  const metaTables =
-    view.kind === "table"
-      ? [refInScope(view.table)]
-      : distinctRefs(view.def.tables.map((_, i) => joinTableRef(view.def, i)));
+  const metaTables = view.kind === "table" ? [refInScope(view.table)] : distinctRefs(view.def.tables.map(refFor));
   const tableMetaLoad = view.kind === "table" ? loadTableMeta(metaTables[0]) : null;
   let data: ViewData;
   try {

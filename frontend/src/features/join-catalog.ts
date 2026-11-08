@@ -76,11 +76,10 @@ export function knownCatalog(): JoinCatalog {
   );
 }
 
-// Every listed schema for `schema.table` names: the scope's own with its tables,
+// Every listed schema for `schema.table` names: the scope's own with `own`,
 // the others not loaded. Undefined while the list is unknown, so nothing is rejected.
-export function knownSchemas(): Record<string, JoinCatalog | null> | undefined {
+export function knownSchemas(own: JoinCatalog): Record<string, JoinCatalog | null> | undefined {
   if (state.schemas.length === 0) return undefined;
-  const own = knownCatalog();
   return Object.fromEntries(state.schemas.map((s) => [s, s === state.scope.schema ? own : null]));
 }
 
