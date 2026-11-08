@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { toWire } from "../src/lib/join-def.ts";
+import { dropScopeSchema, toWire } from "../src/lib/join-def.ts";
 import type { JoinCatalog } from "../src/lib/join-dsl.ts";
 import { parseJoin, printJoin } from "../src/lib/join-dsl.ts";
 import { findForeignKey, joinMismatch, pairNote, unjoinableReason } from "../src/lib/join-types.ts";
+import { near, schemaRef, tableIn } from "../src/lib/table-ref.ts";
+
+const inPublic = (table: string) => tableIn(schemaRef("primary", "public"), table);
 
 // The single join-text -> JoinDef parser (spec/join-dsl.md). Cases come from
 // spec/fixtures/join-parser-tests.json, generated from the doc's §5 table.
@@ -19,17 +22,22 @@ interface JoinCase {
 }
 
 const fixtureUrl = new URL("../../spec/fixtures/join-parser-tests.json", import.meta.url);
-const fixture: { catalog: JoinCatalog; cases: JoinCase[] } = JSON.parse(readFileSync(fixtureUrl, "utf8"));
+const fixture: {
+  catalog: JoinCatalog;
+  schemas: Record<string, JoinCatalog | null>;
+  cases: JoinCase[];
+} = JSON.parse(readFileSync(fixtureUrl, "utf8"));
+const optionsFor = (c: JoinCase) => (c.no_catalog ? {} : { catalog: fixture.catalog, schemas: fixture.schemas });
 
 for (const c of fixture.cases) {
   test(`${c.name}: ${JSON.stringify(c.input.slice(0, 60))}`, () => {
-    const result = parseJoin(c.input, { catalog: c.no_catalog ? undefined : fixture.catalog });
+    const result = parseJoin(c.input, optionsFor(c));
     if (c.expect) {
       assert.ok("def" in result, "error" in result ? result.error.message : "");
       assert.deepEqual(result.def, c.expect);
       assert.equal(printJoin(result.def), c.canonical);
       // text -> definition -> text is stable
-      const again = parseJoin(c.canonical as string, { catalog: c.no_catalog ? undefined : fixture.catalog });
+      const again = parseJoin(c.canonical as string, optionsFor(c));
       assert.ok("def" in again);
       assert.deepEqual(again.def, c.expect);
       return;
@@ -144,12 +152,12 @@ test("a foreign key is found in either direction and greyed notes follow the oth
     },
   ];
   const users = [{ name: "id", type: "uuid", class: "uuid" as const }];
-  assert.deepEqual(findForeignKey([{ table: "orders", columns: orders }], "users", users), {
+  assert.deepEqual(findForeignKey([{ table: inPublic("orders"), columns: orders }], inPublic("users"), users), {
     at: 0,
     leftColumn: "user_id",
     rightColumn: "id",
   });
-  assert.deepEqual(findForeignKey([{ table: "users", columns: users }], "orders", orders), {
+  assert.deepEqual(findForeignKey([{ table: inPublic("users"), columns: users }], inPublic("orders"), orders), {
     at: 0,
     leftColumn: "id",
     rightColumn: "user_id",
@@ -159,7 +167,7 @@ test("a foreign key is found in either direction and greyed notes follow the oth
   assert.equal(pairNote(users[0], users[0]), null);
 });
 
-test("a foreign key into another schema does not match a same-named table in the join", () => {
+test("a foreign key into another schema matches that schema's table, not a same-named one", () => {
   const events = [
     {
       name: "handled_by_user_id",
@@ -170,8 +178,20 @@ test("a foreign key into another schema does not match a same-named table in the
     },
   ];
   const users = [{ name: "id", type: "uuid", class: "uuid" as const }];
-  assert.equal(findForeignKey([{ table: "shipment_events", columns: events }], "users", users), null);
-  assert.equal(findForeignKey([{ table: "users", columns: users }], "shipment_events", events), null);
+  const shipmentEvents = near(inPublic("x"), "warehouse", "shipment_events");
+  const warehouseUsers = near(shipmentEvents, undefined, "users");
+  assert.equal(findForeignKey([{ table: shipmentEvents, columns: events }], warehouseUsers, users), null);
+  assert.equal(findForeignKey([{ table: warehouseUsers, columns: users }], shipmentEvents, events), null);
+  assert.deepEqual(findForeignKey([{ table: shipmentEvents, columns: events }], inPublic("users"), users), {
+    at: 0,
+    leftColumn: "handled_by_user_id",
+    rightColumn: "id",
+  });
+  assert.deepEqual(findForeignKey([{ table: inPublic("users"), columns: users }], shipmentEvents, events), {
+    at: 0,
+    leftColumn: "id",
+    rightColumn: "handled_by_user_id",
+  });
 });
 
 test("toWire keeps alias.* items written out of table order as an explicit column list", () => {
@@ -187,4 +207,50 @@ test("toWire keeps alias.* items written out of table order as an explicit colum
   const wire = toWire(reversed.def, (join) => fixture.catalog[reversed.def.tables[join].table] ?? []);
   assert.equal(wire.columns?.[0].join, 1);
   assert.equal(wire.columns?.at(-1)?.join, 0);
+});
+
+test("toWire sends each table's own schema only where the text names one", () => {
+  const parsed = parseJoin(
+    "FROM warehouse.shipments s LEFT JOIN orders o ON s.order_id = o.id",
+    optionsFor({} as JoinCase),
+  );
+  assert.ok("def" in parsed);
+  assert.deepEqual(
+    toWire(parsed.def, () => []),
+    {
+      table: "shipments",
+      schema: "warehouse",
+      joins: [{ type: "left", table: "orders", on: [{ left: { join: 0, column: "order_id" }, right: "id" }] }],
+    },
+  );
+});
+
+test("dropScopeSchema drops a qualifier that names the scope's own schema", () => {
+  const parsed = parseJoin("FROM warehouse.shipments s JOIN public.orders o ON s.order_id = o.id", {});
+  assert.ok("def" in parsed);
+  const canonical = dropScopeSchema(parsed.def, "warehouse");
+  assert.equal(printJoin(canonical), "SELECT *\nFROM shipments s\nINNER JOIN public.orders o ON s.order_id = o.id");
+  assert.equal(dropScopeSchema(canonical, "warehouse"), canonical);
+  assert.equal(dropScopeSchema(parsed.def, null), parsed.def);
+});
+
+test("two same-named tables from two schemas are named in the clash message", () => {
+  const parsed = parseJoin("FROM warehouse.users JOIN public.users ON users.id = users.id", {});
+  assert.ok("error" in parsed);
+  assert.equal(parsed.error.code, "duplicate-name");
+  assert.match(parsed.error.message, /warehouse\.users and public\.users/);
+});
+
+test("a pair check is told each side's schema", () => {
+  const seen: unknown[] = [];
+  parseJoin("FROM warehouse.shipments s JOIN orders o ON s.order_id = o.id", {
+    pairCheck: (a, b) => {
+      seen.push(a, b);
+      return null;
+    },
+  });
+  assert.deepEqual(seen, [
+    { schema: "warehouse", table: "shipments", column: "order_id" },
+    { table: "orders", column: "id" },
+  ]);
 });

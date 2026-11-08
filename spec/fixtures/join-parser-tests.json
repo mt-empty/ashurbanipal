@@ -39,6 +39,65 @@
       "is_test"
     ]
   },
+  "schemas": {
+    "public": {
+      "orders": [
+        "id",
+        "user_id",
+        "status",
+        "total_cents",
+        "discount_pct",
+        "tags",
+        "line_items",
+        "created_at"
+      ],
+      "users": [
+        "id",
+        "email",
+        "full_name",
+        "age",
+        "is_active",
+        "login_count",
+        "metadata",
+        "last_login_at",
+        "created_at"
+      ],
+      "order_extra": [
+        "order_id",
+        "gift_message",
+        "is_gift",
+        "created_at"
+      ],
+      "events": [
+        "id",
+        "user_id",
+        "event_type",
+        "payload",
+        "ip_address",
+        "duration_ms",
+        "occurred_at",
+        "is_test"
+      ]
+    },
+    "warehouse": {
+      "shipments": [
+        "id",
+        "order_id",
+        "carrier_id",
+        "tracking_number",
+        "status",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "users": [
+        "id",
+        "username",
+        "shift"
+      ],
+      "carriers": null
+    },
+    "other_schema": null
+  },
   "cases": [
     {
       "name": "V1",
@@ -699,6 +758,232 @@
       "canonical": "SELECT *\nFROM \"left\"\nINNER JOIN b ON \"left\".x = b.y"
     },
     {
+      "name": "V19",
+      "input": "FROM warehouse.shipments s JOIN orders o ON s.order_id = o.id",
+      "expect": {
+        "tables": [
+          {
+            "schema": "warehouse",
+            "table": "shipments",
+            "alias": "s"
+          },
+          {
+            "table": "orders",
+            "alias": "o"
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "order_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM warehouse.shipments s\nINNER JOIN orders o ON s.order_id = o.id"
+    },
+    {
+      "name": "V20",
+      "input": "FROM users LEFT JOIN warehouse.users w ON users.id = w.id",
+      "expect": {
+        "tables": [
+          {
+            "table": "users",
+            "alias": null
+          },
+          {
+            "schema": "warehouse",
+            "table": "users",
+            "alias": "w"
+          }
+        ],
+        "joins": [
+          {
+            "type": "left",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM users\nLEFT JOIN warehouse.users w ON users.id = w.id"
+    },
+    {
+      "name": "V21",
+      "input": "FROM \"warehouse\".\"shipments\" JOIN public.orders ON shipments.order_id = orders.id",
+      "expect": {
+        "tables": [
+          {
+            "schema": "warehouse",
+            "table": "shipments",
+            "alias": null
+          },
+          {
+            "schema": "public",
+            "table": "orders",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "order_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM warehouse.shipments\nINNER JOIN public.orders ON shipments.order_id = orders.id"
+    },
+    {
+      "name": "V22",
+      "input": "FROM \"my schema\".t JOIN b ON t.x = b.y",
+      "no_catalog": true,
+      "expect": {
+        "tables": [
+          {
+            "schema": "my schema",
+            "table": "t",
+            "alias": null
+          },
+          {
+            "table": "b",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "x"
+                },
+                "right": "y"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM \"my schema\".t\nINNER JOIN b ON t.x = b.y"
+    },
+    {
+      "name": "V23",
+      "input": "FROM other_schema.decoy_items d JOIN orders o ON d.ref = o.id",
+      "expect": {
+        "tables": [
+          {
+            "schema": "other_schema",
+            "table": "decoy_items",
+            "alias": "d"
+          },
+          {
+            "table": "orders",
+            "alias": "o"
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "ref"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM other_schema.decoy_items d\nINNER JOIN orders o ON d.ref = o.id"
+    },
+    {
+      "name": "V24",
+      "input": "SELECT s.tracking_number, o.* FROM warehouse.shipments s JOIN warehouse.carriers c ON s.carrier_id = c.id JOIN orders o ON s.order_id = o.id",
+      "expect": {
+        "tables": [
+          {
+            "schema": "warehouse",
+            "table": "shipments",
+            "alias": "s"
+          },
+          {
+            "schema": "warehouse",
+            "table": "carriers",
+            "alias": "c"
+          },
+          {
+            "table": "orders",
+            "alias": "o"
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "carrier_id"
+                },
+                "right": "id"
+              }
+            ]
+          },
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "order_id"
+                },
+                "right": "id"
+              }
+            ]
+          }
+        ],
+        "columns": [
+          {
+            "join": 0,
+            "column": "tracking_number"
+          },
+          {
+            "join": 2,
+            "all": true
+          }
+        ]
+      },
+      "canonical": "SELECT s.tracking_number, o.*\nFROM warehouse.shipments s\nINNER JOIN warehouse.carriers c ON s.carrier_id = c.id\nINNER JOIN orders o ON s.order_id = o.id"
+    },
+    {
       "name": "R1",
       "input": "  \n ",
       "expect_error": {
@@ -1098,6 +1383,64 @@
       }
     },
     {
+      "name": "R41",
+      "input": "FROM users JOIN warehouse.users ON users.id = users.id",
+      "expect_error": {
+        "code": "duplicate-name",
+        "line": 1,
+        "column": 17
+      }
+    },
+    {
+      "name": "R42",
+      "input": "FROM orders JOIN warehose.shipments s ON orders.id = s.order_id",
+      "expect_error": {
+        "code": "unknown-schema",
+        "line": 1,
+        "column": 18,
+        "suggest": "warehouse"
+      }
+    },
+    {
+      "name": "R43",
+      "input": "FROM orders JOIN warehouse.shipment s ON orders.id = s.order_id",
+      "expect_error": {
+        "code": "unknown-table",
+        "line": 1,
+        "column": 28,
+        "suggest": "shipments"
+      }
+    },
+    {
+      "name": "R44",
+      "input": "FROM warehouse.shipments s JOIN orders o ON s.order_idd = o.id",
+      "expect_error": {
+        "code": "unknown-column",
+        "line": 1,
+        "column": 47,
+        "suggest": "order_id"
+      }
+    },
+    {
+      "name": "R45",
+      "input": "FROM orders JOIN warehouse. ON orders.id = x.y",
+      "expect_error": {
+        "code": "expected",
+        "line": 1,
+        "column": 29
+      }
+    },
+    {
+      "name": "R46",
+      "input": "FROM a.b.c JOIN d ON c.x = d.y",
+      "no_catalog": true,
+      "expect_error": {
+        "code": "expected",
+        "line": 1,
+        "column": 9
+      }
+    },
+    {
       "name": "A1",
       "input": "FROM orders; DROP TABLE users",
       "expect_error": {
@@ -1186,6 +1529,40 @@
         "line": 1,
         "column": 68
       }
+    },
+    {
+      "name": "A8",
+      "input": "FROM \"x; DROP SCHEMA public\".t a JOIN b ON a.i = b.j",
+      "no_catalog": true,
+      "expect": {
+        "tables": [
+          {
+            "schema": "x; DROP SCHEMA public",
+            "table": "t",
+            "alias": "a"
+          },
+          {
+            "table": "b",
+            "alias": null
+          }
+        ],
+        "joins": [
+          {
+            "type": "inner",
+            "on": [
+              {
+                "left": {
+                  "join": 0,
+                  "column": "i"
+                },
+                "right": "j"
+              }
+            ]
+          }
+        ],
+        "columns": null
+      },
+      "canonical": "SELECT *\nFROM \"x; DROP SCHEMA public\".t a\nINNER JOIN b ON a.i = b.j"
     }
   ]
 }

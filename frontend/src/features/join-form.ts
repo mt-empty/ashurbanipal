@@ -1,6 +1,6 @@
 import { el } from "../core/dom.js";
-import { state } from "../core/state.js";
-import type { Column } from "../core/types.js";
+import { scopeRef, state } from "../core/state.js";
+import type { Column, TableRef } from "../core/types.js";
 import {
   addJoin,
   type Draft,
@@ -13,6 +13,7 @@ import {
 } from "../lib/join-draft.js";
 import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
+import { distinctRefs, near } from "../lib/table-ref.js";
 import { createDropdown, lastDropdownLabel } from "./dropdown.js";
 import { cachedColumns, tableColumns } from "./join-catalog.js";
 import { listedTableNames, tableChipCount } from "./table-chips.js";
@@ -42,9 +43,11 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   let draft: Draft = newDraft("");
   let loadToken = 0;
 
-  const tableAt = (pos: number): string => (pos === 0 ? draft.table : draft.joins[pos - 1].table);
-  const nameAt = (pos: number): string => (pos === 0 ? draft.alias : draft.joins[pos - 1].alias).trim() || tableAt(pos);
-  const columnsAt = (pos: number): Column[] => cachedColumns(tableAt(pos)) ?? [];
+  const at = (pos: number): Draft | DraftJoin => (pos === 0 ? draft : draft.joins[pos - 1]);
+  const tableAt = (pos: number): string => at(pos).table;
+  const refAt = (pos: number): TableRef => near(scopeRef(), at(pos).schema, at(pos).table);
+  const nameAt = (pos: number): string => at(pos).alias.trim() || tableAt(pos);
+  const columnsAt = (pos: number): Column[] => (tableAt(pos) ? (cachedColumns(refAt(pos)) ?? []) : []);
   const columnOf = (pos: number, column: string): Column | undefined => columnsAt(pos).find((c) => c.name === column);
 
   const mismatch = (pos: number, pair: DraftPair) => {
@@ -54,16 +57,17 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   };
 
   function foreignKey(pos: number): DraftPair | null {
-    const earlier = Array.from({ length: pos }, (_, p) => ({ table: tableAt(p), columns: columnsAt(p) }));
-    const fk = findForeignKey(earlier, tableAt(pos), columnsAt(pos));
+    const earlier = Array.from({ length: pos }, (_, p) => ({ table: refAt(p), columns: columnsAt(p) }));
+    const fk = findForeignKey(earlier, refAt(pos), columnsAt(pos));
     return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
 
   // Columns arrive lazily; a table whose lookup fails shows no columns rather than blocking the form.
   async function load(): Promise<void> {
-    const missing = [...new Set([draft.table, ...draft.joins.map((j) => j.table)])].filter(
-      (t) => t && !cachedColumns(t),
-    );
+    const refs = Array.from({ length: draft.joins.length + 1 }, (_, p) => p)
+      .filter((p) => tableAt(p) !== "")
+      .map(refAt);
+    const missing = distinctRefs(refs).filter((r) => !cachedColumns(r));
     if (missing.length === 0) return;
     const token = ++loadToken;
     const results = await Promise.allSettled(missing.map(tableColumns));
@@ -94,6 +98,21 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     if (join && join.table !== "") join.on = [foreignKey(at + 1) ?? emptyPair()];
     changed(true);
   };
+
+  // The menu lists the scope's tables; one from another schema shows qualified and matches none of them.
+  const tableDropdown = (ariaLabel: string, t: Draft | DraftJoin, pos: number): HTMLElement =>
+    createDropdown({
+      ariaLabel,
+      options: tableOptions(),
+      value: t.schema === undefined ? t.table : "",
+      display: t.table ? (t.schema === undefined ? t.table : `${t.schema}.${t.table}`) : undefined,
+      placeholder: "choose a table",
+      mono: true,
+      searchable: true,
+      onPick: (v) => {
+        if (v !== t.table || t.schema !== undefined) pickTable(pos, v);
+      },
+    });
 
   const aliasInput = (value: string, label: string, set: (v: string) => void): HTMLInputElement => {
     const input = el("input", "j-alias");
@@ -194,18 +213,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
           changed(true);
         },
       }),
-      createDropdown({
-        ariaLabel: `join ${pos} table`,
-        options: tableOptions(),
-        value: join.table,
-        display: join.table || undefined,
-        placeholder: "choose a table",
-        mono: true,
-        searchable: true,
-        onPick: (v) => {
-          if (v !== join.table) pickTable(pos, v);
-        },
-      }),
+      tableDropdown(`join ${pos} table`, join, pos),
       el("span", "j-kw", "as"),
       aliasInput(join.alias, `join ${pos} alias`, (v) => {
         join.alias = v;
@@ -328,18 +336,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
     start.append(
-      createDropdown({
-        ariaLabel: "start table",
-        options: tableOptions(),
-        value: draft.table,
-        display: draft.table || undefined,
-        placeholder: "choose a table",
-        mono: true,
-        searchable: true,
-        onPick: (v) => {
-          if (v !== draft.table) pickTable(0, v);
-        },
-      }),
+      tableDropdown("start table", draft, 0),
       aliasInput(draft.alias, "start table alias", (v) => {
         draft.alias = v;
       }),

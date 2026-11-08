@@ -71,6 +71,7 @@ export type JoinExpect = "table" | "qualifier" | "column" | "keyword" | "none";
 export interface DeclaredTable {
   // What a colref names it by: the alias, or the table when unaliased.
   name: string;
+  schema?: string;
   table: string;
 }
 
@@ -155,8 +156,16 @@ export function joinCompletionAt(text: string): JoinCompletion {
       else if (upper === "SELECT") state = "select";
       else if (state !== "start") flush();
     } else if (t.kind === "name" && state === "table") {
-      table = unquote(w);
-      pending = { name: table, table };
+      const dot = before[k + 1];
+      const name = before[k + 2];
+      if (dot && text[dot.start] === "." && name?.kind === "name") {
+        table = unquote(text.slice(name.start, name.end));
+        pending = { name: table, schema: unquote(w), table };
+        k += 2;
+      } else {
+        table = unquote(w);
+        pending = { name: table, table };
+      }
       state = "after-table";
     } else if (t.kind === "name" && (state === "after-table" || state === "alias")) {
       if (pending) pending.name = unquote(w);

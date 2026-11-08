@@ -4,7 +4,7 @@ import {
   scopeIdentity,
   startTable,
   state,
-  tableInView,
+  tableNameInView,
   type ViewRequest,
   viewKey,
 } from "../core/state.js";
@@ -39,7 +39,7 @@ function clearViewNotice(): void {
 function renderNote(): void {
   $("view-notice-text").replaceChildren(
     ...(customText === null
-      ? buildFallbackNote(shownSwaps, tableInView(), placeLabel).map(render)
+      ? buildFallbackNote(shownSwaps, tableNameInView(), placeLabel).map(render)
       : [document.createTextNode(customText)]),
   );
 }

@@ -31,8 +31,10 @@ interface ColumnBase {
   collation?: string;
   comment?: string;
   // Join responses only (spec/protocol.md §5.11.4): `name` is a unique label;
-  // these locate the column. Never parse the label.
+  // these locate the column. Never parse the label. `schema` is present only
+  // when the table is outside the request's schema.
   join?: number;
+  schema?: string;
   table?: string;
   column?: string;
 }
@@ -182,6 +184,8 @@ export interface Swap {
 export type JoinType = "inner" | "left";
 
 export interface JoinTable {
+  // Present only when the text names one; absent means the scope's schema.
+  schema?: string;
   table: string;
   alias: string | null;
 }
@@ -223,8 +227,25 @@ export type View = TableView | JoinView;
 
 export interface WireJoin {
   table: string;
-  joins: { type: JoinType; table: string; on: JoinPair[] }[];
+  schema?: string;
+  joins: { type: JoinType; table: string; schema?: string; on: JoinPair[] }[];
   columns?: { join: number; column: string }[];
+}
+
+// Where a table lives. Built only by lib/table-ref.ts (and refInScope in
+// core/store.ts), so a function that takes one cannot be handed a bare name
+// that silently means "the current scope". A null name is the server's
+// default, sent only when the scope's lists failed to load.
+declare const schemaRefBrand: unique symbol;
+declare const tableRefBrand: unique symbol;
+export interface SchemaRef {
+  readonly source: string | null;
+  readonly schema: string | null;
+  readonly [schemaRefBrand]: true;
+}
+export interface TableRef extends SchemaRef {
+  readonly table: string;
+  readonly [tableRefBrand]: true;
 }
 
 // The source and schema every scoped request runs in. Per-scope memory (sort,

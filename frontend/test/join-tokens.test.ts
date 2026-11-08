@@ -87,3 +87,13 @@ test("a quoted alias is read back unquoted", () => {
   assert.equal(c.qualifier, "my o");
   assert.deepEqual(c.declared[0], { name: "my o", table: "orders" });
 });
+
+test("a schema-qualified table is declared with its schema, named by its table or alias", () => {
+  const c = joinCompletionAt('FROM warehouse.shipments s JOIN "public".orders ON s.order_id = orders.');
+  assert.equal(c.expect, "column");
+  assert.deepEqual(c.declared, [
+    { name: "s", schema: "warehouse", table: "shipments" },
+    { name: "orders", schema: "public", table: "orders" },
+  ]);
+  assert.equal(joinCompletionAt("FROM warehouse.shipments s J").expect, "keyword");
+});

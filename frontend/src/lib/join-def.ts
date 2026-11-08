@@ -29,9 +29,16 @@ export function tablesToExpand(def: JoinDef): number[] {
 
 // `columnsOf` must answer for every position in tablesToExpand(def).
 export function toWire(def: JoinDef, columnsOf: (join: number) => readonly string[]): WireJoin {
+  const schemaOf = (t: JoinTable): { schema?: string } => (t.schema === undefined ? {} : { schema: t.schema });
   const wire: WireJoin = {
     table: def.tables[0].table,
-    joins: def.joins.map((j, i) => ({ type: j.type, table: def.tables[i + 1].table, on: j.on })),
+    ...schemaOf(def.tables[0]),
+    joins: def.joins.map((j, i) => ({
+      type: j.type,
+      table: def.tables[i + 1].table,
+      ...schemaOf(def.tables[i + 1]),
+      on: j.on,
+    })),
   };
   if (def.columns !== null && !selectsEverything(def)) {
     wire.columns = def.columns.flatMap((c) =>
@@ -39,4 +46,15 @@ export function toWire(def: JoinDef, columnsOf: (join: number) => readonly strin
     );
   }
   return wire;
+}
+
+// The canonical definition for a scope: a schema the text names that is the
+// scope's own is dropped, so the same join prints, compares and keys the same
+// whether or not it was written qualified.
+export function dropScopeSchema(def: JoinDef, scopeSchema: string | null): JoinDef {
+  if (scopeSchema === null || def.tables.every((t) => t.schema !== scopeSchema)) return def;
+  return {
+    ...def,
+    tables: def.tables.map((t) => (t.schema === scopeSchema ? { table: t.table, alias: t.alias } : t)),
+  };
 }

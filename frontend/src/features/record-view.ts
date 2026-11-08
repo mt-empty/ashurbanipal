@@ -1,6 +1,6 @@
 import { $, copyText, el } from "../core/dom.js";
 import { qualifiedTable, state, tableInView, viewKey } from "../core/state.js";
-import type { Column, ConstraintFk, JoinDef, Row } from "../core/types.js";
+import type { Column, ConstraintFk, JoinDef, Row, TableRef } from "../core/types.js";
 import { compositeLabel, refTarget } from "../lib/column-key.js";
 import { eqClause } from "../lib/filter-dsl.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
@@ -61,7 +61,7 @@ function fieldValue(col: Column, raw: string, row: Row, { meta, act }: RecordCon
   btn.type = "button";
   btn.title = link.title;
   btn.appendChild(value);
-  btn.onclick = act(() => navigateWithSeededFilter(link.table, link.schema, link.clause));
+  btn.onclick = act(() => navigateWithSeededFilter(link.target, link.clause));
   dd.appendChild(btn);
   return dd;
 }
@@ -140,7 +140,7 @@ function recordAsJson(columns: Column[], row: Row): string {
   );
 }
 
-function recordAsInsert(table: string, columns: Column[], row: Row): string {
+function recordAsInsert(table: TableRef, columns: Column[], row: Row): string {
   // Identifiers left unquoted — no quote char is portable across all three engines.
   const target = qualifiedTable(table);
   const cols = columns.map((c) => c.name).join(", ");

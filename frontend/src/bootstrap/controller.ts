@@ -8,15 +8,20 @@ import {
   diffNewRows,
   dropOneStaleInput,
   dropStaleSort,
+  joinTableRef,
   markFilterVerified,
   markStoredSortVerified,
   markViewShown,
   pruneHiddenColumns,
+  refInScope,
+  scopeRef,
   setSort,
+  startRef,
   startTable,
   state,
   tableDataPath,
-  tableInView,
+  tableLabelOf,
+  tableNameInView,
   type ViewRequest,
   viewKey,
 } from "../core/state.js";
@@ -35,6 +40,7 @@ import { syncUrl } from "../features/view-history.js";
 import { syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
+import { distinctRefs } from "../lib/table-ref.js";
 import { isCurrentLoad, type LoadDataOpts, nextLoadToken } from "./reload.js";
 import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js";
 
@@ -78,7 +84,7 @@ function setSlow(slow: boolean, announce = true): void {
 // plain-language message instead of the server's implementation-defined title.
 function plainError(e: unknown, view: View): unknown {
   return e instanceof ApiError && e.code === "not_readable"
-    ? new Error(`you don't have access to ${startTable(view)}`)
+    ? new Error(`you don't have access to ${tableLabelOf(startRef(view))}`)
     : e;
 }
 
@@ -88,7 +94,7 @@ async function joinPath(def: JoinDef, params: URLSearchParams): Promise<string> 
   await Promise.all(
     tablesToExpand(def).map(async (position) => {
       // A table gone from the catalog is the join's problem, answered in its dialog like the server's invalid_join.
-      const columns = await tableColumns(def.tables[position].table).catch((e: unknown) => {
+      const columns = await tableColumns(joinTableRef(def, position)).catch((e: unknown) => {
         throw e instanceof ApiError && e.code === "unknown_table" ? new ApiError(e.message, "invalid_join") : e;
       });
       names.set(
@@ -146,7 +152,7 @@ async function fetchViewData(req: ViewRequest, auto: boolean): Promise<ViewData>
   // table A would clear table B's row-loading flag (whatever the view
   // had become by the time A's `finally` runs) instead of its own.
   const table = startTable(view);
-  const params = dataParams(req);
+  const params = dataParams(req, scopeRef());
   // In a join view the sort is `alias.column`; the wire wants the column and its table position.
   const target = view.kind === "join" && sort ? splitColumnKey(sort, view.def) : undefined;
   if (target) {
@@ -159,11 +165,11 @@ async function fetchViewData(req: ViewRequest, auto: boolean): Promise<ViewData>
     setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true, !auto), LOADING_DELAY_MS);
   }
-  setTableChipLoading(table, true);
+  if (table !== null) setTableChipLoading(table, true);
   try {
     return await api<ViewData>(await dataPath(view, params));
   } finally {
-    setTableChipLoading(table, false);
+    if (table !== null) setTableChipLoading(table, false);
     if (--inFlightFetches === 0) {
       clearTimeout(slowTimer);
       setSlow(false);
@@ -201,7 +207,7 @@ function failedLoadError(e: unknown, view: View, next: ViewRequest | undefined):
 // exactly as they were, matching the stale <table> body they describe.
 function updateViewChrome(): void {
   const title = viewTitle(state.view);
-  setActiveTable(tableInView());
+  setActiveTable(tableNameInView());
   $("current").textContent = title ?? "—";
   document.title = title ? `${title} — Ashurbanipal` : "Ashurbanipal";
 }
@@ -245,8 +251,11 @@ async function runLoad({
   const widthScope = widthScopeOf(view);
   // Asked beside the rows, so the first draw usually has it already. A join asks
   // after its rows: several lookups sent first would queue it behind them.
-  const metaTables = view.kind === "table" ? [view.table] : [...new Set(view.def.tables.map((t) => t.table))];
-  const tableMetaLoad = view.kind === "table" ? loadTableMeta(view.table) : null;
+  const metaTables =
+    view.kind === "table"
+      ? [refInScope(view.table)]
+      : distinctRefs(view.def.tables.map((_, i) => joinTableRef(view.def, i)));
+  const tableMetaLoad = view.kind === "table" ? loadTableMeta(metaTables[0]) : null;
   let data: ViewData;
   try {
     data = await fetchViewData(req, auto);
@@ -281,7 +290,7 @@ async function runLoad({
   markStoredSortVerified();
   markFilterVerified();
   markViewShown();
-  if (view.kind === "table") seedColumns(view.table, data.columns);
+  if (view.kind === "table") seedColumns(metaTables[0], data.columns);
   pruneHiddenColumns(data.columns.map((c) => c.name));
   updateViewChrome();
 
@@ -335,7 +344,7 @@ async function runLoad({
   });
   // Joins are never asked for ahead: one can run up to the query timeout.
   if (askNextPage && view.kind === "table" && !$<HTMLButtonElement>("next").disabled) {
-    prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);
+    prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }, scopeRef()), "view", NEXT_PAGE_TTL_MS);
   }
   noteLoadOk();
   // Sighted users see the tint; announce the count for everyone else. The

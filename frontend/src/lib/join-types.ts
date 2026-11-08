@@ -1,4 +1,4 @@
-import type { ClassedColumn, Column, ColumnClass } from "../core/types.js";
+import type { ClassedColumn, Column, ColumnClass, TableRef } from "../core/types.js";
 
 // ==== Join pair checks (spec/protocol.md §5.11.2) ====
 // The server reports each column's column class, so the form greys the pairs
@@ -81,23 +81,27 @@ export interface ForeignKeyPair {
   rightColumn: string;
 }
 
-// Every table of a join is in one schema, so only a same-schema reference
-// (no `references.schema`) can name another table of the join.
-function refersTo(c: Column, table: string): boolean {
-  return c.references?.table === table && c.references.schema === undefined;
+// Whether column `c` of table `from` references table `to`. A reference's
+// schema is relative to its own table, absent meaning the same one
+// (spec/protocol.md §5.4.1).
+function refersTo(c: Column, from: TableRef, to: TableRef): boolean {
+  const r = c.references;
+  return (
+    r !== undefined && r.table === to.table && (r.schema ?? from.schema) === to.schema && from.source === to.source
+  );
 }
 
 // A foreign key between `table` (with columns `own`) and one of the earlier
 // tables, in either direction, as an ON pair; the first match wins.
 export function findForeignKey(
-  earlier: readonly { table: string; columns: readonly Column[] }[],
-  table: string,
+  earlier: readonly { table: TableRef; columns: readonly Column[] }[],
+  table: TableRef,
   own: readonly Column[],
 ): ForeignKeyPair | null {
   for (const [at, e] of earlier.entries()) {
-    const out = e.columns.find((c) => refersTo(c, table));
+    const out = e.columns.find((c) => refersTo(c, e.table, table));
     if (out?.references) return { at, leftColumn: out.name, rightColumn: out.references.column };
-    const back = own.find((c) => refersTo(c, e.table));
+    const back = own.find((c) => refersTo(c, table, e.table));
     if (back?.references) return { at, leftColumn: back.references.column, rightColumn: back.name };
   }
   return null;

@@ -112,27 +112,73 @@ tableref    = [ ident , "." ] , ident , [ ws , [ "AS" , ws ] , alias ] ;
 
 ## 6. Frontend (story 41's builder)
 
-- **Table picker.** Lists the current schema's tables first, then other
-  schemas' tables grouped under their schema name. Needs a board on the
-  design canvas before building (see the "Ashurbanipal UI" canvas).
-- **Column catalog.** `join-catalog.ts` `tableColumns(table)` fetches
-  `/tables/data?limit=1` in the current scope only. It must take a schema,
-  and its cache key must include it. The same goes for the index cache in
-  that file (`indexesRead`, keyed by `scopeIdentity(table)`), which composite
-  FK links read.
-- **FK links in the grid.** `fkLink`
-  (`frontend/src/features/column-parts.ts`) passes `references.schema`
-  through as is, so an absent one means the scope. In a join view it must
-  resolve as §2 says, falling back to the column's own `schema`. Otherwise
-  the example in §3 opens `warehouse.users`.
-- **FK suggestions.** `findForeignKey` (`frontend/src/lib/join-types.ts`)
-  matches by `references.table` alone and ignores `references.schema`.
-  - Today that can suggest a wrong `ON` pair: a cross-schema FK can match
-    a same-named table in the current schema.
-  - Fix it first, as its own small change: match on schema and table.
-  - Then offer cross-schema FK targets as join suggestions.
-- **Bands and record dialog.** A band's label stays the effective name. Its
-  tooltip shows `schema.table` when the schema differs from the scope.
+- **Table picker** (canvas board BE, chosen 2026-11-08). Each table row,
+  the start table included, gets a schema dropdown in front of its table
+  dropdown.
+  - The schema dropdown starts on the scope's schema, so a join within one
+    schema needs no extra input.
+  - The table dropdown lists only the chosen schema's tables. Those come
+    from §5.2 with `schema`, fetched the first time that schema is picked.
+  - The schema dropdown is hidden when §5.7 lists only one schema (SQLite
+    always does).
+- **Table references** (design agreed 2026-11-08). A table is always named
+  with its schema and source, so the type system rules out keying or
+  requesting a table under the wrong scope by omission.
+  - Types in `core/types.ts`: `SchemaRef = {source, schema}` and
+    `TableRef = SchemaRef & {table}`, both branded. A `TableRef` is accepted
+    wherever a `SchemaRef` is. Fields are `string | null`: null means "the
+    server's default", which only happens when the schema list failed to
+    load.
+  - Pure builders in `lib/table-ref.ts`, with unit tests: `tableIn(schemaRef,
+    name)`; `near(ownerRef, schema?, table)` for every wire name that is
+    relative to something already held (an FK target to its column's table,
+    a join column to the request's schema, a referrer to the viewed table);
+    `refKey(ref)`, using the `visitKey` encoding. A ref never goes into a
+    template string (it would print `[object Object]`), only through
+    `refKey`.
+  - `refInScope(table)` in `core/store.ts` is the one builder that reads the
+    current scope. It is used only at the edges: URL, storage, history and
+    table chips.
+  - Every function that fetches, caches or links a table takes a
+    `TableRef`, and a table request can only be built from one
+    (`tableParams(ref)`). Module caches are keyed by `refKey(ref)` in place
+    of the `scopeIdentity(table)` keys. `scopeIdentity()` keeps no table
+    argument: it stays as the scope-level "same view?" check, which also
+    runs while the scope loads. `applyScopeParams` and the implicit
+    `scopeQuery()` go; request builders take the scope as an argument.
+  - A view's start table as a ref is `startRef(view)`. `startTable(view)`,
+    the name scope-keyed uses take (storage, the URL's `table=`, chips), is
+    null for a join that starts in another schema. Closing a refused join
+    that starts elsewhere switches to that schema when §5.7 lists it, as FK
+    navigation does, and otherwise opens the scope's first table.
+  - The join dialog drops a qualifier naming the scope's own schema before
+    it saves or shows a join, and the view does the same once a schema
+    restored from a link is confirmed. SQL mode checks `schema.table`
+    against §5.7's list.
+  - Bare names remain only at scope-relative edges: `tableRequest(name)`,
+    `tableNameInView()`, `knownScopeKey(table)`, `listedTableNames()` and
+    `startTable(view)`.
+  - Exceptions: the boot prefetch (before the scope is known) and sibling
+    links (they copy the page's own query).
+  - Call sites: about 80 in 18 files, including the join's start table check
+    (`table-chips.ts`), `tableMeta`, `joinPath`, `navigateWithSeededFilter`
+    and the parser's `JoinCatalog`, which gains a schema dimension.
+- **Column catalog.** `join-catalog.ts` `tableColumns` and the index cache
+  (`indexesRead`, read by composite FK links) take a `TableRef`.
+- **FK links in the grid.** `fkLink` (`features/column-parts.ts`) resolves
+  its target with `near(owner, references.schema, references.table)`, where
+  `owner` is the column's own table. `ColumnBase` gains the optional `schema`
+  the join response sends (§3). Without it, the example in §3 opens
+  `warehouse.users`.
+- **FK suggestions.** `findForeignKey` (`lib/join-types.ts`) already skips
+  any reference that carries a schema (#247), so it can't suggest a wrong
+  pair. Cross-schema targets become suggestions by comparing resolved
+  `TableRef`s.
+- **Bands and record dialog** (board BG, band choice b, chosen 2026-11-08).
+  A band's label is the effective name. When its table's schema differs from
+  the scope, the band also shows the qualified name, muted:
+  `o · public.orders`. In-schema joins look as they do today. The record
+  view and the columns menu headings follow the same rule.
 - **Saved joins.** Still stored under the scope (source and schema) the user
   saved them from. A cross-schema join shows only in that scope's chips.
 - **URL.** The `join` param holds the canonical text, now with qualifiers

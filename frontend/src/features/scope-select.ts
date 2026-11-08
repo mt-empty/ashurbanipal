@@ -72,7 +72,7 @@ export async function loadSchemas(): Promise<boolean> {
     // /schemas is mandatory (spec/protocol.md §5.7); on failure degrade to
     // single-schema but leave a trace.
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
-    settleSchema(null, false, false);
+    settleSchema(null, [], false);
     $("schema-select-wrap").hidden = true;
     markTiming("scope-settled");
     return true;
@@ -81,7 +81,7 @@ export async function loadSchemas(): Promise<boolean> {
   const wanted = state.scope.schema;
   // The server's default can be null (no default schema on that connection).
   const schema = wanted !== null && schemas.includes(wanted) ? wanted : (defaultSchema ?? schemas[0] ?? null);
-  settleSchema(schema, schemas.length > 1, defaultSchema === null);
+  settleSchema(schema, schemas, defaultSchema === null);
   if (schema !== null) populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
   // Re-hidden explicitly: a source switch can land on a source with fewer
   // schemas than the last one, whose selector would otherwise stay up.

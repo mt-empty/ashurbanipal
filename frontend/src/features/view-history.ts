@@ -6,21 +6,22 @@ import {
   enterTable,
   persist,
   setSchema,
+  startsInScope,
   startTable,
   state,
   tableRequest,
   type ViewRequest,
   viewParams,
 } from "../core/state.js";
-import type { FilterCondition } from "../core/types.js";
+import type { FilterCondition, TableRef } from "../core/types.js";
 import { parseFilterDsl } from "../lib/filter-dsl.js";
 import { loadSchemas } from "./scope-select.js";
 import { chipsListScopeInView, listedTableNames, loadTables } from "./table-chips.js";
 
-// FK-cell nav and the referenced-by drill-in: `table` filtered by `clause`,
+// FK-cell nav and the referenced-by drill-in: `target` filtered by `clause`,
 // with no sort (a stale stored one would defeat loadData's drop-and-retry
-// against the filter). `schema` is set only for a cross-schema target.
-export function navigateWithSeededFilter(table: string, schema: string | undefined, clause: string): void {
+// against the filter). A target in another schema switches to it first.
+export function navigateWithSeededFilter(target: TableRef, clause: string): void {
   let ast: FilterCondition[];
   try {
     ast = parseFilterDsl(clause);
@@ -28,6 +29,16 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
     reportError(e);
     return;
   }
+  openTable(target, clause, ast);
+}
+
+// `target` with no filter: a join's start table once the join is dropped.
+export function openTableUnfiltered(target: TableRef): void {
+  openTable(target, "", []);
+}
+
+function openTable(target: TableRef, clause: string, ast: FilterCondition[]): void {
+  const { table, schema } = target;
   const req: ViewRequest = {
     ...tableRequest(table),
     sort: null,
@@ -36,7 +47,7 @@ export function navigateWithSeededFilter(table: string, schema: string | undefin
     filter: clause,
     ast,
   };
-  if (!schema || schema === state.scope.schema) {
+  if (schema === null || schema === state.scope.schema) {
     loadData({ next: req });
     return;
   }
@@ -114,7 +125,9 @@ window.addEventListener("popstate", () => {
   if (state.scope.source === previousSource) {
     // The same scope's table list is the one on screen; only the rows are asked for.
     // An earlier step's list may still be on its way, leaving the chips of another scope.
-    const listed = chipsListScopeInView() && listedTableNames().includes(startTable(state.view) ?? "");
+    const listed =
+      chipsListScopeInView() &&
+      (!startsInScope(state.view) || listedTableNames().includes(startTable(state.view) ?? ""));
     if (state.scope.schema === previousSchema && listed) {
       loadData({ replaceHistory: true, reason: "history" });
       return;

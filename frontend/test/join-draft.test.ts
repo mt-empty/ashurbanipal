@@ -149,3 +149,29 @@ test("a new join table resets its own pairs and the later pairs that named its c
   ]);
   assert.deepEqual(draft.columns, [["id"], null, ["is_gift"]]);
 });
+
+test("a table's own schema survives the draft round trip and a table change", () => {
+  const text = "SELECT *\nFROM warehouse.shipments s\nINNER JOIN orders o ON s.order_id = o.id";
+  const draft = defToDraft(parse(text));
+  assert.equal(draft.schema, "warehouse");
+  assert.equal(draft.joins[0].schema, undefined);
+  const back = draftToDef(draft);
+  assert.ok("def" in back);
+  assert.equal(printJoin(back.def), text);
+  setTableAt(draft, 1, "orders", "public");
+  setTableAt(draft, 0, "shipments");
+  const moved = draftToDef({
+    ...draft,
+    joins: [{ ...draft.joins[0], on: [{ leftJoin: 0, leftColumn: "order_id", rightColumn: "id" }] }],
+  });
+  assert.ok("def" in moved);
+  assert.equal(printJoin(moved.def), "SELECT *\nFROM shipments s\nINNER JOIN public.orders o ON s.order_id = o.id");
+});
+
+test("two same-named tables from two schemas need an alias, and the message names both", () => {
+  const draft = defToDraft(parse("FROM warehouse.users w JOIN public.users ON w.id = users.id"));
+  draft.alias = "";
+  const result = draftToDef(draft);
+  assert.ok("error" in result);
+  assert.match(result.error, /warehouse\.users and public\.users/);
+});

@@ -1,13 +1,28 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, el } from "../core/dom.js";
-import { clearJoin, joinInView, joinRequest, persist, startTable, state, viewIsShown } from "../core/state.js";
+import {
+  applyStoredSort,
+  clearJoin,
+  enterTable,
+  joinInView,
+  joinRequest,
+  persist,
+  startRef,
+  startsInScope,
+  state,
+  tableNameInView,
+  viewIsShown,
+} from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
+import { dropScopeSchema } from "../lib/join-def.js";
 import { type Draft, defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
 import { printJoin } from "../lib/join-dsl.js";
 import { tokenizeJoinText } from "../lib/join-tokens.js";
 import { mountJoinForm } from "./join-form.js";
 import { deleteSavedJoin, renderSavedChips, savedJoinFor, saveJoin } from "./join-saved.js";
 import { draftText, mountJoinSql } from "./join-sql.js";
+import { listedTableNames } from "./table-chips.js";
+import { openTableUnfiltered } from "./view-history.js";
 
 // The join overlay: one JoinDef edited in a form (the SQL text mode builds on
 // the same dialog). Show result applies it and closes; the server's answer to a
@@ -17,6 +32,12 @@ const formTab = $<HTMLButtonElement>("join-mode-form");
 const sqlTab = $<HTMLButtonElement>("join-mode-sql");
 const runBtn = $<HTMLButtonElement>("join-run");
 let mode: "form" | "sql" = "form";
+
+// A new join starts from the table in view, in its own schema.
+function startDraft(): Draft {
+  const start = startRef(state.view);
+  return newDraft(start?.table ?? "", startsInScope(state.view) ? undefined : (start?.schema ?? undefined));
+}
 // The form as it was when SQL took over. A half-finished form prints as text
 // that does not parse; until that text is edited, Form goes back to this draft.
 let handoff: { text: string; draft: Draft } | null = null;
@@ -89,7 +110,7 @@ export function openJoinDialog(
   editingSaved = saved?.name;
   $<HTMLInputElement>("join-name").value = saved?.name ?? "";
   $("join-delete").hidden = saved === undefined;
-  form.setDraft(def ? defToDraft(def) : newDraft(startTable(state.view) ?? ""));
+  form.setDraft(def ? defToDraft(def) : startDraft());
   handoff = null;
   setMode("form");
   $("join-sql-error").textContent = "";
@@ -123,9 +144,11 @@ runBtn.onclick = () => {
     $("join-error").textContent = typeof result.error === "string" ? result.error : problem();
     return;
   }
+  // Saved and shown in the same canonical form, so the saved chip matches the view.
+  const def = dropScopeSchema(result.def, state.scope.schema);
   const name = $<HTMLInputElement>("join-name").value.trim();
   if (name !== "") {
-    const failure = saveJoin(name, printJoin(result.def), editingSaved);
+    const failure = saveJoin(name, printJoin(def), editingSaved);
     if (failure) {
       $("join-error").textContent = failure;
       return;
@@ -133,7 +156,7 @@ runBtn.onclick = () => {
   }
   committed = true;
   dialog.close();
-  applyJoin(result.def);
+  applyJoin(def);
 };
 // Set by Show result, whose join is already loading when the close event arrives.
 let committed = false;
@@ -142,6 +165,18 @@ let committed = false;
 dialog.addEventListener("close", () => {
   if (committed) committed = false;
   else if (joinInView() && !viewIsShown()) {
+    const start = startRef(state.view);
+    if (start && !startsInScope(state.view)) {
+      // The server may have refused the join for its schema; only a listed one is switched to.
+      if (start.schema !== null && state.schemas.includes(start.schema)) openTableUnfiltered(start);
+      else {
+        enterTable(listedTableNames()[0] ?? null);
+        applyStoredSort(tableNameInView());
+        persist();
+        loadData({ replaceHistory: true });
+      }
+      return;
+    }
     clearJoin();
     persist();
     loadData({ replaceHistory: true });
@@ -159,7 +194,7 @@ formTab.onclick = () => {
   else {
     const parsed = sql.text().trim() ? sql.parse() : null;
     if (parsed && "error" in parsed) return;
-    form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(startTable(state.view) ?? ""));
+    form.setDraft(parsed ? defToDraft(parsed.def) : startDraft());
   }
   setMode("form");
   refresh();

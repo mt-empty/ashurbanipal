@@ -30,13 +30,14 @@ select      = "SELECT" , ws , columns ;
 columns     = "*" | selitem , { ows , "," , ows , selitem } ;
 selitem     = name , "." , ( ident | "*" ) ;
 from        = "FROM" , ws , tableref ;
-tableref    = ident , [ ws , [ "AS" , ws ] , alias ] ;
+tableref    = [ schema , "." ] , ident , [ ws , [ "AS" , ws ] , alias ] ;
 joinclause  = [ ( "INNER" | "LEFT" , [ ws , "OUTER" ] ) , ws ] , "JOIN" , ws ,
               tableref , ws , "ON" , ws , pair , { ws , "AND" , ws , pair } ;
 pair        = colref , ows , "=" , ows , colref ;
 colref      = name , "." , ident ;
 name        = ident ;                               (* a table's alias, or its name when unaliased *)
 alias       = ident ;
+schema      = ident ;
 ident       = bare | quoted ;
 bare        = ( letter | "_" ) , { letter | digit | "_" } ;   (* ASCII only; not a keyword *)
 quoted      = '"' , { any-char-except-quote | '""' } , '"' ;   (* at least one char *)
@@ -57,6 +58,10 @@ Notes:
   `alias.*` means all columns of that table. `*` cannot be mixed with other
   items.
 - A trailing `;` is allowed once, at the very end.
+- **`schema.table`** names a table in another schema of the same source
+  (`spec/protocol.md` §5.11.1). It appears only after `FROM` and `JOIN`, so it
+  cannot be confused with `alias.column` in `ON` and `SELECT`. A name with
+  three parts is rejected.
 
 ## 3. Semantics
 
@@ -70,17 +75,21 @@ Notes:
   ```
 
   `tables[0]` is the start table, `joins[i]` joins `tables[i + 1]`. `alias`
-  is `null` when the text gave none. `columns` is `null` for all columns,
+  is `null` when the text gave none. A table gains `"schema"` only when the
+  text qualifies it (`{ "schema": "warehouse", "table": "shipments", "alias":
+  "s" }`); absent means the request's schema. `columns` is `null` for all columns,
   otherwise a list of `{ "join": n, "column": "x" }` and `{ "join": n,
   "all": true }` (for `alias.*`).
 - **Wire request.** The `JoinDef` maps to the `spec/protocol.md` §5.11 object
-  by merging `tables[i + 1]` into `joins[i]` as its `table`. `columns` is
+  by merging `tables[i + 1]` into `joins[i]` as its `table` (and its
+  `schema`, when present; `tables[0]`'s goes on the base object). `columns` is
   omitted when it is `null` or when it is exactly one `all` item per table
   in position order (the server's default order). Otherwise each `all` item
   is expanded in catalog column order.
 - **Effective name** of a table is its alias, or its table name when
-  unaliased. Effective names must all differ. A table that appears twice
-  therefore needs an alias on the second use. Once aliased, only the alias
+  unaliased, never `schema.table`. Effective names must all differ. A table
+  that appears twice therefore needs an alias on the second use, and so does
+  one of two same-named tables from two schemas. Once aliased, only the alias
   resolves: `orders o … orders.id` is an unknown alias.
 - **Pairs.** One side of each pair must be a column of the table being
   joined, the other a column of an earlier table, in either order in the
@@ -90,8 +99,12 @@ Notes:
   `spec/protocol.md` §5.11.1. The parser rejects a 5th table or a 4th pair
   rather than emit an object the server would refuse.
 - **Catalog.** The parser may be given the tables and columns the page
-  already holds. When given, an unknown table is always rejected, and an
-  unknown column is rejected for every table whose columns are known. An
+  already holds: the scope's schema for unqualified names, and a map from
+  schema name to its tables for qualified ones (the scope's own schema
+  included; a schema whose tables are not loaded maps to `null`). When
+  given, an unknown table is always rejected, an unknown schema is rejected
+  when the map is given, and an unknown column is rejected for every table
+  whose columns are known. An
   unknown name suggests the closest catalog name (Levenshtein distance ≤ 2,
   ties in catalog order). Without a catalog, names are not checked; the
   server answers 400. The parser makes no request.
@@ -111,10 +124,15 @@ Notes:
 
   Keywords upper-case, one clause per line, `INNER JOIN` or `LEFT JOIN`
   (never bare `JOIN`, never `OUTER`), no `AS`, no trailing `;`, the alias
-  omitted when `null`, pairs written earlier-table first, items of the
+  omitted when `null`, the schema written only when the definition holds
+  one, pairs written earlier-table first, items of the
   select list in order, `SELECT *` when `columns` is `null`. A name is
   quoted only when it is not a bare identifier or is a keyword or rejected
   word; `"` inside a quoted name is doubled.
+
+  The page drops a schema that equals the scope's own before it shows,
+  stores or compares a join, so a join within one schema prints exactly as
+  it did before qualified names existed.
 
 ## 4. Error behavior
 
@@ -135,7 +153,7 @@ the `code` and position are what the fixtures pin.
 | `bad-pair` | a pair that does not have exactly one side on the table being joined and one on an earlier table, or a column with no alias |
 | `duplicate-name` | two tables with the same effective name |
 | `unknown-alias` | a colref whose first part is not a table's effective name |
-| `unknown-table`, `unknown-column` | catalog check |
+| `unknown-schema`, `unknown-table`, `unknown-column` | catalog check |
 | `too-many-tables`, `too-many-pairs` | limits in §3 |
 | `bad-select` | `*` mixed with items, or the same column selected twice (including `alias.*` with `alias.col`) |
 | `bad-identifier` | an unterminated or empty quoted name, or a character that cannot start a token |
@@ -153,7 +171,10 @@ have, the byte bound, a timeout) arrive as HTTP 400 or 500 per
 Machine-readable fixtures (`spec/fixtures/join-parser-tests.json`) are
 generated from this table, which remains the human-readable source of truth.
 Cases run against the fixture's `catalog` (`orders`, `users`, `order_extra`,
-`events`, from the seed schema) unless marked *(no catalog)*.
+`events`, from the seed schema) and its `schemas` (`public`, with the same
+tables; `warehouse`, with `shipments` and `users` known and `carriers`
+named only; `other_schema`, with no tables loaded) unless marked
+*(no catalog)*.
 `✓` = parses to the stated `JoinDef`; `✗` = rejected with the stated code.
 
 ### Valid
@@ -178,6 +199,12 @@ Cases run against the fixture's `catalog` (`orders`, `users`, `order_extra`,
 | V16 | `From orders Left Join users On orders.user_id = users.id` | mixed case keywords |
 | V17 | `FROM orders JOIN users ON orders.user_id = users.id JOIN events ON events.user_id = users.id` | second join's pair names an earlier table |
 | V18 | `FROM "left" JOIN b ON "left".x = b.y` *(no catalog)* | keyword as quoted name |
+| V19 | `FROM warehouse.shipments s JOIN orders o ON s.order_id = o.id` | qualified start table, `schema` on it only |
+| V20 | `FROM users LEFT JOIN warehouse.users w ON users.id = w.id` | two same-named tables, the second aliased |
+| V21 | `FROM "warehouse"."shipments" JOIN public.orders ON shipments.order_id = orders.id` | quoted schema; the effective name is the bare table |
+| V22 | `FROM "my schema".t JOIN b ON t.x = b.y` *(no catalog)* | a schema name that needs quoting stays quoted in the canonical text |
+| V23 | `FROM other_schema.decoy_items d JOIN orders o ON d.ref = o.id` | a schema whose tables are not loaded: table and columns not checked |
+| V24 | `SELECT s.tracking_number, o.* FROM warehouse.shipments s JOIN warehouse.carriers c ON … JOIN orders o ON …` | three tables, two schemas, a column list |
 
 ### Rejected
 
@@ -223,6 +250,12 @@ Cases run against the fixture's `catalog` (`orders`, `users`, `order_extra`,
 | R38 | `FROM "" JOIN b ON "".x = b.y` | `bad-identifier` |
 | R39 | `FROM orders JOIN users` | `expected` |
 | R40 | `FROM orders JOIN users ON orders.user_id users.id` | `expected` |
+| R41 | `FROM users JOIN warehouse.users ON users.id = users.id` | `duplicate-name` |
+| R42 | `FROM orders JOIN warehose.shipments s ON …` | `unknown-schema`, suggests `warehouse` |
+| R43 | `FROM orders JOIN warehouse.shipment s ON …` | `unknown-table`, suggests `shipments` |
+| R44 | `FROM warehouse.shipments s JOIN orders o ON s.order_idd = o.id` | `unknown-column` against that schema's table, suggests `order_id` |
+| R45 | `FROM orders JOIN warehouse. ON …` | `expected` |
+| R46 | `FROM a.b.c JOIN d ON c.x = d.y` *(no catalog)* | `expected` (three-part name) |
 
 ### Adversarial (must parse *or* reject safely — a name is data, never SQL text)
 
@@ -235,8 +268,9 @@ Cases run against the fixture's `catalog` (`orders`, `users`, `order_extra`,
 | A5 | `FROM ｏｒｄｅｒｓ …` (fullwidth) | `bad-identifier`, not `[A-Za-z0-9_]` |
 | A6 | a NUL byte in a bare name | `bad-identifier` |
 | A7 | `FROM a JOIN b ON a.x = b.x JOIN c … JOIN d … JOIN e …` | `too-many-tables`, no recursion (the parser is iterative) |
+| A8 | `FROM "x; DROP SCHEMA public".t a JOIN b ON a.i = b.j` *(no catalog)* | parses; the schema name is data, which the server rejects as `invalid_join` |
 
-A4 is the reminder that this grammar is half the defense: the server
+A4 and A8 are the reminder that this grammar is half the defense: the server
 checks every table and column against the live catalog
 (`spec/protocol.md` §5.11.1 and §6), and no join text ever reaches SQL.
 
@@ -251,4 +285,4 @@ checks every table and column against the live catalog
   schema. Both parse without a catalog on load, so a restored join whose
   names no longer exist fails at the server (400), not in the parser.
 - Filter and sort in a join view use the existing controls.
-  `alias.column` filter names are specified in `spec/filter-dsl.md` §1.
+  `alias.column` filter names are specified in `spec/filter-dsl.md` §2 and §3.
