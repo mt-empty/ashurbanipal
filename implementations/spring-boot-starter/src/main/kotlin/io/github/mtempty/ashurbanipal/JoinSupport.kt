@@ -48,8 +48,6 @@ data class JoinSpec(
     val schema: String? = null,
 ) {
     fun tableRefs(): List<TableRef> = listOf(TableRef(schema, table)) + joins.map { TableRef(it.schema, it.table) }
-
-    fun namesOwnSchema(): Boolean = tableRefs().any { it.schema != null }
 }
 
 /**

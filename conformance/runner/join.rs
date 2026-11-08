@@ -469,13 +469,18 @@ fn shipments_orders(base_schema: Option<&str>, orders_schema: Option<&str>) -> V
     join
 }
 
-/// The `schema` of every column at `join`, as the response reports it.
-fn column_schemas(body: &Value, join: u64) -> Vec<Value> {
+/// The response's columns at position `join`.
+fn columns_at(body: &Value, join: u64) -> impl Iterator<Item = &Value> {
     body["columns"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|c| c["join"] == join)
+        .filter(move |c| c["join"] == join)
+}
+
+/// The `schema` of every column at `join`, as the response reports it.
+fn column_schemas(body: &Value, join: u64) -> Vec<Value> {
+    columns_at(body, join)
         .map(|c| c.get("schema").cloned().unwrap_or(Value::Null))
         .collect()
 }
@@ -509,11 +514,8 @@ async fn a_joined_table_may_name_its_own_schema() {
         column_schemas(&body, 1).iter().all(|s| *s == json!(home)),
         "orders columns carry schema {home:?}: {body:#?}"
     );
-    let user_id = body["columns"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|c| c["join"] == 1 && c["column"] == "user_id")
+    let user_id = columns_at(&body, 1)
+        .find(|c| c["column"] == "user_id")
         .unwrap();
     assert_exact(
         user_id["references"]["table"].clone(),
@@ -569,17 +571,9 @@ async fn same_named_tables_from_two_schemas_join_as_two_tables() {
         ]
     });
     let body = ok_body(&srv, &join, &[("limit", "5".into())]).await;
-    let columns = |join: u64| -> Vec<String> {
-        body["columns"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|c| c["join"] == join)
-            .map(|c| c["column"].as_str().unwrap().to_string())
-            .collect()
-    };
-    assert!(columns(1).contains(&"email".to_string()), "{body:#?}");
-    assert!(columns(2).contains(&"username".to_string()), "{body:#?}");
+    let has = |join: u64, column: &str| columns_at(&body, join).any(|c| c["column"] == column);
+    assert!(has(1, "email"), "{body:#?}");
+    assert!(has(2, "username"), "{body:#?}");
     assert!(
         column_schemas(&body, 1).iter().all(Value::is_null),
         "{home}.users columns carry no schema: {body:#?}"
@@ -622,29 +616,13 @@ async fn unknown_or_malformed_own_schemas_are_rejected() {
         " warehouse",
         "",
     ];
-    for name in hostile {
-        let mut base = orders_users("left");
-        base["schema"] = json!(name);
-        let resp = get_join(&srv, &base, &[]).await;
-        assert_problem_code(resp, 400, "invalid_join", &format!("base schema {name:?}")).await;
-
-        let mut joined = orders_users("left");
-        joined["joins"][0]["schema"] = json!(name);
-        let resp = get_join(&srv, &joined, &[]).await;
-        assert_problem_code(
-            resp,
-            400,
-            "invalid_join",
-            &format!("joined schema {name:?}"),
-        )
-        .await;
-    }
-    for value in [
+    let wrong_types = [
         json!(null),
         json!(1),
         json!(["warehouse"]),
         json!({"name": "warehouse"}),
-    ] {
+    ];
+    for value in hostile.into_iter().map(|n| json!(n)).chain(wrong_types) {
         let mut base = orders_users("left");
         base["schema"] = value.clone();
         let resp = get_join(&srv, &base, &[]).await;

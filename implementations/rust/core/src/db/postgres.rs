@@ -171,6 +171,18 @@ impl PgPoolSource {
         requested: Option<&str>,
     ) -> Result<String, DbError> {
         let schemas = self.list_schemas_in_tx(tx).await?;
+        self.resolve_schema_among_in_tx(tx, &schemas, requested)
+            .await
+    }
+
+    /// [`Self::resolve_schema_in_tx`] against a schema list already fetched
+    /// in this transaction.
+    async fn resolve_schema_among_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        schemas: &[String],
+        requested: Option<&str>,
+    ) -> Result<String, DbError> {
         let resolved = match requested {
             Some(name) => name.to_string(),
             None => self
@@ -178,9 +190,13 @@ impl PgPoolSource {
                 .await?
                 .ok_or_else(no_default_schema)?,
         };
-        schemas.into_iter().find(|s| s == &resolved).ok_or_else(|| {
-            DbError::not_allowed(NotAllowedKind::Schema, format!("schema {resolved:?}"))
-        })
+        schemas
+            .iter()
+            .find(|s| **s == resolved)
+            .cloned()
+            .ok_or_else(|| {
+                DbError::not_allowed(NotAllowedKind::Schema, format!("schema {resolved:?}"))
+            })
     }
 
     /// Resolves `table` to its OID iff it's a readable base table in
@@ -784,13 +800,11 @@ impl DbSource for PgPoolSource {
         opts: JoinOpts,
     ) -> Result<JoinData, DbError> {
         let mut tx = self.bounded_tx(opts.timeout_secs).await?;
-        let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
+        let listed = self.list_schemas_in_tx(&mut tx).await?;
+        let schema = self
+            .resolve_schema_among_in_tx(&mut tx, &listed, schema)
+            .await?;
         let refs = spec.table_refs();
-        let listed = if refs.iter().any(|(own, _)| own.is_some()) {
-            self.list_schemas_in_tx(&mut tx).await?
-        } else {
-            Vec::new()
-        };
         let schemas = join::table_schemas(&refs, &schema, &listed)?;
         let mut metas: HashMap<(&str, &str), TableMeta> = HashMap::new();
         let mut tables = Vec::with_capacity(refs.len());

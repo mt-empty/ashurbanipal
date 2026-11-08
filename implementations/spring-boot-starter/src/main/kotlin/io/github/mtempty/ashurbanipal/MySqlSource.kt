@@ -167,8 +167,11 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         ) { rs -> rs.getString(1) }.first()
 
     /** Reads MySQL's default database (`spec/protocol.md` §5). */
-    private fun resolveSchema(variant: Variant, requested: String?): String {
-        val schemas = listAllowedSchemas(variant)
+    private fun resolveSchema(variant: Variant, requested: String?): String =
+        resolveSchemaAmong(variant, listAllowedSchemas(variant), requested)
+
+    /** [resolveSchema] against a schema list already fetched in this transaction. */
+    private fun resolveSchemaAmong(variant: Variant, schemas: List<String>, requested: String?): String {
         val resolved = requested
             ?: defaultSchema(variant)
             ?: throw NotAllowedException("no schema requested and this connection has no default database", NotAllowedKind.SCHEMA)
@@ -346,15 +349,15 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
 
     override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
         val variant = variant()
-        val realSchema = resolveSchema(variant, schema)
+        val listed = listAllowedSchemas(variant)
+        val realSchema = resolveSchemaAmong(variant, listed, schema)
         val refs = spec.tableRefs()
-        val schemas = tableSchemas(refs, realSchema, if (spec.namesOwnSchema()) listAllowedSchemas(variant) else emptyList())
-        val allowed = HashMap<String, Collection<String>>()
+        val schemas = tableSchemas(refs, realSchema, listed)
+        val allowed = schemas.distinct().associateWith { allowedTables(variant, it) }
         val metas = HashMap<Pair<String, String>, TableMeta>()
         val tables = refs.mapIndexed { i, ref ->
             metas.getOrPut(schemas[i] to ref.table) {
-                val listing = allowed.getOrPut(schemas[i]) { allowedTables(variant, schemas[i]) }
-                if (ref.table !in listing) throw BadJoinException("unknown table \"${ref.table}\"")
+                if (ref.table !in allowed.getValue(schemas[i])) throw BadJoinException("unknown table \"${ref.table}\"")
                 tableMeta(variant, schemas[i], ref.table)
             }
         }

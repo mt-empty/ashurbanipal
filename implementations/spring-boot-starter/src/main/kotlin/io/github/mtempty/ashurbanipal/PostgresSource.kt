@@ -67,8 +67,10 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         jdbcTemplate.queryForObject("select current_schema()", String::class.java)
 
     /** Resolve inside the operation transaction to prevent pool-session drift (`spec/protocol.md` §5). */
-    private fun resolveSchema(requested: String?): String {
-        val schemas = listAllowedSchemas()
+    private fun resolveSchema(requested: String?): String = resolveSchemaAmong(listAllowedSchemas(), requested)
+
+    /** [resolveSchema] against a schema list already fetched in this transaction. */
+    private fun resolveSchemaAmong(schemas: List<String>, requested: String?): String {
         val resolved = requested
             ?: defaultSchema()
             ?: throw NotAllowedException("no schema requested and this connection has no default schema", NotAllowedKind.SCHEMA)
@@ -283,9 +285,10 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
     }
 
     override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
-        val realSchema = resolveSchema(schema)
+        val listed = listAllowedSchemas()
+        val realSchema = resolveSchemaAmong(listed, schema)
         val refs = spec.tableRefs()
-        val schemas = tableSchemas(refs, realSchema, if (spec.namesOwnSchema()) listAllowedSchemas() else emptyList())
+        val schemas = tableSchemas(refs, realSchema, listed)
         val metas = HashMap<Pair<String, String>, TableMeta>()
         val tables = refs.mapIndexed { i, ref ->
             metas.getOrPut(schemas[i] to ref.table) {

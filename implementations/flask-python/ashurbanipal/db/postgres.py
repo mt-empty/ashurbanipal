@@ -160,7 +160,10 @@ class PgSource(DbSource):
         return cur.fetchone()[0]
 
     def _resolve_schema(self, cur: psycopg.Cursor, requested: str | None) -> str:
-        schemas = self._list_schemas(cur)
+        return self._resolve_schema_among(cur, self._list_schemas(cur), requested)
+
+    def _resolve_schema_among(self, cur: psycopg.Cursor, schemas: list[str], requested: str | None) -> str:
+        """`_resolve_schema` against a schema list already fetched in this transaction."""
         if requested is not None:
             resolved = requested
         else:
@@ -414,19 +417,20 @@ class PgSource(DbSource):
             conn.adapters.register_loader("text", _LenientTextLoader)
             with conn.cursor() as cur:
                 cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
-                resolved_schema = self._resolve_schema(cur, schema)
+                listed = self._list_schemas(cur)
+                resolved_schema = self._resolve_schema_among(cur, listed, schema)
                 refs = spec.table_refs()
-                listed = self._list_schemas(cur) if spec.names_own_schema() else []
                 schemas = table_schemas(refs, resolved_schema, listed)
                 metas: dict[tuple[str, str], TableMeta] = {}
-                for in_schema, (_, name) in zip(schemas, refs, strict=True):
-                    if (in_schema, name) not in metas:
+                tables = []
+                for key in zip(schemas, (name for _, name in refs), strict=True):
+                    if key not in metas:
                         try:
-                            oid = self._readable_table_oid(cur, in_schema, name)
-                            metas[(in_schema, name)] = self._table_meta(cur, in_schema, name, oid)
+                            oid = self._readable_table_oid(cur, *key)
+                            metas[key] = self._table_meta(cur, *key, oid)
                         except NotAllowed as e:
-                            raise unknown_join_table(e, name) from None
-                tables = [metas[(s, n)] for s, (_, n) in zip(schemas, refs, strict=True)]
+                            raise unknown_join_table(e, key[1]) from None
+                    tables.append(metas[key])
                 plan = plan_join(spec, tables, opts)
 
                 # The statement is built from catalog names and generated

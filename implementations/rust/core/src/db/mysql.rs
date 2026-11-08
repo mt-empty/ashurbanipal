@@ -224,6 +224,20 @@ impl MySqlSource {
         timeout_secs: u32,
     ) -> Result<String, DbError> {
         let schemas = self.list_schemas_in_tx(tx, variant, timeout_secs).await?;
+        self.resolve_schema_among_in_tx(tx, variant, &schemas, requested, timeout_secs)
+            .await
+    }
+
+    /// [`Self::resolve_schema_in_tx`] against a schema list already fetched
+    /// in this transaction.
+    async fn resolve_schema_among_in_tx(
+        &self,
+        tx: &mut Transaction<'_, MySql>,
+        variant: Variant,
+        schemas: &[String],
+        requested: Option<&str>,
+        timeout_secs: u32,
+    ) -> Result<String, DbError> {
         let resolved = match requested {
             Some(name) => name.to_string(),
             None => self
@@ -231,9 +245,13 @@ impl MySqlSource {
                 .await?
                 .ok_or_else(no_default_schema)?,
         };
-        schemas.into_iter().find(|s| s == &resolved).ok_or_else(|| {
-            DbError::not_allowed(NotAllowedKind::Schema, format!("schema {resolved:?}"))
-        })
+        schemas
+            .iter()
+            .find(|s| **s == resolved)
+            .cloned()
+            .ok_or_else(|| {
+                DbError::not_allowed(NotAllowedKind::Schema, format!("schema {resolved:?}"))
+            })
     }
 
     async fn allowed_tables_in_tx(
@@ -679,31 +697,28 @@ impl DbSource for MySqlSource {
         let variant = self.variant().await?;
         let mut tx = self.pinned_tx().await?;
         let timeout = opts.timeout_secs;
+        let listed = self.list_schemas_in_tx(&mut tx, variant, timeout).await?;
         let schema = self
-            .resolve_schema_in_tx(&mut tx, variant, schema, timeout)
+            .resolve_schema_among_in_tx(&mut tx, variant, &listed, schema, timeout)
             .await?;
         let refs = spec.table_refs();
-        let listed = if refs.iter().any(|(own, _)| own.is_some()) {
-            self.list_schemas_in_tx(&mut tx, variant, timeout).await?
-        } else {
-            Vec::new()
-        };
         let schemas = join::table_schemas(&refs, &schema, &listed)?;
         let mut allowed: HashMap<&str, Vec<String>> = HashMap::new();
+        for in_schema in &schemas {
+            if let Entry::Vacant(e) = allowed.entry(in_schema) {
+                e.insert(
+                    self.allowed_tables_in_tx(&mut tx, variant, in_schema, timeout)
+                        .await?,
+                );
+            }
+        }
         let mut metas: HashMap<(&str, &str), TableMeta> = HashMap::new();
         let mut tables = Vec::with_capacity(refs.len());
         for (in_schema, &(_, name)) in schemas.iter().zip(&refs) {
             let meta = match metas.entry((in_schema.as_str(), name)) {
                 Entry::Occupied(e) => e.into_mut(),
                 Entry::Vacant(e) => {
-                    let listing = match allowed.entry(in_schema.as_str()) {
-                        Entry::Occupied(l) => l.into_mut(),
-                        Entry::Vacant(l) => l.insert(
-                            self.allowed_tables_in_tx(&mut tx, variant, in_schema, timeout)
-                                .await?,
-                        ),
-                    };
-                    if !listing.iter().any(|t| t == name) {
+                    if !allowed[in_schema.as_str()].iter().any(|t| t == name) {
                         return Err(DbError::BadJoin(format!("unknown table {name:?}")));
                     }
                     e.insert(

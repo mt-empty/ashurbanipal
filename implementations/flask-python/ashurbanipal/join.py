@@ -53,9 +53,6 @@ class JoinSpec:
         """`(own schema, table)` by position."""
         return [(self.schema, self.table), *((j.schema, j.table) for j in self.joins)]
 
-    def names_own_schema(self) -> bool:
-        return any(own is not None for own, _ in self.table_refs())
-
 
 def table_schemas(refs: list[tuple[str | None, str]], request: str, listed: list[str]) -> list[str]:
     """Each position's schema: its own, which must be in `listed` (§5.7), or

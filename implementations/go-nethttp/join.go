@@ -97,15 +97,6 @@ func (s JoinSpec) TableRefs() []TableRef {
 	return refs
 }
 
-func (s JoinSpec) namesOwnSchema() bool {
-	for _, r := range s.TableRefs() {
-		if r.Schema != nil {
-			return true
-		}
-	}
-	return false
-}
-
 // tableSchemas resolves each position's schema: its own, which must be in
 // listed (§5.7), or else request. An unlisted one is invalid_join, never
 // unknown_schema, which belongs to the schema parameter.

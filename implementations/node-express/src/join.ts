@@ -71,10 +71,6 @@ export function joinTableRefs(spec: JoinSpec): TableRef[] {
   return [{ schema: spec.schema, table: spec.table }, ...spec.joins.map((j) => ({ schema: j.schema, table: j.table }))];
 }
 
-export function namesOwnSchema(spec: JoinSpec): boolean {
-  return joinTableRefs(spec).some((r) => r.schema !== undefined);
-}
-
 /**
  * Each position's schema: its own, which must be in `listed` (§5.7), or else
  * `request`. An unlisted one is invalid_join, never unknown_schema, which
@@ -163,9 +159,7 @@ export function parseJoin(raw: string): JoinSpec {
       }
       return { left, right: rawPair.right };
     });
-    const entry: JoinEntry = { left: rawEntry.type === "left", table: rawEntry.table, on };
-    if (entrySchema !== undefined) entry.schema = entrySchema;
-    return entry;
+    return { left: rawEntry.type === "left", table: rawEntry.table, schema: entrySchema, on };
   });
 
   let columns: ColumnPos[] | undefined;
@@ -182,9 +176,7 @@ export function parseJoin(raw: string): JoinSpec {
       return pos;
     });
   }
-  const spec: JoinSpec = { table: parsed.table, joins, columns };
-  if (schema !== undefined) spec.schema = schema;
-  return spec;
+  return { table: parsed.table, schema, joins, columns };
 }
 
 /**

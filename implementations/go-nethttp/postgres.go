@@ -121,6 +121,12 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 	if err != nil {
 		return "", err
 	}
+	return c.resolveSchemaAmong(ctx, db, schemas, requested)
+}
+
+// resolveSchemaAmong is resolveSchema against a schema list already fetched
+// in this transaction.
+func (c *PostgresSource) resolveSchemaAmong(ctx context.Context, db queryer, schemas []string, requested *string) (string, error) {
 	var resolved string
 	if requested != nil {
 		resolved = *requested
@@ -343,17 +349,15 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 	}
 	defer tx.Rollback()
 
-	realSchema, err := c.resolveSchema(ctx, tx, schema)
+	listed, err := c.allowedSchemas(ctx, tx)
+	if err != nil {
+		return JoinData{}, err
+	}
+	realSchema, err := c.resolveSchemaAmong(ctx, tx, listed, schema)
 	if err != nil {
 		return JoinData{}, err
 	}
 	refs := spec.TableRefs()
-	var listed []string
-	if spec.namesOwnSchema() {
-		if listed, err = c.allowedSchemas(ctx, tx); err != nil {
-			return JoinData{}, err
-		}
-	}
 	schemas, err := tableSchemas(refs, realSchema, listed)
 	if err != nil {
 		return JoinData{}, err

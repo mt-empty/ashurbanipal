@@ -227,6 +227,12 @@ func (c *MySQLSource) resolveSchemaInTx(ctx context.Context, tx queryer, variant
 	if err != nil {
 		return "", err
 	}
+	return c.resolveSchemaAmong(ctx, tx, variant, schemas, requested)
+}
+
+// resolveSchemaAmong is resolveSchemaInTx against a schema list already
+// fetched in this transaction.
+func (c *MySQLSource) resolveSchemaAmong(ctx context.Context, tx queryer, variant mysqlVariant, schemas []string, requested *string) (string, error) {
 	var resolved string
 	if requested != nil {
 		resolved = *requested
@@ -453,35 +459,33 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 		return JoinData{}, err
 	}
 	defer tx.Rollback()
-	realSchema, err := c.resolveSchemaInTx(ctx, tx, variant, schema)
+	listed, err := c.allowedSchemasInTx(ctx, tx, variant)
+	if err != nil {
+		return JoinData{}, err
+	}
+	realSchema, err := c.resolveSchemaAmong(ctx, tx, variant, listed, schema)
 	if err != nil {
 		return JoinData{}, err
 	}
 	refs := spec.TableRefs()
-	var listed []string
-	if spec.namesOwnSchema() {
-		if listed, err = c.allowedSchemasInTx(ctx, tx, variant); err != nil {
-			return JoinData{}, err
-		}
-	}
 	schemas, err := tableSchemas(refs, realSchema, listed)
 	if err != nil {
 		return JoinData{}, err
 	}
 	allowed := map[string][]string{}
+	for _, s := range schemas {
+		if _, ok := allowed[s]; !ok {
+			if allowed[s], err = c.allowedTablesInTx(ctx, tx, variant, s); err != nil {
+				return JoinData{}, err
+			}
+		}
+	}
 	metas := map[[2]string]tableMeta{}
 	tables := make([]tableMeta, len(refs))
 	for i, ref := range refs {
 		key := [2]string{schemas[i], ref.Table}
 		if _, ok := metas[key]; !ok {
-			listing, ok := allowed[schemas[i]]
-			if !ok {
-				if listing, err = c.allowedTablesInTx(ctx, tx, variant, schemas[i]); err != nil {
-					return JoinData{}, err
-				}
-				allowed[schemas[i]] = listing
-			}
-			if _, ok := findExact(listing, ref.Table); !ok {
+			if _, ok := findExact(allowed[schemas[i]], ref.Table); !ok {
 				return JoinData{}, badJoin("unknown table %q", ref.Table)
 			}
 			meta, err := c.tableMeta(ctx, tx, variant, schemas[i], ref.Table)

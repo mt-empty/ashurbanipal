@@ -13,7 +13,6 @@ import {
   joinColumnInfos,
   joinRows,
   joinTableRefs,
-  namesOwnSchema,
   planJoin,
   type TableMeta,
   tableSchemas,
@@ -130,7 +129,15 @@ export class PostgresSource implements DbSource {
   // Resolve inside the operation transaction to prevent pool-session drift
   // (spec/protocol.md §5).
   private async resolveSchema(client: PoolClient, requested: string | undefined): Promise<string> {
-    const schemas = await this.allowedSchemas(client);
+    return this.resolveSchemaAmong(client, await this.allowedSchemas(client), requested);
+  }
+
+  // resolveSchema against a schema list already fetched in this transaction.
+  private async resolveSchemaAmong(
+    client: PoolClient,
+    schemas: string[],
+    requested: string | undefined,
+  ): Promise<string> {
     let resolved: string;
     if (requested !== undefined) {
       resolved = requested;
@@ -353,9 +360,9 @@ export class PostgresSource implements DbSource {
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
     return this.withTimeout(timeoutMs, async (client) => {
-      const realSchema = await this.resolveSchema(client, schema);
+      const listed = await this.allowedSchemas(client);
+      const realSchema = await this.resolveSchemaAmong(client, listed, schema);
       const refs = joinTableRefs(spec);
-      const listed = namesOwnSchema(spec) ? await this.allowedSchemas(client) : [];
       const schemas = tableSchemas(refs, realSchema, listed);
       const metas = new Map<string, TableMeta>();
       const tables: TableMeta[] = [];

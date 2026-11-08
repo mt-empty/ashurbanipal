@@ -14,7 +14,6 @@ import {
   joinColumnInfos,
   joinRows,
   joinTableRefs,
-  namesOwnSchema,
   planJoin,
   type TableMeta,
   tableSchemas,
@@ -243,7 +242,23 @@ export class MySqlSource implements DbSource {
     requested: string | undefined,
     timeoutMs: number,
   ): Promise<string> {
-    const schemas = await this.listSchemasInTx(conn, variant, timeoutMs);
+    return this.resolveSchemaAmong(
+      conn,
+      variant,
+      await this.listSchemasInTx(conn, variant, timeoutMs),
+      requested,
+      timeoutMs,
+    );
+  }
+
+  // resolveSchemaInTx against a schema list already fetched in this transaction.
+  private async resolveSchemaAmong(
+    conn: PoolConnection,
+    variant: Variant,
+    schemas: string[],
+    requested: string | undefined,
+    timeoutMs: number,
+  ): Promise<string> {
     let resolved: string;
     if (requested !== undefined) {
       resolved = requested;
@@ -463,22 +478,19 @@ export class MySqlSource implements DbSource {
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
     return this.withTx(async (conn, variant) => {
-      const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
+      const listed = await this.listSchemasInTx(conn, variant, timeoutMs);
+      const realSchema = await this.resolveSchemaAmong(conn, variant, listed, schema, timeoutMs);
       const refs = joinTableRefs(spec);
-      const listed = namesOwnSchema(spec) ? await this.listSchemasInTx(conn, variant, timeoutMs) : [];
       const schemas = tableSchemas(refs, realSchema, listed);
       const allowed = new Map<string, string[]>();
+      for (const s of new Set(schemas)) allowed.set(s, await this.allowedTablesInTx(conn, variant, s, timeoutMs));
       const metas = new Map<string, TableMeta>();
       const tables: TableMeta[] = [];
       for (const [i, { table }] of refs.entries()) {
         const key = JSON.stringify([schemas[i], table]);
         if (!metas.has(key)) {
-          let listing = allowed.get(schemas[i]);
-          if (listing === undefined) {
-            listing = await this.allowedTablesInTx(conn, variant, schemas[i], timeoutMs);
-            allowed.set(schemas[i], listing);
-          }
-          if (!findExact(listing, table)) throw new BadJoinError(`unknown table "${table}"`);
+          if (!findExact(allowed.get(schemas[i]) as string[], table))
+            throw new BadJoinError(`unknown table "${table}"`);
           metas.set(key, await this.tableMeta(conn, variant, schemas[i], table, timeoutMs));
         }
         tables.push(metas.get(key) as TableMeta);

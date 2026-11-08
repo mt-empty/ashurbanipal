@@ -206,7 +206,14 @@ class MySqlSource(DbSource):
         return name
 
     def _resolve_schema(self, cur, variant: str, requested: str | None, timeout_secs: int) -> str:
-        schemas = self._list_schemas(cur, variant, timeout_secs)
+        return self._resolve_schema_among(
+            cur, variant, self._list_schemas(cur, variant, timeout_secs), requested, timeout_secs
+        )
+
+    def _resolve_schema_among(
+        self, cur, variant: str, schemas: list[str], requested: str | None, timeout_secs: int
+    ) -> str:
+        """`_resolve_schema` against a schema list already fetched in this transaction."""
         if requested is not None:
             resolved = requested
         else:
@@ -471,21 +478,19 @@ class MySqlSource(DbSource):
             variant = self._variant_of(conn)
             timeout = opts.timeout_secs
             with conn.cursor() as cur:
-                resolved_schema = self._resolve_schema(cur, variant, schema, timeout)
+                listed = self._list_schemas(cur, variant, timeout)
+                resolved_schema = self._resolve_schema_among(cur, variant, listed, schema, timeout)
                 refs = spec.table_refs()
-                listed = self._list_schemas(cur, variant, timeout) if spec.names_own_schema() else []
                 schemas = table_schemas(refs, resolved_schema, listed)
-                allowed: dict[str, list[str]] = {}
+                allowed = {s: self._allowed_tables(cur, variant, s, timeout) for s in dict.fromkeys(schemas)}
                 metas: dict[tuple[str, str], TableMeta] = {}
+                tables = []
                 for in_schema, (_, name) in zip(schemas, refs, strict=True):
-                    if (in_schema, name) in metas:
-                        continue
-                    if in_schema not in allowed:
-                        allowed[in_schema] = self._allowed_tables(cur, variant, in_schema, timeout)
-                    if name not in allowed[in_schema]:
-                        raise BadJoin(f"unknown table {name!r}")
-                    metas[(in_schema, name)] = self._table_meta(cur, variant, in_schema, name, timeout)
-                tables = [metas[(s, n)] for s, (_, n) in zip(schemas, refs, strict=True)]
+                    if (in_schema, name) not in metas:
+                        if name not in allowed[in_schema]:
+                            raise BadJoin(f"unknown table {name!r}")
+                        metas[(in_schema, name)] = self._table_meta(cur, variant, in_schema, name, timeout)
+                    tables.append(metas[(in_schema, name)])
                 plan = plan_join(spec, tables, opts)
 
                 # The statement is built from catalog names and generated
