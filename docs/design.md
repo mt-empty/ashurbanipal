@@ -141,7 +141,10 @@ Two components, same as the original concept:
     as one-click filter shortcuts; empty when the column has no planner
     statistics yet. Not offered on a column unique on its own (a
     single-column primary key or unique constraint), and dimmed once an
-    answer comes back empty.
+    answer comes back empty. In a join view each join column reads its
+    source table's statistics, so the frequencies describe that table, not
+    the join's rows, and a note under them says so. The pick
+    filters `alias.column`.
   - *Foreign-key navigation* — a cell in an FK column (per the `key`/
     `references` column metadata, §4) is clickable: it switches to the
     referenced table and filters it to the matching row. Per §2's
@@ -157,7 +160,7 @@ Two components, same as the original concept:
     header (`frontend/src/features/filter-ui.ts`): a column at
     condition-start boundaries (empty, or after `AND `/`OR `/`NOT `), an
     operator after a column, the column's common values (§4, same endpoint
-    as the header ▾) after an operator, and `AND`/`OR` once a letter is
+    as the header ▾, a join column's from its source table) after an operator, and `AND`/`OR` once a letter is
     typed after a finished condition. Accepting a row adds a space, so the
     next list follows. Every list opens with no row highlighted, so Enter
     still submits what is typed (Tab or an arrow key picks a row). What is

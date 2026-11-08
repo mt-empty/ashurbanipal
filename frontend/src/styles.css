@@ -587,6 +587,9 @@ dialog dl dd .cell-ws { white-space: pre-wrap; }
           cursor: pointer; border-radius: 4px; }
 #cv-pop button.cv-value:hover { background: var(--hover); }
 #cv-pop .cv-freq { opacity: .6; }
+/* A set width, so the note neither stretches a wide popover nor wraps word by word in a narrow one. */
+#cv-pop .cv-note { width: 13rem; min-width: 100%; box-sizing: border-box; margin: .2rem 0 0;
+          padding: .3rem .5rem 0; border-top: 1px solid var(--border); opacity: .6; font-size: .85em; }
 
 /* ==== referenced-by (§5.9): incoming-FK list, shared by the PK-cell
    popover and the record-dialog section ==== */
