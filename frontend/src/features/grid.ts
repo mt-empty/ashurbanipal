@@ -203,7 +203,7 @@ function buildCell(col: Column, row: Row, { hidden, meta }: CellContext): HTMLTa
   if (link) {
     cellText.classList.add("fk-cell");
     cellText.title = link.title;
-    cellText.onclick = () => navigateWithSeededFilter(link.table, link.schema, link.clause);
+    cellText.onclick = () => navigateWithSeededFilter(link.target, link.clause);
   } else if (col.key === "pk" && meta !== undefined && meta.referrers !== 0) {
     // What points *at* this row, once the table is known to have referrers (or
     // the lookup failed); FK-bearing PKs and no-PK tables use the record dialog.

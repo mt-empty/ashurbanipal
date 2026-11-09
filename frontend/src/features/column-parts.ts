@@ -1,7 +1,9 @@
 import { copyText, el } from "../core/dom.js";
-import type { Column, Row } from "../core/types.js";
+import { columnTable } from "../core/state.js";
+import type { Column, Row, TableRef } from "../core/types.js";
 import { fkTarget, type KeyDescription, refTarget } from "../lib/column-key.js";
 import { filterClause, filterClauses, filterTooLong } from "../lib/filter-dsl.js";
+import { near } from "../lib/table-ref.js";
 import type { TableMeta } from "./table-meta.js";
 
 // ---- what the grid, the record view and the suggestion list draw alike
@@ -26,26 +28,29 @@ export function typeChip(col: Column): HTMLElement {
 
 export interface FkLink {
   title: string;
-  table: string;
-  schema: string | undefined;
+  target: TableRef;
   clause: string;
 }
 
 // Where a foreign key value leads: its single-column reference, or every pair
 // of a composite key (from `meta`, so table views only). Null when a composite
-// member is null, or the filter would not fit.
+// member is null, or the filter would not fit. A reference's schema is
+// relative to the column's own table (spec/protocol.md §5.4.1, §5.11.4).
 export function fkLink(col: Column, raw: string, row: Row, meta: TableMeta | undefined): FkLink | null {
   const ref = col.references;
+  const fk = ref ? undefined : meta?.compositeFkOf.get(col.name);
+  if (!ref && !fk) return null;
+  const owner = columnTable(col);
+  if (owner === null) return null;
   if (ref) {
     const clause = filterClause(ref.column, "=", raw);
     if (filterTooLong(clause)) return null;
-    return { title: `go to ${refTarget(ref)} = ${raw}`, table: ref.table, schema: ref.schema, clause };
+    return { title: `go to ${refTarget(ref)} = ${raw}`, target: near(owner, ref.schema, ref.table), clause };
   }
-  const fk = meta?.compositeFkOf.get(col.name);
   if (!fk?.columns.every((c) => row[c.from] != null)) return null;
   const clause = filterClauses(fk.columns.map((c) => ({ column: c.to, value: row[c.from] as string })));
   if (filterTooLong(clause)) return null;
-  return { title: `go to ${fkTarget(fk)} where ${clause}`, table: fk.table, schema: fk.schema, clause };
+  return { title: `go to ${fkTarget(fk)} where ${clause}`, target: near(owner, fk.schema, fk.table), clause };
 }
 
 // The `=` and copy buttons beside a value; the grid's non-null cells clone

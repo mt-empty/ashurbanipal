@@ -1,10 +1,11 @@
 import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
-import { applyScopeParams, scopeIdentity, tableInView } from "../core/state.js";
-import type { ReferencedByEntry, Row } from "../core/types.js";
+import { tableInView } from "../core/state.js";
+import type { ReferencedByEntry, Row, TableRef } from "../core/types.js";
 import { fkTarget } from "../lib/column-key.js";
 import { filterClauses } from "../lib/filter-dsl.js";
 import { createPromiseCache } from "../lib/promise-cache.js";
+import { near, refKey, tableParams } from "../lib/table-ref.js";
 import { navigateWithSeededFilter } from "./view-history.js";
 
 // ---- "referenced by": the incoming FKs that target the viewed table
@@ -24,13 +25,12 @@ export function clearReferencedByCache(): void {
   cache.clear();
 }
 
-// The loader runs inside get(), so the key and applyScopeParams read the same scope.
-export function fetchReferencedBy(table: string): Promise<ReferencedByEntry[]> {
-  return cache.get(scopeIdentity(table), () => {
-    const params = new URLSearchParams({ table });
-    applyScopeParams(params);
-    return api<{ referenced_by: ReferencedByEntry[] }>(`/tables/referenced-by?${params}`).then((d) => d.referenced_by);
-  });
+export function fetchReferencedBy(ref: TableRef): Promise<ReferencedByEntry[]> {
+  return cache.get(refKey(ref), () =>
+    api<{ referenced_by: ReferencedByEntry[] }>(`/tables/referenced-by?${tableParams(ref)}`).then(
+      (d) => d.referenced_by,
+    ),
+  );
 }
 
 // Same staleness guard as cvRequestToken: a second call targeting the same
@@ -47,15 +47,22 @@ function msg(text: string): HTMLParagraphElement {
   return p;
 }
 
-function drillIn(entry: ReferencedByEntry, row: Row, dismiss: () => void): void {
+// A referrer's `schema` is relative to the table it references (spec/protocol.md §5.9).
+function drillIn(target: TableRef, entry: ReferencedByEntry, row: Row, dismiss: () => void): void {
   // Buttons with a null-valued `to` are rendered disabled, so every pair
   // here has an expressible `=` clause.
   const clauses = entry.columns.map((c) => ({ column: c.from, value: row[c.to] as string }));
   dismiss();
-  navigateWithSeededFilter(entry.table, entry.schema, filterClauses(clauses));
+  navigateWithSeededFilter(near(target, entry.schema, entry.table), filterClauses(clauses));
 }
 
-function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: Row, dismiss: () => void): void {
+function renderList(
+  container: HTMLElement,
+  target: TableRef,
+  entries: ReferencedByEntry[],
+  row: Row,
+  dismiss: () => void,
+): void {
   if (entries.length === 0) {
     container.replaceChildren(msg("nothing references this table"));
     return;
@@ -81,7 +88,7 @@ function renderList(container: HTMLElement, entries: ReferencedByEntry[], row: R
             : "this table has no primary key — no filter is expressible";
       } else {
         btn.title = `go to ${label} where ${entry.columns.map((c) => `${c.from} = ${row[c.to]}`).join(" AND ")}`;
-        btn.onclick = () => drillIn(entry, row, dismiss);
+        btn.onclick = () => drillIn(target, entry, row, dismiss);
       }
       return btn;
     }),
@@ -94,16 +101,16 @@ export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: ()
   // Only offered in a table view: a join row has several tables.
   const table = tableInView();
   if (table === null) return;
-  const hit = cache.peek(scopeIdentity(table));
+  const hit = cache.peek(refKey(table));
   if (hit) {
-    renderList(container, hit, row, dismiss);
+    renderList(container, table, hit, row, dismiss);
     return;
   }
   container.replaceChildren(msg("loading…"));
   fetchReferencedBy(table)
     .then((entries) => {
       if (renderTokens.get(container) !== token) return;
-      renderList(container, entries, row, dismiss);
+      renderList(container, table, entries, row, dismiss);
     })
     .catch((e) => {
       if (renderTokens.get(container) !== token) return;

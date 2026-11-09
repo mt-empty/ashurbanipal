@@ -7,11 +7,11 @@ import {
   clearFilter,
   enterTable,
   scopeIdentity,
-  scopeQuery,
-  startTable,
+  scopeRef,
+  startMissingFrom,
   state,
   tableDataPath,
-  tableInView,
+  tableNameInView,
   tableRequest,
   type ViewRequest,
   viewHref,
@@ -19,6 +19,7 @@ import {
 import { readStored, writeStored } from "../core/storage.js";
 import type { TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
+import { scopeQuery } from "../lib/table-ref.js";
 import { syncGridLock } from "./grid-lock.js";
 
 // ---- table chips: transient, session-local state, not part of
@@ -139,9 +140,9 @@ export async function loadTables({
   setStatus("loading tables…");
   const token = ++loadTablesToken;
   const [{ tables }, { counts }] = await Promise.all([
-    api<{ tables: TableListEntry[] }>(`/tables${scopeQuery()}`),
+    api<{ tables: TableListEntry[] }>(`/tables${scopeQuery(scopeRef())}`),
     // Counts are a hint; a failure leaves the chips without them, not missing.
-    api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery()}`).catch((e) => {
+    api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery(scopeRef())}`).catch((e) => {
       console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
       return { counts: [] };
     }),
@@ -179,10 +180,10 @@ export async function loadTables({
   markTiming("tables-listed");
   const tableNames = tables.map((t) => t.name);
   // Stale persisted state must never wedge the UI: fall back (R5).
-  const fellBack = !tableNames.includes(startTable(next ? next.view : state.view) ?? "");
+  const fellBack = startMissingFrom(next ? next.view : state.view, tableNames);
   if (fellBack) {
     enterTable(tableNames[0] ?? null);
-    applyStoredSort(tableInView());
+    applyStoredSort(tableNameInView());
     // A ?filter= was written against the table the URL named; that table
     // isn't here, so its columns can't apply to the fallback — carrying it
     // over would 400 and dead-end the very load meant to recover (R5).
@@ -241,8 +242,8 @@ function prefetchOnRest(chip: HTMLElement, name: string): void {
     cancel();
     timer = setTimeout(() => {
       // A chip of the last scope (or replaced since) names a table this scope may not have.
-      if (!chip.isConnected || !chipsListScopeInView() || name === tableInView()) return;
-      prefetch(tableDataPath(tableRequest(name)), "view", PREFETCH_TTL_MS);
+      if (!chip.isConnected || !chipsListScopeInView() || name === tableNameInView()) return;
+      prefetch(tableDataPath(tableRequest(name), scopeRef()), "view", PREFETCH_TTL_MS);
     }, PREFETCH_REST_MS);
   };
   chip.addEventListener("pointerenter", (e) => {

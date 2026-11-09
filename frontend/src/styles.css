@@ -704,6 +704,7 @@ thead tr.bands th.row-actions { padding: 0; }
 .band-pill { display: block; margin-right: .75rem; padding: .15rem .5rem; border-radius: 4px; overflow: hidden;
              text-overflow: ellipsis; font-family: var(--font-mono); font-size: .75rem; font-weight: 400;
              background: var(--band-0); color: var(--band-0-fg); }
+.band-pill-schema { opacity: .75; }
 /* The columns menu's table headings take their band's colour. */
 tr.bands th[data-band="1"] .band-pill, .cols-group[data-band="1"] .cols-pill { background: var(--band-1); color: var(--band-1-fg); }
 tr.bands th[data-band="2"] .band-pill, .cols-group[data-band="2"] .cols-pill { background: var(--band-2); color: var(--band-2-fg); }

@@ -1,20 +1,31 @@
 import { $ } from "../core/dom.js";
-import type { Column } from "../core/types.js";
+import { manySchemas, refFor, state } from "../core/state.js";
+import type { Column, TableRef } from "../core/types.js";
 import { type Draft, draftToDef } from "../lib/join-draft.js";
-import { type JoinParse, parseJoin, printJoin, quoteJoinName } from "../lib/join-dsl.js";
-import { type JoinCompletion, type JoinToken, joinCompletionAt, tokenizeJoinText } from "../lib/join-tokens.js";
+import { type JoinPairSide, type JoinParse, parseJoin, printJoin, quoteJoinName } from "../lib/join-dsl.js";
+import {
+  type DeclaredTable,
+  type JoinCompletion,
+  type JoinToken,
+  joinCompletionAt,
+  tokenizeJoinText,
+} from "../lib/join-tokens.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
+import { distinctRefs, schemaRef } from "../lib/table-ref.js";
 import {
   cachedColumns,
+  cachedTablesIn,
   catalogVersion,
   indexedColumns,
   knownCatalog,
+  knownSchemas,
   readIndexedColumns,
   tableColumns,
+  tablesIn,
+  tablesInFailure,
 } from "./join-catalog.js";
 import { attachOverlayHighlight, tokenSpans } from "./overlay-highlight.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
-import { listedTableNames, tableChipCount } from "./table-chips.js";
 
 // The SQL half of the join overlay (boards U and V): a text field coloured like
 // the filter box, with suggestions for what the grammar allows next. The text is
@@ -102,9 +113,9 @@ export function mountJoinSql(onChange: () => void): JoinSql {
   const hlText = $("join-sql-hl-text");
 
   // Known for the tables whose columns were read; an unknown pair is allowed.
-  const pairCheck = (a: { table: string; column: string }, b: { table: string; column: string }): string | null => {
-    const ac = cachedColumns(a.table)?.find((c) => c.name === a.column);
-    const bc = cachedColumns(b.table)?.find((c) => c.name === b.column);
+  const pairCheck = (a: JoinPairSide, b: JoinPairSide): string | null => {
+    const ac = cachedColumns(refFor(a))?.find((c) => c.name === a.column);
+    const bc = cachedColumns(refFor(b))?.find((c) => c.name === b.column);
     return ac && bc ? (joinMismatch(ac, bc)?.message ?? null) : null;
   };
   // Highlight, dialog and suggestions all ask on each keystroke; parse once per text and catalog.
@@ -112,8 +123,15 @@ export function mountJoinSql(onChange: () => void): JoinSql {
   const parse = (): JoinParse => {
     const text = field.value;
     const version = catalogVersion();
-    if (memo?.text !== text || memo.version !== version)
-      memo = { text, version, result: parseJoin(text, { catalog: knownCatalog(), pairCheck }) };
+    if (memo?.text !== text || memo.version !== version) {
+      const catalog = knownCatalog();
+      const scopeSchema = state.scope.schema ?? undefined;
+      memo = {
+        text,
+        version,
+        result: parseJoin(text, { catalog, schemas: knownSchemas(catalog), scopeSchema, pairCheck }),
+      };
+    }
     return memo.result;
   };
 
@@ -167,8 +185,10 @@ export function mountJoinSql(onChange: () => void): JoinSql {
   const anyRead = (results: PromiseSettledResult<unknown>[]): boolean => results.some((r) => r.status === "fulfilled");
 
   // `name` of a declared table → its table, for `alias.` completion.
-  const tableOf = (ctx: JoinCompletion, name: string | null): string | undefined =>
-    ctx.declared.find((d) => d.name === name)?.table;
+  const tableOf = (ctx: JoinCompletion, name: string | null): TableRef | undefined => {
+    const d = ctx.declared.find((t) => t.name === name);
+    return d && refFor(d);
+  };
 
   async function columnRows(ctx: JoinCompletion): Promise<Suggestion[]> {
     const table = tableOf(ctx, ctx.qualifier);
@@ -181,7 +201,7 @@ export function mountJoinSql(onChange: () => void): JoinSql {
         if (document.activeElement === field) void update();
       });
     const otherTable = ctx.otherSide ? tableOf(ctx, ctx.otherSide.qualifier) : undefined;
-    const other = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column);
+    const other = (otherTable ? (cachedColumns(otherTable) ?? []) : []).find((c) => c.name === ctx.otherSide?.column);
     const starts = startsWith(ctx);
     return columns
       .filter((c) => starts(c.name))
@@ -197,32 +217,54 @@ export function mountJoinSql(onChange: () => void): JoinSql {
       });
   }
 
+  type Earlier = { table: TableRef; columns: readonly Column[] }[];
   // A foreign key between a declared table and the one being typed is offered as the whole clause.
-  function foreignKeyClause(ctx: JoinCompletion, taken: ReadonlySet<string>, table: string): string | undefined {
-    const earlier = ctx.declared.map((d) => ({ table: d.table, columns: cachedColumns(d.table) ?? [] }));
-    const fk = findForeignKey(earlier, table, cachedColumns(table) ?? []);
+  function foreignKeyClause(
+    ctx: JoinCompletion,
+    earlier: Earlier,
+    taken: ReadonlySet<string>,
+    ref: TableRef,
+  ): string | undefined {
+    const { table } = ref;
+    const fk = findForeignKey(earlier, ref, cachedColumns(ref) ?? []);
     if (!fk) return undefined;
     const alias = aliasFor(table, taken);
     const left = quoteJoinName(ctx.declared[fk.at].name);
     return `${quoteJoinName(table)} ${alias} ON ${left}.${quoteJoinName(fk.leftColumn)} = ${alias}.${quoteJoinName(fk.rightColumn)}`;
   }
 
-  function tableRows(ctx: JoinCompletion, candidates: string[]): Suggestion[] {
-    const used = new Set(ctx.declared.map((d) => d.table));
+  // `schema` is the one typed before the table, if any; the head already holds it.
+  function tableRows(
+    ctx: JoinCompletion,
+    candidates: readonly { name: string; count: string }[],
+    schema: string | undefined,
+  ): Suggestion[] {
+    const own = (s: string | undefined) => s ?? state.scope.schema;
+    const used = new Set(ctx.declared.filter((d) => own(d.schema) === own(schema)).map((d) => d.table));
     const taken = new Set(ctx.declared.map((d) => d.name));
+    const earlier: Earlier = ctx.declared.map(refFor).map((table) => ({ table, columns: cachedColumns(table) ?? [] }));
     const withKey: Suggestion[] = [];
     const rest: Suggestion[] = [];
-    for (const table of candidates) {
-      const clause = used.has(table) ? undefined : foreignKeyClause(ctx, taken, table);
+    for (const { name: table, count } of candidates) {
+      const clause = used.has(table) ? undefined : foreignKeyClause(ctx, earlier, taken, refFor({ schema, table }));
       if (clause) withKey.push({ label: clause, insert: `${clause} `, tag: "foreign key" });
       else
         rest.push({
           label: table,
           insert: `${quoteJoinName(table)} `,
-          note: used.has(table) ? "already used · add as alias" : tableChipCount(table),
+          note: used.has(table) ? "already used · add as alias" : count,
         });
     }
     return [...withKey, ...rest];
+  }
+
+  // The other schemas, offered after FROM and JOIN; picking one goes on to its tables.
+  function schemaRows(ctx: JoinCompletion): Suggestion[] {
+    if (!manySchemas()) return [];
+    const starts = startsWith(ctx);
+    return state.schemas
+      .filter((s) => s !== state.scope.schema && starts(s))
+      .map((s) => ({ label: `${s}.`, insert: `${quoteJoinName(s)}.`, note: "schema" }));
   }
 
   async function update(): Promise<void> {
@@ -232,16 +274,27 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     const ctx = joinCompletionAt(field.value);
     let rows: Suggestion[] = [];
     if (ctx.expect === "table") {
+      const schema = ctx.qualifier ?? undefined;
+      const listed = cachedTablesIn(schema ?? state.scope.schema);
+      if (!listed && schema !== undefined && state.schemas.includes(schema)) {
+        tablesIn(schemaRef(state.scope.source, schema)).then(
+          () => {
+            if (token === suggest.token()) void update();
+          },
+          () => {},
+        );
+      }
+      const starts = startsWith(ctx);
+      const candidates = (listed ?? []).filter((t) => starts(t.name));
       // Foreign key clauses need the columns of the declared tables and of a few candidates; they appear once read.
-      const candidates = listedTableNames().filter(startsWith(ctx));
-      const wanted = [...ctx.declared.map((d) => d.table), ...(candidates.length <= 8 ? candidates : [])];
-      const missing = [...new Set(wanted)].filter((t) => !cachedColumns(t));
+      const candidateRefs = candidates.length <= 8 ? candidates.map((t) => refFor({ schema, table: t.name })) : [];
+      const missing = distinctRefs([...ctx.declared.map(refFor), ...candidateRefs]).filter((t) => !cachedColumns(t));
       if (missing.length > 0) {
         void Promise.allSettled(missing.map(tableColumns)).then((results) => {
           if (anyRead(results) && token === suggest.token()) void update();
         });
       }
-      rows = tableRows(ctx, candidates);
+      rows = [...tableRows(ctx, candidates, schema), ...(schema === undefined ? schemaRows(ctx) : [])];
     } else if (ctx.expect === "qualifier") {
       const starts = startsWith(ctx);
       rows = ctx.declared
@@ -261,12 +314,32 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     suggest.show(rows, ctx.head);
   }
 
-  // Column names and types are what catches an unknown column or a mismatched pair; read them for every table the text names.
+  // Column names and types are what catches an unknown column or a mismatched pair; read them for every
+  // table the text names that its schema lists, so a half-typed name is never asked for.
   function prefetch(): void {
-    const listed = new Set(listedTableNames());
-    const wanted = [...new Set(joinCompletionAt(field.value).declared.map((d) => d.table))].filter(
-      (t) => listed.has(t) && !cachedColumns(t),
+    const declared = joinCompletionAt(field.value).declared;
+    // Another schema's table list comes first, so its names can be checked and its columns read.
+    const unread = new Set(
+      declared
+        .map((d) => d.schema)
+        .filter(
+          (s): s is string => s !== undefined && state.schemas.includes(s) && !cachedTablesIn(s) && !tablesInFailure(s),
+        ),
     );
+    for (const schema of unread) {
+      tablesIn(schemaRef(state.scope.source, schema)).then(
+        () => {
+          prefetch();
+          render();
+          onChange();
+        },
+        () => {},
+      );
+    }
+    const listed = (d: DeclaredTable): boolean =>
+      cachedTablesIn(d.schema ?? state.scope.schema)?.some((t) => t.name === d.table) ?? false;
+    const named = declared.filter(listed);
+    const wanted = distinctRefs(named.map(refFor)).filter((t) => !cachedColumns(t));
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
       if (!anyRead(results)) return;

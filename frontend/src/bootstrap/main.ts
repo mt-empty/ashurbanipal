@@ -1,7 +1,7 @@
 import { clearPrefetched, onProtocolSkew } from "../core/api.js";
 import "../features/api-reference.js";
 import { $, reportError } from "../core/dom.js";
-import { applyStoredSort, getLastPayload, initState, state, tableInView } from "../core/state.js";
+import { applyStoredSort, getLastPayload, initState, state, tableNameInView } from "../core/state.js";
 import { startAutoRefresh } from "../features/auto-refresh.js";
 import { resetColumnWidths } from "../features/column-widths.js";
 import "../features/filter-highlight.js";
@@ -93,7 +93,7 @@ loadSources()
     // A source switch during start-up runs its own table load.
     if (!current) return;
     // Applied once the scope the sort is stored under is pinned.
-    if (opensWithStoredSort()) applyStoredSort(tableInView());
+    if (opensWithStoredSort()) applyStoredSort(tableNameInView());
     return loadTables({ replaceHistory: true, reason: "boot" });
   })
   .catch(reportError)

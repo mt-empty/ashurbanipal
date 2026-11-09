@@ -39,7 +39,10 @@ Exactly one of `expect`/`expect_error` is present.
 Consumed only by `frontend/test/join-dsl.test.ts` and
 `frontend/test/join-tokens.test.ts`. Not part of backend
 conformance. Top-level `catalog` maps seed-schema table names to their
-column names; cases run against it unless `no_catalog` is `true`.
+column names, for unqualified names. Top-level `schemas` maps a schema name
+to its tables in the same shape, for `schema.table` names; a `null` schema or
+table means its tables or columns are not loaded. Cases run against both
+unless `no_catalog` is `true`.
 
 Each entry in `cases`:
 

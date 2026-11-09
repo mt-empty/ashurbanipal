@@ -1,6 +1,6 @@
-import { scopeIdentity } from "../core/state.js";
-import type { Column, ConstraintFk, ReferencedByEntry, StructureResponse } from "../core/types.js";
+import type { Column, ConstraintFk, ReferencedByEntry, StructureResponse, TableRef } from "../core/types.js";
 import { type KeyDescription, keyDescription } from "../lib/column-key.js";
+import { refKey } from "../lib/table-ref.js";
 import { fetchReferencedBy } from "./referenced-by.js";
 import { tableStructure } from "./structure.js";
 
@@ -20,8 +20,8 @@ export interface TableMeta {
 // don't flicker off and back on.
 const metas = new Map<string, { meta: TableMeta; shape: string }>();
 
-export function tableMeta(table: string | null): TableMeta | undefined {
-  return table === null ? undefined : metas.get(scopeIdentity(table))?.meta;
+export function tableMeta(ref: TableRef | null): TableMeta | undefined {
+  return ref === null ? undefined : metas.get(refKey(ref))?.meta;
 }
 
 export function keyDescriptionOf(col: Column, meta: TableMeta | undefined): KeyDescription | null {
@@ -59,19 +59,19 @@ export function expireTableMeta(): void {
 }
 
 // Never rejects. tableMeta()'s answer changes identity only when the facts do.
-export function loadTableMeta(table: string): Promise<void> {
-  const key = scopeIdentity(table);
+export function loadTableMeta(ref: TableRef): Promise<void> {
+  const key = refKey(ref);
   let load = loads.get(key);
   if (!load) {
     // A lookup from before a refresh must not overwrite the newer answer.
-    load = fetchTableMeta(table, key, () => loads.get(key) === load);
+    load = fetchTableMeta(ref, key, () => loads.get(key) === load);
     loads.set(key, load);
   }
   return load;
 }
 
-async function fetchTableMeta(table: string, key: string, current: () => boolean): Promise<void> {
-  const [structure, entries] = await Promise.allSettled([tableStructure(table), fetchReferencedBy(table)]);
+async function fetchTableMeta(ref: TableRef, key: string, current: () => boolean): Promise<void> {
+  const [structure, entries] = await Promise.allSettled([tableStructure(ref), fetchReferencedBy(ref)]);
   if (!current()) return;
   const failed = [structure, entries].filter((r) => r.status === "rejected");
   for (const r of failed) console.warn("ashurbanipal: table metadata lookup failed", r.reason);

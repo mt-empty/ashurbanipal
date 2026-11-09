@@ -2,20 +2,21 @@ import { loadData } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
 import { $, el, reportError } from "../core/dom.js";
 import {
-  applyScopeParams,
+  columnTable,
   getLastPayload,
   joinAliases,
   joinInView,
   markFilterVerified,
-  scopeIdentity,
   setAppliedFilterAst,
   state,
   tableInView,
+  tableLabelOf,
 } from "../core/state.js";
-import type { Column, CommonValue, FilterCondition } from "../core/types.js";
+import type { Column, CommonValue, FilterCondition, TableRef } from "../core/types.js";
 import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
 import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
 import { truncateType } from "../lib/join-types.js";
+import { refKey, tableParams } from "../lib/table-ref.js";
 import { columnKey } from "./join-view.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
 import { keyDescriptionOf, tableMeta } from "./table-meta.js";
@@ -177,24 +178,22 @@ function markNoCommonValues(btn: HTMLElement): void {
 
 // The table and column whose statistics describe a column: the viewed table's
 // own, or a join column's source table. Null when there is no single table.
-export function commonValueSource(col: Column): { table: string; column: string } | null {
-  if (col.join === undefined) {
-    const table = tableInView();
-    return table === null ? null : { table, column: col.name };
-  }
-  return col.table !== undefined && col.column !== undefined ? { table: col.table, column: col.column } : null;
+export function commonValueSource(col: Column): { table: TableRef; column: string } | null {
+  const table = columnTable(col);
+  const column = col.join === undefined ? col.name : col.column;
+  return table === null || column === undefined ? null : { table, column };
 }
 
 // A focusable control nested in the sortable th — stopPropagation so
 // opening it doesn't also toggle sort. `filterName` is what a picked value
 // filters on: the column's `alias.column` in a join view.
-export function commonValuesButton(table: string, column: string, filterName: string): HTMLButtonElement {
+export function commonValuesButton(table: TableRef, column: string, filterName: string): HTMLButtonElement {
   const btn = el("button");
   btn.type = "button";
   btn.className = "common-values-btn";
   btn.setAttribute("aria-label", `common values for ${filterName}`);
   btn.textContent = "▾";
-  if (emptyCommonValues.has(scopeIdentity(table, column))) markNoCommonValues(btn);
+  if (emptyCommonValues.has(refKey(table, column))) markNoCommonValues(btn);
   btn.onclick = (e) => {
     e.stopPropagation();
     showCommonValues(e, table, column, filterName);
@@ -202,14 +201,13 @@ export function commonValuesButton(table: string, column: string, filterName: st
   return btn;
 }
 
-async function fetchCommonValues(table: string, column: string): Promise<CommonValue[]> {
-  const params = new URLSearchParams({ table, column });
-  applyScopeParams(params);
+async function fetchCommonValues(table: TableRef, column: string): Promise<CommonValue[]> {
+  const params = tableParams(table, { column });
   return (await api<{ values: CommonValue[] }>(`/tables/common-values?${params}`)).values;
 }
 
-function commonValuesFor(table: string, column: string): Promise<string[]> {
-  const key = scopeIdentity(table, column);
+function commonValuesFor(table: TableRef, column: string): Promise<string[]> {
+  const key = refKey(table, column);
   let values = commonValueCache.get(key);
   if (!values) {
     values = fetchCommonValues(table, column)
@@ -297,7 +295,7 @@ filterInput.onfocus = updateFilterSuggestions;
 let cvAnchor: HTMLElement | null = null;
 let cvRequestToken = 0;
 // In a join the shares are of the source table's rows, which a note under them says.
-function renderCommonValues(values: CommonValue[], table: string, filterName: string): void {
+function renderCommonValues(values: CommonValue[], table: TableRef, filterName: string): void {
   const list = $("cv-pop-list");
   if (values.length === 0) {
     const p = el("p", "cv-empty", "no common values available");
@@ -320,10 +318,11 @@ function renderCommonValues(values: CommonValue[], table: string, filterName: st
       return btn;
     }),
   );
-  if (joinInView()) list.append(el("p", "cv-note", `Shares of all rows in ${table}, not indicative of this join`));
+  if (joinInView())
+    list.append(el("p", "cv-note", `Shares of all rows in ${tableLabelOf(table)}, not indicative of this join`));
 }
 
-async function showCommonValues(e: MouseEvent, table: string, column: string, filterName: string): Promise<void> {
+async function showCommonValues(e: MouseEvent, table: TableRef, column: string, filterName: string): Promise<void> {
   const btn = e.currentTarget as HTMLElement;
   if (cvAnchor) cvAnchor.style.anchorName = "";
   cvAnchor = btn;
@@ -336,8 +335,7 @@ async function showCommonValues(e: MouseEvent, table: string, column: string, fi
   // the token discards a stale response instead of clobbering the column
   // actually showing.
   const token = ++cvRequestToken;
-  // Taken before the await: a scope switch meanwhile must not get this answer.
-  const key = scopeIdentity(table, column);
+  const key = refKey(table, column);
   let values: CommonValue[];
   try {
     values = await fetchCommonValues(table, column);

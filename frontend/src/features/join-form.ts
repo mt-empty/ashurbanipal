@@ -1,6 +1,6 @@
 import { el } from "../core/dom.js";
-import { state } from "../core/state.js";
-import type { Column } from "../core/types.js";
+import { manySchemas, refFor, state } from "../core/state.js";
+import type { Column, TableRef } from "../core/types.js";
 import {
   addJoin,
   type Draft,
@@ -13,9 +13,9 @@ import {
 } from "../lib/join-draft.js";
 import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
-import { createDropdown, lastDropdownLabel } from "./dropdown.js";
-import { cachedColumns, tableColumns } from "./join-catalog.js";
-import { listedTableNames, tableChipCount } from "./table-chips.js";
+import { distinctRefs, schemaRef } from "../lib/table-ref.js";
+import { createDropdown, type DropdownOption, lastDropdownLabel } from "./dropdown.js";
+import { cachedColumns, cachedTablesIn, tableColumns, tablesIn, tablesInFailure } from "./join-catalog.js";
 
 // The Form half of the join overlay (board O): edits a Draft in place and tells
 // the dialog when it changed. Menus and buttons re-render the form; typing in an
@@ -29,8 +29,6 @@ function textButton(text: string, className: string, label: string, run: () => v
   return b;
 }
 
-const tableOptions = () => listedTableNames().map((t) => ({ value: t, label: t, note: tableChipCount(t) }));
-
 export interface JoinForm {
   setDraft(draft: Draft): void;
   draft(): Draft;
@@ -42,9 +40,11 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   let draft: Draft = newDraft("");
   let loadToken = 0;
 
-  const tableAt = (pos: number): string => (pos === 0 ? draft.table : draft.joins[pos - 1].table);
-  const nameAt = (pos: number): string => (pos === 0 ? draft.alias : draft.joins[pos - 1].alias).trim() || tableAt(pos);
-  const columnsAt = (pos: number): Column[] => cachedColumns(tableAt(pos)) ?? [];
+  const slot = (pos: number): Draft | DraftJoin => (pos === 0 ? draft : draft.joins[pos - 1]);
+  const tableAt = (pos: number): string => slot(pos).table;
+  const refAt = (pos: number): TableRef => refFor(slot(pos));
+  const nameAt = (pos: number): string => slot(pos).alias.trim() || tableAt(pos);
+  const columnsAt = (pos: number): Column[] => (tableAt(pos) ? (cachedColumns(refAt(pos)) ?? []) : []);
   const columnOf = (pos: number, column: string): Column | undefined => columnsAt(pos).find((c) => c.name === column);
 
   const mismatch = (pos: number, pair: DraftPair) => {
@@ -54,16 +54,15 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   };
 
   function foreignKey(pos: number): DraftPair | null {
-    const earlier = Array.from({ length: pos }, (_, p) => ({ table: tableAt(p), columns: columnsAt(p) }));
-    const fk = findForeignKey(earlier, tableAt(pos), columnsAt(pos));
+    const earlier = Array.from({ length: pos }, (_, p) => ({ table: refAt(p), columns: columnsAt(p) }));
+    const fk = findForeignKey(earlier, refAt(pos), columnsAt(pos));
     return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
 
   // Columns arrive lazily; a table whose lookup fails shows no columns rather than blocking the form.
   async function load(): Promise<void> {
-    const missing = [...new Set([draft.table, ...draft.joins.map((j) => j.table)])].filter(
-      (t) => t && !cachedColumns(t),
-    );
+    const named = [draft, ...draft.joins].filter((t) => t.table !== "");
+    const missing = distinctRefs(named.map(refFor)).filter((r) => !cachedColumns(r));
     if (missing.length === 0) return;
     const token = ++loadToken;
     const results = await Promise.allSettled(missing.map(tableColumns));
@@ -89,10 +88,64 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
 
   // render() calls load(), which fills the pair for a table whose columns are not cached yet.
   const pickTable = (pos: number, table: string): void => {
-    const at = setTableAt(draft, pos, table);
+    const at = setTableAt(draft, pos, table, slot(pos).schema);
     const join = draft.joins[at];
     if (join && join.table !== "") join.on = [foreignKey(at + 1) ?? emptyPair()];
     changed(true);
+  };
+
+  // The schema's tables once read; another schema's are asked for the first time its menu is built (board BE).
+  // An absent schema is the scope's, whose tables are the chips.
+  const tableOptions = (schema: string | undefined): DropdownOption[] => {
+    const tables = cachedTablesIn(schema ?? state.scope.schema);
+    if (tables) return tables.map((t) => ({ value: t.name, label: t.name, note: t.count }));
+    if (schema === undefined) return [];
+    if (!state.schemas.includes(schema))
+      return [{ value: "", label: `${schema} is not a listed schema`, blocked: true }];
+    const failure = tablesInFailure(schema);
+    if (failure) return [{ value: "", label: "could not list tables", note: failure, blocked: true }];
+    tablesIn(schemaRef(state.scope.source, schema)).then(
+      () => changed(),
+      () => changed(),
+    );
+    return [{ value: "", label: "loading…", blocked: true }];
+  };
+
+  // A schema dropdown, starting on the scope's, then that schema's tables. The
+  // schema dropdown is left out when the source lists one schema.
+  const tablePicker = (name: string, t: Draft | DraftJoin, pos: number): HTMLElement[] => {
+    const scope = state.scope.schema;
+    const listed =
+      t.schema === undefined || state.schemas.includes(t.schema) ? state.schemas : [...state.schemas, t.schema];
+    const schema = t.schema ?? scope;
+    const table = createDropdown({
+      ariaLabel: `${name} table`,
+      options: tableOptions(t.schema),
+      value: t.table,
+      display: t.table || undefined,
+      placeholder: "choose a table",
+      mono: true,
+      searchable: true,
+      onPick: (v) => {
+        if (v !== t.table) pickTable(pos, v);
+      },
+    });
+    // A table restored with a schema keeps its dropdown, so the schema can be changed back.
+    if (!manySchemas() && t.schema === undefined) return [table];
+    const schemas = createDropdown({
+      ariaLabel: `${name} schema`,
+      options: listed.map((s) => ({ value: s, label: s, note: s === scope ? "this schema" : undefined })),
+      value: schema ?? "",
+      placeholder: "schema",
+      mono: true,
+      searchable: state.schemas.length > 8,
+      onPick: (v) => {
+        if (v === schema) return;
+        setTableAt(draft, pos, "", v === scope ? undefined : v);
+        changed(true);
+      },
+    });
+    return [schemas, el("span", "jmuted", "."), table];
   };
 
   const aliasInput = (value: string, label: string, set: (v: string) => void): HTMLInputElement => {
@@ -194,18 +247,7 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
           changed(true);
         },
       }),
-      createDropdown({
-        ariaLabel: `join ${pos} table`,
-        options: tableOptions(),
-        value: join.table,
-        display: join.table || undefined,
-        placeholder: "choose a table",
-        mono: true,
-        searchable: true,
-        onPick: (v) => {
-          if (v !== join.table) pickTable(pos, v);
-        },
-      }),
+      ...tablePicker(`join ${pos}`, join, pos),
       el("span", "j-kw", "as"),
       aliasInput(join.alias, `join ${pos} alias`, (v) => {
         join.alias = v;
@@ -328,23 +370,12 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
     start.append(
-      createDropdown({
-        ariaLabel: "start table",
-        options: tableOptions(),
-        value: draft.table,
-        display: draft.table || undefined,
-        placeholder: "choose a table",
-        mono: true,
-        searchable: true,
-        onPick: (v) => {
-          if (v !== draft.table) pickTable(0, v);
-        },
-      }),
+      ...tablePicker("start", draft, 0),
       aliasInput(draft.alias, "start table alias", (v) => {
         draft.alias = v;
       }),
     );
-    if (state.view?.kind === "table" && state.view.table === draft.table)
+    if (state.view?.kind === "table" && state.view.table === draft.table && draft.schema === undefined)
       start.append(el("span", "jmuted", "the table you are viewing"));
     parts.push(start);
     parts.push(el("div", "jlab", `Joins · ${draft.joins.length} of ${JOIN_MAX_TABLES - 1}`));

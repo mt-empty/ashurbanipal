@@ -55,11 +55,18 @@ export function effectiveName(t: JoinTable): string {
   return t.alias ?? t.table;
 }
 
+// `schema.table` as the text writes it, or the bare table name.
+export function qualifiedName(t: { schema?: string; table: string }): string {
+  return t.schema === undefined ? t.table : `${t.schema}.${t.table}`;
+}
+
 export function printJoin(def: JoinDef): string {
   const name = (i: number): string => quoteJoinName(effectiveName(def.tables[i]));
   const ref = (i: number): string => {
     const t = def.tables[i];
-    return t.alias === null ? quoteJoinName(t.table) : `${quoteJoinName(t.table)} ${quoteJoinName(t.alias)}`;
+    const qualified =
+      t.schema === undefined ? quoteJoinName(t.table) : `${quoteJoinName(t.schema)}.${quoteJoinName(t.table)}`;
+    return t.alias === null ? qualified : `${qualified} ${quoteJoinName(t.alias)}`;
   };
   const select =
     def.columns === null
@@ -85,6 +92,7 @@ export type JoinErrorCode =
   | "bad-pair"
   | "duplicate-name"
   | "unknown-alias"
+  | "unknown-schema"
   | "unknown-table"
   | "unknown-column"
   | "too-many-tables"
@@ -107,10 +115,22 @@ export interface JoinError {
 export type JoinParse = { def: JoinDef } | { error: JoinError };
 
 export interface JoinParseOptions {
+  // The tables an unqualified name resolves among: the scope's schema.
   catalog?: JoinCatalog;
+  // Schema name → its tables (null when not loaded), the scope's own included.
+  // When given, a schema it lacks is rejected; when absent, qualified names are not checked.
+  schemas?: Readonly<Record<string, JoinCatalog | null>>;
+  // A qualifier naming this schema is dropped as the table is read, so it and the bare name are one table.
+  scopeSchema?: string;
   // Says why two columns cannot be paired (their types), or null. Only the page
   // knows the types, so the parser never checks them unless it is given this.
-  pairCheck?: (a: { table: string; column: string }, b: { table: string; column: string }) => string | null;
+  pairCheck?: (a: JoinPairSide, b: JoinPairSide) => string | null;
+}
+
+export interface JoinPairSide {
+  schema?: string;
+  table: string;
+  column: string;
 }
 
 // Table name → its column names, or null when only the table is known. Names
@@ -272,13 +292,38 @@ export function parseJoin(text: string, options: JoinParseOptions = {}): JoinPar
   const tables: JoinTable[] = [];
   const names = new Map<string, number>();
 
+  // Per position: the table's column names, or null when they are not known.
+  const known: (readonly string[] | null)[] = [];
+
   const tableref = (): void => {
-    const t = nameTok("a table name");
-    if (catalog && !Object.hasOwn(catalog, t.text)) {
-      const suggest = closest(t.text, Object.keys(catalog));
+    const first = nameTok("a table name");
+    let schemaTok: Tok | null = null;
+    let t = first;
+    if (isSym(peek(), ".")) {
+      next();
+      schemaTok = first;
+      t = nameTok("a table name after the schema");
+    }
+    let tablesHere: JoinCatalog | null | undefined = catalog;
+    if (schemaTok !== null) {
+      const schemas = options.schemas;
+      if (schemas && !Object.hasOwn(schemas, schemaTok.text)) {
+        const suggest = closest(schemaTok.text, Object.keys(schemas));
+        fail(
+          "unknown-schema",
+          `There is no schema ${schemaTok.text}.${suggest ? ` Did you mean ${suggest}?` : ""}`,
+          schemaTok.start,
+          suggest,
+        );
+      }
+      tablesHere = schemas?.[schemaTok.text];
+    }
+    if (tablesHere && !Object.hasOwn(tablesHere, t.text)) {
+      const suggest = closest(t.text, Object.keys(tablesHere));
+      const where = schemaTok === null ? "" : ` in ${schemaTok.text}`;
       fail(
         "unknown-table",
-        `There is no table ${t.text}.${suggest ? ` Did you mean ${suggest}?` : ""}`,
+        `There is no table ${t.text}${where}.${suggest ? ` Did you mean ${suggest}?` : ""}`,
         t.start,
         suggest,
       );
@@ -288,18 +333,25 @@ export function parseJoin(text: string, options: JoinParseOptions = {}): JoinPar
       next();
       alias = nameTok("an alias after AS").text;
     } else if (isNameTok(peek())) alias = next().text;
-    const table: JoinTable = { table: t.text, alias };
+    const schema = schemaTok === null || schemaTok.text === options.scopeSchema ? undefined : schemaTok.text;
+    const table: JoinTable = schema === undefined ? { table: t.text, alias } : { schema, table: t.text, alias };
     const name = effectiveName(table);
-    if (names.has(name))
+    const clash = names.get(name);
+    if (clash !== undefined) {
+      const earlier = tables[clash];
       fail(
         "duplicate-name",
-        alias === null && tables.some((x) => x.table === t.text)
-          ? `table "${t.text}" appears twice; give the second use an alias`
-          : `the name "${name}" is used twice; each table needs its own alias`,
-        t.start,
+        alias !== null || earlier.alias !== null
+          ? `the name "${name}" is used twice; each table needs its own alias`
+          : earlier.schema === table.schema
+            ? `table "${t.text}" appears twice; give the second use an alias`
+            : `${qualifiedName(earlier)} and ${qualifiedName(table)} are both called "${name}"; give the second one an alias`,
+        first.start,
       );
+    }
     names.set(name, tables.length);
     tables.push(table);
+    known.push(tablesHere ? (tablesHere[t.text] ?? null) : null);
   };
 
   interface ColRef {
@@ -320,14 +372,13 @@ export function parseJoin(text: string, options: JoinParseOptions = {}): JoinPar
     return { qual: q.text, qualStart: q.start, column: c.text, columnStart: c.start };
   };
 
-  const columnsOf = (table: string): readonly string[] | null => (catalog ? (catalog[table] ?? null) : null);
   const checkColumn = (position: number, c: ColRef): void => {
-    const known = columnsOf(tables[position].table);
-    if (known === null || known.includes(c.column)) return;
-    const suggest = closest(c.column, known);
+    const columns = known[position];
+    if (columns === null || columns.includes(c.column)) return;
+    const suggest = closest(c.column, columns);
     fail(
       "unknown-column",
-      `${tables[position].table} has no column ${c.column}.${suggest ? ` Did you mean ${suggest}?` : ""}`,
+      `${qualifiedName(tables[position])} has no column ${c.column}.${suggest ? ` Did you mean ${suggest}?` : ""}`,
       c.columnStart,
       suggest,
     );
@@ -356,10 +407,11 @@ export function parseJoin(text: string, options: JoinParseOptions = {}): JoinPar
       );
     checkColumn(a, first);
     checkColumn(b, second);
-    const clash = options.pairCheck?.(
-      { table: tables[a].table, column: first.column },
-      { table: tables[b].table, column: second.column },
-    );
+    const side = (position: number, column: string): JoinPairSide => {
+      const { schema, table } = tables[position];
+      return schema === undefined ? { table, column } : { schema, table, column };
+    };
+    const clash = options.pairCheck?.(side(a, first.column), side(b, second.column));
     if (clash) fail("type-mismatch", clash, second.qualStart);
     return forward
       ? { left: { join: a, column: first.column }, right: second.column }

@@ -1,3 +1,4 @@
+import { schemaRef, scopeParams } from "../lib/table-ref.js";
 import { dropRetiredKeys } from "./storage.js";
 import {
   chosenScope,
@@ -11,7 +12,7 @@ import {
   type ViewRequest,
   withSchema,
 } from "./store.js";
-import type { View } from "./types.js";
+import type { SchemaRef, View } from "./types.js";
 import { recordUrlIntent } from "./url-intent.js";
 
 // URL <-> state, read side (view-history.ts owns the write side, syncUrl).
@@ -68,18 +69,10 @@ export function applyUrlExact(params: URLSearchParams): void {
   restoreFilterFromParams(params);
 }
 
-// Every name the scope holds: both once start-up has resolved them, so no
-// request after start-up depends on the server's default. Start-up's early
-// requests may (bootstrap/boot-prefetch.ts).
-export function applyScopeParams(params: URLSearchParams): void {
-  const { source, schema } = state.scope;
-  if (source) params.set("source", source);
-  if (schema) params.set("schema", schema);
-}
-
 // A data request's query, shared by the load itself and every prefetch of it so
 // the two build the same path. A join's sort and `join` value are the caller's.
-export function dataParams(req: ViewRequest): URLSearchParams {
+// `scope` is the request's schema: a table view's own, a join's default.
+export function dataParams(req: ViewRequest, scope: SchemaRef): URLSearchParams {
   const { view, sort } = req;
   const params = new URLSearchParams({ limit: String(state.limit), offset: String(req.offset) });
   if (view.kind === "table") {
@@ -89,27 +82,20 @@ export function dataParams(req: ViewRequest): URLSearchParams {
       params.set("order", req.order);
     }
   }
-  applyScopeParams(params);
+  scopeParams(scope, params);
   // The wire format is the JSON AST (spec/protocol.md §5.4.2), never the
   // box's DSL text — URLSearchParams handles the URL-encoding.
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
   return params;
 }
 
-export function tableDataPath(req: ViewRequest): string {
-  return `/tables/data?${dataParams(req)}`;
+export function tableDataPath(req: ViewRequest, scope: SchemaRef): string {
+  return `/tables/data?${dataParams(req, scope)}`;
 }
 
 function applyUrlScope(params: URLSearchParams): void {
   const { source, schema } = chosenScope();
-  if (source) params.set("source", source);
-  if (schema) params.set("schema", schema);
-}
-
-export function scopeQuery(): string {
-  const params = new URLSearchParams();
-  applyScopeParams(params);
-  return params.size ? `?${params}` : "";
+  scopeParams(schemaRef(source, schema), params);
 }
 
 // The params that name a view, shared by syncUrl and chip links.
@@ -128,7 +114,7 @@ export function viewHref(view: View): string {
 
 // `api/schemas` (spec/protocol.md §5.7) takes `source` but not `schema` —
 // it's what resolves schema in the first place — so it gets its own query
-// builder rather than scopeQuery()'s combined source+schema.
+// builder rather than lib/table-ref.ts scopeQuery()'s source and schema.
 export function sourceQuery(): string {
   const { source } = state.scope;
   return source ? `?${new URLSearchParams({ source })}` : "";

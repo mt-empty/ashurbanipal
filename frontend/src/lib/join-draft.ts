@@ -1,4 +1,4 @@
-import type { JoinColumn, JoinDef, JoinType } from "../core/types.js";
+import type { JoinColumn, JoinDef, JoinTable, JoinType } from "../core/types.js";
 
 // ==== Join form draft ====
 // What the form edits: a join that may still be incomplete (no table chosen
@@ -13,12 +13,15 @@ export interface DraftPair {
 
 export interface DraftJoin {
   type: JoinType;
+  // Absent means the scope's schema, as in JoinTable.
+  schema?: string;
   table: string;
   alias: string;
   on: DraftPair[];
 }
 
 export interface Draft {
+  schema?: string;
   table: string;
   alias: string;
   joins: DraftJoin[];
@@ -30,8 +33,8 @@ export interface Draft {
 
 export const emptyPair = (): DraftPair => ({ leftJoin: 0, leftColumn: "", rightColumn: "" });
 
-export function newDraft(table: string): Draft {
-  const draft: Draft = { table, alias: "", joins: [], columns: [null], order: null };
+export function newDraft(table: string, schema?: string): Draft {
+  const draft: Draft = { ...schemaOf({ schema }), table, alias: "", joins: [], columns: [null], order: null };
   addJoin(draft);
   return draft;
 }
@@ -43,10 +46,12 @@ export function defToDraft(def: JoinDef): Draft {
     return mine.some((c) => "all" in c) ? null : mine.map((c) => ("column" in c ? c.column : ""));
   });
   return {
+    ...schemaOf(def.tables[0]),
     table: def.tables[0].table,
     alias: def.tables[0].alias ?? "",
     joins: def.joins.map((j, i) => ({
       type: j.type,
+      ...schemaOf(def.tables[i + 1]),
       table: def.tables[i + 1].table,
       alias: def.tables[i + 1].alias ?? "",
       on: j.on.map((p) => ({ leftJoin: p.left.join, leftColumn: p.left.column, rightColumn: p.right })),
@@ -56,26 +61,36 @@ export function defToDraft(def: JoinDef): Draft {
   };
 }
 
+const qualified = (t: JoinTable): string => (t.schema === undefined ? t.table : `${t.schema}.${t.table}`);
+
+function schemaOf(t: { schema?: string }): { schema?: string } {
+  return t.schema === undefined ? {} : { schema: t.schema };
+}
+
 const columnId = (c: JoinColumn): string => ("all" in c ? `${c.join}.*` : `${c.join}.${c.column}`);
 
 export function draftToDef(draft: Draft): { def: JoinDef } | { error: string } {
   if (draft.joins.length === 0) return { error: "Add a table to join." };
-  const tables = [
-    { table: draft.table, alias: draft.alias.trim() || null },
-    ...draft.joins.map((j) => ({ table: j.table, alias: j.alias.trim() || null })),
-  ];
-  const seen = new Set<string>();
+  const tables: JoinTable[] = [draft, ...draft.joins].map((t) => ({
+    ...schemaOf(t),
+    table: t.table,
+    alias: t.alias.trim() || null,
+  }));
+  const seen = new Map<string, JoinTable>();
   for (const [i, t] of tables.entries()) {
     if (t.table === "") return { error: i === 0 ? "Choose the table to start from." : `Choose a table for join ${i}.` };
     const name = t.alias ?? t.table;
-    if (seen.has(name))
+    const earlier = seen.get(name);
+    if (earlier)
       return {
         error:
-          t.alias === null
-            ? `${t.table} is used twice; give the second use an alias.`
-            : `The alias ${name} is used twice.`,
+          t.alias !== null
+            ? `The alias ${name} is used twice.`
+            : earlier.schema === t.schema
+              ? `${t.table} is used twice; give the second use an alias.`
+              : `${qualified(earlier)} and ${qualified(t)} are both called ${name}; give the second one an alias.`,
       };
-    seen.add(name);
+    seen.set(name, t);
   }
   const joins = [];
   for (const [i, j] of draft.joins.entries()) {
@@ -127,12 +142,14 @@ export function removeJoin(draft: Draft, index: number): void {
   }
 }
 
-// Puts `table` at position `pos` (0 is the start table). The join that pairs
+// Puts `table`, in `schema` or else the scope's, at position `pos` (0 is the start table). The join that pairs
 // it with earlier tables, join 1 for the start, starts over; later pairs that
 // named one of its columns lose that side. Returns that join's index.
-export function setTableAt(draft: Draft, pos: number, table: string): number {
-  if (pos === 0) draft.table = table;
-  else draft.joins[pos - 1].table = table;
+export function setTableAt(draft: Draft, pos: number, table: string, schema?: string): number {
+  const target = pos === 0 ? draft : draft.joins[pos - 1];
+  target.table = table;
+  if (schema === undefined) delete target.schema;
+  else target.schema = schema;
   const own = Math.max(pos, 1) - 1;
   if (draft.joins[own]) draft.joins[own].on = [emptyPair()];
   for (const j of draft.joins.slice(own + 1)) {

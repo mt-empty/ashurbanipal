@@ -1,10 +1,27 @@
 import { tryParseFilterDsl } from "../lib/filter-dsl.js";
+import { dropScopeSchema } from "../lib/join-def.js";
 import { effectiveName, parseJoin, printJoin } from "../lib/join-dsl.js";
 import { collectNewRowKeys } from "../lib/row-diff.js";
 import { isScopeKey, scopeKey, visitKey } from "../lib/scope-key.js";
+import { near, schemaRef, tableIn } from "../lib/table-ref.js";
+
+// A table as join text and wire columns name it: a schema only when outside the scope.
+type TableNamed = { readonly schema?: string; readonly table: string };
+
 import { $ } from "./dom.js";
 import { readStored, writeStored } from "./storage.js";
-import type { FilterCondition, JoinDef, JoinView, Scope, TableView, View, ViewData } from "./types.js";
+import type {
+  Column,
+  FilterCondition,
+  JoinDef,
+  JoinView,
+  SchemaRef,
+  Scope,
+  TableRef,
+  TableView,
+  View,
+  ViewData,
+} from "./types.js";
 
 const UI_KEY = "ashurbanipal_view";
 
@@ -13,7 +30,8 @@ export interface State {
   // Whether /sources and /schemas list more than one name: the URL names only
   // a choice there was (url.ts applyUrlScope).
   manySources: boolean;
-  manySchemas: boolean;
+  // The schemas /schemas listed for the source; empty until then or when it failed.
+  schemas: string[];
   // /schemas reported no default, so a table name only resolves with its schema.
   noDefaultSchema: boolean;
   // null until a table is chosen. Changed through the transitions below.
@@ -52,7 +70,7 @@ export interface State {
 export const state: State = {
   scope: { kind: "loading", source: null, schema: null },
   manySources: false,
-  manySchemas: false,
+  schemas: [],
   noDefaultSchema: false,
   view: null,
   sort: null,
@@ -70,29 +88,46 @@ export function tableView(name: string | null | undefined): TableView | null {
   return name ? { kind: "table", table: name } : null;
 }
 
-// Hidden columns survive only while the same join stays in view.
-function joinView(def: JoinDef, previous: View | null): JoinView {
+// Hidden columns survive only while the same join stays in view. A qualifier
+// naming the scope's own schema is dropped, so the text keys and prints alike.
+function joinView(written: JoinDef, previous: View | null): JoinView {
+  const def = dropScopeSchema(written, state.scope.schema);
   const text = printJoin(def);
   const hidden = previous?.kind === "join" && previous.text === text ? previous.hidden : [];
   return { kind: "join", def, text, hidden };
 }
 
-// The table a view is rooted on: a join's start table. For the URL, storage and
-// per-scope keys; per-table requests use tableInView().
-export function startTable(view: View): string;
-export function startTable(view: View | null): string | null;
-export function startTable(view: View | null): string | null {
+// The table a view is rooted on, as written: a join's start table, with a
+// schema only when it lives outside the scope.
+export function startOf(view: View | null): TableNamed | null {
   if (view === null) return null;
-  switch (view.kind) {
-    case "table":
-      return view.table;
-    case "join":
-      return view.def.tables[0].table;
-    default: {
-      const _exhaustive: never = view;
-      return _exhaustive;
-    }
-  }
+  return view.kind === "table" ? { table: view.table } : view.def.tables[0];
+}
+
+// Whether the scope's own table list should hold the view's start table: not
+// for a join that starts in another schema, which no table list here names.
+export function startsInScope(view: View | null): boolean {
+  return startOf(view)?.schema === undefined;
+}
+
+// The scope's table a view is rooted on, or null for a join that starts in
+// another schema. For the URL, storage, chips and per-scope keys.
+export function startTable(view: View | null): string | null {
+  const start = startOf(view);
+  return start && start.schema === undefined ? start.table : null;
+}
+
+// Whether `names`, the scope's table list, lacks a view rooted in the scope.
+export function startMissingFrom(view: View | null, names: readonly string[]): boolean {
+  return startsInScope(view) && !names.includes(startTable(view) ?? "");
+}
+
+// The view's start table where it lives.
+export function startRef(view: View): TableRef;
+export function startRef(view: View | null): TableRef | null;
+export function startRef(view: View | null): TableRef | null {
+  const start = startOf(view);
+  return start && refFor(start);
 }
 
 export function viewKey(view: View | null): string {
@@ -100,9 +135,43 @@ export function viewKey(view: View | null): string {
   return view.kind === "table" ? `table:${view.table}` : `join:${view.text}`;
 }
 
+// The scope every request without a table of its own runs in. Names still
+// loading are sent as they are; a failed list leaves the server's default.
+export function scopeRef(): SchemaRef {
+  return schemaRef(state.scope.source, state.scope.schema);
+}
+
+// A table named relative to the scope: a join's table, a join column's, a
+// declared table in SQL mode. An absent schema is the scope's own.
+export function refFor(t: TableNamed): TableRef {
+  return near(scopeRef(), t.schema, t.table);
+}
+
+// A table the current scope lists: a table chip, a table view, a stored sort.
+// A table from a join, an FK or a referrer carries its own schema instead.
+export function refInScope(table: string): TableRef {
+  return tableIn(scopeRef(), table);
+}
+
+export function manySchemas(): boolean {
+  return state.schemas.length > 1;
+}
+
 // The one table in view, or null in a join view (which has several) or before one is chosen.
-export function tableInView(): string | null {
+export function tableInView(): TableRef | null {
+  return state.view?.kind === "table" ? refInScope(state.view.table) : null;
+}
+
+// Its name, for what is kept per scope (stored sort, chips); a table view is always in the scope.
+export function tableNameInView(): string | null {
   return state.view?.kind === "table" ? state.view.table : null;
+}
+
+// The table a grid column comes from: the table in view, or a join column's
+// own table. Null when neither is known.
+export function columnTable(col: Column): TableRef | null {
+  if (col.join === undefined) return tableInView();
+  return col.table === undefined ? null : refFor({ schema: col.schema, table: col.table });
 }
 
 export function joinInView(): JoinView | null {
@@ -129,11 +198,12 @@ export function enterTable(name: string | null): void {
   state.view = tableView(name);
 }
 
-// To the join's start table, as a table chip would open it.
-export function clearJoin(): void {
+// To the join's start table, as a table chip would open it, or to `fallback`
+// when the join starts in another schema.
+export function clearJoin(fallback: string | null): void {
   const join = joinInView();
   if (!join) return;
-  const table = startTable(join);
+  const table = startTable(join) ?? fallback;
   enterTable(table);
   state.offset = 0;
   applyStoredSort(table);
@@ -195,7 +265,7 @@ export function currentRequest(): ViewRequest | null {
 
 // A new join starts from the default view: the sort and filter were written
 // against other columns. The join already in view (saved or renamed) keeps them.
-export function joinRequest(def: JoinDef): ViewRequest {
+export function joinRequest(def: JoinDef): ViewRequest & { view: JoinView } {
   const view = joinView(def, state.view);
   const current = currentRequest();
   if (current && viewKey(current.view) === viewKey(view)) return { ...current, view };
@@ -286,10 +356,10 @@ export function knownScopeKey(...rest: string[]): string | null {
   return state.scope.kind === "known" ? scopeKey(state.scope.source, state.scope.schema, ...rest) : null;
 }
 
-// Tells one scope (and, with `rest`, a table in it) from another within this
-// visit, resolved or not; for per-visit caches, never stored.
-export function scopeIdentity(...rest: string[]): string {
-  return visitKey(state.scope.source, state.scope.schema, ...rest);
+// Tells one scope from another within this visit, resolved or not, for "is
+// this still the same view?" checks; a table's own key is refKey().
+export function scopeIdentity(): string {
+  return visitKey(state.scope.source, state.scope.schema);
 }
 
 // The names the page URL carries: only where there was a choice, so a link
@@ -297,15 +367,20 @@ export function scopeIdentity(...rest: string[]): string {
 export function chosenScope(): { source: string | null; schema: string | null } {
   return {
     source: state.manySources ? state.scope.source : null,
-    schema: state.manySchemas ? state.scope.schema : null,
+    schema: manySchemas() ? state.scope.schema : null,
   };
+}
+
+// A table as the page names it: schema-qualified only when outside the scope.
+export function tableLabelOf(ref: TableRef): string {
+  return ref.schema !== null && ref.schema !== state.scope.schema ? `${ref.schema}.${ref.table}` : ref.table;
 }
 
 // A table name as the user would type it in SQL: schema-qualified only where
 // the bare name could mean another schema's table, or none.
-export function qualifiedTable(table: string): string {
-  const { schema } = state.scope;
-  return schema && (state.manySchemas || state.noDefaultSchema) ? `${schema}.${table}` : table;
+export function qualifiedTable(ref: TableRef): string {
+  const { schema } = ref;
+  return schema && (manySchemas() || state.noDefaultSchema) ? `${schema}.${ref.table}` : ref.table;
 }
 
 // A table's name only means one table within its source and schema, so the
@@ -438,7 +513,7 @@ export function setSort(sort: string | null, order: "asc" | "desc" = "asc"): voi
 // sort + order are remembered per table (like hiddenColumns): a column
 // name is table-specific, so this never carries a sort across tables.
 export function rememberSort(): void {
-  const table = tableInView();
+  const table = tableNameInView();
   if (!table) return;
   setTableEntry(state.sortByTable, table, state.sort ? { col: state.sort, order: state.order } : undefined);
   sortRisk.set(false); // came from a click on a live header
@@ -475,7 +550,7 @@ export function dropOneStaleInput(code: string | undefined): boolean {
   // A sort can break the query itself (a 500 on a type the engine cannot
   // order); a timeout or a problem with the join or table is no sign against it.
   if (sortRisk.isUnverified() && state.view && !NOT_THE_INPUTS.has(code ?? "")) {
-    dropStoredSort(tableInView());
+    dropStoredSort(tableNameInView());
     return true;
   }
   if (filterRisk.isUnverified() && FILTER_FAULTS.has(code ?? "")) {
@@ -490,7 +565,8 @@ const NOT_THE_INPUTS = new Set(["query_timeout", "invalid_join", "not_readable"]
 // is forgotten and the request retried without it.
 export function dropStaleSort(req: ViewRequest, code: string | undefined): ViewRequest | null {
   if (!req.restoredSort || NOT_THE_INPUTS.has(code ?? "")) return null;
-  setTableEntry(state.sortByTable, startTable(req.view), undefined);
+  const table = startTable(req.view);
+  if (table !== null) setTableEntry(state.sortByTable, table, undefined);
   persist();
   return { ...req, sort: null, order: "asc", restoredSort: false };
 }
@@ -528,13 +604,15 @@ export function settleSource(source: string | null, many: boolean): void {
   state.manySources = many;
 }
 
-// loadSchemas' result: the listed schema to use, or null when /schemas failed
-// or listed none.
-export function settleSchema(schema: string | null, many: boolean, noDefault: boolean): void {
+// loadSchemas' result: the listed schema to use (null when /schemas failed or
+// listed none) and every listed name. A join restored before the schema was
+// known drops a qualifier that now names the scope's own.
+export function settleSchema(schema: string | null, schemas: string[], noDefault: boolean): void {
   state.scope =
     schema === null ? { kind: "failed", source: state.scope.source, schema } : withSchema(state.scope, schema);
-  state.manySchemas = many;
+  state.schemas = schemas;
   state.noDefaultSchema = noDefault;
+  if (state.view?.kind === "join") state.view = joinView(state.view.def, state.view);
 }
 
 // ---- named scope transitions ----

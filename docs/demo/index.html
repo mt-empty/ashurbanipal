@@ -1043,6 +1043,7 @@ thead tr.bands th.row-actions { padding: 0; }
 .band-pill { display: block; margin-right: .75rem; padding: .15rem .5rem; border-radius: 4px; overflow: hidden;
              text-overflow: ellipsis; font-family: var(--font-mono); font-size: .75rem; font-weight: 400;
              background: var(--band-0); color: var(--band-0-fg); }
+.band-pill-schema { opacity: .75; }
 /* The columns menu's table headings take their band's colour. */
 tr.bands th[data-band="1"] .band-pill, .cols-group[data-band="1"] .cols-pill { background: var(--band-1); color: var(--band-1-fg); }
 tr.bands th[data-band="2"] .band-pill, .cols-group[data-band="2"] .cols-pill { background: var(--band-2); color: var(--band-2-fg); }
@@ -1973,6 +1974,57 @@ function filterDslErrorAt(input2, aliases) {
   }
 }
 
+// src/lib/join-def.ts
+function labelSchemas(def, scopeSchema) {
+  if (scopeSchema === null || def.tables.every((t) => t.schema === void 0)) return def.tables.map((t) => t.schema);
+  return def.tables.map((t) => t.schema ?? scopeSchema);
+}
+function tableLabel(t, schema) {
+  const name = schema === void 0 ? t.table : `${schema}.${t.table}`;
+  return t.alias === null ? name : `${name} ${t.alias}`;
+}
+function joinLabel(def, scopeSchema) {
+  const schemas = labelSchemas(def, scopeSchema);
+  return def.tables.map((t, i) => {
+    const label = tableLabel(t, schemas[i]);
+    return i === 0 ? label : `${def.joins[i - 1].type === "left" ? "\u27D5" : "\u22C8"} ${label}`;
+  }).join(" ");
+}
+function selectsEverything(def) {
+  if (def.columns === null) return true;
+  return def.columns.length === def.tables.length && def.columns.every((c, i) => "all" in c && c.join === i);
+}
+function tablesToExpand(def) {
+  if (selectsEverything(def)) return [];
+  return [...new Set((def.columns ?? []).filter((c) => "all" in c).map((c) => c.join))];
+}
+function toWire(def, columnsOf) {
+  const schemaOf2 = (t) => t.schema === void 0 ? {} : { schema: t.schema };
+  const wire = {
+    table: def.tables[0].table,
+    ...schemaOf2(def.tables[0]),
+    joins: def.joins.map((j, i) => ({
+      type: j.type,
+      table: def.tables[i + 1].table,
+      ...schemaOf2(def.tables[i + 1]),
+      on: j.on
+    }))
+  };
+  if (def.columns !== null && !selectsEverything(def)) {
+    wire.columns = def.columns.flatMap(
+      (c) => "all" in c ? columnsOf(c.join).map((column) => ({ join: c.join, column })) : [c]
+    );
+  }
+  return wire;
+}
+function dropScopeSchema(def, scopeSchema) {
+  if (scopeSchema === null || def.tables.every((t) => t.schema !== scopeSchema)) return def;
+  return {
+    ...def,
+    tables: def.tables.map((t) => t.schema === scopeSchema ? { table: t.table, alias: t.alias } : t)
+  };
+}
+
 // src/lib/join-dsl.ts
 var JOIN_MAX_TABLES = 4;
 var JOIN_MAX_PAIRS = 3;
@@ -2014,11 +2066,15 @@ function quoteJoinName(name) {
 function effectiveName(t) {
   return t.alias ?? t.table;
 }
+function qualifiedName(t) {
+  return t.schema === void 0 ? t.table : `${t.schema}.${t.table}`;
+}
 function printJoin(def) {
   const name = (i) => quoteJoinName(effectiveName(def.tables[i]));
   const ref = (i) => {
     const t = def.tables[i];
-    return t.alias === null ? quoteJoinName(t.table) : `${quoteJoinName(t.table)} ${quoteJoinName(t.alias)}`;
+    const qualified2 = t.schema === void 0 ? quoteJoinName(t.table) : `${quoteJoinName(t.schema)}.${quoteJoinName(t.table)}`;
+    return t.alias === null ? qualified2 : `${qualified2} ${quoteJoinName(t.alias)}`;
   };
   const select = def.columns === null ? "*" : def.columns.map((c) => `${name(c.join)}.${"all" in c ? "*" : quoteJoinName(c.column)}`).join(", ");
   const lines = [`SELECT ${select}`, `FROM ${ref(0)}`];
@@ -2164,13 +2220,36 @@ function parseJoin(text, options = {}) {
   };
   const tables = [];
   const names = /* @__PURE__ */ new Map();
+  const known = [];
   const tableref = () => {
-    const t = nameTok("a table name");
-    if (catalog && !Object.hasOwn(catalog, t.text)) {
-      const suggest2 = closest(t.text, Object.keys(catalog));
+    const first = nameTok("a table name");
+    let schemaTok = null;
+    let t = first;
+    if (isSym(peek(), ".")) {
+      next();
+      schemaTok = first;
+      t = nameTok("a table name after the schema");
+    }
+    let tablesHere = catalog;
+    if (schemaTok !== null) {
+      const schemas = options.schemas;
+      if (schemas && !Object.hasOwn(schemas, schemaTok.text)) {
+        const suggest2 = closest(schemaTok.text, Object.keys(schemas));
+        fail(
+          "unknown-schema",
+          `There is no schema ${schemaTok.text}.${suggest2 ? ` Did you mean ${suggest2}?` : ""}`,
+          schemaTok.start,
+          suggest2
+        );
+      }
+      tablesHere = schemas?.[schemaTok.text];
+    }
+    if (tablesHere && !Object.hasOwn(tablesHere, t.text)) {
+      const suggest2 = closest(t.text, Object.keys(tablesHere));
+      const where = schemaTok === null ? "" : ` in ${schemaTok.text}`;
       fail(
         "unknown-table",
-        `There is no table ${t.text}.${suggest2 ? ` Did you mean ${suggest2}?` : ""}`,
+        `There is no table ${t.text}${where}.${suggest2 ? ` Did you mean ${suggest2}?` : ""}`,
         t.start,
         suggest2
       );
@@ -2180,16 +2259,21 @@ function parseJoin(text, options = {}) {
       next();
       alias = nameTok("an alias after AS").text;
     } else if (isNameTok(peek())) alias = next().text;
-    const table = { table: t.text, alias };
+    const schema = schemaTok === null || schemaTok.text === options.scopeSchema ? void 0 : schemaTok.text;
+    const table = schema === void 0 ? { table: t.text, alias } : { schema, table: t.text, alias };
     const name = effectiveName(table);
-    if (names.has(name))
+    const clash = names.get(name);
+    if (clash !== void 0) {
+      const earlier = tables[clash];
       fail(
         "duplicate-name",
-        alias === null && tables.some((x) => x.table === t.text) ? `table "${t.text}" appears twice; give the second use an alias` : `the name "${name}" is used twice; each table needs its own alias`,
-        t.start
+        alias !== null || earlier.alias !== null ? `the name "${name}" is used twice; each table needs its own alias` : earlier.schema === table.schema ? `table "${t.text}" appears twice; give the second use an alias` : `${qualifiedName(earlier)} and ${qualifiedName(table)} are both called "${name}"; give the second one an alias`,
+        first.start
       );
+    }
     names.set(name, tables.length);
     tables.push(table);
+    known.push(tablesHere ? tablesHere[t.text] ?? null : null);
   };
   const colref = () => {
     const q = nameTok("a column written as alias.column");
@@ -2202,14 +2286,13 @@ function parseJoin(text, options = {}) {
     const c = nameTok("a column name");
     return { qual: q.text, qualStart: q.start, column: c.text, columnStart: c.start };
   };
-  const columnsOf = (table) => catalog ? catalog[table] ?? null : null;
   const checkColumn = (position, c) => {
-    const known = columnsOf(tables[position].table);
-    if (known === null || known.includes(c.column)) return;
-    const suggest2 = closest(c.column, known);
+    const columns = known[position];
+    if (columns === null || columns.includes(c.column)) return;
+    const suggest2 = closest(c.column, columns);
     fail(
       "unknown-column",
-      `${tables[position].table} has no column ${c.column}.${suggest2 ? ` Did you mean ${suggest2}?` : ""}`,
+      `${qualifiedName(tables[position])} has no column ${c.column}.${suggest2 ? ` Did you mean ${suggest2}?` : ""}`,
       c.columnStart,
       suggest2
     );
@@ -2237,10 +2320,11 @@ function parseJoin(text, options = {}) {
       );
     checkColumn(a, first);
     checkColumn(b, second);
-    const clash = options.pairCheck?.(
-      { table: tables[a].table, column: first.column },
-      { table: tables[b].table, column: second.column }
-    );
+    const side = (position, column) => {
+      const { schema, table } = tables[position];
+      return schema === void 0 ? { table, column } : { schema, table, column };
+    };
+    const clash = options.pairCheck?.(side(a, first.column), side(b, second.column));
     if (clash) fail("type-mismatch", clash, second.qualStart);
     return forward ? { left: { join: a, column: first.column }, right: second.column } : { left: { join: b, column: second.column }, right: first.column };
   };
@@ -2373,6 +2457,35 @@ function isScopeKey(key, parts) {
   }
 }
 
+// src/lib/table-ref.ts
+function schemaRef(source, schema) {
+  return { source, schema };
+}
+function tableIn(scope2, table) {
+  return { source: scope2.source, schema: scope2.schema, table };
+}
+function near(owner, schema, table) {
+  return tableIn(schema === void 0 ? owner : schemaRef(owner.source, schema), table);
+}
+function refKey(ref, ...rest) {
+  return JSON.stringify([ref.source, ref.schema, ref.table, ...rest]);
+}
+function distinctRefs(refs) {
+  return [...new Map(refs.map((r) => [refKey(r), r])).values()];
+}
+function scopeParams(scope2, params = new URLSearchParams()) {
+  if (scope2.source) params.set("source", scope2.source);
+  if (scope2.schema) params.set("schema", scope2.schema);
+  return params;
+}
+function scopeQuery(scope2) {
+  const params = scopeParams(scope2);
+  return params.size ? `?${params}` : "";
+}
+function tableParams(ref, extra = {}) {
+  return scopeParams(ref, new URLSearchParams({ table: ref.table, ...extra }));
+}
+
 // src/core/storage.ts
 function readStored(key) {
   try {
@@ -2401,7 +2514,7 @@ var UI_KEY = "ashurbanipal_view";
 var state = {
   scope: { kind: "loading", source: null, schema: null },
   manySources: false,
-  manySchemas: false,
+  schemas: [],
   noDefaultSchema: false,
   view: null,
   sort: null,
@@ -2416,30 +2529,55 @@ var state = {
 function tableView(name) {
   return name ? { kind: "table", table: name } : null;
 }
-function joinView(def, previous) {
+function joinView(written2, previous) {
+  const def = dropScopeSchema(written2, state.scope.schema);
   const text = printJoin(def);
   const hidden = previous?.kind === "join" && previous.text === text ? previous.hidden : [];
   return { kind: "join", def, text, hidden };
 }
-function startTable(view) {
+function startOf(view) {
   if (view === null) return null;
-  switch (view.kind) {
-    case "table":
-      return view.table;
-    case "join":
-      return view.def.tables[0].table;
-    default: {
-      const _exhaustive = view;
-      return _exhaustive;
-    }
-  }
+  return view.kind === "table" ? { table: view.table } : view.def.tables[0];
+}
+function startsInScope(view) {
+  return startOf(view)?.schema === void 0;
+}
+function startTable(view) {
+  const start = startOf(view);
+  return start && start.schema === void 0 ? start.table : null;
+}
+function startMissingFrom(view, names) {
+  return startsInScope(view) && !names.includes(startTable(view) ?? "");
+}
+function startRef(view) {
+  const start = startOf(view);
+  return start && refFor(start);
 }
 function viewKey(view) {
   if (view === null) return "";
   return view.kind === "table" ? `table:${view.table}` : `join:${view.text}`;
 }
+function scopeRef() {
+  return schemaRef(state.scope.source, state.scope.schema);
+}
+function refFor(t) {
+  return near(scopeRef(), t.schema, t.table);
+}
+function refInScope(table) {
+  return tableIn(scopeRef(), table);
+}
+function manySchemas() {
+  return state.schemas.length > 1;
+}
 function tableInView() {
+  return state.view?.kind === "table" ? refInScope(state.view.table) : null;
+}
+function tableNameInView() {
   return state.view?.kind === "table" ? state.view.table : null;
+}
+function columnTable(col) {
+  if (col.join === void 0) return tableInView();
+  return col.table === void 0 ? null : refFor({ schema: col.schema, table: col.table });
 }
 function joinInView() {
   return state.view?.kind === "join" ? state.view : null;
@@ -2458,10 +2596,10 @@ function enterTable(name) {
   }
   state.view = tableView(name);
 }
-function clearJoin() {
+function clearJoin(fallback) {
   const join = joinInView();
   if (!join) return;
-  const table = startTable(join);
+  const table = startTable(join) ?? fallback;
   enterTable(table);
   state.offset = 0;
   applyStoredSort(table);
@@ -2558,18 +2696,21 @@ function isPlainObject(v) {
 function knownScopeKey(...rest) {
   return state.scope.kind === "known" ? scopeKey(state.scope.source, state.scope.schema, ...rest) : null;
 }
-function scopeIdentity(...rest) {
-  return visitKey(state.scope.source, state.scope.schema, ...rest);
+function scopeIdentity() {
+  return visitKey(state.scope.source, state.scope.schema);
 }
 function chosenScope() {
   return {
     source: state.manySources ? state.scope.source : null,
-    schema: state.manySchemas ? state.scope.schema : null
+    schema: manySchemas() ? state.scope.schema : null
   };
 }
-function qualifiedTable(table) {
-  const { schema } = state.scope;
-  return schema && (state.manySchemas || state.noDefaultSchema) ? `${schema}.${table}` : table;
+function tableLabelOf(ref) {
+  return ref.schema !== null && ref.schema !== state.scope.schema ? `${ref.schema}.${ref.table}` : ref.table;
+}
+function qualifiedTable(ref) {
+  const { schema } = ref;
+  return schema && (manySchemas() || state.noDefaultSchema) ? `${schema}.${ref.table}` : ref.table;
 }
 function tableEntry(map, table) {
   const key = knownScopeKey(table);
@@ -2665,7 +2806,7 @@ function setSort(sort, order = "asc") {
   rememberSort();
 }
 function rememberSort() {
-  const table = tableInView();
+  const table = tableNameInView();
   if (!table) return;
   setTableEntry(state.sortByTable, table, state.sort ? { col: state.sort, order: state.order } : void 0);
   sortRisk.set(false);
@@ -2687,7 +2828,7 @@ function dropStoredSort(table) {
 function dropOneStaleInput(code) {
   if (state.filter !== "" && !filterRisk.isUnverified()) return false;
   if (sortRisk.isUnverified() && state.view && !NOT_THE_INPUTS.has(code ?? "")) {
-    dropStoredSort(tableInView());
+    dropStoredSort(tableNameInView());
     return true;
   }
   if (filterRisk.isUnverified() && FILTER_FAULTS.has(code ?? "")) {
@@ -2699,7 +2840,8 @@ function dropOneStaleInput(code) {
 var NOT_THE_INPUTS = /* @__PURE__ */ new Set(["query_timeout", "invalid_join", "not_readable"]);
 function dropStaleSort(req, code) {
   if (!req.restoredSort || NOT_THE_INPUTS.has(code ?? "")) return null;
-  setTableEntry(state.sortByTable, startTable(req.view), void 0);
+  const table = startTable(req.view);
+  if (table !== null) setTableEntry(state.sortByTable, table, void 0);
   persist();
   return { ...req, sort: null, order: "asc", restoredSort: false };
 }
@@ -2720,10 +2862,11 @@ function settleSource(source, many) {
   state.scope = source === null ? { kind: "failed", source, schema } : { kind: "loading", source, schema };
   state.manySources = many;
 }
-function settleSchema(schema, many, noDefault) {
+function settleSchema(schema, schemas, noDefault) {
   state.scope = schema === null ? { kind: "failed", source: state.scope.source, schema } : withSchema(state.scope, schema);
-  state.manySchemas = many;
+  state.schemas = schemas;
   state.noDefaultSchema = noDefault;
+  if (state.view?.kind === "join") state.view = joinView(state.view.def, state.view);
 }
 function setSchema(name) {
   state.scope = withSchema(state.scope, name);
@@ -2820,12 +2963,7 @@ function applyUrlExact(params) {
   restoreJoinFromParams(params);
   restoreFilterFromParams(params);
 }
-function applyScopeParams(params) {
-  const { source, schema } = state.scope;
-  if (source) params.set("source", source);
-  if (schema) params.set("schema", schema);
-}
-function dataParams(req) {
+function dataParams(req, scope2) {
   const { view, sort } = req;
   const params = new URLSearchParams({ limit: String(state.limit), offset: String(req.offset) });
   if (view.kind === "table") {
@@ -2835,22 +2973,16 @@ function dataParams(req) {
       params.set("order", req.order);
     }
   }
-  applyScopeParams(params);
+  scopeParams(scope2, params);
   if (req.filter) params.set("filter", JSON.stringify(req.ast));
   return params;
 }
-function tableDataPath(req) {
-  return `/tables/data?${dataParams(req)}`;
+function tableDataPath(req, scope2) {
+  return `/tables/data?${dataParams(req, scope2)}`;
 }
 function applyUrlScope(params) {
   const { source, schema } = chosenScope();
-  if (source) params.set("source", source);
-  if (schema) params.set("schema", schema);
-}
-function scopeQuery() {
-  const params = new URLSearchParams();
-  applyScopeParams(params);
-  return params.size ? `?${params}` : "";
+  scopeParams(schemaRef(source, schema), params);
 }
 function viewParams(view) {
   const params = new URLSearchParams({ table: startTable(view) ?? "" });
@@ -3139,7 +3271,7 @@ function clearViewNotice() {
 }
 function renderNote() {
   $("view-notice-text").replaceChildren(
-    ...customText === null ? buildFallbackNote(shownSwaps, tableInView(), placeLabel).map(render2) : [document.createTextNode(customText)]
+    ...customText === null ? buildFallbackNote(shownSwaps, tableNameInView(), placeLabel).map(render2) : [document.createTextNode(customText)]
   );
 }
 function showViewNotice(text) {
@@ -3542,8 +3674,8 @@ attachOverlayHighlight(input, render4);
 
 // src/lib/join-draft.ts
 var emptyPair = () => ({ leftJoin: 0, leftColumn: "", rightColumn: "" });
-function newDraft(table) {
-  const draft = { table, alias: "", joins: [], columns: [null], order: null };
+function newDraft(table, schema) {
+  const draft = { ...schemaOf({ schema }), table, alias: "", joins: [], columns: [null], order: null };
   addJoin(draft);
   return draft;
 }
@@ -3554,10 +3686,12 @@ function defToDraft(def) {
     return mine.some((c) => "all" in c) ? null : mine.map((c) => "column" in c ? c.column : "");
   });
   return {
+    ...schemaOf(def.tables[0]),
     table: def.tables[0].table,
     alias: def.tables[0].alias ?? "",
     joins: def.joins.map((j, i) => ({
       type: j.type,
+      ...schemaOf(def.tables[i + 1]),
       table: def.tables[i + 1].table,
       alias: def.tables[i + 1].alias ?? "",
       on: j.on.map((p) => ({ leftJoin: p.left.join, leftColumn: p.left.column, rightColumn: p.right }))
@@ -3566,22 +3700,28 @@ function defToDraft(def) {
     order: def.columns
   };
 }
+var qualified = (t) => t.schema === void 0 ? t.table : `${t.schema}.${t.table}`;
+function schemaOf(t) {
+  return t.schema === void 0 ? {} : { schema: t.schema };
+}
 var columnId = (c) => "all" in c ? `${c.join}.*` : `${c.join}.${c.column}`;
 function draftToDef(draft) {
   if (draft.joins.length === 0) return { error: "Add a table to join." };
-  const tables = [
-    { table: draft.table, alias: draft.alias.trim() || null },
-    ...draft.joins.map((j) => ({ table: j.table, alias: j.alias.trim() || null }))
-  ];
-  const seen = /* @__PURE__ */ new Set();
+  const tables = [draft, ...draft.joins].map((t) => ({
+    ...schemaOf(t),
+    table: t.table,
+    alias: t.alias.trim() || null
+  }));
+  const seen = /* @__PURE__ */ new Map();
   for (const [i, t] of tables.entries()) {
     if (t.table === "") return { error: i === 0 ? "Choose the table to start from." : `Choose a table for join ${i}.` };
     const name = t.alias ?? t.table;
-    if (seen.has(name))
+    const earlier = seen.get(name);
+    if (earlier)
       return {
-        error: t.alias === null ? `${t.table} is used twice; give the second use an alias.` : `The alias ${name} is used twice.`
+        error: t.alias !== null ? `The alias ${name} is used twice.` : earlier.schema === t.schema ? `${t.table} is used twice; give the second use an alias.` : `${qualified(earlier)} and ${qualified(t)} are both called ${name}; give the second one an alias.`
       };
-    seen.add(name);
+    seen.set(name, t);
   }
   const joins = [];
   for (const [i, j] of draft.joins.entries()) {
@@ -3625,9 +3765,11 @@ function removeJoin(draft, index) {
     }
   }
 }
-function setTableAt(draft, pos, table) {
-  if (pos === 0) draft.table = table;
-  else draft.joins[pos - 1].table = table;
+function setTableAt(draft, pos, table, schema) {
+  const target = pos === 0 ? draft : draft.joins[pos - 1];
+  target.table = table;
+  if (schema === void 0) delete target.schema;
+  else target.schema = schema;
   const own2 = Math.max(pos, 1) - 1;
   if (draft.joins[own2]) draft.joins[own2].on = [emptyPair()];
   for (const j of draft.joins.slice(own2 + 1)) {
@@ -3747,8 +3889,16 @@ function joinCompletionAt(text) {
       else if (upper === "SELECT") state2 = "select";
       else if (state2 !== "start") flush();
     } else if (t.kind === "name" && state2 === "table") {
-      table = unquote(w);
-      pending = { name: table, table };
+      const dot = before[k + 1];
+      const name = before[k + 2];
+      if (dot && text[dot.start] === "." && name?.kind === "name") {
+        table = unquote(text.slice(name.start, name.end));
+        pending = { name: table, schema: unquote(w), table };
+        k += 2;
+      } else {
+        table = unquote(w);
+        pending = { name: table, table };
+      }
       state2 = "after-table";
     } else if (t.kind === "name" && (state2 === "after-table" || state2 === "alias")) {
       if (pending) pending.name = unquote(w);
@@ -3770,7 +3920,7 @@ function joinCompletionAt(text) {
   const joinWords = ["JOIN", "INNER JOIN", "LEFT JOIN"];
   let expect = "none";
   let keywords = [];
-  if (qualifier !== null) expect = state2 === "colref" ? "column" : "none";
+  if (qualifier !== null) expect = state2 === "colref" ? "column" : state2 === "table" ? "table" : "none";
   else if (state2 === "table") expect = "table";
   else if (state2 === "colref") expect = "qualifier";
   else if (state2 === "after-table" && partial !== "") {
@@ -3839,14 +3989,15 @@ function unjoinableReason(column) {
 function pairNote(column, other) {
   return other === void 0 ? unjoinableReason(column) : joinMismatch(column, other)?.note ?? null;
 }
-function refersTo(c, table) {
-  return c.references?.table === table && c.references.schema === void 0;
+function refersTo(c, from, to) {
+  const r = c.references;
+  return r !== void 0 && r.table === to.table && (r.schema ?? from.schema) === to.schema && from.source === to.source;
 }
 function findForeignKey(earlier, table, own2) {
   for (const [at, e] of earlier.entries()) {
-    const out = e.columns.find((c) => refersTo(c, table));
+    const out = e.columns.find((c) => refersTo(c, e.table, table));
     if (out?.references) return { at, leftColumn: out.name, rightColumn: out.references.column };
-    const back = own2.find((c) => refersTo(c, e.table));
+    const back = own2.find((c) => refersTo(c, table, e.table));
     if (back?.references) return { at, leftColumn: back.references.column, rightColumn: back.name };
   }
   return null;
@@ -4111,12 +4262,8 @@ function renderStructure(data) {
     )
   );
 }
-function tableStructure(table) {
-  return cache.get(scopeIdentity(table), () => {
-    const params = new URLSearchParams({ table });
-    applyScopeParams(params);
-    return api(`/tables/structure?${params}`);
-  });
+function tableStructure(ref) {
+  return cache.get(refKey(ref), () => api(`/tables/structure?${tableParams(ref)}`));
 }
 function openStructure() {
   const table = tableInView();
@@ -4124,7 +4271,7 @@ function openStructure() {
   const token = ++requestToken;
   $("structure-title").textContent = `structure \u2014 ${qualifiedTable(table)}`;
   $("structure-dialog").showModal();
-  const hit = cache.peek(scopeIdentity(table));
+  const hit = cache.peek(refKey(table));
   if (hit) {
     renderStructure(hit);
     return;
@@ -4263,9 +4410,9 @@ async function loadTables({
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
   const [{ tables }, { counts: counts2 }] = await Promise.all([
-    api(`/tables${scopeQuery()}`),
+    api(`/tables${scopeQuery(scopeRef())}`),
     // Counts are a hint; a failure leaves the chips without them, not missing.
-    api(`/table-counts${scopeQuery()}`).catch((e) => {
+    api(`/table-counts${scopeQuery(scopeRef())}`).catch((e) => {
       console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
       return { counts: [] };
     })
@@ -4300,10 +4447,10 @@ async function loadTables({
   updateTablesCap();
   markTiming("tables-listed");
   const tableNames = tables.map((t) => t.name);
-  const fellBack = !tableNames.includes(startTable(next ? next.view : state.view) ?? "");
+  const fellBack = startMissingFrom(next ? next.view : state.view, tableNames);
   if (fellBack) {
     enterTable(tableNames[0] ?? null);
-    applyStoredSort(tableInView());
+    applyStoredSort(tableNameInView());
     clearFilter();
   }
   await loadData({ replaceHistory, next: fellBack ? void 0 : next, reason });
@@ -4335,8 +4482,8 @@ function prefetchOnRest(chip, name) {
   const start = () => {
     cancel();
     timer2 = setTimeout(() => {
-      if (!chip.isConnected || !chipsListScopeInView() || name === tableInView()) return;
-      prefetch(tableDataPath(tableRequest(name)), "view", PREFETCH_TTL_MS);
+      if (!chip.isConnected || !chipsListScopeInView() || name === tableNameInView()) return;
+      prefetch(tableDataPath(tableRequest(name), scopeRef()), "view", PREFETCH_TTL_MS);
     }, PREFETCH_REST_MS);
   };
   chip.addEventListener("pointerenter", (e) => {
@@ -4388,6 +4535,9 @@ var cache2 = /* @__PURE__ */ new Map();
 var resolved = /* @__PURE__ */ new Map();
 var indexes = /* @__PURE__ */ new Map();
 var indexesRead = /* @__PURE__ */ new Map();
+var schemaTables = /* @__PURE__ */ new Map();
+var schemaTablesRead = /* @__PURE__ */ new Map();
+var schemaTablesFailed = /* @__PURE__ */ new Map();
 var generation = 0;
 var version = 0;
 function clearJoinCatalog() {
@@ -4395,6 +4545,9 @@ function clearJoinCatalog() {
   resolved.clear();
   indexes.clear();
   indexesRead.clear();
+  schemaTables.clear();
+  schemaTablesRead.clear();
+  schemaTablesFailed.clear();
   generation++;
   version++;
 }
@@ -4402,18 +4555,17 @@ function catalogVersion() {
   return version;
 }
 function seedColumns(table, columns) {
-  const key = scopeIdentity(table);
+  const key = refKey(table);
   if (resolved.has(key)) return;
   resolved.set(key, columns);
   version++;
   cache2.set(key, Promise.resolve(columns));
 }
 function tableColumns(table) {
-  const key = scopeIdentity(table);
+  const key = refKey(table);
   let columns = cache2.get(key);
   if (!columns) {
-    const params = new URLSearchParams({ table, limit: "1", offset: "0" });
-    applyScopeParams(params);
+    const params = tableParams(table, { limit: "1", offset: "0" });
     const started = generation;
     const asked2 = api(`/tables/data?${params}`).then((d) => {
       if (started === generation) {
@@ -4432,13 +4584,62 @@ function tableColumns(table) {
   return columns;
 }
 function cachedColumns(table) {
-  return resolved.get(scopeIdentity(table));
+  return resolved.get(refKey(table));
 }
 function knownCatalog() {
-  return Object.fromEntries(listedTableNames().map((t) => [t, cachedColumns(t)?.map((c) => c.name) ?? null]));
+  return Object.fromEntries(
+    listedTableNames().map((t) => [t, cachedColumns(refInScope(t))?.map((c) => c.name) ?? null])
+  );
+}
+function tablesIn(scope2) {
+  const key = scopeQuery(scope2);
+  let read2 = schemaTables.get(key);
+  if (!read2) {
+    const started = generation;
+    read2 = Promise.all([
+      api(`/tables${key}`),
+      api(`/table-counts${key}`).catch(() => ({ counts: [] }))
+    ]).then(([{ tables }, { counts: counts2 }]) => {
+      if (started !== generation) return;
+      const countOf = new Map(counts2.map((c) => [c.table, c.approx_rows]));
+      schemaTablesRead.set(
+        key,
+        tables.map((t) => ({ name: t.name, count: formatApproxCount(countOf.get(t.name)) }))
+      );
+      version++;
+    });
+    schemaTables.set(key, read2);
+    read2.catch((e) => {
+      if (started !== generation) return;
+      schemaTablesFailed.set(key, e instanceof Error ? e.message : String(e));
+      console.warn("ashurbanipal: the join builder could not list a schema's tables", e);
+      version++;
+    });
+  }
+  return read2;
+}
+function tablesInFailure(schema) {
+  return schemaTablesFailed.get(scopeQuery(schemaRef(state.scope.source, schema)));
+}
+function cachedTablesIn(schema) {
+  if (schema === null || schema === state.scope.schema)
+    return listedTableNames().map((name) => ({ name, count: tableChipCount(name) }));
+  return schemaTablesRead.get(scopeQuery(schemaRef(state.scope.source, schema)));
+}
+function knownSchemas(own2) {
+  if (state.schemas.length === 0) return void 0;
+  const catalogOf = (schema) => {
+    if (schema === state.scope.schema) return own2;
+    const tables = cachedTablesIn(schema);
+    if (!tables) return null;
+    return Object.fromEntries(
+      tables.map((t) => [t.name, cachedColumns(refFor({ schema, table: t.name }))?.map((c) => c.name) ?? null])
+    );
+  };
+  return Object.fromEntries(state.schemas.map((s) => [s, catalogOf(s)]));
 }
 function indexedColumns(table) {
-  const key = scopeIdentity(table);
+  const key = refKey(table);
   let found = indexes.get(key);
   if (!found) {
     const asked2 = generation;
@@ -4454,7 +4655,7 @@ function indexedColumns(table) {
   return found;
 }
 function readIndexedColumns(table) {
-  return indexesRead.get(scopeIdentity(table));
+  return indexesRead.get(refKey(table));
 }
 
 // src/features/join-form.ts
@@ -4465,13 +4666,14 @@ function textButton(text, className, label, run) {
   b.onclick = run;
   return b;
 }
-var tableOptions = () => listedTableNames().map((t) => ({ value: t, label: t, note: tableChipCount(t) }));
 function mountJoinForm(root, onChange) {
   let draft = newDraft("");
   let loadToken2 = 0;
-  const tableAt = (pos) => pos === 0 ? draft.table : draft.joins[pos - 1].table;
-  const nameAt = (pos) => (pos === 0 ? draft.alias : draft.joins[pos - 1].alias).trim() || tableAt(pos);
-  const columnsAt = (pos) => cachedColumns(tableAt(pos)) ?? [];
+  const slot = (pos) => pos === 0 ? draft : draft.joins[pos - 1];
+  const tableAt = (pos) => slot(pos).table;
+  const refAt = (pos) => refFor(slot(pos));
+  const nameAt = (pos) => slot(pos).alias.trim() || tableAt(pos);
+  const columnsAt = (pos) => tableAt(pos) ? cachedColumns(refAt(pos)) ?? [] : [];
   const columnOf = (pos, column) => columnsAt(pos).find((c) => c.name === column);
   const mismatch = (pos, pair) => {
     const leftCol = columnOf(pair.leftJoin, pair.leftColumn);
@@ -4479,14 +4681,13 @@ function mountJoinForm(root, onChange) {
     return leftCol && rightCol ? joinMismatch(leftCol, rightCol) : null;
   };
   function foreignKey(pos) {
-    const earlier = Array.from({ length: pos }, (_, p) => ({ table: tableAt(p), columns: columnsAt(p) }));
-    const fk = findForeignKey(earlier, tableAt(pos), columnsAt(pos));
+    const earlier = Array.from({ length: pos }, (_, p) => ({ table: refAt(p), columns: columnsAt(p) }));
+    const fk = findForeignKey(earlier, refAt(pos), columnsAt(pos));
     return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
   async function load() {
-    const missing = [.../* @__PURE__ */ new Set([draft.table, ...draft.joins.map((j) => j.table)])].filter(
-      (t) => t && !cachedColumns(t)
-    );
+    const named = [draft, ...draft.joins].filter((t) => t.table !== "");
+    const missing = distinctRefs(named.map(refFor)).filter((r) => !cachedColumns(r));
     if (missing.length === 0) return;
     const token = ++loadToken2;
     const results = await Promise.allSettled(missing.map(tableColumns));
@@ -4507,10 +4708,56 @@ function mountJoinForm(root, onChange) {
     onChange();
   };
   const pickTable = (pos, table) => {
-    const at = setTableAt(draft, pos, table);
+    const at = setTableAt(draft, pos, table, slot(pos).schema);
     const join = draft.joins[at];
     if (join && join.table !== "") join.on = [foreignKey(at + 1) ?? emptyPair()];
     changed(true);
+  };
+  const tableOptions = (schema) => {
+    const tables = cachedTablesIn(schema ?? state.scope.schema);
+    if (tables) return tables.map((t) => ({ value: t.name, label: t.name, note: t.count }));
+    if (schema === void 0) return [];
+    if (!state.schemas.includes(schema))
+      return [{ value: "", label: `${schema} is not a listed schema`, blocked: true }];
+    const failure = tablesInFailure(schema);
+    if (failure) return [{ value: "", label: "could not list tables", note: failure, blocked: true }];
+    tablesIn(schemaRef(state.scope.source, schema)).then(
+      () => changed(),
+      () => changed()
+    );
+    return [{ value: "", label: "loading\u2026", blocked: true }];
+  };
+  const tablePicker = (name, t, pos) => {
+    const scope2 = state.scope.schema;
+    const listed = t.schema === void 0 || state.schemas.includes(t.schema) ? state.schemas : [...state.schemas, t.schema];
+    const schema = t.schema ?? scope2;
+    const table = createDropdown({
+      ariaLabel: `${name} table`,
+      options: tableOptions(t.schema),
+      value: t.table,
+      display: t.table || void 0,
+      placeholder: "choose a table",
+      mono: true,
+      searchable: true,
+      onPick: (v) => {
+        if (v !== t.table) pickTable(pos, v);
+      }
+    });
+    if (!manySchemas() && t.schema === void 0) return [table];
+    const schemas = createDropdown({
+      ariaLabel: `${name} schema`,
+      options: listed.map((s) => ({ value: s, label: s, note: s === scope2 ? "this schema" : void 0 })),
+      value: schema ?? "",
+      placeholder: "schema",
+      mono: true,
+      searchable: state.schemas.length > 8,
+      onPick: (v) => {
+        if (v === schema) return;
+        setTableAt(draft, pos, "", v === scope2 ? void 0 : v);
+        changed(true);
+      }
+    });
+    return [schemas, el("span", "jmuted", "."), table];
   };
   const aliasInput = (value, label, set) => {
     const input2 = el("input", "j-alias");
@@ -4608,18 +4855,7 @@ function mountJoinForm(root, onChange) {
           changed(true);
         }
       }),
-      createDropdown({
-        ariaLabel: `join ${pos} table`,
-        options: tableOptions(),
-        value: join.table,
-        display: join.table || void 0,
-        placeholder: "choose a table",
-        mono: true,
-        searchable: true,
-        onPick: (v) => {
-          if (v !== join.table) pickTable(pos, v);
-        }
-      }),
+      ...tablePicker(`join ${pos}`, join, pos),
       el("span", "j-kw", "as"),
       aliasInput(join.alias, `join ${pos} alias`, (v) => {
         join.alias = v;
@@ -4735,23 +4971,12 @@ function mountJoinForm(root, onChange) {
     parts.push(el("div", "jlab", "Start from"));
     const start = el("div", "j-start");
     start.append(
-      createDropdown({
-        ariaLabel: "start table",
-        options: tableOptions(),
-        value: draft.table,
-        display: draft.table || void 0,
-        placeholder: "choose a table",
-        mono: true,
-        searchable: true,
-        onPick: (v) => {
-          if (v !== draft.table) pickTable(0, v);
-        }
-      }),
+      ...tablePicker("start", draft, 0),
       aliasInput(draft.alias, "start table alias", (v) => {
         draft.alias = v;
       })
     );
-    if (state.view?.kind === "table" && state.view.table === draft.table)
+    if (state.view?.kind === "table" && state.view.table === draft.table && draft.schema === void 0)
       start.append(el("span", "jmuted", "the table you are viewing"));
     parts.push(start);
     parts.push(el("div", "jlab", `Joins \xB7 ${draft.joins.length} of ${JOIN_MAX_TABLES - 1}`));
@@ -4796,34 +5021,6 @@ function mountJoinForm(root, onChange) {
       return null;
     }
   };
-}
-
-// src/lib/join-def.ts
-function tableLabel(t) {
-  return t.alias === null ? t.table : `${t.table} ${t.alias}`;
-}
-function joinLabel(def) {
-  return def.tables.map((t, i) => i === 0 ? tableLabel(t) : `${def.joins[i - 1].type === "left" ? "\u27D5" : "\u22C8"} ${tableLabel(t)}`).join(" ");
-}
-function selectsEverything(def) {
-  if (def.columns === null) return true;
-  return def.columns.length === def.tables.length && def.columns.every((c, i) => "all" in c && c.join === i);
-}
-function tablesToExpand(def) {
-  if (selectsEverything(def)) return [];
-  return [...new Set((def.columns ?? []).filter((c) => "all" in c).map((c) => c.join))];
-}
-function toWire(def, columnsOf) {
-  const wire = {
-    table: def.tables[0].table,
-    joins: def.joins.map((j, i) => ({ type: j.type, table: def.tables[i + 1].table, on: j.on }))
-  };
-  if (def.columns !== null && !selectsEverything(def)) {
-    wire.columns = def.columns.flatMap(
-      (c) => "all" in c ? columnsOf(c.join).map((column) => ({ join: c.join, column })) : [c]
-    );
-  }
-  return wire;
 }
 
 // src/lib/join-saved.ts
@@ -4956,7 +5153,7 @@ function renderSavedChips(actions) {
   });
   if (current2 && !inSaved) {
     chips.push({
-      label: `\u22C8 ${joinLabel(current2.def)}`,
+      label: `\u22C8 ${joinLabel(current2.def, state.scope.schema)}`,
       title: "this join is not saved",
       className: "unsaved",
       active: true,
@@ -4995,16 +5192,19 @@ function typeChip(col) {
 }
 function fkLink(col, raw, row2, meta) {
   const ref = col.references;
+  const fk = ref ? void 0 : meta?.compositeFkOf.get(col.name);
+  if (!ref && !fk) return null;
+  const owner = columnTable(col);
+  if (owner === null) return null;
   if (ref) {
     const clause2 = filterClause(ref.column, "=", raw);
     if (filterTooLong(clause2)) return null;
-    return { title: `go to ${refTarget(ref)} = ${raw}`, table: ref.table, schema: ref.schema, clause: clause2 };
+    return { title: `go to ${refTarget(ref)} = ${raw}`, target: near(owner, ref.schema, ref.table), clause: clause2 };
   }
-  const fk = meta?.compositeFkOf.get(col.name);
   if (!fk?.columns.every((c) => row2[c.from] != null)) return null;
   const clause = filterClauses(fk.columns.map((c) => ({ column: c.to, value: row2[c.from] })));
   if (filterTooLong(clause)) return null;
-  return { title: `go to ${fkTarget(fk)} where ${clause}`, table: fk.table, schema: fk.schema, clause };
+  return { title: `go to ${fkTarget(fk)} where ${clause}`, target: near(owner, fk.schema, fk.table), clause };
 }
 function eqButton(isNull, onClick) {
   const btn = el("button", "filter-eq", "=");
@@ -5155,8 +5355,8 @@ function errorSpan(text, tokens, index, code) {
     const eol = text.indexOf("\n", word.end);
     return [index, eol < 0 ? text.length : eol];
   }
-  const qualified = textOf(next) === "." && next.start === word.end && after?.start === next.end && (after.kind === "name" || after.kind === "keyword");
-  return [index, qualified ? after.end : word.end];
+  const qualified2 = textOf(next) === "." && next.start === word.end && after?.start === next.end && (after.kind === "name" || after.kind === "keyword");
+  return [index, qualified2 ? after.end : word.end];
 }
 function aliasFor(table, taken) {
   const initials = table.split("_").filter(Boolean).map((w) => w[0]).join("").toLowerCase().replace(/[^a-z0-9_]/g, "");
@@ -5169,16 +5369,23 @@ function mountJoinSql(onChange) {
   const field = $("join-sql");
   const hlText = $("join-sql-hl-text");
   const pairCheck = (a, b) => {
-    const ac = cachedColumns(a.table)?.find((c) => c.name === a.column);
-    const bc = cachedColumns(b.table)?.find((c) => c.name === b.column);
+    const ac = cachedColumns(refFor(a))?.find((c) => c.name === a.column);
+    const bc = cachedColumns(refFor(b))?.find((c) => c.name === b.column);
     return ac && bc ? joinMismatch(ac, bc)?.message ?? null : null;
   };
   let memo = null;
   const parse = () => {
     const text = field.value;
     const version2 = catalogVersion();
-    if (memo?.text !== text || memo.version !== version2)
-      memo = { text, version: version2, result: parseJoin(text, { catalog: knownCatalog(), pairCheck }) };
+    if (memo?.text !== text || memo.version !== version2) {
+      const catalog = knownCatalog();
+      const scopeSchema = state.scope.schema ?? void 0;
+      memo = {
+        text,
+        version: version2,
+        result: parseJoin(text, { catalog, schemas: knownSchemas(catalog), scopeSchema, pairCheck })
+      };
+    }
     return memo.result;
   };
   function render6() {
@@ -5222,7 +5429,10 @@ function mountJoinSql(onChange) {
     return (name) => name.toLowerCase().startsWith(partial);
   };
   const anyRead = (results) => results.some((r) => r.status === "fulfilled");
-  const tableOf = (ctx, name) => ctx.declared.find((d) => d.name === name)?.table;
+  const tableOf = (ctx, name) => {
+    const d = ctx.declared.find((t) => t.name === name);
+    return d && refFor(d);
+  };
   async function columnRows(ctx) {
     const table = tableOf(ctx, ctx.qualifier);
     if (!table) return [];
@@ -5233,7 +5443,7 @@ function mountJoinSql(onChange) {
         if (document.activeElement === field) void update2();
       });
     const otherTable = ctx.otherSide ? tableOf(ctx, ctx.otherSide.qualifier) : void 0;
-    const other = (cachedColumns(otherTable ?? "") ?? []).find((c) => c.name === ctx.otherSide?.column);
+    const other = (otherTable ? cachedColumns(otherTable) ?? [] : []).find((c) => c.name === ctx.otherSide?.column);
     const starts = startsWith(ctx);
     return columns.filter((c) => starts(c.name)).map((c) => {
       const note = pairNote(c, other);
@@ -5246,30 +5456,37 @@ function mountJoinSql(onChange) {
       };
     });
   }
-  function foreignKeyClause(ctx, taken, table) {
-    const earlier = ctx.declared.map((d) => ({ table: d.table, columns: cachedColumns(d.table) ?? [] }));
-    const fk = findForeignKey(earlier, table, cachedColumns(table) ?? []);
+  function foreignKeyClause(ctx, earlier, taken, ref) {
+    const { table } = ref;
+    const fk = findForeignKey(earlier, ref, cachedColumns(ref) ?? []);
     if (!fk) return void 0;
     const alias = aliasFor(table, taken);
     const left = quoteJoinName(ctx.declared[fk.at].name);
     return `${quoteJoinName(table)} ${alias} ON ${left}.${quoteJoinName(fk.leftColumn)} = ${alias}.${quoteJoinName(fk.rightColumn)}`;
   }
-  function tableRows(ctx, candidates) {
-    const used = new Set(ctx.declared.map((d) => d.table));
+  function tableRows(ctx, candidates, schema) {
+    const own2 = (s) => s ?? state.scope.schema;
+    const used = new Set(ctx.declared.filter((d) => own2(d.schema) === own2(schema)).map((d) => d.table));
     const taken = new Set(ctx.declared.map((d) => d.name));
+    const earlier = ctx.declared.map(refFor).map((table) => ({ table, columns: cachedColumns(table) ?? [] }));
     const withKey = [];
     const rest = [];
-    for (const table of candidates) {
-      const clause = used.has(table) ? void 0 : foreignKeyClause(ctx, taken, table);
+    for (const { name: table, count } of candidates) {
+      const clause = used.has(table) ? void 0 : foreignKeyClause(ctx, earlier, taken, refFor({ schema, table }));
       if (clause) withKey.push({ label: clause, insert: `${clause} `, tag: "foreign key" });
       else
         rest.push({
           label: table,
           insert: `${quoteJoinName(table)} `,
-          note: used.has(table) ? "already used \xB7 add as alias" : tableChipCount(table)
+          note: used.has(table) ? "already used \xB7 add as alias" : count
         });
     }
     return [...withKey, ...rest];
+  }
+  function schemaRows(ctx) {
+    if (!manySchemas()) return [];
+    const starts = startsWith(ctx);
+    return state.schemas.filter((s) => s !== state.scope.schema && starts(s)).map((s) => ({ label: `${s}.`, insert: `${quoteJoinName(s)}.`, note: "schema" }));
   }
   async function update2() {
     suggest2.close();
@@ -5278,15 +5495,27 @@ function mountJoinSql(onChange) {
     const ctx = joinCompletionAt(field.value);
     let rows = [];
     if (ctx.expect === "table") {
-      const candidates = listedTableNames().filter(startsWith(ctx));
-      const wanted = [...ctx.declared.map((d) => d.table), ...candidates.length <= 8 ? candidates : []];
-      const missing = [...new Set(wanted)].filter((t) => !cachedColumns(t));
+      const schema = ctx.qualifier ?? void 0;
+      const listed = cachedTablesIn(schema ?? state.scope.schema);
+      if (!listed && schema !== void 0 && state.schemas.includes(schema)) {
+        tablesIn(schemaRef(state.scope.source, schema)).then(
+          () => {
+            if (token === suggest2.token()) void update2();
+          },
+          () => {
+          }
+        );
+      }
+      const starts = startsWith(ctx);
+      const candidates = (listed ?? []).filter((t) => starts(t.name));
+      const candidateRefs = candidates.length <= 8 ? candidates.map((t) => refFor({ schema, table: t.name })) : [];
+      const missing = distinctRefs([...ctx.declared.map(refFor), ...candidateRefs]).filter((t) => !cachedColumns(t));
       if (missing.length > 0) {
         void Promise.allSettled(missing.map(tableColumns)).then((results) => {
           if (anyRead(results) && token === suggest2.token()) void update2();
         });
       }
-      rows = tableRows(ctx, candidates);
+      rows = [...tableRows(ctx, candidates, schema), ...schema === void 0 ? schemaRows(ctx) : []];
     } else if (ctx.expect === "qualifier") {
       const starts = startsWith(ctx);
       rows = ctx.declared.filter((d) => starts(d.name)).map((d) => ({ label: d.name, insert: `${quoteJoinName(d.name)}.`, note: d.name === d.table ? "" : d.table }));
@@ -5301,10 +5530,26 @@ function mountJoinSql(onChange) {
     suggest2.show(rows, ctx.head);
   }
   function prefetch2() {
-    const listed = new Set(listedTableNames());
-    const wanted = [...new Set(joinCompletionAt(field.value).declared.map((d) => d.table))].filter(
-      (t) => listed.has(t) && !cachedColumns(t)
+    const declared = joinCompletionAt(field.value).declared;
+    const unread = new Set(
+      declared.map((d) => d.schema).filter(
+        (s) => s !== void 0 && state.schemas.includes(s) && !cachedTablesIn(s) && !tablesInFailure(s)
+      )
     );
+    for (const schema of unread) {
+      tablesIn(schemaRef(state.scope.source, schema)).then(
+        () => {
+          prefetch2();
+          render6();
+          onChange();
+        },
+        () => {
+        }
+      );
+    }
+    const listed = (d) => cachedTablesIn(d.schema ?? state.scope.schema)?.some((t) => t.name === d.table) ?? false;
+    const named = declared.filter(listed);
+    const wanted = distinctRefs(named.map(refFor)).filter((t) => !cachedColumns(t));
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
       if (!anyRead(results)) return;
@@ -5328,12 +5573,166 @@ function mountJoinSql(onChange) {
   };
 }
 
+// src/features/scope-select.ts
+async function loadSources() {
+  let names;
+  let defaultSource;
+  try {
+    let sources;
+    ({ sources, default: defaultSource } = await api("/sources"));
+    names = sources.map((s) => s.name);
+    nameStartupDefault("source", defaultSource);
+  } catch (e) {
+    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
+    settleSource(null, false);
+    return;
+  }
+  const wanted = state.scope.source;
+  const fallback = names.includes(defaultSource) ? defaultSource : names[0] ?? null;
+  const source = wanted !== null && names.includes(wanted) ? wanted : fallback;
+  settleSource(source, names.length > 1);
+  if (!state.manySources) return;
+  populateSelect($("source-select"), names, source);
+  $("source-select-wrap").hidden = false;
+}
+$("source-select").onchange = () => {
+  supersedeLoads();
+  switchSource($("source-select").value);
+  loadSchemas().then((current2) => current2 ? loadTables() : void 0).catch(reportError);
+};
+var loadSchemasToken = 0;
+async function loadSchemas() {
+  syncGridLock();
+  const token = ++loadSchemasToken;
+  const { source } = state.scope;
+  let schemas;
+  let defaultSchema;
+  try {
+    const listing = await api(`/schemas${sourceQuery()}`);
+    schemas = listing.schemas.map((s) => s.name);
+    defaultSchema = listing.default ?? null;
+    nameStartupDefault("schema", defaultSchema, { source });
+  } catch (e) {
+    if (token !== loadSchemasToken) return false;
+    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
+    settleSchema(null, [], false);
+    $("schema-select-wrap").hidden = true;
+    markTiming("scope-settled");
+    return true;
+  }
+  if (token !== loadSchemasToken) return false;
+  const wanted = state.scope.schema;
+  const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema ?? schemas[0] ?? null;
+  settleSchema(schema, schemas, defaultSchema === null);
+  if (schema !== null) populateSelect($("schema-select"), schemas, schema);
+  $("schema-select-wrap").hidden = !manySchemas();
+  markTiming("scope-settled");
+  return true;
+}
+$("schema-select").onchange = () => {
+  supersedeLoads();
+  switchSchema($("schema-select").value);
+  loadTables().catch(reportError);
+};
+
+// src/features/view-history.ts
+function navigateWithSeededFilter(target, clause) {
+  let ast;
+  try {
+    ast = parseFilterDsl(clause);
+  } catch (e) {
+    reportError(e);
+    return;
+  }
+  openTable(target, clause, ast, `${target.table} isn't independently browsable in schema ${target.schema}`);
+}
+function openTableUnfiltered(target) {
+  openTable(target, "", [], `${target.table} isn't a table of schema ${target.schema}`);
+}
+function openTable(target, clause, ast, missing) {
+  const { table, schema } = target;
+  const req = {
+    ...tableRequest(table),
+    sort: null,
+    order: "asc",
+    restoredSort: false,
+    filter: clause,
+    ast
+  };
+  if (schema === null || schema === state.scope.schema) {
+    loadData({ next: req });
+    return;
+  }
+  supersedeLoads();
+  enterTable(table);
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
+  setSchema(schema);
+  loadTables({ next: req }).then((outcome) => {
+    if (outcome === "fell-back") {
+      reportError(new Error(missing));
+    }
+  }).catch(reportError);
+}
+var written = null;
+function noteStartupSettled() {
+  written ??= location.search;
+}
+function syncUrl(replaceHistory) {
+  const params = viewParams(state.view);
+  params.set("limit", String(state.limit));
+  params.set("offset", String(state.offset));
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
+  if (state.filter) params.set("filter", state.filter);
+  const query = params.toString();
+  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
+    history.replaceState(null, "", `?${query}`);
+  } else {
+    history.pushState(null, "", `?${query}`);
+  }
+  written = location.search;
+}
+window.addEventListener("popstate", () => {
+  if (written === null) {
+    location.reload();
+    return;
+  }
+  if (location.search === written) return;
+  written = location.search;
+  supersedeLoads();
+  const params = new URLSearchParams(location.search);
+  const previousSource = state.scope.source;
+  const previousSchema = state.scope.schema;
+  applyUrlExact(params);
+  $("source-select").value = state.scope.source ?? "";
+  $("schema-select").value = state.scope.schema ?? "";
+  persist();
+  if (state.scope.source === previousSource) {
+    const listed = chipsListScopeInView() && !startMissingFrom(state.view, listedTableNames());
+    if (state.scope.schema === previousSchema && listed) {
+      loadData({ replaceHistory: true, reason: "history" });
+      return;
+    }
+    loadTables({ replaceHistory: true, reason: "history" }).catch(reportError);
+    return;
+  }
+  loadSchemas().then((current2) => current2 ? loadTables({ replaceHistory: true, reason: "history" }) : void 0).catch(reportError);
+});
+
 // src/features/join-dialog.ts
 var dialog = $("join-dialog");
 var formTab = $("join-mode-form");
 var sqlTab = $("join-mode-sql");
 var runBtn = $("join-run");
 var mode = "form";
+function startDraft() {
+  const start = startOf(state.view);
+  return newDraft(start?.table ?? "", start?.schema);
+}
 var handoff = null;
 var untouched = () => handoff !== null && sql.text() === handoff.text;
 function problem() {
@@ -5386,7 +5785,7 @@ function openJoinDialog(opts = {}) {
   editingSaved = saved?.name;
   $("join-name").value = saved?.name ?? "";
   $("join-delete").hidden = saved === void 0;
-  form.setDraft(def ? defToDraft(def) : newDraft(startTable(state.view) ?? ""));
+  form.setDraft(def ? defToDraft(def) : startDraft());
   handoff = null;
   setMode("form");
   $("join-sql-error").textContent = "";
@@ -5416,9 +5815,10 @@ runBtn.onclick = () => {
     $("join-error").textContent = typeof result.error === "string" ? result.error : problem();
     return;
   }
+  const req = joinRequest(result.def);
   const name = $("join-name").value.trim();
   if (name !== "") {
-    const failure = saveJoin(name, printJoin(result.def), editingSaved);
+    const failure = saveJoin(name, req.view.text, editingSaved);
     if (failure) {
       $("join-error").textContent = failure;
       return;
@@ -5426,13 +5826,18 @@ runBtn.onclick = () => {
   }
   committed = true;
   dialog.close();
-  applyJoin(result.def);
+  loadData({ next: req });
 };
 var committed = false;
 dialog.addEventListener("close", () => {
   if (committed) committed = false;
   else if (joinInView() && !viewIsShown()) {
-    clearJoin();
+    const start = startOf(state.view);
+    if (start?.schema !== void 0 && state.schemas.includes(start.schema)) {
+      openTableUnfiltered(refFor(start));
+      return;
+    }
+    clearJoin(listedTableNames()[0] ?? null);
     persist();
     loadData({ replaceHistory: true });
   }
@@ -5449,7 +5854,7 @@ formTab.onclick = () => {
   else {
     const parsed = sql.text().trim() ? sql.parse() : null;
     if (parsed && "error" in parsed) return;
-    form.setDraft(parsed ? defToDraft(parsed.def) : newDraft(startTable(state.view) ?? ""));
+    form.setDraft(parsed ? defToDraft(parsed.def) : startDraft());
   }
   setMode("form");
   refresh();
@@ -5473,7 +5878,12 @@ function columnKey(col, def = joinInView()?.def) {
   return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
 }
 function tableGroups(columns, def) {
-  return def.tables.map((t, index) => ({ label: tableLabel(t), index, columns: columns.filter((c) => c.join === index) })).filter((g) => g.columns.length > 0);
+  const schemas = labelSchemas(def, state.scope.schema);
+  return def.tables.map((t, index) => ({
+    label: tableLabel(t, schemas[index]),
+    index,
+    columns: columns.filter((c) => c.join === index)
+  })).filter((g) => g.columns.length > 0);
 }
 function displayName(col) {
   return col.column ?? col.name;
@@ -5489,6 +5899,7 @@ function splitColumnKey(key, def) {
 function buildBands(columns, heads) {
   const def = joinInView()?.def;
   if (!def) return null;
+  const schemas = labelSchemas(def, state.scope.schema);
   const tr = el("tr", "bands");
   tr.appendChild(el("th", "row-actions"));
   let band = null;
@@ -5499,10 +5910,14 @@ function buildBands(columns, heads) {
       band = el("th", "band");
       band.dataset.band = String(col.join);
       band.dataset.run = String(tr.cells.length);
-      const label = tableLabel(t);
+      const schema = schemas[col.join];
+      const label = tableLabel(t, schema);
       const pill = el("span", "band-pill");
       pill.title = label;
-      pill.appendChild(el("span", "band-pill-text", label));
+      const text = el("span", "band-pill-text");
+      if (schema !== void 0) text.append(el("span", "band-pill-schema", `${schema}.`));
+      text.append(label.slice(schema === void 0 ? 0 : schema.length + 1));
+      pill.appendChild(text);
       band.appendChild(pill);
       tr.appendChild(band);
     }
@@ -5558,172 +5973,30 @@ function buildEmptyJoin(onLeft) {
   return box;
 }
 
-// src/features/scope-select.ts
-async function loadSources() {
-  let names;
-  let defaultSource;
-  try {
-    let sources;
-    ({ sources, default: defaultSource } = await api("/sources"));
-    names = sources.map((s) => s.name);
-    nameStartupDefault("source", defaultSource);
-  } catch (e) {
-    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    settleSource(null, false);
-    return;
-  }
-  const wanted = state.scope.source;
-  const fallback = names.includes(defaultSource) ? defaultSource : names[0] ?? null;
-  const source = wanted !== null && names.includes(wanted) ? wanted : fallback;
-  settleSource(source, names.length > 1);
-  if (!state.manySources) return;
-  populateSelect($("source-select"), names, source);
-  $("source-select-wrap").hidden = false;
-}
-$("source-select").onchange = () => {
-  supersedeLoads();
-  switchSource($("source-select").value);
-  loadSchemas().then((current2) => current2 ? loadTables() : void 0).catch(reportError);
-};
-var loadSchemasToken = 0;
-async function loadSchemas() {
-  syncGridLock();
-  const token = ++loadSchemasToken;
-  const { source } = state.scope;
-  let schemas;
-  let defaultSchema;
-  try {
-    const listing = await api(`/schemas${sourceQuery()}`);
-    schemas = listing.schemas.map((s) => s.name);
-    defaultSchema = listing.default ?? null;
-    nameStartupDefault("schema", defaultSchema, { source });
-  } catch (e) {
-    if (token !== loadSchemasToken) return false;
-    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
-    settleSchema(null, false, false);
-    $("schema-select-wrap").hidden = true;
-    markTiming("scope-settled");
-    return true;
-  }
-  if (token !== loadSchemasToken) return false;
-  const wanted = state.scope.schema;
-  const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema ?? schemas[0] ?? null;
-  settleSchema(schema, schemas.length > 1, defaultSchema === null);
-  if (schema !== null) populateSelect($("schema-select"), schemas, schema);
-  $("schema-select-wrap").hidden = !state.manySchemas;
-  markTiming("scope-settled");
-  return true;
-}
-$("schema-select").onchange = () => {
-  supersedeLoads();
-  switchSchema($("schema-select").value);
-  loadTables().catch(reportError);
-};
-
-// src/features/view-history.ts
-function navigateWithSeededFilter(table, schema, clause) {
-  let ast;
-  try {
-    ast = parseFilterDsl(clause);
-  } catch (e) {
-    reportError(e);
-    return;
-  }
-  const req = {
-    ...tableRequest(table),
-    sort: null,
-    order: "asc",
-    restoredSort: false,
-    filter: clause,
-    ast
-  };
-  if (!schema || schema === state.scope.schema) {
-    loadData({ next: req });
-    return;
-  }
-  supersedeLoads();
-  enterTable(table);
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
-  setSchema(schema);
-  loadTables({ next: req }).then((outcome) => {
-    if (outcome === "fell-back") {
-      reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
-    }
-  }).catch(reportError);
-}
-var written = null;
-function noteStartupSettled() {
-  written ??= location.search;
-}
-function syncUrl(replaceHistory) {
-  const params = viewParams(state.view);
-  params.set("limit", String(state.limit));
-  params.set("offset", String(state.offset));
-  if (state.sort) {
-    params.set("sort", state.sort);
-    params.set("order", state.order);
-  }
-  if (state.filter) params.set("filter", state.filter);
-  const query = params.toString();
-  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
-    history.replaceState(null, "", `?${query}`);
-  } else {
-    history.pushState(null, "", `?${query}`);
-  }
-  written = location.search;
-}
-window.addEventListener("popstate", () => {
-  if (written === null) {
-    location.reload();
-    return;
-  }
-  if (location.search === written) return;
-  written = location.search;
-  supersedeLoads();
-  const params = new URLSearchParams(location.search);
-  const previousSource = state.scope.source;
-  const previousSchema = state.scope.schema;
-  applyUrlExact(params);
-  $("source-select").value = state.scope.source ?? "";
-  $("schema-select").value = state.scope.schema ?? "";
-  persist();
-  if (state.scope.source === previousSource) {
-    const listed = chipsListScopeInView() && listedTableNames().includes(startTable(state.view) ?? "");
-    if (state.scope.schema === previousSchema && listed) {
-      loadData({ replaceHistory: true, reason: "history" });
-      return;
-    }
-    loadTables({ replaceHistory: true, reason: "history" }).catch(reportError);
-    return;
-  }
-  loadSchemas().then((current2) => current2 ? loadTables({ replaceHistory: true, reason: "history" }) : void 0).catch(reportError);
-});
-
 // src/features/referenced-by.ts
 var cache3 = createPromiseCache();
 function clearReferencedByCache() {
   cache3.clear();
 }
-function fetchReferencedBy(table) {
-  return cache3.get(scopeIdentity(table), () => {
-    const params = new URLSearchParams({ table });
-    applyScopeParams(params);
-    return api(`/tables/referenced-by?${params}`).then((d) => d.referenced_by);
-  });
+function fetchReferencedBy(ref) {
+  return cache3.get(
+    refKey(ref),
+    () => api(`/tables/referenced-by?${tableParams(ref)}`).then(
+      (d) => d.referenced_by
+    )
+  );
 }
 var renderTokens = /* @__PURE__ */ new Map();
 function msg2(text) {
   const p = el("p", "refby-empty", text);
   return p;
 }
-function drillIn(entry, row2, dismiss) {
+function drillIn(target, entry, row2, dismiss) {
   const clauses = entry.columns.map((c) => ({ column: c.from, value: row2[c.to] }));
   dismiss();
-  navigateWithSeededFilter(entry.table, entry.schema, filterClauses(clauses));
+  navigateWithSeededFilter(near(target, entry.schema, entry.table), filterClauses(clauses));
 }
-function renderList(container, entries, row2, dismiss) {
+function renderList(container, target, entries, row2, dismiss) {
   if (entries.length === 0) {
     container.replaceChildren(msg2("nothing references this table"));
     return;
@@ -5741,7 +6014,7 @@ function renderList(container, entries, row2, dismiss) {
         btn.title = nullPair.to in row2 ? `${nullPair.to} is null in this row \u2014 no filter is expressible` : "this table has no primary key \u2014 no filter is expressible";
       } else {
         btn.title = `go to ${label} where ${entry.columns.map((c) => `${c.from} = ${row2[c.to]}`).join(" AND ")}`;
-        btn.onclick = () => drillIn(entry, row2, dismiss);
+        btn.onclick = () => drillIn(target, entry, row2, dismiss);
       }
       return btn;
     })
@@ -5752,15 +6025,15 @@ function renderReferencedBy(container, row2, dismiss) {
   renderTokens.set(container, token);
   const table = tableInView();
   if (table === null) return;
-  const hit = cache3.peek(scopeIdentity(table));
+  const hit = cache3.peek(refKey(table));
   if (hit) {
-    renderList(container, hit, row2, dismiss);
+    renderList(container, table, hit, row2, dismiss);
     return;
   }
   container.replaceChildren(msg2("loading\u2026"));
   fetchReferencedBy(table).then((entries) => {
     if (renderTokens.get(container) !== token) return;
-    renderList(container, entries, row2, dismiss);
+    renderList(container, table, entries, row2, dismiss);
   }).catch((e) => {
     if (renderTokens.get(container) !== token) return;
     container.replaceChildren(msg2(e.message));
@@ -5777,8 +6050,8 @@ function openReferencedByPopover(e, row2) {
 
 // src/features/table-meta.ts
 var metas = /* @__PURE__ */ new Map();
-function tableMeta(table) {
-  return table === null ? void 0 : metas.get(scopeIdentity(table))?.meta;
+function tableMeta(ref) {
+  return ref === null ? void 0 : metas.get(refKey(ref))?.meta;
 }
 function keyDescriptionOf(col, meta) {
   return keyDescription(col, meta?.compositeFkOf.get(col.name));
@@ -5806,17 +6079,17 @@ var loads = /* @__PURE__ */ new Map();
 function expireTableMeta() {
   loads.clear();
 }
-function loadTableMeta(table) {
-  const key = scopeIdentity(table);
+function loadTableMeta(ref) {
+  const key = refKey(ref);
   let load = loads.get(key);
   if (!load) {
-    load = fetchTableMeta(table, key, () => loads.get(key) === load);
+    load = fetchTableMeta(ref, key, () => loads.get(key) === load);
     loads.set(key, load);
   }
   return load;
 }
-async function fetchTableMeta(table, key, current2) {
-  const [structure, entries] = await Promise.allSettled([tableStructure(table), fetchReferencedBy(table)]);
+async function fetchTableMeta(ref, key, current2) {
+  const [structure, entries] = await Promise.allSettled([tableStructure(ref), fetchReferencedBy(ref)]);
   if (!current2()) return;
   const failed = [structure, entries].filter((r) => r.status === "rejected");
   for (const r of failed) console.warn("ashurbanipal: table metadata lookup failed", r.reason);
@@ -5944,11 +6217,9 @@ function markNoCommonValues(btn) {
   btn.title = "no common values in the statistics";
 }
 function commonValueSource(col) {
-  if (col.join === void 0) {
-    const table = tableInView();
-    return table === null ? null : { table, column: col.name };
-  }
-  return col.table !== void 0 && col.column !== void 0 ? { table: col.table, column: col.column } : null;
+  const table = columnTable(col);
+  const column = col.join === void 0 ? col.name : col.column;
+  return table === null || column === void 0 ? null : { table, column };
 }
 function commonValuesButton(table, column, filterName) {
   const btn = el("button");
@@ -5956,7 +6227,7 @@ function commonValuesButton(table, column, filterName) {
   btn.className = "common-values-btn";
   btn.setAttribute("aria-label", `common values for ${filterName}`);
   btn.textContent = "\u25BE";
-  if (emptyCommonValues.has(scopeIdentity(table, column))) markNoCommonValues(btn);
+  if (emptyCommonValues.has(refKey(table, column))) markNoCommonValues(btn);
   btn.onclick = (e) => {
     e.stopPropagation();
     showCommonValues(e, table, column, filterName);
@@ -5964,12 +6235,11 @@ function commonValuesButton(table, column, filterName) {
   return btn;
 }
 async function fetchCommonValues(table, column) {
-  const params = new URLSearchParams({ table, column });
-  applyScopeParams(params);
+  const params = tableParams(table, { column });
   return (await api(`/tables/common-values?${params}`)).values;
 }
 function commonValuesFor(table, column) {
-  const key = scopeIdentity(table, column);
+  const key = refKey(table, column);
   let values = commonValueCache.get(key);
   if (!values) {
     values = fetchCommonValues(table, column).then((rows) => rows.map((v) => v.value)).catch((e) => {
@@ -6065,7 +6335,8 @@ function renderCommonValues(values, table, filterName) {
       return btn;
     })
   );
-  if (joinInView()) list.append(el("p", "cv-note", `Shares of all rows in ${table}, not indicative of this join`));
+  if (joinInView())
+    list.append(el("p", "cv-note", `Shares of all rows in ${tableLabelOf(table)}, not indicative of this join`));
 }
 async function showCommonValues(e, table, column, filterName) {
   const btn = e.currentTarget;
@@ -6077,7 +6348,7 @@ async function showCommonValues(e, table, column, filterName) {
   list.replaceChildren(loading2);
   $("cv-pop").showPopover();
   const token = ++cvRequestToken;
-  const key = scopeIdentity(table, column);
+  const key = refKey(table, column);
   let values;
   try {
     values = await fetchCommonValues(table, column);
@@ -6394,14 +6665,15 @@ update();
 
 // src/bootstrap/boot-prefetch.ts
 function prefetchStartup() {
+  const scope2 = scopeRef();
   prefetch("/sources", "boot");
   prefetch(`/schemas${sourceQuery()}`, "boot");
-  prefetch(`/tables${scopeQuery()}`, "boot");
-  prefetch(`/table-counts${scopeQuery()}`, "boot");
+  prefetch(`/tables${scopeQuery(scope2)}`, "boot");
+  prefetch(`/table-counts${scopeQuery(scope2)}`, "boot");
   const req = currentRequest();
   if (req?.view.kind !== "table") return;
   const stored2 = opensWithStoredSort() ? storedSortBeforeScope(req.view.table) : void 0;
-  prefetch(tableDataPath(stored2 ? { ...req, sort: stored2.col, order: stored2.order } : req), "boot");
+  prefetch(tableDataPath(stored2 ? { ...req, sort: stored2.col, order: stored2.order } : req, scope2), "boot");
 }
 function opensWithStoredSort() {
   const navType = performance.getEntriesByType("navigation")[0]?.type;
@@ -6589,7 +6861,7 @@ function fieldValue(col, raw, row2, { meta, act }) {
   btn.type = "button";
   btn.title = link.title;
   btn.appendChild(value);
-  btn.onclick = act(() => navigateWithSeededFilter(link.table, link.schema, link.clause));
+  btn.onclick = act(() => navigateWithSeededFilter(link.target, link.clause));
   dd.appendChild(btn);
   return dd;
 }
@@ -6843,7 +7115,7 @@ function buildCell(col, row2, { hidden, meta }) {
   if (link) {
     cellText.classList.add("fk-cell");
     cellText.title = link.title;
-    cellText.onclick = () => navigateWithSeededFilter(link.table, link.schema, link.clause);
+    cellText.onclick = () => navigateWithSeededFilter(link.target, link.clause);
   } else if (col.key === "pk" && meta !== void 0 && meta.referrers !== 0) {
     cellText.classList.add("pk-cell");
     const n = meta.referrers;
@@ -7053,13 +7325,13 @@ function setSlow(slow, announce = true) {
   if (announce || !slow) setStatus(slow ? "loading\u2026" : "");
 }
 function plainError(e, view) {
-  return e instanceof ApiError && e.code === "not_readable" ? new Error(`you don't have access to ${startTable(view)}`) : e;
+  return e instanceof ApiError && e.code === "not_readable" ? new Error(`you don't have access to ${tableLabelOf(startRef(view))}`) : e;
 }
 async function joinPath(def, params) {
   const names = /* @__PURE__ */ new Map();
   await Promise.all(
     tablesToExpand(def).map(async (position) => {
-      const columns = await tableColumns(def.tables[position].table).catch((e) => {
+      const columns = await tableColumns(refFor(def.tables[position])).catch((e) => {
         throw e instanceof ApiError && e.code === "unknown_table" ? new ApiError(e.message, "invalid_join") : e;
       });
       names.set(
@@ -7106,7 +7378,7 @@ function dataPath(view, params) {
 async function fetchViewData(req, auto) {
   const { view, sort, order } = req;
   const table = startTable(view);
-  const params = dataParams(req);
+  const params = dataParams(req, scopeRef());
   const target = view.kind === "join" && sort ? splitColumnKey(sort, view.def) : void 0;
   if (target) {
     params.set("sort", target.column);
@@ -7118,11 +7390,11 @@ async function fetchViewData(req, auto) {
     setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true, !auto), LOADING_DELAY_MS);
   }
-  setTableChipLoading(table, true);
+  if (table !== null) setTableChipLoading(table, true);
   try {
     return await api(await dataPath(view, params));
   } finally {
-    setTableChipLoading(table, false);
+    if (table !== null) setTableChipLoading(table, false);
     if (--inFlightFetches === 0) {
       clearTimeout(slowTimer);
       setSlow(false);
@@ -7137,7 +7409,7 @@ function viewTitle(view) {
     case "table":
       return view.table;
     case "join":
-      return joinLabel(view.def);
+      return joinLabel(view.def, state.scope.schema);
     default: {
       const _exhaustive = view;
       return _exhaustive;
@@ -7152,7 +7424,7 @@ function failedLoadError(e, view, next) {
 }
 function updateViewChrome() {
   const title = viewTitle(state.view);
-  setActiveTable(tableInView());
+  setActiveTable(tableNameInView());
   $("current").textContent = title ?? "\u2014";
   document.title = title ? `${title} \u2014 Ashurbanipal` : "Ashurbanipal";
 }
@@ -7189,8 +7461,8 @@ async function runLoad({
   const token = nextLoadToken();
   const superseded = () => !isCurrentLoad(token);
   const widthScope = widthScopeOf(view);
-  const metaTables = view.kind === "table" ? [view.table] : [...new Set(view.def.tables.map((t) => t.table))];
-  const tableMetaLoad = view.kind === "table" ? loadTableMeta(view.table) : null;
+  const metaTables = view.kind === "table" ? [refInScope(view.table)] : distinctRefs(view.def.tables.map(refFor));
+  const tableMetaLoad = view.kind === "table" ? loadTableMeta(metaTables[0]) : null;
   let data;
   try {
     data = await fetchViewData(req, auto);
@@ -7217,7 +7489,7 @@ async function runLoad({
   markStoredSortVerified();
   markFilterVerified();
   markViewShown();
-  if (view.kind === "table") seedColumns(view.table, data.columns);
+  if (view.kind === "table") seedColumns(metaTables[0], data.columns);
   pruneHiddenColumns(data.columns.map((c) => c.name));
   updateViewChrome();
   const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
@@ -7255,7 +7527,7 @@ async function runLoad({
     if (!superseded() && metaInView().some((m, i) => m !== drawnMeta[i])) renderTable();
   });
   if (askNextPage && view.kind === "table" && !$("next").disabled) {
-    prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }), "view", NEXT_PAGE_TTL_MS);
+    prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }, scopeRef()), "view", NEXT_PAGE_TTL_MS);
   }
   noteLoadOk();
   setNewChip(newRowKeys?.size ?? 0);
@@ -7327,7 +7599,7 @@ $("refresh").onclick = () => {
 };
 loadSources().then(loadSchemas).then((current2) => {
   if (!current2) return;
-  if (opensWithStoredSort()) applyStoredSort(tableInView());
+  if (opensWithStoredSort()) applyStoredSort(tableNameInView());
   return loadTables({ replaceHistory: true, reason: "boot" });
 }).catch(reportError).finally(() => {
   clearPrefetched("boot");

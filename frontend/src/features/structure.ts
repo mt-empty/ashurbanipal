@@ -1,9 +1,10 @@
 import { api } from "../core/api.js";
 import { $, el } from "../core/dom.js";
-import { applyScopeParams, qualifiedTable, scopeIdentity, tableInView } from "../core/state.js";
-import type { ConstraintFk, StructureResponse } from "../core/types.js";
+import { qualifiedTable, tableInView } from "../core/state.js";
+import type { ConstraintFk, StructureResponse, TableRef } from "../core/types.js";
 import { fkTarget } from "../lib/column-key.js";
 import { createPromiseCache } from "../lib/promise-cache.js";
+import { refKey, tableParams } from "../lib/table-ref.js";
 
 // ---- structure dialog: a table's indexes and constraints (spec/protocol.md
 // §5.10), cached per (source, schema, table); errors are never cached. ----
@@ -76,12 +77,8 @@ function renderStructure(data: StructureResponse): void {
 }
 
 // One table's structure through the same cache the dialog uses.
-export function tableStructure(table: string): Promise<StructureResponse> {
-  return cache.get(scopeIdentity(table), () => {
-    const params = new URLSearchParams({ table });
-    applyScopeParams(params);
-    return api<StructureResponse>(`/tables/structure?${params}`);
-  });
+export function tableStructure(ref: TableRef): Promise<StructureResponse> {
+  return cache.get(refKey(ref), () => api<StructureResponse>(`/tables/structure?${tableParams(ref)}`));
 }
 
 export function openStructure(): void {
@@ -91,7 +88,7 @@ export function openStructure(): void {
   $("structure-title").textContent = `structure — ${qualifiedTable(table)}`;
   $<HTMLDialogElement>("structure-dialog").showModal();
 
-  const hit = cache.peek(scopeIdentity(table));
+  const hit = cache.peek(refKey(table));
   if (hit) {
     renderStructure(hit);
     return;
