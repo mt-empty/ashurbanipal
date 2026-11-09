@@ -97,3 +97,12 @@ test("a schema-qualified table is declared with its schema, named by its table o
   ]);
   assert.equal(joinCompletionAt("FROM warehouse.shipments s J").expect, "keyword");
 });
+
+test("after a schema and a dot a table of that schema is expected", () => {
+  const c = joinCompletionAt("FROM shipments s LEFT JOIN public.ord");
+  assert.equal(c.expect, "table");
+  assert.equal(c.qualifier, "public");
+  assert.equal(c.partial, "ord");
+  assert.equal(c.head, "FROM shipments s LEFT JOIN public.");
+  assert.equal(joinCompletionAt('FROM "my schema".').qualifier, "my schema");
+});

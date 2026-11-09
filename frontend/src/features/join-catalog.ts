@@ -1,10 +1,11 @@
 import { ApiError, api } from "../core/api.js";
-import { refInScope, state } from "../core/state.js";
-import type { Column, TableRef, ViewData } from "../core/types.js";
+import { refFor, refInScope, state } from "../core/state.js";
+import type { Column, SchemaRef, TableListEntry, TableRef, ViewData } from "../core/types.js";
+import { formatApproxCount } from "../lib/format.js";
 import type { JoinCatalog } from "../lib/join-dsl.js";
-import { refKey, tableParams } from "../lib/table-ref.js";
+import { refKey, schemaRef, scopeQuery, tableParams } from "../lib/table-ref.js";
 import { tableStructure } from "./structure.js";
-import { listedTableNames } from "./table-chips.js";
+import { listedTableNames, tableChipCount } from "./table-chips.js";
 
 // The page learns a table's columns (names, types, keys) from the first row of
 // its data; the table listing carries only names. Cached per table, failures
@@ -14,6 +15,9 @@ const cache = new Map<string, Promise<Column[]>>();
 const resolved = new Map<string, Column[]>();
 const indexes = new Map<string, Promise<Set<string>>>();
 const indexesRead = new Map<string, Set<string>>();
+// Another schema's table names and their approximate counts, keyed by its scope query.
+const schemaTables = new Map<string, Promise<void>>();
+const schemaTablesRead = new Map<string, { name: string; count: string }[]>();
 let generation = 0;
 let version = 0;
 
@@ -22,6 +26,8 @@ export function clearJoinCatalog(): void {
   resolved.clear();
   indexes.clear();
   indexesRead.clear();
+  schemaTables.clear();
+  schemaTablesRead.clear();
   generation++;
   version++;
 }
@@ -76,11 +82,55 @@ export function knownCatalog(): JoinCatalog {
   );
 }
 
-// Every listed schema for `schema.table` names: the scope's own with `own`,
-// the others not loaded. Undefined while the list is unknown, so nothing is rejected.
+// The tables of `scope`, a schema other than the current one, for the join
+// builder's pickers. Read once per visit until Refresh; a failed read is not kept.
+export function tablesIn(scope: SchemaRef): Promise<void> {
+  const key = scopeQuery(scope);
+  let read = schemaTables.get(key);
+  if (!read) {
+    const started = generation;
+    read = Promise.all([
+      api<{ tables: TableListEntry[] }>(`/tables${key}`),
+      api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${key}`).catch(() => ({ counts: [] })),
+    ]).then(([{ tables }, { counts }]) => {
+      if (started !== generation) return;
+      const countOf = new Map(counts.map((c) => [c.table, c.approx_rows]));
+      schemaTablesRead.set(
+        key,
+        tables.map((t) => ({ name: t.name, count: formatApproxCount(countOf.get(t.name)) })),
+      );
+      version++;
+    });
+    schemaTables.set(key, read);
+    read.catch(() => {
+      if (schemaTables.get(key) === read) schemaTables.delete(key);
+    });
+  }
+  return read;
+}
+
+// The tables of `schema` once read: the scope's own (or, with null, the one the
+// server defaulted to) from its chips, another's from tablesIn().
+export function cachedTablesIn(schema: string | null): { name: string; count: string }[] | undefined {
+  if (schema === null || schema === state.scope.schema)
+    return listedTableNames().map((name) => ({ name, count: tableChipCount(name) }));
+  return schemaTablesRead.get(scopeQuery(schemaRef(state.scope.source, schema)));
+}
+
+// Every listed schema for `schema.table` names, with the tables and columns read
+// so far: the scope's own is `own`. Undefined while the list is unknown, so
+// nothing is rejected.
 export function knownSchemas(own: JoinCatalog): Record<string, JoinCatalog | null> | undefined {
   if (state.schemas.length === 0) return undefined;
-  return Object.fromEntries(state.schemas.map((s) => [s, s === state.scope.schema ? own : null]));
+  const catalogOf = (schema: string): JoinCatalog | null => {
+    if (schema === state.scope.schema) return own;
+    const tables = cachedTablesIn(schema);
+    if (!tables) return null;
+    return Object.fromEntries(
+      tables.map((t) => [t.name, cachedColumns(refFor({ schema, table: t.name }))?.map((c) => c.name) ?? null]),
+    );
+  };
+  return Object.fromEntries(state.schemas.map((s) => [s, catalogOf(s)]));
 }
 
 // Columns that lead an index, so a join on them is cheap. A table whose structure cannot be read has none.

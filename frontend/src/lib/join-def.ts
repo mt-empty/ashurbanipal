@@ -2,15 +2,28 @@ import type { JoinDef, JoinTable, WireJoin } from "../core/types.js";
 
 // ==== Join definition helpers (wire request, labels) ====
 
+// The schema each table of a join is labelled with. A join within one schema
+// names none; one that spans schemas names every table's, the scope's for a
+// table the canonical definition leaves unqualified.
+export function labelSchemas(def: JoinDef, scopeSchema: string | null): (string | undefined)[] {
+  if (scopeSchema === null || def.tables.every((t) => t.schema === undefined)) return def.tables.map((t) => t.schema);
+  return def.tables.map((t) => t.schema ?? scopeSchema);
+}
+
 // One table of a join as the label, bands, menu headings and record groups name it.
-export function tableLabel(t: JoinTable): string {
-  return t.alias === null ? t.table : `${t.table} ${t.alias}`;
+export function tableLabel(t: JoinTable, schema: string | undefined): string {
+  const name = schema === undefined ? t.table : `${schema}.${t.table}`;
+  return t.alias === null ? name : `${name} ${t.alias}`;
 }
 
 // `orders ⟕ users o` style one-line summary for the meta row and the chips.
-export function joinLabel(def: JoinDef): string {
+export function joinLabel(def: JoinDef, scopeSchema: string | null): string {
+  const schemas = labelSchemas(def, scopeSchema);
   return def.tables
-    .map((t, i) => (i === 0 ? tableLabel(t) : `${def.joins[i - 1].type === "left" ? "⟕" : "⋈"} ${tableLabel(t)}`))
+    .map((t, i) => {
+      const label = tableLabel(t, schemas[i]);
+      return i === 0 ? label : `${def.joins[i - 1].type === "left" ? "⟕" : "⋈"} ${label}`;
+    })
     .join(" ");
 }
 

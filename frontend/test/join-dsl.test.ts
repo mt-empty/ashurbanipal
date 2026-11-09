@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { dropScopeSchema, toWire } from "../src/lib/join-def.ts";
+import { dropScopeSchema, joinLabel, labelSchemas, toWire } from "../src/lib/join-def.ts";
 import type { JoinCatalog } from "../src/lib/join-dsl.ts";
 import { parseJoin, printJoin } from "../src/lib/join-dsl.ts";
 import { findForeignKey, joinMismatch, pairNote, unjoinableReason } from "../src/lib/join-types.ts";
@@ -253,4 +253,16 @@ test("a pair check is told each side's schema", () => {
     { schema: "warehouse", table: "shipments", column: "order_id" },
     { table: "orders", column: "id" },
   ]);
+});
+
+test("a join that spans schemas labels every table with its schema; one within the scope labels none", () => {
+  const cross = parseJoin("FROM shipments s LEFT JOIN public.orders o ON s.order_id = o.id", {});
+  assert.ok("def" in cross);
+  assert.deepEqual(labelSchemas(cross.def, "warehouse"), ["warehouse", "public"]);
+  assert.equal(joinLabel(cross.def, "warehouse"), "warehouse.shipments s ⟕ public.orders o");
+  const within = parseJoin("FROM orders o JOIN users u ON o.user_id = u.id", {});
+  assert.ok("def" in within);
+  assert.equal(joinLabel(within.def, "public"), "orders o ⋈ users u");
+  // No scope name to write (the schema list failed): only the qualified table says its schema.
+  assert.equal(joinLabel(cross.def, null), "shipments s ⟕ public.orders o");
 });

@@ -1,5 +1,5 @@
 import { reportError } from "../core/dom.js";
-import { joinInView, knownScopeKey, scopeIdentity, viewHref } from "../core/state.js";
+import { joinInView, knownScopeKey, scopeIdentity, state, viewHref } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
 import type { JoinDef } from "../core/types.js";
 import { joinLabel } from "../lib/join-def.js";
@@ -106,7 +106,7 @@ export function renderSavedChips(actions: ChipActions): void {
   });
   if (current && !inSaved) {
     chips.push({
-      label: `⋈ ${joinLabel(current.def)}`,
+      label: `⋈ ${joinLabel(current.def, state.scope.schema)}`,
       title: "this join is not saved",
       className: "unsaved",
       active: true,

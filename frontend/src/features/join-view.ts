@@ -1,7 +1,7 @@
 import { $, el } from "../core/dom.js";
-import { joinInView } from "../core/state.js";
+import { joinInView, state } from "../core/state.js";
 import type { Column, JoinDef } from "../core/types.js";
-import { tableLabel } from "../lib/join-def.js";
+import { labelSchemas, tableLabel } from "../lib/join-def.js";
 import { effectiveName, quoteJoinName } from "../lib/join-dsl.js";
 
 // The filter DSL reads a bare AND, OR or NOT as a keyword, so a join alias spelled so is quoted there.
@@ -17,8 +17,13 @@ export function columnKey(col: Column, def: JoinDef | undefined = joinInView()?.
 // A join's columns under the table each came from, in table order: one group
 // per table even when the select list alternates tables.
 export function tableGroups(columns: Column[], def: JoinDef): { label: string; index: number; columns: Column[] }[] {
+  const schemas = labelSchemas(def, state.scope.schema);
   return def.tables
-    .map((t, index) => ({ label: tableLabel(t), index, columns: columns.filter((c) => c.join === index) }))
+    .map((t, index) => ({
+      label: tableLabel(t, schemas[index]),
+      index,
+      columns: columns.filter((c) => c.join === index),
+    }))
     .filter((g) => g.columns.length > 0);
 }
 
@@ -47,6 +52,7 @@ export function splitColumnKey(key: string, def: JoinDef): { join: number; colum
 export function buildBands(columns: Column[], heads: readonly HTMLElement[]): HTMLTableRowElement | null {
   const def = joinInView()?.def;
   if (!def) return null;
+  const schemas = labelSchemas(def, state.scope.schema);
   const tr = el("tr", "bands");
   tr.appendChild(el("th", "row-actions"));
   let band: HTMLTableCellElement | null = null;
@@ -57,10 +63,15 @@ export function buildBands(columns: Column[], heads: readonly HTMLElement[]): HT
       band = el("th", "band");
       band.dataset.band = String(col.join);
       band.dataset.run = String(tr.cells.length);
-      const label = tableLabel(t);
+      const schema = schemas[col.join];
+      const label = tableLabel(t, schema);
       const pill = el("span", "band-pill");
       pill.title = label;
-      pill.appendChild(el("span", "band-pill-text", label));
+      const text = el("span", "band-pill-text");
+      // In a join that spans schemas every band names its schema, muted.
+      if (schema !== undefined) text.append(el("span", "band-pill-schema", `${schema}.`));
+      text.append(label.slice(schema === undefined ? 0 : schema.length + 1));
+      pill.appendChild(text);
       band.appendChild(pill);
       tr.appendChild(band);
     }

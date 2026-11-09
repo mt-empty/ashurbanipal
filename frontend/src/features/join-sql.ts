@@ -1,23 +1,30 @@
 import { $ } from "../core/dom.js";
-import { refFor, refInScope } from "../core/state.js";
+import { manySchemas, refFor, state } from "../core/state.js";
 import type { Column, TableRef } from "../core/types.js";
 import { type Draft, draftToDef } from "../lib/join-draft.js";
 import { type JoinPairSide, type JoinParse, parseJoin, printJoin, quoteJoinName } from "../lib/join-dsl.js";
-import { type JoinCompletion, type JoinToken, joinCompletionAt, tokenizeJoinText } from "../lib/join-tokens.js";
+import {
+  type DeclaredTable,
+  type JoinCompletion,
+  type JoinToken,
+  joinCompletionAt,
+  tokenizeJoinText,
+} from "../lib/join-tokens.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
-import { distinctRefs } from "../lib/table-ref.js";
+import { distinctRefs, schemaRef } from "../lib/table-ref.js";
 import {
   cachedColumns,
+  cachedTablesIn,
   catalogVersion,
   indexedColumns,
   knownCatalog,
   knownSchemas,
   readIndexedColumns,
   tableColumns,
+  tablesIn,
 } from "./join-catalog.js";
 import { attachOverlayHighlight, tokenSpans } from "./overlay-highlight.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
-import { listedTableNames, tableChipCount } from "./table-chips.js";
 
 // The SQL half of the join overlay (boards U and V): a text field coloured like
 // the filter box, with suggestions for what the grammar allows next. The text is
@@ -210,9 +217,9 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     ctx: JoinCompletion,
     earlier: Earlier,
     taken: ReadonlySet<string>,
-    table: string,
+    ref: TableRef,
   ): string | undefined {
-    const ref = refInScope(table);
+    const { table } = ref;
     const fk = findForeignKey(earlier, ref, cachedColumns(ref) ?? []);
     if (!fk) return undefined;
     const alias = aliasFor(table, taken);
@@ -220,23 +227,37 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     return `${quoteJoinName(table)} ${alias} ON ${left}.${quoteJoinName(fk.leftColumn)} = ${alias}.${quoteJoinName(fk.rightColumn)}`;
   }
 
-  function tableRows(ctx: JoinCompletion, candidates: string[]): Suggestion[] {
-    const used = new Set(ctx.declared.filter((d) => d.schema === undefined).map((d) => d.table));
+  // `schema` is the one typed before the table, if any; the head already holds it.
+  function tableRows(
+    ctx: JoinCompletion,
+    candidates: readonly { name: string; count: string }[],
+    schema: string | undefined,
+  ): Suggestion[] {
+    const used = new Set(ctx.declared.filter((d) => d.schema === schema).map((d) => d.table));
     const taken = new Set(ctx.declared.map((d) => d.name));
     const earlier: Earlier = ctx.declared.map(refFor).map((table) => ({ table, columns: cachedColumns(table) ?? [] }));
     const withKey: Suggestion[] = [];
     const rest: Suggestion[] = [];
-    for (const table of candidates) {
-      const clause = used.has(table) ? undefined : foreignKeyClause(ctx, earlier, taken, table);
+    for (const { name: table, count } of candidates) {
+      const clause = used.has(table) ? undefined : foreignKeyClause(ctx, earlier, taken, refFor({ schema, table }));
       if (clause) withKey.push({ label: clause, insert: `${clause} `, tag: "foreign key" });
       else
         rest.push({
           label: table,
           insert: `${quoteJoinName(table)} `,
-          note: used.has(table) ? "already used · add as alias" : tableChipCount(table),
+          note: used.has(table) ? "already used · add as alias" : count,
         });
     }
     return [...withKey, ...rest];
+  }
+
+  // The other schemas, offered after FROM and JOIN; picking one goes on to its tables.
+  function schemaRows(ctx: JoinCompletion): Suggestion[] {
+    if (!manySchemas()) return [];
+    const starts = startsWith(ctx);
+    return state.schemas
+      .filter((s) => s !== state.scope.schema && starts(s))
+      .map((s) => ({ label: `${s}.`, insert: `${quoteJoinName(s)}.`, note: "schema" }));
   }
 
   async function update(): Promise<void> {
@@ -246,16 +267,27 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     const ctx = joinCompletionAt(field.value);
     let rows: Suggestion[] = [];
     if (ctx.expect === "table") {
+      const schema = ctx.qualifier ?? undefined;
+      const listed = cachedTablesIn(schema ?? state.scope.schema);
+      if (!listed && schema !== undefined && state.schemas.includes(schema)) {
+        tablesIn(schemaRef(state.scope.source, schema)).then(
+          () => {
+            if (token === suggest.token()) void update();
+          },
+          () => {},
+        );
+      }
+      const starts = startsWith(ctx);
+      const candidates = (listed ?? []).filter((t) => starts(t.name));
       // Foreign key clauses need the columns of the declared tables and of a few candidates; they appear once read.
-      const candidates = listedTableNames().filter(startsWith(ctx));
-      const wanted = [...ctx.declared.map(refFor), ...(candidates.length <= 8 ? candidates.map(refInScope) : [])];
-      const missing = distinctRefs(wanted).filter((t) => !cachedColumns(t));
+      const candidateRefs = candidates.length <= 8 ? candidates.map((t) => refFor({ schema, table: t.name })) : [];
+      const missing = distinctRefs([...ctx.declared.map(refFor), ...candidateRefs]).filter((t) => !cachedColumns(t));
       if (missing.length > 0) {
         void Promise.allSettled(missing.map(tableColumns)).then((results) => {
           if (anyRead(results) && token === suggest.token()) void update();
         });
       }
-      rows = tableRows(ctx, candidates);
+      rows = [...tableRows(ctx, candidates, schema), ...(schema === undefined ? schemaRows(ctx) : [])];
     } else if (ctx.expect === "qualifier") {
       const starts = startsWith(ctx);
       rows = ctx.declared
@@ -276,10 +308,11 @@ export function mountJoinSql(onChange: () => void): JoinSql {
   }
 
   // Column names and types are what catches an unknown column or a mismatched pair; read them for every
-  // table the text names that the scope lists, so a half-typed name is never asked for.
+  // table the text names that its schema lists, so a half-typed name is never asked for.
   function prefetch(): void {
-    const listed = new Set(listedTableNames());
-    const named = joinCompletionAt(field.value).declared.filter((d) => d.schema === undefined && listed.has(d.table));
+    const listed = (d: DeclaredTable): boolean =>
+      cachedTablesIn(d.schema ?? state.scope.schema)?.some((t) => t.name === d.table) ?? false;
+    const named = joinCompletionAt(field.value).declared.filter(listed);
     const wanted = distinctRefs(named.map(refFor)).filter((t) => !cachedColumns(t));
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {

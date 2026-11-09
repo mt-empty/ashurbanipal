@@ -174,11 +174,16 @@ tableref    = [ ident , "." ] , ident , [ ws , [ "AS" , ws ] , alias ] ;
   any reference that carries a schema (#247), so it can't suggest a wrong
   pair. Cross-schema targets become suggestions by comparing resolved
   `TableRef`s.
-- **Bands and record dialog** (board BG, band choice b, chosen 2026-11-08).
-  A band's label is the effective name. When its table's schema differs from
-  the scope, the band also shows the qualified name, muted:
-  `o · public.orders`. In-schema joins look as they do today. The record
-  view and the columns menu headings follow the same rule.
+- **Bands and record dialog** (board BG, band choice b, chosen 2026-11-08;
+  widened 2026-11-09). A band names its table as join labels already do,
+  table then alias. In a join that spans schemas every band is qualified,
+  the scope's tables too, with the schema muted: `warehouse.shipments s`
+  and `public.orders o`. A join within one schema looks as it does today.
+  The record view, the columns menu headings, the meta row and the join
+  chip use the same label.
+- **SQL mode.** After `FROM` and `JOIN` the suggestions add the other
+  schemas (`public.`). After `schema.` they list that schema's tables, read
+  the first time it is named, with a foreign key clause first.
 - **Saved joins.** Still stored under the scope (source and schema) the user
   saved them from. A cross-schema join shows only in that scope's chips.
 - **URL.** The `join` param holds the canonical text, now with qualifiers

@@ -81,7 +81,7 @@ export interface JoinCompletion {
   partial: string;
   // Everything before it; a suggestion replaces `partial` and keeps `head`.
   head: string;
-  // The alias before the dot, when completing a column.
+  // The name before the dot: an alias when completing a column, a schema when completing a table.
   qualifier: string | null;
   declared: DeclaredTable[];
   // The colref on the other side of `=`, when completing the second one.
@@ -187,7 +187,7 @@ export function joinCompletionAt(text: string): JoinCompletion {
   const joinWords = ["JOIN", "INNER JOIN", "LEFT JOIN"];
   let expect: JoinExpect = "none";
   let keywords: readonly string[] = [];
-  if (qualifier !== null) expect = state === "colref" ? "column" : "none";
+  if (qualifier !== null) expect = state === "colref" ? "column" : state === "table" ? "table" : "none";
   else if (state === "table") expect = "table";
   else if (state === "colref") expect = "qualifier";
   else if (state === "after-table" && partial !== "") {

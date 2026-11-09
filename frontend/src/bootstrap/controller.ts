@@ -185,7 +185,7 @@ function viewTitle(view: View | null): string | null {
     case "table":
       return view.table;
     case "join":
-      return joinLabel(view.def);
+      return joinLabel(view.def, state.scope.schema);
     default: {
       const _exhaustive: never = view;
       return _exhaustive;
