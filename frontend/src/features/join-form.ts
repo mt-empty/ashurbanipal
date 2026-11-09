@@ -15,7 +15,7 @@ import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
 import { distinctRefs, schemaRef } from "../lib/table-ref.js";
 import { createDropdown, type DropdownOption, lastDropdownLabel } from "./dropdown.js";
-import { cachedColumns, cachedTablesIn, tableColumns, tablesIn } from "./join-catalog.js";
+import { cachedColumns, cachedTablesIn, tableColumns, tablesIn, tablesInFailure } from "./join-catalog.js";
 
 // The Form half of the join overlay (board O): edits a Draft in place and tells
 // the dialog when it changed. Menus and buttons re-render the form; typing in an
@@ -97,14 +97,17 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   // The schema's tables once read; another schema's are asked for the first time its menu is built (board BE).
   // An absent schema is the scope's, whose tables are the chips.
   const tableOptions = (schema: string | undefined): DropdownOption[] => {
-    const tables = schema === undefined ? cachedTablesIn(state.scope.schema) : cachedTablesIn(schema);
+    const tables = cachedTablesIn(schema ?? state.scope.schema);
     if (tables) return tables.map((t) => ({ value: t.name, label: t.name, note: t.count }));
-    if (schema !== undefined) {
-      tablesIn(schemaRef(state.scope.source, schema)).then(
-        () => changed(),
-        (e: unknown) => console.warn("ashurbanipal: the join builder could not list a schema's tables", e),
-      );
-    }
+    if (schema === undefined) return [];
+    if (!state.schemas.includes(schema))
+      return [{ value: "", label: `${schema} is not a listed schema`, blocked: true }];
+    const failure = tablesInFailure(schema);
+    if (failure) return [{ value: "", label: "could not list tables", note: failure, blocked: true }];
+    tablesIn(schemaRef(state.scope.source, schema)).then(
+      () => changed(),
+      () => changed(),
+    );
     return [{ value: "", label: "loading…", blocked: true }];
   };
 
@@ -112,6 +115,8 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   // schema dropdown is left out when the source lists one schema.
   const tablePicker = (name: string, t: Draft | DraftJoin, pos: number): HTMLElement[] => {
     const scope = state.scope.schema;
+    const listed =
+      t.schema === undefined || state.schemas.includes(t.schema) ? state.schemas : [...state.schemas, t.schema];
     const schema = t.schema ?? scope;
     const table = createDropdown({
       ariaLabel: `${name} table`,
@@ -125,10 +130,11 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
         if (v !== t.table) pickTable(pos, v);
       },
     });
-    if (!manySchemas()) return [table];
+    // A table restored with a schema keeps its dropdown, so the schema can be changed back.
+    if (!manySchemas() && t.schema === undefined) return [table];
     const schemas = createDropdown({
       ariaLabel: `${name} schema`,
-      options: state.schemas.map((s) => ({ value: s, label: s, note: s === scope ? "this schema" : undefined })),
+      options: listed.map((s) => ({ value: s, label: s, note: s === scope ? "this schema" : undefined })),
       value: schema ?? "",
       placeholder: "schema",
       mono: true,

@@ -18,6 +18,7 @@ const indexesRead = new Map<string, Set<string>>();
 // Another schema's table names and their approximate counts, keyed by its scope query.
 const schemaTables = new Map<string, Promise<void>>();
 const schemaTablesRead = new Map<string, { name: string; count: string }[]>();
+const schemaTablesFailed = new Map<string, string>();
 let generation = 0;
 let version = 0;
 
@@ -28,6 +29,7 @@ export function clearJoinCatalog(): void {
   indexesRead.clear();
   schemaTables.clear();
   schemaTablesRead.clear();
+  schemaTablesFailed.clear();
   generation++;
   version++;
 }
@@ -83,7 +85,7 @@ export function knownCatalog(): JoinCatalog {
 }
 
 // The tables of `scope`, a schema other than the current one, for the join
-// builder's pickers. Read once per visit until Refresh; a failed read is not kept.
+// builder's pickers. Read once until Refresh, failures included, so typing never repeats a refused read.
 export function tablesIn(scope: SchemaRef): Promise<void> {
   const key = scopeQuery(scope);
   let read = schemaTables.get(key);
@@ -102,11 +104,19 @@ export function tablesIn(scope: SchemaRef): Promise<void> {
       version++;
     });
     schemaTables.set(key, read);
-    read.catch(() => {
-      if (schemaTables.get(key) === read) schemaTables.delete(key);
+    read.catch((e: unknown) => {
+      if (started !== generation) return;
+      schemaTablesFailed.set(key, e instanceof Error ? e.message : String(e));
+      console.warn("ashurbanipal: the join builder could not list a schema's tables", e);
+      version++;
     });
   }
   return read;
+}
+
+// Why `schema`'s tables could not be listed, once a read failed.
+export function tablesInFailure(schema: string): string | undefined {
+  return schemaTablesFailed.get(scopeQuery(schemaRef(state.scope.source, schema)));
 }
 
 // The tables of `schema` once read: the scope's own (or, with null, the one the

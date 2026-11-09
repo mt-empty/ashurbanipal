@@ -117,10 +117,11 @@ export type JoinParse = { def: JoinDef } | { error: JoinError };
 export interface JoinParseOptions {
   // The tables an unqualified name resolves among: the scope's schema.
   catalog?: JoinCatalog;
-  // Schema name → its tables, for `schema.table` names, or null when only the
-  // schema is known. When given, a schema it lacks is rejected; when absent,
-  // qualified names are not checked. The scope's schema belongs here too.
+  // Schema name → its tables (null when not loaded), the scope's own included.
+  // When given, a schema it lacks is rejected; when absent, qualified names are not checked.
   schemas?: Readonly<Record<string, JoinCatalog | null>>;
+  // A qualifier naming this schema is dropped as the table is read, so it and the bare name are one table.
+  scopeSchema?: string;
   // Says why two columns cannot be paired (their types), or null. Only the page
   // knows the types, so the parser never checks them unless it is given this.
   pairCheck?: (a: JoinPairSide, b: JoinPairSide) => string | null;
@@ -332,8 +333,8 @@ export function parseJoin(text: string, options: JoinParseOptions = {}): JoinPar
       next();
       alias = nameTok("an alias after AS").text;
     } else if (isNameTok(peek())) alias = next().text;
-    const table: JoinTable =
-      schemaTok === null ? { table: t.text, alias } : { schema: schemaTok.text, table: t.text, alias };
+    const schema = schemaTok === null || schemaTok.text === options.scopeSchema ? undefined : schemaTok.text;
+    const table: JoinTable = schema === undefined ? { table: t.text, alias } : { schema, table: t.text, alias };
     const name = effectiveName(table);
     const clash = names.get(name);
     if (clash !== undefined) {
@@ -377,7 +378,7 @@ export function parseJoin(text: string, options: JoinParseOptions = {}): JoinPar
     const suggest = closest(c.column, columns);
     fail(
       "unknown-column",
-      `${tables[position].table} has no column ${c.column}.${suggest ? ` Did you mean ${suggest}?` : ""}`,
+      `${qualifiedName(tables[position])} has no column ${c.column}.${suggest ? ` Did you mean ${suggest}?` : ""}`,
       c.columnStart,
       suggest,
     );

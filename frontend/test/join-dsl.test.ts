@@ -266,3 +266,20 @@ test("a join that spans schemas labels every table with its schema; one within t
   // No scope name to write (the schema list failed): only the qualified table says its schema.
   assert.equal(joinLabel(cross.def, null), "shipments s ⟕ public.orders o");
 });
+
+test("a qualifier naming the scope's schema is dropped as the table is read", () => {
+  const parsed = parseJoin("FROM public.orders o JOIN users u ON o.user_id = u.id", { scopeSchema: "public" });
+  assert.ok("def" in parsed);
+  assert.deepEqual(parsed.def.tables[0], { table: "orders", alias: "o" });
+  const twice = parseJoin("FROM users JOIN public.users ON users.id = users.id", { scopeSchema: "public" });
+  assert.ok("error" in twice);
+  assert.equal(twice.error.code, "duplicate-name");
+  assert.match(twice.error.message, /table "users" appears twice/);
+});
+
+test("an unknown column names its table with the schema it was written with", () => {
+  const parsed = parseJoin("FROM users LEFT JOIN warehouse.users w ON users.id = w.idd", optionsFor({} as JoinCase));
+  assert.ok("error" in parsed);
+  assert.equal(parsed.error.code, "unknown-column");
+  assert.match(parsed.error.message, /^warehouse\.users has no column idd/);
+});

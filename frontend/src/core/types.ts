@@ -232,10 +232,8 @@ export interface WireJoin {
   columns?: { join: number; column: string }[];
 }
 
-// Where a table lives. Built only by lib/table-ref.ts (and refInScope in
-// core/store.ts), so a function that takes one cannot be handed a bare name
-// that silently means "the current scope". A null name is the server's
-// default, sent only when the scope's lists failed to load.
+// Where a table lives, built only by lib/table-ref.ts and core/store.ts, so no bare
+// name can silently mean "the current scope". A null name is the server's default.
 declare const schemaRefBrand: unique symbol;
 declare const tableRefBrand: unique symbol;
 export interface SchemaRef {

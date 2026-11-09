@@ -1942,7 +1942,8 @@ function parseJoin(text, options = {}) {
       next();
       alias = nameTok("an alias after AS").text;
     } else if (isNameTok(peek())) alias = next().text;
-    const table = schemaTok === null ? { table: t.text, alias } : { schema: schemaTok.text, table: t.text, alias };
+    const schema = schemaTok === null || schemaTok.text === options.scopeSchema ? void 0 : schemaTok.text;
+    const table = schema === void 0 ? { table: t.text, alias } : { schema, table: t.text, alias };
     const name = effectiveName(table);
     const clash = names.get(name);
     if (clash !== void 0) {
@@ -1974,7 +1975,7 @@ function parseJoin(text, options = {}) {
     const suggest2 = closest(c.column, columns);
     fail(
       "unknown-column",
-      `${tables[position].table} has no column ${c.column}.${suggest2 ? ` Did you mean ${suggest2}?` : ""}`,
+      `${qualifiedName(tables[position])} has no column ${c.column}.${suggest2 ? ` Did you mean ${suggest2}?` : ""}`,
       c.columnStart,
       suggest2
     );
@@ -4219,6 +4220,7 @@ var indexes = /* @__PURE__ */ new Map();
 var indexesRead = /* @__PURE__ */ new Map();
 var schemaTables = /* @__PURE__ */ new Map();
 var schemaTablesRead = /* @__PURE__ */ new Map();
+var schemaTablesFailed = /* @__PURE__ */ new Map();
 var generation = 0;
 var version = 0;
 function clearJoinCatalog() {
@@ -4228,6 +4230,7 @@ function clearJoinCatalog() {
   indexesRead.clear();
   schemaTables.clear();
   schemaTablesRead.clear();
+  schemaTablesFailed.clear();
   generation++;
   version++;
 }
@@ -4289,11 +4292,17 @@ function tablesIn(scope2) {
       version++;
     });
     schemaTables.set(key, read2);
-    read2.catch(() => {
-      if (schemaTables.get(key) === read2) schemaTables.delete(key);
+    read2.catch((e) => {
+      if (started !== generation) return;
+      schemaTablesFailed.set(key, e instanceof Error ? e.message : String(e));
+      console.warn("ashurbanipal: the join builder could not list a schema's tables", e);
+      version++;
     });
   }
   return read2;
+}
+function tablesInFailure(schema) {
+  return schemaTablesFailed.get(scopeQuery(schemaRef(state.scope.source, schema)));
 }
 function cachedTablesIn(schema) {
   if (schema === null || schema === state.scope.schema)
@@ -4388,18 +4397,22 @@ function mountJoinForm(root, onChange) {
     changed(true);
   };
   const tableOptions = (schema) => {
-    const tables = schema === void 0 ? cachedTablesIn(state.scope.schema) : cachedTablesIn(schema);
+    const tables = cachedTablesIn(schema ?? state.scope.schema);
     if (tables) return tables.map((t) => ({ value: t.name, label: t.name, note: t.count }));
-    if (schema !== void 0) {
-      tablesIn(schemaRef(state.scope.source, schema)).then(
-        () => changed(),
-        (e) => console.warn("ashurbanipal: the join builder could not list a schema's tables", e)
-      );
-    }
+    if (schema === void 0) return [];
+    if (!state.schemas.includes(schema))
+      return [{ value: "", label: `${schema} is not a listed schema`, blocked: true }];
+    const failure = tablesInFailure(schema);
+    if (failure) return [{ value: "", label: "could not list tables", note: failure, blocked: true }];
+    tablesIn(schemaRef(state.scope.source, schema)).then(
+      () => changed(),
+      () => changed()
+    );
     return [{ value: "", label: "loading\u2026", blocked: true }];
   };
   const tablePicker = (name, t, pos) => {
     const scope2 = state.scope.schema;
+    const listed = t.schema === void 0 || state.schemas.includes(t.schema) ? state.schemas : [...state.schemas, t.schema];
     const schema = t.schema ?? scope2;
     const table = createDropdown({
       ariaLabel: `${name} table`,
@@ -4413,10 +4426,10 @@ function mountJoinForm(root, onChange) {
         if (v !== t.table) pickTable(pos, v);
       }
     });
-    if (!manySchemas()) return [table];
+    if (!manySchemas() && t.schema === void 0) return [table];
     const schemas = createDropdown({
       ariaLabel: `${name} schema`,
-      options: state.schemas.map((s) => ({ value: s, label: s, note: s === scope2 ? "this schema" : void 0 })),
+      options: listed.map((s) => ({ value: s, label: s, note: s === scope2 ? "this schema" : void 0 })),
       value: schema ?? "",
       placeholder: "schema",
       mono: true,
@@ -5049,7 +5062,12 @@ function mountJoinSql(onChange) {
     const version2 = catalogVersion();
     if (memo?.text !== text || memo.version !== version2) {
       const catalog = knownCatalog();
-      memo = { text, version: version2, result: parseJoin(text, { catalog, schemas: knownSchemas(catalog), pairCheck }) };
+      const scopeSchema = state.scope.schema ?? void 0;
+      memo = {
+        text,
+        version: version2,
+        result: parseJoin(text, { catalog, schemas: knownSchemas(catalog), scopeSchema, pairCheck })
+      };
     }
     return memo.result;
   };
@@ -5130,7 +5148,8 @@ function mountJoinSql(onChange) {
     return `${quoteJoinName(table)} ${alias} ON ${left}.${quoteJoinName(fk.leftColumn)} = ${alias}.${quoteJoinName(fk.rightColumn)}`;
   }
   function tableRows(ctx, candidates, schema) {
-    const used = new Set(ctx.declared.filter((d) => d.schema === schema).map((d) => d.table));
+    const own2 = (s) => s ?? state.scope.schema;
+    const used = new Set(ctx.declared.filter((d) => own2(d.schema) === own2(schema)).map((d) => d.table));
     const taken = new Set(ctx.declared.map((d) => d.name));
     const earlier = ctx.declared.map(refFor).map((table) => ({ table, columns: cachedColumns(table) ?? [] }));
     const withKey = [];
@@ -5196,7 +5215,9 @@ function mountJoinSql(onChange) {
   function prefetch2() {
     const declared = joinCompletionAt(field.value).declared;
     const unread = new Set(
-      declared.map((d) => d.schema).filter((s) => s !== void 0 && state.schemas.includes(s) && !cachedTablesIn(s))
+      declared.map((d) => d.schema).filter(
+        (s) => s !== void 0 && state.schemas.includes(s) && !cachedTablesIn(s) && !tablesInFailure(s)
+      )
     );
     for (const schema of unread) {
       tablesIn(schemaRef(state.scope.source, schema)).then(
@@ -5306,12 +5327,12 @@ function navigateWithSeededFilter(target, clause) {
     reportError(e);
     return;
   }
-  openTable(target, clause, ast);
+  openTable(target, clause, ast, `${target.table} isn't independently browsable in schema ${target.schema}`);
 }
 function openTableUnfiltered(target) {
-  openTable(target, "", []);
+  openTable(target, "", [], `${target.table} isn't a table of schema ${target.schema}`);
 }
-function openTable(target, clause, ast) {
+function openTable(target, clause, ast, missing) {
   const { table, schema } = target;
   const req = {
     ...tableRequest(table),
@@ -5333,7 +5354,7 @@ function openTable(target, clause, ast) {
   setSchema(schema);
   loadTables({ next: req }).then((outcome) => {
     if (outcome === "fell-back") {
-      reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
+      reportError(new Error(missing));
     }
   }).catch(reportError);
 }

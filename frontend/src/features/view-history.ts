@@ -28,15 +28,15 @@ export function navigateWithSeededFilter(target: TableRef, clause: string): void
     reportError(e);
     return;
   }
-  openTable(target, clause, ast);
+  openTable(target, clause, ast, `${target.table} isn't independently browsable in schema ${target.schema}`);
 }
 
-// `target` with no filter: a join's start table once the join is dropped.
+// `target` with no filter: a refused join's start table once the join is dropped.
 export function openTableUnfiltered(target: TableRef): void {
-  openTable(target, "", []);
+  openTable(target, "", [], `${target.table} isn't a table of schema ${target.schema}`);
 }
 
-function openTable(target: TableRef, clause: string, ast: FilterCondition[]): void {
+function openTable(target: TableRef, clause: string, ast: FilterCondition[], missing: string): void {
   const { table, schema } = target;
   const req: ViewRequest = {
     ...tableRequest(table),
@@ -61,11 +61,10 @@ function openTable(target: TableRef, clause: string, ast: FilterCondition[]): vo
   loadTables({ next: req })
     .then((outcome) => {
       // loadTables()'s stale-state fallback (table-chips.ts) drops `req` and
-      // opens another table when `table` isn't in this schema's own
-      // /api/tables listing (e.g. a partitioned referrer, which list_tables
-      // excludes).
+      // opens another table when `table` isn't in this schema's own /api/tables
+      // listing: for an FK target, a partitioned referrer, which list_tables excludes.
       if (outcome === "fell-back") {
-        reportError(new Error(`${table} isn't independently browsable in schema ${schema}`));
+        reportError(new Error(missing));
       }
     })
     .catch(reportError);

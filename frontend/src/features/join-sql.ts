@@ -22,6 +22,7 @@ import {
   readIndexedColumns,
   tableColumns,
   tablesIn,
+  tablesInFailure,
 } from "./join-catalog.js";
 import { attachOverlayHighlight, tokenSpans } from "./overlay-highlight.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
@@ -124,7 +125,12 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     const version = catalogVersion();
     if (memo?.text !== text || memo.version !== version) {
       const catalog = knownCatalog();
-      memo = { text, version, result: parseJoin(text, { catalog, schemas: knownSchemas(catalog), pairCheck }) };
+      const scopeSchema = state.scope.schema ?? undefined;
+      memo = {
+        text,
+        version,
+        result: parseJoin(text, { catalog, schemas: knownSchemas(catalog), scopeSchema, pairCheck }),
+      };
     }
     return memo.result;
   };
@@ -233,7 +239,8 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     candidates: readonly { name: string; count: string }[],
     schema: string | undefined,
   ): Suggestion[] {
-    const used = new Set(ctx.declared.filter((d) => d.schema === schema).map((d) => d.table));
+    const own = (s: string | undefined) => s ?? state.scope.schema;
+    const used = new Set(ctx.declared.filter((d) => own(d.schema) === own(schema)).map((d) => d.table));
     const taken = new Set(ctx.declared.map((d) => d.name));
     const earlier: Earlier = ctx.declared.map(refFor).map((table) => ({ table, columns: cachedColumns(table) ?? [] }));
     const withKey: Suggestion[] = [];
@@ -315,7 +322,9 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     const unread = new Set(
       declared
         .map((d) => d.schema)
-        .filter((s): s is string => s !== undefined && state.schemas.includes(s) && !cachedTablesIn(s)),
+        .filter(
+          (s): s is string => s !== undefined && state.schemas.includes(s) && !cachedTablesIn(s) && !tablesInFailure(s),
+        ),
     );
     for (const schema of unread) {
       tablesIn(schemaRef(state.scope.source, schema)).then(

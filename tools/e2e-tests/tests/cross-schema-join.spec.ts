@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
-import { apiCall, gotoApp, urlParam, waitForTable } from "./support/helpers";
+import { apiCall, failRequests, gotoApp, urlParam, waitForTable } from "./support/helpers";
 import { expandTableChips, joinParam, pick, showResult, storedSavedJoins, writeSql } from "./support/join";
 
 // A join across two schemas of one source (backlog story 44; boards BE and BG).
@@ -48,6 +48,26 @@ test("the form joins a table from another schema and suggests the foreign key pa
   // Board BG, widened: in a join that spans schemas every band names its schema.
   await expect(page.locator("th.band")).toHaveText(["warehouse.shipments", "public.orders"]);
   await expect(page.locator("#current")).toHaveText("warehouse.shipments ⋈ public.orders");
+});
+
+test("a schema whose tables cannot be listed says so in the table menu, and is not asked again", async ({ page }) => {
+  await failRequests(page, apiCall("/tables", { schema: "public" }));
+  const asked: string[] = [];
+  page.on("request", (r) => {
+    if (apiCall("/tables", { schema: "public" })(r)) asked.push(r.url());
+  });
+  await openFromShipments(page);
+  const failed = page.waitForResponse(apiCall("/tables", { schema: "public" }));
+  await pick(page, "join 1 schema", "public");
+  await failed;
+  await page.getByRole("button", { name: "join 1 table", exact: true }).click();
+  await expect(page.locator("#dd-pop .dd-row.blocked")).toContainText("could not list tables");
+  await page.keyboard.press("Escape");
+  await page.locator("#join-mode-sql").click();
+  await page.locator("#join-sql").fill("FROM shipments s JOIN public.orders o ON s.order_id = o.id");
+  await page.locator("#join-sql").press("End");
+  await page.locator("#join-sql").pressSequentially(" ");
+  expect(asked).toHaveLength(1);
 });
 
 test("a join within one schema keeps its labels bare", async ({ page }) => {
