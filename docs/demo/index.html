@@ -5511,8 +5511,23 @@ function mountJoinSql(onChange) {
     suggest2.show(rows, ctx.head);
   }
   function prefetch2() {
+    const declared = joinCompletionAt(field.value).declared;
+    const unread = new Set(
+      declared.map((d) => d.schema).filter((s) => s !== void 0 && state.schemas.includes(s) && !cachedTablesIn(s))
+    );
+    for (const schema of unread) {
+      tablesIn(schemaRef(state.scope.source, schema)).then(
+        () => {
+          prefetch2();
+          render6();
+          onChange();
+        },
+        () => {
+        }
+      );
+    }
     const listed = (d) => cachedTablesIn(d.schema ?? state.scope.schema)?.some((t) => t.name === d.table) ?? false;
-    const named = joinCompletionAt(field.value).declared.filter(listed);
+    const named = declared.filter(listed);
     const wanted = distinctRefs(named.map(refFor)).filter((t) => !cachedColumns(t));
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {

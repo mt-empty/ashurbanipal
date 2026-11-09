@@ -1,6 +1,6 @@
 # Cross-schema joins
 
-> **Status:** PARTIAL · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** extends stories 40 (join route) and 41 (join builder); server side done (spec, seeds, conformance, all five ports); frontend (§4, §6) open
+> **Status:** DONE · **Area:** spec, ports, conformance, frontend, docs, e2e · **Ref:** server side in PR #248; join DSL, table refs, picker, bands and e2e in the frontend PR that follows
 
 Let one join name tables from more than one schema of the same source.
 Read-only, like every join. A join still never crosses a source.
@@ -205,7 +205,7 @@ tableref    = [ ident , "." ] , ident , [ ws , [ "AS" , ws ] , alias ] ;
 - `frontend/src/lib/join-dsl.ts`, `join-def.ts`, `join-types.ts`,
   `join-draft.ts`; `frontend/src/features/join-catalog.ts`, `join-form.ts`,
   `join-sql.ts`, `join-view.ts`, `column-parts.ts`
-- e2e: `join-builder.spec.ts`, `join-result.spec.ts`
+- e2e: `cross-schema-join.spec.ts` (picker, bands, SQL suggestions and checks, the cross-schema FK link, common values, saved joins)
 
 ## 8. What "done" means
 

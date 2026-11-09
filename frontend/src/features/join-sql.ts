@@ -310,9 +310,26 @@ export function mountJoinSql(onChange: () => void): JoinSql {
   // Column names and types are what catches an unknown column or a mismatched pair; read them for every
   // table the text names that its schema lists, so a half-typed name is never asked for.
   function prefetch(): void {
+    const declared = joinCompletionAt(field.value).declared;
+    // Another schema's table list comes first, so its names can be checked and its columns read.
+    const unread = new Set(
+      declared
+        .map((d) => d.schema)
+        .filter((s): s is string => s !== undefined && state.schemas.includes(s) && !cachedTablesIn(s)),
+    );
+    for (const schema of unread) {
+      tablesIn(schemaRef(state.scope.source, schema)).then(
+        () => {
+          prefetch();
+          render();
+          onChange();
+        },
+        () => {},
+      );
+    }
     const listed = (d: DeclaredTable): boolean =>
       cachedTablesIn(d.schema ?? state.scope.schema)?.some((t) => t.name === d.table) ?? false;
-    const named = joinCompletionAt(field.value).declared.filter(listed);
+    const named = declared.filter(listed);
     const wanted = distinctRefs(named.map(refFor)).filter((t) => !cachedColumns(t));
     if (wanted.length === 0) return;
     void Promise.allSettled(wanted.map(tableColumns)).then((results) => {
