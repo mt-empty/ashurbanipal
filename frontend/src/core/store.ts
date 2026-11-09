@@ -135,10 +135,28 @@ export function viewKey(view: View | null): string {
   return view.kind === "table" ? `table:${view.table}` : `join:${view.text}`;
 }
 
-// The scope every request without a table of its own runs in. Names still
-// loading are sent as they are; a failed list leaves the server's default.
+// Whether /sources and /schemas have answered, so a table can be named.
+export function scopeSettled(): boolean {
+  return state.scope.kind !== "loading";
+}
+
+// The scope every request without a table of its own runs in. Callers check
+// scopeSettled first: a guessed name must never reach a ref, a key or a request.
 export function scopeRef(): SchemaRef {
+  const { scope } = state;
+  if (scope.kind === "loading") throw new Error("ashurbanipal: a table was named before the scope settled");
+  return schemaRef(scope.source, scope.schema);
+}
+
+// Start-up's prefetch only: the names it will try, sent before the lists
+// answer. api.ts's nameStartupDefault re-keys those answers once they do.
+export function startupScopeGuess(): SchemaRef {
   return schemaRef(state.scope.source, state.scope.schema);
+}
+
+// Another schema of the scope's source.
+export function schemaRefFor(schema: string): SchemaRef {
+  return schemaRef(scopeRef().source, schema);
 }
 
 // A table named relative to the scope: a join's table, a join column's, a
@@ -157,9 +175,10 @@ export function manySchemas(): boolean {
   return state.schemas.length > 1;
 }
 
-// The one table in view, or null in a join view (which has several) or before one is chosen.
+// The one table in view, or null in a join view (which has several), before
+// one is chosen, or while the scope settles.
 export function tableInView(): TableRef | null {
-  return state.view?.kind === "table" ? refInScope(state.view.table) : null;
+  return state.view?.kind === "table" && scopeSettled() ? refInScope(state.view.table) : null;
 }
 
 // Its name, for what is kept per scope (stored sort, chips); a table view is always in the scope.
@@ -171,7 +190,7 @@ export function tableNameInView(): string | null {
 // own table. Null when neither is known.
 export function columnTable(col: Column): TableRef | null {
   if (col.join === undefined) return tableInView();
-  return col.table === undefined ? null : refFor({ schema: col.schema, table: col.table });
+  return col.table === undefined || !scopeSettled() ? null : refFor({ schema: col.schema, table: col.table });
 }
 
 export function joinInView(): JoinView | null {

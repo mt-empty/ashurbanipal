@@ -1,4 +1,4 @@
-import { schemaRef, scopeParams } from "../lib/table-ref.js";
+import { scopeParams } from "../lib/table-ref.js";
 import { dropRetiredKeys } from "./storage.js";
 import {
   chosenScope,
@@ -93,9 +93,11 @@ export function tableDataPath(req: ViewRequest, scope: SchemaRef): string {
   return `/tables/data?${dataParams(req, scope)}`;
 }
 
+// Not a SchemaRef: a name left out here is one the page had no choice of.
 function applyUrlScope(params: URLSearchParams): void {
   const { source, schema } = chosenScope();
-  scopeParams(schemaRef(source, schema), params);
+  if (source) params.set("source", source);
+  if (schema) params.set("schema", schema);
 }
 
 // The params that name a view, shared by syncUrl and chip links.

@@ -81,6 +81,7 @@ export async function loadSchemas(): Promise<boolean> {
     // single-schema but leave a trace.
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
     settleSchema(null, [], false);
+    syncGridLock();
     $("schema-select-wrap").hidden = true;
     markTiming("scope-settled");
     return true;
@@ -90,6 +91,7 @@ export async function loadSchemas(): Promise<boolean> {
   // The server's default can be null (no default schema on that connection).
   const schema = wanted !== null && schemas.includes(wanted) ? wanted : (defaultSchema ?? schemas[0] ?? null);
   settleSchema(schema, schemas, defaultSchema === null);
+  syncGridLock();
   if (schema !== null) populateSelect($<HTMLSelectElement>("schema-select"), schemas, schema);
   // Re-hidden explicitly: a source switch can land on a source with fewer
   // schemas than the last one, whose selector would otherwise stay up.

@@ -1,9 +1,9 @@
 import { ApiError, api } from "../core/api.js";
-import { refFor, refInScope, state } from "../core/state.js";
+import { refFor, refInScope, schemaRefFor, state } from "../core/state.js";
 import type { Column, SchemaRef, TableListEntry, TableRef, ViewData } from "../core/types.js";
 import { formatApproxCount } from "../lib/format.js";
 import type { JoinCatalog } from "../lib/join-dsl.js";
-import { refKey, schemaRef, scopeQuery, tableParams } from "../lib/table-ref.js";
+import { refKey, scopeQuery, tableParams } from "../lib/table-ref.js";
 import { tableStructure } from "./structure.js";
 import { listedTableNames, tableChipCount } from "./table-chips.js";
 
@@ -116,15 +116,15 @@ export function tablesIn(scope: SchemaRef): Promise<void> {
 
 // Why `schema`'s tables could not be listed, once a read failed.
 export function tablesInFailure(schema: string): string | undefined {
-  return schemaTablesFailed.get(scopeQuery(schemaRef(state.scope.source, schema)));
+  return schemaTablesFailed.get(scopeQuery(schemaRefFor(schema)));
 }
 
-// The tables of `schema` once read: the scope's own (or, with null, the one the
-// server defaulted to) from its chips, another's from tablesIn().
-export function cachedTablesIn(schema: string | null): { name: string; count: string }[] | undefined {
-  if (schema === null || schema === state.scope.schema)
+// The tables of `schema` once read: the scope's own (absent, or named) from its
+// chips, another's from tablesIn().
+export function cachedTablesIn(schema: string | undefined): { name: string; count: string }[] | undefined {
+  if (schema === undefined || schema === state.scope.schema)
     return listedTableNames().map((name) => ({ name, count: tableChipCount(name) }));
-  return schemaTablesRead.get(scopeQuery(schemaRef(state.scope.source, schema)));
+  return schemaTablesRead.get(scopeQuery(schemaRefFor(schema)));
 }
 
 // Every listed schema for `schema.table` names, with the tables and columns read

@@ -1,6 +1,16 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, copyText, el } from "../core/dom.js";
-import { clearJoin, joinInView, joinRequest, persist, refFor, startOf, state, viewIsShown } from "../core/state.js";
+import {
+  clearJoin,
+  joinInView,
+  joinRequest,
+  persist,
+  refFor,
+  scopeSettled,
+  startOf,
+  state,
+  viewIsShown,
+} from "../core/state.js";
 import type { JoinDef } from "../core/types.js";
 import { type Draft, defToDraft, draftToDef, newDraft } from "../lib/join-draft.js";
 import { printJoin } from "../lib/join-dsl.js";
@@ -87,6 +97,8 @@ let editingSaved: string | undefined;
 export function openJoinDialog(
   opts: { error?: string; def?: JoinDef; fresh?: boolean; focusName?: boolean } = {},
 ): void {
+  // Its tables are named in the scope, so it waits until the lists answer.
+  if (!scopeSettled()) return;
   // Reopened while its join was loading: the server's answer must not replace what is being typed.
   if (opts.error !== undefined && dialog.open) {
     $("join-error").textContent = opts.error;
@@ -162,6 +174,12 @@ dialog.addEventListener("close", () => {
     persist();
     loadData({ replaceHistory: true });
   }
+});
+// A history step replaces the view the dialog was built on; its own close handling would act on the new one.
+window.addEventListener("popstate", () => {
+  if (!dialog.open) return;
+  committed = true;
+  dialog.close();
 });
 $("join-delete").onclick = () => {
   if (editingSaved !== undefined) deleteSavedJoin(editingSaved);

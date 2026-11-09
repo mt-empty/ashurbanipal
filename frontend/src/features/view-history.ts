@@ -5,6 +5,7 @@ import {
   clearFilter,
   enterTable,
   persist,
+  scopeSettled,
   setSchema,
   startMissingFrom,
   state,
@@ -120,7 +121,8 @@ window.addEventListener("popstate", () => {
   $<HTMLSelectElement>("source-select").value = state.scope.source ?? "";
   $<HTMLSelectElement>("schema-select").value = state.scope.schema ?? "";
   persist();
-  if (state.scope.source === previousSource) {
+  // A scope still loading from an earlier step is checked again, as another source is.
+  if (state.scope.source === previousSource && scopeSettled()) {
     // The same scope's table list is the one on screen; only the rows are asked for.
     // An earlier step's list may still be on its way, leaving the chips of another scope.
     const listed = chipsListScopeInView() && !startMissingFrom(state.view, listedTableNames());

@@ -1,5 +1,5 @@
 import { el } from "../core/dom.js";
-import { manySchemas, refFor, state } from "../core/state.js";
+import { manySchemas, refFor, schemaRefFor, state } from "../core/state.js";
 import type { Column, TableRef } from "../core/types.js";
 import {
   addJoin,
@@ -13,7 +13,7 @@ import {
 } from "../lib/join-draft.js";
 import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
-import { distinctRefs, schemaRef } from "../lib/table-ref.js";
+import { distinctRefs } from "../lib/table-ref.js";
 import { createDropdown, type DropdownOption, lastDropdownLabel } from "./dropdown.js";
 import { cachedColumns, cachedTablesIn, tableColumns, tablesIn, tablesInFailure } from "./join-catalog.js";
 
@@ -97,14 +97,14 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   // The schema's tables once read; another schema's are asked for the first time its menu is built (board BE).
   // An absent schema is the scope's, whose tables are the chips.
   const tableOptions = (schema: string | undefined): DropdownOption[] => {
-    const tables = cachedTablesIn(schema ?? state.scope.schema);
+    const tables = cachedTablesIn(schema);
     if (tables) return tables.map((t) => ({ value: t.name, label: t.name, note: t.count }));
     if (schema === undefined) return [];
     if (!state.schemas.includes(schema))
       return [{ value: "", label: `${schema} is not a listed schema`, blocked: true }];
     const failure = tablesInFailure(schema);
     if (failure) return [{ value: "", label: "could not list tables", note: failure, blocked: true }];
-    tablesIn(schemaRef(state.scope.source, schema)).then(
+    tablesIn(schemaRefFor(schema)).then(
       () => changed(),
       () => changed(),
     );

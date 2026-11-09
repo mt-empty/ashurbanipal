@@ -2557,8 +2557,19 @@ function viewKey(view) {
   if (view === null) return "";
   return view.kind === "table" ? `table:${view.table}` : `join:${view.text}`;
 }
+function scopeSettled() {
+  return state.scope.kind !== "loading";
+}
 function scopeRef() {
+  const { scope: scope2 } = state;
+  if (scope2.kind === "loading") throw new Error("ashurbanipal: a table was named before the scope settled");
+  return schemaRef(scope2.source, scope2.schema);
+}
+function startupScopeGuess() {
   return schemaRef(state.scope.source, state.scope.schema);
+}
+function schemaRefFor(schema) {
+  return schemaRef(scopeRef().source, schema);
 }
 function refFor(t) {
   return near(scopeRef(), t.schema, t.table);
@@ -2570,14 +2581,14 @@ function manySchemas() {
   return state.schemas.length > 1;
 }
 function tableInView() {
-  return state.view?.kind === "table" ? refInScope(state.view.table) : null;
+  return state.view?.kind === "table" && scopeSettled() ? refInScope(state.view.table) : null;
 }
 function tableNameInView() {
   return state.view?.kind === "table" ? state.view.table : null;
 }
 function columnTable(col) {
   if (col.join === void 0) return tableInView();
-  return col.table === void 0 ? null : refFor({ schema: col.schema, table: col.table });
+  return col.table === void 0 || !scopeSettled() ? null : refFor({ schema: col.schema, table: col.table });
 }
 function joinInView() {
   return state.view?.kind === "join" ? state.view : null;
@@ -2982,7 +2993,8 @@ function tableDataPath(req, scope2) {
 }
 function applyUrlScope(params) {
   const { source, schema } = chosenScope();
-  scopeParams(schemaRef(source, schema), params);
+  if (source) params.set("source", source);
+  if (schema) params.set("schema", schema);
 }
 function viewParams(view) {
   const params = new URLSearchParams({ table: startTable(view) ?? "" });
@@ -3343,7 +3355,7 @@ function tick() {
     return;
   }
   if (fetching) return;
-  if (!state.view) {
+  if (!state.view || !scopeSettled()) {
     restart();
     return;
   }
@@ -4330,6 +4342,10 @@ function syncGridLock() {
   const locked = gridIsStale();
   tableEl.inert = locked;
   tableEl.toggleAttribute("data-stale", locked);
+  const settling = !scopeSettled();
+  $("tables").inert = settling;
+  $("join-btn").disabled = settling;
+  $("join-edit-btn").disabled = settling;
   for (const id of ["columns-btn", "structure-btn", "sort-note-show", "sort-note-clear", "all-hidden-show"]) {
     $(id).disabled = locked;
   }
@@ -4457,7 +4473,7 @@ async function loadTables({
   return fellBack ? "fell-back" : "loaded";
 }
 function chipsListScopeInView() {
-  return listedScope === scopeIdentity();
+  return scopeSettled() && listedScope === scopeIdentity();
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
@@ -4619,12 +4635,12 @@ function tablesIn(scope2) {
   return read2;
 }
 function tablesInFailure(schema) {
-  return schemaTablesFailed.get(scopeQuery(schemaRef(state.scope.source, schema)));
+  return schemaTablesFailed.get(scopeQuery(schemaRefFor(schema)));
 }
 function cachedTablesIn(schema) {
-  if (schema === null || schema === state.scope.schema)
+  if (schema === void 0 || schema === state.scope.schema)
     return listedTableNames().map((name) => ({ name, count: tableChipCount(name) }));
-  return schemaTablesRead.get(scopeQuery(schemaRef(state.scope.source, schema)));
+  return schemaTablesRead.get(scopeQuery(schemaRefFor(schema)));
 }
 function knownSchemas(own2) {
   if (state.schemas.length === 0) return void 0;
@@ -4714,14 +4730,14 @@ function mountJoinForm(root, onChange) {
     changed(true);
   };
   const tableOptions = (schema) => {
-    const tables = cachedTablesIn(schema ?? state.scope.schema);
+    const tables = cachedTablesIn(schema);
     if (tables) return tables.map((t) => ({ value: t.name, label: t.name, note: t.count }));
     if (schema === void 0) return [];
     if (!state.schemas.includes(schema))
       return [{ value: "", label: `${schema} is not a listed schema`, blocked: true }];
     const failure = tablesInFailure(schema);
     if (failure) return [{ value: "", label: "could not list tables", note: failure, blocked: true }];
-    tablesIn(schemaRef(state.scope.source, schema)).then(
+    tablesIn(schemaRefFor(schema)).then(
       () => changed(),
       () => changed()
     );
@@ -5496,9 +5512,9 @@ function mountJoinSql(onChange) {
     let rows = [];
     if (ctx.expect === "table") {
       const schema = ctx.qualifier ?? void 0;
-      const listed = cachedTablesIn(schema ?? state.scope.schema);
+      const listed = cachedTablesIn(schema);
       if (!listed && schema !== void 0 && state.schemas.includes(schema)) {
-        tablesIn(schemaRef(state.scope.source, schema)).then(
+        tablesIn(schemaRefFor(schema)).then(
           () => {
             if (token === suggest2.token()) void update2();
           },
@@ -5537,7 +5553,7 @@ function mountJoinSql(onChange) {
       )
     );
     for (const schema of unread) {
-      tablesIn(schemaRef(state.scope.source, schema)).then(
+      tablesIn(schemaRefFor(schema)).then(
         () => {
           prefetch2();
           render6();
@@ -5547,7 +5563,7 @@ function mountJoinSql(onChange) {
         }
       );
     }
-    const listed = (d) => cachedTablesIn(d.schema ?? state.scope.schema)?.some((t) => t.name === d.table) ?? false;
+    const listed = (d) => cachedTablesIn(d.schema)?.some((t) => t.name === d.table) ?? false;
     const named = declared.filter(listed);
     const wanted = distinctRefs(named.map(refFor)).filter((t) => !cachedColumns(t));
     if (wanted.length === 0) return;
@@ -5616,6 +5632,7 @@ async function loadSchemas() {
     if (token !== loadSchemasToken) return false;
     console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
     settleSchema(null, [], false);
+    syncGridLock();
     $("schema-select-wrap").hidden = true;
     markTiming("scope-settled");
     return true;
@@ -5624,6 +5641,7 @@ async function loadSchemas() {
   const wanted = state.scope.schema;
   const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema ?? schemas[0] ?? null;
   settleSchema(schema, schemas, defaultSchema === null);
+  syncGridLock();
   if (schema !== null) populateSelect($("schema-select"), schemas, schema);
   $("schema-select-wrap").hidden = !manySchemas();
   markTiming("scope-settled");
@@ -5711,7 +5729,7 @@ window.addEventListener("popstate", () => {
   $("source-select").value = state.scope.source ?? "";
   $("schema-select").value = state.scope.schema ?? "";
   persist();
-  if (state.scope.source === previousSource) {
+  if (state.scope.source === previousSource && scopeSettled()) {
     const listed = chipsListScopeInView() && !startMissingFrom(state.view, listedTableNames());
     if (state.scope.schema === previousSchema && listed) {
       loadData({ replaceHistory: true, reason: "history" });
@@ -5776,6 +5794,7 @@ function setMode(next) {
 }
 var editingSaved;
 function openJoinDialog(opts = {}) {
+  if (!scopeSettled()) return;
   if (opts.error !== void 0 && dialog.open) {
     $("join-error").textContent = opts.error;
     return;
@@ -5841,6 +5860,11 @@ dialog.addEventListener("close", () => {
     persist();
     loadData({ replaceHistory: true });
   }
+});
+window.addEventListener("popstate", () => {
+  if (!dialog.open) return;
+  committed = true;
+  dialog.close();
 });
 $("join-delete").onclick = () => {
   if (editingSaved !== void 0) deleteSavedJoin(editingSaved);
@@ -6665,7 +6689,7 @@ update();
 
 // src/bootstrap/boot-prefetch.ts
 function prefetchStartup() {
-  const scope2 = scopeRef();
+  const scope2 = startupScopeGuess();
   prefetch("/sources", "boot");
   prefetch(`/schemas${sourceQuery()}`, "boot");
   prefetch(`/tables${scopeQuery(scope2)}`, "boot");
@@ -7429,6 +7453,7 @@ function updateViewChrome() {
   document.title = title ? `${title} \u2014 Ashurbanipal` : "Ashurbanipal";
 }
 function loadData2(opts = {}) {
+  if (!scopeSettled()) return Promise.resolve();
   const reason = opts.reason ?? (opts.auto ? "auto" : "other");
   markTiming("load-start", reason);
   return runLoad({ ...opts, reason });
