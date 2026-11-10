@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import psycopg
+from psycopg.abc import Buffer
 from psycopg.types.string import TextLoader
 
 from ..filter import Condition, NullCheck
@@ -65,7 +66,7 @@ CATALOG_TIMEOUT_SECS = 5
 class _LenientTextLoader(TextLoader):
     """Use the protocol sentinel when psycopg cannot decode text."""
 
-    def load(self, data):
+    def load(self, data: Buffer) -> bytes | str:
         try:
             return super().load(data)
         except UnicodeDecodeError:
@@ -158,7 +159,8 @@ class PgSource(DbSource):
     def _default_schema(self, cur: psycopg.Cursor) -> str | None:
         # None when no schema on the session's search_path exists.
         cur.execute("select current_schema()")
-        return one_row(cur)[0]
+        schema: str | None = one_row(cur)[0]
+        return schema
 
     def _resolve_schema(self, cur: psycopg.Cursor, requested: str | None) -> str:
         return self._resolve_schema_among(cur, self._list_schemas(cur), requested)
@@ -199,7 +201,8 @@ class PgSource(DbSource):
         row = cur.fetchone()
         if row is None:
             raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
-        return row[0]
+        oid: int = row[0]
+        return oid
 
     def _allowed_columns(self, cur: psycopg.Cursor, schema: str, table: str) -> list[str]:
         cur.execute(
@@ -230,7 +233,7 @@ class PgSource(DbSource):
             (schema, table),
         )
         pk_columns: set[str] = set()
-        fk_candidates: dict[str, list[tuple]] = {}
+        fk_candidates: dict[str, list[tuple[str, str | None, str | None, str | None]]] = {}
         for constraint_name, constraint_type, column_name, ref_schema, ref_table, ref_column in cur.fetchall():
             if constraint_type == "PRIMARY KEY":
                 pk_columns.add(column_name)

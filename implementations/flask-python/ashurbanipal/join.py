@@ -8,9 +8,9 @@ emits SQL from catalog names and generated aliases only.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TypeGuard
+from typing import Any, TypeGuard
 
 from .db import OP_SQL, BadJoin, BadParam, ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
@@ -71,7 +71,7 @@ def table_schemas(refs: list[tuple[str | None, str]], request: str, listed: list
     return out
 
 
-def _optional_schema(obj: dict, what: str) -> str | None:
+def _optional_schema(obj: dict[str, Any], what: str) -> str | None:
     if "schema" not in obj:
         return None
     if not isinstance(obj["schema"], str):
@@ -83,13 +83,13 @@ def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _check_keys(obj: dict, allowed: set[str], what: str) -> None:
+def _check_keys(obj: dict[str, Any], allowed: set[str], what: str) -> None:
     unknown = set(obj) - allowed
     if unknown:
         raise BadJoin(f"{what} has unknown field(s): {sorted(unknown)}")
 
 
-def _to_pos(raw, what: str) -> ColumnPos:
+def _to_pos(raw: object, what: str) -> ColumnPos:
     if not isinstance(raw, dict):
         raise BadJoin(f"{what} must be an object with join and column")
     _check_keys(raw, {"join", "column"}, what)
@@ -336,7 +336,9 @@ class JoinPlan:
             )
         return out
 
-    def rows_from(self, db_rows, limit: int, decode: Callable = lambda v: v) -> tuple[list[dict], bool]:
+    def rows_from(
+        self, db_rows: Sequence[Sequence[Any]], limit: int, decode: Callable[[Any], Any] = lambda v: v
+    ) -> tuple[list[dict[str, Any]], bool]:
         """Keys result rows by label and trims the extra row asked for has_more."""
         has_more = len(db_rows) > limit
         out = [dict(zip(self.labels, (decode(v) for v in row), strict=True)) for row in db_rows[:limit]]
