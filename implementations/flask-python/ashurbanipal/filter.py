@@ -16,15 +16,28 @@ VALID_LOGIC = {"AND", "OR"}
 _CONDITION_FIELDS = {"logic", "not", "column", "op", "value"}
 
 
-@dataclass(frozen=True)
-class Condition:
+@dataclass(frozen=True, kw_only=True)
+class _ConditionBase:
     column: str
     op: str
     logic: str | None = None
     not_: bool = False
-    value: str | None = None
     # Table position, accepted only by `parse_for_join` (spec/protocol.md §5.11.3).
     join: int | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class NullCheck(_ConditionBase):
+    """`IS NULL` or `IS NOT NULL`: nothing to bind."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class Comparison(_ConditionBase):
+    value: str
+
+
+# A backend narrows on the class before binding, so a value is never missing.
+type Condition = NullCheck | Comparison
 
 
 class FilterError(Exception):
@@ -93,16 +106,19 @@ def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
             raise FilterError(f"condition {i} has invalid op {op!r}")
 
         value = raw_cond.get("value")
-        takes_value = op not in NO_VALUE_OPS
-        if takes_value and not isinstance(value, str):
+        if op in NO_VALUE_OPS:
+            if value is not None:
+                raise FilterError(f"op {op!r} takes no value")
+        elif not isinstance(value, str):
             raise FilterError(f"op {op!r} requires a string value")
-        if not takes_value and value is not None:
-            raise FilterError(f"op {op!r} takes no value")
 
         join = raw_cond.get("join")
         if join is not None and (not isinstance(join, int) or isinstance(join, bool) or join < 0):
             raise FilterError(f'condition {i} has an invalid "join" position')
 
-        conditions.append(Condition(column=column, op=op, logic=logic, not_=not_, value=value, join=join))
+        if isinstance(value, str):
+            conditions.append(Comparison(column=column, op=op, logic=logic, not_=not_, join=join, value=value))
+        else:
+            conditions.append(NullCheck(column=column, op=op, logic=logic, not_=not_, join=join))
 
     return conditions

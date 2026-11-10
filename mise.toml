@@ -54,8 +54,8 @@ description = "node-express implementation checks: lint, typecheck, build, test"
 depends = ["node:lint", "node:typecheck", "node:build", "node:test"]
 
 [tasks.flask]
-description = "flask-python implementation checks: lint, fmt-check, test"
-depends = ["flask:lint", "flask:fmt-check", "flask:test"]
+description = "flask-python implementation checks: lint, fmt-check, typecheck, test"
+depends = ["flask:lint", "flask:fmt-check", "flask:typecheck", "flask:test"]
 
 [tasks.frontend]
 description = "frontend checks: lint, cycle check, api-reference drift, typecheck, e2e lint + typecheck, unit tests, build-check, vendored-copy sync, demo sync, Playwright e2e suite"

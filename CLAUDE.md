@@ -100,7 +100,7 @@ mise run rust                        # rust:fmt-check + rust:lint + rust:test + 
 mise run spring                      # spring gradle build + test
 mise run go                          # go build/vet/fmt-check + test (go-nethttp)
 mise run node                        # node lint + typecheck + build + test (node-express)
-mise run flask                       # flask lint + fmt-check + test (flask-python, ruff + pytest via uv)
+mise run flask                       # flask lint + fmt-check + typecheck + test (flask-python, ruff + mypy + pytest via uv)
 mise run frontend                    # frontend lint, cycle + api-reference checks, typecheck, unit tests, build/ports/demo sync checks, full e2e suite
 mise run conformance                 # seed sync check + conformance:test + conformance:schema-test
 mise run docs                        # readme.md versions vs. the publishing ledger; feature-backlog index vs. entry headers

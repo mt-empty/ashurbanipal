@@ -7,12 +7,24 @@ import functools
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from ..join import JoinData, JoinOpts, JoinSpec
 
 _F = TypeVar("_F", bound=Callable)
+
+
+class _Fetches(Protocol):
+    def fetchone(self) -> tuple[Any, ...] | None: ...
+
+
+def one_row(cur: _Fetches) -> tuple[Any, ...]:
+    """The row a query that always returns one (an aggregate, `select version()`) returned."""
+    row = cur.fetchone()
+    if row is None:
+        raise RuntimeError("expected one row, got none")
+    return row
 
 
 class KeyKind(StrEnum):

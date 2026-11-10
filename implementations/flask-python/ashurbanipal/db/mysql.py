@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 import pymysql
 
-from ..filter import Condition
+from ..filter import Condition, NullCheck
 from ..join import (
     BINARY,
     FLOAT,
@@ -51,6 +51,7 @@ from . import (
     TableInfo,
     group_referenced_by,
     no_default_schema,
+    one_row,
     wrap_driver_errors,
 )
 
@@ -118,11 +119,11 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
             raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
         cast = f"CAST({_quote_ident(cond.column)} AS CHAR)"
 
-        if cond.op == "ILIKE":
+        if isinstance(cond, NullCheck):
+            inner = f"{cast} {cond.op}"
+        elif cond.op == "ILIKE":
             values.append(cond.value)
             inner = f"LOWER({cast}) LIKE LOWER(%s)"
-        elif cond.op in ("IS NULL", "IS NOT NULL"):
-            inner = f"{cast} {cond.op}"
         else:
             values.append(cond.value)
             inner = f"{cast} {cond.op} %s"
@@ -183,7 +184,7 @@ class MySqlSource(DbSource):
             return self._variant
         with conn.cursor() as cur:
             cur.execute("select version()")
-            (version,) = cur.fetchone()
+            (version,) = one_row(cur)
         self._variant = _MARIADB if "mariadb" in version.lower() else _MYSQL
         return self._variant
 
@@ -202,7 +203,7 @@ class MySqlSource(DbSource):
     def _default_schema(self, cur, variant: str, timeout_secs: int) -> str | None:
         # None when the connection names no database.
         cur.execute(_timed_select(variant, timeout_secs, "database()"))
-        (name,) = cur.fetchone()
+        (name,) = one_row(cur)
         return name
 
     def _resolve_schema(self, cur, variant: str, requested: str | None, timeout_secs: int) -> str:
@@ -214,12 +215,9 @@ class MySqlSource(DbSource):
         self, cur, variant: str, schemas: list[str], requested: str | None, timeout_secs: int
     ) -> str:
         """`_resolve_schema` against a schema list already fetched in this transaction."""
-        if requested is not None:
-            resolved = requested
-        else:
-            resolved = self._default_schema(cur, variant, timeout_secs)
-            if resolved is None:
-                raise no_default_schema()
+        resolved = requested if requested is not None else self._default_schema(cur, variant, timeout_secs)
+        if resolved is None:
+            raise no_default_schema()
         if resolved not in schemas:
             raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
         return resolved
@@ -424,7 +422,7 @@ class MySqlSource(DbSource):
                     ),
                     (resolved_schema, table),
                 )
-                (count,) = cur.fetchone()
+                (count,) = one_row(cur)
                 total_approx = count if count is not None else -1
             conn.commit()
             return TableData(columns=columns, rows=rows, total_approx=total_approx)
@@ -694,7 +692,7 @@ class MySqlSource(DbSource):
                         "where table_schema = 'information_schema' and table_name = 'CHECK_CONSTRAINTS'",
                     )
                 )
-                if cur.fetchone()[0] > 0:
+                if one_row(cur)[0] > 0:
                     # MariaDB names unnamed table-level checks per table, so
                     # its view carries table_name for the join; MySQL's has none.
                     cc_table = "and cc.table_name = tc.table_name " if variant == _MARIADB else ""

@@ -18,6 +18,12 @@ run = "uv run ruff format --check ."
 dir = "implementations/flask-python"
 depends = ["flask:install"]
 
+["flask:typecheck"]
+description = "mypy over ashurbanipal/ (settings in pyproject.toml [tool.mypy])"
+run = "uv run mypy"
+dir = "implementations/flask-python"
+depends = ["flask:install"]
+
 ["flask:test"]
 description = "pytest -q (postgres/mysql integration tests skip without DATABASE_URL/MYSQL_TEST_URL/MARIADB_TEST_URL)"
 run = "uv run pytest -q"

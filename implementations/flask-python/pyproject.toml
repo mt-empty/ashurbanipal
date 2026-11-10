@@ -27,6 +27,8 @@ dev = [
     "ashurbanipal-flask[postgres,mysql]",
     "pytest>=8.0",
     "ruff>=0.6",
+    "mypy>=2.4",
+    "types-PyMySQL>=1.1",
 ]
 
 [tool.pytest.ini_options]
@@ -39,6 +41,11 @@ filterwarnings = [
     "error::DeprecationWarning",
     "error::PendingDeprecationWarning",
 ]
+
+[tool.mypy]
+files = ["ashurbanipal"]
+python_version = "3.12"
+check_untyped_defs = true
 
 [tool.ruff]
 line-length = 115

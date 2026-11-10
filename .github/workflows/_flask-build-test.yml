@@ -96,6 +96,10 @@ jobs:
         working-directory: implementations/flask-python
         run: uv run ruff format --check .
 
+      - name: mypy
+        working-directory: implementations/flask-python
+        run: uv run mypy
+
       # Re-hash after generation: catches a build pipeline silently
       # mangling the copy at implementations/flask-python/ashurbanipal/frontend/dbviewer.html
       # (PORTING.md's vendoring contract, hardening checklist item 3) —

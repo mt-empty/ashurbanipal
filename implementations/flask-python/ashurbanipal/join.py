@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TypeGuard
 
 from .db import OP_SQL, BadJoin, BadParam, ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
-from .filter import Condition, load_json
+from .filter import Condition, NullCheck, load_json
 
 MAX_JOIN_BYTES = 8192
 MAX_JOIN_TABLES = 4
@@ -78,7 +79,7 @@ def _optional_schema(obj: dict, what: str) -> str | None:
     return obj["schema"]
 
 
-def _is_int(value) -> bool:
+def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
@@ -424,9 +425,6 @@ def plan_join(spec: JoinSpec, tables: list[TableMeta], opts: JoinOpts) -> JoinPl
         pos = cond.join if cond.join is not None else 0
         if pos < 0 or pos >= len(tables):
             raise _FilterParseError(f"condition {i}: join position {pos} is not in the join")
-        takes_value = cond.op not in ("IS NULL", "IS NOT NULL")
-        if takes_value != (cond.value is not None):
-            raise _FilterParseError(f"condition {i}: op {cond.op!r} has the wrong value arity")
         resolved_filter.append(_ResolvedCondition(cond=cond, pos=pos, col=tables[pos].index(cond.column)))
 
     sort = None
@@ -488,7 +486,7 @@ def build_select(plan: JoinPlan, d: Dialect) -> tuple[str, list[str]]:
     for i, rc_cond in enumerate(plan.filter):
         cond = rc_cond.cond
         cast = d.cast_text(alias(rc_cond.pos, rc_cond.col))
-        if cond.op in ("IS NULL", "IS NOT NULL"):
+        if isinstance(cond, NullCheck):
             inner = f"{cast} {OP_SQL[cond.op]}"
         elif cond.op == "ILIKE":
             values.append(cond.value)
