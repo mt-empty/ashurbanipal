@@ -56,7 +56,11 @@ jobs:
           # DoS): reached only transitively via actix-http -> actix-web, which
           # still pins h2 0.3.x — no patched actix-http or h2 0.3.x release
           # exists yet. Drop this once actix-web ships an h2 0.4.16+ dep.
-          ignore: RUSTSEC-2026-0258
+          # RUSTSEC-2026-0459 (bundled SQLite < 3.54.0 can return stale memory
+          # when opening a crafted db + -wal pair, local only): sqlx-sqlite
+          # 0.9.0 caps libsqlite3-sys below the patched 0.39. Drop this once a
+          # sqlx release allows libsqlite3-sys 0.39+.
+          ignore: RUSTSEC-2026-0258,RUSTSEC-2026-0459
 
   build-and-test:
     uses: ./.github/workflows/_rust-crate-build-test.yml
