@@ -22,7 +22,8 @@ def one_row(cur: _Fetches) -> tuple[Any, ...]:
     """The row a query that always returns one (an aggregate, `select version()`) returned."""
     row = cur.fetchone()
     if row is None:
-        raise RuntimeError("expected one row, got none")
+        # A DbError, so a row gone mid-request (a dropped table) still gets a protocol error response.
+        raise DatabaseError("expected one row, got none")
     return row
 
 
