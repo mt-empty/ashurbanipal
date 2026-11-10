@@ -228,7 +228,9 @@ both are present. In CI, `_conformance-behavior.yml`'s `backend` input
 starts the engine and applies its seed; each port's
 `other-backend-conformance` job is the concrete pattern.
 
-Shape conformance — Python + schemathesis, no Rust toolchain needed:
+Shape conformance — schemathesis, pinned by `conformance/schemathesis/uv.lock`
+and installed with `mise run conformance:schema-install` (needs uv, no Rust
+toolchain):
 
 ```sh
 ASHURBANIPAL_CONFORMANCE_URL=http://localhost:PORT/__ashurbanipal \

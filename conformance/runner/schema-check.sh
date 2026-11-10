@@ -31,7 +31,9 @@
 # if it appears; don't chase it.
 #
 # ASHURBANIPAL_SCHEMA_CHECK_SEED pins schemathesis's generator seed; unset
-# means a fresh random seed per run.
+# means a fresh random seed per run. `--generation-database none` stops a
+# local `.hypothesis/` from replaying an old failure on every later run; CI
+# starts clean, so this keeps local runs matching CI.
 #
 # Usage: conformance/runner/schema-check.sh [extra schemathesis args]
 set -euo pipefail
@@ -86,6 +88,7 @@ fi
 "$VENV/bin/schemathesis" run "$SCHEMA" \
     -u "$MOUNT_ROOT/api" \
     ${SEED_ARGS[@]+"${SEED_ARGS[@]}"} \
+    --generation-database none \
     --checks all \
     --exclude-checks positive_data_acceptance \
     --max-examples "${ASHURBANIPAL_SCHEMA_CHECK_EXAMPLES:-100}" \
