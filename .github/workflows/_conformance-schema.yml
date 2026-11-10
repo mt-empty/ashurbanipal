@@ -110,8 +110,8 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
-      - name: Set up uv (Python toolchain)
-        if: inputs.toolchain == 'python'
+      # Every toolchain needs uv: schemathesis installs from its uv.lock.
+      - name: Set up uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: ${{ inputs.python-version }}
@@ -124,7 +124,9 @@ jobs:
           workspaces: "implementations/rust -> target"
 
       - name: Install schemathesis
-        run: python3 -m venv .venv-schemathesis && .venv-schemathesis/bin/pip install --upgrade pip schemathesis
+        run: uv sync --locked --project conformance/schemathesis
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-schemathesis
 
       - name: Start the demo
         run: |

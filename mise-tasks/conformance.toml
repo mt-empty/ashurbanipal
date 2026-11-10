@@ -30,7 +30,7 @@ run = "bash conformance/runner/report.sh"
 
 ["conformance:schema-install"]
 description = "one-time install of schemathesis (layer 2 shape-conformance fuzzer, docs/design.md §4.2) into a local venv"
-run = "python3 -m venv .venv-schemathesis && .venv-schemathesis/bin/pip install --upgrade pip schemathesis"
+run = "UV_PROJECT_ENVIRONMENT=\"$PWD/.venv-schemathesis\" uv sync --locked --project conformance/schemathesis"
 
 ["conformance:schema-test"]
 description = "fire schemathesis at spec/openapi.yaml (layer 2 shape conformance, docs/design.md §4.2) — spawns the Rust demo by default, or set ASHURBANIPAL_CONFORMANCE_URL to target an external implementation instead; run conformance:schema-install first"
