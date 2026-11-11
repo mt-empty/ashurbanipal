@@ -218,7 +218,9 @@ demo-deps-stay-dev-dependencies.
   names — including `sort` and every filter condition's column — are only
   spliced into a query after an exact match against a live catalog lookup,
   done by each backend in `db/postgres.rs` / `db/sqlite.rs` /
-  `db/mysql.rs`; everything else is a bound parameter. On Postgres the
+  `db/mysql.rs`; everything else is a bound parameter. The type system
+  enforces it: `quote_ident` takes only a `db::Ident`, which only a
+  backend's catalog lookup can build (`Ident::from_catalog`). On Postgres the
   table allow-list and the table listing are both gated by
   `has_table_privilege(…, 'SELECT')`, so they stay in lockstep;
   `docs/adapter-decisions.md` §5.2/§5.3 has how MySQL/MariaDB differ.

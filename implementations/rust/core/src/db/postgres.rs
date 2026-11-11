@@ -7,7 +7,7 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 use super::{
     group_referenced_by, no_default_schema, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef,
     ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
-    IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
+    Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
     TableData, TableInfo,
 };
 use crate::filter::{Condition, Logic};
@@ -18,10 +18,17 @@ use crate::join::{
 /// Bounds catalog queries (`spec/protocol.md` §6).
 const CATALOG_TIMEOUT_SECS: u32 = 5;
 
+/// A table `readable_table_oid_in_tx` found, named as the catalog spells it.
+struct ReadableTable {
+    oid: i32,
+    schema: Ident,
+    name: Ident,
+}
+
 /// Validates filter columns before SQL interpolation (`spec/protocol.md` §5.4.2).
 fn build_where_clause(
     conditions: &[Condition],
-    column_names: &[String],
+    column_names: &[Ident],
 ) -> Result<(String, Vec<String>), DbError> {
     if conditions.is_empty() {
         return Ok((String::new(), Vec::new()));
@@ -33,7 +40,7 @@ fn build_where_clause(
     for (i, condition) in conditions.iter().enumerate() {
         let column = column_names
             .iter()
-            .find(|c| c.as_str() == condition.column)
+            .find(|c| **c == *condition.column)
             .ok_or_else(|| {
                 DbError::not_allowed(
                     NotAllowedKind::Column,
@@ -213,7 +220,7 @@ impl PgPoolSource {
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
         table: &str,
-    ) -> Result<i32, DbError> {
+    ) -> Result<ReadableTable, DbError> {
         // Postgres text can never hold a NUL byte, so no real relname could
         // ever match one; short-circuit before it reaches the driver, which
         // otherwise throws its own encoding error ahead of `fetch_optional`
@@ -224,8 +231,8 @@ impl PgPoolSource {
                 format!("table {table:?}"),
             ));
         }
-        sqlx::query_scalar::<_, i32>(
-            "select c.oid::int4 from pg_class c \
+        let (oid, schema, name) = sqlx::query_as::<_, (i32, String, String)>(
+            "select c.oid::int4, n.nspname::text, c.relname::text from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
              where n.nspname = $1 and c.relname = $2 and c.relkind = 'r' \
                and has_table_privilege(c.oid, 'SELECT')",
@@ -234,7 +241,12 @@ impl PgPoolSource {
         .bind(table)
         .fetch_optional(&mut **tx)
         .await?
-        .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))
+        .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?;
+        Ok(ReadableTable {
+            oid,
+            schema: Ident::from_catalog(schema),
+            name: Ident::from_catalog(name),
+        })
     }
 
     /// Key columns only (`indnkeyatts`); an `indkey` of `0` is an expression
@@ -408,14 +420,10 @@ impl PgPoolSource {
         Ok(rows)
     }
 
-    /// Column metadata of a table already cleared by `readable_table_oid_in_tx`,
-    /// which supplies `oid`.
     async fn table_meta_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        schema: &str,
-        table: &str,
-        oid: i32,
+        table: &ReadableTable,
     ) -> Result<TableMeta, DbError> {
         // information_schema.columns drives the list (column privileges, order);
         // pg_attribute adds the full type spelling, comment and collation, keyed
@@ -452,15 +460,17 @@ impl PgPoolSource {
              where c.table_schema = $1 and c.table_name = $2 \
              order by c.ordinal_position",
         )
-        .bind(schema)
-        .bind(table)
-        .bind(oid)
+        .bind(table.schema.as_str())
+        .bind(table.name.as_str())
+        .bind(table.oid)
         .fetch_all(&mut **tx)
         .await?;
-        let (pk_columns, fk_columns) = self.key_metadata_in_tx(tx, schema, table).await?;
+        let (pk_columns, fk_columns) = self
+            .key_metadata_in_tx(tx, &table.schema, &table.name)
+            .await?;
         Ok(TableMeta {
-            schema: Some(schema.to_string()),
-            name: table.to_string(),
+            schema: Some(table.schema.clone()),
+            name: table.name.clone(),
             columns: columns
                 .into_iter()
                 .map(
@@ -488,7 +498,7 @@ impl PgPoolSource {
                             key,
                             references,
                             type_name,
-                            name,
+                            name: Ident::from_catalog(name),
                         }
                     },
                 )
@@ -698,33 +708,26 @@ impl DbSource for PgPoolSource {
     ) -> Result<TableData, DbError> {
         let mut tx = self.bounded_tx(opts.timeout_secs).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        let oid = self
+        let found = self
             .readable_table_oid_in_tx(&mut tx, &schema, table)
             .await?;
-        let table = table.to_string();
 
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
-        let columns: Vec<ColumnInfo> = self
-            .table_meta_in_tx(&mut tx, &schema, &table, oid)
-            .await?
-            .columns
-            .into_iter()
-            .map(ColumnInfo::from)
-            .collect();
-        let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+        let meta = self.table_meta_in_tx(&mut tx, &found).await?;
+        let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
+        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sort = match &opts.sort {
             Some(requested) => Some(
                 column_names
                     .iter()
-                    .find(|c| c.as_str() == requested)
+                    .find(|c| **c == **requested)
                     .ok_or_else(|| {
                         DbError::not_allowed(
                             NotAllowedKind::Column,
                             format!("column {requested:?}"),
                         )
-                    })?
-                    .clone(),
+                    })?,
             ),
             None => None,
         };
@@ -734,9 +737,9 @@ impl DbSource for PgPoolSource {
             None => (String::new(), Vec::new()),
         };
 
-        let select_list = columns
+        let select_list = column_names
             .iter()
-            .map(|c| format!("{}::text", quote_ident(&c.name)))
+            .map(|c| format!("{}::text", quote_ident(c)))
             .collect::<Vec<_>>()
             .join(", ");
         // Table-qualified (by relation name, not schema — a FROM item's
@@ -747,7 +750,7 @@ impl DbSource for PgPoolSource {
         let order_clause = match &sort {
             Some(col) => format!(
                 " order by {}.{} {}",
-                quote_ident(&table),
+                quote_ident(&found.name),
                 quote_ident(col),
                 if opts.descending { "desc" } else { "asc" }
             ),
@@ -755,8 +758,8 @@ impl DbSource for PgPoolSource {
         };
         let sql = format!(
             "select {select_list} from {}.{}{where_clause}{order_clause} limit $1 offset $2",
-            quote_ident(&schema),
-            quote_ident(&table)
+            quote_ident(&found.schema),
+            quote_ident(&found.name)
         );
 
         // AssertSqlSafe: sql interpolates only schema-validated identifiers
@@ -770,14 +773,13 @@ impl DbSource for PgPoolSource {
         let pg_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, &table, opts.sort.as_deref()))?;
+            .map_err(|e| map_select_denied(e, &found.name, opts.sort.as_deref()))?;
         let total_approx = sqlx::query_scalar::<_, i64>(
             "select reltuples::bigint from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
-             where n.nspname = $1 and c.relname = $2",
+             where c.oid = $1",
         )
-        .bind(&schema)
-        .bind(&table)
+        .bind(found.oid)
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -812,12 +814,12 @@ impl DbSource for PgPoolSource {
             let meta = match metas.entry((in_schema.as_str(), name)) {
                 Entry::Occupied(e) => e.into_mut(),
                 Entry::Vacant(e) => {
-                    let oid = self
+                    let found = self
                         .readable_table_oid_in_tx(&mut tx, in_schema, name)
                         .await
                         .map_err(join::unknown_join_table)?;
                     e.insert(
-                        self.table_meta_in_tx(&mut tx, in_schema, name, oid)
+                        self.table_meta_in_tx(&mut tx, &found)
                             .await
                             .map_err(join::unknown_join_table)?,
                     )
@@ -934,7 +936,8 @@ impl DbSource for PgPoolSource {
         // zero rows (spec/protocol.md §5.2/§5.9).
         let target_oid = self
             .readable_table_oid_in_tx(&mut tx, &schema, table)
-            .await?;
+            .await?
+            .oid;
 
         // `pg_catalog`, not `information_schema`: the reverse (`confrelid`)
         // filter over the standard-SQL views runs 20–40x slower on a large
@@ -986,7 +989,8 @@ impl DbSource for PgPoolSource {
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
         let table_oid = self
             .readable_table_oid_in_tx(&mut tx, &schema, table)
-            .await?;
+            .await?
+            .oid;
         let indexes = self.indexes_in_tx(&mut tx, table_oid).await?;
         let constraints = self.constraints_in_tx(&mut tx, &schema, table_oid).await?;
         tx.commit().await?;
@@ -1068,7 +1072,7 @@ mod tests {
     /// Static mirror of the seed schema's columns for the tables the
     /// fixture references (README: unit runners substitute this for the
     /// live `information_schema` lookup).
-    fn seed_columns(table: &str) -> Vec<String> {
+    fn seed_columns(table: &str) -> Vec<Ident> {
         let cols: &[&str] = match table {
             "users" => &[
                 "id",
@@ -1104,7 +1108,7 @@ mod tests {
             ],
             other => panic!("fixture references unmapped table {other:?}"),
         };
-        cols.iter().map(|c| c.to_string()).collect()
+        cols.iter().map(|c| Ident::for_test(c)).collect()
     }
 
     /// Fixture placeholders are numbered from `$1`; this implementation binds
