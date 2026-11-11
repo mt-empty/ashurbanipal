@@ -129,6 +129,8 @@ internal fun mysqlColumnClass(dataType: String, columnType: String): ColumnClass
 
 /** MySQL/MariaDB [DbSource] (`spec/protocol.md` §5). */
 class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
+    override val engine = "mysql"
+
     private val transactionTemplate = TransactionTemplate(DataSourceTransactionManager(dataSource)).apply {
         isReadOnly = true
     }

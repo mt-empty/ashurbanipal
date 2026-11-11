@@ -37,6 +37,7 @@ class MultiSourceTest : AshurbanipalHttpTestBase() {
         val body = getJson("/api/sources")
         val names = (body["sources"] as Iterable<JsonNode>).map { it["name"].asText() }
         assertEquals(listOf("alpha", "beta"), names)
+        assertEquals(listOf("postgres", "postgres"), (body["sources"] as Iterable<JsonNode>).map { it["engine"].asText() })
         assertEquals("alpha", body["default"].asText())
     }
 

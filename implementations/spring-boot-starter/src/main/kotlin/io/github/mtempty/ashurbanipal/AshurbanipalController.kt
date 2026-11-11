@@ -32,7 +32,7 @@ internal const val PROTOCOL_VERSION = "1"
 /** Stops a browser from rendering echoed request text in a JSON error as HTML. */
 internal const val NOSNIFF_HEADER = "X-Content-Type-Options"
 
-data class SourceEntry(val name: String)
+data class SourceEntry(val name: String, val engine: String)
 data class SourcesResponse(val sources: List<SourceEntry>, val default: String)
 data class SchemaEntry(val name: String)
 // ALWAYS: spec §5.7 requires `default` even when null, whatever the host's Jackson inclusion setting.
@@ -103,7 +103,7 @@ class AshurbanipalController(
 
     @GetMapping("/api/sources")
     fun listSources(): ResponseEntity<SourcesResponse> =
-        apiOk(SourcesResponse(dbSources.keys.map { SourceEntry(it) }, defaultSourceName()))
+        apiOk(SourcesResponse(dbSources.map { (name, source) -> SourceEntry(name, source.engine) }, defaultSourceName()))
 
     @GetMapping("/api/schemas")
     fun listSchemas(@RequestParam(required = false) source: String?): ResponseEntity<SchemasResponse> =

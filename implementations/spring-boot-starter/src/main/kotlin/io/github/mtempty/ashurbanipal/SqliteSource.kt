@@ -97,6 +97,8 @@ internal fun sqliteColumnClass(declared: String): ColumnClass {
 
 /** SQLite source uses a progress handler, not `Statement.setQueryTimeout`, to interrupt running queries. */
 class SqliteSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
+    override val engine = "sqlite"
+
 
     /** Clears the progress handler before pool reuse so it cannot abort the next query. */
     internal fun <T> bounded(timeoutSecs: Int, block: (Connection) -> T): T {

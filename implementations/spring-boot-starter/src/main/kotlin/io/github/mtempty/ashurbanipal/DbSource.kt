@@ -181,6 +181,9 @@ data class QueryOpts(
 
 /** Backend-selection seam; route handlers never access a concrete driver. */
 interface DbSource {
+    /** `postgres`, `mysql` (MariaDB too) or `sqlite`: a constant, so `/api/sources` never queries the database (`spec/protocol.md` §5.8). */
+    val engine: String
+
     fun listSchemas(): SchemaListing
     fun listTables(schema: String?): List<TableInfo>
     fun tableCounts(schema: String?): List<CountEntry>
