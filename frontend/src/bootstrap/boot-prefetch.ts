@@ -1,14 +1,20 @@
 import { prefetch } from "../core/api.js";
-import { currentRequest, scopeRef, sourceQuery, state, storedSortBeforeScope, tableDataPath } from "../core/state.js";
+import {
+  currentRequest,
+  sourceQuery,
+  startupScopeGuess,
+  state,
+  storedSortBeforeScope,
+  tableDataPath,
+} from "../core/state.js";
 import { scopeQuery } from "../lib/table-ref.js";
 
 // Start-up's requests all go out at once, for the scope and view the URL or
 // storage names, instead of each waiting for the one before. The usual
 // start-up sequence then takes these answers where they match what it asks
-// for, and asks again where they don't (a stale name). The scope is still
-// loading, so these send whatever names the URL or storage gave.
+// for, and asks again where they don't (a stale name).
 export function prefetchStartup(): void {
-  const scope = scopeRef();
+  const scope = startupScopeGuess();
   prefetch("/sources", "boot");
   prefetch(`/schemas${sourceQuery()}`, "boot");
   prefetch(`/tables${scopeQuery(scope)}`, "boot");

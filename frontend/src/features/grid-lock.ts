@@ -1,6 +1,6 @@
 import { tableEl } from "../bootstrap/table-focus.js";
 import { $ } from "../core/dom.js";
-import { scopeIdentity, state, viewKey } from "../core/state.js";
+import { scopeIdentity, scopeSettled, state, viewKey } from "../core/state.js";
 
 // The scope and view the grid was drawn for; null before the first render.
 let gridKey: string | null = null;
@@ -24,6 +24,11 @@ export function syncGridLock(): void {
   tableEl.inert = locked;
   tableEl.toggleAttribute("data-stale", locked);
   // The note buttons sit outside the table but act on the grid's columns and sort.
+  // The table list and the join builder name tables in the scope, so they wait for its lists.
+  const settling = !scopeSettled();
+  $("tables").inert = settling;
+  $<HTMLButtonElement>("join-btn").disabled = settling;
+  $<HTMLButtonElement>("join-edit-btn").disabled = settling;
   for (const id of ["columns-btn", "structure-btn", "sort-note-show", "sort-note-clear", "all-hidden-show"]) {
     $<HTMLButtonElement>(id).disabled = locked;
   }

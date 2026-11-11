@@ -1,6 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
 import { $, clearError, el, reportError } from "../core/dom.js";
-import { state } from "../core/state.js";
+import { scopeSettled, state } from "../core/state.js";
 import { formatClock } from "../lib/format.js";
 import { startCountdown, stopCountdown } from "./load-bar.js";
 import { showViewNotice } from "./view-notice.js";
@@ -56,8 +56,8 @@ function tick(): void {
     return;
   }
   if (fetching) return;
-  // No view while a source or schema switch loads its tables, or in an empty one: keep counting, fetch nothing.
-  if (!state.view) {
+  // No view, or a scope whose lists are still answering, or an empty one: keep counting, fetch nothing.
+  if (!state.view || !scopeSettled()) {
     restart();
     return;
   }

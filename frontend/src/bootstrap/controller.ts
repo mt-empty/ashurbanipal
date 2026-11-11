@@ -15,6 +15,7 @@ import {
   refFor,
   refInScope,
   scopeRef,
+  scopeSettled,
   setSort,
   startRef,
   startTable,
@@ -213,6 +214,8 @@ function updateViewChrome(): void {
 }
 
 export function loadData(opts: LoadDataOpts = {}): Promise<void> {
+  // A submit while the lists answer: the step that settles the scope loads next.
+  if (!scopeSettled()) return Promise.resolve();
   const reason = opts.reason ?? (opts.auto ? "auto" : "other");
   markTiming("load-start", reason);
   return runLoad({ ...opts, reason });

@@ -1,10 +1,12 @@
 import { expect, type Page, test } from "./support/fixtures";
 import {
   apiCall,
+  apiRoute,
   dataWith,
   failRequests,
   goBack,
   gotoApp,
+  holdRequests,
   reloadApp,
   tablesWith,
   uiState,
@@ -138,4 +140,55 @@ test("a superseded schema load does not reload the table list", async ({ page, s
   await waitForIdle(page);
   expect(tableLists).toEqual([]);
   expect(urlParam(page, "source")).toBe("primary");
+});
+
+test("while Back waits for another source's schema list, nothing names a table, and a filter typed meanwhile is kept", async ({
+  page,
+  secondSourceDemo,
+}) => {
+  await gotoApp(page, "?table=orders", secondSourceDemo.baseUrl);
+  await selectAndSettle(page, "#source-select", "other_schema", { source: "other_schema" });
+  const primarySchemas = apiCall("/schemas", { source: "primary" });
+  const release = await holdRequests(page, primarySchemas);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  // Events arrive in the order the browser sent them, so a table request before /schemas answered comes first.
+  const order: string[] = [];
+  page.on("request", (r) => {
+    if (apiRoute(r.url())?.startsWith("/table")) order.push(apiRoute(r.url()) ?? "");
+  });
+  page.on("response", (r) => {
+    if (primarySchemas(r)) order.push("schemas answered");
+  });
+  const schemasAsked = page.waitForRequest(primarySchemas);
+  await goBack(page);
+  await schemasAsked;
+  await expect(page.locator("#join-btn")).toBeDisabled();
+  await page.locator("#filter").fill("id > 3");
+  await page.locator("#filter").press("Enter");
+
+  const data = page.waitForRequest(apiCall("/tables/data", { source: "primary", table: "orders" }));
+  release();
+  expect(JSON.parse(new URL((await data).url()).searchParams.get("filter") ?? "[]")).toHaveLength(1);
+  await waitForIdle(page);
+  expect(order[0]).toBe("schemas answered");
+  expect(errors).toEqual([]);
+});
+
+test("Back to another source closes the join dialog without acting on the view it lands on", async ({
+  page,
+  secondSourceDemo,
+}) => {
+  await gotoApp(page, "?table=orders", secondSourceDemo.baseUrl);
+  await selectAndSettle(page, "#source-select", "other_schema", { source: "other_schema" });
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.locator("#join-btn").click();
+  await expect(page.locator("#join-dialog")).toBeVisible();
+  const data = page.waitForResponse(apiCall("/tables/data", { source: "primary", table: "orders" }));
+  await goBack(page);
+  await expect(page.locator("#join-dialog")).toBeHidden();
+  await data;
+  await waitForIdle(page);
+  expect(errors).toEqual([]);
 });

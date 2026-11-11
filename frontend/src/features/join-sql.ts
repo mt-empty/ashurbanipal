@@ -1,5 +1,5 @@
 import { $ } from "../core/dom.js";
-import { manySchemas, refFor, state } from "../core/state.js";
+import { manySchemas, refFor, schemaRefFor, state } from "../core/state.js";
 import type { Column, TableRef } from "../core/types.js";
 import { type Draft, draftToDef } from "../lib/join-draft.js";
 import { type JoinPairSide, type JoinParse, parseJoin, printJoin, quoteJoinName } from "../lib/join-dsl.js";
@@ -11,7 +11,7 @@ import {
   tokenizeJoinText,
 } from "../lib/join-tokens.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
-import { distinctRefs, schemaRef } from "../lib/table-ref.js";
+import { distinctRefs } from "../lib/table-ref.js";
 import {
   cachedColumns,
   cachedTablesIn,
@@ -275,9 +275,9 @@ export function mountJoinSql(onChange: () => void): JoinSql {
     let rows: Suggestion[] = [];
     if (ctx.expect === "table") {
       const schema = ctx.qualifier ?? undefined;
-      const listed = cachedTablesIn(schema ?? state.scope.schema);
+      const listed = cachedTablesIn(schema);
       if (!listed && schema !== undefined && state.schemas.includes(schema)) {
-        tablesIn(schemaRef(state.scope.source, schema)).then(
+        tablesIn(schemaRefFor(schema)).then(
           () => {
             if (token === suggest.token()) void update();
           },
@@ -327,7 +327,7 @@ export function mountJoinSql(onChange: () => void): JoinSql {
         ),
     );
     for (const schema of unread) {
-      tablesIn(schemaRef(state.scope.source, schema)).then(
+      tablesIn(schemaRefFor(schema)).then(
         () => {
           prefetch();
           render();
@@ -336,8 +336,7 @@ export function mountJoinSql(onChange: () => void): JoinSql {
         () => {},
       );
     }
-    const listed = (d: DeclaredTable): boolean =>
-      cachedTablesIn(d.schema ?? state.scope.schema)?.some((t) => t.name === d.table) ?? false;
+    const listed = (d: DeclaredTable): boolean => cachedTablesIn(d.schema)?.some((t) => t.name === d.table) ?? false;
     const named = declared.filter(listed);
     const wanted = distinctRefs(named.map(refFor)).filter((t) => !cachedColumns(t));
     if (wanted.length === 0) return;

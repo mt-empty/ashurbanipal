@@ -8,6 +8,7 @@ import {
   enterTable,
   scopeIdentity,
   scopeRef,
+  scopeSettled,
   startMissingFrom,
   state,
   tableDataPath,
@@ -195,7 +196,7 @@ export async function loadTables({
 
 // False while a source, schema or history switch still shows the last scope's chips.
 export function chipsListScopeInView(): boolean {
-  return listedScope === scopeIdentity();
+  return scopeSettled() && listedScope === scopeIdentity();
 }
 
 export function listedTableNames(): string[] {
