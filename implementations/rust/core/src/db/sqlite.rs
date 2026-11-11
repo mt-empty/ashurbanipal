@@ -6,8 +6,9 @@ use sqlx::{Row, SqlitePool};
 
 use super::{
     group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, ConstraintFk,
-    ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Ident, IndexInfo, KeyKind,
-    NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo,
+    ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident, IndexInfo,
+    KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData,
+    TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
@@ -358,6 +359,9 @@ fn build_where_clause(
 }
 
 impl DbSource for SqliteSource {
+    fn engine(&self) -> Engine {
+        Engine::Sqlite
+    }
     async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
         Ok(SchemaListing::new(
             vec![ONLY_SCHEMA.to_string()],

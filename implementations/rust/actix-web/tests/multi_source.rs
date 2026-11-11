@@ -207,7 +207,7 @@ async fn api_sources_lists_registered_names_in_registration_order_with_no_backen
     assert_eq!(
         body,
         serde_json::json!({
-            "sources": [{"name": "second"}, {"name": "first"}],
+            "sources": [{"name": "second", "engine": "postgres"}, {"name": "first", "engine": "postgres"}],
             "default": "second"
         })
     );

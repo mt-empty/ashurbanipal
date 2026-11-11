@@ -3,7 +3,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use super::{
-    DbError, DbSource, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo,
+    DbError, DbSource, Engine, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData,
+    TableInfo,
 };
 use crate::join::{JoinData, JoinOpts, JoinSpec};
 
@@ -11,6 +12,7 @@ type BoxFut<'a, T> = Pin<Box<dyn Future<Output = Result<T, DbError>> + Send + 'a
 
 /// `DbSource` with boxed futures, so it can sit behind `dyn`.
 trait ErasedSource: Send + Sync + 'static {
+    fn engine(&self) -> Engine;
     fn list_schemas(&self) -> BoxFut<'_, SchemaListing>;
     fn list_tables<'a>(&'a self, schema: Option<&'a str>) -> BoxFut<'a, Vec<TableInfo>>;
     fn table_counts<'a>(&'a self, schema: Option<&'a str>) -> BoxFut<'a, Vec<(String, i64)>>;
@@ -41,6 +43,9 @@ trait ErasedSource: Send + Sync + 'static {
 }
 
 impl<T: DbSource> ErasedSource for T {
+    fn engine(&self) -> Engine {
+        DbSource::engine(self)
+    }
     fn list_schemas(&self) -> BoxFut<'_, SchemaListing> {
         Box::pin(DbSource::list_schemas(self))
     }
@@ -98,6 +103,9 @@ impl Source {
 }
 
 impl DbSource for Source {
+    fn engine(&self) -> Engine {
+        self.0.engine()
+    }
     async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
         self.0.list_schemas().await
     }

@@ -21,9 +21,9 @@ pub use db::PgPoolSource;
 pub use db::SqliteSource;
 pub use db::{
     default_source, resolve_source, ColumnInfo, ColumnPair, ConstraintCheck, ConstraintFk,
-    ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, IndexInfo, NotAllowedDetail,
-    NotAllowedKind, ProblemDetails, QueryOpts, ReferencedBy, SchemaListing, Source, Structure,
-    TableData, TableInfo,
+    ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, IndexInfo,
+    NotAllowedDetail, NotAllowedKind, ProblemDetails, QueryOpts, ReferencedBy, SchemaListing,
+    Source, Structure, TableData, TableInfo,
 };
 pub use filter::{Condition, FilterError, FilterOp, Logic};
 pub use join::{JoinColumnInfo, JoinData, JoinError, JoinOpts, JoinSpec};

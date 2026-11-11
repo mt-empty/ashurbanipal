@@ -83,7 +83,10 @@ async fn one_router_serves_a_sqlite_and_a_mysql_source() {
 
     assert_eq!(
         get_json(&app, "/__ashurbanipal/api/sources").await,
-        serde_json::json!({"sources": [{"name": "local"}, {"name": "remote"}], "default": "local"})
+        serde_json::json!({
+            "sources": [{"name": "local", "engine": "sqlite"}, {"name": "remote", "engine": "mysql"}],
+            "default": "local"
+        })
     );
 
     assert_eq!(

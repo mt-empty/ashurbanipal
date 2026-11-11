@@ -290,6 +290,7 @@ mod kill_switch_tests {
     use actix_web::{test, App};
 
     use super::*;
+    use ashurbanipal::Engine;
     use ashurbanipal::{
         JoinOpts, JoinSpec, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo,
     };
@@ -300,6 +301,9 @@ mod kill_switch_tests {
     struct NeverQueried;
 
     impl DbSource for NeverQueried {
+        fn engine(&self) -> Engine {
+            Engine::Postgres
+        }
         async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
             unreachable!("kill switch must 404 before reaching the handler")
         }

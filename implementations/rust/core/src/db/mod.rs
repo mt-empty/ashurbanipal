@@ -369,7 +369,19 @@ impl ProblemDetails {
     }
 }
 
+/// The database engine behind a source, as `/api/sources` reports it
+/// (`spec/protocol.md` §5.8). MariaDB is `Mysql`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    Postgres,
+    Mysql,
+    Sqlite,
+}
+
 pub trait DbSource: Send + Sync + 'static {
+    /// A constant per implementation: `/api/sources` never queries the database.
+    fn engine(&self) -> Engine;
     fn list_schemas(
         &self,
     ) -> impl std::future::Future<Output = Result<SchemaListing, DbError>> + Send;
