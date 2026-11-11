@@ -125,7 +125,12 @@ export interface QueryOpts {
 }
 
 /** Database seam; every call is timeout-bounded (`spec/protocol.md` §1, §6). */
+/** The `/api/sources` engine names (`spec/protocol.md` §5.8); MariaDB is `mysql`. */
+export type Engine = "postgres" | "mysql" | "sqlite";
+
 export interface DbSource {
+  /** A constant per implementation: `/api/sources` never queries the database. */
+  readonly engine: Engine;
   listSchemas(timeoutMs: number): Promise<SchemaListing>;
   listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]>;
   tableCounts(schema: string | undefined, timeoutMs: number): Promise<CountEntry[]>;

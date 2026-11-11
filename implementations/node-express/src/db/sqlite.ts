@@ -268,6 +268,7 @@ async function tableMeta(db: Database, table: string): Promise<TableMeta> {
 
 /** SQLite implementation; see docs/adapter-decisions.md for protocol differences. */
 export class SqliteSource implements DbSource {
+  readonly engine = "sqlite";
   constructor(private readonly db: Database) {}
 
   // timeoutMs is part of DbSource's signature but unused here — no

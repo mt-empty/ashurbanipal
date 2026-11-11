@@ -88,6 +88,7 @@ export function pgColumnClass(dataType: string, udtSchema: string, udtName: stri
 
 /** Postgres `DbSource`; `SET LOCAL` scopes query timeouts (`spec/protocol.md` §6). */
 export class PostgresSource implements DbSource {
+  readonly engine = "postgres";
   constructor(private readonly pool: Pool) {}
 
   // `SET LOCAL` prevents timeout settings leaking through the connection pool.

@@ -178,6 +178,7 @@ async function queryRows(
 
 /** MySQL/MariaDB `DbSource` (`spec/protocol.md` §5). */
 export class MySqlSource implements DbSource {
+  readonly engine = "mysql";
   private variantPromise: Promise<Variant> | undefined;
 
   constructor(private readonly pool: Pool) {}

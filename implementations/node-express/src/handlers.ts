@@ -78,7 +78,10 @@ async function route(
   const schema = query("schema");
   switch (path) {
     case "/sources":
-      return json({ sources: sources.map(({ name }) => ({ name })), default: defaultSource(sources).name });
+      return json({
+        sources: sources.map(({ name, source }) => ({ name, engine: source.engine })),
+        default: defaultSource(sources).name,
+      });
     case "/siblings":
       return json(await siblings());
     case "/schemas": {

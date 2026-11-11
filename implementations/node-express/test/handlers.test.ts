@@ -18,6 +18,7 @@ import type { JoinData, JoinOpts } from "../src/join.js";
 // handleApi without Express — the contract the GitHub Pages live demo's worker
 // relies on. A fake DbSource records what each route asked of it.
 class RecordingSource implements DbSource {
+  readonly engine = "postgres";
   calls: { method: string; args: unknown[] }[] = [];
   private record(method: string, args: unknown[]) {
     this.calls.push({ method, args });
