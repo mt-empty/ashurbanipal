@@ -40,6 +40,7 @@ from . import (
     ConstraintPk,
     ConstraintUnique,
     DbSource,
+    Engine,
     FilterParseError,
     IndexInfo,
     KeyKind,
@@ -173,6 +174,8 @@ def column_class(data_type: str, column_type: str) -> ColumnClass:
 
 
 class MySqlSource(DbSource):
+    engine: Engine = "mysql"
+
     def __init__(self, **connect_kwargs: Any) -> None:
         self._connect_kwargs = connect_kwargs
         self._variant: str | None = None

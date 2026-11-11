@@ -25,6 +25,8 @@ from ashurbanipal.routes import router
 
 
 class _FailingSource(DbSource):
+    engine = "postgres"
+
     def __init__(self, exc: Exception):
         self._exc = exc
 

@@ -40,6 +40,7 @@ from . import (
     ConstraintPk,
     ConstraintUnique,
     DbSource,
+    Engine,
     FilterParseError,
     IndexInfo,
     KeyKind,
@@ -180,6 +181,8 @@ def column_class(declared: str) -> ColumnClass:
 
 
 class SqliteSource(DbSource):
+    engine: Engine = "sqlite"
+
     def __init__(self, path: str):
         self._path = path
 

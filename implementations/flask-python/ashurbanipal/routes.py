@@ -119,7 +119,9 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("/api/sources")
     def list_sources() -> Response:
-        return jsonify({"sources": [{"name": n} for n, _ in sources], "default": default_source()[0]})
+        return jsonify(
+            {"sources": [{"name": n, "engine": s.engine} for n, s in sources], "default": default_source()[0]}
+        )
 
     @bp.get("/api/schemas")
     def list_schemas() -> Response:
