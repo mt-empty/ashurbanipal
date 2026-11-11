@@ -1,3 +1,4 @@
+mod ident;
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]
@@ -6,6 +7,7 @@ mod source;
 #[cfg(feature = "sqlite")]
 mod sqlite;
 
+pub use ident::Ident;
 #[cfg(feature = "mysql")]
 pub use mysql::MySqlSource;
 #[cfg(feature = "postgres")]
@@ -227,6 +229,16 @@ impl NotAllowedKind {
             Self::NotReadable => "not_readable",
         }
     }
+
+    /// The word a `not_allowed` message names the thing with.
+    pub(crate) fn noun(self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Schema => "schema",
+            Self::Table | Self::NotReadable => "table",
+            Self::Column => "column",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -432,15 +444,10 @@ pub fn resolve_source<'a, S>(
     }
 }
 
-/// Escapes an identifier for splicing into SQL text by doubling embedded
-/// `"` (the standard Postgres/SQLite quoted-identifier escape) — every name
-/// reaching this must already be allow-list-validated against a live
-/// catalog lookup; this only makes a validated name syntactically safe to
-/// splice; it is not itself a validation step. Not universal: MySQL's
-/// default identifier quote is the backtick, not `"`, so
-/// `mysql::quote_ident_mysql` is its own function, not a reuse of this one.
-pub(crate) fn quote_ident(ident: &str) -> String {
-    format!("\"{}\"", ident.replace('"', "\"\""))
+/// Quotes a catalog name for Postgres and SQLite by doubling embedded `"`.
+/// MySQL quotes with backticks instead (`mysql::quote_ident_mysql`).
+pub(crate) fn quote_ident(ident: &Ident) -> String {
+    format!("\"{}\"", ident.as_str().replace('"', "\"\""))
 }
 
 /// The hardcoded operator→SQL-keyword table — wire text never becomes an
@@ -488,16 +495,16 @@ pub(crate) fn group_referenced_by(
 
 #[cfg(test)]
 mod tests {
-    use super::{quote_ident, resolve_source, DbError};
+    use super::{quote_ident, resolve_source, DbError, Ident};
 
     #[test]
     fn quote_ident_doubles_embedded_quotes() {
-        assert_eq!(quote_ident("users"), "\"users\"");
+        assert_eq!(quote_ident(&Ident::for_test("users")), "\"users\"");
         // A name containing `"` must not let the attacker close the quoted
         // identifier early — doubling is the escape, not omission.
-        assert_eq!(quote_ident("foo\"bar"), "\"foo\"\"bar\"");
+        assert_eq!(quote_ident(&Ident::for_test("foo\"bar")), "\"foo\"\"bar\"");
         assert_eq!(
-            quote_ident("a\"; drop table users; --"),
+            quote_ident(&Ident::for_test("a\"; drop table users; --")),
             "\"a\"\"; drop table users; --\""
         );
     }

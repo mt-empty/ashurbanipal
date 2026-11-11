@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::{ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowedKind};
+use crate::db::{ColumnInfo, ColumnRef, DbError, Ident, KeyKind, NotAllowedKind};
 use crate::filter::{Condition, FilterOp, Logic};
 
 pub const MAX_JOIN_BYTES: usize = 8192;
@@ -236,7 +236,7 @@ impl Serialize for ColumnClass {
 /// One column as the live catalog reports it.
 #[derive(Debug, Clone)]
 pub struct ColMeta {
-    pub name: String,
+    pub name: Ident,
     pub type_name: String,
     pub class: ColumnClass,
     /// Set where two text collations can clash (`spec/protocol.md` §5.4.1).
@@ -249,7 +249,7 @@ pub struct ColMeta {
 impl From<ColMeta> for ColumnInfo {
     fn from(c: ColMeta) -> Self {
         ColumnInfo {
-            name: c.name,
+            name: c.name.into_string(),
             type_name: c.type_name,
             enum_type: c.class.enum_type(),
             collation: c.class.wire_collation(c.collation.as_ref()),
@@ -265,8 +265,8 @@ impl From<ColMeta> for ColumnInfo {
 pub struct TableMeta {
     /// The catalog-checked schema the table is spliced under; `None` on an
     /// engine with no schema above the database (SQLite).
-    pub schema: Option<String>,
-    pub name: String,
+    pub schema: Option<Ident>,
+    pub name: Ident,
     pub columns: Vec<ColMeta>,
 }
 
@@ -355,12 +355,14 @@ impl Plan {
                     name: label.clone(),
                     type_name: c.type_name.clone(),
                     join: pos,
-                    table: table.name.clone(),
+                    table: table.name.as_str().to_string(),
                     schema: table
                         .schema
-                        .clone()
-                        .filter(|s| Some(s.as_str()) != request_schema),
-                    column: c.name.clone(),
+                        .as_ref()
+                        .map(Ident::as_str)
+                        .filter(|s| Some(*s) != request_schema)
+                        .map(str::to_string),
+                    column: c.name.as_str().to_string(),
                     class: c.class.clone(),
                     enum_type: c.class.enum_type(),
                     collation: c.class.wire_collation(c.collation.as_ref()),
@@ -373,33 +375,36 @@ impl Plan {
     }
 }
 
-fn column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> {
+pub(crate) fn column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> {
     table
         .columns
         .iter()
-        .position(|c| c.name == column)
+        .position(|c| c.name.as_str() == column)
         .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Column, format!("column {column:?}")))
 }
 
 // A name inside the `join` value is part of the join, so a miss is `invalid_join`, not `unknown_column`.
 fn join_column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> {
     column_index(table, column)
-        .map_err(|_| DbError::BadJoin(format!("{} has no column {column:?}", table.name)))
+        .map_err(|_| DbError::BadJoin(format!("{} has no column {column:?}", table.name.as_str())))
 }
 
 /// The schema each position resolves in: its own, which must be in `listed`
 /// (§5.7), or else `request`. An unlisted one is `invalid_join`, never
 /// `unknown_schema`, which belongs to the `schema` parameter.
-pub(crate) fn table_schemas(
+pub(crate) fn table_schemas<S: Clone + std::borrow::Borrow<str>>(
     refs: &[(Option<&str>, &str)],
-    request: &str,
-    listed: &[String],
-) -> Result<Vec<String>, DbError> {
+    request: &S,
+    listed: &[S],
+) -> Result<Vec<S>, DbError> {
     refs.iter()
         .map(|&(own, _)| match own {
-            None => Ok(request.to_string()),
-            Some(s) if listed.iter().any(|l| l == s) => Ok(s.to_string()),
-            Some(s) => Err(DbError::BadJoin(format!("unknown schema {s:?}"))),
+            None => Ok(request.clone()),
+            Some(s) => listed
+                .iter()
+                .find(|l| (*l).borrow() == s)
+                .cloned()
+                .ok_or_else(|| DbError::BadJoin(format!("unknown schema {s:?}"))),
         })
         .collect()
 }
@@ -415,7 +420,12 @@ pub(crate) fn unknown_join_table(e: DbError) -> DbError {
 }
 
 fn describe(table: &TableMeta, col: &ColMeta) -> String {
-    format!("{}.{} ({})", table.name, col.name, col.type_name)
+    format!(
+        "{}.{} ({})",
+        table.name.as_str(),
+        col.name.as_str(),
+        col.type_name
+    )
 }
 
 fn unjoinable(position: usize, table: &TableMeta, col: &ColMeta) -> DbError {
@@ -598,7 +608,7 @@ pub fn plan(spec: &JoinSpec, tables: Vec<TableMeta>, opts: &JoinOpts) -> Result<
 
 /// How a backend spells the pieces that differ between engines.
 pub struct Dialect {
-    pub quote: fn(&str) -> String,
+    pub quote: fn(&Ident) -> String,
     /// The expression rendering a column as text.
     pub cast_text: fn(&str) -> String,
     /// `$n` placeholders (Postgres) instead of `?`.
@@ -718,7 +728,7 @@ mod tests {
 
     fn col(name: &str, ty: &str, class: ColumnClass) -> ColMeta {
         ColMeta {
-            name: name.into(),
+            name: Ident::for_test(name),
             type_name: ty.into(),
             class,
             collation: None,
@@ -730,8 +740,8 @@ mod tests {
 
     fn orders() -> TableMeta {
         TableMeta {
-            schema: Some("public".into()),
-            name: "orders".into(),
+            schema: Some(Ident::for_test("public")),
+            name: Ident::for_test("orders"),
             columns: vec![
                 col("id", "uuid", ColumnClass::Uuid),
                 col("user_id", "uuid", ColumnClass::Uuid),
@@ -743,8 +753,8 @@ mod tests {
 
     fn users() -> TableMeta {
         TableMeta {
-            schema: Some("public".into()),
-            name: "users".into(),
+            schema: Some(Ident::for_test("public")),
+            name: Ident::for_test("users"),
             columns: vec![
                 col("id", "uuid", ColumnClass::Uuid),
                 col("email", "text", ColumnClass::Text),
@@ -1002,7 +1012,7 @@ mod tests {
     fn a_table_in_another_schema_is_spliced_and_reported_under_it() {
         let spec = JoinSpec::parse(JOIN).unwrap();
         let mut u = users();
-        u.schema = Some("warehouse".into());
+        u.schema = Some(Ident::for_test("warehouse"));
         let p = plan(&spec, vec![orders(), u], &opts()).unwrap();
         let (sql, _) = build_select(&p, &dialect());
         assert!(

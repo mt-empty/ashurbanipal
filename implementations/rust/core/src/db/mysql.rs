@@ -8,7 +8,7 @@ use sqlx::{MySql, MySqlPool, Row, Transaction};
 use super::{
     group_referenced_by, no_default_schema, op_sql, ColumnInfo, ColumnPair, ColumnRef,
     ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
-    IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
+    Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
     TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
@@ -41,15 +41,15 @@ fn timed_select(variant: Variant, timeout_secs: u32, body: &str) -> String {
 }
 
 /// Backtick-escape live-catalog identifiers for MySQL (`spec/protocol.md` §5).
-fn quote_ident_mysql(ident: &str) -> String {
-    format!("`{}`", ident.replace('`', "``"))
+fn quote_ident_mysql(ident: &Ident) -> String {
+    format!("`{}`", ident.as_str().replace('`', "``"))
 }
 
 /// Builds MySQL filter SQL; map ILIKE through LOWER for collation independence
 /// (`spec/protocol.md` §5.4.2).
 fn build_where_clause(
     conditions: &[Condition],
-    column_names: &[String],
+    column_names: &[Ident],
 ) -> Result<(String, Vec<String>), DbError> {
     if conditions.is_empty() {
         return Ok((String::new(), Vec::new()));
@@ -58,15 +58,7 @@ fn build_where_clause(
     let mut values = Vec::new();
     let mut clause = String::new();
     for (i, condition) in conditions.iter().enumerate() {
-        let column = column_names
-            .iter()
-            .find(|c| c.as_str() == condition.column)
-            .ok_or_else(|| {
-                DbError::not_allowed(
-                    NotAllowedKind::Column,
-                    format!("column {:?}", condition.column),
-                )
-            })?;
+        let column = Ident::find_in(column_names, &condition.column, NotAllowedKind::Column)?;
         let cast = format!("CAST({} AS CHAR)", quote_ident_mysql(column));
 
         let inner = if condition.op == FilterOp::Ilike {
@@ -184,7 +176,7 @@ impl MySqlSource {
         tx: &mut Transaction<'_, MySql>,
         variant: Variant,
         timeout_secs: u32,
-    ) -> Result<Vec<String>, DbError> {
+    ) -> Result<Vec<Ident>, DbError> {
         let rows = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(timed_select(
             variant,
             timeout_secs,
@@ -194,7 +186,7 @@ impl MySqlSource {
         )))
         .fetch_all(&mut **tx)
         .await?;
-        Ok(rows)
+        Ok(rows.into_iter().map(Ident::from_catalog).collect())
     }
 
     /// `None` when the connection names no database.
@@ -222,7 +214,7 @@ impl MySqlSource {
         variant: Variant,
         requested: Option<&str>,
         timeout_secs: u32,
-    ) -> Result<String, DbError> {
+    ) -> Result<Ident, DbError> {
         let schemas = self.list_schemas_in_tx(tx, variant, timeout_secs).await?;
         self.resolve_schema_among_in_tx(tx, variant, &schemas, requested, timeout_secs)
             .await
@@ -234,10 +226,10 @@ impl MySqlSource {
         &self,
         tx: &mut Transaction<'_, MySql>,
         variant: Variant,
-        schemas: &[String],
+        schemas: &[Ident],
         requested: Option<&str>,
         timeout_secs: u32,
-    ) -> Result<String, DbError> {
+    ) -> Result<Ident, DbError> {
         let resolved = match requested {
             Some(name) => name.to_string(),
             None => self
@@ -245,13 +237,7 @@ impl MySqlSource {
                 .await?
                 .ok_or_else(no_default_schema)?,
         };
-        schemas
-            .iter()
-            .find(|s| **s == resolved)
-            .cloned()
-            .ok_or_else(|| {
-                DbError::not_allowed(NotAllowedKind::Schema, format!("schema {resolved:?}"))
-            })
+        Ident::find_in(schemas, &resolved, NotAllowedKind::Schema).cloned()
     }
 
     async fn allowed_tables_in_tx(
@@ -260,7 +246,7 @@ impl MySqlSource {
         variant: Variant,
         schema: &str,
         timeout_secs: u32,
-    ) -> Result<Vec<String>, DbError> {
+    ) -> Result<Vec<Ident>, DbError> {
         let rows = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(timed_select(
             variant,
             timeout_secs,
@@ -271,7 +257,7 @@ impl MySqlSource {
         .bind(schema)
         .fetch_all(&mut **tx)
         .await?;
-        Ok(rows)
+        Ok(rows.into_iter().map(Ident::from_catalog).collect())
     }
 
     async fn allowed_columns_in_tx(
@@ -300,8 +286,8 @@ impl MySqlSource {
         &self,
         tx: &mut Transaction<'_, MySql>,
         variant: Variant,
-        schema: &str,
-        table: &str,
+        schema: &Ident,
+        table: &Ident,
         timeout_secs: u32,
     ) -> Result<TableMeta, DbError> {
         let columns = sqlx::query_as::<_, (String, String, String, Option<String>, String)>(
@@ -314,19 +300,19 @@ impl MySqlSource {
                  order by ordinal_position",
             )),
         )
-        .bind(schema)
-        .bind(table)
+        .bind(schema.as_str())
+        .bind(table.as_str())
         .fetch_all(&mut **tx)
         .await?;
         let (pk_columns, fk_columns) = self
-            .key_metadata_in_tx(tx, variant, schema, table, timeout_secs)
+            .key_metadata_in_tx(tx, variant, schema.as_str(), table.as_str(), timeout_secs)
             .await?;
         let json_columns = self
-            .mariadb_json_columns_in_tx(tx, variant, schema, table, timeout_secs)
+            .mariadb_json_columns_in_tx(tx, variant, schema.as_str(), table.as_str(), timeout_secs)
             .await?;
         Ok(TableMeta {
-            schema: Some(schema.to_string()),
-            name: table.to_string(),
+            schema: Some(schema.clone()),
+            name: table.clone(),
             columns: columns
                 .into_iter()
                 .map(|(name, data_type, comment, collation, column_type)| {
@@ -352,7 +338,7 @@ impl MySqlSource {
                         key,
                         references,
                         type_name,
-                        name,
+                        name: Ident::from_catalog(name),
                     }
                 })
                 .collect(),
@@ -516,7 +502,10 @@ impl DbSource for MySqlSource {
             .default_schema_in_tx(&mut tx, variant, CATALOG_TIMEOUT_SECS)
             .await?;
         tx.commit().await?;
-        Ok(SchemaListing::new(schemas, default))
+        Ok(SchemaListing::new(
+            schemas.into_iter().map(Ident::into_string).collect(),
+            default,
+        ))
     }
 
     async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError> {
@@ -533,7 +522,7 @@ impl DbSource for MySqlSource {
              where table_schema = ? and table_type = 'BASE TABLE' \
              order by cast(table_name as binary)",
         )))
-        .bind(&schema)
+        .bind(schema.as_str())
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -561,7 +550,7 @@ impl DbSource for MySqlSource {
              where table_schema = ? and table_type = 'BASE TABLE' \
              order by cast(table_name as binary)",
         )))
-        .bind(&schema)
+        .bind(schema.as_str())
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -585,48 +574,31 @@ impl DbSource for MySqlSource {
             .resolve_schema_in_tx(&mut tx, variant, schema, timeout)
             .await?;
         let tables = self
-            .allowed_tables_in_tx(&mut tx, variant, &schema, timeout)
+            .allowed_tables_in_tx(&mut tx, variant, schema.as_str(), timeout)
             .await?;
-        let table = tables
-            .iter()
-            .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
-            .clone();
+        let table = Ident::find_in(&tables, table, NotAllowedKind::Table)?;
 
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
-        let columns: Vec<ColumnInfo> = self
-            .table_meta_in_tx(&mut tx, variant, &schema, &table, timeout)
-            .await?
-            .columns
-            .into_iter()
-            .map(ColumnInfo::from)
-            .collect();
-        let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
-        let sort = match &opts.sort {
-            Some(requested) => Some(
-                column_names
-                    .iter()
-                    .find(|c| c.as_str() == requested)
-                    .ok_or_else(|| {
-                        DbError::not_allowed(
-                            NotAllowedKind::Column,
-                            format!("column {requested:?}"),
-                        )
-                    })?
-                    .clone(),
-            ),
-            None => None,
-        };
+        let meta = self
+            .table_meta_in_tx(&mut tx, variant, &schema, table, timeout)
+            .await?;
+        let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
+        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
+        let sort = opts
+            .sort
+            .as_deref()
+            .map(|requested| Ident::find_in(&column_names, requested, NotAllowedKind::Column))
+            .transpose()?;
 
         let (where_clause, filter_values) = match &opts.filter {
             Some(filter) => build_where_clause(filter, &column_names)?,
             None => (String::new(), Vec::new()),
         };
 
-        let select_list = columns
+        let select_list = column_names
             .iter()
-            .map(|c| format!("CAST({} AS CHAR)", quote_ident_mysql(&c.name)))
+            .map(|c| format!("CAST({} AS CHAR)", quote_ident_mysql(c)))
             .collect::<Vec<_>>()
             .join(", ");
         // Table-qualified, same reason as postgres.rs/sqlite.rs: an
@@ -636,7 +608,7 @@ impl DbSource for MySqlSource {
         let order_clause = match &sort {
             Some(col) => format!(
                 " order by {}.{} {}",
-                quote_ident_mysql(&table),
+                quote_ident_mysql(table),
                 quote_ident_mysql(col),
                 if opts.descending { "desc" } else { "asc" }
             ),
@@ -648,7 +620,7 @@ impl DbSource for MySqlSource {
             &format!(
                 "{select_list} from {}.{}{where_clause}{order_clause} limit ? offset ?",
                 quote_ident_mysql(&schema),
-                quote_ident_mysql(&table)
+                quote_ident_mysql(table)
             ),
         );
 
@@ -662,7 +634,7 @@ impl DbSource for MySqlSource {
         let mysql_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, &table))?;
+            .map_err(|e| map_select_denied(e, table.as_str()))?;
         let rows = mysql_rows
             .iter()
             .map(|r| row_to_json(r, columns.iter().map(|c| c.name.as_str())))
@@ -674,8 +646,8 @@ impl DbSource for MySqlSource {
             "cast(table_rows as signed) from information_schema.tables \
              where table_schema = ? and table_name = ?",
         )))
-        .bind(&schema)
-        .bind(&table)
+        .bind(schema.as_str())
+        .bind(table.as_str())
         .fetch_one(&mut *tx)
         .await?
         .unwrap_or(-1);
@@ -703,11 +675,11 @@ impl DbSource for MySqlSource {
             .await?;
         let refs = spec.table_refs();
         let schemas = join::table_schemas(&refs, &schema, &listed)?;
-        let mut allowed: HashMap<&str, Vec<String>> = HashMap::new();
+        let mut allowed: HashMap<&str, Vec<Ident>> = HashMap::new();
         for in_schema in &schemas {
-            if let Entry::Vacant(e) = allowed.entry(in_schema) {
+            if let Entry::Vacant(e) = allowed.entry(in_schema.as_str()) {
                 e.insert(
-                    self.allowed_tables_in_tx(&mut tx, variant, in_schema, timeout)
+                    self.allowed_tables_in_tx(&mut tx, variant, in_schema.as_str(), timeout)
                         .await?,
                 );
             }
@@ -718,11 +690,11 @@ impl DbSource for MySqlSource {
             let meta = match metas.entry((in_schema.as_str(), name)) {
                 Entry::Occupied(e) => e.into_mut(),
                 Entry::Vacant(e) => {
-                    if !allowed[in_schema.as_str()].iter().any(|t| t == name) {
-                        return Err(DbError::BadJoin(format!("unknown table {name:?}")));
-                    }
+                    let table =
+                        Ident::find_in(&allowed[in_schema.as_str()], name, NotAllowedKind::Table)
+                            .map_err(join::unknown_join_table)?;
                     e.insert(
-                        self.table_meta_in_tx(&mut tx, variant, in_schema, name, timeout)
+                        self.table_meta_in_tx(&mut tx, variant, in_schema, table, timeout)
                             .await?,
                     )
                 }
@@ -748,7 +720,7 @@ impl DbSource for MySqlSource {
         let has_more = mysql_rows.len() > opts.limit as usize;
         mysql_rows.truncate(opts.limit as usize);
         Ok(JoinData {
-            columns: plan.columns(Some(&schema)),
+            columns: plan.columns(Some(schema.as_str())),
             rows: mysql_rows
                 .iter()
                 .map(|r| row_to_json(r, plan.labels().iter().map(String::as_str)))
@@ -769,15 +741,17 @@ impl DbSource for MySqlSource {
             .resolve_schema_in_tx(&mut tx, variant, schema, CATALOG_TIMEOUT_SECS)
             .await?;
         let tables = self
-            .allowed_tables_in_tx(&mut tx, variant, &schema, CATALOG_TIMEOUT_SECS)
+            .allowed_tables_in_tx(&mut tx, variant, schema.as_str(), CATALOG_TIMEOUT_SECS)
             .await?;
-        let table = tables
-            .iter()
-            .find(|t| t.as_str() == table)
-            .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
-            .clone();
+        let table = Ident::find_in(&tables, table, NotAllowedKind::Table)?;
         let columns = self
-            .allowed_columns_in_tx(&mut tx, variant, &schema, &table, CATALOG_TIMEOUT_SECS)
+            .allowed_columns_in_tx(
+                &mut tx,
+                variant,
+                schema.as_str(),
+                table.as_str(),
+                CATALOG_TIMEOUT_SECS,
+            )
             .await?;
         columns
             .iter()
@@ -801,8 +775,8 @@ impl DbSource for MySqlSource {
         let schema = self
             .resolve_schema_in_tx(&mut tx, variant, schema, CATALOG_TIMEOUT_SECS)
             .await?;
-        let allowed: HashSet<String> = self
-            .allowed_tables_in_tx(&mut tx, variant, &schema, CATALOG_TIMEOUT_SECS)
+        let allowed: HashSet<Ident> = self
+            .allowed_tables_in_tx(&mut tx, variant, schema.as_str(), CATALOG_TIMEOUT_SECS)
             .await?
             .into_iter()
             .collect();
@@ -830,9 +804,9 @@ impl DbSource for MySqlSource {
                  order by kcu.table_name, kcu.constraint_name, kcu.ordinal_position",
             ),
         ))
-        .bind(&schema)
+        .bind(schema.as_str())
         .bind(table)
-        .bind(&schema)
+        .bind(schema.as_str())
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -842,7 +816,7 @@ impl DbSource for MySqlSource {
         // table the rest of the API won't.
         Ok(group_referenced_by(
             rows.into_iter()
-                .filter(|(ref_table, ..)| allowed.contains(ref_table))
+                .filter(|(ref_table, ..)| allowed.contains(ref_table.as_str()))
                 .map(|(ref_table, constraint, from, to)| ReferencedBy {
                     table: ref_table,
                     schema: None,
@@ -859,9 +833,9 @@ impl DbSource for MySqlSource {
             .resolve_schema_in_tx(&mut tx, variant, schema, CATALOG_TIMEOUT_SECS)
             .await?;
         let allowed = self
-            .allowed_tables_in_tx(&mut tx, variant, &schema, CATALOG_TIMEOUT_SECS)
+            .allowed_tables_in_tx(&mut tx, variant, schema.as_str(), CATALOG_TIMEOUT_SECS)
             .await?;
-        if !allowed.iter().any(|t| t == table) {
+        if !allowed.iter().any(|t| t.as_str() == table) {
             return Err(DbError::not_allowed(
                 NotAllowedKind::Table,
                 format!("table {table:?}"),
@@ -886,7 +860,7 @@ impl DbSource for MySqlSource {
                 ),
             )),
         )
-        .bind(&schema)
+        .bind(schema.as_str())
         .bind(table)
         .fetch_all(&mut *tx)
         .await?;
@@ -920,7 +894,7 @@ impl DbSource for MySqlSource {
                    and tc.constraint_type in ('PRIMARY KEY', 'UNIQUE') \
                  order by tc.constraint_type desc, tc.constraint_name, kcu.ordinal_position",
             )))
-            .bind(&schema)
+            .bind(schema.as_str())
             .bind(table)
             .fetch_all(&mut *tx)
             .await?;
@@ -967,7 +941,7 @@ impl DbSource for MySqlSource {
                  order by kcu.constraint_name, kcu.ordinal_position",
             )),
         )
-        .bind(&schema)
+        .bind(schema.as_str())
         .bind(table)
         .fetch_all(&mut *tx)
         .await?;
@@ -978,7 +952,7 @@ impl DbSource for MySqlSource {
                 _ => foreign_keys.push(ConstraintFk {
                     name,
                     table: ref_table,
-                    schema: (ref_schema != schema).then_some(ref_schema),
+                    schema: (ref_schema != schema.as_str()).then_some(ref_schema),
                     columns: vec![ColumnPair { from, to }],
                     on_delete: on_delete.to_ascii_uppercase(),
                     on_update: on_update.to_ascii_uppercase(),
@@ -1018,7 +992,7 @@ impl DbSource for MySqlSource {
                      order by tc.constraint_name"
                 ),
             )))
-            .bind(&schema)
+            .bind(schema.as_str())
             .bind(table)
             .fetch_all(&mut *tx)
             .await?
