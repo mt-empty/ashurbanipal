@@ -1,6 +1,6 @@
 # Report each source's database engine
 
-> **Status:** OPEN · **Area:** spec, ports, conformance, frontend, docs · **Ref:** decided 2026-11-11 to drop §5.8's no-engine rule
+> **Status:** DONE · **Area:** spec, ports, conformance, frontend, docs · **Ref:** decided 2026-11-11 to drop §5.8's no-engine rule; shipped 2026-11-11
 
 Add an `engine` field to each `/sources` entry, and drop the rule that a
 response must not say which engine a source uses.
@@ -28,13 +28,14 @@ The rule no longer pays its way:
 ## 2. Wire change
 
 - A §5.8 source entry gains a required `engine`, from a closed list:
-  `postgres`, `mysql`, `mariadb`, `sqlite`.
+  `postgres`, `mysql`, `sqlite`. A MariaDB source reports `mysql` (§7).
 - Clients MUST accept a value they do not know and treat it like a source
   with no engine facts. A new port's engine then needs no client release.
 - §5.8 loses the MUST NOT sentence. `openapi.yaml` and `docs/design.md`
   lose their copies of it.
-- Additive, so a `feat(protocol)`, not a breaking change. Record it in
-  `spec/CHANGELOG.md`.
+- A client that ignores the field sees no change, so it is a
+  `feat(protocol)`. Because the field is required, it lands under §7's
+  alpha exception, recorded in `spec/CHANGELOG.md`.
 
 ```json
 { "sources": [{ "name": "primary", "engine": "postgres" }], "default": "primary" }
@@ -58,10 +59,11 @@ Write this rule into §5.8 so a later change cannot quietly widen it.
 
 - Keep the `engine` from `/sources` in the scope state beside the source
   name.
-- Table counts: on `sqlite`, show no count at all, and drop the count
-  cell from the table chip and the side panel row (design canvas Round 19,
-  board BN c). `?` stays for an engine that estimates but has no figure
-  yet.
+- Table counts: on `sqlite`, show no count at all: not on the table chip
+  (its count slot stays empty, sized for the loading spinner), not in the
+  grid's row meta, and not in the join builder's table list. Story 54's side
+  panel row follows the same rule (design canvas Round 19, board BN c). `?`
+  stays for an engine that estimates but has no figure yet.
 - The AI-agent API reference (`frontend/src/features/api-reference.ts`)
   shows the new field in its `/sources` example.
 - Story 22's dialect follow-up can then start. It is a separate change.
@@ -88,14 +90,16 @@ Write this rule into §5.8 so a later change cannot quietly widen it.
   that was never analyzed.
 - The full three-browser e2e suite passes.
 
-## 7. Open questions
+## 7. Decisions
 
-- **MySQL or MariaDB.** They share drivers, so a port has to ask the
-  server (`SELECT VERSION()` contains `MariaDB`). Is that worth one query
-  per source at start-up, or should both report `mysql`? The adapter
-  notes already treat them apart in places (JSON stored as `longtext`).
-- **Version.** Leave out a server version for now. Add it only when a
-  feature needs it.
+- **MariaDB reports `mysql`** (decided 2026-11-11). Every port already
+  tells them apart with a cached `SELECT VERSION()`, but only on the first
+  query. Reporting `mysql` keeps `/sources` a configuration read that never
+  touches the database. Clients accept unknown values, so `mariadb` can be
+  added later without a client release (`docs/adapter-decisions.md` §5.8).
+- **Each `DbSource` reports its own engine** as a constant, so a host
+  configures nothing new and a mixed-engine process reports each source.
+- **Version.** Left out. Add it only when a feature needs it.
 
 ## 8. Out of scope
 

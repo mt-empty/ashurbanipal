@@ -66,9 +66,10 @@ that opens over the page).
   nothing moves (R9).
 - **b. Long names:** the name is cut with an ellipsis and the count always
   stays. The `title` holds the name and the table comment (R8).
-- **c. No estimate:** `?` as today. Once story 53 reports the engine, a
-  SQLite source shows no count at all, and the chip drops its count cell.
-  Build the count cell as optional from the start.
+- **c. No estimate:** `?` as today. A SQLite source shows no count at all
+  (story 53, shipped: `countsNeverEstimated` in `lib/format.ts`), so the
+  chip drops its count cell. Build the count cell as optional from the
+  start.
 - **d. Joins:** a saved join in view is marked like the active table. An
   unsaved join in view has a dashed edge with **Save…** after it.
 - **e. Keyboard:** Tab reaches the hide or show button, then each table and
@@ -112,8 +113,7 @@ that opens over the page).
 ## 6. What "done" means
 
 - Screenshots match BH, BI, BL, BM and each BN case in light and dark.
-- Every BN case works, apart from c's no-count case, which waits on story
-  53.
+- Every BN case works, including c's no-count case on SQLite.
 - The full three-browser e2e suite passes.
 
 ## 7. Out of scope
