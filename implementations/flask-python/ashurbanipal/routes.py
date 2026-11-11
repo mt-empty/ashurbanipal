@@ -9,15 +9,17 @@ import urllib.error
 import urllib.request
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from flask import Blueprint, Response, jsonify, request
 
 from . import filter as filter_module
-from .config import Config, SiblingsView
+from .config import Config, Sibling, SiblingsView
 from .db import (
     BadJoin,
     BadParam,
+    ColumnInfo,
     DbError,
     DbSource,
     FilterParseError,
@@ -25,10 +27,13 @@ from .db import (
     NotAllowedKind,
     QueryOpts,
     QueryTimeout,
+    ReferencedBy,
+    Structure,
+    TableInfo,
     Unsortable,
 )
 from .embed import DBVIEWER_HTML, DBVIEWER_HTML_GZIP
-from .join import JoinOpts, parse_join
+from .join import JoinColumnInfo, JoinOpts, parse_join
 
 PROTOCOL_HEADER = "x-ashurbanipal-protocol"
 # Bumped only for non-additive wire changes; additive optional fields keep
@@ -284,7 +289,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
 
     @bp.get("/api/siblings")
     def siblings() -> Response:
-        body: dict = {}
+        body: dict[str, Any] = {}
         if view.instance is not None:
             body["instance"] = {"name": view.instance.name, "label": view.instance.label}
         body["siblings"] = _check_siblings(view)
@@ -295,15 +300,15 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     return bp
 
 
-def _table_to_dict(t) -> dict:
-    d = {"name": t.name}
+def _table_to_dict(t: TableInfo) -> dict[str, Any]:
+    d: dict[str, Any] = {"name": t.name}
     if t.comment is not None:
         d["comment"] = t.comment
     return d
 
 
-def _column_to_dict(c) -> dict:
-    d = {"name": c.name, "type": c.type_name, "class": c.column_class}
+def _column_to_dict(c: ColumnInfo | JoinColumnInfo) -> dict[str, Any]:
+    d: dict[str, Any] = {"name": c.name, "type": c.type_name, "class": c.column_class}
     if c.enum_type is not None:
         d["enum_type"] = c.enum_type
     if c.collation is not None:
@@ -320,15 +325,15 @@ def _column_to_dict(c) -> dict:
     return d
 
 
-def _join_column_to_dict(c) -> dict:
+def _join_column_to_dict(c: JoinColumnInfo) -> dict[str, Any]:
     out = {**_column_to_dict(c), "join": c.join, "table": c.table, "column": c.column}
     if c.schema is not None:
         out["schema"] = c.schema
     return out
 
 
-def _referenced_by_to_dict(e) -> dict:
-    d = {
+def _referenced_by_to_dict(e: ReferencedBy) -> dict[str, Any]:
+    d: dict[str, Any] = {
         "table": e.table,
         "constraint": e.constraint,
         "columns": [{"from": p.from_, "to": p.to} for p in e.columns],
@@ -339,17 +344,17 @@ def _referenced_by_to_dict(e) -> dict:
     return d
 
 
-def _structure_to_dict(s) -> dict:
+def _structure_to_dict(s: Structure) -> dict[str, Any]:
     indexes = []
     for i in s.indexes:
-        d = {"name": i.name, "columns": i.columns, "unique": i.unique, "method": i.method}
+        d: dict[str, Any] = {"name": i.name, "columns": i.columns, "unique": i.unique, "method": i.method}
         if i.predicate is not None:
             d["predicate"] = i.predicate
         indexes.append(d)
     c = s.constraints
-    constraints: dict = {}
+    constraints: dict[str, Any] = {}
     if c.primary_key is not None:
-        pk = {"columns": c.primary_key.columns}
+        pk: dict[str, Any] = {"columns": c.primary_key.columns}
         if c.primary_key.name is not None:
             pk["name"] = c.primary_key.name
         constraints["primary_key"] = pk
@@ -373,7 +378,7 @@ def _structure_to_dict(s) -> dict:
     return {"indexes": indexes, "constraints": constraints}
 
 
-def _clamp_int(raw, *, default: int, lo: int, hi: int):
+def _clamp_int(raw: str | None, *, default: int, lo: int, hi: int) -> int | None:
     """§5.4 requires both `limit` and `offset` to be clamped, never
     rejected, for any numerically valid out-of-range value; only genuinely
     non-numeric input (`"abc"`, `"1.5"`) 400s. Returns None on the latter.
@@ -387,7 +392,7 @@ def _clamp_int(raw, *, default: int, lo: int, hi: int):
     return max(lo, min(hi, value))
 
 
-def _health_url(base_url: str, health_path: str):
+def _health_url(base_url: str, health_path: str) -> str | None:
     """Resolves against the sibling's origin (scheme + host + port), not
     the base_url's own path.
     """
@@ -397,7 +402,7 @@ def _health_url(base_url: str, health_path: str):
     return urlunsplit((parts.scheme, parts.netloc, health_path, "", ""))
 
 
-def _check_one_sibling(sibling, is_instance: bool) -> dict:
+def _check_one_sibling(sibling: Sibling, is_instance: bool) -> dict[str, Any]:
     url = _health_url(sibling.base_url, sibling.health_path)
     healthy = is_instance
     if url is not None and not is_instance:
@@ -406,14 +411,14 @@ def _check_one_sibling(sibling, is_instance: bool) -> dict:
                 healthy = 200 <= resp.status < 300
         except (urllib.error.URLError, OSError, ValueError):
             healthy = False
-    status = {"name": sibling.name}
+    status: dict[str, Any] = {"name": sibling.name}
     if sibling.label is not None:
         status["label"] = sibling.label
     status.update(base_url=sibling.base_url, healthy=healthy)
     return status
 
 
-def _check_siblings(view: SiblingsView) -> list[dict]:
+def _check_siblings(view: SiblingsView) -> list[dict[str, Any]]:
     """Checks SHOULD run in parallel and MUST be individually bounded by a
     timeout, so one dead sibling can't stall the response (§5.6).
     """

@@ -10,6 +10,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Framework :: Flask",
+    "Typing :: Typed",
 ]
 dependencies = [
     "flask>=3.0",
@@ -27,6 +28,8 @@ dev = [
     "ashurbanipal-flask[postgres,mysql]",
     "pytest>=8.0",
     "ruff>=0.6",
+    "mypy>=2.4",
+    "types-PyMySQL>=1.1",
 ]
 
 [tool.pytest.ini_options]
@@ -39,6 +42,11 @@ filterwarnings = [
     "error::DeprecationWarning",
     "error::PendingDeprecationWarning",
 ]
+
+[tool.mypy]
+files = ["ashurbanipal"]
+python_version = "3.12"
+strict = true
 
 [tool.ruff]
 line-length = 115

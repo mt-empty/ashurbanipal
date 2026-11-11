@@ -7,12 +7,24 @@ import functools
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    from ..filter import Condition
     from ..join import JoinData, JoinOpts, JoinSpec
 
-_F = TypeVar("_F", bound=Callable)
+
+class _Fetches(Protocol):
+    def fetchone(self) -> tuple[Any, ...] | None: ...
+
+
+def one_row(cur: _Fetches) -> tuple[Any, ...]:
+    """The row a query that always returns one (an aggregate, `select version()`) returned."""
+    row = cur.fetchone()
+    if row is None:
+        # A DbError, so a row gone mid-request (a dropped table) still gets a protocol error response.
+        raise DatabaseError("expected one row, got none")
+    return row
 
 
 class KeyKind(StrEnum):
@@ -167,7 +179,7 @@ class QueryOpts:
     timeout_secs: int
     sort: str | None = None
     descending: bool = False
-    filter: list | None = None  # list[filter.Condition]; typed loosely to avoid a circular import
+    filter: list[Condition] | None = None
 
 
 class DbError(Exception):
@@ -243,15 +255,17 @@ def _is_timeout(exc: BaseException) -> bool:
     return getattr(exc, "sqlite_errorcode", None) == 9
 
 
-def wrap_driver_errors(driver_error_cls: type[BaseException]) -> Callable[[_F], _F]:
+def wrap_driver_errors[**P, R](
+    driver_error_cls: type[BaseException],
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Decorator: re-raises `driver_error_cls` (a backend driver's own
     exception hierarchy — psycopg.Error, sqlite3.Error, pymysql.err.Error)
     as DatabaseError so route error handling returns protocol text errors.
     """
 
-    def decorator(fn: _F) -> _F:
+    def decorator(fn: Callable[P, R]) -> Callable[P, R]:
         @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             try:
                 return fn(*args, **kwargs)
             except driver_error_cls as exc:
@@ -259,7 +273,7 @@ def wrap_driver_errors(driver_error_cls: type[BaseException]) -> Callable[[_F], 
                     raise QueryTimeout(str(exc)) from exc
                 raise DatabaseError(str(exc)) from exc
 
-        return wrapper  # type: ignore[return-value]
+        return wrapper
 
     return decorator
 

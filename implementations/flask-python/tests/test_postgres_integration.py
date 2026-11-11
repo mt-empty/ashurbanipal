@@ -14,7 +14,7 @@ from psycopg.conninfo import make_conninfo
 from ashurbanipal import Config, router
 from ashurbanipal.db import BadJoin, FilterParseError, KeyKind, NotAllowed, QueryOpts, QueryTimeout, Unsortable
 from ashurbanipal.db.postgres import PgSource
-from ashurbanipal.filter import Condition
+from ashurbanipal.filter import Comparison
 from ashurbanipal.join import JoinOpts, parse_join
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -311,7 +311,7 @@ def test_nul_byte_in_filter_value_rejected(source) -> None:
     # A NUL byte in a filter value is a Postgres-only limit, not a protocol
     # one (docs/adapter-decisions.md §5.4.2) - still rejected as
     # FilterParseError, not a raw 500.
-    condition = Condition(column="full_name", op="=", value="a\0b")
+    condition = Comparison(column="full_name", op="=", value="a\0b")
     with pytest.raises(FilterParseError):
         source.query_table(None, "users", QueryOpts(limit=5, offset=0, timeout_secs=5, filter=[condition]))
 
