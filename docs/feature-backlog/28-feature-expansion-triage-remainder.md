@@ -38,9 +38,9 @@ See the discussion that produced this triage.
 All of these introspect the catalog, run `SELECT`, or act entirely in the
 frontend. None changes the read/write posture.
 
-- **CSV export of the current result page.** The payload viewer already
-  gives copyable JSON of the current view; this adds a CSV form and a file
-  download. Frontend-only for the current page.
+- **CSV export of the current result page.** Now story 56
+  (`docs/feature-backlog/56-copy-and-download-the-current-page.md`),
+  together with CSV, TSV and Markdown copies to the clipboard.
 - **Client-side aggregates on a selection.** Sum / avg / count / min / max
   over selected cells or a column, shown in a status strip. Frontend-only,
   operates on already-fetched rows (bounded by R7).
