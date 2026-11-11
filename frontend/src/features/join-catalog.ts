@@ -1,7 +1,7 @@
 import { ApiError, api } from "../core/api.js";
-import { refFor, refInScope, schemaRefFor, scopeEngine, state } from "../core/state.js";
-import type { Column, SchemaRef, TableListEntry, TableRef, ViewData } from "../core/types.js";
-import { countsNeverEstimated, formatApproxCount } from "../lib/format.js";
+import { noCountsFor, refFor, refInScope, schemaRefFor, state } from "../core/state.js";
+import type { Column, CountsResponse, SchemaRef, TableListEntry, TableRef, ViewData } from "../core/types.js";
+import { formatApproxCount } from "../lib/format.js";
 import type { JoinCatalog } from "../lib/join-dsl.js";
 import { refKey, scopeQuery, tableParams } from "../lib/table-ref.js";
 import { tableStructure } from "./structure.js";
@@ -91,13 +91,15 @@ export function tablesIn(scope: SchemaRef): Promise<void> {
   let read = schemaTables.get(key);
   if (!read) {
     const started = generation;
+    const noCounts = noCountsFor(scope.source);
     read = Promise.all([
       api<{ tables: TableListEntry[] }>(`/tables${key}`),
-      api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${key}`).catch(() => ({ counts: [] })),
+      noCounts
+        ? { counts: [] }
+        : api<CountsResponse>(`/table-counts${key}`).catch((): CountsResponse => ({ counts: [] })),
     ]).then(([{ tables }, { counts }]) => {
       if (started !== generation) return;
       const countOf = new Map(counts.map((c) => [c.table, c.approx_rows]));
-      const noCounts = countsNeverEstimated(scopeEngine());
       schemaTablesRead.set(
         key,
         tables.map((t) => ({ name: t.name, count: noCounts ? "" : formatApproxCount(countOf.get(t.name)) })),

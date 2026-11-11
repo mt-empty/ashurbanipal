@@ -140,8 +140,8 @@ ul { list-style: none; margin: 0; padding: 0; }
             overflow: hidden; text-overflow: ellipsis; }
 .chip-right { position: relative; display: flex; align-items: center; flex: none; }
 .count { font-size: .7rem; opacity: .6; }
-/* No count on an engine that never estimates; the slot still holds the spinner. */
-.count.none { min-width: .6rem; }
+/* Empty on an engine that never estimates; the slot still holds the spinner. */
+.count:empty { min-width: .6rem; }
 /* Overlays the count while loading (absolutely positioned, so it adds no
    width and the chip list never reflows). */
 .chip-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;

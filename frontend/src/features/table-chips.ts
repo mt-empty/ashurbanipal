@@ -6,7 +6,7 @@ import {
   applyStoredSort,
   clearFilter,
   enterTable,
-  scopeEngine,
+  noCountsFor,
   scopeIdentity,
   scopeRef,
   scopeSettled,
@@ -19,8 +19,8 @@ import {
   viewHref,
 } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
-import type { TableListEntry } from "../core/types.js";
-import { APPROX_COUNT_TITLE, countsNeverEstimated, formatApproxCount } from "../lib/format.js";
+import type { CountsResponse, TableListEntry } from "../core/types.js";
+import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
 import { scopeQuery } from "../lib/table-ref.js";
 import { syncGridLock } from "./grid-lock.js";
 
@@ -141,17 +141,19 @@ export async function loadTables({
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
+  const noCounts = noCountsFor(state.scope.source);
   const [{ tables }, { counts }] = await Promise.all([
     api<{ tables: TableListEntry[] }>(`/tables${scopeQuery(scopeRef())}`),
-    // Counts are a hint; a failure leaves the chips without them, not missing.
-    api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${scopeQuery(scopeRef())}`).catch((e) => {
-      console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
-      return { counts: [] };
-    }),
+    noCounts
+      ? { counts: [] }
+      : // Counts are a hint; a failure leaves the chips without them, not missing.
+        api<CountsResponse>(`/table-counts${scopeQuery(scopeRef())}`).catch((e): CountsResponse => {
+          console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
+          return { counts: [] };
+        }),
   ]);
   if (token !== loadTablesToken) return "superseded";
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
-  const noCounts = countsNeverEstimated(scopeEngine());
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
@@ -161,10 +163,7 @@ export async function loadTables({
     const chip = qs<HTMLAnchorElement>(li, "a");
     qs<HTMLElement>(li, ".chip-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
-    if (noCounts) {
-      // Kept empty: the loading spinner overlays this slot.
-      countEl.classList.add("none");
-    } else {
+    if (!noCounts) {
       countEl.textContent = formatApproxCount(countMap[t.name]);
       chipCounts.set(t.name, countEl.textContent);
       countEl.title = APPROX_COUNT_TITLE;

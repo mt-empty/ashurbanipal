@@ -162,8 +162,8 @@ ul { list-style: none; margin: 0; padding: 0; }
             overflow: hidden; text-overflow: ellipsis; }
 .chip-right { position: relative; display: flex; align-items: center; flex: none; }
 .count { font-size: .7rem; opacity: .6; }
-/* No count on an engine that never estimates; the slot still holds the spinner. */
-.count.none { min-width: .6rem; }
+/* Empty on an engine that never estimates; the slot still holds the spinner. */
+.count:empty { min-width: .6rem; }
 /* Overlays the count while loading (absolutely positioned, so it adds no
    width and the chip list never reflows). */
 .chip-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
@@ -1675,6 +1675,164 @@ function filterDslErrorAt(input2, aliases) {
   }
 }
 
+// src/lib/format.ts
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function formatClock(at) {
+  return at.toLocaleTimeString([], { hourCycle: "h23" });
+}
+function formatApproxCount(n) {
+  return n == null || n < 0 ? "?" : `~${n}`;
+}
+var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no estimate yet (table not yet analyzed)";
+function countsNeverEstimated(engine) {
+  return engine === "sqlite";
+}
+var TYPE_ALIASES = {
+  smallint: "number",
+  integer: "number",
+  int: "number",
+  int2: "number",
+  int4: "number",
+  int8: "number",
+  bigint: "number",
+  mediumint: "number",
+  tinyint: "number",
+  numeric: "number",
+  decimal: "number",
+  real: "number",
+  double: "number",
+  "double precision": "number",
+  float: "number",
+  number: "number",
+  serial: "number",
+  smallserial: "number",
+  bigserial: "number",
+  boolean: "bool",
+  bool: "bool",
+  date: "date",
+  timestamp: "date",
+  timestamptz: "date",
+  datetime: "date",
+  "timestamp with time zone": "date",
+  "timestamp without time zone": "date",
+  uuid: "uuid",
+  json: "json",
+  jsonb: "json"
+};
+function baseTypeName(rawType) {
+  return rawType.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\b(unsigned|signed|zerofill)\b/g, "").replace(/\s+/g, " ").trim();
+}
+function typeNameClass(rawType) {
+  if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
+  return TYPE_ALIASES[baseTypeName(rawType)] ?? null;
+}
+var FROM_COLUMN_CLASS = {
+  number: "number",
+  temporal: "date",
+  uuid: "uuid",
+  boolean: "bool",
+  float: "number",
+  json: "json"
+};
+function columnTypeClass(col) {
+  return typeNameClass(col.type) ?? FROM_COLUMN_CLASS[col.class] ?? null;
+}
+var TYPE_CLASS_CSS = {
+  number: "cell-type-number",
+  bool: "cell-type-bool",
+  uuid: "cell-type-uuid"
+};
+function isTextType(type) {
+  if (type.endsWith("[]") || type.startsWith("_")) return false;
+  return type === "" || type === "unknown" || /char|clob|text/.test(type);
+}
+function rendersAsJson(col, raw) {
+  const type = baseTypeName(col.type);
+  if (columnTypeClass(col) === "json") return true;
+  return (isTextType(type) || col.class === "text") && /^\s*[[{]/.test(raw);
+}
+function warnBadJsonCell(col, err) {
+  if (columnTypeClass(col) === "json") {
+    console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
+  }
+}
+var isEdgeSpace = (ch) => /\s/.test(ch) || ch === "\u200B";
+function edgeWhitespace(raw) {
+  let start = 0;
+  while (start < raw.length && isEdgeSpace(raw[start])) start++;
+  let end = raw.length;
+  while (end > start && isEdgeSpace(raw[end - 1])) end--;
+  return { lead: raw.slice(0, start), core: raw.slice(start, end), trail: raw.slice(end) };
+}
+var WS_NAMES = {
+  " ": ["space", "spaces"],
+  "	": ["tab", "tabs"],
+  "\xA0": ["no-break space", "no-break spaces"],
+  "\u200B": ["zero-width space", "zero-width spaces"],
+  "\uFEFF": ["byte-order mark", "byte-order marks"]
+};
+var NEWLINE = /\r\n?|[\n\u2028\u2029]/g;
+function whitespaceTitle(run, side) {
+  const chars = [...run.replace(NEWLINE, "\n")];
+  if (chars.every((c) => c === "\n")) {
+    return chars.length === 1 ? `${side} newline` : `${chars.length} ${side} newlines`;
+  }
+  const names = WS_NAMES[chars[0]];
+  if (names && chars.every((c) => c === chars[0])) {
+    return `${chars.length} ${side} ${chars.length === 1 ? names[0] : names[1]}`;
+  }
+  return `${chars.length} ${side} whitespace characters`;
+}
+function edgeMarks(run, side) {
+  const title = whitespaceTitle(run, side);
+  return (run.match(/\r\n?|[\n\u2028\u2029]|[\u200B\uFEFF]|[^\r\n\u2028\u2029\u200B\uFEFF]+/g) ?? []).map((part) => {
+    const span = document.createElement("span");
+    span.title = title;
+    if (/^[\r\n\u2028\u2029]/.test(part)) span.className = "cell-ws cell-nl";
+    else if (/^[\u200B\uFEFF]/.test(part)) span.className = "cell-ws cell-zw";
+    else {
+      span.className = "cell-ws";
+      span.textContent = part;
+    }
+    return span;
+  });
+}
+function typedValue(col, raw) {
+  const typeClass = columnTypeClass(col);
+  if (typeClass === "date") {
+    const time = document.createElement("time");
+    time.textContent = raw;
+    time.className = "cell-type-date";
+    return time;
+  }
+  let cssClass;
+  if (typeClass) cssClass = TYPE_CLASS_CSS[typeClass];
+  else if (UUID_RE.test(raw)) cssClass = "cell-type-uuid";
+  if (cssClass) {
+    const span = document.createElement("span");
+    span.className = cssClass;
+    span.textContent = raw;
+    return span;
+  }
+  return document.createTextNode(raw);
+}
+function formatCellValue(col, raw) {
+  if (raw === "") {
+    const empty = document.createElement("span");
+    empty.className = "cell-empty";
+    empty.title = "empty text";
+    empty.textContent = "''";
+    return empty;
+  }
+  const { lead, core, trail } = edgeWhitespace(raw);
+  if (!lead && !trail) return typedValue(col, raw);
+  const out = document.createDocumentFragment();
+  if (lead) out.append(...edgeMarks(lead, "leading"));
+  if (core) out.append(typedValue(col, core));
+  if (trail) out.append(...edgeMarks(trail, "trailing"));
+  return out;
+}
+
 // src/lib/join-def.ts
 function labelSchemas(def, scopeSchema) {
   if (scopeSchema === null || def.tables.every((t) => t.schema === void 0)) return def.tables.map((t) => t.schema);
@@ -2570,15 +2728,14 @@ function scopeOnSource(source, schema = null) {
 function withSchema(scope2, schema) {
   return scope2.source === null ? { kind: "failed", source: null, schema } : { kind: "known", source: scope2.source, schema };
 }
-function settleSource(source, many, engines = {}) {
+function settleSource(source, many, engines) {
   const { schema } = state.scope;
   state.scope = source === null ? { kind: "failed", source, schema } : { kind: "loading", source, schema };
   state.manySources = many;
   state.sourceEngines = engines;
 }
-function scopeEngine() {
-  const { source } = state.scope;
-  return source === null ? void 0 : state.sourceEngines[source];
+function noCountsFor(source) {
+  return countsNeverEstimated(source === null ? void 0 : state.sourceEngines[source]);
 }
 function settleSchema(schema, schemas, noDefault) {
   state.scope = schema === null ? { kind: "failed", source: state.scope.source, schema } : withSchema(state.scope, schema);
@@ -2741,164 +2898,6 @@ function isCurrentLoad(token) {
 }
 function supersedeLoads() {
   loadToken++;
-}
-
-// src/lib/format.ts
-var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function formatClock(at) {
-  return at.toLocaleTimeString([], { hourCycle: "h23" });
-}
-function formatApproxCount(n) {
-  return n == null || n < 0 ? "?" : `~${n}`;
-}
-var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no estimate yet (table not yet analyzed)";
-function countsNeverEstimated(engine) {
-  return engine === "sqlite";
-}
-var TYPE_ALIASES = {
-  smallint: "number",
-  integer: "number",
-  int: "number",
-  int2: "number",
-  int4: "number",
-  int8: "number",
-  bigint: "number",
-  mediumint: "number",
-  tinyint: "number",
-  numeric: "number",
-  decimal: "number",
-  real: "number",
-  double: "number",
-  "double precision": "number",
-  float: "number",
-  number: "number",
-  serial: "number",
-  smallserial: "number",
-  bigserial: "number",
-  boolean: "bool",
-  bool: "bool",
-  date: "date",
-  timestamp: "date",
-  timestamptz: "date",
-  datetime: "date",
-  "timestamp with time zone": "date",
-  "timestamp without time zone": "date",
-  uuid: "uuid",
-  json: "json",
-  jsonb: "json"
-};
-function baseTypeName(rawType) {
-  return rawType.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\b(unsigned|signed|zerofill)\b/g, "").replace(/\s+/g, " ").trim();
-}
-function typeNameClass(rawType) {
-  if (/^\s*tinyint\(1\)(\s|$)/i.test(rawType)) return "bool";
-  return TYPE_ALIASES[baseTypeName(rawType)] ?? null;
-}
-var FROM_COLUMN_CLASS = {
-  number: "number",
-  temporal: "date",
-  uuid: "uuid",
-  boolean: "bool",
-  float: "number",
-  json: "json"
-};
-function columnTypeClass(col) {
-  return typeNameClass(col.type) ?? FROM_COLUMN_CLASS[col.class] ?? null;
-}
-var TYPE_CLASS_CSS = {
-  number: "cell-type-number",
-  bool: "cell-type-bool",
-  uuid: "cell-type-uuid"
-};
-function isTextType(type) {
-  if (type.endsWith("[]") || type.startsWith("_")) return false;
-  return type === "" || type === "unknown" || /char|clob|text/.test(type);
-}
-function rendersAsJson(col, raw) {
-  const type = baseTypeName(col.type);
-  if (columnTypeClass(col) === "json") return true;
-  return (isTextType(type) || col.class === "text") && /^\s*[[{]/.test(raw);
-}
-function warnBadJsonCell(col, err) {
-  if (columnTypeClass(col) === "json") {
-    console.warn(`ashurbanipal: JSON column ${col.name} is not valid JSON`, err);
-  }
-}
-var isEdgeSpace = (ch) => /\s/.test(ch) || ch === "\u200B";
-function edgeWhitespace(raw) {
-  let start = 0;
-  while (start < raw.length && isEdgeSpace(raw[start])) start++;
-  let end = raw.length;
-  while (end > start && isEdgeSpace(raw[end - 1])) end--;
-  return { lead: raw.slice(0, start), core: raw.slice(start, end), trail: raw.slice(end) };
-}
-var WS_NAMES = {
-  " ": ["space", "spaces"],
-  "	": ["tab", "tabs"],
-  "\xA0": ["no-break space", "no-break spaces"],
-  "\u200B": ["zero-width space", "zero-width spaces"],
-  "\uFEFF": ["byte-order mark", "byte-order marks"]
-};
-var NEWLINE = /\r\n?|[\n\u2028\u2029]/g;
-function whitespaceTitle(run, side) {
-  const chars = [...run.replace(NEWLINE, "\n")];
-  if (chars.every((c) => c === "\n")) {
-    return chars.length === 1 ? `${side} newline` : `${chars.length} ${side} newlines`;
-  }
-  const names = WS_NAMES[chars[0]];
-  if (names && chars.every((c) => c === chars[0])) {
-    return `${chars.length} ${side} ${chars.length === 1 ? names[0] : names[1]}`;
-  }
-  return `${chars.length} ${side} whitespace characters`;
-}
-function edgeMarks(run, side) {
-  const title = whitespaceTitle(run, side);
-  return (run.match(/\r\n?|[\n\u2028\u2029]|[\u200B\uFEFF]|[^\r\n\u2028\u2029\u200B\uFEFF]+/g) ?? []).map((part) => {
-    const span = document.createElement("span");
-    span.title = title;
-    if (/^[\r\n\u2028\u2029]/.test(part)) span.className = "cell-ws cell-nl";
-    else if (/^[\u200B\uFEFF]/.test(part)) span.className = "cell-ws cell-zw";
-    else {
-      span.className = "cell-ws";
-      span.textContent = part;
-    }
-    return span;
-  });
-}
-function typedValue(col, raw) {
-  const typeClass = columnTypeClass(col);
-  if (typeClass === "date") {
-    const time = document.createElement("time");
-    time.textContent = raw;
-    time.className = "cell-type-date";
-    return time;
-  }
-  let cssClass;
-  if (typeClass) cssClass = TYPE_CLASS_CSS[typeClass];
-  else if (UUID_RE.test(raw)) cssClass = "cell-type-uuid";
-  if (cssClass) {
-    const span = document.createElement("span");
-    span.className = cssClass;
-    span.textContent = raw;
-    return span;
-  }
-  return document.createTextNode(raw);
-}
-function formatCellValue(col, raw) {
-  if (raw === "") {
-    const empty = document.createElement("span");
-    empty.className = "cell-empty";
-    empty.title = "empty text";
-    empty.textContent = "''";
-    return empty;
-  }
-  const { lead, core, trail } = edgeWhitespace(raw);
-  if (!lead && !trail) return typedValue(col, raw);
-  const out = document.createDocumentFragment();
-  if (lead) out.append(...edgeMarks(lead, "leading"));
-  if (core) out.append(typedValue(col, core));
-  if (trail) out.append(...edgeMarks(trail, "trailing"));
-  return out;
 }
 
 // src/features/load-bar.ts
@@ -4135,17 +4134,19 @@ async function loadTables({
   syncGridLock();
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
+  const noCounts = noCountsFor(state.scope.source);
   const [{ tables }, { counts: counts2 }] = await Promise.all([
     api(`/tables${scopeQuery(scopeRef())}`),
-    // Counts are a hint; a failure leaves the chips without them, not missing.
-    api(`/table-counts${scopeQuery(scopeRef())}`).catch((e) => {
-      console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
-      return { counts: [] };
-    })
+    noCounts ? { counts: [] } : (
+      // Counts are a hint; a failure leaves the chips without them, not missing.
+      api(`/table-counts${scopeQuery(scopeRef())}`).catch((e) => {
+        console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
+        return { counts: [] };
+      })
+    )
   ]);
   if (token !== loadTablesToken) return "superseded";
   const countMap = Object.fromEntries(counts2.map((c) => [c.table, c.approx_rows]));
-  const noCounts = countsNeverEstimated(scopeEngine());
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
@@ -4155,9 +4156,7 @@ async function loadTables({
     const chip = qs(li, "a");
     qs(li, ".chip-name").textContent = t.name;
     const countEl = qs(li, ".count");
-    if (noCounts) {
-      countEl.classList.add("none");
-    } else {
+    if (!noCounts) {
       countEl.textContent = formatApproxCount(countMap[t.name]);
       chipCounts.set(t.name, countEl.textContent);
       countEl.title = APPROX_COUNT_TITLE;
@@ -4327,13 +4326,13 @@ function tablesIn(scope2) {
   let read2 = schemaTables.get(key);
   if (!read2) {
     const started = generation;
+    const noCounts = noCountsFor(scope2.source);
     read2 = Promise.all([
       api(`/tables${key}`),
-      api(`/table-counts${key}`).catch(() => ({ counts: [] }))
+      noCounts ? { counts: [] } : api(`/table-counts${key}`).catch(() => ({ counts: [] }))
     ]).then(([{ tables }, { counts: counts2 }]) => {
       if (started !== generation) return;
       const countOf = new Map(counts2.map((c) => [c.table, c.approx_rows]));
-      const noCounts = countsNeverEstimated(scopeEngine());
       schemaTablesRead.set(
         key,
         tables.map((t) => ({ name: t.name, count: noCounts ? "" : formatApproxCount(countOf.get(t.name)) }))
@@ -5318,7 +5317,7 @@ async function loadSources() {
     nameStartupDefault("source", defaultSource);
   } catch (e) {
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    settleSource(null, false);
+    settleSource(null, false, {});
     return;
   }
   const wanted = state.scope.source;
@@ -7061,11 +7060,15 @@ function updatePager(data) {
     return;
   }
   $("page").textContent = `page ${page}`;
-  const noCount = countsNeverEstimated(scopeEngine());
-  rowsMeta = noCount ? "" : ` \xB7 ${formatApproxCount(data.total_approx ?? -1)} rows`;
-  writeRowMeta();
-  if (noCount) $("row-meta").removeAttribute("title");
-  else $("row-meta").title = APPROX_COUNT_TITLE;
+  if (noCountsFor(state.scope.source)) {
+    rowsMeta = "";
+    writeRowMeta();
+    $("row-meta").removeAttribute("title");
+  } else {
+    rowsMeta = ` \xB7 ${formatApproxCount(data.total_approx ?? -1)} rows`;
+    writeRowMeta();
+    $("row-meta").title = APPROX_COUNT_TITLE;
+  }
   $("next").disabled = data.rows.length < state.limit;
 }
 

@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "./support/fixtures";
-import { apiCall, gotoApp, selectTable } from "./support/helpers";
+import { apiCall, tableData } from "./support/helpers";
+import { openJoinOverlay } from "./support/join";
 
 // The e2e backend is Postgres. These specs relabel its real sources, keeping
 // their names, so the scoped requests that follow still resolve.
@@ -17,7 +18,7 @@ async function reportEngine(page: Page, engine: string) {
     for (const count of body.counts) count.approx_rows = -1;
     await route.fulfill({ response, json: body });
   });
-  await page.route(apiCall("/tables/data"), async (route) => {
+  await page.route(tableData, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
     body.total_approx = -1;
@@ -25,22 +26,15 @@ async function reportEngine(page: Page, engine: string) {
   });
 }
 
-async function openJoinTablePicker(page: Page) {
-  await page.locator("#join-btn").click();
-  await expect(page.locator("#join-dialog")).toBeVisible();
-  await page.getByRole("button", { name: "join 1 table", exact: true }).click();
-}
+const openJoinTablePicker = (page: Page) => page.getByRole("button", { name: "join 1 table", exact: true }).click();
 
 const usersOption = (page: Page) => page.locator('#dd-pop .dd-row[data-value="users"]');
 
 test("a SQLite source shows no table counts anywhere", async ({ page }) => {
   await reportEngine(page, "sqlite");
-  await gotoApp(page);
-  await selectTable(page, "orders");
+  await openJoinOverlay(page);
 
-  const chip = page.locator('#tables a[data-table="users"]');
-  await expect(chip.locator(".count")).toHaveText("");
-  await expect(chip.locator(".count")).toHaveClass(/\bnone\b/);
+  await expect(page.locator('#tables a[data-table="users"] .count')).toBeEmpty();
   await expect(page.locator("#row-meta")).not.toContainText("rows");
   await expect(page.locator("#row-meta")).toContainText("columns");
 
@@ -51,8 +45,7 @@ test("a SQLite source shows no table counts anywhere", async ({ page }) => {
 
 test("a Postgres table with no estimate yet still shows ?", async ({ page }) => {
   await reportEngine(page, "postgres");
-  await gotoApp(page);
-  await selectTable(page, "orders");
+  await openJoinOverlay(page);
 
   await expect(page.locator('#tables a[data-table="users"] .count')).toHaveText("?");
   await expect(page.locator("#row-meta")).toContainText("? rows");

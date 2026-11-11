@@ -137,6 +137,11 @@ export interface SourceEntry {
   engine: string;
 }
 
+/** `/table-counts`: `approx_rows` is -1 when the table has no estimate yet (spec/protocol.md §5.3). */
+export interface CountsResponse {
+  counts: { table: string; approx_rows: number }[];
+}
+
 /** `default` is the source an absent `source` param resolves to (spec/protocol.md §5.8). */
 export interface SourcesResponse {
   sources: SourceEntry[];

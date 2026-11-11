@@ -35,7 +35,7 @@ export async function loadSources(): Promise<void> {
     // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
     // single-source, with no `source` param, but leave a trace.
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    settleSource(null, false);
+    settleSource(null, false, {});
     return;
   }
   const wanted = state.scope.source;

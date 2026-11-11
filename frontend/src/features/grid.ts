@@ -4,7 +4,7 @@ import { $, copyText, el, qs } from "../core/dom.js";
 import {
   hiddenColumns,
   joinInView,
-  scopeEngine,
+  noCountsFor,
   setHiddenColumns,
   setSort,
   state,
@@ -15,7 +15,6 @@ import type { KeyDescription } from "../lib/column-key.js";
 import { eqClause, filterClause } from "../lib/filter-dsl.js";
 import {
   APPROX_COUNT_TITLE,
-  countsNeverEstimated,
   formatApproxCount,
   formatCellValue,
   rendersAsJson,
@@ -464,10 +463,14 @@ export function updatePager(data: ViewData): void {
     return;
   }
   $("page").textContent = `page ${page}`;
-  const noCount = countsNeverEstimated(scopeEngine());
-  rowsMeta = noCount ? "" : ` · ${formatApproxCount(data.total_approx ?? -1)} rows`;
-  writeRowMeta();
-  if (noCount) $("row-meta").removeAttribute("title");
-  else $("row-meta").title = APPROX_COUNT_TITLE;
+  if (noCountsFor(state.scope.source)) {
+    rowsMeta = "";
+    writeRowMeta();
+    $("row-meta").removeAttribute("title");
+  } else {
+    rowsMeta = ` · ${formatApproxCount(data.total_approx ?? -1)} rows`;
+    writeRowMeta();
+    $("row-meta").title = APPROX_COUNT_TITLE;
+  }
   $<HTMLButtonElement>("next").disabled = data.rows.length < state.limit;
 }
