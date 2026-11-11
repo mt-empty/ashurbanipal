@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { ColumnClass } from "../src/core/types.ts";
 import {
   columnTypeClass,
+  countsNeverEstimated,
   type DisplayBucket,
   edgeWhitespace,
   rendersAsJson,
@@ -173,4 +174,9 @@ test("a domain over json renders as JSON through its class", () => {
 test("a text domain still gets JSON shape detection through its class", () => {
   assert.equal(rendersAsJson({ name: "c", type: "settings_text", class: "text" }, '{"a":1}'), true);
   assert.equal(rendersAsJson({ name: "c", type: "positive_int", class: "number" }, "[1]"), false);
+});
+
+test("only a SQLite source drops its counts; an unknown or missing engine keeps them", () => {
+  assert.equal(countsNeverEstimated("sqlite"), true);
+  for (const engine of ["postgres", "mysql", "duckdb", undefined]) assert.equal(countsNeverEstimated(engine), false);
 });

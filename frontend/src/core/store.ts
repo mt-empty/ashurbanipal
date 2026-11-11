@@ -30,6 +30,8 @@ export interface State {
   // Whether /sources and /schemas list more than one name: the URL names only
   // a choice there was (url.ts applyUrlScope).
   manySources: boolean;
+  // Each listed source's engine from /sources; empty when it failed.
+  sourceEngines: Record<string, string>;
   // The schemas /schemas listed for the source; empty until then or when it failed.
   schemas: string[];
   // /schemas reported no default, so a table name only resolves with its schema.
@@ -70,6 +72,7 @@ export interface State {
 export const state: State = {
   scope: { kind: "loading", source: null, schema: null },
   manySources: false,
+  sourceEngines: {},
   schemas: [],
   noDefaultSchema: false,
   view: null,
@@ -617,10 +620,17 @@ export function withSchema(scope: Scope, schema: string): Scope {
 
 // loadSources' result: the listed source to use, or null when /sources failed.
 // The schema stays a name to try until loadSchemas checks it.
-export function settleSource(source: string | null, many: boolean): void {
+export function settleSource(source: string | null, many: boolean, engines: Record<string, string> = {}): void {
   const { schema } = state.scope;
   state.scope = source === null ? { kind: "failed", source, schema } : { kind: "loading", source, schema };
   state.manySources = many;
+  state.sourceEngines = engines;
+}
+
+// The engine of the scope's source; undefined when unknown.
+export function scopeEngine(): string | undefined {
+  const { source } = state.scope;
+  return source === null ? undefined : state.sourceEngines[source];
 }
 
 // loadSchemas' result: the listed schema to use (null when /schemas failed or

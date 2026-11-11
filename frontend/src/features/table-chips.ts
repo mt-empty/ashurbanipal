@@ -6,6 +6,7 @@ import {
   applyStoredSort,
   clearFilter,
   enterTable,
+  scopeEngine,
   scopeIdentity,
   scopeRef,
   scopeSettled,
@@ -19,7 +20,7 @@ import {
 } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
 import type { TableListEntry } from "../core/types.js";
-import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
+import { APPROX_COUNT_TITLE, countsNeverEstimated, formatApproxCount } from "../lib/format.js";
 import { scopeQuery } from "../lib/table-ref.js";
 import { syncGridLock } from "./grid-lock.js";
 
@@ -150,6 +151,7 @@ export async function loadTables({
   ]);
   if (token !== loadTablesToken) return "superseded";
   const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
+  const noCounts = countsNeverEstimated(scopeEngine());
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
@@ -159,9 +161,14 @@ export async function loadTables({
     const chip = qs<HTMLAnchorElement>(li, "a");
     qs<HTMLElement>(li, ".chip-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
-    countEl.textContent = formatApproxCount(countMap[t.name]);
-    chipCounts.set(t.name, countEl.textContent);
-    countEl.title = APPROX_COUNT_TITLE;
+    if (noCounts) {
+      // Kept empty: the loading spinner overlays this slot.
+      countEl.classList.add("none");
+    } else {
+      countEl.textContent = formatApproxCount(countMap[t.name]);
+      chipCounts.set(t.name, countEl.textContent);
+      countEl.title = APPROX_COUNT_TITLE;
+    }
     chip.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
     // (see .chip-name), so the title tooltip is the escape hatch.

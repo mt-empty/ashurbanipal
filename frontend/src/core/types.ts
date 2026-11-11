@@ -131,8 +131,10 @@ export interface TableListEntry {
   comment?: string;
 }
 
+/** `engine` is a string, not a union: an unknown value must still load (spec/protocol.md §5.8). */
 export interface SourceEntry {
   name: string;
+  engine: string;
 }
 
 /** `default` is the source an absent `source` param resolves to (spec/protocol.md §5.8). */

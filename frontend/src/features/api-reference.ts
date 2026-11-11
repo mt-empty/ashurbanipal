@@ -17,9 +17,15 @@ function buildApiReference() {
         method: "GET",
         path: `${base}/sources`,
         summary:
-          "Source names selectable as the `source` param on the routes below, for a host that has registered more than one. A single-source deployment still returns exactly one entry. `default` is the source used when `source` is omitted.",
+          "Source names selectable as the `source` param on the routes below, for a host that has registered more than one. A single-source deployment still returns exactly one entry. `default` is the source used when `source` is omitted. `engine` is postgres, mysql (MariaDB too) or sqlite; accept any other value.",
         params: [],
-        example_response: { sources: [{ name: "primary" }, { name: "reporting" }], default: "primary" },
+        example_response: {
+          sources: [
+            { name: "primary", engine: "postgres" },
+            { name: "reporting", engine: "sqlite" },
+          ],
+          default: "primary",
+        },
       },
       {
         method: "GET",

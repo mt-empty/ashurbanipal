@@ -5,6 +5,7 @@ import snapshotData from "virtual:demo-snapshot";
 import type { ClassedColumn, FilterCondition, FilterOp } from "../../core/types.js";
 import { columnTypeClass } from "../../lib/format.js";
 import { SIBLINGS, SIBLINGS_INSTANCE } from "../siblings.js";
+import { DEMO_ENGINE } from "../sources.js";
 import { type ApiResponse, json, problem } from "../wire.js";
 import type { Snapshot, SnapshotSource, SnapshotTable } from "./snapshot-types.js";
 
@@ -156,7 +157,10 @@ function tableData(params: URLSearchParams): ApiResponse {
 
 export async function serve(path: string, params: URLSearchParams): Promise<ApiResponse> {
   if (path === "/sources") {
-    return json({ sources: snapshot.sources.map(({ name }) => ({ name })), default: DEFAULT_SOURCE.name });
+    return json({
+      sources: snapshot.sources.map(({ name }) => ({ name, engine: DEMO_ENGINE })),
+      default: DEFAULT_SOURCE.name,
+    });
   }
   if (path === "/siblings") return json({ instance: SIBLINGS_INSTANCE, siblings: SIBLINGS });
   if (path === "/tables/join") {

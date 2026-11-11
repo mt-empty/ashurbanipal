@@ -4,7 +4,7 @@
 import { withDefaults } from "../../../../implementations/node-express/src/config.js";
 import { installFetch, showBadge } from "../page-shim.js";
 import { SIBLINGS, SIBLINGS_INSTANCE } from "../siblings.js";
-import { DEMO_SOURCES } from "../sources.js";
+import { DEMO_ENGINE, DEMO_SOURCES } from "../sources.js";
 import { type ApiResponse, json, problem } from "../wire.js";
 import type { FromWorker, ToWorker } from "./worker.js";
 
@@ -116,7 +116,7 @@ async function forward(source: string, path: string, params: URLSearchParams): P
 
 installFetch(async (path, params) => {
   if (path === "/sources") {
-    return json({ sources: DEMO_SOURCES.map((name) => ({ name })), default: DEMO_SOURCES[0] });
+    return json({ sources: DEMO_SOURCES.map((name) => ({ name, engine: DEMO_ENGINE })), default: DEMO_SOURCES[0] });
   }
   if (path === "/siblings") return json({ instance: SIBLINGS_INSTANCE, siblings: SIBLINGS });
   const source = params.get("source") ?? DEMO_SOURCES[0];

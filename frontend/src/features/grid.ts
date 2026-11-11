@@ -1,12 +1,21 @@
 import { loadData } from "../bootstrap/reload.js";
 import { tableEl } from "../bootstrap/table-focus.js";
 import { $, copyText, el, qs } from "../core/dom.js";
-import { hiddenColumns, joinInView, setHiddenColumns, setSort, state, tableInView } from "../core/state.js";
+import {
+  hiddenColumns,
+  joinInView,
+  scopeEngine,
+  setHiddenColumns,
+  setSort,
+  state,
+  tableInView,
+} from "../core/state.js";
 import type { Column, Row, View, ViewData } from "../core/types.js";
 import type { KeyDescription } from "../lib/column-key.js";
 import { eqClause, filterClause } from "../lib/filter-dsl.js";
 import {
   APPROX_COUNT_TITLE,
+  countsNeverEstimated,
   formatApproxCount,
   formatCellValue,
   rendersAsJson,
@@ -455,8 +464,10 @@ export function updatePager(data: ViewData): void {
     return;
   }
   $("page").textContent = `page ${page}`;
-  rowsMeta = ` · ${formatApproxCount(data.total_approx ?? -1)} rows`;
+  const noCount = countsNeverEstimated(scopeEngine());
+  rowsMeta = noCount ? "" : ` · ${formatApproxCount(data.total_approx ?? -1)} rows`;
   writeRowMeta();
-  $("row-meta").title = APPROX_COUNT_TITLE;
+  if (noCount) $("row-meta").removeAttribute("title");
+  else $("row-meta").title = APPROX_COUNT_TITLE;
   $<HTMLButtonElement>("next").disabled = data.rows.length < state.limit;
 }
