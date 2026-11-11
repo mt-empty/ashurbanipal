@@ -229,6 +229,16 @@ impl NotAllowedKind {
             Self::NotReadable => "not_readable",
         }
     }
+
+    /// The word a `not_allowed` message names the thing with.
+    pub(crate) fn noun(self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Schema => "schema",
+            Self::Table | Self::NotReadable => "table",
+            Self::Column => "column",
+        }
+    }
 }
 
 #[derive(Debug)]

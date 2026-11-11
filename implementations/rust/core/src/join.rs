@@ -355,13 +355,14 @@ impl Plan {
                     name: label.clone(),
                     type_name: c.type_name.clone(),
                     join: pos,
-                    table: table.name.to_string(),
+                    table: table.name.as_str().to_string(),
                     schema: table
                         .schema
-                        .as_deref()
+                        .as_ref()
+                        .map(Ident::as_str)
                         .filter(|s| Some(*s) != request_schema)
                         .map(str::to_string),
-                    column: c.name.to_string(),
+                    column: c.name.as_str().to_string(),
                     class: c.class.clone(),
                     enum_type: c.class.enum_type(),
                     collation: c.class.wire_collation(c.collation.as_ref()),
@@ -374,11 +375,11 @@ impl Plan {
     }
 }
 
-fn column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> {
+pub(crate) fn column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> {
     table
         .columns
         .iter()
-        .position(|c| c.name == *column)
+        .position(|c| c.name.as_str() == column)
         .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Column, format!("column {column:?}")))
 }
 
@@ -391,17 +392,17 @@ fn join_column_index(table: &TableMeta, column: &str) -> Result<usize, DbError> 
 /// The schema each position resolves in: its own, which must be in `listed`
 /// (§5.7), or else `request`. An unlisted one is `invalid_join`, never
 /// `unknown_schema`, which belongs to the `schema` parameter.
-pub(crate) fn table_schemas(
+pub(crate) fn table_schemas<S: Clone + std::borrow::Borrow<str>>(
     refs: &[(Option<&str>, &str)],
-    request: &str,
-    listed: &[String],
-) -> Result<Vec<String>, DbError> {
+    request: &S,
+    listed: &[S],
+) -> Result<Vec<S>, DbError> {
     refs.iter()
         .map(|&(own, _)| match own {
-            None => Ok(request.to_string()),
+            None => Ok(request.clone()),
             Some(s) => listed
                 .iter()
-                .find(|l| *l == s)
+                .find(|l| (*l).borrow() == s)
                 .cloned()
                 .ok_or_else(|| DbError::BadJoin(format!("unknown schema {s:?}"))),
         })

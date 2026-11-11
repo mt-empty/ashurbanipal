@@ -319,15 +319,7 @@ fn build_where_clause(
     let mut values = Vec::new();
     let mut clause = String::new();
     for (i, condition) in conditions.iter().enumerate() {
-        let column = column_names
-            .iter()
-            .find(|c| **c == *condition.column)
-            .ok_or_else(|| {
-                DbError::not_allowed(
-                    NotAllowedKind::Column,
-                    format!("column {:?}", condition.column),
-                )
-            })?;
+        let column = Ident::find_in(column_names, &condition.column, NotAllowedKind::Column)?;
 
         let keyword = if condition.op == FilterOp::Ilike {
             "LIKE"
@@ -406,11 +398,7 @@ impl DbSource for SqliteSource {
     ) -> Result<TableData, DbError> {
         check_schema(schema)?;
         let tables = self.allowed_tables().await?;
-        let table = tables
-            .iter()
-            .find(|t| **t == *table)
-            .ok_or_else(|| DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}")))?
-            .clone();
+        let table = Ident::find_in(&tables, table, NotAllowedKind::Table)?;
 
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
@@ -422,20 +410,11 @@ impl DbSource for SqliteSource {
             .await?;
         let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
         let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
-        let sort = match &opts.sort {
-            Some(requested) => Some(
-                column_names
-                    .iter()
-                    .find(|c| **c == **requested)
-                    .ok_or_else(|| {
-                        DbError::not_allowed(
-                            NotAllowedKind::Column,
-                            format!("column {requested:?}"),
-                        )
-                    })?,
-            ),
-            None => None,
-        };
+        let sort = opts
+            .sort
+            .as_deref()
+            .map(|requested| Ident::find_in(&column_names, requested, NotAllowedKind::Column))
+            .transpose()?;
 
         let (where_clause, filter_values) = match &opts.filter {
             Some(filter) => build_where_clause(filter, &column_names)?,
@@ -450,13 +429,13 @@ impl DbSource for SqliteSource {
         let order_clause = match &sort {
             Some(col) => format!(
                 " order by {}.{} {}",
-                quote_ident(&table),
+                quote_ident(table),
                 quote_ident(col),
                 if opts.descending { "desc" } else { "asc" }
             ),
             None => String::new(),
         };
-        let quoted_table = quote_ident(&table);
+        let quoted_table = quote_ident(table);
         let sql = format!(
             "select {select_list} from {quoted_table}{where_clause}{order_clause} limit ? offset ?"
         );
@@ -498,7 +477,7 @@ impl DbSource for SqliteSource {
     ) -> Result<JoinData, DbError> {
         check_schema(schema)?;
         let refs = spec.table_refs();
-        join::table_schemas(&refs, ONLY_SCHEMA, &[ONLY_SCHEMA.to_string()])?;
+        join::table_schemas(&refs, &ONLY_SCHEMA, &[ONLY_SCHEMA])?;
         let names: Vec<&str> = refs.iter().map(|&(_, name)| name).collect();
         // Catalog lookups and the select share one connection and one
         // deadline (`spec/protocol.md` §5.11.5).
@@ -509,10 +488,8 @@ impl DbSource for SqliteSource {
                 if metas.contains_key(name) {
                     continue;
                 }
-                let table = allowed
-                    .iter()
-                    .find(|t| **t == **name)
-                    .ok_or_else(|| DbError::BadJoin(format!("unknown table {name:?}")))?;
+                let table = Ident::find_in(&allowed, name, NotAllowedKind::Table)
+                    .map_err(join::unknown_join_table)?;
                 metas.insert(name, table_meta(conn, table).await?);
             }
             let tables = names.iter().map(|n| metas[n].clone()).collect();
@@ -550,9 +527,7 @@ impl DbSource for SqliteSource {
     ) -> Result<Vec<(String, f32)>, DbError> {
         check_schema(schema)?;
         let tables = self.allowed_tables().await?;
-        let table = tables.iter().find(|t| **t == *table).ok_or_else(|| {
-            DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}"))
-        })?;
+        let table = Ident::find_in(&tables, table, NotAllowedKind::Table)?;
         let columns = self.allowed_columns(table).await?;
         columns
             .iter()
@@ -574,7 +549,7 @@ impl DbSource for SqliteSource {
     ) -> Result<Vec<ReferencedBy>, DbError> {
         check_schema(schema)?;
         let allowed = self.allowed_tables().await?;
-        if !allowed.iter().any(|t| *t == *table) {
+        if !allowed.iter().any(|t| t.as_str() == table) {
             return Err(DbError::not_allowed(
                 NotAllowedKind::Table,
                 format!("table {table:?}"),
@@ -639,12 +614,10 @@ impl DbSource for SqliteSource {
     async fn structure(&self, schema: Option<&str>, table: &str) -> Result<Structure, DbError> {
         check_schema(schema)?;
         let allowed = self.allowed_tables().await?;
-        let table = allowed.iter().find(|t| **t == *table).ok_or_else(|| {
-            DbError::not_allowed(NotAllowedKind::Table, format!("table {table:?}"))
-        })?;
+        let table = Ident::find_in(&allowed, table, NotAllowedKind::Table)?;
         // PRAGMA table-valued functions take the table as a column-reference argument, so it is quoted, not bound.
         let quoted = quote_ident(table);
-        let table = table.to_string();
+        let table = table.as_str().to_string();
 
         self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
             // `key = 1` drops the trailing rowid/auxiliary entries. An
