@@ -2,7 +2,7 @@ module github.com/mt-empty/ashurbanipal/implementations/go-nethttp
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/go-sql-driver/mysql v1.10.1
