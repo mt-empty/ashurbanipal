@@ -72,5 +72,5 @@ Follow-ups that shipped on 2026-11-04, in the same PR: `class` for every
 column, a separate `collation` field for the text-collation clash, and a 400
 `unsortable_column` for a sort on a Postgres `json`, `xml` or geometric
 column (`spec/CHANGELOG.md`). The other column facts the page guesses
-(`generated`, `identity`, `nullable`, `default`, enum labels, and an `engine`
-field) stay with stories 22 and 23, as separate named fields.
+(`generated`, `identity`, `nullable`, `default`, enum labels) stay with
+stories 22 and 23, as separate named fields; the `engine` field is story 53.
