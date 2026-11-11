@@ -6,6 +6,7 @@
 //! needs a target started with a second source registered.
 
 use crate::assert::{assert_exact, assert_problem_code, assert_status};
+use crate::backend::Backend;
 use crate::common::TestServer;
 
 #[tokio::test]
@@ -42,9 +43,13 @@ async fn lists_exactly_the_one_registered_source() {
             source["name"].is_string(),
             "each entry must carry a `name`: {sources:?}"
         );
-        assert!(
-            source.get("backend").is_none(),
-            "api/sources must never disclose a backend engine (spec/protocol.md §5.8): {sources:?}"
+        // Every source a conformance target registers is on the seeded
+        // engine, including the two-source run's `other_schema` source.
+        assert_exact(
+            source["engine"].as_str(),
+            Some(Backend::current().wire_engine()),
+            "each entry's `engine` names the seeded engine; MariaDB reports `mysql` \
+             (spec/protocol.md §5.8)",
         );
     }
 }
@@ -66,7 +71,8 @@ async fn explicit_default_source_matches_the_implicit_default() {
         sources["sources"]
             .as_array()
             .unwrap()
-            .contains(&serde_json::json!({ "name": name })),
+            .iter()
+            .any(|s| s["name"] == name.as_str()),
         "`default` must be one of the listed sources (spec/protocol.md §5.8): {sources}"
     );
 

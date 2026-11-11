@@ -153,6 +153,17 @@ folds table identifiers to lowercase, so `table=Users` would resolve to
 assumes the `= 0` setting; running it against a `= 1` server is out of
 scope.
 
+## §5.8 — source `engine`
+
+Protocol property: each `/api/sources` entry names its engine, from
+`postgres`, `mysql`, `sqlite`.
+
+| Backend  | Mechanism | Notes |
+|----------|-----------|-------|
+| Postgres | Constant `postgres` on the `DbSource` | — |
+| MySQL    | Constant `mysql` on the `DbSource`, MariaDB included | Every port already tells MariaDB apart with a cached `SELECT VERSION()`, but only on the first query. Reporting `mysql` for both keeps `/api/sources` a configuration read that never touches the database or fails when it is down. |
+| SQLite   | Constant `sqlite` on the `DbSource` | — |
+
 ## §5.2 / §5.3 — table listing & the `table` allow-list
 
 Protocol property: `GET /api/tables` *is* the allow-list every other

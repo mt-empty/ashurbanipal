@@ -105,3 +105,12 @@ response column carries `schema` only when its table is not in the
 request's resolved schema; its `references.schema` stays relative to the
 column's own table. Additive — a request without the new field behaves as
 before — so v1 stands.
+
+Each `/api/sources` (§5.8) entry gained a required `engine`: `postgres`,
+`mysql` (MariaDB too) or `sqlite`. This replaces the rule that a response
+must not say which engine a source uses. Clients must accept other values,
+and may use the engine only for copied SQL text, labels and whether a table
+count can exist. A client that ignores the field sees no change, but §7's
+additive rule covers only optional fields, so this required one lands under
+§7's alpha exception, with every port, the conformance runner and the bundled
+UI changed together.
