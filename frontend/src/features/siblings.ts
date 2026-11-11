@@ -32,7 +32,8 @@ let retryDelay = FRESH_MS;
 let siblingsWarned = false;
 
 type LinkCell = Extract<MatrixCell, { kind: "link" }>;
-type LinkRef = { a: HTMLAnchorElement; dot: HTMLElement; state: HTMLElement };
+// `nameLink`: the row's service name, when it links to this cell.
+type LinkRef = { a: HTMLAnchorElement; dot: HTMLElement; state: HTMLElement; nameLink?: HTMLAnchorElement };
 // The rendered matrix's shape and its link elements in render order, so a
 // refresh that changes only health repaints cells in place and keeps focus.
 let matrixShape = "";
@@ -202,7 +203,7 @@ function paintRow(ref: RowRef, { sibling: s, note }: ListedSibling, newTab: bool
 }
 
 function shapeOf(m: SiblingMatrix): string {
-  return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
+  return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.nameLink, r.cells.map((c) => c.kind)])]);
 }
 
 function paintLink(ref: LinkRef, name: string, label: string, { sibling, sameView }: LinkCell): void {
@@ -211,9 +212,13 @@ function paintLink(ref: LinkRef, name: string, label: string, { sibling, sameVie
   ref.state.textContent = state;
   ref.a.setAttribute("aria-label", `${name} in ${label}: ${state}`);
   ref.a.href = sameView ? sameViewHref(sibling.base_url, location.search) : sibling.base_url;
+  if (ref.nameLink) {
+    ref.nameLink.href = ref.a.href;
+    ref.nameLink.title = `${name} in ${label}`; // also the truncation escape hatch
+  }
 }
 
-function renderCell(cell: MatrixCell): HTMLTableCellElement {
+function renderCell(cell: MatrixCell, nameLink?: HTMLAnchorElement): HTMLTableCellElement {
   const td = el("td");
   if (cell.kind === "here") {
     const here = el("span", "sibling-here", "you are here");
@@ -224,7 +229,8 @@ function renderCell(cell: MatrixCell): HTMLTableCellElement {
   } else {
     const a = el("a", cell.sameView ? "sibling-cell same" : "sibling-cell");
     a.rel = "noopener";
-    const ref: LinkRef = { a, dot: healthDot(cell.sibling.healthy), state: el("span", "sibling-state") };
+    if (nameLink) a.classList.add("name-target");
+    const ref: LinkRef = { a, dot: healthDot(cell.sibling.healthy), state: el("span", "sibling-state"), nameLink };
     a.append(ref.dot, ref.state);
     td.append(a);
     linkRefs.push(ref);
@@ -255,11 +261,20 @@ function renderMatrix(m: SiblingMatrix): void {
         const tr = el("tr", row.isInstance ? "instance" : undefined);
         const th = el("th", row.isInstance ? "mine" : undefined);
         th.scope = "row";
-        const name = el("span", "sibling-name", row.name);
-        name.title = row.name; // truncation escape hatch
-        th.append(name);
+        let nameLink: HTMLAnchorElement | undefined;
+        if (row.nameLink === null) {
+          const name = el("span", "sibling-name", row.name);
+          name.title = row.name; // truncation escape hatch
+          th.append(name);
+        } else {
+          // Out of the tab order: the cell it duplicates is already a stop.
+          nameLink = el("a", "sibling-name sibling-name-link", row.name);
+          nameLink.rel = "noopener";
+          nameLink.tabIndex = -1;
+          th.append(nameLink);
+        }
         if (row.isInstance) th.append(el("span", "sibling-me", "this service"));
-        tr.append(th, ...row.cells.map(renderCell));
+        tr.append(th, ...row.cells.map((cell, i) => renderCell(cell, i === row.nameLink ? nameLink : undefined)));
         return tr;
       }),
     );

@@ -150,3 +150,29 @@ test("a base_url with its own query or fragment keeps both", () => {
 test("an unparseable base_url is returned unchanged", () => {
   assert.equal(sameViewHref("not a url", "?table=orders"), "not a url");
 });
+
+test("a row's name links to its cell in the instance's own column", () => {
+  const list = [
+    sib("orders", "dev"),
+    sib("orders", "int"),
+    sib("billing", "dev", false),
+    sib("billing", "int"),
+    sib("reports", "int"),
+  ];
+  const nameLinks = (m: ReturnType<typeof buildSiblingMatrix>) => m?.rows.map((r) => [r.name, r.nameLink]);
+  assert.deepEqual(nameLinks(buildSiblingMatrix({ instance: { name: "orders", label: "dev" }, siblings: list })), [
+    ["orders", null],
+    ["billing", 0], // down, but still a link
+    ["reports", null], // no dev: the name never switches label
+  ]);
+  assert.deepEqual(nameLinks(buildSiblingMatrix({ instance: { name: "orders", label: "int" }, siblings: list })), [
+    ["orders", null],
+    ["billing", 1],
+    ["reports", 1],
+  ]);
+  assert.deepEqual(nameLinks(buildSiblingMatrix({ siblings: list })), [
+    ["orders", null],
+    ["billing", null],
+    ["reports", null],
+  ]);
+});

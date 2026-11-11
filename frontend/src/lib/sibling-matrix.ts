@@ -11,7 +11,9 @@ export interface SiblingMatrix {
   labels: string[];
   // The instance's own label, so its column can be marked; null without one.
   ownLabel: string | null;
-  rows: { name: string; isInstance: boolean; cells: MatrixCell[] }[];
+  // `nameLink`: the index of the cell the row's name links to (its cell in the
+  // instance's own column), or null when the name stays plain text.
+  rows: { name: string; isInstance: boolean; cells: MatrixCell[]; nameLink: number | null }[];
 }
 
 // `note` tells apart entries the name alone does not.
@@ -51,6 +53,7 @@ export function buildSiblingMatrix({ instance, siblings }: SiblingsResponse): Si
   if (instance && !names.includes(instance.name)) names.unshift(instance.name);
 
   const first = firstEntries(labelled);
+  const ownCol = instance ? labels.indexOf(instance.label) : -1;
   const rows = names.map((name) => {
     const isInstance = instance?.name === name;
     const cells = labels.map((label): MatrixCell => {
@@ -58,7 +61,10 @@ export function buildSiblingMatrix({ instance, siblings }: SiblingsResponse): Si
       const sibling = first.get(keyOf(name, label));
       return sibling ? { kind: "link", sibling, sameView: isInstance } : { kind: "missing" };
     });
-    return { name, isInstance, cells };
+    // A service missing from this instance's label keeps a plain name, so a
+    // name never switches label without the user picking a cell.
+    const nameLink = !isInstance && ownCol >= 0 && cells[ownCol].kind === "link" ? ownCol : null;
+    return { name, isInstance, cells, nameLink };
   });
   return { labels, ownLabel: instance?.label ?? null, rows };
 }

@@ -427,7 +427,7 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 .sibling-row { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem;
                border-radius: 6px; color: inherit; text-decoration: none; }
 .sibling-row:hover { background: var(--hover); }
-/* Full name is in `title` (see paintRow and renderMatrix) as the truncation escape hatch. */
+/* Full name is in `title` (paintRow, renderMatrix, and paintLink for a linked name) as the truncation escape hatch. */
 .sibling-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                 white-space: nowrap; font-family: var(--font-mono); }
 .sibling-note, .sibling-state { color: var(--text-muted); font-size: .75rem; }
@@ -443,16 +443,26 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
                             max-width: 14rem; }
 #siblings-matrix tbody tr.instance th, #siblings-matrix tbody tr.instance td {
   border-bottom: 1px solid var(--rule); padding-bottom: .15rem; }
-#siblings-matrix .sibling-name { display: inline-block; max-width: 100%; vertical-align: bottom; }
+/* The name box clips overflow (truncation), so a linked name's underline sits
+   inside this padding; plain names get it too, so every row lines up. */
+#siblings-matrix .sibling-name { display: inline-block; max-width: 100%; vertical-align: bottom;
+                                 padding-bottom: 3px; }
+#siblings-matrix .sibling-name-link { color: inherit; text-decoration: none; }
+#siblings-matrix .sibling-name-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* A gap between rows, so the cells' borders don't touch. */
+#siblings-matrix tbody td { padding-block: .125rem; }
 .sibling-me { display: block; font-size: .7rem; font-weight: 400; color: var(--text-muted); }
 #siblings-matrix th.mine { font-weight: 600; color: inherit; }
 .sibling-cell, .sibling-here, .sibling-missing { display: flex; align-items: center; gap: .45rem;
   min-height: 44px; min-width: 6.5rem; box-sizing: border-box; padding: 0 .6rem; border-radius: 6px;
   white-space: nowrap; }
 .sibling-cell, .sibling-here { font-size: .8125rem; }
-.sibling-cell { color: inherit; text-decoration: none; }
-.sibling-cell:hover { background: var(--hover); }
-.sibling-cell.same { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.sibling-cell { color: inherit; text-decoration: none; box-shadow: inset 0 0 0 1px var(--border); }
+.sibling-cell:hover { background: var(--hover); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.sibling-cell.same { box-shadow: inset 0 0 0 1px var(--text-muted); }
+/* Hovering a service name previews the cell it opens. */
+#siblings-matrix tr:has(.sibling-name-link:hover) .sibling-cell.name-target {
+  background: var(--hover); box-shadow: inset 0 0 0 1.5px currentColor; }
 .sibling-cell.same .sibling-state { color: inherit; }
 .sibling-here { background: var(--chip-active-bg); color: var(--chip-active-fg); }
 .sibling-missing { color: var(--text-muted); font-size: .75rem; }
@@ -6094,6 +6104,7 @@ function buildSiblingMatrix({ instance, siblings }) {
   if (instance && !labels.includes(instance.label)) labels.unshift(instance.label);
   if (instance && !names.includes(instance.name)) names.unshift(instance.name);
   const first = firstEntries(labelled);
+  const ownCol = instance ? labels.indexOf(instance.label) : -1;
   const rows = names.map((name) => {
     const isInstance = instance?.name === name;
     const cells = labels.map((label) => {
@@ -6101,7 +6112,8 @@ function buildSiblingMatrix({ instance, siblings }) {
       const sibling = first.get(keyOf2(name, label));
       return sibling ? { kind: "link", sibling, sameView: isInstance } : { kind: "missing" };
     });
-    return { name, isInstance, cells };
+    const nameLink = !isInstance && ownCol >= 0 && cells[ownCol].kind === "link" ? ownCol : null;
+    return { name, isInstance, cells, nameLink };
   });
   return { labels, ownLabel: instance?.label ?? null, rows };
 }
@@ -6286,7 +6298,7 @@ function paintRow(ref, { sibling: s, note }, newTab) {
   ref.state.textContent = `${health(s.healthy)}${newTab ? " \u2197" : ""}`;
 }
 function shapeOf(m) {
-  return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.cells.map((c) => c.kind)])]);
+  return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.nameLink, r.cells.map((c) => c.kind)])]);
 }
 function paintLink(ref, name, label, { sibling, sameView }) {
   const state2 = sameView ? `same view \xB7 ${health(sibling.healthy)}` : health(sibling.healthy);
@@ -6294,8 +6306,12 @@ function paintLink(ref, name, label, { sibling, sameView }) {
   ref.state.textContent = state2;
   ref.a.setAttribute("aria-label", `${name} in ${label}: ${state2}`);
   ref.a.href = sameView ? sameViewHref(sibling.base_url, location.search) : sibling.base_url;
+  if (ref.nameLink) {
+    ref.nameLink.href = ref.a.href;
+    ref.nameLink.title = `${name} in ${label}`;
+  }
 }
-function renderCell(cell) {
+function renderCell(cell, nameLink) {
   const td = el("td");
   if (cell.kind === "here") {
     const here = el("span", "sibling-here", "you are here");
@@ -6306,7 +6322,8 @@ function renderCell(cell) {
   } else {
     const a = el("a", cell.sameView ? "sibling-cell same" : "sibling-cell");
     a.rel = "noopener";
-    const ref = { a, dot: healthDot(cell.sibling.healthy), state: el("span", "sibling-state") };
+    if (nameLink) a.classList.add("name-target");
+    const ref = { a, dot: healthDot(cell.sibling.healthy), state: el("span", "sibling-state"), nameLink };
     a.append(ref.dot, ref.state);
     td.append(a);
     linkRefs.push(ref);
@@ -6336,11 +6353,19 @@ function renderMatrix(m) {
         const tr = el("tr", row2.isInstance ? "instance" : void 0);
         const th = el("th", row2.isInstance ? "mine" : void 0);
         th.scope = "row";
-        const name = el("span", "sibling-name", row2.name);
-        name.title = row2.name;
-        th.append(name);
+        let nameLink;
+        if (row2.nameLink === null) {
+          const name = el("span", "sibling-name", row2.name);
+          name.title = row2.name;
+          th.append(name);
+        } else {
+          nameLink = el("a", "sibling-name sibling-name-link", row2.name);
+          nameLink.rel = "noopener";
+          nameLink.tabIndex = -1;
+          th.append(nameLink);
+        }
         if (row2.isInstance) th.append(el("span", "sibling-me", "this service"));
-        tr.append(th, ...row2.cells.map(renderCell));
+        tr.append(th, ...row2.cells.map((cell, i) => renderCell(cell, i === row2.nameLink ? nameLink : void 0)));
         return tr;
       })
     );
