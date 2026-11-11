@@ -1,4 +1,5 @@
 import { tryParseFilterDsl } from "../lib/filter-dsl.js";
+import { countsNeverEstimated } from "../lib/format.js";
 import { dropScopeSchema } from "../lib/join-def.js";
 import { effectiveName, parseJoin, printJoin } from "../lib/join-dsl.js";
 import { collectNewRowKeys } from "../lib/row-diff.js";
@@ -30,6 +31,8 @@ export interface State {
   // Whether /sources and /schemas list more than one name: the URL names only
   // a choice there was (url.ts applyUrlScope).
   manySources: boolean;
+  // Each listed source's engine from /sources; empty when it failed.
+  sourceEngines: Record<string, string>;
   // The schemas /schemas listed for the source; empty until then or when it failed.
   schemas: string[];
   // /schemas reported no default, so a table name only resolves with its schema.
@@ -70,6 +73,7 @@ export interface State {
 export const state: State = {
   scope: { kind: "loading", source: null, schema: null },
   manySources: false,
+  sourceEngines: {},
   schemas: [],
   noDefaultSchema: false,
   view: null,
@@ -617,10 +621,16 @@ export function withSchema(scope: Scope, schema: string): Scope {
 
 // loadSources' result: the listed source to use, or null when /sources failed.
 // The schema stays a name to try until loadSchemas checks it.
-export function settleSource(source: string | null, many: boolean): void {
+export function settleSource(source: string | null, many: boolean, engines: Record<string, string>): void {
   const { schema } = state.scope;
   state.scope = source === null ? { kind: "failed", source, schema } : { kind: "loading", source, schema };
   state.manySources = many;
+  state.sourceEngines = engines;
+}
+
+// Whether `source` can never have a table count; false when its engine is unknown.
+export function noCountsFor(source: string | null): boolean {
+  return countsNeverEstimated(source === null ? undefined : state.sourceEngines[source]);
 }
 
 // loadSchemas' result: the listed schema to use (null when /schemas failed or

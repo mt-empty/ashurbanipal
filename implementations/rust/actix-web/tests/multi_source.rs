@@ -178,7 +178,7 @@ async fn unknown_source_is_rejected_with_400_on_every_source_aware_route() {
 }
 
 #[actix_web::test]
-async fn api_sources_lists_registered_names_in_registration_order_with_no_backend_field() {
+async fn api_sources_lists_registered_names_and_engines_in_registration_order() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
     let pool = connect_plain_pool(&database_url).await;
@@ -207,7 +207,7 @@ async fn api_sources_lists_registered_names_in_registration_order_with_no_backen
     assert_eq!(
         body,
         serde_json::json!({
-            "sources": [{"name": "second"}, {"name": "first"}],
+            "sources": [{"name": "second", "engine": "postgres"}, {"name": "first", "engine": "postgres"}],
             "default": "second"
         })
     );

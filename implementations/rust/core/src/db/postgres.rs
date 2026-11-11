@@ -7,8 +7,8 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 use super::{
     group_referenced_by, no_default_schema, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef,
     ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
-    Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
-    TableData, TableInfo,
+    Engine, Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing,
+    Structure, TableData, TableInfo,
 };
 use crate::filter::{Condition, Logic};
 use crate::join::{
@@ -633,6 +633,9 @@ fn row_to_json<'a>(
 }
 
 impl DbSource for PgPoolSource {
+    fn engine(&self) -> Engine {
+        Engine::Postgres
+    }
     async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schemas = self.list_schemas_in_tx(&mut tx).await?;

@@ -33,6 +33,8 @@ class _UnusedSource(DbSource):
     construction time, only per-request.
     """
 
+    engine = "postgres"
+
     def list_schemas(self):
         raise NotImplementedError
 

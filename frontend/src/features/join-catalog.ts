@@ -5,7 +5,7 @@ import { formatApproxCount } from "../lib/format.js";
 import type { JoinCatalog } from "../lib/join-dsl.js";
 import { refKey, scopeQuery, tableParams } from "../lib/table-ref.js";
 import { tableStructure } from "./structure.js";
-import { listedTableNames, tableChipCount } from "./table-chips.js";
+import { listedTableNames, readTableCounts, tableChipCount } from "./table-chips.js";
 
 // The page learns a table's columns (names, types, keys) from the first row of
 // its data; the table listing carries only names. Cached per table, failures
@@ -91,18 +91,16 @@ export function tablesIn(scope: SchemaRef): Promise<void> {
   let read = schemaTables.get(key);
   if (!read) {
     const started = generation;
-    read = Promise.all([
-      api<{ tables: TableListEntry[] }>(`/tables${key}`),
-      api<{ counts: { table: string; approx_rows: number }[] }>(`/table-counts${key}`).catch(() => ({ counts: [] })),
-    ]).then(([{ tables }, { counts }]) => {
-      if (started !== generation) return;
-      const countOf = new Map(counts.map((c) => [c.table, c.approx_rows]));
-      schemaTablesRead.set(
-        key,
-        tables.map((t) => ({ name: t.name, count: formatApproxCount(countOf.get(t.name)) })),
-      );
-      version++;
-    });
+    read = Promise.all([api<{ tables: TableListEntry[] }>(`/tables${key}`), readTableCounts(scope)]).then(
+      ([{ tables }, counts]) => {
+        if (started !== generation) return;
+        schemaTablesRead.set(
+          key,
+          tables.map((t) => ({ name: t.name, count: counts ? formatApproxCount(counts.get(t.name)) : "" })),
+        );
+        version++;
+      },
+    );
     schemaTables.set(key, read);
     read.catch((e: unknown) => {
       if (started !== generation) return;

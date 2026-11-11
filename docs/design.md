@@ -327,15 +327,19 @@ a `Config` field — see `implementations/rust/axum/src/routes.rs`'s
 `AppState`), never inferred from the database itself.
 
 ```json
-{ "sources": [{ "name": "primary" }, { "name": "reporting" }], "default": "primary" }
+{ "sources": [{ "name": "primary", "engine": "postgres" }, { "name": "reporting", "engine": "sqlite" }], "default": "primary" }
 ```
 
 `default` is the source an absent `source` param resolves to, so a client
-never infers it from list order. Each entry is deliberately just
-`{ "name": ... }` — no `backend` field, because `spec/protocol.md` §5.8
-says a response must not reveal which engine a source uses. Sources
-registered together may use different backends (e.g. Postgres and SQLite
-in one process) in every port; in Rust, through `Source` (§5).
+never infers it from list order. Each entry also names its `engine`,
+which the source's `DbSource` reports, so the host configures nothing for
+it. The page reads it only for SQL text the user copies, for labels, and
+to know that a SQLite table never has a count; behaviour a route can state
+itself stays a reported field (`spec/protocol.md` §5.8). The engine was
+once withheld, but column `type` spellings already gave it away and the
+host, not the API, decides who can reach the UI. Sources registered
+together may use different backends (e.g. Postgres and SQLite in one
+process) in every port; in Rust, through `Source` (§5).
 
 A single-source deployment still returns exactly one entry — same
 degrade-gracefully shape as `/schemas`, and the frontend's source

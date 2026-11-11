@@ -3,6 +3,7 @@ import type {
   CommonValueEntry,
   CountEntry,
   DbSource,
+  Engine,
   QueryOpts,
   ReferencedByEntry,
   SchemaListing,
@@ -21,7 +22,10 @@ import { getJson as sharedGetJson, startServer, type TestServer } from "./helper
 // with distinguishable canned data is enough to prove resolution without
 // a live DB.
 class FakeDbSource implements DbSource {
-  constructor(private readonly label: string) {}
+  constructor(
+    private readonly label: string,
+    readonly engine: Engine = "postgres",
+  ) {}
 
   async listSchemas(): Promise<SchemaListing> {
     return { schemas: [`${this.label}-schema`], default: `${this.label}-schema` };
@@ -61,7 +65,7 @@ class FakeDbSource implements DbSource {
 }
 
 const alpha: NamedSource = { name: "alpha", source: new FakeDbSource("alpha") };
-const beta: NamedSource = { name: "beta", source: new FakeDbSource("beta") };
+const beta: NamedSource = { name: "beta", source: new FakeDbSource("beta", "sqlite") };
 
 describe("multi-source support", () => {
   let testServer: TestServer;
@@ -79,7 +83,13 @@ describe("multi-source support", () => {
   it("lists registered source names in registration order", async () => {
     const { status, body } = await getJson("/__ashurbanipal/api/sources");
     expect(status).toBe(200);
-    expect(body).toEqual({ sources: [{ name: "alpha" }, { name: "beta" }], default: "alpha" });
+    expect(body).toEqual({
+      sources: [
+        { name: "alpha", engine: "postgres" },
+        { name: "beta", engine: "sqlite" },
+      ],
+      default: "alpha",
+    });
   });
 
   it("rejects an unrecognized source value on every source-aware route", async () => {

@@ -24,23 +24,25 @@ import { loadTables } from "./table-chips.js";
 export async function loadSources(): Promise<void> {
   let names: string[];
   let defaultSource: string;
+  let engines: Record<string, string>;
   try {
     let sources: SourceEntry[];
     ({ sources, default: defaultSource } = await api<SourcesResponse>("/sources"));
     names = sources.map((s) => s.name);
+    engines = Object.fromEntries(sources.map((s) => [s.name, s.engine]));
     nameStartupDefault("source", defaultSource);
   } catch (e) {
     // /sources is mandatory (spec/protocol.md §5.8); on failure degrade to
     // single-source, with no `source` param, but leave a trace.
     console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    settleSource(null, false);
+    settleSource(null, false, {});
     return;
   }
   const wanted = state.scope.source;
   // `default` must be listed (spec/protocol.md §5.8); a lone source is its own default either way.
   const fallback = names.includes(defaultSource) ? defaultSource : (names[0] ?? null);
   const source = wanted !== null && names.includes(wanted) ? wanted : fallback;
-  settleSource(source, names.length > 1);
+  settleSource(source, names.length > 1, engines);
   if (!state.manySources) return;
   populateSelect($<HTMLSelectElement>("source-select"), names, source);
   $("source-select-wrap").hidden = false;

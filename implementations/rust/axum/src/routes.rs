@@ -265,6 +265,7 @@ async fn siblings<S: DbSource>(State(state): State<Arc<AppState<S>>>) -> Respons
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ashurbanipal::Engine;
     use ashurbanipal::{JoinOpts, JoinSpec, QueryOpts, ReferencedBy, SchemaListing, TableInfo};
 
     // resolve_source itself now lives in ashurbanipal-core (see its own
@@ -275,6 +276,13 @@ mod tests {
     struct StubSource<const N: u8>(&'static str);
 
     impl<const N: u8> DbSource for StubSource<N> {
+        fn engine(&self) -> Engine {
+            if N == 0 {
+                Engine::Postgres
+            } else {
+                Engine::Sqlite
+            }
+        }
         async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
             unreachable!()
         }
@@ -429,7 +437,10 @@ mod tests {
         );
         assert_eq!(
             get_json(app.clone(), "/__ashurbanipal/api/sources").await,
-            serde_json::json!({ "sources": [{ "name": "a" }, { "name": "b" }], "default": "a" })
+            serde_json::json!({
+                "sources": [{ "name": "a", "engine": "postgres" }, { "name": "b", "engine": "sqlite" }],
+                "default": "a"
+            })
         );
         for (source, table) in [("a", "users"), ("b", "orders")] {
             assert_eq!(

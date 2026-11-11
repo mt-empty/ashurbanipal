@@ -103,7 +103,8 @@ func querySource(q url.Values) *string {
 }
 
 type SourceEntry struct {
-	Name string `json:"name"`
+	Name   string `json:"name"`
+	Engine Engine `json:"engine"`
 }
 
 type SchemaEntry struct {
@@ -114,7 +115,7 @@ func listSourcesHandler(sources []NamedSource) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entries := make([]SourceEntry, len(sources))
 		for i, s := range sources {
-			entries[i].Name = s.Name
+			entries[i] = SourceEntry{Name: s.Name, Engine: s.Source.Engine()}
 		}
 		writeJSON(w, struct {
 			Sources []SourceEntry `json:"sources"`

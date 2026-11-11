@@ -6,6 +6,7 @@ export type {
   CommonValueEntry,
   CountEntry,
   DbSource,
+  Engine,
   KeyKind,
   QueryOpts,
   TableData,

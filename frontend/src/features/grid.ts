@@ -1,7 +1,15 @@
 import { loadData } from "../bootstrap/reload.js";
 import { tableEl } from "../bootstrap/table-focus.js";
 import { $, copyText, el, qs } from "../core/dom.js";
-import { hiddenColumns, joinInView, setHiddenColumns, setSort, state, tableInView } from "../core/state.js";
+import {
+  hiddenColumns,
+  joinInView,
+  noCountsFor,
+  setHiddenColumns,
+  setSort,
+  state,
+  tableInView,
+} from "../core/state.js";
 import type { Column, Row, View, ViewData } from "../core/types.js";
 import type { KeyDescription } from "../lib/column-key.js";
 import { eqClause, filterClause } from "../lib/filter-dsl.js";
@@ -261,6 +269,13 @@ function sortedColumn(): Column | undefined {
 // The rows part of #row-meta, set by updatePager once a load has rendered.
 let rowsMeta = "";
 
+function setRowsMeta(text: string, title: string | null): void {
+  rowsMeta = text;
+  writeRowMeta();
+  if (title === null) $("row-meta").removeAttribute("title");
+  else $("row-meta").title = title;
+}
+
 function writeRowMeta(): void {
   const { shown, total } = counts;
   $("row-meta").textContent = `${rowsMeta} · ${shown < total ? `${shown} of ${total}` : total} columns`;
@@ -448,15 +463,12 @@ export function updatePager(data: ViewData): void {
   if (joinInView()) {
     // A join has no total (spec/protocol.md §5.11.4): the page says whether more follows.
     $("page").textContent = `page ${page} · ${data.has_more ? "more rows available" : "last page"}`;
-    rowsMeta = ` · ${data.rows.length}${data.has_more ? "+" : ""} rows`;
-    writeRowMeta();
-    $("row-meta").removeAttribute("title");
+    setRowsMeta(` · ${data.rows.length}${data.has_more ? "+" : ""} rows`, null);
     $<HTMLButtonElement>("next").disabled = !data.has_more;
     return;
   }
   $("page").textContent = `page ${page}`;
-  rowsMeta = ` · ${formatApproxCount(data.total_approx ?? -1)} rows`;
-  writeRowMeta();
-  $("row-meta").title = APPROX_COUNT_TITLE;
+  if (noCountsFor(state.scope.source)) setRowsMeta("", null);
+  else setRowsMeta(` · ${formatApproxCount(data.total_approx ?? -1)} rows`, APPROX_COUNT_TITLE);
   $<HTMLButtonElement>("next").disabled = data.rows.length < state.limit;
 }

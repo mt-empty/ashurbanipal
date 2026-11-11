@@ -59,8 +59,8 @@ and the three diverge (Postgres `integer`/`boolean`, MySQL
   on-screen truncation (matches the cell viewer).
 - **True per-backend dialect** (raised in PR review, `#87`): Postgres
   `::type` casts, MySQL backtick-quoted identifiers, engine-specific
-  literal forms, instead of the one portable dialect above. Waits on
-  [[53-source-engine-field]], which adds an `engine` field to each
+  literal forms, instead of the one portable dialect above. Unblocked:
+  [[53-source-engine-field]] added an `engine` field to each
   `/sources` entry; column-type spellings alone aren't a reliable proxy
   (the whole reason §3's detection is loose-match + value-shape gated, not
   type-name-keyed). The page should read it only for quoting and literals.

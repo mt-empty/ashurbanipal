@@ -12,17 +12,22 @@ export function formatClock(at: Date): string {
   return at.toLocaleTimeString([], { hourCycle: "h23" });
 }
 
-// approx_rows/total_approx is -1 when the backend has no cheap estimate for
-// this table (e.g. Postgres before ANALYZE, or an engine with no such
-// catalog at all — see docs/adapter-decisions.md); show "?" rather than a
-// confusing raw negative number. No leading "~" in that case either —
-// "~?" would read as "approximately unknown".
+// approx_rows/total_approx is -1 when the table has no estimate yet (e.g.
+// Postgres before ANALYZE); show "?" rather than a confusing raw negative
+// number. No leading "~" in that case either — "~?" would read as
+// "approximately unknown".
 export function formatApproxCount(n: number | null | undefined): string {
   return n == null || n < 0 ? "?" : `~${n}`;
 }
 export const APPROX_COUNT_TITLE =
   "~ = approximate, from the backend's own statistics, not a live count; " +
-  "? = no cheap estimate available (table not yet analyzed, or this backend keeps no such statistics)";
+  "? = no estimate available (e.g. table not yet analyzed)";
+
+// The page's only engine check (spec/protocol.md §5.8 limits what the engine
+// may decide): SQLite keeps no row estimate, so no count is shown at all.
+export function countsNeverEstimated(engine: string | undefined): boolean {
+  return engine === "sqlite";
+}
 
 // col.type is the DB engine's full spelling (Postgres format_type, MySQL
 // COLUMN_TYPE, SQLite declared type or "unknown"), so bucketing folds case,

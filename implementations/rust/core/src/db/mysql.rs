@@ -8,8 +8,8 @@ use sqlx::{MySql, MySqlPool, Row, Transaction};
 use super::{
     group_referenced_by, no_default_schema, op_sql, ColumnInfo, ColumnPair, ColumnRef,
     ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
-    Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
-    TableData, TableInfo,
+    Engine, Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing,
+    Structure, TableData, TableInfo,
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
@@ -492,6 +492,9 @@ fn row_to_json<'a>(
 }
 
 impl DbSource for MySqlSource {
+    fn engine(&self) -> Engine {
+        Engine::Mysql
+    }
     async fn list_schemas(&self) -> Result<SchemaListing, DbError> {
         let variant = self.variant().await?;
         let mut tx = self.pinned_tx().await?;

@@ -90,9 +90,12 @@ func TestSourcesEndpointListsRegisteredNamesInOrder(t *testing.T) {
 	}
 	want := []string{"primary", "secondary"}
 	for i, s := range sources {
-		name := s.(map[string]interface{})["name"]
-		if name != want[i] {
-			t.Errorf("source[%d].name = %v, want %q", i, name, want[i])
+		entry := s.(map[string]interface{})
+		if entry["name"] != want[i] {
+			t.Errorf("source[%d].name = %v, want %q", i, entry["name"], want[i])
+		}
+		if entry["engine"] != "postgres" {
+			t.Errorf("source[%d].engine = %v, want postgres", i, entry["engine"])
 		}
 	}
 	if body["default"] != "primary" {

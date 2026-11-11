@@ -165,6 +165,16 @@ impl Backend {
         })
     }
 
+    /// The `engine` `/api/sources` reports (§5.8). MariaDB targets parse
+    /// as `Mysql`, and report `mysql` too.
+    pub fn wire_engine(self) -> &'static str {
+        match self {
+            Backend::Postgres => "postgres",
+            Backend::Mysql => "mysql",
+            Backend::Sqlite => "sqlite",
+        }
+    }
+
     /// The name of the connection's own default schema — what an absent
     /// `schema` param resolves to, and the value `schema=<this>` must
     /// resolve identically to. Postgres seeds into `public`; SQLite's sole

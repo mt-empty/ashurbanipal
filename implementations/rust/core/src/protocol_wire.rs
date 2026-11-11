@@ -6,13 +6,16 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::Limits;
-use crate::db::{default_source, DbError, QueryOpts, ReferencedBy, SchemaListing, TableInfo};
+use crate::db::{
+    default_source, DbError, DbSource, Engine, QueryOpts, ReferencedBy, SchemaListing, TableInfo,
+};
 use crate::filter;
 use crate::join::{JoinOpts, JoinSpec};
 
 #[derive(Debug, Serialize)]
 pub struct SourceEntry {
     pub name: String,
+    pub engine: Engine,
 }
 
 /// `GET /api/sources` (§5.8).
@@ -24,11 +27,14 @@ pub struct SourcesResponse {
 
 impl SourcesResponse {
     /// `sources` must be non-empty, as every adapter's constructor asserts.
-    pub fn from_sources<S>(sources: &[(String, S)]) -> Self {
+    pub fn from_sources<S: DbSource>(sources: &[(String, S)]) -> Self {
         Self {
             sources: sources
                 .iter()
-                .map(|(name, _)| SourceEntry { name: name.clone() })
+                .map(|(name, source)| SourceEntry {
+                    name: name.clone(),
+                    engine: source.engine(),
+                })
                 .collect(),
             default: default_source(sources).0.clone(),
         }

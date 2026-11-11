@@ -7,7 +7,7 @@ import functools
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from ..filter import Condition
@@ -278,12 +278,21 @@ def wrap_driver_errors[**P, R](
     return decorator
 
 
+Engine = Literal["postgres", "mysql", "sqlite"]
+"""The `/api/sources` engine names (spec/protocol.md §5.8); MariaDB is `mysql`."""
+
+
 class DbSource(abc.ABC):
     """One implementation per backend. No method may run a query the caller
     hasn't first validated an identifier for against a live catalog lookup
     (spec/protocol.md §6) — never accept a `table`/`column`/`schema`
     argument and trust it without that check first.
     """
+
+    @property
+    @abc.abstractmethod
+    def engine(self) -> Engine:
+        """A constant per implementation: `/api/sources` never queries the database."""
 
     @abc.abstractmethod
     def list_schemas(self) -> SchemaListing: ...

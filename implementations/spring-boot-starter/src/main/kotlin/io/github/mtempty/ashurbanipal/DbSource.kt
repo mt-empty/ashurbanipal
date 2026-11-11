@@ -3,6 +3,13 @@ package io.github.mtempty.ashurbanipal
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 
+/** A source's database engine; `wire` is what `/api/sources` reports (`spec/protocol.md` §5.8). MariaDB is [MYSQL]. */
+enum class Engine(val wire: String) {
+    POSTGRES("postgres"),
+    MYSQL("mysql"),
+    SQLITE("sqlite"),
+}
+
 /**
  * Which allow-list (or privilege check) rejected a request — maps 1:1 onto
  * `spec/protocol.md` §2's `unknown_source`/`unknown_schema`/`unknown_table`/
@@ -181,6 +188,9 @@ data class QueryOpts(
 
 /** Backend-selection seam; route handlers never access a concrete driver. */
 interface DbSource {
+    /** A constant, so `/api/sources` never queries the database (`spec/protocol.md` §5.8). */
+    val engine: Engine
+
     fun listSchemas(): SchemaListing
     fun listTables(schema: String?): List<TableInfo>
     fun tableCounts(schema: String?): List<CountEntry>

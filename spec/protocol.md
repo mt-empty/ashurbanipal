@@ -550,13 +550,26 @@ validates against.
 Response:
 
 ```json
-{ "sources": [{ "name": "primary" }, { "name": "reporting" }], "default": "primary" }
+{
+  "sources": [
+    { "name": "primary", "engine": "postgres" },
+    { "name": "reporting", "engine": "sqlite" }
+  ],
+  "default": "primary"
+}
 ```
 
-- `name` — the source's opaque, implementation-defined identifier. No
-  other field is defined on an entry — in particular, responses MUST NOT
-  include which backend engine a source uses; that stays purely a
-  host-side configuration detail with no wire representation.
+- `name` — the source's opaque, implementation-defined identifier.
+- `engine` — the database engine behind the source. Implementations MUST
+  send one of `postgres`, `mysql`, or `sqlite`. A MariaDB source reports
+  `mysql`, so this route never has to query the database. Clients MUST
+  accept any other value and treat that source as one with no known
+  engine.
+  - A client MAY use `engine` only for SQL text the user copies, for
+    labels, and to tell whether a table count can ever exist (§5.3).
+  - A client MUST NOT use it to work out a column's class, a join class,
+    sortability, or any other behaviour a route already reports. Such a
+    need gets its own reported field.
 - `default` — the source an absent `source` parameter resolves to (§1).
   MUST be an entry of `sources`. Clients use it, not list order, to pick
   the initial source.

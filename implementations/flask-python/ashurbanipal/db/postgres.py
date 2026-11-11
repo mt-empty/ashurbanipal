@@ -40,6 +40,7 @@ from . import (
     ConstraintPk,
     ConstraintUnique,
     DbSource,
+    Engine,
     FilterParseError,
     IndexInfo,
     KeyKind,
@@ -139,6 +140,8 @@ def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) 
 
 
 class PgSource(DbSource):
+    engine: Engine = "postgres"
+
     def __init__(self, dsn: str):
         self._dsn = dsn
 

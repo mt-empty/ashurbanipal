@@ -607,14 +607,20 @@ components:
   schemas:
     SourceEntry:
       type: object
-      required: [name]
+      required: [name, engine]
       properties:
         name:
           type: string
+          description: Opaque, implementation-defined identifier.
+        engine:
+          type: string
+          enum: [postgres, mysql, sqlite]
           description: >
-            Opaque, implementation-defined identifier. No other field is
-            defined on an entry — a source's backend engine has no wire
-            representation, it's a host-side configuration detail only.
+            The database engine behind the source. Servers send one of the
+            listed values; a MariaDB source reports `mysql`. Clients MUST
+            accept any other value and treat that source as having no known
+            engine, and use it only for copied SQL text, labels and whether
+            a table count can exist (`spec/protocol.md` §5.8).
 
     SourcesResponse:
       type: object

@@ -171,7 +171,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | ID | Requirement | Test |
 |---|---|---|
 | `P5.8-LISTS-REGISTERED-SOURCES` | Lists every source §1's default-resolution case could resolve to; exactly one entry for a single-source deployment | `sources::lists_exactly_the_one_registered_source` (single-source); `two_source::second_source_is_scoped_to_other_schema_and_differs_from_the_default` (>1-source, self-skips otherwise) |
-| `P5.8-NO-BACKEND-FIELD` | MUST NOT disclose which backend engine a source uses | `sources::lists_exactly_the_one_registered_source` |
+| `P5.8-ENGINE` | Each entry names its `engine` (`postgres`, `mysql` for MySQL and MariaDB, `sqlite`) | `sources::lists_exactly_the_one_registered_source` (every listed source, in single- and two-source runs) |
 | `P5.8-REPORTS-DEFAULT` | `default` is listed and is the source an absent `source` resolves to | `sources::explicit_default_source_matches_the_implicit_default`; `two_source::api_sources_default_matches_default_resolution` (self-skips without a second source) |
 | `P5.8-HEADER` | Carries the protocol version header | `sources::every_sources_response_carries_the_protocol_version_header` |
 
