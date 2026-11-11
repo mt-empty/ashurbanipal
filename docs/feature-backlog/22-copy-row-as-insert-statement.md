@@ -59,16 +59,8 @@ and the three diverge (Postgres `integer`/`boolean`, MySQL
   on-screen truncation (matches the cell viewer).
 - **True per-backend dialect** (raised in PR review, `#87`): Postgres
   `::type` casts, MySQL backtick-quoted identifiers, engine-specific
-  literal forms, instead of the one portable dialect above. Blocked on the
-  frontend not knowing which engine is behind the selected source —
-  `spec/protocol.md` has no `engine`/`dialect` field on `/sources`,
-  `/schemas`, or `/tables` today, and column-type spellings alone aren't a
-  reliable proxy (the whole reason §3's detection is loose-match +
-  value-shape gated, not type-name-keyed). Doing this properly means a
-  protocol addition wired through all five ports and conformance, not a
-  frontend-only change — a separate, larger story if picked up. It would
-  also reverse §5.8's rule that a response MUST NOT say which engine a
-  source uses (`spec/protocol.md` §5.8, `docs/design.md` §5), so that
-  decision comes first. JDBC's `getDatabaseProductName` is the precedent for
-  one field per source; the page should read it only for quoting and
-  literals.
+  literal forms, instead of the one portable dialect above. Waits on
+  [[53-source-engine-field]], which adds an `engine` field to each
+  `/sources` entry; column-type spellings alone aren't a reliable proxy
+  (the whole reason §3's detection is loose-match + value-shape gated, not
+  type-name-keyed). The page should read it only for quoting and literals.
