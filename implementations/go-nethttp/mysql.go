@@ -527,6 +527,9 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 	return JoinData{Columns: plan.columnInfos(realSchema), Rows: out, HasMore: hasMore}, nil
 }
 
+// Engine reports mysql for MariaDB too (docs/adapter-decisions.md §5.8).
+func (c *MySQLSource) Engine() string { return "mysql" }
+
 func (c *MySQLSource) ListSchemas(ctx context.Context) (SchemaListing, error) {
 	variant, err := c.variantOf(ctx)
 	if err != nil {

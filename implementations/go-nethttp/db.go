@@ -167,6 +167,9 @@ type QueryOpts struct {
 // Every query is timeout-bounded, with enforcement varying by engine
 // (spec/protocol.md §1; docs/adapter-decisions.md §6).
 type DbSource interface {
+	// Engine is a constant per implementation: /api/sources never queries
+	// the database (spec/protocol.md §5.8).
+	Engine() string
 	ListSchemas(ctx context.Context) (SchemaListing, error)
 	ListTables(ctx context.Context, schema *string) ([]TableInfo, error)
 	TableCounts(ctx context.Context, schema *string) ([]CountEntry, error)

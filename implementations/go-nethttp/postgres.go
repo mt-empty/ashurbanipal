@@ -410,6 +410,8 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 	return JoinData{Columns: plan.columnInfos(realSchema), Rows: out, HasMore: hasMore}, nil
 }
 
+func (c *PostgresSource) Engine() string { return "postgres" }
+
 func (c *PostgresSource) ListSchemas(ctx context.Context) (SchemaListing, error) {
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
