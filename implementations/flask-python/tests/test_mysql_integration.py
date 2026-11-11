@@ -14,7 +14,7 @@ import pytest
 
 from ashurbanipal.db import BadJoin, KeyKind, NotAllowed, QueryOpts, QueryTimeout, wrap_driver_errors
 from ashurbanipal.db.mysql import _MARIADB, MySqlSource, connect_kwargs_from_url
-from ashurbanipal.filter import Condition
+from ashurbanipal.filter import Comparison
 from ashurbanipal.join import JoinOpts, JoinSpec, parse_join
 
 pytestmark = pytest.mark.mysql
@@ -285,7 +285,7 @@ def test_join_left_keeps_unmatched_rows_and_ilike_filters_a_joined_column(seeded
             limit=10,
             offset=0,
             timeout_secs=5,
-            filter=[Condition(column="email", op="ILIKE", value="B@X.%", join=0)],
+            filter=[Comparison(column="email", op="ILIKE", value="B@X.%", join=0)],
         ),
     )
     assert len(one.rows) == 1

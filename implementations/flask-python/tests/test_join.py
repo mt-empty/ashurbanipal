@@ -19,7 +19,7 @@ from ashurbanipal.db import BadJoin, BadParam, FilterParseError, NotAllowed, Que
 from ashurbanipal.db.postgres import column_class as pg_column_class
 from ashurbanipal.db.sqlite import SqliteSource
 from ashurbanipal.db.sqlite import column_class as sqlite_column_class
-from ashurbanipal.filter import Condition, FilterError, parse, parse_for_join
+from ashurbanipal.filter import Comparison, FilterError, NullCheck, parse, parse_for_join
 from ashurbanipal.join import (
     ARRAY,
     FLOAT,
@@ -197,7 +197,7 @@ def test_enums_pair_only_within_one_type_and_collations_must_match() -> None:
 def test_filter_and_sort_positions_are_range_checked() -> None:
     spec = parse_join(JOIN)
     with pytest.raises(FilterParseError):
-        plan_join(spec, [_orders(), _users()], _opts(filter=[Condition(column="id", op="IS NULL", join=2)]))
+        plan_join(spec, [_orders(), _users()], _opts(filter=[NullCheck(column="id", op="IS NULL", join=2)]))
     with pytest.raises(BadParam):
         plan_join(spec, [_orders(), _users()], _opts(sort_join=1))
     with pytest.raises(NotAllowed):
@@ -217,8 +217,8 @@ def test_build_select_uses_catalog_names_and_generated_aliases_only() -> None:
             sort="email",
             sort_join=1,
             filter=[
-                Condition(column="email", op="=", value="a@b.c", join=1),
-                Condition(column="status", op="IS NULL", logic="OR", not_=True),
+                Comparison(column="email", op="=", value="a@b.c", join=1),
+                NullCheck(column="status", op="IS NULL", logic="OR", not_=True),
             ],
         ),
     )

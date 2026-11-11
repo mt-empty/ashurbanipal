@@ -9,7 +9,7 @@ import re
 import sqlite3
 import time
 
-from ..filter import Condition
+from ..filter import Condition, NullCheck
 from ..join import (
     BINARY,
     BOOLEAN,
@@ -126,7 +126,7 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
             raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
         keyword = _KEYWORD.get(cond.op, cond.op)
         quoted_column = quote_ident(cond.column)
-        if cond.op in ("IS NULL", "IS NOT NULL"):
+        if isinstance(cond, NullCheck):
             inner = f"CAST({quoted_column} AS TEXT) {keyword}"
         else:
             inner = f"CAST({quoted_column} AS TEXT) {keyword} ?"

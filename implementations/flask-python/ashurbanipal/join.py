@@ -8,12 +8,13 @@ emits SQL from catalog names and generated aliases only.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any, TypeGuard
 
 from .db import OP_SQL, BadJoin, BadParam, ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
-from .filter import Condition, load_json
+from .filter import Condition, NullCheck, load_json
 
 MAX_JOIN_BYTES = 8192
 MAX_JOIN_TABLES = 4
@@ -70,7 +71,7 @@ def table_schemas(refs: list[tuple[str | None, str]], request: str, listed: list
     return out
 
 
-def _optional_schema(obj: dict, what: str) -> str | None:
+def _optional_schema(obj: dict[str, Any], what: str) -> str | None:
     if "schema" not in obj:
         return None
     if not isinstance(obj["schema"], str):
@@ -78,17 +79,17 @@ def _optional_schema(obj: dict, what: str) -> str | None:
     return obj["schema"]
 
 
-def _is_int(value) -> bool:
+def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _check_keys(obj: dict, allowed: set[str], what: str) -> None:
+def _check_keys(obj: dict[str, Any], allowed: set[str], what: str) -> None:
     unknown = set(obj) - allowed
     if unknown:
         raise BadJoin(f"{what} has unknown field(s): {sorted(unknown)}")
 
 
-def _to_pos(raw, what: str) -> ColumnPos:
+def _to_pos(raw: object, what: str) -> ColumnPos:
     if not isinstance(raw, dict):
         raise BadJoin(f"{what} must be an object with join and column")
     _check_keys(raw, {"join", "column"}, what)
@@ -335,7 +336,9 @@ class JoinPlan:
             )
         return out
 
-    def rows_from(self, db_rows, limit: int, decode: Callable = lambda v: v) -> tuple[list[dict], bool]:
+    def rows_from(
+        self, db_rows: Sequence[Sequence[Any]], limit: int, decode: Callable[[Any], Any] = lambda v: v
+    ) -> tuple[list[dict[str, Any]], bool]:
         """Keys result rows by label and trims the extra row asked for has_more."""
         has_more = len(db_rows) > limit
         out = [dict(zip(self.labels, (decode(v) for v in row), strict=True)) for row in db_rows[:limit]]
@@ -424,9 +427,6 @@ def plan_join(spec: JoinSpec, tables: list[TableMeta], opts: JoinOpts) -> JoinPl
         pos = cond.join if cond.join is not None else 0
         if pos < 0 or pos >= len(tables):
             raise _FilterParseError(f"condition {i}: join position {pos} is not in the join")
-        takes_value = cond.op not in ("IS NULL", "IS NOT NULL")
-        if takes_value != (cond.value is not None):
-            raise _FilterParseError(f"condition {i}: op {cond.op!r} has the wrong value arity")
         resolved_filter.append(_ResolvedCondition(cond=cond, pos=pos, col=tables[pos].index(cond.column)))
 
     sort = None
@@ -488,7 +488,7 @@ def build_select(plan: JoinPlan, d: Dialect) -> tuple[str, list[str]]:
     for i, rc_cond in enumerate(plan.filter):
         cond = rc_cond.cond
         cast = d.cast_text(alias(rc_cond.pos, rc_cond.col))
-        if cond.op in ("IS NULL", "IS NOT NULL"):
+        if isinstance(cond, NullCheck):
             inner = f"{cast} {OP_SQL[cond.op]}"
         elif cond.op == "ILIKE":
             values.append(cond.value)

@@ -4,27 +4,62 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, TypeGuard, get_args
 
 MAX_FILTER_BYTES = 8192
 MAX_CONDITIONS = 10
 
-# Wire operators must come from this allow-list before reaching SQL (spec/protocol.md §5.4.2).
-VALID_OPS = {"=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"}
-NO_VALUE_OPS = {"IS NULL", "IS NOT NULL"}
+# Wire operators must come from these allow-lists before reaching SQL (spec/protocol.md §5.4.2).
+type NullOp = Literal["IS NULL", "IS NOT NULL"]
+type ValueOp = Literal["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE"]
+NULL_OPS: frozenset[str] = frozenset(get_args(NullOp.__value__))
+VALUE_OPS: frozenset[str] = frozenset(get_args(ValueOp.__value__))
 VALID_LOGIC = {"AND", "OR"}
 _CONDITION_FIELDS = {"logic", "not", "column", "op", "value"}
 
 
-@dataclass(frozen=True)
-class Condition:
+def _is_null_op(op: str) -> TypeGuard[NullOp]:
+    return op in NULL_OPS
+
+
+def _is_value_op(op: str) -> TypeGuard[ValueOp]:
+    return op in VALUE_OPS
+
+
+@dataclass(frozen=True, kw_only=True)
+class _ConditionBase:
     column: str
-    op: str
     logic: str | None = None
     not_: bool = False
-    value: str | None = None
     # Table position, accepted only by `parse_for_join` (spec/protocol.md §5.11.3).
     join: int | None = None
+
+
+# Each class checks its op when built as well, since a host's DbSource code may not be type-checked.
+@dataclass(frozen=True, kw_only=True)
+class NullCheck(_ConditionBase):
+    """`IS NULL` or `IS NOT NULL`: nothing to bind."""
+
+    op: NullOp
+    value: None = None
+
+    def __post_init__(self) -> None:
+        if not _is_null_op(self.op) or self.value is not None:
+            raise ValueError(f"NullCheck takes IS NULL or IS NOT NULL and no value, not {self.op!r}")
+
+
+@dataclass(frozen=True, kw_only=True)
+class Comparison(_ConditionBase):
+    op: ValueOp
+    value: str
+
+    def __post_init__(self) -> None:
+        if not _is_value_op(self.op) or not isinstance(self.value, str):
+            raise ValueError(f"Comparison takes a value operator and a string value, not {self.op!r}")
+
+
+# A backend narrows on the class before binding, so a value is never missing.
+Condition = NullCheck | Comparison
 
 
 class FilterError(Exception):
@@ -88,21 +123,23 @@ def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
         if not isinstance(column, str):
             raise FilterError(f'condition {i} is missing a string "column"')
 
-        op = raw_cond.get("op")
-        if not isinstance(op, str) or op not in VALID_OPS:
-            raise FilterError(f"condition {i} has invalid op {op!r}")
-
-        value = raw_cond.get("value")
-        takes_value = op not in NO_VALUE_OPS
-        if takes_value and not isinstance(value, str):
-            raise FilterError(f"op {op!r} requires a string value")
-        if not takes_value and value is not None:
-            raise FilterError(f"op {op!r} takes no value")
-
         join = raw_cond.get("join")
         if join is not None and (not isinstance(join, int) or isinstance(join, bool) or join < 0):
             raise FilterError(f'condition {i} has an invalid "join" position')
 
-        conditions.append(Condition(column=column, op=op, logic=logic, not_=not_, value=value, join=join))
+        op = raw_cond.get("op")
+        value = raw_cond.get("value")
+        if not isinstance(op, str):
+            raise FilterError(f"condition {i} has invalid op {op!r}")
+        if _is_null_op(op):
+            if value is not None:
+                raise FilterError(f"op {op!r} takes no value")
+            conditions.append(NullCheck(column=column, op=op, logic=logic, not_=not_, join=join))
+        elif _is_value_op(op):
+            if not isinstance(value, str):
+                raise FilterError(f"op {op!r} requires a string value")
+            conditions.append(Comparison(column=column, op=op, logic=logic, not_=not_, join=join, value=value))
+        else:
+            raise FilterError(f"condition {i} has invalid op {op!r}")
 
     return conditions

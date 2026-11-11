@@ -37,5 +37,5 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
     // For the backend-mysql and backend-sqlite profiles.
     runtimeOnly("com.mysql:mysql-connector-j:26.10.0")
-    runtimeOnly("org.xerial:sqlite-jdbc:3.53.4.0")
+    runtimeOnly("org.xerial:sqlite-jdbc:3.54.1.0")
 }

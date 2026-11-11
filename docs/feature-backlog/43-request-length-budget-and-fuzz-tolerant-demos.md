@@ -150,7 +150,7 @@ fuzzer sees. The longest fuzzed URL seen so far was about 24 KB.
 
 | Port | Demo change | Default today |
 |---|---|---|
-| Node | `demo/main.ts`: `http.createServer({ maxHeaderSize: 65536 }, app).listen(…)` in place of `app.listen` | 16 KB, answers 431 |
+| Node | done: `demo/main.ts` uses `createServer({ maxHeaderSize: 65536 }, app)` | was 16 KB, answered 431 |
 | Spring | none: the demo `application.yml` already sets `server.max-http-request-header-size: 64KB` (#148) | 64 KB |
 | Flask | check the server the demo and CI use and its request-line limit | not measured |
 | Go | none expected (`net/http` default is 1 MB); confirm | 1 MB |
@@ -160,10 +160,9 @@ These are demo settings only. Hosts own their servers, so each port's
 README states the requirement: allow at least 8 KB of request line, which
 the budget guarantees is enough.
 
-Also in `conformance/runner/schema-check.sh`: stop `.hypothesis/` replay from
-making local runs fail forever after one hit. Either run schemathesis from a
-fresh temporary directory or pass its option that disables the example
-database (check the flag name for the pinned schemathesis version).
+Done in `conformance/runner/schema-check.sh`: it passes
+`--generation-database none`, so a local `.hypothesis/` no longer replays an
+old failure on every later run.
 
 ## 4. Open questions
 

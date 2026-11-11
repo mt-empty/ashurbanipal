@@ -3,6 +3,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 *.db
 # Generated fresh from ../../frontend/dbviewer.html by
 # tools/sync-ports-frontend.sh - never committed here, same reasoning

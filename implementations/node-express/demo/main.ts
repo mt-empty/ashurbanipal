@@ -17,6 +17,7 @@
 // CONFORMANCE_SECOND_SOURCE=1 (postgres backend only) registers a second
 // source, pinned to `other_schema`, for conformance/runner/two_source.rs
 // — see that file's module doc.
+import { createServer } from "node:http";
 import express from "express";
 import { MySqlSource } from "../src/db/mysql.js";
 import { PostgresSource } from "../src/db/postgres.js";
@@ -140,7 +141,9 @@ async function main(): Promise<void> {
   app.get("/", (_req, res) => res.redirect(307, "/__ashurbanipal"));
   app.use(viewer);
 
-  app.listen(port, "0.0.0.0", () => {
+  // Node's 16 KB default answers 431 before the router runs; a filter or join
+  // inside the protocol's 8192-byte decoded bound can percent-encode to ~25 KB.
+  createServer({ maxHeaderSize: 65536 }, app).listen(port, "0.0.0.0", () => {
     console.log(
       `demo host (backend=${backend}) on http://localhost:${port} — browser at http://localhost:${port}/__ashurbanipal`,
     );

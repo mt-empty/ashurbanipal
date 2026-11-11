@@ -1,0 +1,8 @@
+# Pins the schemathesis version conformance/runner/schema-check.sh runs, so a
+# new release reaches CI only as a Dependabot PR. Not a package: `uv sync`
+# installs the locked dependencies into .venv-schemathesis and nothing else.
+[project]
+name = "ashurbanipal-schemathesis"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = ["schemathesis==4.33.1"]

@@ -10,6 +10,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Framework :: Flask",
+    "Typing :: Typed",
 ]
 dependencies = [
     "flask>=3.0",
@@ -27,6 +28,8 @@ dev = [
     "ashurbanipal-flask[postgres,mysql]",
     "pytest>=8.0",
     "ruff>=0.6",
+    "mypy>=2.4",
+    "types-PyMySQL>=1.1",
 ]
 
 [tool.pytest.ini_options]
@@ -40,6 +43,11 @@ filterwarnings = [
     "error::PendingDeprecationWarning",
 ]
 
+[tool.mypy]
+files = ["ashurbanipal"]
+python_version = "3.12"
+strict = true
+
 [tool.ruff]
 line-length = 115
 target-version = "py312"
@@ -52,7 +60,7 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "PTH"]
 # 2.5, ahead of PyPI/pypa-gh-action-pypi-publish support — pin below it or
 # `uv build` produces a wheel PyPI rejects with "'2.5' is not a valid
 # metadata version".
-requires = ["hatchling<1.33"]
+requires = ["hatchling<1.34"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

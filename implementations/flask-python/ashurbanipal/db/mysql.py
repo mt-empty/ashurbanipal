@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import urlsplit
 
 import pymysql
+from pymysql.cursors import Cursor
 
-from ..filter import Condition
+from ..filter import Condition, NullCheck
 from ..join import (
     BINARY,
     FLOAT,
@@ -51,6 +53,7 @@ from . import (
     TableInfo,
     group_referenced_by,
     no_default_schema,
+    one_row,
     wrap_driver_errors,
 )
 
@@ -68,7 +71,7 @@ _MARIADB_JSON_COLUMNS_SQL = (
 )
 
 
-def connect_kwargs_from_url(url: str) -> dict:
+def connect_kwargs_from_url(url: str) -> dict[str, Any]:
     """Parses a `mysql://user:pass@host:port/dbname` URL (the same shape
     `MYSQL_TEST_URL`/`MARIADB_TEST_URL` use) into `pymysql.connect` kwargs
     — a small convenience for `demo/app.py` and the test suite, not part
@@ -118,11 +121,11 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
             raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
         cast = f"CAST({_quote_ident(cond.column)} AS CHAR)"
 
-        if cond.op == "ILIKE":
+        if isinstance(cond, NullCheck):
+            inner = f"{cast} {cond.op}"
+        elif cond.op == "ILIKE":
             values.append(cond.value)
             inner = f"LOWER({cast}) LIKE LOWER(%s)"
-        elif cond.op in ("IS NULL", "IS NOT NULL"):
-            inner = f"{cast} {cond.op}"
         else:
             values.append(cond.value)
             inner = f"{cast} {cond.op} %s"
@@ -170,7 +173,7 @@ def column_class(data_type: str, column_type: str) -> ColumnClass:
 
 
 class MySqlSource(DbSource):
-    def __init__(self, **connect_kwargs):
+    def __init__(self, **connect_kwargs: Any) -> None:
         self._connect_kwargs = connect_kwargs
         self._variant: str | None = None
 
@@ -183,11 +186,11 @@ class MySqlSource(DbSource):
             return self._variant
         with conn.cursor() as cur:
             cur.execute("select version()")
-            (version,) = cur.fetchone()
+            (version,) = one_row(cur)
         self._variant = _MARIADB if "mariadb" in version.lower() else _MYSQL
         return self._variant
 
-    def _list_schemas(self, cur, variant: str, timeout_secs: int) -> list[str]:
+    def _list_schemas(self, cur: Cursor, variant: str, timeout_secs: int) -> list[str]:
         cur.execute(
             _timed_select(
                 variant,
@@ -199,32 +202,29 @@ class MySqlSource(DbSource):
         )
         return [row[0] for row in cur.fetchall()]
 
-    def _default_schema(self, cur, variant: str, timeout_secs: int) -> str | None:
+    def _default_schema(self, cur: Cursor, variant: str, timeout_secs: int) -> str | None:
         # None when the connection names no database.
         cur.execute(_timed_select(variant, timeout_secs, "database()"))
-        (name,) = cur.fetchone()
+        name: str | None = one_row(cur)[0]
         return name
 
-    def _resolve_schema(self, cur, variant: str, requested: str | None, timeout_secs: int) -> str:
+    def _resolve_schema(self, cur: Cursor, variant: str, requested: str | None, timeout_secs: int) -> str:
         return self._resolve_schema_among(
             cur, variant, self._list_schemas(cur, variant, timeout_secs), requested, timeout_secs
         )
 
     def _resolve_schema_among(
-        self, cur, variant: str, schemas: list[str], requested: str | None, timeout_secs: int
+        self, cur: Cursor, variant: str, schemas: list[str], requested: str | None, timeout_secs: int
     ) -> str:
         """`_resolve_schema` against a schema list already fetched in this transaction."""
-        if requested is not None:
-            resolved = requested
-        else:
-            resolved = self._default_schema(cur, variant, timeout_secs)
-            if resolved is None:
-                raise no_default_schema()
+        resolved = requested if requested is not None else self._default_schema(cur, variant, timeout_secs)
+        if resolved is None:
+            raise no_default_schema()
         if resolved not in schemas:
             raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
         return resolved
 
-    def _allowed_tables(self, cur, variant: str, schema: str, timeout_secs: int) -> list[str]:
+    def _allowed_tables(self, cur: Cursor, variant: str, schema: str, timeout_secs: int) -> list[str]:
         cur.execute(
             _timed_select(
                 variant,
@@ -237,7 +237,7 @@ class MySqlSource(DbSource):
         )
         return [row[0] for row in cur.fetchall()]
 
-    def _allowed_columns(self, cur, variant: str, schema: str, table: str, timeout_secs: int) -> list[str]:
+    def _allowed_columns(self, cur: Cursor, variant: str, schema: str, table: str, timeout_secs: int) -> list[str]:
         cur.execute(
             _timed_select(
                 variant,
@@ -251,7 +251,7 @@ class MySqlSource(DbSource):
         return [row[0] for row in cur.fetchall()]
 
     def _key_metadata(
-        self, cur, variant: str, schema: str, table: str, timeout_secs: int
+        self, cur: Cursor, variant: str, schema: str, table: str, timeout_secs: int
     ) -> tuple[set[str], dict[str, ColumnRef]]:
         """Join MySQL's repeating PRIMARY name on table name (`spec/protocol.md` §5.4.1)."""
         cur.execute(
@@ -273,7 +273,7 @@ class MySqlSource(DbSource):
             (schema, table),
         )
         pk_columns: set[str] = set()
-        fk_candidates: dict[str, list[tuple]] = {}
+        fk_candidates: dict[str, list[tuple[str, str | None, str | None, str | None]]] = {}
         for constraint_name, constraint_type, column_name, ref_schema, ref_table, ref_column in cur.fetchall():
             if constraint_type == "PRIMARY KEY":
                 pk_columns.add(column_name)
@@ -424,21 +424,23 @@ class MySqlSource(DbSource):
                     ),
                     (resolved_schema, table),
                 )
-                (count,) = cur.fetchone()
+                (count,) = one_row(cur)
                 total_approx = count if count is not None else -1
             conn.commit()
             return TableData(columns=columns, rows=rows, total_approx=total_approx)
         finally:
             conn.close()
 
-    def _mariadb_json_columns(self, cur, variant: str, schema: str, table: str, timeout_secs: int) -> set[str]:
+    def _mariadb_json_columns(
+        self, cur: Cursor, variant: str, schema: str, table: str, timeout_secs: int
+    ) -> set[str]:
         # MariaDB has no JSON type: a JSON column is longtext guarded by a json_valid column check.
         if variant != _MARIADB:
             return set()
         cur.execute(_timed_select(variant, timeout_secs, _MARIADB_JSON_COLUMNS_SQL), (schema, table))
         return {name for (name,) in cur.fetchall()}
 
-    def _table_meta(self, cur, variant: str, schema: str, table: str, timeout_secs: int) -> TableMeta:
+    def _table_meta(self, cur: Cursor, variant: str, schema: str, table: str, timeout_secs: int) -> TableMeta:
         cur.execute(
             _timed_select(
                 variant,
@@ -694,7 +696,7 @@ class MySqlSource(DbSource):
                         "where table_schema = 'information_schema' and table_name = 'CHECK_CONSTRAINTS'",
                     )
                 )
-                if cur.fetchone()[0] > 0:
+                if one_row(cur)[0] > 0:
                     # MariaDB names unnamed table-level checks per table, so
                     # its view carries table_name for the join; MySQL's has none.
                     cc_table = "and cc.table_name = tc.table_name " if variant == _MARIADB else ""

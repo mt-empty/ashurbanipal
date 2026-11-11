@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import psycopg
+from psycopg.abc import Buffer
 from psycopg.types.string import TextLoader
 
-from ..filter import Condition
+from ..filter import Condition, NullCheck
 from ..join import (
     ARRAY,
     BINARY,
@@ -53,6 +54,7 @@ from . import (
     Unsortable,
     group_referenced_by,
     no_default_schema,
+    one_row,
     quote_ident,
     wrap_driver_errors,
 )
@@ -64,7 +66,7 @@ CATALOG_TIMEOUT_SECS = 5
 class _LenientTextLoader(TextLoader):
     """Use the protocol sentinel when psycopg cannot decode text."""
 
-    def load(self, data):
+    def load(self, data: Buffer) -> bytes | str:
         try:
             return super().load(data)
         except UnicodeDecodeError:
@@ -82,7 +84,7 @@ def _build_where_clause(conditions: list[Condition], column_names: list[str]) ->
         if cond.column not in column_names:
             raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
         quoted = quote_ident(cond.column)
-        if cond.op in ("IS NULL", "IS NOT NULL"):
+        if isinstance(cond, NullCheck):
             inner = f"{quoted}::text {cond.op}"
         else:
             inner = f"{quoted}::text {cond.op} %s"
@@ -157,19 +159,17 @@ class PgSource(DbSource):
     def _default_schema(self, cur: psycopg.Cursor) -> str | None:
         # None when no schema on the session's search_path exists.
         cur.execute("select current_schema()")
-        return cur.fetchone()[0]
+        schema: str | None = one_row(cur)[0]
+        return schema
 
     def _resolve_schema(self, cur: psycopg.Cursor, requested: str | None) -> str:
         return self._resolve_schema_among(cur, self._list_schemas(cur), requested)
 
     def _resolve_schema_among(self, cur: psycopg.Cursor, schemas: list[str], requested: str | None) -> str:
         """`_resolve_schema` against a schema list already fetched in this transaction."""
-        if requested is not None:
-            resolved = requested
-        else:
-            resolved = self._default_schema(cur)
-            if resolved is None:
-                raise no_default_schema()
+        resolved = requested if requested is not None else self._default_schema(cur)
+        if resolved is None:
+            raise no_default_schema()
         if resolved not in schemas:
             raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
         return resolved
@@ -201,7 +201,8 @@ class PgSource(DbSource):
         row = cur.fetchone()
         if row is None:
             raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
-        return row[0]
+        oid: int = row[0]
+        return oid
 
     def _allowed_columns(self, cur: psycopg.Cursor, schema: str, table: str) -> list[str]:
         cur.execute(
@@ -232,7 +233,7 @@ class PgSource(DbSource):
             (schema, table),
         )
         pk_columns: set[str] = set()
-        fk_candidates: dict[str, list[tuple]] = {}
+        fk_candidates: dict[str, list[tuple[str, str | None, str | None, str | None]]] = {}
         for constraint_name, constraint_type, column_name, ref_schema, ref_table, ref_column in cur.fetchall():
             if constraint_type == "PRIMARY KEY":
                 pk_columns.add(column_name)
@@ -362,7 +363,7 @@ class PgSource(DbSource):
                     "where n.nspname = %s and c.relname = %s",
                     (resolved_schema, table),
                 )
-                total_approx = cur.fetchone()[0]
+                total_approx = one_row(cur)[0]
 
                 return TableData(columns=columns, rows=rows, total_approx=total_approx)
 
