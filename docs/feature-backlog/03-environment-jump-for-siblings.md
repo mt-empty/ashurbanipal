@@ -202,6 +202,14 @@ The frontend reads only the wire shape above.
   the pop-up lists each one above the grid. A repeated name and label fills
   its cell once; later copies are listed under the grid as "<label> ·
   duplicate". Unlabelled entries sharing a name show their host.
+- **F12. Name link.** A service name links to that service's cell in the
+  instance's own column, with the same `href`, and follows F7. It stays
+  plain text in the instance's own row, when that cell is "not set up",
+  and when there is no `instance`, so a name never switches label. A down
+  service's name still links. It is out of the tab order, because its
+  cell is already a stop. Hovering the name highlights that cell. Every
+  link cell has a light border. Design: boards **AW** and **AZ** (choice
+  A).
 
 ## 5. Fallback note (ships first)
 

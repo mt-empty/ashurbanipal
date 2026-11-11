@@ -77,13 +77,52 @@ test("every cell is a plain link that switches this tab", async ({ page }) => {
   await gotoApp(page);
   await openMatrix(page);
 
+  await expect(page.locator("#siblings-matrix .sibling-cell")).toHaveCount(4);
   const links = page.locator("#siblings-matrix a");
-  await expect(links).toHaveCount(4);
+  await expect(links).toHaveCount(6);
   for (const link of await links.all()) {
     await expect(link).not.toHaveAttribute("target", /.*/);
     await expect(link).toHaveAttribute("rel", "noopener");
   }
   await expect(cell(page, "billing", 0).locator("a")).toHaveAttribute("href", base("billing", "dev"));
+});
+
+test("a service name links to its cell in this instance's label", async ({ page }) => {
+  await mockSiblings(page, LABELLED);
+  await gotoApp(page);
+  await openMatrix(page);
+  const names = page.locator("#siblings-matrix-body .sibling-name-link");
+  await expect(names).toHaveText(["billing", "users"]);
+  await expect(names.first()).toHaveAttribute("href", base("billing", "dev"));
+  await expect(names.first()).toHaveAttribute("title", "billing in dev");
+  await expect(names.nth(1)).toHaveAttribute("href", base("users", "dev"));
+  await expect(names.first()).toHaveAttribute("tabindex", "-1");
+});
+
+test("a service missing from this instance's label keeps a plain name", async ({ page }) => {
+  await mockSiblings(page, { ...LABELLED, instance: { name: "orders", label: "int" } });
+  await gotoApp(page);
+  await openMatrix(page);
+  // users has no int, and orders is this service.
+  const names = page.locator("#siblings-matrix-body .sibling-name-link");
+  await expect(names).toHaveText(["billing"]);
+  await expect(names).toHaveAttribute("href", base("billing", "int"));
+  await expect(page.locator("#siblings-matrix-body th[scope=row] .sibling-name")).toHaveCount(3);
+});
+
+test("hovering a service name previews the cell it opens", async ({ page }) => {
+  await mockSiblings(page, LABELLED);
+  await gotoApp(page);
+  await openMatrix(page);
+  const target = cell(page, "billing", 0).locator("a");
+  const other = cell(page, "billing", 1).locator("a");
+  const shadow = (l: typeof target) => l.evaluate((e) => getComputedStyle(e).boxShadow);
+  // The pop-up can open under the pointer; the baseline needs no cell hovered.
+  await page.mouse.move(0, 0);
+  const before = await shadow(target);
+  await page.locator("#siblings-matrix-body .sibling-name-link", { hasText: "billing" }).hover();
+  await expect.poll(() => shadow(target)).not.toBe(before);
+  expect(await shadow(other)).toBe(before);
 });
 
 test("the same-view link carries the current view and follows it", async ({ page }) => {
@@ -139,6 +178,7 @@ test("labels without an instance still show the grid, with nothing marked", asyn
   await openMatrix(page);
   await expect(page.locator("#siblings-matrix [aria-current=page]")).toHaveCount(0);
   await expect(page.locator("#siblings-matrix .sibling-cell.same")).toHaveCount(0);
+  await expect(page.locator("#siblings-matrix .sibling-name-link")).toHaveCount(0);
 });
 
 test("a closed pop-up never polls, and reopening within 15 s reuses the last result", async ({ page }) => {
