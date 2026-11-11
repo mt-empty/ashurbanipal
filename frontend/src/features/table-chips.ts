@@ -19,7 +19,7 @@ import {
   viewHref,
 } from "../core/state.js";
 import { readStored, writeStored } from "../core/storage.js";
-import type { CountsResponse, TableListEntry } from "../core/types.js";
+import type { CountsResponse, SchemaRef, TableListEntry } from "../core/types.js";
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
 import { scopeQuery } from "../lib/table-ref.js";
 import { syncGridLock } from "./grid-lock.js";
@@ -141,19 +141,11 @@ export async function loadTables({
   syncGridLock();
   setStatus("loading tables…");
   const token = ++loadTablesToken;
-  const noCounts = noCountsFor(state.scope.source);
-  const [{ tables }, { counts }] = await Promise.all([
+  const [{ tables }, counts] = await Promise.all([
     api<{ tables: TableListEntry[] }>(`/tables${scopeQuery(scopeRef())}`),
-    noCounts
-      ? { counts: [] }
-      : // Counts are a hint; a failure leaves the chips without them, not missing.
-        api<CountsResponse>(`/table-counts${scopeQuery(scopeRef())}`).catch((e): CountsResponse => {
-          console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
-          return { counts: [] };
-        }),
+    readTableCounts(scopeRef()),
   ]);
   if (token !== loadTablesToken) return "superseded";
-  const countMap = Object.fromEntries(counts.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
@@ -163,8 +155,8 @@ export async function loadTables({
     const chip = qs<HTMLAnchorElement>(li, "a");
     qs<HTMLElement>(li, ".chip-name").textContent = t.name;
     const countEl = qs<HTMLElement>(li, ".count");
-    if (!noCounts) {
-      countEl.textContent = formatApproxCount(countMap[t.name]);
+    if (counts) {
+      countEl.textContent = formatApproxCount(counts.get(t.name));
       chipCounts.set(t.name, countEl.textContent);
       countEl.title = APPROX_COUNT_TITLE;
     }
@@ -207,6 +199,19 @@ export function chipsListScopeInView(): boolean {
 
 export function listedTableNames(): string[] {
   return tableEntries.map((e) => e.name);
+}
+
+// Each table's approx_rows in `scope`, or null when its engine never estimates
+// one (no request is sent). Counts are a hint: a failure gives an empty map.
+export async function readTableCounts(scope: SchemaRef): Promise<Map<string, number> | null> {
+  if (noCountsFor(scope.source)) return null;
+  try {
+    const { counts } = await api<CountsResponse>(`/table-counts${scopeQuery(scope)}`);
+    return new Map(counts.map((c) => [c.table, c.approx_rows]));
+  } catch (e) {
+    console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
+    return new Map();
+  }
 }
 
 // The row count the table's chip shows (`~208`), for places that list tables.

@@ -104,7 +104,7 @@ func querySource(q url.Values) *string {
 
 type SourceEntry struct {
 	Name   string `json:"name"`
-	Engine string `json:"engine"`
+	Engine Engine `json:"engine"`
 }
 
 type SchemaEntry struct {

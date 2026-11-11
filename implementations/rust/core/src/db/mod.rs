@@ -373,6 +373,7 @@ impl ProblemDetails {
 /// (`spec/protocol.md` §5.8). MariaDB is `Mysql`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Engine {
     Postgres,
     Mysql,

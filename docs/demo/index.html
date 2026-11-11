@@ -2006,7 +2006,7 @@ function formatClock(at) {
 function formatApproxCount(n) {
   return n == null || n < 0 ? "?" : `~${n}`;
 }
-var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no estimate yet (table not yet analyzed)";
+var APPROX_COUNT_TITLE = "~ = approximate, from the backend's own statistics, not a live count; ? = no estimate available (e.g. table not yet analyzed)";
 function countsNeverEstimated(engine) {
   return engine === "sqlite";
 }
@@ -4457,19 +4457,11 @@ async function loadTables({
   syncGridLock();
   setStatus("loading tables\u2026");
   const token = ++loadTablesToken;
-  const noCounts = noCountsFor(state.scope.source);
-  const [{ tables }, { counts: counts2 }] = await Promise.all([
+  const [{ tables }, counts2] = await Promise.all([
     api(`/tables${scopeQuery(scopeRef())}`),
-    noCounts ? { counts: [] } : (
-      // Counts are a hint; a failure leaves the chips without them, not missing.
-      api(`/table-counts${scopeQuery(scopeRef())}`).catch((e) => {
-        console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
-        return { counts: [] };
-      })
-    )
+    readTableCounts(scopeRef())
   ]);
   if (token !== loadTablesToken) return "superseded";
-  const countMap = Object.fromEntries(counts2.map((c) => [c.table, c.approx_rows]));
   const ul = $("tables");
   ul.replaceChildren();
   tableEntries = [];
@@ -4479,8 +4471,8 @@ async function loadTables({
     const chip = qs(li, "a");
     qs(li, ".chip-name").textContent = t.name;
     const countEl = qs(li, ".count");
-    if (!noCounts) {
-      countEl.textContent = formatApproxCount(countMap[t.name]);
+    if (counts2) {
+      countEl.textContent = formatApproxCount(counts2.get(t.name));
       chipCounts.set(t.name, countEl.textContent);
       countEl.title = APPROX_COUNT_TITLE;
     }
@@ -4514,6 +4506,16 @@ function chipsListScopeInView() {
 }
 function listedTableNames() {
   return tableEntries.map((e) => e.name);
+}
+async function readTableCounts(scope2) {
+  if (noCountsFor(scope2.source)) return null;
+  try {
+    const { counts: counts2 } = await api(`/table-counts${scopeQuery(scope2)}`);
+    return new Map(counts2.map((c) => [c.table, c.approx_rows]));
+  } catch (e) {
+    console.warn("ashurbanipal: /table-counts failed; showing no counts", e);
+    return /* @__PURE__ */ new Map();
+  }
 }
 function tableChipCount(name) {
   return chipCounts.get(name) ?? "";
@@ -4649,19 +4651,16 @@ function tablesIn(scope2) {
   let read2 = schemaTables.get(key);
   if (!read2) {
     const started = generation;
-    const noCounts = noCountsFor(scope2.source);
-    read2 = Promise.all([
-      api(`/tables${key}`),
-      noCounts ? { counts: [] } : api(`/table-counts${key}`).catch(() => ({ counts: [] }))
-    ]).then(([{ tables }, { counts: counts2 }]) => {
-      if (started !== generation) return;
-      const countOf = new Map(counts2.map((c) => [c.table, c.approx_rows]));
-      schemaTablesRead.set(
-        key,
-        tables.map((t) => ({ name: t.name, count: noCounts ? "" : formatApproxCount(countOf.get(t.name)) }))
-      );
-      version++;
-    });
+    read2 = Promise.all([api(`/tables${key}`), readTableCounts(scope2)]).then(
+      ([{ tables }, counts2]) => {
+        if (started !== generation) return;
+        schemaTablesRead.set(
+          key,
+          tables.map((t) => ({ name: t.name, count: counts2 ? formatApproxCount(counts2.get(t.name)) : "" }))
+        );
+        version++;
+      }
+    );
     schemaTables.set(key, read2);
     read2.catch((e) => {
       if (started !== generation) return;
@@ -7234,6 +7233,12 @@ function sortedColumn() {
   return state.sort === null ? void 0 : columnsInView.find((c) => columnKey(c) === state.sort);
 }
 var rowsMeta = "";
+function setRowsMeta(text, title) {
+  rowsMeta = text;
+  writeRowMeta();
+  if (title === null) $("row-meta").removeAttribute("title");
+  else $("row-meta").title = title;
+}
 function writeRowMeta() {
   const { shown, total } = counts;
   $("row-meta").textContent = `${rowsMeta} \xB7 ${shown < total ? `${shown} of ${total}` : total} columns`;
@@ -7376,22 +7381,13 @@ function updatePager(data) {
   $("prev").disabled = state.offset === 0;
   if (joinInView()) {
     $("page").textContent = `page ${page} \xB7 ${data.has_more ? "more rows available" : "last page"}`;
-    rowsMeta = ` \xB7 ${data.rows.length}${data.has_more ? "+" : ""} rows`;
-    writeRowMeta();
-    $("row-meta").removeAttribute("title");
+    setRowsMeta(` \xB7 ${data.rows.length}${data.has_more ? "+" : ""} rows`, null);
     $("next").disabled = !data.has_more;
     return;
   }
   $("page").textContent = `page ${page}`;
-  if (noCountsFor(state.scope.source)) {
-    rowsMeta = "";
-    writeRowMeta();
-    $("row-meta").removeAttribute("title");
-  } else {
-    rowsMeta = ` \xB7 ${formatApproxCount(data.total_approx ?? -1)} rows`;
-    writeRowMeta();
-    $("row-meta").title = APPROX_COUNT_TITLE;
-  }
+  if (noCountsFor(state.scope.source)) setRowsMeta("", null);
+  else setRowsMeta(` \xB7 ${formatApproxCount(data.total_approx ?? -1)} rows`, APPROX_COUNT_TITLE);
   $("next").disabled = data.rows.length < state.limit;
 }
 

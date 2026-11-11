@@ -21,7 +21,7 @@ export function formatApproxCount(n: number | null | undefined): string {
 }
 export const APPROX_COUNT_TITLE =
   "~ = approximate, from the backend's own statistics, not a live count; " +
-  "? = no estimate yet (table not yet analyzed)";
+  "? = no estimate available (e.g. table not yet analyzed)";
 
 // The page's only engine check (spec/protocol.md §5.8 limits what the engine
 // may decide): SQLite keeps no row estimate, so no count is shown at all.

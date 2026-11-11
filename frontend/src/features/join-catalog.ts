@@ -1,11 +1,11 @@
 import { ApiError, api } from "../core/api.js";
-import { noCountsFor, refFor, refInScope, schemaRefFor, state } from "../core/state.js";
-import type { Column, CountsResponse, SchemaRef, TableListEntry, TableRef, ViewData } from "../core/types.js";
+import { refFor, refInScope, schemaRefFor, state } from "../core/state.js";
+import type { Column, SchemaRef, TableListEntry, TableRef, ViewData } from "../core/types.js";
 import { formatApproxCount } from "../lib/format.js";
 import type { JoinCatalog } from "../lib/join-dsl.js";
 import { refKey, scopeQuery, tableParams } from "../lib/table-ref.js";
 import { tableStructure } from "./structure.js";
-import { listedTableNames, tableChipCount } from "./table-chips.js";
+import { listedTableNames, readTableCounts, tableChipCount } from "./table-chips.js";
 
 // The page learns a table's columns (names, types, keys) from the first row of
 // its data; the table listing carries only names. Cached per table, failures
@@ -91,21 +91,16 @@ export function tablesIn(scope: SchemaRef): Promise<void> {
   let read = schemaTables.get(key);
   if (!read) {
     const started = generation;
-    const noCounts = noCountsFor(scope.source);
-    read = Promise.all([
-      api<{ tables: TableListEntry[] }>(`/tables${key}`),
-      noCounts
-        ? { counts: [] }
-        : api<CountsResponse>(`/table-counts${key}`).catch((): CountsResponse => ({ counts: [] })),
-    ]).then(([{ tables }, { counts }]) => {
-      if (started !== generation) return;
-      const countOf = new Map(counts.map((c) => [c.table, c.approx_rows]));
-      schemaTablesRead.set(
-        key,
-        tables.map((t) => ({ name: t.name, count: noCounts ? "" : formatApproxCount(countOf.get(t.name)) })),
-      );
-      version++;
-    });
+    read = Promise.all([api<{ tables: TableListEntry[] }>(`/tables${key}`), readTableCounts(scope)]).then(
+      ([{ tables }, counts]) => {
+        if (started !== generation) return;
+        schemaTablesRead.set(
+          key,
+          tables.map((t) => ({ name: t.name, count: counts ? formatApproxCount(counts.get(t.name)) : "" })),
+        );
+        version++;
+      },
+    );
     schemaTables.set(key, read);
     read.catch((e: unknown) => {
       if (started !== generation) return;

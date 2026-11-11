@@ -103,7 +103,7 @@ class AshurbanipalController(
 
     @GetMapping("/api/sources")
     fun listSources(): ResponseEntity<SourcesResponse> =
-        apiOk(SourcesResponse(dbSources.map { (name, source) -> SourceEntry(name, source.engine) }, defaultSourceName()))
+        apiOk(SourcesResponse(dbSources.map { (name, source) -> SourceEntry(name, source.engine.wire) }, defaultSourceName()))
 
     @GetMapping("/api/schemas")
     fun listSchemas(@RequestParam(required = false) source: String?): ResponseEntity<SchemasResponse> =

@@ -37,7 +37,7 @@ internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String,
 
 /** Postgres [DbSource]; queryTimeout bounds catalog and data operations (`spec/protocol.md` §6). */
 class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val filterValidator: FilterValidator) : DbSource {
-    override val engine = "postgres"
+    override val engine = Engine.POSTGRES
 
     private val jdbcTemplate = JdbcTemplate(dataSource).apply {
         queryTimeout = queryTimeoutSecs

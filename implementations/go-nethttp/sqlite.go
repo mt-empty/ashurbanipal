@@ -385,7 +385,7 @@ func sqliteBuildWhereClause(conditions []Condition, columnNames []string) (strin
 	return " where " + string(clause), values, nil
 }
 
-func (c *SQLiteSource) Engine() string { return "sqlite" }
+func (c *SQLiteSource) Engine() Engine { return EngineSQLite }
 
 func (c *SQLiteSource) ListSchemas(ctx context.Context) (SchemaListing, error) {
 	def := onlySchema
