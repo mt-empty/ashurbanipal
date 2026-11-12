@@ -2,7 +2,7 @@
 
 > **Status:** OPEN · **Area:** ports
 
-**Where logged:** `design.md` §4 (`GET /siblings`), §9 (deferred, with a
+**Where logged:** `design.md` §4.1 (siblings), §9 (deferred, with a
 concrete trigger).
 
 **What it is:** `/siblings` currently does parallel per-request HTTP health

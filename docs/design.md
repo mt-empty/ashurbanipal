@@ -120,13 +120,13 @@ Two components, same as the original concept:
     at its ends rather than fetching another page.
   - *API reference for AI agents* — a fixed "?" button in the corner opens
     a native `<dialog>` (same chrome as the payload viewer) showing a
-    static, hand-maintained JSON document describing every route in §4
+    static, hand-maintained JSON document describing every route in `spec/protocol.md`
     (method, params, an example request/response) plus the filter AST
     wire format and its limits (`spec/protocol.md` §5.4.2), with a copy
     button. Deliberately not its own endpoint — the
     doc doesn't vary per request, so it's meant for a human to copy and
     paste into an agent's context, not to be machine-fetched. Lives in the
-    frontend JS; route descriptions are kept in sync with §4 by hand, while
+    frontend JS; route descriptions are kept in sync with the spec by hand, while
     its operator list and filter limits are held to `spec/openapi.yaml` by
     `tools/check-frontend-api-reference.sh`.
 - **Navigation and filtering affordances**:
@@ -286,7 +286,7 @@ Two components, same as the original concept:
 - Does not open its own DB connection. Takes a `DbSource` (see §5) backed by
   the host's existing `sqlx::PgPool`.
 - Stateless beyond the injected config and pool — no background tasks, no
-  caches (health check polling is per-request; see §4's `GET /siblings`).
+  caches (health check polling is per-request; see §4.1).
 
 ### 3.3 Routes
 
@@ -307,176 +307,43 @@ its full path space and the host doesn't need to pick a mount point.
 
 ## 4. API contract
 
-> **Now normative elsewhere:** the endpoint contract lives in
-> `spec/protocol.md`. `spec/openapi.yaml` is hand-maintained prose, same
-> as `spec/protocol.md` — not generated from any implementation's own
-> route/type annotations. Every implementation, Rust included, implements
-> against both as a fixed target; none of them generates either file.
-> Where this section and the spec disagree, the spec wins; this section
-> stays as rationale and background. See §4.2 for how the schema is kept
-> binding on every implementation, and for the tradeoff hand-maintaining
-> it (rather than generating it) reintroduces.
+The contract lives in `spec/protocol.md` (normative) and
+`spec/openapi.yaml` (shapes). Both are hand-maintained; no implementation
+generates either, and every implementation, Rust included, builds against
+them as a fixed target. This section does not restate the routes. It keeps
+only the reasons behind their shape; §4.2 covers how the contract is kept
+binding.
 
-Paths below are shorthand for the full routes in §3.3 (e.g. `/tables` means
-`/__ashurbanipal/api/tables`).
+### 4.1 Why the routes look the way they do
 
-### `GET /sources`
-
-Lists the source names selectable as the `source` param on every other
-route — the same allow-list/default-resolution shape as `/schemas`, one
-level above it: `source` picks which registered `DbSource` (which live
-connection) an operation targets, and `schema` then resolves within
-whichever source that was. A host registers sources by name at
-construction time (a `Vec<(String, DbSource)>` in the Rust reference, not
-a `Config` field — see `implementations/rust/axum/src/routes.rs`'s
-`AppState`), never inferred from the database itself.
-
-```json
-{ "sources": [{ "name": "primary", "engine": "postgres" }, { "name": "reporting", "engine": "sqlite" }], "default": "primary" }
-```
-
-`default` is the source an absent `source` param resolves to, so a client
-never infers it from list order. Each entry also names its `engine`,
-which the source's `DbSource` reports, so the host configures nothing for
-it. The page reads it only for SQL text the user copies, for labels, and
-to know that a SQLite table never has a count; behaviour a route can state
-itself stays a reported field (`spec/protocol.md` §5.8). The engine was
-once withheld, but column `type` spellings already gave it away and the
-host, not the API, decides who can reach the UI. Sources registered
-together may use different backends (e.g. Postgres and SQLite in one
-process) in every port; in Rust, through `Source` (§5).
-
-A single-source deployment still returns exactly one entry — same
-degrade-gracefully shape as `/schemas`, and the frontend's source
-selector (`frontend/src/features/scope-select.ts`'s `loadSources`) hides itself
-entirely in that case, byte-identical wire behavior to before this
-feature existed.
-
-### `GET /schemas`
-
-Lists the schema names selectable as the `schema` param on every other
-route — the live allow-list those routes validate an explicit `schema`
-against, and (per `spec/protocol.md` §5.7) exactly the set the implicit
-default-resolution case could ever resolve to, so the two paths never
-diverge on what counts as valid.
-
-```json
-{ "schemas": [{ "name": "public" }, { "name": "reporting" }], "default": "public" }
-```
-
-`default` (`spec/protocol.md` §5.7) lets the UI open the server's own
-default schema instead of guessing one; `docs/adapter-decisions.md` §1
-has where each engine reads it from.
-
-Excludes Postgres's own system/internal namespaces (`pg_catalog`,
-`information_schema`, `pg_toast`/`pg_temp`) and any schema the connected
-role lacks access to. A single-schema deployment still returns exactly
-one entry — the frontend treats a one-element list the same as "no schema
-selector needed" (see `frontend/src/features/scope-select.ts`'s `loadSchemas`).
-
-### `GET /tables`
-
-Returns table names in the resolved schema (`schema` param, `spec/protocol.md`
-§1), validated against
-`information_schema` at request time (also doubles as the allow-list used by
-`/tables/data`). `comment` is each table's `COMMENT ON TABLE` text and is
-omitted when the table has none.
-
-```json
-{
-  "tables": [
-    { "name": "users", "comment": "Registered accounts." },
-    { "name": "sessions" },
-    { "name": "orders" }
-  ]
-}
-```
-
-### `GET /table-counts`
-
-```json
-{ "counts": [{ "table": "users", "approx_rows": 108234 }, ...] }
-```
-
-Backed by `pg_class.reltuples` — approximate, not `COUNT(*)`, to stay cheap
-on large tables.
-
-### `GET /tables/data`
-
-Query params:
-
-| Param     | Required | Notes                                                        |
-|-----------|----------|---------------------------------------------------------------|
-| `table`   | yes      | Must match an entry from `/tables` (schema allow-list).       |
-| `filter`  | no       | Filter DSL, see §4.1.                                         |
-| `limit`   | no       | Default 50, max 100 (hard cap, server-enforced).               |
-| `offset`  | no       | Default 0.                                                     |
-| `sort`    | no       | Single column name.                                            |
-| `order`   | no       | `asc` \| `desc`, default `asc`.                                |
-
-```json
-{
-  "columns": [
-    { "name": "id", "type": "uuid", "class": "uuid", "key": "pk" },
-    { "name": "user_id", "type": "uuid", "class": "uuid", "key": "fk", "references": { "table": "users", "column": "id" } },
-    { "name": "status", "type": "order_status", "class": "enum", "comment": "Order lifecycle state." },
-    { "name": "created_at", "type": "timestamp with time zone", "class": "temporal" }
-  ],
-  "rows": [ { "id": "...", "user_id": "...", "status": "...", "created_at": "..." } ],
-  "total_approx": 108234
-}
-```
-
-Each column entry is `{name, type, class}` plus optional metadata, all schema-catalog
-reads (never data queries, same cost class as `/table-counts`): `key`
-(`"pk"` \| `"fk"`) and, for `"fk"`, `references` (the target table/column) —
-sourced from `information_schema.table_constraints`/`key_column_usage`;
-composite foreign keys are omitted rather than risk mislabeling which
-referencing column pairs with which referenced column. `comment` is that
-column's `COMMENT ON COLUMN` text, omitted when absent. None of this is used
-to build SQL — it's informational metadata for the frontend only (§3.1).
-
-Server enforces:
-- `limit` clamped to `[1, 100]`.
-- `table` validated against the live schema (not just the request-supplied
-  string) before being interpolated into SQL — never trusted raw.
-- Statement timeout applied per query (target ~5s) so a pathological filter
-  can't hold a connection from the host's pool indefinitely.
-
-#### 4.1 Filter DSL
-
-`[NOT] column OP value [AND|OR [NOT] column OP value ...]`
-
-Operators: `=`, `!=`, `>`, `>=`, `<`, `<=`, `LIKE`, `ILIKE`, `IS NULL`,
-`IS NOT NULL`.
-
-- Operators are allow-listed, not interpolated as arbitrary SQL.
-- Values are always parameterized, never string-concatenated. Bare values
-  run to the next whitespace; values containing spaces/quotes/keywords are
-  single-quoted with SQL-style `''` escaping.
-- Columns are cast to `text` before comparison, so the same DSL works
-  uniformly across `uuid`, `timestamptz`, `jsonb`, etc.
-- Flat `AND`/`OR` chain; `AND` binds tighter than `OR` (SQL convention).
-  `NOT` is a prefix on a single condition only (`NOT status = active`),
-  never a general boolean operator over a compound expression — so it
-  doesn't reopen parentheses/nesting, which stay out of scope, same as
-  cross-table conditions.
-
-Full grammar (EBNF), semantics, and the parser's test table live in
-`spec/filter-dsl.md`. The parser is hand-written (RSQL-inspired shape, no
-parser dependency) and is a **frontend** concern: `dbviewer.html` parses
-the DSL text client-side and submits the resulting JSON AST as the
-`filter` param; the server contract is defined purely in terms of that
-AST (`spec/protocol.md` §5.4.2). (Historically the parser was built
-server-side, in the Rust crate's `filter.rs`, last in the server build
-order.)
-
-Example:
-
-```
-status = completed AND created_at > 2016-01-01
-session_id = 18d852af-77ae-4a95-9f7d-e37a77fda2fd
-```
+- **Catalog reads over data reads.** Row counts come from the planner's
+  estimate (`pg_class.reltuples` on Postgres), and a column's common values
+  from planner statistics (`pg_stats`), never `COUNT(*)` or
+  `SELECT DISTINCT`. Both stay cheap on a large table, at the cost of being
+  approximate or empty. Common values are fetched for one column on demand,
+  not folded into the row response, because they are only needed when a
+  column's menu opens.
+- **One allow-list per level.** `/sources`, `/schemas` and `/tables` each
+  return the live set that every other route checks its `source`,
+  `schema` or `table` against, and the implicit default resolves within
+  that same set, so the explicit and default paths can never disagree.
+  Sources are registered by the host at construction time, never read from
+  the database. Each source reports its engine: column type spellings
+  already reveal it, and the host decides who can reach the UI.
+- **Column metadata is informational.** Keys, references and comments are
+  catalog reads that the frontend uses for links and labels; none of them
+  is used to build SQL. A composite foreign key is left out rather than
+  risk pairing the wrong columns.
+- **The filter is parsed in the browser.** The user types a DSL
+  (`spec/filter-dsl.md`); the frontend parses it and sends a JSON AST, and
+  the server validates only that AST (`spec/protocol.md` §5.4.2). Values
+  are always bound parameters and operators come from a fixed table.
+  Comparing the column's text cast keeps one filter working across every
+  type, which is why range operators compare as text. There is no nesting.
+- **Siblings are checked on request.** `/siblings` health-checks the other
+  instances in parallel when it is called, with no background polling or
+  server-side cache (§9 has when to revisit). The frontend polls it only
+  while the pop-up is open and the tab is visible.
 
 ### 4.2 Guaranteeing the contract across implementations
 
@@ -510,14 +377,14 @@ can't:
    `spec/openapi.yaml` and asserting every response actually matches its
    documented type, nullability, and status code. This is what makes the
    schema *binding* on an implementation rather than merely descriptive:
-   returning a JSON number for a numeric column (violating §4's
-   all-values-as-strings rule, §5.4.3 of `spec/protocol.md`) or omitting
+   returning a JSON number for a numeric column (violating the
+   all-values-as-strings rule, `spec/protocol.md` §5.4.3) or omitting
    a required field fails CI automatically — the fuzzer explores the
    schema's cases, not whatever a human thought to hand-write.
 3. **Behavior conformance — golden fixtures over seeded data.** Schema
    fuzzing only proves a response has the right *shape*; it can't catch
    wrong *logic* — AND/OR precedence inverted, `total_approx` reacting to
-   `filter` when §4's contract says it must not, off-by-one pagination.
+   `filter` when the contract says it must not, off-by-one pagination.
    For that, the conformance kit (`conformance/`, `spec/fixtures/`)
    replays fixed request → expected-response pairs against seeded known
    data, comparing *decoded values*, per field, against a rule chosen for
@@ -560,66 +427,11 @@ and status code while getting the actual query logic wrong; (3) without
 A "conformant" listing in `PORTING.md` requires a green run of all three,
 not just the behavioral suite.
 
-### `GET /tables/common-values`
-
-Query params: `table`, `column` — both validated against the live schema
-allow-list, same as `/tables/data`.
-
-```json
-{ "values": [{ "value": "active", "freq": 0.62 }, { "value": "closed", "freq": 0.31 }] }
-```
-
-Backed by `pg_stats.most_common_vals`/`most_common_freqs` (populated by
-`ANALYZE`) — a catalog-only read, never `SELECT DISTINCT`, matching the same
-"approximate and cheap over exact and expensive" philosophy as
-`/table-counts`. Empty when the column has no planner statistics yet (never
-an error). Fetched on demand for one column at a time, not folded into
-`/tables/data`'s response — it's only needed when a user opens that column's
-dropdown.
-
-### `GET /siblings`
-
-```json
-{
-  "instance": { "name": "orders", "label": "dev" },
-  "siblings": [
-    { "name": "orders", "label": "dev", "base_url": "https://orders-dev.internal.vpn/__ashurbanipal", "healthy": true },
-    { "name": "orders", "label": "int", "base_url": "https://orders-int.internal.vpn/__ashurbanipal", "healthy": true },
-    { "name": "billing", "label": "dev", "base_url": "https://billing-dev.internal.vpn/__ashurbanipal", "healthy": false }
-  ]
-}
-```
-
-`instance` and `label` are optional and opaque (§7 has the config). The
-entry matching `instance` is this instance itself: it stays in place, so
-every instance sharing one list shows the same grid, and is never
-health-checked. Sibling config is never rejected: an incomplete
-`instance` is ignored, an empty label dropped and duplicates kept, each
-reported in an optional `warnings` array that the pop-up shows above the
-grid.
-
-The backend performs the other health checks (parallel HTTP GET to each
-sibling's configured health path) synchronously when this endpoint is
-called. The frontend fetches `/siblings` once at page load, then only while
-the Other services pop-up is open and the tab is visible — every ~15s, and
-never when the last result is younger than that. With the pop-up closed,
-the only further fetches are retries after a failure, backing off from 15s
-to 60s until one succeeds. No server-side background polling or caching in
-v1 (see §9 for revisit criteria if this gets expensive).
-
 ## 5. DB integration
 
-```rust
-pub trait DbSource: Send + Sync + 'static {
-    async fn list_schemas(&self) -> Result<Vec<String>, DbError>;
-    async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<TableInfo>, DbError>;
-    async fn table_counts(&self, schema: Option<&str>) -> Result<Vec<(String, i64)>, DbError>;
-    async fn query_table(&self, schema: Option<&str>, table: &str, opts: QueryOpts) -> Result<TableData, DbError>;
-    async fn common_values(&self, schema: Option<&str>, table: &str, column: &str) -> Result<Vec<(String, f32)>, DbError>;
-}
-```
-
-Native async-fn-in-trait — no `async_trait` macro. The router is generic
+`DbSource` (`implementations/rust/core/src/db/mod.rs`) is the only seam
+to the database; each method returns `impl Future<Output = …> + Send` — no
+`async_trait` macro. The router is generic
 over `S: DbSource`, one concrete type per `router()` call. To mix backends
 in one router, a host wraps each source in `Source::new(..)`
 (`core/src/db/source.rs`) and passes `Vec<(String, Source)>`. `Source` is
@@ -642,8 +454,8 @@ Single-backend hosts never box anything.
   the first statement in that operation's transaction, so every later
   query in the same transaction reuses the same value even under pool
   session drift (`implementations/rust/axum/tests/schema_isolation.rs`).
-- `TableInfo` (§4's `/tables` shape: `name` + optional `comment`) and
-  `common_values` (§4's `/tables/common-values`) both read schema catalogs
+- `TableInfo` (the `/tables` entry: `name` + optional `comment`) and
+  `common_values` (`/tables/common-values`) both read schema catalogs
   (`pg_description`/`pg_stats`), never table data beyond what `query_table`
   itself fetches.
 

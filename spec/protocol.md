@@ -1,6 +1,7 @@
 # Ashurbanipal Protocol — v1
 
-Status: normative, but a work in progress — subject to change at any time.
+Status: normative. It changes only under §7's versioning policy, and every
+change is listed in `spec/CHANGELOG.md`.
 Companions: `spec/openapi.yaml` (machine-readable shapes),
 `spec/filter-dsl.md` (the frontend's filter grammar), `docs/design.md`
 (rationale and history — non-normative), `docs/adapter-decisions.md`
@@ -9,7 +10,7 @@ without prescribing how a specific database engine satisfies it —
 non-normative, but read it before porting to a non-Postgres engine).
 
 This document defines the HTTP contract every Ashurbanipal implementation
-— the Rust reference and any port — must satisfy. The shared frontend
+must satisfy; no implementation is the reference. The shared frontend
 (`dbviewer.html`) is written against exactly this contract and nothing
 else.
 
@@ -18,7 +19,7 @@ else.
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are to be
 interpreted as described in RFC 2119.
 
-- **Implementation** — a server (the Rust reference or a port) exposing
+- **Implementation** — a server exposing
   the routes in §5 under a mount point.
 - **Mount** — the URL path prefix under which an implementation serves the
   UI and API (see §3).
@@ -101,8 +102,8 @@ interpreted as described in RFC 2119.
 
 - The UI is served at `{mount}`; the ten API routes live at
   `{mount}/api/...`.
-- `{mount}` is implementation-defined. `/__ashurbanipal` is the Rust
-  implementation's default, not a requirement.
+- `{mount}` is implementation-defined. `/__ashurbanipal` is the
+  conventional default, not a requirement.
 - The frontend derives its API base from its own URL
   (`location.pathname + "/api"`), so an implementation MAY serve the
   unmodified frontend artifact at any mount, including behind a
@@ -171,8 +172,8 @@ Response:
 - `name` — the table name.
 - `comment` — the table's `COMMENT ON TABLE` text; MUST be omitted when
   the table has none.
-- Tables SHOULD be returned in a stable order (the Rust implementation
-  sorts by name).
+- Tables SHOULD be returned in a stable order, e.g. by name; collation
+  unspecified.
 - SHOULD exclude any table the connected role cannot read, so nothing
   listed here would be rejected by §5.4's table check — or fail mid-query
   — for lack of privilege. On an engine that can't cheaply express this
@@ -338,7 +339,7 @@ Structural rules (violations → 400):
   MUST NOT produce a 5xx. The same holds for `join` (§5.11.1).
 - Implementations MUST bound the byte length of the JSON-encoded filter
   parameter and reject oversize filters with 400, never a truncated
-  query. The Rust implementation's bound is 8192 bytes on the URL-decoded JSON text —
+  query. The suggested bound is 8192 bytes on the URL-decoded JSON text,
   derived by measuring the JSON-over-DSL inflation of every valid case in
   `spec/fixtures/parser-tests.json` (worst case 5.67x, so the DSL era's
   1024 bytes of expressiveness needs ~5803 JSON bytes; 8192 is the
@@ -440,8 +441,8 @@ Response:
   MUST yield an empty `values` list, not an error.
 - `freq` is the fraction of rows (0–1], most frequent first.
 - `value` strings SHOULD match the §5.4.3 rendering of the same data
-  (the Rust implementation normalizes boolean `t`/`f` from the stats array's text
-  form to `true`/`false` for this reason), so a value can round-trip
+  (so a boolean read as `t`/`f` from the stats array's text form is
+  normalized to `true`/`false`), so a value can round-trip
   into an equality filter.
 
 ### 5.6 `GET {mount}/api/siblings`
@@ -538,8 +539,8 @@ Response:
   lack of privilege.
 - Engines with no schema concept above a single database (e.g. SQLite)
   MUST return exactly one entry — see `docs/adapter-decisions.md`.
-- Schemas SHOULD be returned in a stable order (the Rust implementation
-  sorts by name).
+- Schemas SHOULD be returned in a stable order, e.g. by name; collation
+  unspecified.
 
 ### 5.8 `GET {mount}/api/sources`
 
