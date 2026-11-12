@@ -314,7 +314,8 @@ export class MySqlSource implements DbSource {
     return rows.map((r) => r.column_name as string);
   }
 
-  // MySQL's PRIMARY name repeats, so join on table name; omit composite FKs
+  // key_column_usage alone: MariaDB hides table_constraints from a SELECT-only
+  // role. A primary key is always named PRIMARY; composite FKs are omitted
   // (`spec/protocol.md` §5.4.1).
   private async keyMetadataInTx(
     conn: PoolConnection,
@@ -326,18 +327,15 @@ export class MySqlSource implements DbSource {
     const sql = timedSelect(
       variant,
       timeoutMs,
-      "tc.constraint_name as constraint_name, tc.constraint_type as constraint_type, " +
+      "kcu.constraint_name as constraint_name, " +
+        "case when kcu.referenced_table_name is not null then 'FOREIGN KEY' else 'PRIMARY KEY' end as constraint_type, " +
         "kcu.column_name as column_name, " +
         "kcu.referenced_table_schema as referenced_table_schema, " +
         "kcu.referenced_table_name as referenced_table_name, " +
         "kcu.referenced_column_name as referenced_column_name " +
-        "from information_schema.table_constraints tc " +
-        "join information_schema.key_column_usage kcu " +
-        "on kcu.constraint_name = tc.constraint_name " +
-        "and kcu.table_schema = tc.table_schema " +
-        "and kcu.table_name = tc.table_name " +
-        "where tc.table_schema = ? and tc.table_name = ? " +
-        "and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
+        "from information_schema.key_column_usage kcu " +
+        "where kcu.table_schema = ? and kcu.table_name = ? " +
+        "and (kcu.constraint_name = 'PRIMARY' or kcu.referenced_table_name is not null)",
     );
     const rows = await queryRows(conn, sql, [schema, table]);
 

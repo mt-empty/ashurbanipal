@@ -260,22 +260,22 @@ class MySqlSource(DbSource):
     def _key_metadata(
         self, cur: Cursor, variant: str, schema: str, table: str, timeout_secs: int
     ) -> tuple[set[str], dict[str, ColumnRef]]:
-        """Join MySQL's repeating PRIMARY name on table name (`spec/protocol.md` §5.4.1)."""
+        """Read key_column_usage alone: MariaDB hides table_constraints from a
+        SELECT-only role. A primary key is always named PRIMARY; composite FKs
+        are omitted (`spec/protocol.md` §5.4.1)."""
         cur.execute(
             _timed_select(
                 variant,
                 timeout_secs,
-                "tc.constraint_name, tc.constraint_type, kcu.column_name, "
-                "       kcu.referenced_table_schema, kcu.referenced_table_name, "
+                "kcu.constraint_name, "
+                "       case when kcu.referenced_table_name is not null "
+                "            then 'FOREIGN KEY' else 'PRIMARY KEY' end, "
+                "       kcu.column_name, kcu.referenced_table_schema, kcu.referenced_table_name, "
                 "       kcu.referenced_column_name "
-                "from information_schema.table_constraints tc "
-                "join information_schema.key_column_usage kcu "
-                "  on kcu.constraint_name = tc.constraint_name "
-                " and kcu.table_schema = tc.table_schema "
-                " and kcu.table_name = tc.table_name "
-                "where tc.table_schema = %s "
-                "  and tc.table_name = %s "
-                "  and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
+                "from information_schema.key_column_usage kcu "
+                "where kcu.table_schema = %s "
+                "  and kcu.table_name = %s "
+                "  and (kcu.constraint_name = 'PRIMARY' or kcu.referenced_table_name is not null)",
             ),
             (schema, table),
         )

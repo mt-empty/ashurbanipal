@@ -199,67 +199,47 @@ export class PostgresSource implements DbSource {
     return rows.map((r) => r.column_name);
   }
 
-  // Use constraint_schema for cross-schema FKs; omit composites
-  // (spec/protocol.md §5.4.1).
+  // pg_constraint has no privilege filter, so a role that doesn't own the
+  // table still sees its keys. Composite foreign keys, and ones whose target
+  // the role can't open, are left out (spec/protocol.md §5.4.1).
   private async keyMetadata(
     client: PoolClient,
     schema: string,
-    table: string,
+    oid: number,
   ): Promise<{ pkColumns: Set<string>; fkColumns: Map<string, ColumnRef> }> {
     const { rows } = await client.query<{
-      constraint_name: string;
-      constraint_type: string;
+      is_pk: boolean;
       column_name: string;
       ref_schema: string | null;
       ref_table: string | null;
       ref_column: string | null;
     }>(
-      `select tc.constraint_name, tc.constraint_type, kcu.column_name,
-              ccu.table_schema as ref_schema, ccu.table_name as ref_table, ccu.column_name as ref_column
-       from information_schema.table_constraints tc
-       join information_schema.key_column_usage kcu
-         on kcu.constraint_name = tc.constraint_name
-        and kcu.table_schema = tc.table_schema
-       left join information_schema.constraint_column_usage ccu
-         on ccu.constraint_name = tc.constraint_name
-        and ccu.constraint_schema = tc.table_schema
-        and tc.constraint_type = 'FOREIGN KEY'
-       where tc.table_schema = $1
-         and tc.table_name = $2
-         and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')`,
-      [schema, table],
+      `select con.contype = 'p' as is_pk, a.attname::text as column_name,
+              rn.nspname::text as ref_schema, rc.relname::text as ref_table,
+              ra.attname::text as ref_column
+       from pg_constraint con
+       cross join lateral unnest(con.conkey) k(attnum)
+       join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum
+       left join pg_class rc on con.contype = 'f' and rc.oid = con.confrelid
+       left join pg_namespace rn on rn.oid = rc.relnamespace
+       left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1]
+       where con.conrelid = $1
+         and (con.contype = 'p'
+              or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r'
+                  and has_schema_privilege(rc.relnamespace, 'USAGE') and has_table_privilege(rc.oid, 'SELECT')))`,
+      [oid],
     );
 
     const pkColumns = new Set<string>();
-    const fkCandidates = new Map<
-      string,
-      { column: string; refSchema: string | null; refTable: string | null; refColumn: string | null }[]
-    >();
-    for (const row of rows) {
-      if (row.constraint_type === "PRIMARY KEY") {
-        pkColumns.add(row.column_name);
-      } else if (row.constraint_type === "FOREIGN KEY") {
-        const list = fkCandidates.get(row.constraint_name) ?? [];
-        list.push({
-          column: row.column_name,
-          refSchema: row.ref_schema,
-          refTable: row.ref_table,
-          refColumn: row.ref_column,
-        });
-        fkCandidates.set(row.constraint_name, list);
-      }
-    }
-
     const fkColumns = new Map<string, ColumnRef>();
-    for (const members of fkCandidates.values()) {
-      const distinctColumns = new Set(members.map((m) => m.column));
-      if (distinctColumns.size !== 1) continue; // composite FK: omit entirely
-      const first = members[0];
-      if (first.refSchema && first.refTable && first.refColumn) {
+    for (const row of rows) {
+      if (row.is_pk) {
+        pkColumns.add(row.column_name);
+      } else if (row.ref_schema && row.ref_table && row.ref_column) {
         // Same-schema references omit `schema` on the wire (spec/protocol.md §5.4.1).
-        const ref: ColumnRef = { table: first.refTable, column: first.refColumn };
-        if (first.refSchema !== schema) ref.schema = first.refSchema;
-        fkColumns.set(first.column, ref);
+        const ref: ColumnRef = { table: row.ref_table, column: row.ref_column };
+        if (row.ref_schema !== schema) ref.schema = row.ref_schema;
+        fkColumns.set(row.column_name, ref);
       }
     }
     return { pkColumns, fkColumns };
@@ -342,7 +322,7 @@ export class PostgresSource implements DbSource {
        order by c.ordinal_position`,
       [schema, table, oid],
     );
-    const { pkColumns, fkColumns } = await this.keyMetadata(client, schema, table);
+    const { pkColumns, fkColumns } = await this.keyMetadata(client, schema, oid);
     const columns = rows.map((r): ColMeta => {
       const col: ColMeta = {
         name: r.column_name,

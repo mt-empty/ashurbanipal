@@ -318,6 +318,11 @@ per-engine source is in `spec/openapi.yaml`.
   of these are additive relaxations of an already-optional field, so
   existing clients that ignore `references` when `key` isn't `"fk"` see
   no change (§7 versioning policy — additive, no version bump).
+  A foreign key whose referenced table the client could not open (the
+  connection's role cannot read it, or §5.2/§5.7 would not list it) SHOULD
+  be reported as no foreign key at all (no `"fk"` key, no `references`). Key metadata MUST
+  NOT depend on the role owning the table; a role with only `SELECT` sees
+  the same `key` and `references` as the owner, apart from that omission.
 - `comment` — `COMMENT ON COLUMN` text, omitted when absent.
 - **Composite foreign keys MUST be omitted** from `key`/`references`
   entirely (the columns appear with no key metadata) rather than risk

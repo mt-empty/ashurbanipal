@@ -266,6 +266,18 @@ list, and `conformance/seed/VERSION` must change. A new schema is cheaper:
 the schemas test only checks that the expected schemas are present. This
 is a constraint on S1–S8, not a bug. *Size:* none on its own.
 
+**C7. MariaDB has no read-only conformance run, and its structure route
+fails one.** Each port's `readonly-conformance` job runs the suite as a
+SELECT-only Postgres role (`conformance/seed/readonly-role.sql`). MariaDB
+shows `table_constraints` and `referential_constraints` only to a role with
+a privilege beyond `SELECT`, so on a read-only connection
+`/api/tables/structure` reports no primary key, unique, foreign key or
+check constraints (`docs/adapter-decisions.md` §5.10). Primary key and
+unique could come from `statistics`, and checks from `check_constraints`
+filtered on `table_name`; FK `on_delete`/`on_update` exist only in
+`referential_constraints`. Fix that, then add a `mariadb-readonly` backend
+to `_conformance-behavior.yml`. *Size:* M.
+
 ### E — Playwright e2e
 
 **E1. The full suite runs against one port and one engine.** It starts

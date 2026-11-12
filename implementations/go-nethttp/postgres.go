@@ -201,78 +201,54 @@ func (c *PostgresSource) allowedColumns(ctx context.Context, db queryer, schema,
 	return out, rows.Err()
 }
 
-type fkCandidate struct {
-	column    string
-	refSchema sql.NullString
-	refTable  sql.NullString
-	refColumn sql.NullString
-}
-
-// keyMetadata uses constraint_schema for cross-schema FKs and omits composites
+// pgKeyMetadataSQL reads pg_constraint, which has no privilege filter, so a
+// role that doesn't own the table still sees its keys. Composite foreign keys,
+// and ones whose target the role can't open, are left out
 // (`spec/protocol.md` §5.4.1).
-func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema, table string) (map[string]bool, map[string]ColumnRef, error) {
+const pgKeyMetadataSQL = `select con.contype = 'p', a.attname, rn.nspname, rc.relname, ra.attname
+ from pg_constraint con
+ cross join lateral unnest(con.conkey) k(attnum)
+ join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum
+ left join pg_class rc on con.contype = 'f' and rc.oid = con.confrelid
+ left join pg_namespace rn on rn.oid = rc.relnamespace
+ left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1]
+ where con.conrelid = $1
+   and (con.contype = 'p'
+        or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r'
+            and has_schema_privilege(rc.relnamespace, 'USAGE') and has_table_privilege(rc.oid, 'SELECT')))`
+
+func (c *PostgresSource) keyMetadata(ctx context.Context, db queryer, schema string, oid int) (map[string]bool, map[string]ColumnRef, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	rows, err := db.QueryContext(ctx,
-		`select tc.constraint_name, tc.constraint_type, kcu.column_name,
-		        ccu.table_schema as ref_schema, ccu.table_name as ref_table, ccu.column_name as ref_column
-		 from information_schema.table_constraints tc
-		 join information_schema.key_column_usage kcu
-		   on kcu.constraint_name = tc.constraint_name
-		  and kcu.table_schema = tc.table_schema
-		 left join information_schema.constraint_column_usage ccu
-		   on ccu.constraint_name = tc.constraint_name
-		  and ccu.constraint_schema = tc.table_schema
-		  and tc.constraint_type = 'FOREIGN KEY'
-		 where tc.table_schema = $1
-		   and tc.table_name = $2
-		   and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')`, schema, table)
+	rows, err := db.QueryContext(ctx, pgKeyMetadataSQL, oid)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer rows.Close()
 
 	pkColumns := map[string]bool{}
-	fkCandidates := map[string][]fkCandidate{}
+	fkColumns := map[string]ColumnRef{}
 	for rows.Next() {
-		var constraintName, constraintType, columnName string
+		var primary bool
+		var column string
 		var refSchema, refTable, refColumn sql.NullString
-		if err := rows.Scan(&constraintName, &constraintType, &columnName, &refSchema, &refTable, &refColumn); err != nil {
+		if err := rows.Scan(&primary, &column, &refSchema, &refTable, &refColumn); err != nil {
 			return nil, nil, err
 		}
-		switch constraintType {
-		case "PRIMARY KEY":
-			pkColumns[columnName] = true
-		case "FOREIGN KEY":
-			fkCandidates[constraintName] = append(fkCandidates[constraintName], fkCandidate{
-				column: columnName, refSchema: refSchema, refTable: refTable, refColumn: refColumn,
-			})
+		if primary {
+			pkColumns[column] = true
+			continue
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
-	}
-
-	fkColumns := map[string]ColumnRef{}
-	for _, members := range fkCandidates {
-		distinct := map[string]bool{}
-		for _, m := range members {
-			distinct[m.column] = true
-		}
-		if len(distinct) != 1 {
-			continue // composite FK: omit entirely
-		}
-		first := members[0]
-		if first.refSchema.Valid && first.refTable.Valid && first.refColumn.Valid {
-			ref := ColumnRef{Table: first.refTable.String, Column: first.refColumn.String}
+		if refSchema.Valid && refTable.Valid && refColumn.Valid {
+			ref := ColumnRef{Table: refTable.String, Column: refColumn.String}
 			// Same-schema references omit Schema on the wire (spec/protocol.md §5.4.1).
-			if first.refSchema.String != schema {
-				ref.Schema = first.refSchema.String
+			if refSchema.String != schema {
+				ref.Schema = refSchema.String
 			}
-			fkColumns[first.column] = ref
+			fkColumns[column] = ref
 		}
 	}
-	return pkColumns, fkColumns, nil
+	return pkColumns, fkColumns, rows.Err()
 }
 
 // tableMeta reads a table already cleared by readableTableOID, which
@@ -329,7 +305,7 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 	}
 	rows.Close()
 
-	pk, fk, err := c.keyMetadata(ctx, tx, schema, table)
+	pk, fk, err := c.keyMetadata(ctx, tx, schema, oid)
 	if err != nil {
 		return tableMeta{}, err
 	}

@@ -302,22 +302,20 @@ type mysqlFKCandidate struct {
 	refSchema, refTable, refColumn sql.NullString
 }
 
-// keyMetadataInTx joins MySQL's repeating PRIMARY name on table name and
-// omits composite FKs (`spec/protocol.md` §5.4.1).
+// keyMetadataInTx reads key_column_usage alone: MariaDB hides
+// table_constraints from a SELECT-only role. A primary key is always named
+// PRIMARY; composite FKs are omitted (`spec/protocol.md` §5.4.1).
 func (c *MySQLSource) keyMetadataInTx(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (map[string]bool, map[string]ColumnRef, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 	rows, err := tx.QueryContext(ctx, timedSelect(variant, c.timeoutSec,
-		`tc.constraint_name, tc.constraint_type, kcu.column_name,
-		        kcu.referenced_table_schema, kcu.referenced_table_name, kcu.referenced_column_name
-		 from information_schema.table_constraints tc
-		 join information_schema.key_column_usage kcu
-		   on kcu.constraint_name = tc.constraint_name
-		  and kcu.table_schema = tc.table_schema
-		  and kcu.table_name = tc.table_name
-		 where tc.table_schema = ?
-		   and tc.table_name = ?
-		   and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')`), schema, table)
+		`kcu.constraint_name,
+		        case when kcu.referenced_table_name is not null then 'FOREIGN KEY' else 'PRIMARY KEY' end,
+		        kcu.column_name, kcu.referenced_table_schema, kcu.referenced_table_name, kcu.referenced_column_name
+		 from information_schema.key_column_usage kcu
+		 where kcu.table_schema = ?
+		   and kcu.table_name = ?
+		   and (kcu.constraint_name = 'PRIMARY' or kcu.referenced_table_name is not null)`), schema, table)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -48,6 +48,26 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: flask-python-conformance-report
 
+  # Same suite as a SELECT-only role that doesn't own the tables: the owner
+  # sees catalog rows that other roles don't.
+  readonly-conformance:
+    name: Flask — conformance kit (SELECT-only Postgres role)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      backend: postgres-readonly
+      toolchain: python
+      python-version: "3.12"
+      start-command: >-
+        tools/sync-ports-frontend.sh &&
+        cd implementations/flask-python &&
+        uv sync --extra postgres &&
+        PORT=4000 uv run python demo/app.py
+      start-env: "DATABASE_URL=$CONFORMANCE_PG_RO_URL"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: flask-python-conformance-readonly-report
+
   # Same suite, run again (not instead) against a demo started with a
   # second source and labelled siblings — see rust-axum-conformance.yml's
   # identical job for the rationale.
