@@ -1,6 +1,6 @@
 # Spec-hardening review: wire-contract and doc red flags
 
-> **Status:** PARTIAL · **Area:** spec, ports, frontend, docs · **Ref:** B3 and S3 done; B1, B2, B4, B5, B6, S1, S2, S4, D1, D2, D3 open
+> **Status:** PARTIAL · **Area:** spec, ports, frontend, docs · **Ref:** B3, S3, D1, D2, D3 done; B1, B2, B4, B5, B6, S1, S2, S4 open
 
 **Ask:** a review pass on 2026-09-08, done while planning
 [[14-incoming-fk-references]], turned up a set of best-practice concerns
@@ -165,6 +165,9 @@ reader who lands there first gets wrong information.
 Fix: §4 links to `spec/protocol.md` and keeps only the *why* — no route
 restatement.
 
+**Actioned:** §4 now links to the spec and keeps a short list of reasons
+(§4.1); §5 points at the real trait instead of copying it.
+
 ### D2 — Normative clauses name one implementation as the exemplar
 
 `spec/protocol.md` §5.2 and §5.7 contain "(the Rust implementation sorts
@@ -177,6 +180,10 @@ carry it.)
 Fix: state the requirement (stable order, by name, collation unspecified)
 without pointing at a specific port.
 
+**Actioned:** §5.2 and §5.7 now say "e.g. by name; collation
+unspecified". The same pass removed the other Rust mentions: the header,
+§1, §3's mount default, §5.4.2's filter bound and §5.5's boolean note.
+
 ### D3 — "subject to change at any time"
 
 `spec/protocol.md`'s header disclaims stability while five ports are held
@@ -185,3 +192,6 @@ churn.
 
 Fix: replace with a concrete change process (additive vs breaking, as §7
 already sketches) rather than an open-ended disclaimer.
+
+**Actioned:** the header now says the spec changes only under §7's
+policy, with every change listed in `spec/CHANGELOG.md`.
