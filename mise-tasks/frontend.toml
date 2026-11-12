@@ -172,8 +172,8 @@ dir = "tools/e2e-tests"
 depends = ["frontend:rebuild"]
 
 ["frontend:showcase"]
-description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to a Bayer-dithered tools/e2e-tests/showcase.gif"
-run = "./generate-showcase-gif.sh"
+description = "record a scripted dark-theme walkthrough of dbviewer.html and encode it to an H.264 tools/e2e-tests/showcase.mp4 (git-ignored; upload it for readme.md)"
+run = "./generate-showcase-video.sh"
 dir = "tools/e2e-tests"
 
 # A task's `depends` run in parallel, so the sync is this task's run, after the build.
