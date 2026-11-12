@@ -84,7 +84,9 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Apply the conformance seed
         if: inputs.backend == 'postgres'
@@ -95,7 +97,7 @@ jobs:
       - name: Start ${{ inputs.backend }} and apply the MySQL conformance seed
         if: inputs.backend == 'mysql' || inputs.backend == 'mariadb'
         run: |
-          if [ "${{ inputs.backend }}" = mysql ]; then
+          if [ "${INPUTS_BACKEND}" = mysql ]; then
             docker run -d --name conformance-db -p 3306:3306 \
               -e MYSQL_ROOT_PASSWORD=ashurbanipal -e MYSQL_DATABASE=ashurbanipal mysql:8
           else
@@ -112,6 +114,8 @@ jobs:
             echo "CONFORMANCE_MYSQL_URL=mysql://root:ashurbanipal@127.0.0.1:3306/ashurbanipal"
             echo "CONFORMANCE_JDBC_URL=jdbc:mysql://127.0.0.1:3306/ashurbanipal?allowPublicKeyRetrieval=true&useSSL=false"
           } >> "$GITHUB_ENV"
+        env:
+          INPUTS_BACKEND: ${{ inputs.backend }}
 
       - name: Apply the SQLite conformance seed
         if: inputs.backend == 'sqlite'
@@ -125,7 +129,7 @@ jobs:
 
       - name: Set up Java toolchain
         if: inputs.toolchain == 'java'
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "21"
@@ -133,7 +137,7 @@ jobs:
 
       - name: Set up Go toolchain
         if: inputs.toolchain == 'go'
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
           cache-dependency-path: implementations/go-nethttp/go.sum
@@ -146,7 +150,7 @@ jobs:
 
       - name: Set up Node toolchain
         if: inputs.toolchain == 'node'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ inputs.node-version }}
 
@@ -160,7 +164,9 @@ jobs:
       # The conformance runner itself (layer 3) is Rust regardless of which
       # implementation is under test — report.sh always runs `cargo test`
       # inside implementations/rust, per PORTING.md.
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -168,15 +174,22 @@ jobs:
 
       - name: Start the demo
         run: |
-          ${{ inputs.start-env && format('export {0}', inputs.start-env) || 'true' }}
-          ${{ inputs.start-command }} &
+          # Both inputs are shell source from same-repo callers: start-env may reference
+          # $GITHUB_ENV values and start-command chains with `&&`. setsid gives the demo its
+          # own process group so "Stop the demo" can kill the whole chain, not just a wrapper.
+          if [ -n "$INPUTS_START_ENV" ]; then eval "export $INPUTS_START_ENV"; fi
+          setsid bash -c "$INPUTS_START_COMMAND" &
           echo $! > /tmp/demo.pid
           for _ in $(seq 1 60); do
-            curl -sf "${{ inputs.health-url }}" >/dev/null && exit 0
+            curl -sf "${INPUTS_HEALTH_URL}" >/dev/null && exit 0
             sleep 2
           done
           echo "demo did not become healthy in time" >&2
           exit 1
+        env:
+          INPUTS_START_ENV: ${{ inputs.start-env }}
+          INPUTS_START_COMMAND: ${{ inputs.start-command }}
+          INPUTS_HEALTH_URL: ${{ inputs.health-url }}
 
       - name: Run the conformance kit against it (layer 3, behavior)
         env:
@@ -185,9 +198,9 @@ jobs:
 
       - name: Stop the demo
         if: always()
-        run: kill "$(cat /tmp/demo.pid)" 2>/dev/null || true
+        run: kill -- -"$(cat /tmp/demo.pid)" 2>/dev/null || true
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: ${{ inputs.report-name }}

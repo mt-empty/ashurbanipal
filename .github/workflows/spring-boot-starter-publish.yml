@@ -34,14 +34,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # need full history for the branch-ancestry check below
+          persist-credentials: false
 
       - name: Check that the tagged commit is on main
         run: |
-          if ! git branch -r --contains "${{ github.sha }}" | grep -q 'origin/main$'; then
-            echo "tag ${{ github.ref_name }} (${{ github.sha }}) is not on main — refusing to publish" >&2
+          if ! git branch -r --contains "${GITHUB_SHA}" | grep -q 'origin/main$'; then
+            echo "tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on main — refusing to publish" >&2
             exit 1
           fi
 
@@ -106,13 +107,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
 
       - name: Publish to Maven Central (Central Portal)
         working-directory: implementations/spring-boot-starter

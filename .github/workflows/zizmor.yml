@@ -1,0 +1,46 @@
+name: zizmor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/**"
+      - "mise-tasks/ci.toml"
+      - "mise.toml"
+      - "mise.lock"
+  pull_request:
+    paths:
+      - ".github/**"
+      - "mise-tasks/ci.toml"
+      - "mise.toml"
+      - "mise.lock"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  zizmor:
+    name: zizmor audit of .github/
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: 2026.7.13
+          install: false
+
+      - run: mise install aqua:zizmorcore/zizmor
+
+      - run: mise run ci:zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Only zizmor is needed; don't pull the repo's full [tools] set.
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
