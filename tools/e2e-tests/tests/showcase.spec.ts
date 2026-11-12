@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
-import { applyFilter, gotoApp, selectTable, waitForIdle } from "./support/helpers";
+import { applyFilter, gotoApp, selectTable, waitForIdle, waitForTable } from "./support/helpers";
 import { pick, showResult } from "./support/join";
 
 // The refresh segment inserts a handful of rows straight into the
@@ -24,9 +24,10 @@ const psql = (sql: string) => {
 // no-waitForTimeout rule those tests follow.
 const beat = (page: import("@playwright/test").Page) => page.waitForTimeout(700);
 
-test("showcase: browse tables, filter down to one row, inspect jsonb, view structure, join tables, switch environment, catch live rows on refresh, open API reference", async ({
+test("showcase: browse tables from the side panel, filter by a common value, inspect jsonb and a record, follow its foreign key, join across schemas, switch environment, hide the panel, auto-refresh live rows, open API reference", async ({
   page,
 }) => {
+  test.setTimeout(120_000);
   // addInitScript runs before the inline <head> script that applies the stored theme.
   await page.addInitScript(() => localStorage.setItem("ashurbanipal_theme", "dark"));
 
@@ -36,19 +37,15 @@ test("showcase: browse tables, filter down to one row, inspect jsonb, view struc
   await selectTable(page, "users");
   await beat(page);
 
-  await selectTable(page, "products");
-  await beat(page);
-
   await selectTable(page, "orders");
   await beat(page);
 
-  // Click a "pending" status cell's filter button — narrows to ~two dozen rows.
-  const pendingCell = page
-    .locator('#tbody td[data-col="status"] .cell-text', { hasText: "pending" })
-    .first()
-    .locator("xpath=ancestor::td[1]");
-  await pendingCell.hover();
-  await pendingCell.locator(".filter-eq").click();
+  // A column's common values, with their share of the table; one click filters.
+  await page.locator('.common-values-btn[aria-label="common values for status"]').click();
+  await expect(page.locator("#cv-pop")).toBeVisible();
+  await beat(page);
+  await beat(page);
+  await page.locator("#cv-pop-list button.cv-value", { hasText: "pending" }).click();
   await waitForIdle(page);
   await beat(page);
 
@@ -58,42 +55,54 @@ test("showcase: browse tables, filter down to one row, inspect jsonb, view struc
   await expect(page.locator("#tbody tr")).toHaveCount(1);
   await beat(page);
 
-  // Open the jsonb cell popover and toggle a nested node to show the
-  // colored, collapsible tree.
+  // Open the jsonb cell popover and fold a nested node.
   const jsonCell = page.locator("#tbody tr").first().locator('td[data-col="line_items"] .cell-text');
   await jsonCell.click();
   await expect(page.locator("#cell-pop")).toBeVisible();
   await beat(page);
   await page.locator("#cell-json .json-fold").first().click();
   await beat(page);
-  await page.locator("#cell-json .json-fold").first().click();
-  await beat(page);
-
-  await page.locator("#current").click();
+  await page.keyboard.press("Escape");
   await expect(page.locator("#cell-pop")).toBeHidden();
+
+  // The record view: every column with its key, type and comment.
+  await page.locator("#tbody tr").first().locator(".record-btn").click();
+  await expect(page.locator("#record-dialog")).toBeVisible();
+  for (let i = 0; i < 4; i++) await beat(page);
+  // Its foreign key value opens the referenced row.
+  await page.locator('#record-dl dd[data-col="user_id"] .record-link').click();
+  await expect(page.locator("#record-dialog")).toBeHidden();
+  await waitForTable(page, "users");
+  await waitForIdle(page);
+  await beat(page);
+  await beat(page);
 
   // Structure: indexes and constraints for the table.
   await page.locator("#structure-btn").click();
-  await expect(page.locator("#structure-body").getByText("orders_pending_idx")).toBeVisible();
+  await expect(page.locator("#structure-dialog")).toBeVisible();
   await beat(page);
   await beat(page);
   await page.keyboard.press("Escape");
   await expect(page.locator("#structure-dialog")).toBeHidden();
 
-  // Join: orders -> users on the suggested foreign key.
+  // Join across schemas: warehouse.shipments -> public.orders on the suggested foreign key.
+  await page.locator("#schema-select").selectOption("warehouse");
+  await waitForIdle(page);
+  await selectTable(page, "shipments");
+  await beat(page);
   await page.locator("#join-btn").click();
   await expect(page.locator("#join-dialog")).toBeVisible();
   await beat(page);
-  await beat(page);
   await pick(page, "join 1 type", "left");
+  await pick(page, "join 1 schema", "public");
   await beat(page);
-  await pick(page, "join 1 table", "users");
-  await expect(page.locator("#join-preview")).toContainText("LEFT JOIN users");
+  await pick(page, "join 1 table", "orders");
+  await expect(page.locator("#join-preview")).toContainText("LEFT JOIN public.orders");
   await beat(page);
   await beat(page);
   await showResult(page);
-  await expect(page.locator("th.band")).toHaveText(["orders", "users"]);
-  for (let i = 0; i < 5; i++) await beat(page);
+  await expect(page.locator("th.band")).toHaveText(["warehouse.shipments", "public.orders"]);
+  for (let i = 0; i < 4; i++) await beat(page);
 
   // Other services: switch to the same view in the int environment.
   await page.locator("#siblings-btn").click();
@@ -116,23 +125,37 @@ test("showcase: browse tables, filter down to one row, inspect jsonb, view struc
   await page.keyboard.press("Escape");
   await expect(page.locator("#siblings-matrix")).toBeHidden();
 
-  // Refresh: rows added since the last look wash in green for 3s. events
-  // has a bigint identity PK, so sorting it id-descending parks anything
-  // just inserted at the top of page 1 where the tint is visible.
-  psql(`DELETE FROM events WHERE event_type = '${SHOWCASE_EVENT_TYPE}'`);
+  // Hide the table list for more room: it folds into a row of chips above the filter.
+  await page.locator("#schema-select").selectOption("public");
+  await waitForIdle(page);
   await selectTable(page, "events");
+  await beat(page);
+  await page.locator("#tables-panel-toggle").click();
+  await expect(page.locator("html")).toHaveAttribute("data-tables-panel", "hidden");
+  await beat(page);
+  await beat(page);
+
+  // Auto-refresh: rows added since the last look wash in green. events has
+  // a bigint identity PK, so sorting it id-descending parks anything just
+  // inserted at the top of page 1 where the tint is visible.
+  psql(`DELETE FROM events WHERE event_type = '${SHOWCASE_EVENT_TYPE}'`);
   const idHeader = page.locator('#thead th[data-col="id"]');
   await idHeader.click({ position: { x: 6, y: 6 } }); // first click sorts ascending...
   await waitForIdle(page);
   await idHeader.click({ position: { x: 6, y: 6 } }); // ...second flips it to descending — newest first
   await waitForIdle(page);
   try {
+    await page.locator("#refresh-menu-btn").click();
+    await beat(page);
+    await page.getByRole("radio", { name: "5 s", exact: true }).click();
+    await expect(page.locator("#refresh-interval")).toBeVisible();
     psql(`INSERT INTO events (event_type) SELECT '${SHOWCASE_EVENT_TYPE}' FROM generate_series(1, 5)`);
-    await page.locator("#refresh").click();
-    await waitForIdle(page);
-    await expect(page.locator("#tbody tr.row-new")).toHaveCount(5);
-    await expect(page.locator("#status")).toHaveText("5 new");
+    await expect(page.locator("#tbody tr.row-new")).toHaveCount(5, { timeout: 15_000 });
+    await expect(page.locator("#row-new-chip")).toHaveText("+5 new");
     await beat(page); // hold on the green wash (it keeps fading into the next shot)
+    await beat(page);
+    await page.locator("#refresh-menu-btn").click();
+    await page.getByRole("radio", { name: "Off", exact: true }).click();
   } finally {
     psql(`DELETE FROM events WHERE event_type = '${SHOWCASE_EVENT_TYPE}'`);
   }
