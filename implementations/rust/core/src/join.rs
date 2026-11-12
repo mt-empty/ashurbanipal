@@ -268,6 +268,118 @@ pub struct TableMeta {
     pub schema: Option<Ident>,
     pub name: Ident,
     pub columns: Vec<ColMeta>,
+    /// Indexes into `columns` that break ties after `sort` (`spec/protocol.md`
+    /// §5.4); built by [`tie_break_keys`].
+    pub order_keys: Vec<usize>,
+}
+
+/// A unique key a backend's catalog reports for one table. Backends pass a
+/// unique index only when its key columns are plain (no expression), it is
+/// not partial, and every key column is NOT NULL.
+pub struct UniqueKey {
+    pub name: String,
+    pub primary: bool,
+    pub columns: Vec<String>,
+}
+
+/// The primary key's columns in key order, else those of the unique key with
+/// the fewest columns (then the lowest name). A key with a column the role
+/// cannot see is skipped, and none left means no tie-break.
+pub fn tie_break_keys(columns: &[ColMeta], keys: &[UniqueKey]) -> Vec<usize> {
+    keys.iter()
+        .filter_map(|k| {
+            let idx: Option<Vec<usize>> = k
+                .columns
+                .iter()
+                .map(|n| columns.iter().position(|c| c.name.as_str() == n))
+                .collect();
+            idx.filter(|v| !v.is_empty()).map(|v| (k, v))
+        })
+        .min_by(|(a, av), (b, bv)| {
+            b.primary
+                .cmp(&a.primary)
+                .then(av.len().cmp(&bv.len()))
+                .then(a.name.cmp(&b.name))
+        })
+        .map(|(_, v)| v)
+        .unwrap_or_default()
+}
+
+/// One key column of a candidate unique key; `usable` is false when the part
+/// rules the whole key out (an expression, or a nullable column).
+pub struct KeyPart {
+    pub index: String,
+    pub primary: bool,
+    pub column: Option<String>,
+    pub usable: bool,
+}
+
+/// Folds parts, ordered by index and then key position, into keys, dropping
+/// a key with any unusable part.
+pub fn group_unique_keys(parts: impl IntoIterator<Item = KeyPart>) -> Vec<UniqueKey> {
+    let mut keys: Vec<(UniqueKey, bool)> = Vec::new();
+    for p in parts {
+        if keys.last().is_none_or(|(k, _)| k.name != p.index) {
+            keys.push((
+                UniqueKey {
+                    name: p.index,
+                    primary: p.primary,
+                    columns: Vec::new(),
+                },
+                true,
+            ));
+        }
+        let (key, usable) = keys.last_mut().expect("pushed above");
+        key.columns.push(p.column.unwrap_or_default());
+        *usable &= p.usable;
+    }
+    keys.into_iter()
+        .filter(|(_, u)| *u)
+        .map(|(k, _)| k)
+        .collect()
+}
+
+/// A single-table query's order by, every column qualified by the table name
+/// so it never resolves to a text-cast output column in the select list.
+pub fn table_order_clause(
+    meta: &TableMeta,
+    sort: Option<&Ident>,
+    descending: bool,
+    quote: impl Fn(&Ident) -> String,
+) -> String {
+    let sort_index = sort.and_then(|s| meta.columns.iter().position(|c| &c.name == s));
+    order_by_clause(
+        sort_index,
+        meta.order_keys.iter().copied(),
+        descending,
+        |i| format!("{}.{}", quote(&meta.name), quote(&meta.columns[i].name)),
+    )
+}
+
+/// ` order by <sort>, <keys…>` with a key equal to `sort` left out, every
+/// term in one direction (`asc` when there is no `sort`); empty when there
+/// is nothing to order by.
+pub fn order_by_clause<T: Copy + PartialEq>(
+    sort: Option<T>,
+    keys: impl IntoIterator<Item = T>,
+    descending: bool,
+    render: impl Fn(T) -> String,
+) -> String {
+    let dir = if descending && sort.is_some() {
+        "desc"
+    } else {
+        "asc"
+    };
+    let terms: Vec<String> = sort
+        .into_iter()
+        .chain(keys.into_iter().filter(|&k| Some(k) != sort))
+        .map(|t| format!("{} {dir}", render(t)))
+        .collect();
+    if terms.is_empty() {
+        String::new()
+    } else {
+        format!(" order by {}", terms.join(", "))
+    }
 }
 
 /// A response column: where it came from and the label rows are keyed by.
@@ -707,13 +819,17 @@ pub fn build_select(plan: &Plan, d: &Dialect) -> (String, Vec<String>) {
         sql.push_str(&format!(" where {clause}"));
     }
 
-    if let Some((p, c)) = plan.sort {
-        sql.push_str(&format!(
-            " order by {} {}",
-            alias(p, c),
-            if plan.descending { "desc" } else { "asc" }
-        ));
-    }
+    let keys = plan
+        .tables
+        .iter()
+        .enumerate()
+        .flat_map(|(p, t)| t.order_keys.iter().map(move |&c| (p, c)));
+    sql.push_str(&order_by_clause(
+        plan.sort,
+        keys,
+        plan.descending,
+        |(p, c)| alias(p, c),
+    ));
     if d.numbered {
         sql.push_str(" limit $1 offset $2");
     } else {
@@ -748,6 +864,7 @@ mod tests {
                 col("status", "text", ColumnClass::Text),
                 col("tags", "ARRAY", ColumnClass::Array),
             ],
+            order_keys: vec![0],
         }
     }
 
@@ -759,6 +876,7 @@ mod tests {
                 col("id", "uuid", ColumnClass::Uuid),
                 col("email", "text", ColumnClass::Text),
             ],
+            order_keys: vec![0],
         }
     }
 
@@ -933,6 +1051,56 @@ mod tests {
     }
 
     #[test]
+    fn tie_break_prefers_the_primary_key_then_the_shortest_unique_key() {
+        let cols = orders().columns;
+        let key = |name: &str, primary, columns: &[&str]| UniqueKey {
+            name: name.into(),
+            primary,
+            columns: columns.iter().map(|c| c.to_string()).collect(),
+        };
+        let pk = key("z_pkey", true, &["status", "id"]);
+        let short = key("b", false, &["user_id"]);
+        let tied = key("a", false, &["status"]);
+        let hidden = key("0", false, &["hidden"]);
+        assert_eq!(tie_break_keys(&cols, &[short, pk]), [2, 0]);
+        let short = key("b", false, &["user_id"]);
+        assert_eq!(tie_break_keys(&cols, &[short, tied, hidden]), [2]);
+        assert!(tie_break_keys(&cols, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_key_with_an_unusable_part_is_dropped() {
+        let part = |index: &str, column: &str, usable| KeyPart {
+            index: index.into(),
+            primary: false,
+            column: Some(column.into()),
+            usable,
+        };
+        let keys = group_unique_keys([
+            part("a", "x", true),
+            part("a", "y", false),
+            part("b", "x", true),
+        ]);
+        assert_eq!(keys.len(), 1);
+        assert_eq!(
+            (keys[0].name.as_str(), keys[0].columns.as_slice()),
+            ("b", ["x".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn order_by_leaves_out_a_key_already_used_as_sort() {
+        let render = |i: usize| format!("c{i}");
+        assert_eq!(
+            order_by_clause(Some(1), [1, 0], true, render),
+            " order by c1 desc, c0 desc"
+        );
+        // `order` applies only with a `sort`.
+        assert_eq!(order_by_clause(None, [0], true, render), " order by c0 asc");
+        assert_eq!(order_by_clause(None, [], false, render), "");
+    }
+
+    #[test]
     fn labels_are_unique_and_stable() {
         let labels = assign_labels(&[(0, "id"), (1, "id"), (1, "email"), (0, "id_1")]);
         assert_eq!(labels, ["id_0", "id_1_2", "email", "id_1"]);
@@ -979,7 +1147,9 @@ mod tests {
             "{sql}"
         );
         assert!(
-            sql.ends_with(" order by t1.\"email\" asc limit $1 offset $2"),
+            sql.ends_with(
+                " order by t1.\"email\" asc, t0.\"id\" asc, t1.\"id\" asc limit $1 offset $2"
+            ),
             "{sql}"
         );
         assert_eq!(values, ["a@b.c"]);

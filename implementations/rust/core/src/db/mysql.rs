@@ -13,7 +13,8 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
-    self, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta,
+    self, group_unique_keys, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect,
+    IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, UniqueKey,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -310,38 +311,42 @@ impl MySqlSource {
         let json_columns = self
             .mariadb_json_columns_in_tx(tx, variant, schema.as_str(), table.as_str(), timeout_secs)
             .await?;
+        let unique_keys =
+            unique_keys_in_tx(tx, variant, schema.as_str(), table.as_str(), timeout_secs).await?;
+        let columns: Vec<ColMeta> = columns
+            .into_iter()
+            .map(|(name, data_type, comment, collation, column_type)| {
+                // column_type keeps what data_type drops: `tinyint(1)`,
+                // `int unsigned`, an enum's members.
+                let (type_name, class) = if json_columns.contains(&name) {
+                    ("json".to_string(), ColumnClass::Json)
+                } else {
+                    let class = column_class(&data_type, &column_type);
+                    (column_type, class)
+                };
+                let (key, references) = if pk_columns.contains(&name) {
+                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
+                } else if let Some(r) = fk_columns.get(&name) {
+                    (Some(KeyKind::Fk), Some(r.clone()))
+                } else {
+                    (None, None)
+                };
+                ColMeta {
+                    class,
+                    collation,
+                    comment: (!comment.is_empty()).then_some(comment),
+                    key,
+                    references,
+                    type_name,
+                    name: Ident::from_catalog(name),
+                }
+            })
+            .collect();
         Ok(TableMeta {
             schema: Some(schema.clone()),
             name: table.clone(),
-            columns: columns
-                .into_iter()
-                .map(|(name, data_type, comment, collation, column_type)| {
-                    // column_type keeps what data_type drops: `tinyint(1)`,
-                    // `int unsigned`, an enum's members.
-                    let (type_name, class) = if json_columns.contains(&name) {
-                        ("json".to_string(), ColumnClass::Json)
-                    } else {
-                        let class = column_class(&data_type, &column_type);
-                        (column_type, class)
-                    };
-                    let (key, references) = if pk_columns.contains(&name) {
-                        (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                    } else if let Some(r) = fk_columns.get(&name) {
-                        (Some(KeyKind::Fk), Some(r.clone()))
-                    } else {
-                        (None, None)
-                    };
-                    ColMeta {
-                        class,
-                        collation,
-                        comment: (!comment.is_empty()).then_some(comment),
-                        key,
-                        references,
-                        type_name,
-                        name: Ident::from_catalog(name),
-                    }
-                })
-                .collect(),
+            order_keys: tie_break_keys(&columns, &unique_keys),
+            columns,
         })
     }
 
@@ -587,7 +592,6 @@ impl DbSource for MySqlSource {
             .table_meta_in_tx(&mut tx, variant, &schema, table, timeout)
             .await?;
         let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
-        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sort = opts
             .sort
             .as_deref()
@@ -608,15 +612,8 @@ impl DbSource for MySqlSource {
         // unqualified `order by` would resolve to the CAST-output column in
         // select_list, sorting lexicographically instead of by the real
         // typed value.
-        let order_clause = match &sort {
-            Some(col) => format!(
-                " order by {}.{} {}",
-                quote_ident_mysql(table),
-                quote_ident_mysql(col),
-                if opts.descending { "desc" } else { "asc" }
-            ),
-            None => String::new(),
-        };
+        let order_clause = table_order_clause(&meta, sort, opts.descending, quote_ident_mysql);
+        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sql = timed_select(
             variant,
             timeout,
@@ -1017,6 +1014,37 @@ impl DbSource for MySqlSource {
             },
         })
     }
+}
+
+/// The primary key and every unique index whose key parts are all plain
+/// NOT NULL columns. A functional key part has no `column_name`.
+async fn unique_keys_in_tx(
+    tx: &mut Transaction<'_, MySql>,
+    variant: Variant,
+    schema: &str,
+    table: &str,
+    timeout_secs: u32,
+) -> Result<Vec<UniqueKey>, DbError> {
+    let rows =
+        sqlx::query_as::<_, (String, Option<String>, String)>(sqlx::AssertSqlSafe(timed_select(
+            variant,
+            timeout_secs,
+            "index_name, column_name, nullable from information_schema.statistics \
+             where table_schema = ? and table_name = ? and non_unique = 0 \
+             order by index_name, seq_in_index",
+        )))
+        .bind(schema)
+        .bind(table)
+        .fetch_all(&mut **tx)
+        .await?;
+    Ok(group_unique_keys(rows.into_iter().map(
+        |(index, column, nullable)| KeyPart {
+            primary: index == "PRIMARY",
+            index,
+            usable: column.is_some() && nullable != "YES",
+            column,
+        },
+    )))
 }
 
 #[cfg(test)]

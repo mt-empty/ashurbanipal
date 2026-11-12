@@ -12,7 +12,8 @@ use super::{
 };
 use crate::filter::{Condition, Logic};
 use crate::join::{
-    self, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta,
+    self, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData,
+    JoinOpts, JoinSpec, TableMeta, UniqueKey,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -453,41 +454,44 @@ impl PgPoolSource {
         let (pk_columns, fk_columns) = self
             .key_metadata_in_tx(tx, schema.as_str(), table.name.as_str())
             .await?;
+        let unique_keys = unique_keys_in_tx(tx, table.oid).await?;
+        let columns: Vec<ColMeta> = columns
+            .into_iter()
+            .map(
+                |(
+                    name,
+                    data_type,
+                    udt_schema,
+                    udt_name,
+                    is_enum,
+                    type_name,
+                    comment,
+                    collation,
+                )| {
+                    let (key, references) = if pk_columns.contains(&name) {
+                        (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
+                    } else if let Some(r) = fk_columns.get(&name) {
+                        (Some(KeyKind::Fk), Some(r.clone()))
+                    } else {
+                        (None, None)
+                    };
+                    ColMeta {
+                        class: column_class(&data_type, &udt_schema, &udt_name, is_enum),
+                        collation,
+                        comment,
+                        key,
+                        references,
+                        type_name,
+                        name: Ident::from_catalog(name),
+                    }
+                },
+            )
+            .collect();
         Ok(TableMeta {
             schema: Some(schema.clone()),
             name: table.name.clone(),
-            columns: columns
-                .into_iter()
-                .map(
-                    |(
-                        name,
-                        data_type,
-                        udt_schema,
-                        udt_name,
-                        is_enum,
-                        type_name,
-                        comment,
-                        collation,
-                    )| {
-                        let (key, references) = if pk_columns.contains(&name) {
-                            (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                        } else if let Some(r) = fk_columns.get(&name) {
-                            (Some(KeyKind::Fk), Some(r.clone()))
-                        } else {
-                            (None, None)
-                        };
-                        ColMeta {
-                            class: column_class(&data_type, &udt_schema, &udt_name, is_enum),
-                            collation,
-                            comment,
-                            key,
-                            references,
-                            type_name,
-                            name: Ident::from_catalog(name),
-                        }
-                    },
-                )
-                .collect(),
+            order_keys: tie_break_keys(&columns, &unique_keys),
+            columns,
         })
     }
 
@@ -707,7 +711,6 @@ impl DbSource for PgPoolSource {
         // names are the live catalog's, so they also serve as the allow-list.
         let meta = self.table_meta_in_tx(&mut tx, &schema, &found).await?;
         let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
-        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sort = opts
             .sort
             .as_deref()
@@ -729,15 +732,8 @@ impl DbSource for PgPoolSource {
         // FROM itself is schema-qualified): an unqualified `order by "col"`
         // would resolve to the `::text`-cast output column in select_list,
         // sorting lexicographically instead of by the real typed value.
-        let order_clause = match &sort {
-            Some(col) => format!(
-                " order by {}.{} {}",
-                quote_ident(&found.name),
-                quote_ident(col),
-                if opts.descending { "desc" } else { "asc" }
-            ),
-            None => String::new(),
-        };
+        let order_clause = table_order_clause(&meta, sort, opts.descending, quote_ident);
+        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sql = format!(
             "select {select_list} from {}.{}{where_clause}{order_clause} limit $1 offset $2",
             quote_ident(&schema),
@@ -982,6 +978,41 @@ impl DbSource for PgPoolSource {
             constraints,
         })
     }
+}
+
+/// The primary key and every unique index that can break ties: plain key
+/// columns (`INCLUDE` columns left out), not partial, and all NOT NULL.
+/// `pg_index` has no privilege filter, unlike `information_schema`, so a role
+/// with only `SELECT` still sees the key.
+async fn unique_keys_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    table: i32,
+) -> Result<Vec<UniqueKey>, DbError> {
+    let rows = sqlx::query_as::<_, (String, bool, Vec<String>)>(
+        "select c.relname::text, i.indisprimary, u.cols \
+         from pg_index i \
+         join pg_class c on c.oid = i.indexrelid \
+         cross join lateral ( \
+           select array_agg(a.attname::text order by k.n) as cols, \
+                  bool_and(a.attnotnull) as all_not_null \
+             from unnest(i.indkey::int2[]) with ordinality k(attnum, n) \
+             join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum \
+            where k.n <= i.indnkeyatts) u \
+         where i.indrelid = $1 and i.indisunique and i.indisvalid \
+           and i.indpred is null and i.indexprs is null \
+           and (i.indisprimary or u.all_not_null)",
+    )
+    .bind(table)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(name, primary, columns)| UniqueKey {
+            name,
+            primary,
+            columns,
+        })
+        .collect())
 }
 
 #[cfg(test)]

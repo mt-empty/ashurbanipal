@@ -9,14 +9,17 @@ import {
   buildJoinSelect,
   type ColMeta,
   columnInfo,
+  groupUniqueKeys,
   type JoinDialect,
   type JoinOpts,
   joinColumnInfos,
   joinTableRefs,
+  orderByClause,
   parseJoin,
   planJoin,
   type TableMeta,
   tableSchemas,
+  tieBreakKeys,
 } from "../src/join.js";
 
 const uuid = (name: string): ColMeta => ({ name, type: "uuid", class: { kind: "uuid" } });
@@ -26,8 +29,14 @@ const orders = (): TableMeta => ({
   schema: "public",
   name: "orders",
   columns: [uuid("id"), uuid("user_id"), text("status"), { name: "tags", type: "ARRAY", class: { kind: "array" } }],
+  orderKeys: [0],
 });
-const users = (): TableMeta => ({ schema: "public", name: "users", columns: [uuid("id"), text("email")] });
+const users = (): TableMeta => ({
+  schema: "public",
+  name: "users",
+  columns: [uuid("id"), text("email")],
+  orderKeys: [0],
+});
 
 const opts = (over: Partial<JoinOpts> = {}): JoinOpts => ({
   limit: 10,
@@ -46,6 +55,37 @@ const pg: JoinDialect = {
   numbered: true,
   ilike: "native",
 };
+
+describe("row order (spec/protocol.md §5.4)", () => {
+  it("prefers the primary key, then the shortest unique key, then the lowest name", () => {
+    const cols = orders().columns;
+    const pk = { name: "z_pkey", primary: true, columns: ["status", "id"] };
+    const short = { name: "b", primary: false, columns: ["user_id"] };
+    const tied = { name: "a", primary: false, columns: ["status"] };
+    const hidden = { name: "0", primary: false, columns: ["hidden"] };
+    expect(tieBreakKeys(cols, [short, pk])).toEqual([2, 0]);
+    expect(tieBreakKeys(cols, [short, tied, hidden])).toEqual([2]);
+    expect(tieBreakKeys(cols, [])).toEqual([]);
+  });
+
+  it("drops a key with an unusable part", () => {
+    expect(
+      groupUniqueKeys([
+        { index: "a", primary: false, column: "x", usable: true },
+        { index: "a", primary: false, column: "y", usable: false },
+        { index: "b", primary: false, column: "x", usable: true },
+      ]),
+    ).toEqual([{ name: "b", primary: false, columns: ["x"] }]);
+  });
+
+  it("leaves out a key already used as sort", () => {
+    const render = (i: number) => `c${i}`;
+    expect(orderByClause(1, [1, 0], true, render)).toBe(" order by c1 desc, c0 desc");
+    // order applies only with a sort.
+    expect(orderByClause(undefined, [0], true, render)).toBe(" order by c0 asc");
+    expect(orderByClause(undefined, [], false, render)).toBe("");
+  });
+});
 
 describe("parseJoin", () => {
   it("accepts a valid join", () => {
@@ -120,8 +160,8 @@ describe("planJoin", () => {
     const ok = planJoin(
       spec,
       [
-        { name: "x", columns: [e("a")] },
-        { name: "y", columns: [e("a")] },
+        { name: "x", columns: [e("a")], orderKeys: [] },
+        { name: "y", columns: [e("a")], orderKeys: [] },
       ],
       opts(),
     );
@@ -130,8 +170,8 @@ describe("planJoin", () => {
       planJoin(
         spec,
         [
-          { name: "x", columns: [e("a")] },
-          { name: "y", columns: [e("b")] },
+          { name: "x", columns: [e("a")], orderKeys: [] },
+          { name: "y", columns: [e("b")], orderKeys: [] },
         ],
         opts(),
       ),
@@ -146,8 +186,8 @@ describe("planJoin", () => {
       planJoin(
         clash,
         [
-          { name: "ca", columns: [bin] },
-          { name: "cb", columns: [ci] },
+          { name: "ca", columns: [bin], orderKeys: [] },
+          { name: "cb", columns: [ci], orderKeys: [] },
         ],
         opts(),
       ),
@@ -198,7 +238,7 @@ describe("buildJoinSelect", () => {
     expect(body).toContain('t0."id"::text as c0, ');
     expect(body).toContain(' from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"');
     expect(body).toContain(' where (t1."email"::text = $3) OR (NOT (t0."status"::text IS NULL))');
-    expect(body).toMatch(/ order by t1\."email" asc limit \$1 offset \$2$/);
+    expect(body).toMatch(/ order by t1\."email" asc, t0\."id" asc, t1\."id" asc limit \$1 offset \$2$/);
     expect(values).toEqual(["a@b.c"]);
   });
 });

@@ -144,22 +144,44 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
     private fun tableMeta(conn: Connection, table: String): TableMeta {
         val (pk, fkColumns) = keyMetadataOn(conn, table)
         val quoted = quoteIdent(table)
-        return TableMeta(
-            table,
-            query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
-                rs.getString(2) to (rs.getString(3) ?: "")
-            }.map { (col, declared) ->
-                ColMeta(
-                    name = col,
-                    // A declared type can be empty (""); a stable label beats emitting "".
-                    type = declared.ifEmpty { "unknown" },
-                    columnClass = sqliteColumnClass(declared),
-                    key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
-                    references = fkColumns[col],
-                )
-            },
-        )
+        val columns = query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
+            rs.getString(2) to (rs.getString(3) ?: "")
+        }.map { (col, declared) ->
+            ColMeta(
+                name = col,
+                // A declared type can be empty (""); a stable label beats emitting "".
+                type = declared.ifEmpty { "unknown" },
+                columnClass = sqliteColumnClass(declared),
+                key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
+                references = fkColumns[col],
+            )
+        }
+        return TableMeta(table, columns, orderKeys = tieBreakKeys(columns, uniqueKeys(conn, quoted)))
     }
+
+    /**
+     * The primary key (an INTEGER PRIMARY KEY has no index row) and every unique,
+     * non-partial index whose key columns are all NOT NULL table columns. An
+     * expression key part has no pragma_table_info row.
+     */
+    private fun uniqueKeys(conn: Connection, quoted: String): List<UniqueKey> = groupUniqueKeys(
+        query(
+            conn,
+            "select '', 1, name, 1, pk from pragma_table_info($quoted) where pk > 0 " +
+                "union all " +
+                "select il.name, 0, ti.name, ti.\"notnull\", ii.seqno " +
+                "from pragma_index_list($quoted) il " +
+                "join pragma_index_xinfo(il.name) ii " +
+                "left join pragma_table_info($quoted) ti on ti.cid = ii.cid " +
+                "where il.\"unique\" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1 " +
+                "order by 1, 5",
+        ) { rs ->
+            val primary = rs.getInt(2) == 1
+            val column: String? = rs.getString(3)
+            val notNull = rs.getInt(4) == 1 && !rs.wasNull()
+            KeyPart(rs.getString(1), primary, column, primary || (column != null && notNull))
+        },
+    )
 
     /** Composite FKs are dropped rather than risk mislabeling which columns pair up. */
     private fun keyMetadataOn(conn: Connection, table: String): Pair<List<String>, Map<String, ColumnRef>> {
@@ -247,7 +269,8 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         val realTable = requireTable(table)
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
-        val columns = bounded(queryTimeoutSecs) { conn -> tableMeta(conn, realTable) }.columns.map { it.columnInfo() }
+        val meta = bounded(queryTimeoutSecs) { conn -> tableMeta(conn, realTable) }
+        val columns = meta.columns.map { it.columnInfo() }
         val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
@@ -258,9 +281,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         val quotedTable = quoteIdent(realTable)
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdent(it.name)} AS TEXT)" }
-        val orderClause = sort?.let {
-            " order by ${quoteIdent(realTable)}.${quoteIdent(it)} ${if (opts.descending) "desc" else "asc"}"
-        } ?: ""
+        val orderClause = tableOrderClause(meta, sort, opts.descending, ::quoteIdent)
         val sql = "select $selectList from $quotedTable${whereClause.sql}$orderClause limit ? offset ?"
 
         val bindArgs = mutableListOf<Any?>()

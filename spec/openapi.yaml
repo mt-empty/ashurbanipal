@@ -217,7 +217,11 @@ paths:
             columns; unknown column yields 400. Ordering uses the
             column's native type ordering; a column whose type has none
             (Postgres json, xml, geometric types) yields 400
-            unsortable_column.
+            unsortable_column. The table's tie-break key (its primary
+            key, else its shortest NOT NULL unique index) follows, so
+            paging never repeats or skips a row; with no sort, rows come
+            in that key's order, ascending. A table with neither has no
+            tie-break (protocol §5.4).
           schema:
             type: string
           examples:
@@ -458,6 +462,8 @@ paths:
             Column name of the table at `sort_join`; unknown column yields
             400, and a column whose type has no ordering yields 400
             unsortable_column. Ordering uses the column's native type ordering.
+            Each joined table's tie-break key follows, in position order
+            (protocol §5.11.3).
           schema:
             type: string
         - name: sort_join

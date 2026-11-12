@@ -32,6 +32,7 @@ drop schema if exists warehouse cascade;
 -- New tables are dropped before the originals they reference — `cascade` handles
 -- dependent constraints/views either way, but this keeps the drop order honest.
 drop table if exists _conformance_meta cascade;
+drop table if exists page_hits cascade;
 drop table if exists feature_flags cascade;
 drop table if exists inventory_counts cascade;
 drop table if exists inventory_locations cascade;
@@ -208,6 +209,21 @@ create table feature_flags (
     rollout_pct smallint,
     created_at timestamptz not null default now()
 );
+
+-- No primary key on purpose: rows tie-break on (path, day), the shortest
+-- unique key whose columns are all NOT NULL (spec/protocol.md §5.4). The
+-- shorter or earlier-named nullable, partial and expression keys must be skipped.
+create table page_hits (
+    path text not null,
+    day date not null,
+    hits integer not null,
+    ref_code text unique,
+    detail json,
+    unique (hits, day, path)
+);
+create unique index page_hits_path_day on page_hits (path, day);
+create unique index page_hits_a_top on page_hits (hits) where hits > 1000000;
+create unique index page_hits_a_lower_path on page_hits (lower(path), day);
 
 -- Conformance sentinel (conformance/runner reads this when it isn't asked
 -- to apply the seed itself) — see write_conformance_meta().
@@ -53019,14 +53035,14 @@ insert into audit_log (actor_user_id, session_id, event_id, action, details, occ
     ('3feb404a-0b98-43b5-bcc9-657ccfa257d9', NULL, 71, 'order.refunded', '{"seq": 29999}'::jsonb, TIMESTAMPTZ '2026-07-19 00:00:00+00' - interval '416426 minutes');
 
 insert into inventory_locations (warehouse_code, bin_code, label, capacity) values
-    ('WH1', 'A01', 'Aisle A01 — WH1', 28),
-    ('WH1', 'A02', 'Aisle A02 — WH1', 172),
-    ('WH1', 'A03', NULL, 268),
-    ('WH1', 'A04', 'Aisle A04 — WH1', 294),
-    ('WH2', 'A01', 'Aisle A01 — WH2', 112),
-    ('WH2', 'A02', 'Aisle A02 — WH2', 313),
     ('WH2', 'A03', 'Aisle A03 — WH2', 158),
-    ('WH2', 'A04', 'Aisle A04 — WH2', 201);
+    ('WH1', 'A01', 'Aisle A01 — WH1', 28),
+    ('WH2', 'A01', 'Aisle A01 — WH2', 112),
+    ('WH1', 'A04', 'Aisle A04 — WH1', 294),
+    ('WH1', 'A02', 'Aisle A02 — WH1', 172),
+    ('WH2', 'A04', 'Aisle A04 — WH2', 201),
+    ('WH2', 'A02', 'Aisle A02 — WH2', 313),
+    ('WH1', 'A03', NULL, 268);
 
 insert into inventory_counts (warehouse_code, bin_code, product_id, quantity, photo, counted_at) values
     ('WH1', 'A03', 13, 849, NULL, TIMESTAMPTZ '2026-07-19 00:00:00+00' - interval '131 days'),
@@ -53077,6 +53093,16 @@ insert into feature_flags (key, enabled, rollout_pct, created_at) values
     ('export_v2', false, NULL, DATE '2026-07-19' - 270),
     ('inline_editing', false, NULL, DATE '2026-07-19' - 164),
     ('sibling_health_badges', true, 11, DATE '2026-07-19' - 146);
+
+insert into page_hits (path, day, hits, ref_code, detail) values
+    ('/pricing', '2026-07-03', 41, null, '{"ms": 41}'),
+    ('/docs', '2026-07-02', 12, 'b', '{"ms": 12}'),
+    ('/pricing', '2026-07-01', 12, null, null),
+    ('/docs', '2026-07-03', 30, null, '{"ms": 30}'),
+    ('/home', '2026-07-02', 8, 'a', '{"ms": 8}'),
+    ('/docs', '2026-07-01', 12, null, null),
+    ('/home', '2026-07-01', 30, null, '{"ms": 9}'),
+    ('/pricing', '2026-07-02', 27, null, '{"ms": 27}');
 
 insert into warehouse.carriers (name, contact_email, is_active) values
     ('Northwind Freight', 'keira@example.com', true),
@@ -53567,8 +53593,9 @@ analyze audit_log;
 analyze saved_reports;
 analyze inventory_locations;
 analyze inventory_counts;
+analyze page_hits;
 analyze warehouse.carriers;
 analyze warehouse.shipments;
 analyze warehouse.shipment_events;
 analyze warehouse.users;
-insert into _conformance_meta (seed_version, dialect, checksum) values ('6', 'postgres', '661d019ea366a781');
+insert into _conformance_meta (seed_version, dialect, checksum) values ('7', 'postgres', 'dd16645c8007717a');

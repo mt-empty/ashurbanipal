@@ -17,6 +17,7 @@
 SET FOREIGN_KEY_CHECKS = 0;
 DROP DATABASE IF EXISTS `warehouse`;
 DROP TABLE IF EXISTS `_conformance_meta`;
+DROP TABLE IF EXISTS `page_hits`;
 DROP TABLE IF EXISTS `feature_flags`;
 DROP TABLE IF EXISTS `inventory_counts`;
 DROP TABLE IF EXISTS `inventory_locations`;
@@ -201,6 +202,20 @@ CREATE TABLE `feature_flags` (
   `created_at`  datetime NOT NULL
 );
 
+-- No primary key on purpose: rows tie-break on (path, day), the shortest unique
+-- key whose columns are all NOT NULL (spec/protocol.md §5.4); the shorter
+-- or earlier-named keys are nullable, partial or on an expression. Inserted
+-- out of (path, day) order.
+CREATE TABLE `page_hits` (
+  `path`     varchar(60) NOT NULL,
+  `day`      date NOT NULL,
+  `hits`     int NOT NULL,
+  `ref_code` varchar(20) UNIQUE,
+  `detail`   json,
+  UNIQUE KEY `page_hits_hits_day_path` (`hits`, `day`, `path`),
+  UNIQUE KEY `page_hits_path_day` (`path`, `day`)
+);
+
 CREATE TABLE `_conformance_meta` (
   `seed_version` varchar(20) NOT NULL,
   `dialect`      varchar(20) NOT NULL,
@@ -335,14 +350,14 @@ FROM seq;
 
 INSERT INTO `inventory_locations` (`warehouse_code`, `bin_code`, `label`, `capacity`)
 VALUES
-  ('WH1', 'A01', 'Aisle A01 — WH1', 120),
-  ('WH1', 'A02', NULL, 200),
-  ('WH1', 'A03', 'Aisle A03 — WH1', 90),
-  ('WH1', 'A04', NULL, 300),
-  ('WH2', 'A01', 'Aisle A01 — WH2', 150),
-  ('WH2', 'A02', 'Aisle A02 — WH2', 80),
   ('WH2', 'A03', NULL, 260),
-  ('WH2', 'A04', 'Aisle A04 — WH2', 110);
+  ('WH1', 'A01', 'Aisle A01 — WH1', 120),
+  ('WH2', 'A01', 'Aisle A01 — WH2', 150),
+  ('WH1', 'A04', NULL, 300),
+  ('WH1', 'A02', NULL, 200),
+  ('WH2', 'A04', 'Aisle A04 — WH2', 110),
+  ('WH2', 'A02', 'Aisle A02 — WH2', 80),
+  ('WH1', 'A03', 'Aisle A03 — WH1', 90);
 
 INSERT INTO `inventory_counts` (`id`, `warehouse_code`, `bin_code`, `product_id`, `quantity`, `counted_at`)
 WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 20)
@@ -363,6 +378,16 @@ VALUES
   ('export_v2',             FALSE, NULL, TIMESTAMP('2026-07-19 00:00:00') - INTERVAL 15 DAY),
   ('inline_editing',        TRUE,  10,   TIMESTAMP('2026-07-19 00:00:00') - INTERVAL 10 DAY),
   ('sibling_health_badges', TRUE,  75,   TIMESTAMP('2026-07-19 00:00:00') - INTERVAL 5 DAY);
+
+INSERT INTO `page_hits` (`path`, `day`, `hits`, `ref_code`, `detail`) VALUES
+  ('/pricing', '2026-07-03', 41, NULL, '{"ms": 41}'),
+  ('/docs', '2026-07-02', 12, 'b', '{"ms": 12}'),
+  ('/pricing', '2026-07-01', 12, NULL, NULL),
+  ('/docs', '2026-07-03', 30, NULL, '{"ms": 30}'),
+  ('/home', '2026-07-02', 8, 'a', '{"ms": 8}'),
+  ('/docs', '2026-07-01', 12, NULL, NULL),
+  ('/home', '2026-07-01', 30, NULL, '{"ms": 9}'),
+  ('/pricing', '2026-07-02', 27, NULL, '{"ms": 27}');
 
 -- ------------------------------------------------------------- warehouse
 -- The cross-database fixture, the counterpart of seed.sql's `warehouse`
@@ -456,7 +481,7 @@ ANALYZE TABLE `warehouse`.`carriers`, `warehouse`.`shipments`,
 -- stays NULL -> mapped to -1 by mysql.rs (the §5.3 "never analyzed" case).
 ANALYZE TABLE `users`, `orders`, `order_extra`, `products`, `events`, `sessions`,
   `reviews`, `support_tickets`, `payments`, `audit_log`, `saved_reports`,
-  `inventory_locations`, `inventory_counts`;
+  `inventory_locations`, `inventory_counts`, `page_hits`;
 
 INSERT INTO `_conformance_meta` (`seed_version`, `dialect`, `checksum`, `generated_at`)
-VALUES ('6', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));
+VALUES ('7', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));

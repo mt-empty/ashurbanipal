@@ -1,7 +1,10 @@
-use crate::assert::{assert_exact, assert_problem_code, assert_row_estimate, assert_status};
+use crate::assert::{
+    assert_exact, assert_problem_code, assert_row_estimate, assert_status, key_cmp,
+};
 use crate::backend::{Backend, Comments, NotJoinableColumns};
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
+use serde_json::Value;
 
 #[tokio::test]
 async fn returns_requested_shape_and_row_count() {
@@ -414,6 +417,199 @@ async fn sort_on_a_numeric_column_is_numeric_not_lexicographic() {
         prices,
         sorted,
         "real numeric ascending order, not lexicographic string order",
+    );
+}
+
+/// Every row of `table`, one 50-row page at a time, as offset paging does.
+async fn walk_pages(srv: &TestServer, table: &str, extra: &[(&str, &str)]) -> Vec<Value> {
+    let mut all = Vec::new();
+    for page in 0..100 {
+        let offset = (page * 50).to_string();
+        let mut query = vec![
+            ("table", table),
+            ("limit", "50"),
+            ("offset", offset.as_str()),
+        ];
+        query.extend_from_slice(extra);
+        let resp = srv
+            .client()
+            .get(srv.url("/api/tables/data"))
+            .query(&query)
+            .send()
+            .await
+            .unwrap();
+        assert_status(&resp, 200, &format!("{table} page {page} {extra:?}"));
+        let body: Value = resp.json().await.unwrap();
+        let rows = body["rows"].as_array().unwrap().clone();
+        if rows.is_empty() {
+            return all;
+        }
+        all.extend(rows);
+    }
+    panic!("{table} did not run out of rows within 100 pages");
+}
+
+fn ids(rows: &[Value], column: &str) -> Vec<String> {
+    rows.iter()
+        .map(|r| r[column].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// P5.4-TOTAL-ORDER: paging over a sort column with repeated values returns
+/// every row exactly once. Without a tie-break, Postgres orders the ties of
+/// `limit 50` and `limit 50 offset 50` differently.
+#[tokio::test]
+async fn paging_over_a_repeated_sort_column_returns_every_row_once() {
+    let srv = TestServer::spawn().await;
+    let mut expected = ids(
+        &walk_pages(&srv, "support_tickets", &[("sort", "id")]).await,
+        "id",
+    );
+    expected.sort_by(|a, b| key_cmp(a, b));
+    for order in ["asc", "desc"] {
+        let mut got = ids(
+            &walk_pages(
+                &srv,
+                "support_tickets",
+                &[("sort", "status"), ("order", order)],
+            )
+            .await,
+            "id",
+        );
+        got.sort_by(|a, b| key_cmp(a, b));
+        assert_exact(
+            got,
+            expected.clone(),
+            &format!("support_tickets ids paged by status {order}"),
+        );
+    }
+}
+
+/// P5.4-TOTAL-ORDER: with no `sort`, rows come in primary-key order, and
+/// `order` has no effect. `orders` has a uuid key on Postgres, so storage
+/// order differs from it; `inventory_locations` is stored out of key order.
+#[tokio::test]
+async fn rows_with_no_sort_come_in_primary_key_order() {
+    let srv = TestServer::spawn().await;
+    let got = ids(&walk_pages(&srv, "orders", &[]).await, "id");
+    let mut sorted = got.clone();
+    sorted.sort_by(|a, b| key_cmp(a, b));
+    assert_exact(got, sorted.clone(), "orders with no sort, in id order");
+    assert_exact(
+        ids(
+            &walk_pages(&srv, "orders", &[("order", "desc")]).await,
+            "id",
+        ),
+        sorted,
+        "orders with order=desc and no sort, still in ascending id order",
+    );
+
+    let rows = walk_pages(&srv, "inventory_locations", &[]).await;
+    let got: Vec<(String, String)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r["warehouse_code"].as_str().unwrap().to_string(),
+                r["bin_code"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    let mut sorted = got.clone();
+    sorted.sort();
+    assert_exact(
+        got,
+        sorted,
+        "inventory_locations with no sort, in (warehouse_code, bin_code) order",
+    );
+}
+
+/// P5.4-TOTAL-ORDER: rows tied on `sort` follow the primary key, in the
+/// `order` direction.
+#[tokio::test]
+async fn ties_follow_the_primary_key_in_the_order_direction() {
+    let srv = TestServer::spawn().await;
+    for order in ["asc", "desc"] {
+        let rows = walk_pages(&srv, "orders", &[("sort", "status"), ("order", order)]).await;
+        for pair in rows.windows(2) {
+            if pair[0]["status"] != pair[1]["status"] {
+                continue;
+            }
+            let (a, b) = (
+                pair[0]["id"].as_str().unwrap(),
+                pair[1]["id"].as_str().unwrap(),
+            );
+            let want = if order == "asc" {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            };
+            assert_exact(
+                key_cmp(a, b),
+                want,
+                &format!(
+                    "orders tied on status {}, {order}: {a} then {b}",
+                    pair[0]["status"]
+                ),
+            );
+        }
+    }
+}
+
+/// P5.4-TOTAL-ORDER: a table with no primary key breaks ties on its unique
+/// key with the fewest columns whose columns are all NOT NULL. `page_hits`
+/// is stored out of `(path, day)` order; its shorter or earlier-named keys
+/// are nullable (`ref_code`), partial, or on an expression, and its
+/// three-column key is longer.
+#[tokio::test]
+async fn a_table_without_a_primary_key_orders_by_its_shortest_not_null_unique_key() {
+    let srv = TestServer::spawn().await;
+    let pairs = |rows: Vec<Value>| -> Vec<String> {
+        rows.iter()
+            .map(|r| {
+                format!(
+                    "{} {}",
+                    r["path"].as_str().unwrap(),
+                    r["day"].as_str().unwrap()
+                )
+            })
+            .collect()
+    };
+    let owned = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let asc = [
+        "/docs 2026-07-01",
+        "/docs 2026-07-02",
+        "/docs 2026-07-03",
+        "/home 2026-07-01",
+        "/home 2026-07-02",
+        "/pricing 2026-07-01",
+        "/pricing 2026-07-02",
+        "/pricing 2026-07-03",
+    ];
+    assert_exact(
+        pairs(walk_pages(&srv, "page_hits", &[]).await),
+        owned(&asc),
+        "page_hits with no sort",
+    );
+    let mut desc = owned(&asc);
+    desc.reverse();
+    assert_exact(
+        pairs(walk_pages(&srv, "page_hits", &[("sort", "path"), ("order", "desc")]).await),
+        desc,
+        "page_hits sorted by path desc",
+    );
+    assert_exact(
+        pairs(walk_pages(&srv, "page_hits", &[("sort", "hits")]).await),
+        owned(&[
+            "/home 2026-07-02",
+            "/docs 2026-07-01",
+            "/docs 2026-07-02",
+            "/pricing 2026-07-01",
+            "/pricing 2026-07-02",
+            "/docs 2026-07-03",
+            "/home 2026-07-01",
+            "/pricing 2026-07-03",
+        ]),
+        "page_hits sorted by hits, ties in (path, day) order",
     );
 }
 

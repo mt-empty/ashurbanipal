@@ -228,8 +228,66 @@ data class ColMeta(
     )
 }
 
-/** [schema] is the catalog-checked schema the table is spliced under; null on SQLite. */
-data class TableMeta(val name: String, val columns: List<ColMeta>, val schema: String? = null) {
+/**
+ * A unique key a backend's catalog reports for one table. Backends pass a unique
+ * index only when its key columns are plain (no expression), it is not partial,
+ * and every key column is NOT NULL.
+ */
+data class UniqueKey(val name: String, val primary: Boolean, val columns: List<String>)
+
+/**
+ * The primary key's column indexes in key order, else those of the unique key
+ * with the fewest columns (then the lowest name). A key with a column the role
+ * cannot see is skipped; none left means no tie-break.
+ */
+fun tieBreakKeys(columns: List<ColMeta>, keys: List<UniqueKey>): List<Int> =
+    keys
+        .map { k -> k to k.columns.map { name -> columns.indexOfFirst { it.name == name } } }
+        .filter { (_, idx) -> idx.isNotEmpty() && idx.all { it >= 0 } }
+        .minWithOrNull(compareBy({ !it.first.primary }, { it.second.size }, { it.first.name }))
+        ?.second
+        ?: emptyList()
+
+/** One key column of a candidate unique key; [usable] is false when it rules the key out. */
+data class KeyPart(val index: String, val primary: Boolean, val column: String?, val usable: Boolean)
+
+/** Folds [parts], ordered by index and then key position, into keys, dropping a key with an unusable part. */
+fun groupUniqueKeys(parts: List<KeyPart>): List<UniqueKey> =
+    parts
+        .fold(mutableListOf<MutableList<KeyPart>>()) { groups, p ->
+            if (groups.lastOrNull()?.first()?.index == p.index) groups.last().add(p) else groups.add(mutableListOf(p))
+            groups
+        }.filter { g -> g.all { it.usable } }
+        .map { g -> UniqueKey(g.first().index, g.first().primary, g.map { it.column ?: "" }) }
+
+/**
+ * A single-table query's order by, every column qualified by the table name so
+ * it never resolves to a text-cast output column.
+ */
+fun tableOrderClause(meta: TableMeta, sort: String?, descending: Boolean, quote: (String) -> String): String {
+    return orderByClause(sort?.let(meta::index), meta.orderKeys, descending) { "${quote(meta.name)}.${quote(meta.columns[it].name)}" }
+}
+
+/**
+ * ` order by <sort>, <keys…>` with a key equal to [sort] left out, every term in
+ * one direction (asc when there is no sort); "" when there is nothing to order by.
+ */
+fun <T> orderByClause(sort: T?, keys: List<T>, descending: Boolean, render: (T) -> String): String {
+    val dir = if (descending && sort != null) "desc" else "asc"
+    val terms = listOfNotNull(sort) + keys.filter { it != sort }
+    return if (terms.isEmpty()) "" else terms.joinToString(", ", prefix = " order by ") { "${render(it)} $dir" }
+}
+
+/**
+ * [schema] is the catalog-checked schema the table is spliced under; null on SQLite.
+ * [orderKeys] index [columns] that break ties after `sort` (`spec/protocol.md` §5.4).
+ */
+data class TableMeta(
+    val name: String,
+    val columns: List<ColMeta>,
+    val schema: String? = null,
+    val orderKeys: List<Int> = emptyList(),
+) {
     fun index(column: String): Int {
         val i = columns.indexOfFirst { it.name == column }
         if (i < 0) throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
@@ -409,7 +467,8 @@ internal fun buildJoinSelect(plan: JoinPlan, d: JoinDialect): Pair<String, List<
         clause.append(if (cond.not) "(NOT ($inner))" else "($inner)")
     }
     if (clause.isNotEmpty()) sql.append(" where $clause")
-    plan.sort?.let { (p, c) -> sql.append(" order by ${alias(p, c)} ${if (plan.descending) "desc" else "asc"}") }
+    val keys = plan.tables.flatMapIndexed { p, t -> t.orderKeys.map { c -> p to c } }
+    sql.append(orderByClause(plan.sort, keys, plan.descending) { (p, c) -> alias(p, c) })
     sql.append(" limit ? offset ?")
     return sql.toString() to values
 }

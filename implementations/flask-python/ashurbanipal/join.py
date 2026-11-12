@@ -8,7 +8,7 @@ emits SQL from catalog names and generated aliases only.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeGuard
 
@@ -231,11 +231,60 @@ class ColMeta:
 
 
 @dataclass
+class UniqueKey:
+    """A unique key a backend's catalog reports for one table. Backends pass a unique
+    index only when its key columns are plain (no expression), it is not partial, and
+    every key column is NOT NULL."""
+
+    name: str
+    primary: bool
+    columns: list[str]
+
+
+def tie_break_keys(columns: Sequence[ColMeta], keys: Sequence[UniqueKey]) -> list[int]:
+    """The primary key's column indexes in key order, else those of the unique key with
+    the fewest columns (then the lowest name). A key with a column the role cannot see
+    is skipped; none left means no tie-break."""
+    names = [c.name for c in columns]
+    usable = [
+        (k, [names.index(n) for n in k.columns]) for k in keys if k.columns and all(n in names for n in k.columns)
+    ]
+    if not usable:
+        return []
+    return min(usable, key=lambda u: (not u[0].primary, len(u[1]), u[0].name))[1]
+
+
+def group_unique_keys(parts: Iterable[tuple[str, bool, str | None, bool]]) -> list[UniqueKey]:
+    """Folds `(index, primary, column, usable)` parts, ordered by index and then key
+    position, into keys, dropping a key with any unusable part."""
+    keys: list[tuple[UniqueKey, bool]] = []
+    for index, primary, column, usable in parts:
+        if not keys or keys[-1][0].name != index:
+            keys.append((UniqueKey(index, primary, []), True))
+        key, ok = keys[-1]
+        key.columns.append(column or "")
+        keys[-1] = (key, ok and usable)
+    return [k for k, ok in keys if ok]
+
+
+def order_by_clause(sort: Any, keys: Sequence[Any], descending: bool, render: Callable[[Any], str]) -> str:
+    """` order by <sort>, <keys…>` with a key equal to `sort` left out, every term in
+    one direction (asc when there is no sort); "" when there is nothing to order by."""
+    direction = "desc" if descending and sort is not None else "asc"
+    terms = ([] if sort is None else [sort]) + [k for k in keys if k != sort]
+    if not terms:
+        return ""
+    return " order by " + ", ".join(f"{render(t)} {direction}" for t in terms)
+
+
+@dataclass
 class TableMeta:
     name: str
     columns: list[ColMeta]
     # The catalog-checked schema the table is spliced under; None on SQLite.
     schema: str | None = None
+    # Indexes into `columns` that break ties after `sort` (`spec/protocol.md` §5.4).
+    order_keys: list[int] = field(default_factory=list)
 
     def index(self, column: str) -> int:
         for i, c in enumerate(self.columns):
@@ -249,6 +298,15 @@ class TableMeta:
             return self.index(column)
         except NotAllowed:
             raise BadJoin(f"{self.name} has no column {column!r}") from None
+
+
+def table_order_clause(meta: TableMeta, sort: str | None, descending: bool, quote: Callable[[str], str]) -> str:
+    """A single-table query's order by, every column qualified by the table name so it
+    never resolves to a text-cast output column."""
+    sort_index = None if sort is None else meta.index(sort)
+    return order_by_clause(
+        sort_index, meta.order_keys, descending, lambda i: f"{quote(meta.name)}.{quote(meta.columns[i].name)}"
+    )
 
 
 def unknown_join_table(err: DbError, table: str) -> DbError:
@@ -506,7 +564,7 @@ def build_select(plan: JoinPlan, d: Dialect) -> tuple[str, list[str]]:
         clause += f"(NOT ({inner}))" if cond.not_ else f"({inner})"
     if clause:
         sql += f" where {clause}"
-    if plan.sort is not None:
-        sql += f" order by {alias(*plan.sort)} {'desc' if plan.descending else 'asc'}"
+    keys = [(pos, c) for pos, t in enumerate(plan.tables) for c in t.order_keys]
+    sql += order_by_clause(plan.sort, keys, plan.descending, lambda k: alias(*k))
     sql += f" limit {ph} offset {ph}"
     return sql, values

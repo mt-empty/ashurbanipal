@@ -211,6 +211,29 @@ a 400 `unsortable_column` (`spec/protocol.md` §5.4, §5.11.3), never a 500.
 | MySQL/MariaDB | None: every type orders (`json` as JSON, geometry by bytes) | |
 | SQLite   | None: every storage class orders | |
 
+## §5.4 / §5.11.3 — tie-break keys
+
+Protocol property: after `sort`, rows are ordered by the table's tie-break
+key: the primary key, else the unique index with the fewest key columns
+that has no expression, is not partial, and has only `NOT NULL` key
+columns (`spec/protocol.md` §5.4). Each port reads the candidate keys from
+the catalog and picks one with a shared helper (`tie_break_keys`): the
+primary key first, then the fewest columns, then the lowest index name. A
+key with a column missing from the table's column list (hidden by column
+privileges) is skipped.
+
+| Backend  | Candidate keys | Notes |
+|----------|----------------|-------|
+| Postgres | `pg_index` (`indisunique`, `indisvalid`, `indpred` and `indexprs` null), key columns from the first `indnkeyatts` of `indkey`, `NOT NULL` from `pg_attribute.attnotnull` | Not `information_schema.table_constraints`: it hides constraints from a role that holds only `SELECT` on the table, which would leave every read-only role with no key. `INCLUDE` columns are not key columns. A deferrable unique constraint still counts. |
+| MySQL/MariaDB | `information_schema.statistics` with `non_unique = 0`, in `seq_in_index` order; the primary key is the index named `PRIMARY` | A functional key part (MySQL 8.0.13+) has no `column_name`, and a nullable key part has `nullable = 'YES'`; either rules the index out. A prefix key part (`sub_part`) still counts: a unique prefix makes the whole value unique. A `text`/`blob` sorts on its first `max_sort_length` bytes (1024 by default), so rows that differ only past that point MAY change places. InnoDB secondary indexes already end in the primary key, so `sort` plus the key can still use an index on the sort column. |
+| SQLite   | Primary key from `pragma_table_info.pk` (1-based position in the key), since an `INTEGER PRIMARY KEY` has no index row; unique indexes from `pragma_index_list` (`unique = 1`, `partial = 0`, `origin <> 'pk'`) and `pragma_index_xinfo` (`key = 1`), `NOT NULL` from `pragma_table_info.notnull` | An expression key part has no `pragma_table_info` row and rules the index out. SQLite lets a non-`INTEGER` primary-key column of a rowid table hold NULL, so rows that are NULL in the key MAY change places. A table with no key still has a `rowid`; it is not used, so the rule stays the same on every engine. |
+
+A table with no usable key gets no tie-break: paging over its tied or
+unsorted rows MAY repeat or skip a row (`spec/protocol.md` §5.4). This is
+an accepted gap. The alternatives cost more than they save: ordering by
+every column sorts the whole table for each page, and Postgres `ctid` or
+SQLite `rowid` have no MySQL equivalent.
+
 ## §5.4.1 — forward FK/PK column metadata (`key_metadata`)
 
 Protocol property: for a given `table`, each column's `key`

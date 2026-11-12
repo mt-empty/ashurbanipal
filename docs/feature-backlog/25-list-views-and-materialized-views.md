@@ -91,10 +91,9 @@ Column metadata needs no change: `information_schema.columns` and
 
 ## 7. Open questions
 
-- **Default order.** With no sort chosen there is no `ORDER BY`
-  (`postgres.rs`, `query_table`), so paging a view can repeat or skip
-  rows. PK-less tables share this today; views hit it more. Sort by the
-  first column by default, or leave it?
+- **Default order.** Answered by story 33 B1: a table with no primary
+  key or NOT NULL unique index gets no tie-break (`spec/protocol.md`
+  §5.4). A view has no key, so its rows come in the engine's order.
 - **Joins on views.** Keep them allowed, or limit `/tables/join` to
   `kind = table`?
 - **Partitioned tables** (`relkind = 'p'`) are also left out today

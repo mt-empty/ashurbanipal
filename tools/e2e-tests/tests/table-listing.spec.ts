@@ -10,6 +10,7 @@ const SEEDED_TABLES = [
   "inventory_locations",
   "order_extra",
   "orders",
+  "page_hits",
   "payments",
   "products",
   "reviews",

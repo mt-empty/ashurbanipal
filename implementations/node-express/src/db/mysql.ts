@@ -7,6 +7,7 @@ import {
   type ColMeta,
   type ColumnClass,
   columnInfo,
+  groupUniqueKeys,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
@@ -16,7 +17,10 @@ import {
   joinTableRefs,
   planJoin,
   type TableMeta,
+  tableOrderClause,
   tableSchemas,
+  tieBreakKeys,
+  type UniqueKey,
 } from "../join.js";
 import {
   type ColumnInfo,
@@ -474,7 +478,38 @@ export class MySqlSource implements DbSource {
       if (comment.length > 0) col.comment = comment;
       return col;
     });
-    return { schema, name: table, columns };
+    const orderKeys = tieBreakKeys(columns, await this.uniqueKeys(conn, variant, schema, table, timeoutMs));
+    return { schema, name: table, columns, orderKeys };
+  }
+
+  // The primary key and every unique index whose key parts are all plain NOT
+  // NULL columns. A functional key part has no column_name.
+  private async uniqueKeys(
+    conn: PoolConnection,
+    variant: Variant,
+    schema: string,
+    table: string,
+    timeoutMs: number,
+  ): Promise<UniqueKey[]> {
+    const rows = await queryRows(
+      conn,
+      timedSelect(
+        variant,
+        timeoutMs,
+        "index_name as index_name, column_name as column_name, nullable as nullable " +
+          "from information_schema.statistics where table_schema = ? and table_name = ? and non_unique = 0 " +
+          "order by index_name, seq_in_index",
+      ),
+      [schema, table],
+    );
+    return groupUniqueKeys(
+      rows.map((r) => ({
+        index: String(r.index_name),
+        primary: r.index_name === "PRIMARY",
+        column: r.column_name === null ? "" : String(r.column_name),
+        usable: r.column_name !== null && r.nullable !== "YES",
+      })),
+    );
   }
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
@@ -542,10 +577,7 @@ export class MySqlSource implements DbSource {
         .map((c) => `CAST(${quoteIdentMysql(c.name)} AS CHAR) AS ${quoteIdentMysql(c.name)}`)
         .join(", ");
       // Qualify the source column so ORDER BY keeps its native type.
-      const orderClause =
-        sort !== undefined
-          ? ` order by ${quoteIdentMysql(realTable)}.${quoteIdentMysql(sort)} ${opts.descending ? "desc" : "asc"}`
-          : "";
+      const orderClause = tableOrderClause(meta, sort, opts.descending, quoteIdentMysql);
       const dataSql = timedSelect(
         variant,
         timeoutMs,

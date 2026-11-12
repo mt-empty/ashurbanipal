@@ -116,3 +116,12 @@ pub async fn assert_problem_code(
         body.get("code")
     );
 }
+
+/// Key values compare as integers where the seed uses integer ids, else as
+/// text (uuid order is its lowercase hex order on every engine).
+pub(crate) fn key_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    match (a.parse::<i64>(), b.parse::<i64>()) {
+        (Ok(x), Ok(y)) => x.cmp(&y),
+        _ => a.cmp(b),
+    }
+}

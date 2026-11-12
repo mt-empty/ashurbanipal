@@ -126,7 +126,53 @@ func (c *SQLiteSource) tableMeta(ctx context.Context, q queryer, table string) (
 		col := &meta.columns[i]
 		col.key, col.references = joinKeyOf(col.name, pk, fk)
 	}
+	keys, err := c.uniqueKeys(ctx, q, table)
+	if err != nil {
+		return tableMeta{}, err
+	}
+	meta.orderKeys = tieBreakKeys(meta.columns, keys)
 	return meta, nil
+}
+
+// uniqueKeys lists the primary key (an INTEGER PRIMARY KEY has no index row)
+// and every unique, non-partial index whose key columns are all NOT NULL table
+// columns. An expression key part has no pragma_table_info row.
+func (c *SQLiteSource) uniqueKeys(ctx context.Context, q queryer, table string) ([]uniqueKey, error) {
+	keyCtx, cancel := c.bounded(ctx)
+	defer cancel()
+	t := quoteIdent(table)
+	rows, err := q.QueryContext(keyCtx, fmt.Sprintf(
+		`select '', 1, name, 1, pk from pragma_table_info(%[1]s) where pk > 0
+		 union all
+		 select il.name, 0, ti.name, ti."notnull", ii.seqno
+		 from pragma_index_list(%[1]s) il
+		 join pragma_index_xinfo(il.name) ii
+		 left join pragma_table_info(%[1]s) ti on ti.cid = ii.cid
+		 where il."unique" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1
+		 order by 1, 5`, t))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var parts []keyPart
+	for rows.Next() {
+		var index string
+		var primary bool
+		var column sql.NullString
+		var notNull sql.NullInt64
+		var position int64
+		if err := rows.Scan(&index, &primary, &column, &notNull, &position); err != nil {
+			return nil, err
+		}
+		parts = append(parts, keyPart{
+			index: index, primary: primary, column: column.String,
+			usable: primary || (column.Valid && notNull.Int64 == 1),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return groupUniqueKeys(parts), nil
 }
 
 // QueryJoin serves GET /api/tables/join (spec/protocol.md §5.11): every
@@ -471,14 +517,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	}
 	selectList := joinComma(selectParts)
 
-	orderClause := ""
-	if sort != nil {
-		direction := "asc"
-		if opts.Descending {
-			direction = "desc"
-		}
-		orderClause = fmt.Sprintf(" order by %s.%s %s", quoteIdent(realTable), quoteIdent(*sort), direction)
-	}
+	orderClause := tableOrderClause(meta, sort, opts.Descending, quoteIdent)
 
 	// Identifiers spliced here are schema-validated (realTable via
 	// allowedTables, columns via allowedColumns, sort via the findExact

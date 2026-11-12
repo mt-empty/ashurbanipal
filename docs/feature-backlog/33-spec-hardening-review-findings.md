@@ -1,6 +1,6 @@
 # Spec-hardening review: wire-contract and doc red flags
 
-> **Status:** PARTIAL · **Area:** spec, ports, frontend, docs · **Ref:** B3, S3, D1, D2, D3 done; B1, B2, B4, B5, B6, S1, S2, S4 open
+> **Status:** PARTIAL · **Area:** spec, ports, frontend, docs · **Ref:** B1, B3, S3, D1, D2, D3 done; B2, B4, B5, B6, S1, S2, S4 open
 
 **Ask:** a review pass on 2026-09-08, done while planning
 [[14-incoming-fk-references]], turned up a set of best-practice concerns
@@ -27,6 +27,66 @@ Fix: §5.4 MUST require a deterministic order whenever `limit`/`offset`
 apply — e.g. append the primary key (or the full column tuple for a
 PK-less table) as an implicit final sort key, in every port. Needs a
 conformance case. Adjacent to [[05-multi-column-sort]].
+
+**Actioned:** §5.4 and §5.11.3 now break ties on each table's key, and
+every port appends it. After review (2026-11-12) the no-primary-key rule
+changed from "every sortable column" to: the shortest unique index whose
+columns are all NOT NULL (no expression, not partial), else no tie-break,
+an accepted gap in `docs/adapter-decisions.md`. Keys come from `pg_index`
+on Postgres, so a SELECT-only role still sees them. `order` applies only
+with a `sort`. The `page_hits` seed table (unique indexes only) and five
+conformance cases cover it on every engine.
+
+#### B1 plan (2026-11-12)
+
+**Seen on the devcontainer seed.** `support_tickets` (350 rows, 4
+`status` values) sorted by `status` and paged 50 at a time: the 7 pages
+return 66 rows twice and never return 66 others. Ticket 22 is on pages 1,
+2 and 3 (`/api/tables/data?table=support_tickets&sort=status`). Postgres
+breaks ties differently for `limit 50` and `limit 100 offset 50`.
+
+**Decided (2026-11-12):**
+- No `sort` → order by the tie-break key, ascending; `order` is ignored.
+  This visibly reorders tables with uuid keys (`users`, `orders`,
+  `sessions`, `order_extra`).
+- Tie-break key: the primary key, else the shortest unique index whose
+  key columns are all NOT NULL, with no expression and not partial.
+  Neither → no tie-break, a documented gap. An earlier draft sorted
+  key-less tables by every sortable column; review dropped it for its
+  cost (a full sort per page), its Postgres 14-only catalog check, and
+  its per-column lookup on every request.
+- The join route (§5.11) appends each joined table's key, in join order.
+- Keys come from the catalog without a privilege filter (`pg_index` on
+  Postgres), so a SELECT-only role still sees them.
+
+NULL placement in tie-break keys stays engine-defined (outer-join keys
+can be NULL). Not a version bump: the order of tied and unsorted rows was
+unspecified; `spec/CHANGELOG.md` records it as "v1 stands".
+
+**What changed**, one PR across every port:
+- Spec: `spec/protocol.md` §5.4 and §5.11.3, `spec/openapi.yaml`,
+  `spec/CHANGELOG.md`, and `docs/adapter-decisions.md` (each engine's
+  catalog lookup).
+- Every port: a shared `tie_break_keys` / `order_by_clause` pair next to
+  the join builder, and a `unique_keys` lookup per engine.
+- Seed: `page_hits` has no primary key, only unique indexes, some of
+  which must be skipped; `inventory_locations` is stored out of key
+  order. Seed version 7.
+- Conformance (`P5.4-TOTAL-ORDER`, `P5.11-TOTAL-ORDER`): paging over
+  ties, no-`sort` key order (single and composite key, `order=desc`
+  ignored), tie direction, the unique-index choice, and a paged join.
+- Demos: the snapshot builder relies on the default order; the synthetic
+  backend sorts `desc` ties in reverse key order.
+
+**Cost.** No `sort`: an index scan on the key with `LIMIT`, cheap. With
+`sort`: the engine already sorts every matching row; one more key is
+noise. A join with no `sort` orders by every table's key, which sorts
+the whole join result per page; dropping a joined table's key when its
+`on` columns cover it is a possible follow-up.
+
+**Out of scope:** keyset paging (B2), multi-column sort
+([[05-multi-column-sort]]), and showing the implicit key order in the
+grid's header arrows.
 
 ### B2 — Offset-only pagination
 

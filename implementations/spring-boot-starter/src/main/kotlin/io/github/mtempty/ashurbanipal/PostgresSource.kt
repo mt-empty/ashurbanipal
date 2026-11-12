@@ -269,22 +269,40 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             table,
         )
         val (pkColumns, fkColumns) = keyMetadata(schema, table)
-        return TableMeta(
-            schema = schema,
-            name = table,
-            columns = columns.map { c ->
-                ColMeta(
-                    name = c.name,
-                    type = c.fullType,
-                    columnClass = pgColumnClass(c.type, c.udtSchema, c.udtName, c.isEnum),
-                    collation = c.collation,
-                    key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
-                    references = fkColumns[c.name],
-                    comment = c.comment,
-                )
-            },
-        )
+        val colMetas = columns.map { c ->
+            ColMeta(
+                name = c.name,
+                type = c.fullType,
+                columnClass = pgColumnClass(c.type, c.udtSchema, c.udtName, c.isEnum),
+                collation = c.collation,
+                key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
+                references = fkColumns[c.name],
+                comment = c.comment,
+            )
+        }
+        return TableMeta(schema = schema, name = table, columns = colMetas, orderKeys = tieBreakKeys(colMetas, uniqueKeys(oid)))
     }
+
+    /**
+     * The primary key and every unique index that can break ties: plain key
+     * columns (INCLUDE columns left out), not partial, and all NOT NULL.
+     * pg_index has no privilege filter, unlike information_schema, so a role
+     * with only SELECT still sees the key.
+     */
+    private fun uniqueKeys(oid: Long): List<UniqueKey> = groupUniqueKeys(
+        jdbcTemplate.query(
+            "select c.relname, i.indisprimary, a.attname, a.attnotnull " +
+                "from pg_index i " +
+                "join pg_class c on c.oid = i.indexrelid " +
+                "cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n) " +
+                "join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum " +
+                "where i.indrelid = ? and i.indisunique and i.indisvalid " +
+                "  and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts " +
+                "order by c.relname, k.n",
+            RowMapper { rs, _ -> KeyPart(rs.getString(1), rs.getBoolean(2), rs.getString(3), rs.getBoolean(2) || rs.getBoolean(4)) },
+            oid,
+        ),
+    )
 
     override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
         val listed = listAllowedSchemas()
@@ -331,7 +349,8 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val realTable = table
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
-        val columns = tableMeta(realSchema, realTable, oid).columns.map { it.columnInfo() }
+        val meta = tableMeta(realSchema, realTable, oid)
+        val columns = meta.columns.map { it.columnInfo() }
         val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
@@ -342,10 +361,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             ?: WhereClause("", emptyList())
 
         val selectList = columns.joinToString(", ") { "${quoteIdent(it.name)}::text" }
-        // Qualify the source column so ORDER BY keeps its native type.
-        val orderClause = sort?.let {
-            " order by ${quoteIdent(realTable)}.${quoteIdent(it)} ${if (opts.descending) "desc" else "asc"}"
-        } ?: ""
+        val orderClause = tableOrderClause(meta, sort, opts.descending, ::quoteIdent)
         val sql = "select $selectList from ${quoteIdent(realSchema)}.${quoteIdent(realTable)}" +
             "${whereClause.sql}$orderClause limit ? offset ?"
 

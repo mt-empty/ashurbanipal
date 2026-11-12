@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -20,13 +21,45 @@ func textCol(name string) colMeta {
 
 func testOrdersUsers() []tableMeta {
 	return []tableMeta{
-		{schema: "public", name: "orders", columns: []colMeta{uuidCol("id"), uuidCol("user_id"), textCol("status"), {name: "tags", typeName: "ARRAY", class: classArray}}},
-		{schema: "public", name: "users", columns: []colMeta{uuidCol("id"), textCol("email")}},
+		{schema: "public", name: "orders", columns: []colMeta{uuidCol("id"), uuidCol("user_id"), textCol("status"), {name: "tags", typeName: "ARRAY", class: classArray}}, orderKeys: []int{0}},
+		{schema: "public", name: "users", columns: []colMeta{uuidCol("id"), textCol("email")}, orderKeys: []int{0}},
 	}
 }
 
 const testJoinJSON = `{"table":"orders","joins":[{"type":"left","table":"users",
 	"on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}`
+
+func TestTieBreakPrefersThePrimaryKeyThenTheShortestUniqueKey(t *testing.T) {
+	cols := testOrdersUsers()[0].columns
+	pk := uniqueKey{name: "z_pkey", primary: true, columns: []string{"status", "id"}}
+	short := uniqueKey{name: "b", columns: []string{"user_id"}}
+	tied := uniqueKey{name: "a", columns: []string{"status"}}
+	hidden := uniqueKey{name: "0", columns: []string{"hidden"}}
+	if got := tieBreakKeys(cols, []uniqueKey{short, pk}); !slices.Equal(got, []int{2, 0}) {
+		t.Errorf("primary key = %v", got)
+	}
+	if got := tieBreakKeys(cols, []uniqueKey{short, tied, hidden}); !slices.Equal(got, []int{2}) {
+		t.Errorf("shortest, then lowest name = %v", got)
+	}
+	if got := tieBreakKeys(cols, nil); len(got) != 0 {
+		t.Errorf("no key = %v", got)
+	}
+}
+
+func TestOrderByLeavesOutAKeyAlreadyUsedAsSort(t *testing.T) {
+	render := func(i int) string { return fmt.Sprintf("c%d", i) }
+	one := 1
+	if got := orderByClause(&one, []int{1, 0}, true, render); got != " order by c1 desc, c0 desc" {
+		t.Errorf("got %q", got)
+	}
+	// order applies only with a sort.
+	if got := orderByClause(nil, []int{0}, true, render); got != " order by c0 asc" {
+		t.Errorf("got %q", got)
+	}
+	if got := orderByClause[int](nil, nil, false, render); got != "" {
+		t.Errorf("got %q", got)
+	}
+}
 
 func TestOnlyATextColumnReportsItsCollation(t *testing.T) {
 	bin := "utf8mb4_bin"
@@ -193,7 +226,7 @@ func TestBuildJoinSelectUsesCatalogNamesAndGeneratedAliasesOnly(t *testing.T) {
 		`t0."id"::text as c0, `,
 		` from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"`,
 		` where (t1."email"::text = $3) OR (NOT (t0."status"::text IS NULL))`,
-		` order by t1."email" asc limit $1 offset $2`,
+		` order by t1."email" asc, t0."id" asc, t1."id" asc limit $1 offset $2`,
 	} {
 		if !strings.Contains(sqlText, want) {
 			t.Errorf("sql missing %q:\n%s", want, sqlText)

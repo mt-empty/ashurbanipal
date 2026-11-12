@@ -227,6 +227,7 @@ fn generate_postgres(rng: &mut StdRng) -> String {
     write_inventory_counts(&mut out, rng, &locations);
     write_feature_flags(&mut out, rng);
     // feature_flags is deliberately excluded from analyze below.
+    write_page_hits(&mut out);
 
     write_carriers(&mut out, rng);
     let shipped_offsets_mins = write_shipments(&mut out, rng, &orders);
@@ -252,6 +253,7 @@ fn generate_postgres(rng: &mut StdRng) -> String {
          analyze saved_reports;\n\
          analyze inventory_locations;\n\
          analyze inventory_counts;\n\
+         analyze page_hits;\n\
          analyze warehouse.carriers;\n\
          analyze warehouse.shipments;\n\
          analyze warehouse.shipment_events;\n\
@@ -295,6 +297,7 @@ fn write_header(out: &mut String) {
          -- New tables are dropped before the originals they reference — `cascade` handles\n\
          -- dependent constraints/views either way, but this keeps the drop order honest.\n\
          drop table if exists _conformance_meta cascade;\n\
+         drop table if exists page_hits cascade;\n\
          drop table if exists feature_flags cascade;\n\
          drop table if exists inventory_counts cascade;\n\
          drop table if exists inventory_locations cascade;\n\
@@ -461,6 +464,20 @@ fn write_schema(out: &mut String) {
          \x20   rollout_pct smallint,\n\
          \x20   created_at timestamptz not null default now()\n\
          );\n\n\
+         -- No primary key on purpose: rows tie-break on (path, day), the shortest\n\
+         -- unique key whose columns are all NOT NULL (spec/protocol.md §5.4). The\n\
+         -- shorter or earlier-named nullable, partial and expression keys must be skipped.\n\
+         create table page_hits (\n\
+         \x20   path text not null,\n\
+         \x20   day date not null,\n\
+         \x20   hits integer not null,\n\
+         \x20   ref_code text unique,\n\
+         \x20   detail json,\n\
+         \x20   unique (hits, day, path)\n\
+         );\n\
+         create unique index page_hits_path_day on page_hits (path, day);\n\
+         create unique index page_hits_a_top on page_hits (hits) where hits > 1000000;\n\
+         create unique index page_hits_a_lower_path on page_hits (lower(path), day);\n\n\
          -- Conformance sentinel (conformance/runner reads this when it isn't asked\n\
          -- to apply the seed itself) — see write_conformance_meta().\n\
          create table _conformance_meta (\n\
@@ -1310,6 +1327,8 @@ fn write_audit_log(out: &mut String, rng: &mut StdRng, users: &[GenUser], sessio
 /// fixture. Two warehouses of four bins each; returns the generated
 /// `(warehouse_code, bin_code)` pairs so `write_inventory_counts` can pick
 /// real ones.
+const INVENTORY_LOCATIONS_WRITE_ORDER: [usize; 8] = [6, 0, 4, 3, 1, 7, 5, 2];
+
 fn write_inventory_locations(out: &mut String, rng: &mut StdRng) -> Vec<(String, String)> {
     let warehouses = ["WH1", "WH2"];
     let mut pairs = Vec::new();
@@ -1319,18 +1338,27 @@ fn write_inventory_locations(out: &mut String, rng: &mut StdRng) -> Vec<(String,
         }
     }
 
+    let rows: Vec<String> = pairs
+        .iter()
+        .map(|(wh, bin)| {
+            let label = if rng.random_bool(0.7) {
+                q(&format!("Aisle {bin} — {wh}"))
+            } else {
+                "NULL".into()
+            };
+            let capacity = rng.random_range(20..500);
+            format!("    ({}, {}, {label}, {capacity})", q(wh), q(bin))
+        })
+        .collect();
+    // Written out of key order, so storage order differs from the
+    // `(warehouse_code, bin_code)` order a request with no sort must return.
+    let written: Vec<&str> = INVENTORY_LOCATIONS_WRITE_ORDER
+        .iter()
+        .map(|&i| rows[i].as_str())
+        .collect();
     out.push_str("insert into inventory_locations (warehouse_code, bin_code, label, capacity) values\n");
-    let n = pairs.len();
-    for (i, (wh, bin)) in pairs.iter().enumerate() {
-        let label = if rng.random_bool(0.7) {
-            q(&format!("Aisle {bin} — {wh}"))
-        } else {
-            "NULL".into()
-        };
-        let capacity = rng.random_range(20..500);
-        let sep = if i + 1 == n { ";\n\n" } else { ",\n" };
-        write!(out, "    ({}, {}, {label}, {capacity}){sep}", q(wh), q(bin)).unwrap();
-    }
+    out.push_str(&written.join(",\n"));
+    out.push_str(";\n\n");
     pairs
 }
 
@@ -1370,6 +1398,23 @@ fn write_inventory_counts(out: &mut String, rng: &mut StdRng, locations: &[(Stri
         .unwrap();
     }
 }
+
+/// `page_hits` — inserted out of `(path, day)` order, so storage order
+/// differs from the order §5.4's tie-break must produce. `hits` repeats, and
+/// `ref_code` sorts `/home` before `/docs`, so tie-breaking on the wrong key shows.
+fn write_page_hits(out: &mut String) {
+    out.push_str(PAGE_HITS_INSERT);
+}
+
+const PAGE_HITS_INSERT: &str = "insert into page_hits (path, day, hits, ref_code, detail) values\n\
+    \x20   ('/pricing', '2026-07-03', 41, null, '{\"ms\": 41}'),\n\
+    \x20   ('/docs', '2026-07-02', 12, 'b', '{\"ms\": 12}'),\n\
+    \x20   ('/pricing', '2026-07-01', 12, null, null),\n\
+    \x20   ('/docs', '2026-07-03', 30, null, '{\"ms\": 30}'),\n\
+    \x20   ('/home', '2026-07-02', 8, 'a', '{\"ms\": 8}'),\n\
+    \x20   ('/docs', '2026-07-01', 12, null, null),\n\
+    \x20   ('/home', '2026-07-01', 30, null, '{\"ms\": 9}'),\n\
+    \x20   ('/pricing', '2026-07-02', 27, null, '{\"ms\": 27}');\n\n";
 
 /// `feature_flags` — deliberately excluded from the `analyze` block in
 /// `main()`: the conformance fixture for a table with no planner statistics

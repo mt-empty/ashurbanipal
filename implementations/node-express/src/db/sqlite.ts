@@ -7,6 +7,7 @@ import {
   type ColMeta,
   type ColumnClass,
   columnInfo,
+  groupUniqueKeys,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
@@ -16,7 +17,10 @@ import {
   joinTableRefs,
   planJoin,
   type TableMeta,
+  tableOrderClause,
   tableSchemas,
+  tieBreakKeys,
+  type UniqueKey,
 } from "../join.js";
 import {
   type ColumnInfo,
@@ -263,7 +267,34 @@ async function tableMeta(db: Database, table: string): Promise<TableMeta> {
     }
     return col;
   });
-  return { name: table, columns };
+  return { name: table, columns, orderKeys: tieBreakKeys(columns, await uniqueKeys(db, table)) };
+}
+
+// The primary key (an INTEGER PRIMARY KEY has no index row) and every unique,
+// non-partial index whose key columns are all NOT NULL table columns. An
+// expression key part has no pragma_table_info row. `table` must already be
+// allow-listed.
+async function uniqueKeys(db: Database, table: string): Promise<UniqueKey[]> {
+  const t = quoteIdent(table);
+  const rows = await dbAll<{ idx: string; is_pk: number; col: string | null; not_null: number | null }>(
+    db,
+    `select '' as idx, 1 as is_pk, name as col, 1 as not_null, pk as pos from pragma_table_info(${t}) where pk > 0
+     union all
+     select il.name, 0, ti.name, ti."notnull", ii.seqno
+     from pragma_index_list(${t}) il
+     join pragma_index_xinfo(il.name) ii
+     left join pragma_table_info(${t}) ti on ti.cid = ii.cid
+     where il."unique" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1
+     order by 1, 5`,
+  );
+  return groupUniqueKeys(
+    rows.map((r) => ({
+      index: r.idx,
+      primary: r.is_pk === 1,
+      column: r.col ?? "",
+      usable: r.is_pk === 1 || (r.col !== null && r.not_null === 1),
+    })),
+  );
 }
 
 /** SQLite implementation; see docs/adapter-decisions.md for protocol differences. */
@@ -337,9 +368,8 @@ export class SqliteSource implements DbSource {
 
     // The join route's lookup, so both routes report the same columns; its
     // names are the live catalog's, so they also serve as the allow-list.
-    const columns: ColumnInfo[] = (await bounded(this.db, timeoutMs, () => tableMeta(this.db, realTable))).columns.map(
-      columnInfo,
-    );
+    const meta = await bounded(this.db, timeoutMs, () => tableMeta(this.db, realTable));
+    const columns: ColumnInfo[] = meta.columns.map(columnInfo);
     const columnNames = columns.map((c) => c.name);
     let sort: string | undefined;
     if (opts.sort !== undefined) {
@@ -358,8 +388,7 @@ export class SqliteSource implements DbSource {
     // access by name below (cellToJson via col.name) would otherwise
     // silently read undefined for every cell.
     const selectList = columns.map((c) => `CAST(${quoteIdent(c.name)} AS TEXT) AS ${quoteIdent(c.name)}`).join(", ");
-    const orderClause =
-      sort !== undefined ? ` order by ${quotedTable}.${quoteIdent(sort)} ${opts.descending ? "desc" : "asc"}` : "";
+    const orderClause = tableOrderClause(meta, sort, opts.descending, quoteIdent);
     const sql = `select ${selectList} from ${quotedTable}${whereClause}${orderClause} limit ? offset ?`;
     const params = [...filterValues, opts.limit, opts.offset];
 

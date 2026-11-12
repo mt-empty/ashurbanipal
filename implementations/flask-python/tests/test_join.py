@@ -33,12 +33,16 @@ from ashurbanipal.join import (
     Dialect,
     JoinOpts,
     TableMeta,
+    UniqueKey,
     assign_labels,
     build_select,
     enum_class,
+    group_unique_keys,
+    order_by_clause,
     parse_join,
     plan_join,
     table_schemas,
+    tie_break_keys,
 )
 from ashurbanipal.routes import router
 
@@ -73,11 +77,14 @@ def _orders() -> TableMeta:
             _col("tags", "ARRAY", ARRAY),
         ],
         schema="public",
+        order_keys=[0],
     )
 
 
 def _users() -> TableMeta:
-    return TableMeta("users", [_col("id", "uuid", UUID), _col("email", "text", TEXT)], schema="public")
+    return TableMeta(
+        "users", [_col("id", "uuid", UUID), _col("email", "text", TEXT)], schema="public", order_keys=[0]
+    )
 
 
 def _opts(**kw) -> JoinOpts:
@@ -226,7 +233,7 @@ def test_build_select_uses_catalog_names_and_generated_aliases_only() -> None:
     assert body.startswith('t0."id"::text as c0, ')
     assert ' from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"' in body
     assert ' where (t1."email"::text = %s) OR (NOT (t0."status"::text IS NULL))' in body
-    assert body.endswith(' order by t1."email" asc limit %s offset %s')
+    assert body.endswith(' order by t1."email" asc, t0."id" asc, t1."id" asc limit %s offset %s')
     assert values == ["a@b.c"]
 
 
@@ -445,3 +452,29 @@ def test_a_table_in_another_schema_is_spliced_and_reported_under_it() -> None:
     assert ' from "public"."orders" t0 left join "warehouse"."users" t1 ' in body
     for c in plan.column_infos("public"):
         assert c.schema == ("warehouse" if c.table == "users" else None), (c.table, c.column)
+
+
+def test_tie_break_prefers_the_primary_key_then_the_shortest_unique_key() -> None:
+    cols = _orders().columns
+    pk = UniqueKey("z_pkey", True, ["status", "id"])
+    short = UniqueKey("b", False, ["user_id"])
+    tied = UniqueKey("a", False, ["status"])
+    hidden = UniqueKey("0", False, ["hidden"])
+    assert tie_break_keys(cols, [short, pk]) == [2, 0]
+    assert tie_break_keys(cols, [short, tied, hidden]) == [2]
+    assert tie_break_keys(cols, []) == []
+
+
+def test_a_key_with_an_unusable_part_is_dropped() -> None:
+    parts = [("a", False, "x", True), ("a", False, "y", False), ("b", False, "x", True)]
+    assert group_unique_keys(parts) == [UniqueKey("b", False, ["x"])]
+
+
+def test_order_by_leaves_out_a_key_already_used_as_sort() -> None:
+    def render(i: int) -> str:
+        return f"c{i}"
+
+    assert order_by_clause(1, [1, 0], True, render) == " order by c1 desc, c0 desc"
+    # `order` applies only with a sort.
+    assert order_by_clause(None, [0], True, render) == " order by c0 asc"
+    assert order_by_clause(None, [], False, render) == ""

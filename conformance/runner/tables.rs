@@ -2,7 +2,7 @@ use crate::assert::{assert_exact, assert_row_estimate, assert_status};
 use crate::backend::{Backend, Comments, SchemaModel, UnanalyzedCount};
 use crate::common::TestServer;
 
-pub(crate) const SEEDED_TABLES: [&str; 15] = [
+pub(crate) const SEEDED_TABLES: [&str; 16] = [
     "_conformance_meta",
     "audit_log",
     "events",
@@ -11,6 +11,7 @@ pub(crate) const SEEDED_TABLES: [&str; 15] = [
     "inventory_locations",
     "order_extra",
     "orders",
+    "page_hits",
     "payments",
     "products",
     "reviews",
@@ -82,6 +83,7 @@ async fn table_comments_are_present_only_where_seeded() {
         "inventory_locations",
         "inventory_counts",
         "feature_flags",
+        "page_hits",
     ];
 
     match Backend::current().comments() {
