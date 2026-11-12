@@ -10,14 +10,21 @@
 <title>Ashurbanipal</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='1' y='1' width='14' height='14' rx='2' fill='%23e7e0cc'/><path d='M2 8h12' stroke='%238a7f66' stroke-width='.7'/><path d='M3 3.4l3 1.1-3 1.1zM7 3.4l3 1.1-3 1.1zM11 3.4l3 1.1-3 1.1zM3 10.4l3 1.1-3 1.1zM7 10.4l3 1.1-3 1.1z' fill='%23554b39'/></svg>">
 <script>
-  // Runs synchronously, before the stylesheet below is applied, so a
-  // saved light/dark override takes effect on first paint instead of
-  // flashing the system-default theme and then swapping.
-  try {
-    var ashurbanipalTheme = localStorage.getItem("ashurbanipal_theme");
-    if (ashurbanipalTheme === "light" || ashurbanipalTheme === "dark")
-      document.documentElement.dataset.theme = ashurbanipalTheme;
-  } catch {}
+  // Runs synchronously, before the stylesheet below is applied, so saved
+  // display preferences (theme, table panel) take effect on first paint
+  // instead of flashing the defaults and then swapping. Keep it one block:
+  // a host's CSP must allow each inline script (PORTING.md).
+  (function () {
+    var root = document.documentElement, theme = null, panel = null;
+    try {
+      theme = localStorage.getItem("ashurbanipal_theme");
+      panel = localStorage.getItem("ashurbanipal_tables_panel");
+    } catch {}
+    if (theme === "light" || theme === "dark") root.dataset.theme = theme;
+    // A narrow window starts with the panel hidden, so the grid keeps its width.
+    root.dataset.tablesPanel = panel === "open" || panel === "hidden" ? panel
+      : matchMedia("(max-width: 56.24rem)").matches ? "hidden" : "open";
+  })();
 </script>
 <style>
 :root {
@@ -48,7 +55,9 @@
   --text-muted: light-dark(#6b6b68, #a0a09c);
   --chip-active-bg: light-dark(#1d1d1f, #ececea);
   --chip-active-fg: light-dark(#fff, #1a1a1c);
-  --chip-h: 1.75rem;
+  /* Table list: a chip's height, and a side-panel row's. */
+  --chip-h: 1.625rem;
+  --panel-row-h: 1.75rem;
   /* Scrollable content budget inside a modal <dialog> (max-height 80vh
      less the header). */
   --dialog-body-max-h: calc(80vh - 3rem);
@@ -72,7 +81,14 @@
   --z-header: 1;
   --z-load-bar: 2;
   --z-chrome: 3;
+  /* Over everything in the scroller: a table scrolled sideways passes under
+     the open panel, and #chrome's padding box overlaps its column. */
+  --z-tables-panel: 4;
+  /* The open side panel's width; 0 when the list shows as chips, so every
+     rule that clears the panel computes as it would without one. */
+  --tables-panel-w: 0px;
 }
+:root[data-tables-panel="open"] { --tables-panel-w: 14.5rem; }
 
 /* ==== Layout ==== */
 /* Author-level display rules below would otherwise defeat the hidden
@@ -83,10 +99,14 @@ body { margin: 0; height: 100vh; font-size: .875rem; }
    the table header pins (thead th, top: 0). The stable gutter keeps a classic
    vertical scrollbar from narrowing the page, and so rewrapping the table
    chips, when a short table switches to a tall one. */
-main { height: 100%; overflow: auto; scrollbar-gutter: stable; }
+main { height: 100%; overflow: auto; scrollbar-gutter: stable; scroll-padding-left: var(--tables-panel-w); }
 /* sticky left keeps the chrome in view when a wide table scrolls sideways;
-   it works because #content below is as wide as the table (see #content). */
-#chrome { position: sticky; left: 0; z-index: var(--z-chrome); padding: var(--gap-lg) var(--gap-xl) 0; }
+   it works because #content below is as wide as the table (see #content).
+   Each stays a direct child of main so its sticky offset can travel the
+   whole scroll area. */
+#masthead { position: sticky; left: 0; padding: var(--gap-lg) var(--gap-xl) 0; }
+#chrome { position: sticky; left: 0; z-index: var(--z-chrome);
+          padding: 0 var(--gap-xl) 0 calc(var(--tables-panel-w) + var(--gap-xl)); }
 #main.header-stuck #chrome { z-index: var(--z-header); }
 /* width: max-content (floored at 100%) makes #content's own box grow to
    match a wide table's overflow instead of staying clipped to main's
@@ -94,13 +114,15 @@ main { height: 100%; overflow: auto; scrollbar-gutter: stable; }
    travel — its containing block (#content) is only as wide as the
    viewport, so once scrolled past that it runs out of stickiness and gets
    dragged along horizontally. */
-#content { box-sizing: border-box; padding: 0 var(--gap-xl) var(--gap-lg); width: max-content; min-width: 100%; }
+#content { box-sizing: border-box; padding: 0 var(--gap-xl) var(--gap-lg) calc(var(--tables-panel-w) + var(--gap-xl));
+           width: max-content; min-width: 100%; }
 /* Pinned to the scroller's top and viewport-wide (not table-wide); the negative
    margin keeps it out of the flow, like the row spinner. 100vw counts a classic
    vertical scrollbar, so min() keeps a narrow table's page from growing a
    horizontal one. */
-#load-bar { position: sticky; top: 0; left: var(--gap-xl); z-index: var(--z-load-bar); box-sizing: border-box;
-            width: min(100%, calc(100vw - 2 * var(--gap-xl))); height: 2px; margin-bottom: -2px;
+#load-bar { position: sticky; top: 0; left: calc(var(--tables-panel-w) + var(--gap-xl)); z-index: var(--z-load-bar);
+            box-sizing: border-box; width: min(100%, calc(100vw - var(--tables-panel-w) - 2 * var(--gap-xl)));
+            height: 2px; margin-bottom: -2px;
             overflow: hidden; background: var(--rule); }
 #load-bar:not([data-state]) { display: none; }
 #load-bar i { display: block; height: 100%; background: var(--rule-strong); transform-origin: left; }
@@ -141,29 +163,50 @@ h1 a:hover { text-decoration: underline; text-underline-offset: .15em; }
    browsers, leaving light-on-light text in dark theme; pin the options. */
 #source-select option, #schema-select option { background: Canvas; color: CanvasText; }
 
-/* ==== Table chips ==== */
-#tables-bar { margin-top: var(--gap-lg); }
-ul#tables { display: flex; flex-wrap: wrap; gap: .25rem .125rem; position: relative; }
+/* ==== Table list: chips, or the side panel ==== */
+ul { list-style: none; margin: 0; padding: 0; }
+/* Chips (the default): the toggle starts a wrapped row above the filter. */
+#tables-bar { position: sticky; left: 0; padding: var(--gap-lg) var(--gap-xl) 0; }
+#tables-panel { display: flex; align-items: flex-start; gap: .375rem .25rem; }
+#tables-head { display: contents; }
+#tables-heading, #joins-heading { display: none; }
+.tables-heading { margin: 0; font-size: .6875rem; font-weight: 400; letter-spacing: .04em;
+                  text-transform: uppercase; color: var(--text-muted); }
+#tables-panel-toggle { flex: none; display: inline-flex; align-items: center; justify-content: center;
+                       width: 1.75rem; height: var(--chip-h); padding: 0; border: none; border-radius: 6px;
+                       background: none; color: var(--text-muted); cursor: pointer; }
+#tables-panel-toggle:hover { background: var(--hover); color: inherit; }
+ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .375rem .25rem; position: relative; }
 #tables-more-item { margin-left: auto; }
 /* The active chip of a collapsed list when a hidden chip sits before it (see features/table-chips.ts). */
 #tables li.pulled { position: relative; margin-left: .5rem; }
 #tables li.pulled::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                             width: 1px; background: var(--border-strong); }
-ul { list-style: none; margin: 0; padding: 0; }
-#tables li :is(a, button) { background: none; border: none; padding: 0 .65rem; height: var(--chip-h);
-                            cursor: pointer; font: inherit; color: inherit; text-decoration: none;
-                            border-radius: 999px; display: flex; align-items: center; gap: .4rem;
-                            white-space: nowrap; }
+#tables li :is(a, button) { display: flex; align-items: stretch; box-sizing: border-box; height: var(--chip-h);
+                            padding: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+                            background: none; cursor: pointer; font: inherit; color: inherit;
+                            text-decoration: none; white-space: nowrap; }
 #tables li :is(a, button):hover { background: var(--hover); }
-#tables li :is(a, button).active { background: var(--chip-active-bg); color: var(--chip-active-fg); }
+#tables li :is(a, button).active { border-color: var(--chip-active-bg); box-shadow: inset 0 0 0 1px var(--chip-active-bg); }
+/* Table names are monospace, so bold keeps their width; a join label is not,
+   so its chip keeps the regular weight and the chips after it never shift. */
+#tables li:not(.join-chip) :is(a, button).active .chip-name { font-weight: 600; }
+#tables li :is(a, button):focus-visible, #tables-more:focus-visible, #tables-panel-toggle:focus-visible {
+  outline: 2px solid var(--chip-active-bg); outline-offset: 1px; }
 /* min-width:0 plus the cap lets one very long name ellipsize instead of
    widening the row; the full name is in `title` (see loadTables()). */
-.chip-name { font-family: var(--font-mono); font-size: .8125rem; max-width: 16rem; min-width: 0;
-            overflow: hidden; text-overflow: ellipsis; }
-.chip-right { position: relative; display: flex; align-items: center; flex: none; }
-.count { font-size: .7rem; opacity: .6; }
-/* Empty on an engine that never estimates; the slot still holds the spinner. */
-.count:empty { min-width: .6rem; }
+/* A block, not a flex box: text-overflow applies only to a block container. */
+.chip-name { align-self: center; padding: 0 .5rem; font-family: var(--font-mono);
+             font-size: .8125rem; max-width: 16rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The count's own cell, which also holds the loading spinner. */
+.chip-right { position: relative; display: flex; align-items: center; flex: none; padding: 0 .4375rem;
+              border-left: 1px solid var(--rule); }
+.count { font-size: .6875rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+#tables li :is(a, button).active .count { color: inherit; }
+/* An engine that never estimates has no count: no cell, only room for the spinner. */
+/* min-width: the spinner's full size, borders included. */
+.chip-right:not(:has(> .count)) { border-left: none; padding: 0 .125rem 0 0; margin-left: -.25rem;
+                                  min-width: calc(.6rem + 4px); }
 /* Overlays the count while loading (absolutely positioned, so it adds no
    width and the chip list never reflows). */
 .chip-spinner { position: absolute; inset: 0; margin: auto; width: .6rem; height: .6rem;
@@ -175,10 +218,39 @@ ul { list-style: none; margin: 0; padding: 0; }
 @media (prefers-reduced-motion: reduce) {
   #tables li :is(a, button).loading .chip-spinner { animation: none; border-top-color: currentColor; }
 }
-#tables-more { flex: none; background: none; border: none; font: inherit; font-size: .8rem;
-               color: var(--text-muted); height: var(--chip-h); padding: 0 .5rem;
-               cursor: pointer; border-radius: 6px; }
-#tables-more:hover { background: var(--hover); color: inherit; }
+/* A plain text control, not a chip, though it sits in the list. */
+#tables #tables-more { flex: none; display: block; background: none; border: none; overflow: visible;
+                       font: inherit; font-size: .8rem; color: var(--text-muted); height: var(--chip-h);
+                       padding: 0 .5rem; cursor: pointer; border-radius: 6px; }
+#tables #tables-more:hover { background: var(--hover); color: inherit; }
+
+/* The open panel: a zero-height dock, sticky top and left, that the panel
+   overflows. As a direct child of main its offsets travel the whole scroll
+   area, so the panel pins once the masthead scrolls away and covers a
+   table scrolled sideways, without main knowing its height. */
+[data-tables-panel="open"] #tables-bar { top: 0; z-index: var(--z-tables-panel); height: 0; padding: 0; }
+[data-tables-panel="open"] #tables-panel { display: block; box-sizing: border-box; width: var(--tables-panel-w);
+                                           height: var(--tables-panel-h, 100vh); overflow-y: auto; overscroll-behavior: contain;
+                                           padding: var(--gap-xl) .75rem 1rem 1rem;
+                                           border-right: 1px solid var(--rule); background: canvas; }
+[data-tables-panel="open"] #tables-head { display: flex; align-items: center; justify-content: space-between;
+                                          padding: 0 0 .375rem .5rem; }
+[data-tables-panel="open"] :is(#tables-heading, #joins-heading) { display: block; }
+[data-tables-panel="open"] #tables-panel-toggle { height: var(--panel-row-h); }
+[data-tables-panel="open"] ul#tables { display: block; }
+[data-tables-panel="open"] #tables li :is(a, button) { width: 100%; height: var(--panel-row-h); align-items: center;
+                                                       justify-content: space-between; gap: .5rem;
+                                                       padding: 0 .5rem; border: 0; text-align: left; }
+[data-tables-panel="open"] #tables li :is(a, button).active { background: var(--chip-active-bg);
+                                                              color: var(--chip-active-fg); box-shadow: none; }
+[data-tables-panel="open"] #tables li :is(a, button).active .chip-name { font-weight: inherit; }
+[data-tables-panel="open"] #tables li :is(a, button).active .count {
+  color: color-mix(in srgb, currentColor 70%, transparent); }
+[data-tables-panel="open"] .chip-name { padding: 0; max-width: none; }
+[data-tables-panel="open"] .chip-right { border-left: none; padding: 0; margin: 0; }
+[data-tables-panel="open"] .count { font-size: .75rem; }
+[data-tables-panel="open"] #joins-heading { margin: .625rem 0 0 .5rem; padding: .625rem 0 .375rem;
+                                            border-top: 1px solid var(--rule); }
 /* One rotation per click, always run to completion (JS drops .spinning on a
    timer) so a sub-100ms re-fetch still acknowledges the click, separately
    from #status/aria-busy. inline-block so the rotate applies. */
@@ -481,7 +553,8 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
    wide table pushes main's horizontal scrollbar out, an unpinned pager
    scrolls away with it instead of staying reachable. */
 #pager { margin-top: var(--gap-lg); display: flex; gap: var(--gap); align-items: center;
-         position: sticky; left: var(--gap-xl); width: fit-content; color: var(--text-muted); }
+         position: sticky; left: calc(var(--tables-panel-w) + var(--gap-xl)); width: fit-content;
+         color: var(--text-muted); }
 
 /* Native <dialog>: showModal() gives backdrop, Esc-to-close, and focus
    trapping for free. */
@@ -713,13 +786,19 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #filter-suggest button:hover, #filter-suggest button.active { background: var(--hover); }
 
 /* ==== Join: saved chips, bands, notices ==== */
-/* Saved joins are chips after the table chips, past a divider. */
+/* Saved joins follow the tables: past a divider among the chips, under their
+   own heading in the panel. */
 #tables li.join-first { position: relative; margin-left: .5rem; }
 #tables li.join-first::before { content: ""; position: absolute; left: -.3rem; top: 25%; bottom: 25%;
                                 width: 1px; background: var(--border-strong); }
-#tables li.join-chip :is(a, button) { font-family: var(--font-mono); font-size: .8125rem; }
-#tables li.join-chip.unsaved button { border: 1px dashed var(--border-strong); }
-#tables li.join-chip.muted button { color: var(--text-muted); }
+#tables li.join-chip .chip-name { font-family: inherit; }
+#tables li.join-chip.unsaved button { border-style: dashed; border-color: var(--border-strong); }
+#tables li.join-chip.muted button { border-color: transparent; color: var(--text-muted); }
+[data-tables-panel="open"] #tables li.join-first { margin-left: 0; }
+[data-tables-panel="open"] #tables li.join-first::before { content: none; }
+[data-tables-panel="open"] #tables li.join-chip.unsaved button { outline: 1px dashed var(--border-strong); outline-offset: -1px; }
+[data-tables-panel="open"] #tables li.join-chip.unsaved button:focus-visible { outline: 2px solid var(--chip-active-bg);
+                                                                               outline-offset: 1px; }
 /* One tint per table position in a join, shared by the bands over the headers. */
 :root {
   --band-0: light-dark(#eeeeea, #2e2e32);
@@ -877,7 +956,7 @@ thead tr.bands + tr th { top: var(--band-h); }
 </head>
 <body>
 <main id="main">
-  <div id="chrome">
+  <div id="masthead">
     <header id="topbar">
       <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
       <div id="scope">
@@ -902,10 +981,18 @@ thead tr.bands + tr th { top: var(--band-h); }
       <span id="protocol-warning-text"></span>
       <button id="protocol-warning-dismiss" type="button" aria-label="dismiss warning">✕</button>
     </div>
-    <nav id="tables-bar" aria-label="tables">
+  </div>
+  <nav id="tables-bar" aria-label="tables">
+    <div id="tables-panel">
+      <div id="tables-head">
+        <h2 id="tables-heading" class="tables-heading">Tables</h2>
+        <button id="tables-panel-toggle" type="button" aria-controls="tables-bar" aria-label="Hide the table list" title="Hide the table list"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M6 3v10"/></svg></button>
+      </div>
       <ul id="tables" aria-busy="true"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
-      <template id="table-chip-template"><li><a><span class="chip-name"></span><span class="chip-right"><span class="chip-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
-    </nav>
+    </div>
+    <template id="table-chip-template"><li><a><span class="chip-name"></span><span class="chip-right"><span class="chip-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
+  </nav>
+  <div id="chrome">
     <div id="toolbar">
       <search id="controls">
         <form id="filter-form">
@@ -1161,8 +1248,8 @@ function el(tag, className, text) {
   if (text !== void 0) e.textContent = text;
   return e;
 }
-function qs(root, selector) {
-  const el2 = root.querySelector(selector);
+function qs(root2, selector) {
+  const el2 = root2.querySelector(selector);
   if (!el2) throw new Error(`no element matches ${selector}`);
   return el2;
 }
@@ -1845,8 +1932,8 @@ function tableLabel(t, schema) {
 function joinLabel(def, scopeSchema) {
   const schemas = labelSchemas(def, scopeSchema);
   return def.tables.map((t, i) => {
-    const label = tableLabel(t, schemas[i]);
-    return i === 0 ? label : `${def.joins[i - 1].type === "left" ? "\u27D5" : "\u22C8"} ${label}`;
+    const label2 = tableLabel(t, schemas[i]);
+    return i === 0 ? label2 : `${def.joins[i - 1].type === "left" ? "\u27D5" : "\u22C8"} ${label2}`;
   }).join(" ");
 }
 function selectsEverything(def) {
@@ -2937,19 +3024,19 @@ function swapsFrom(asked2, settled) {
     return [{ kind, asked: want, got }];
   });
 }
-function placeSegments(label) {
-  return label === null ? [{ text: "here" }] : [{ text: "in " }, { label }];
+function placeSegments(label2) {
+  return label2 === null ? [{ text: "here" }] : [{ text: "in " }, { label: label2 }];
 }
 function joinWith(items, sep, lastSep = sep) {
   return items.flatMap((item, i) => i === 0 ? item : [{ text: i === items.length - 1 ? lastSep : sep }, ...item]);
 }
-function buildFallbackNote(swaps, table, label) {
+function buildFallbackNote(swaps, table, label2) {
   const named = ORDER.flatMap((kind) => kind === "filter" ? [] : swaps.filter((s) => s.kind === kind));
   const filterDropped = named.length < swaps.length;
   if (named.length === 0) {
     if (!filterDropped) return [];
     const target = table ? [{ code: table }, { text: " " }] : [];
-    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(label), { text: ", so it was removed." }];
+    return [{ text: "Your filter doesn't fit " }, ...target, ...placeSegments(label2), { text: ", so it was removed." }];
   }
   const out = [
     { text: "There is no " },
@@ -2959,7 +3046,7 @@ function buildFallbackNote(swaps, table, label) {
       " or "
     ),
     { text: " " },
-    ...placeSegments(label)
+    ...placeSegments(label2)
   ];
   const shown = named.flatMap((s) => s.got === null ? [] : [[{ code: s.got }]]);
   if (shown.length === 0) {
@@ -3013,9 +3100,9 @@ function showBootFallbackNote() {
   $("view-notice").hidden = false;
   renderNote();
 }
-function setNoticePlace(label) {
-  if (label === placeLabel) return;
-  placeLabel = label;
+function setNoticePlace(label2) {
+  if (label2 === placeLabel) return;
+  placeLabel = label2;
   if (shownFor !== null) renderNote();
 }
 function syncViewNotice(req) {
@@ -3077,9 +3164,9 @@ function render3() {
   suffix.hidden = !on;
   $("refresh").setAttribute("aria-label", "refresh");
   if (on) {
-    const { label } = STEPS.find((s) => s.ms === intervalMs) ?? STEPS[0];
-    suffix.textContent = ` \xB7 ${label}`;
-    $("refresh").setAttribute("aria-label", `refresh, automatically every ${label}`);
+    const { label: label2 } = STEPS.find((s) => s.ms === intervalMs) ?? STEPS[0];
+    suffix.textContent = ` \xB7 ${label2}`;
+    $("refresh").setAttribute("aria-label", `refresh, automatically every ${label2}`);
   }
   for (const radio of document.querySelectorAll("#refresh-pop-list input")) {
     radio.checked = Number(radio.value) === intervalMs;
@@ -3150,14 +3237,14 @@ function setNewChip(count) {
 function startAutoRefresh() {
   const list = $("refresh-pop-list");
   list.replaceChildren(
-    ...STEPS.map(({ ms, label }) => {
+    ...STEPS.map(({ ms, label: label2 }) => {
       const radio = el("input");
       radio.type = "radio";
       radio.name = "refresh-interval";
       radio.value = String(ms);
       radio.onchange = () => chooseInterval(ms);
       const row2 = el("label");
-      row2.append(radio, label);
+      row2.append(radio, label2);
       row2.onclick = (e) => {
         if (e.detail > 0) closeMenu();
       };
@@ -3943,9 +4030,9 @@ function row(text, detail) {
   }
   return div;
 }
-function section(label, rows, emptyText) {
+function section(label2, rows, emptyText) {
   const wrap2 = el("div", "structure-section");
-  const heading = el("span", "section-label", label);
+  const heading = el("span", "section-label", label2);
   const list = el("div");
   list.replaceChildren(...rows.length ? rows : [msg(emptyText)]);
   wrap2.append(heading, list);
@@ -4064,6 +4151,49 @@ function syncGridLock() {
   for (const id of ["columns-pop", "cell-pop", "refby-pop", "cv-pop"]) $(id).hidePopover();
 }
 
+// src/features/tables-panel.ts
+var TABLES_PANEL_KEY = "ashurbanipal_tables_panel";
+var root = document.documentElement;
+var toggle = $("tables-panel-toggle");
+var panel = $("tables-panel");
+function tablesPanelOpen() {
+  return root.dataset.tablesPanel !== "hidden";
+}
+function label() {
+  const text = tablesPanelOpen() ? "Hide the table list" : "Show the table list";
+  toggle.setAttribute("aria-label", text);
+  toggle.title = text;
+}
+toggle.onclick = () => {
+  const next = tablesPanelOpen() ? "hidden" : "open";
+  root.dataset.tablesPanel = next;
+  writeStored(TABLES_PANEL_KEY, next);
+  label();
+};
+label();
+var main = $("main");
+var masthead = $("masthead");
+var panelHeight = -1;
+function fitPanel() {
+  const mainBox = main.getBoundingClientRect();
+  const shown = Math.max(0, masthead.getBoundingClientRect().bottom - mainBox.top);
+  const height = Math.max(0, Math.floor(main.clientHeight - shown));
+  if (height === panelHeight) return;
+  panelHeight = height;
+  root.style.setProperty("--tables-panel-h", `${height}px`);
+}
+main.addEventListener("scroll", fitPanel, { passive: true });
+var fit = new ResizeObserver(fitPanel);
+fit.observe(main);
+fit.observe(masthead);
+function revealInPanel(entry) {
+  const box = panel.getBoundingClientRect();
+  const bottom = Math.min(box.bottom, main.getBoundingClientRect().bottom);
+  const r = entry.getBoundingClientRect();
+  if (r.bottom > bottom) panel.scrollTop += r.bottom - bottom;
+  else if (r.top < box.top) panel.scrollTop -= box.top - r.top;
+}
+
 // src/features/table-chips.ts
 var tableEntries = [];
 var chipCounts = /* @__PURE__ */ new Map();
@@ -4071,6 +4201,9 @@ var joinEntries = [];
 var joinScope = "";
 var allEntries = () => [...tableEntries, ...joinEntries];
 var tableChipTemplate = $("table-chip-template");
+var joinsHeading = el("li");
+joinsHeading.id = "joins-heading";
+var joinsHeadingText = joinsHeading.appendChild(el("h2", "tables-heading"));
 var TABLE_CAP_LINES = 3;
 var tablesMore = $("tables-more");
 var tablesMoreItem = $("tables-more-item");
@@ -4083,6 +4216,12 @@ function updateTablesCap() {
   for (const e of entries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
+  }
+  if (tablesPanelOpen()) {
+    tablesMoreItem.hidden = true;
+    const active2 = entries.find((e) => e.chip.classList.contains("active"));
+    if (active2) revealInPanel(active2.chip);
+    return;
   }
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastLineTop = tops[TABLE_CAP_LINES - 1];
@@ -4152,6 +4291,8 @@ async function loadTables({
       countEl.textContent = formatApproxCount(counts2.get(t.name));
       chipCounts.set(t.name, countEl.textContent);
       countEl.title = APPROX_COUNT_TITLE;
+    } else {
+      countEl.remove();
     }
     chip.dataset.table = t.name;
     chip.title = t.comment ? `${t.name} \u2014 ${t.comment}` : t.name;
@@ -4162,8 +4303,10 @@ async function loadTables({
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
   }
+  $("tables-heading").textContent = `Tables \xB7 ${tables.length}`;
   listedScope = scopeIdentity();
   if (joinScope !== scopeIdentity()) joinEntries = [];
+  if (joinEntries.length) ul.appendChild(joinsHeading);
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
@@ -4232,13 +4375,15 @@ function actionButton(run) {
 function hasJoinChips() {
   return joinEntries.length > 0;
 }
-function setJoinChips(chips) {
+function setJoinChips(chips, savedCount) {
   const ul = $("tables");
   for (const e of joinEntries) e.li.remove();
+  joinsHeadingText.textContent = savedCount ? `Joins \xB7 ${savedCount}` : "Joins";
+  ul.insertBefore(joinsHeading, tablesMoreItem);
   joinEntries = chips.map((c, i) => {
     const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
     const chip = c.href ? linkTo(el("a"), c.href, c.run) : actionButton(c.run);
-    chip.textContent = c.label;
+    chip.appendChild(el("span", "chip-name", c.label));
     chip.title = c.title;
     chip.classList.toggle("active", c.active);
     if (c.active) chip.setAttribute("aria-current", "true");
@@ -4389,14 +4534,14 @@ function readIndexedColumns(table) {
 }
 
 // src/features/join-form.ts
-function textButton(text, className, label, run) {
+function textButton(text, className, label2, run) {
   const b = el("button", className, text);
   b.type = "button";
-  b.setAttribute("aria-label", label);
+  b.setAttribute("aria-label", label2);
   b.onclick = run;
   return b;
 }
-function mountJoinForm(root, onChange) {
+function mountJoinForm(root2, onChange) {
   let draft = newDraft("");
   let loadToken2 = 0;
   const slot = (pos) => pos === 0 ? draft : draft.joins[pos - 1];
@@ -4432,9 +4577,9 @@ function mountJoinForm(root, onChange) {
   }
   const changed = (fromMenu = false) => {
     const active = document.activeElement;
-    const focused = fromMenu ? lastDropdownLabel() : root.contains(active) ? active?.getAttribute("aria-label") : null;
+    const focused = fromMenu ? lastDropdownLabel() : root2.contains(active) ? active?.getAttribute("aria-label") : null;
     render6();
-    if (focused) root.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
+    if (focused) root2.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
     onChange();
   };
   const pickTable = (pos, table) => {
@@ -4489,13 +4634,13 @@ function mountJoinForm(root, onChange) {
     });
     return [schemas, el("span", "jmuted", "."), table];
   };
-  const aliasInput = (value, label, set) => {
+  const aliasInput = (value, label2, set) => {
     const input2 = el("input", "j-alias");
     input2.value = value;
     input2.placeholder = "alias";
     input2.spellcheck = false;
     input2.autocomplete = "off";
-    input2.setAttribute("aria-label", label);
+    input2.setAttribute("aria-label", label2);
     input2.oninput = () => {
       set(input2.value);
       onChange();
@@ -4672,7 +4817,7 @@ function mountJoinForm(root, onChange) {
       card.appendChild(h);
       const boxes = [];
       for (const c of cols) {
-        const label = el("label");
+        const label2 = el("label");
         const box = el("input");
         box.type = "checkbox";
         box.checked = chosen === null || chosen.includes(c.name);
@@ -4684,8 +4829,8 @@ function mountJoinForm(root, onChange) {
           changed();
         };
         boxes.push(box);
-        label.append(box, c.name);
-        card.appendChild(label);
+        label2.append(box, c.name);
+        card.appendChild(label2);
       }
       cards.push(card);
     }
@@ -4732,7 +4877,7 @@ function mountJoinForm(root, onChange) {
     parts.push(add);
     const cards = columnCards();
     if (cards) parts.push(cards);
-    root.replaceChildren(...parts);
+    root2.replaceChildren(...parts);
     load();
   }
   return {
@@ -4866,16 +5011,16 @@ function renderSavedChips(actions) {
   const inSaved = saved.some((s) => s.text === current2?.text);
   const chips = saved.map((s) => {
     const active = s.text === current2?.text;
-    const label = `\u22C8 ${s.name}`;
+    const label2 = `\u22C8 ${s.name}`;
     if (active)
       return {
-        label,
+        label: label2,
         title: `${s.name}: click to edit, rename or delete`,
         className: "saved",
         active,
         run: actions.edit
       };
-    const chip = { label, title: `${s.name} \u2014 ${s.text.replaceAll("\n", " ")}`, className: "saved", active };
+    const chip = { label: label2, title: `${s.name} \u2014 ${s.text.replaceAll("\n", " ")}`, className: "saved", active };
     const parsed = parseJoin(s.text);
     if ("error" in parsed) return { ...chip, run: () => reportError(new Error(`saved join: ${parsed.error.message}`)) };
     const { def } = parsed;
@@ -4905,7 +5050,7 @@ function renderSavedChips(actions) {
     active: false,
     run: actions.startNew
   });
-  setJoinChips(chips);
+  setJoinChips(chips, saved.length);
 }
 
 // src/features/column-parts.ts
@@ -5651,12 +5796,12 @@ function buildBands(columns, heads) {
       band.dataset.band = String(col.join);
       band.dataset.run = String(tr.cells.length);
       const schema = schemas[col.join];
-      const label = tableLabel(t, schema);
+      const label2 = tableLabel(t, schema);
       const pill = el("span", "band-pill");
-      pill.title = label;
+      pill.title = label2;
       const text = el("span", "band-pill-text");
       if (schema !== void 0) text.append(el("span", "band-pill-schema", `${schema}.`));
-      text.append(label.slice(schema === void 0 ? 0 : schema.length + 1));
+      text.append(label2.slice(schema === void 0 ? 0 : schema.length + 1));
       pill.appendChild(text);
       band.appendChild(pill);
       tr.appendChild(band);
@@ -5743,17 +5888,17 @@ function renderList(container, target, entries, row2, dismiss) {
   }
   container.replaceChildren(
     ...entries.map((entry) => {
-      const label = fkTarget(entry);
+      const label2 = fkTarget(entry);
       const btn = el("button");
       btn.type = "button";
       btn.className = "refby-entry";
-      btn.textContent = `\u2192 ${label} (${entry.columns.map((c) => c.from).join(", ")})`;
+      btn.textContent = `\u2192 ${label2} (${entry.columns.map((c) => c.from).join(", ")})`;
       const nullPair = entry.columns.find((c) => row2[c.to] == null);
       if (nullPair) {
         btn.disabled = true;
         btn.title = nullPair.to in row2 ? `${nullPair.to} is null in this row \u2014 no filter is expressible` : "this table has no primary key \u2014 no filter is expressible";
       } else {
-        btn.title = `go to ${label} where ${entry.columns.map((c) => `${c.from} = ${row2[c.to]}`).join(" AND ")}`;
+        btn.title = `go to ${label2} where ${entry.columns.map((c) => `${c.from} = ${row2[c.to]}`).join(" AND ")}`;
         btn.onclick = () => drillIn(target, entry, row2, dismiss);
       }
       return btn;
@@ -6019,7 +6164,7 @@ function updateFilterSuggestions() {
   suggest.close();
   if (ctx.partial.startsWith("'")) return;
   const token = suggest.token();
-  const plain = (labels) => labels.map((label) => ({ label, insert: label }));
+  const plain = (labels) => labels.map((label2) => ({ label: label2, insert: label2 }));
   if (ctx.expect === "column") {
     const columns = getLastPayload()?.columns ?? [];
     const meta = tableMeta(tableInView());
@@ -6107,7 +6252,7 @@ async function showCommonValues(e, table, column, filterName) {
 }
 
 // src/lib/sibling-matrix.ts
-var keyOf2 = (name, label) => JSON.stringify([name, label ?? null]);
+var keyOf2 = (name, label2) => JSON.stringify([name, label2 ?? null]);
 function firstEntries(siblings) {
   const first = /* @__PURE__ */ new Map();
   for (const s of siblings) {
@@ -6130,9 +6275,9 @@ function buildSiblingMatrix({ instance, siblings }) {
   const ownCol = instance ? labels.indexOf(instance.label) : -1;
   const rows = names.map((name) => {
     const isInstance = instance?.name === name;
-    const cells = labels.map((label) => {
-      if (isInstance && instance?.label === label) return { kind: "here" };
-      const sibling = first.get(keyOf2(name, label));
+    const cells = labels.map((label2) => {
+      if (isInstance && instance?.label === label2) return { kind: "here" };
+      const sibling = first.get(keyOf2(name, label2));
       return sibling ? { kind: "link", sibling, sameView: isInstance } : { kind: "missing" };
     });
     const nameLink = !isInstance && ownCol >= 0 && cells[ownCol].kind === "link" ? ownCol : null;
@@ -6323,15 +6468,15 @@ function paintRow(ref, { sibling: s, note }, newTab) {
 function shapeOf(m) {
   return JSON.stringify([m.labels, m.ownLabel, m.rows.map((r) => [r.name, r.nameLink, r.cells.map((c) => c.kind)])]);
 }
-function paintLink(ref, name, label, { sibling, sameView }) {
+function paintLink(ref, name, label2, { sibling, sameView }) {
   const state2 = sameView ? `same view \xB7 ${health(sibling.healthy)}` : health(sibling.healthy);
   ref.dot.className = dotClass(sibling.healthy);
   ref.state.textContent = state2;
-  ref.a.setAttribute("aria-label", `${name} in ${label}: ${state2}`);
+  ref.a.setAttribute("aria-label", `${name} in ${label2}: ${state2}`);
   ref.a.href = sameView ? sameViewHref(sibling.base_url, location.search) : sibling.base_url;
   if (ref.nameLink) {
     ref.nameLink.href = ref.a.href;
-    ref.nameLink.title = `${name} in ${label}`;
+    ref.nameLink.title = `${name} in ${label2}`;
   }
 }
 function renderCell(cell, nameLink) {
@@ -6365,8 +6510,8 @@ function renderMatrix(m) {
     corner.append(el("span", "sr-only", "service"));
     $("siblings-matrix-head").replaceChildren(
       corner,
-      ...m.labels.map((label) => {
-        const th = el("th", label === m.ownLabel ? "mine" : void 0, label);
+      ...m.labels.map((label2) => {
+        const th = el("th", label2 === m.ownLabel ? "mine" : void 0, label2);
         th.scope = "col";
         return th;
       })
@@ -6396,8 +6541,8 @@ function renderMatrix(m) {
   repaintLinks();
 }
 function repaintLinks() {
-  linkCells.forEach(({ name, label, cell }, i) => {
-    paintLink(linkRefs[i], name, label, cell);
+  linkCells.forEach(({ name, label: label2, cell }, i) => {
+    paintLink(linkRefs[i], name, label2, cell);
   });
 }
 $("siblings-pop").addEventListener("beforetoggle", (e) => {
@@ -6409,12 +6554,12 @@ $("siblings-pop").addEventListener("beforetoggle", (e) => {
 });
 
 // src/features/sticky-header.ts
-var main = $("main");
+var main2 = $("main");
 var thead = $("thead");
 function update() {
-  main.classList.toggle("header-stuck", thead.getBoundingClientRect().top < main.getBoundingClientRect().top - 0.5);
+  main2.classList.toggle("header-stuck", thead.getBoundingClientRect().top < main2.getBoundingClientRect().top - 0.5);
 }
-main.addEventListener("scroll", update, { passive: true });
+main2.addEventListener("scroll", update, { passive: true });
 window.addEventListener("resize", update);
 update();
 
@@ -6762,7 +6907,7 @@ function renderHeader(columns) {
     if (minWidth) th.style.minWidth = `${minWidth}px`;
     if (hidden.has(col.name)) th.classList.add("col-hidden");
     const fullName = columnKey(col);
-    const label = `${fullName} (${col.type})`;
+    const label2 = `${fullName} (${col.type})`;
     const head = el("span", "th-name");
     const nameEl = el("button", "col-name sort-btn", displayName(col));
     nameEl.type = "button";
@@ -6770,7 +6915,7 @@ function renderHeader(columns) {
     const key = keyDescriptionOf(col, meta);
     if (key) {
       head.append(keyIcon(key), nameEl, " ");
-      th.setAttribute("aria-label", col.comment ? `${label}, ${key.label}, ${col.comment}` : `${label}, ${key.label}`);
+      th.setAttribute("aria-label", col.comment ? `${label2}, ${key.label}, ${col.comment}` : `${label2}, ${key.label}`);
     } else {
       head.append(nameEl, " ");
     }
@@ -6965,10 +7110,10 @@ function columnGroups(columns) {
   if (viewInGrid?.kind !== "join") return [{ label: viewInGrid?.table ?? "", band: 0, columns }];
   return tableGroups(columns, viewInGrid.def).map((g) => ({ label: g.label, band: g.index, columns: g.columns }));
 }
-function groupButton(action, label, names) {
+function groupButton(action, label2, names) {
   const btn = el("button", "cols-action", action);
   btn.type = "button";
-  btn.setAttribute("aria-label", `${action === "all" ? "show" : "hide"} all ${label} columns`);
+  btn.setAttribute("aria-label", `${action === "all" ? "show" : "hide"} all ${label2} columns`);
   btn.onclick = () => {
     const rest = hiddenColumns().filter((n) => !names.has(n));
     setHidden(action === "all" ? rest : [...rest, ...names]);
@@ -6976,8 +7121,8 @@ function groupButton(action, label, names) {
   return btn;
 }
 function buildMenuItem(col, key) {
-  const label = el("label");
-  label.dataset.name = col.name;
+  const label2 = el("label");
+  label2.dataset.name = col.name;
   const input2 = el("input");
   input2.type = "checkbox";
   input2.onchange = () => setColumnHidden(col.name, !input2.checked);
@@ -6988,8 +7133,8 @@ function buildMenuItem(col, key) {
   text.title = fullName;
   const type = el("span", "cols-type", col.type);
   type.title = col.type;
-  label.append(input2, keyIcon(key), text, type, el("span", "cols-sorted"));
-  return label;
+  label2.append(input2, keyIcon(key), text, type, el("span", "cols-sorted"));
+  return label2;
 }
 function buildMenuGroup(group, keys) {
   const box = el("div", "cols-group");

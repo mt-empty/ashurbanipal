@@ -10,14 +10,21 @@
 <title>Ashurbanipal</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='1' y='1' width='14' height='14' rx='2' fill='%23e7e0cc'/><path d='M2 8h12' stroke='%238a7f66' stroke-width='.7'/><path d='M3 3.4l3 1.1-3 1.1zM7 3.4l3 1.1-3 1.1zM11 3.4l3 1.1-3 1.1zM3 10.4l3 1.1-3 1.1zM7 10.4l3 1.1-3 1.1z' fill='%23554b39'/></svg>">
 <script>
-  // Runs synchronously, before the stylesheet below is applied, so a
-  // saved light/dark override takes effect on first paint instead of
-  // flashing the system-default theme and then swapping.
-  try {
-    var ashurbanipalTheme = localStorage.getItem("ashurbanipal_theme");
-    if (ashurbanipalTheme === "light" || ashurbanipalTheme === "dark")
-      document.documentElement.dataset.theme = ashurbanipalTheme;
-  } catch {}
+  // Runs synchronously, before the stylesheet below is applied, so saved
+  // display preferences (theme, table panel) take effect on first paint
+  // instead of flashing the defaults and then swapping. Keep it one block:
+  // a host's CSP must allow each inline script (PORTING.md).
+  (function () {
+    var root = document.documentElement, theme = null, panel = null;
+    try {
+      theme = localStorage.getItem("ashurbanipal_theme");
+      panel = localStorage.getItem("ashurbanipal_tables_panel");
+    } catch {}
+    if (theme === "light" || theme === "dark") root.dataset.theme = theme;
+    // A narrow window starts with the panel hidden, so the grid keeps its width.
+    root.dataset.tablesPanel = panel === "open" || panel === "hidden" ? panel
+      : matchMedia("(max-width: 56.24rem)").matches ? "hidden" : "open";
+  })();
 </script>
 <style>
 /*ASHURBANIPAL_STYLE*/
@@ -25,7 +32,7 @@
 </head>
 <body>
 <main id="main">
-  <div id="chrome">
+  <div id="masthead">
     <header id="topbar">
       <h1><a href="https://github.com/mt-empty/ashurbanipal" target="_blank" rel="noopener">Ashurbanipal</a></h1>
       <div id="scope">
@@ -50,10 +57,18 @@
       <span id="protocol-warning-text"></span>
       <button id="protocol-warning-dismiss" type="button" aria-label="dismiss warning">✕</button>
     </div>
-    <nav id="tables-bar" aria-label="tables">
+  </div>
+  <nav id="tables-bar" aria-label="tables">
+    <div id="tables-panel">
+      <div id="tables-head">
+        <h2 id="tables-heading" class="tables-heading">Tables</h2>
+        <button id="tables-panel-toggle" type="button" aria-controls="tables-bar" aria-label="Hide the table list" title="Hide the table list"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M6 3v10"/></svg></button>
+      </div>
       <ul id="tables" aria-busy="true"><li id="tables-more-item" hidden><button id="tables-more" type="button" aria-expanded="false"></button></li></ul>
-      <template id="table-chip-template"><li><a><span class="chip-name"></span><span class="chip-right"><span class="chip-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
-    </nav>
+    </div>
+    <template id="table-chip-template"><li><a><span class="chip-name"></span><span class="chip-right"><span class="chip-spinner" aria-hidden="true"></span><span class="count"></span></span></a></li></template>
+  </nav>
+  <div id="chrome">
     <div id="toolbar">
       <search id="controls">
         <form id="filter-form">
