@@ -18,6 +18,70 @@ async function openFromShipments(page: Page) {
   await expect(page.locator("#join-dialog")).toBeVisible();
 }
 
+test("the table menu of another schema tags the table the start table has a foreign key to", async ({ page }) => {
+  await openFromShipments(page);
+  const listed = page.waitForResponse(apiCall("/tables", { schema: "public" }));
+  await pick(page, "join 1 schema", "public");
+  await listed;
+  await page.getByRole("button", { name: "join 1 table", exact: true }).click();
+  await expect(page.locator('#dd-pop .dd-row[data-value="orders"] .dd-tag')).toHaveAttribute(
+    "title",
+    "shipments.order_id → orders.id",
+  );
+  await expect(page.locator('#dd-pop .dd-row[data-value="products"] .dd-tag')).toHaveCount(0);
+});
+
+test("a table menu opened while another schema's tables load fills in where it is", async ({ page }) => {
+  await openFromShipments(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(apiCall("/tables", { schema: "public" }), async (route) => {
+    await held;
+    await route.continue();
+  });
+  await pick(page, "join 1 schema", "public");
+  await page.getByRole("button", { name: "join 1 table", exact: true }).click();
+  const menu = page.locator("#dd-pop");
+  await expect(menu.locator(".dd-row")).toHaveText(["loading…"]);
+  const before = await menu.boundingBox();
+  release();
+  await expect(menu.locator('.dd-row[data-value="orders"]')).toBeVisible();
+  const after = await menu.boundingBox();
+  expect(before).not.toBeNull();
+  expect(after?.x).toBeCloseTo(before?.x ?? -1, 0);
+  expect(after?.y).toBeCloseTo(before?.y ?? -1, 0);
+});
+
+test("a column menu opened while the table's columns load fills in under its button", async ({ page }) => {
+  await openFromShipments(page);
+  await pick(page, "join 1 schema", "public");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(apiCall("/tables/data", { schema: "public", table: "orders" }), async (route) => {
+    await held;
+    await route.continue();
+  });
+  await pick(page, "join 1 table", "orders");
+  const button = page.getByRole("button", { name: "join 1: column of orders", exact: true });
+  await button.click();
+  const menu = page.locator("#dd-pop");
+  await expect(menu).toBeVisible();
+  await expect(menu.locator(".dd-row")).toHaveCount(0);
+  release();
+  await expect(menu.locator('.dd-row[data-value="id"]')).toBeVisible();
+  // The button is redrawn when the columns arrive, and the menu follows it.
+  const at = await button.boundingBox();
+  const under = await menu.boundingBox();
+  expect(at).not.toBeNull();
+  expect(under?.x).toBeCloseTo(at?.x ?? -1, 0);
+  expect(under?.y ?? -1).toBeGreaterThanOrEqual((at?.y ?? 0) + (at?.height ?? 0) - 1);
+  expect(under?.y ?? 1e9).toBeLessThan((at?.y ?? 0) + (at?.height ?? 0) + 12);
+});
+
 test("the form joins a table from another schema and suggests the foreign key pair into it", async ({ page }) => {
   await openFromShipments(page);
   await expect(page.getByRole("button", { name: "start schema", exact: true })).toHaveText("warehouse ▾");

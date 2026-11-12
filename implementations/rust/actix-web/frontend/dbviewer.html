@@ -898,6 +898,8 @@ thead tr.bands + tr th { top: var(--band-h); }
 .dd-row:hover:not(.blocked), .dd-row:focus-visible { background: var(--hover); outline: none; }
 .dd-row[aria-selected="true"] { background: var(--hover); }
 .dd-note { font-family: var(--font-sans, system-ui, sans-serif); font-size: .6875rem; color: var(--text-muted); align-self: center; }
+.dd-tag { margin-left: .25rem; padding: 0 .3rem; border: 1px solid var(--border); border-radius: 4px;
+         font-family: var(--font-sans, system-ui, sans-serif); font-size: .625rem; color: var(--text-muted); }
 .dd-row.blocked { color: var(--text-muted); opacity: .75; cursor: not-allowed; }
 .j-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; }
 .j-card { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .65rem; }
@@ -2431,6 +2433,29 @@ function scopeQuery(scope2) {
 function tableParams(ref, extra = {}) {
   return scopeParams(ref, new URLSearchParams({ table: ref.table, ...extra }));
 }
+function relatedTables(earlier) {
+  const found = /* @__PURE__ */ new Map();
+  const add = (ref, text) => {
+    const key = refKey(ref);
+    const texts = found.get(key);
+    if (texts) texts.push(text);
+    else found.set(key, [text]);
+  };
+  for (const e of earlier) {
+    for (const c of e.columns) {
+      const r = c.references;
+      if (r) add(near(e.table, r.schema, r.table), `${e.table.table}.${c.name} \u2192 ${r.table}.${r.column}`);
+    }
+    for (const entry of e.referrers ?? []) {
+      const pair = entry.columns[0];
+      if (pair)
+        add(near(e.table, entry.schema, entry.table), `${entry.table}.${pair.from} \u2192 ${e.table.table}.${pair.to}`);
+    }
+  }
+  return new Map(
+    [...found].map(([key, texts]) => [key, texts.length > 1 ? `${texts[0]} (+${texts.length - 1} more)` : texts[0]])
+  );
+}
 
 // src/core/storage.ts
 function readStored(key) {
@@ -3861,10 +3886,30 @@ function lastDropdownLabel() {
 function closeMenu2() {
   if (pop().matches(":popover-open")) pop().hidePopover();
 }
+var optionsOf = (opts) => typeof opts.options === "function" ? opts.options() : opts.options;
+var built = /* @__PURE__ */ new WeakMap();
+function reattachOpenMenu(root2) {
+  if (!current || !pop().matches(":popover-open")) return;
+  const next = root2.querySelector(`button[aria-label="${CSS.escape(current.ariaLabel)}"]`);
+  const opts = next && built.get(next);
+  if (!next || !opts) {
+    closeMenu2();
+    return;
+  }
+  if (anchor) anchor.style.anchorName = "";
+  anchor = next;
+  current = opts;
+  next.style.anchorName = "--dd-anchor";
+  renderRows(opts, search().value);
+}
+function refreshOpenMenu() {
+  if (current && pop().matches(":popover-open")) renderRows(current, search().value);
+}
 var search = () => $("dd-pop-search");
 function renderRows(opts, query) {
   const list = $("dd-pop-list");
-  const shown = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
+  const options = optionsOf(opts);
+  const shown = query.trim() ? fuzzyFilter(query, options, (o) => o.label) : options;
   list.replaceChildren(
     ...shown.map((o) => {
       const row2 = el("button");
@@ -3875,6 +3920,11 @@ function renderRows(opts, query) {
       row2.dataset.value = o.value;
       const name = el("span");
       name.textContent = o.label;
+      if (o.tag) {
+        const tag = el("span", "dd-tag", o.tag.text);
+        tag.title = o.tag.title;
+        name.append(" ", tag);
+      }
       row2.appendChild(name);
       if (o.note) {
         const note = el("span", "dd-note", o.note);
@@ -3922,11 +3972,12 @@ function createDropdown(opts) {
   button.className = `dd${opts.mono ? " mono" : ""}${opts.invalid ? " bad" : ""}`;
   button.setAttribute("aria-label", opts.ariaLabel);
   button.setAttribute("aria-haspopup", "listbox");
-  const picked = opts.options.find((o) => o.value === opts.value);
+  const picked = typeof opts.options === "function" ? void 0 : opts.options.find((o) => o.value === opts.value);
   const text = opts.display ?? picked?.label ?? opts.placeholder;
   button.textContent = `${text} \u25BE`;
   if (!picked && opts.display === void 0) button.classList.add("empty");
   button.onclick = () => open(button, opts);
+  built.set(button, opts);
   return button;
 }
 search().addEventListener("input", () => {
@@ -4533,6 +4584,238 @@ function readIndexedColumns(table) {
   return indexesRead.get(refKey(table));
 }
 
+// src/features/scope-select.ts
+async function loadSources() {
+  let names;
+  let defaultSource;
+  let engines;
+  try {
+    let sources;
+    ({ sources, default: defaultSource } = await api("/sources"));
+    names = sources.map((s) => s.name);
+    engines = Object.fromEntries(sources.map((s) => [s.name, s.engine]));
+    nameStartupDefault("source", defaultSource);
+  } catch (e) {
+    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
+    settleSource(null, false, {});
+    return;
+  }
+  const wanted = state.scope.source;
+  const fallback = names.includes(defaultSource) ? defaultSource : names[0] ?? null;
+  const source = wanted !== null && names.includes(wanted) ? wanted : fallback;
+  settleSource(source, names.length > 1, engines);
+  if (!state.manySources) return;
+  populateSelect($("source-select"), names, source);
+  $("source-select-wrap").hidden = false;
+}
+$("source-select").onchange = () => {
+  supersedeLoads();
+  switchSource($("source-select").value);
+  loadSchemas().then((current2) => current2 ? loadTables() : void 0).catch(reportError);
+};
+var loadSchemasToken = 0;
+async function loadSchemas() {
+  syncGridLock();
+  const token = ++loadSchemasToken;
+  const { source } = state.scope;
+  let schemas;
+  let defaultSchema;
+  try {
+    const listing = await api(`/schemas${sourceQuery()}`);
+    schemas = listing.schemas.map((s) => s.name);
+    defaultSchema = listing.default ?? null;
+    nameStartupDefault("schema", defaultSchema, { source });
+  } catch (e) {
+    if (token !== loadSchemasToken) return false;
+    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
+    settleSchema(null, [], false);
+    syncGridLock();
+    $("schema-select-wrap").hidden = true;
+    markTiming("scope-settled");
+    return true;
+  }
+  if (token !== loadSchemasToken) return false;
+  const wanted = state.scope.schema;
+  const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema ?? schemas[0] ?? null;
+  settleSchema(schema, schemas, defaultSchema === null);
+  syncGridLock();
+  if (schema !== null) populateSelect($("schema-select"), schemas, schema);
+  $("schema-select-wrap").hidden = !manySchemas();
+  markTiming("scope-settled");
+  return true;
+}
+$("schema-select").onchange = () => {
+  supersedeLoads();
+  switchSchema($("schema-select").value);
+  loadTables().catch(reportError);
+};
+
+// src/features/view-history.ts
+function navigateWithSeededFilter(target, clause) {
+  let ast;
+  try {
+    ast = parseFilterDsl(clause);
+  } catch (e) {
+    reportError(e);
+    return;
+  }
+  openTable(target, clause, ast, `${target.table} isn't independently browsable in schema ${target.schema}`);
+}
+function openTableUnfiltered(target) {
+  openTable(target, "", [], `${target.table} isn't a table of schema ${target.schema}`);
+}
+function openTable(target, clause, ast, missing) {
+  const { table, schema } = target;
+  const req = {
+    ...tableRequest(table),
+    sort: null,
+    order: "asc",
+    restoredSort: false,
+    filter: clause,
+    ast
+  };
+  if (schema === null || schema === state.scope.schema) {
+    loadData({ next: req });
+    return;
+  }
+  supersedeLoads();
+  enterTable(table);
+  state.sort = null;
+  state.offset = 0;
+  clearFilter();
+  setSchema(schema);
+  loadTables({ next: req }).then((outcome) => {
+    if (outcome === "fell-back") {
+      reportError(new Error(missing));
+    }
+  }).catch(reportError);
+}
+var written = null;
+function noteStartupSettled() {
+  written ??= location.search;
+}
+function syncUrl(replaceHistory) {
+  const params = viewParams(state.view);
+  params.set("limit", String(state.limit));
+  params.set("offset", String(state.offset));
+  if (state.sort) {
+    params.set("sort", state.sort);
+    params.set("order", state.order);
+  }
+  if (state.filter) params.set("filter", state.filter);
+  const query = params.toString();
+  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
+    history.replaceState(null, "", `?${query}`);
+  } else {
+    history.pushState(null, "", `?${query}`);
+  }
+  written = location.search;
+}
+window.addEventListener("popstate", () => {
+  if (written === null) {
+    location.reload();
+    return;
+  }
+  if (location.search === written) return;
+  written = location.search;
+  supersedeLoads();
+  const params = new URLSearchParams(location.search);
+  const previousSource = state.scope.source;
+  const previousSchema = state.scope.schema;
+  applyUrlExact(params);
+  $("source-select").value = state.scope.source ?? "";
+  $("schema-select").value = state.scope.schema ?? "";
+  persist();
+  if (state.scope.source === previousSource && scopeSettled()) {
+    const listed = chipsListScopeInView() && !startMissingFrom(state.view, listedTableNames());
+    if (state.scope.schema === previousSchema && listed) {
+      loadData({ replaceHistory: true, reason: "history" });
+      return;
+    }
+    loadTables({ replaceHistory: true, reason: "history" }).catch(reportError);
+    return;
+  }
+  loadSchemas().then((current2) => current2 ? loadTables({ replaceHistory: true, reason: "history" }) : void 0).catch(reportError);
+});
+
+// src/features/referenced-by.ts
+var cache3 = createPromiseCache();
+function clearReferencedByCache() {
+  cache3.clear();
+}
+function fetchReferencedBy(ref) {
+  return cache3.get(
+    refKey(ref),
+    () => api(`/tables/referenced-by?${tableParams(ref)}`).then(
+      (d) => d.referenced_by
+    )
+  );
+}
+function peekReferencedBy(ref) {
+  return cache3.peek(refKey(ref));
+}
+var renderTokens = /* @__PURE__ */ new Map();
+function msg2(text) {
+  const p = el("p", "refby-empty", text);
+  return p;
+}
+function drillIn(target, entry, row2, dismiss) {
+  const clauses = entry.columns.map((c) => ({ column: c.from, value: row2[c.to] }));
+  dismiss();
+  navigateWithSeededFilter(near(target, entry.schema, entry.table), filterClauses(clauses));
+}
+function renderList(container, target, entries, row2, dismiss) {
+  if (entries.length === 0) {
+    container.replaceChildren(msg2("nothing references this table"));
+    return;
+  }
+  container.replaceChildren(
+    ...entries.map((entry) => {
+      const label2 = fkTarget(entry);
+      const btn = el("button");
+      btn.type = "button";
+      btn.className = "refby-entry";
+      btn.textContent = `\u2192 ${label2} (${entry.columns.map((c) => c.from).join(", ")})`;
+      const nullPair = entry.columns.find((c) => row2[c.to] == null);
+      if (nullPair) {
+        btn.disabled = true;
+        btn.title = nullPair.to in row2 ? `${nullPair.to} is null in this row \u2014 no filter is expressible` : "this table has no primary key \u2014 no filter is expressible";
+      } else {
+        btn.title = `go to ${label2} where ${entry.columns.map((c) => `${c.from} = ${row2[c.to]}`).join(" AND ")}`;
+        btn.onclick = () => drillIn(target, entry, row2, dismiss);
+      }
+      return btn;
+    })
+  );
+}
+function renderReferencedBy(container, row2, dismiss) {
+  const token = (renderTokens.get(container) ?? 0) + 1;
+  renderTokens.set(container, token);
+  const table = tableInView();
+  if (table === null) return;
+  const hit = peekReferencedBy(table);
+  if (hit) {
+    renderList(container, table, hit, row2, dismiss);
+    return;
+  }
+  container.replaceChildren(msg2("loading\u2026"));
+  fetchReferencedBy(table).then((entries) => {
+    if (renderTokens.get(container) !== token) return;
+    renderList(container, table, entries, row2, dismiss);
+  }).catch((e) => {
+    if (renderTokens.get(container) !== token) return;
+    container.replaceChildren(msg2(e.message));
+  });
+}
+var refbyAnchor = null;
+function openReferencedByPopover(e, row2) {
+  if (refbyAnchor) refbyAnchor.style.anchorName = "";
+  refbyAnchor = e.currentTarget;
+  refbyAnchor.style.anchorName = "--refby-anchor";
+  $("refby-pop").showPopover();
+  renderReferencedBy($("refby-pop-list"), row2, () => $("refby-pop").hidePopover());
+}
+
 // src/features/join-form.ts
 function textButton(text, className, label2, run) {
   const b = el("button", className, text);
@@ -4555,14 +4838,16 @@ function mountJoinForm(root2, onChange) {
     const rightCol = columnOf(pos, pair.rightColumn);
     return leftCol && rightCol ? joinMismatch(leftCol, rightCol) : null;
   };
+  const earlierAt = (pos) => Array.from({ length: pos }, (_, p) => ({ table: refAt(p), columns: columnsAt(p) }));
   function foreignKey(pos) {
-    const earlier = Array.from({ length: pos }, (_, p) => ({ table: refAt(p), columns: columnsAt(p) }));
-    const fk = findForeignKey(earlier, refAt(pos), columnsAt(pos));
+    const fk = findForeignKey(earlierAt(pos), refAt(pos), columnsAt(pos));
     return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
+  const tagFor = (key) => key === void 0 ? void 0 : { text: "FK", title: key };
+  const relatedAt = (pos) => relatedTables(earlierAt(pos).map((e) => ({ ...e, referrers: peekReferencedBy(e.table) })));
+  const namedRefs = () => distinctRefs([draft, ...draft.joins].filter((t) => t.table !== "").map(refFor));
   async function load() {
-    const named = [draft, ...draft.joins].filter((t) => t.table !== "");
-    const missing = distinctRefs(named.map(refFor)).filter((r) => !cachedColumns(r));
+    const missing = namedRefs().filter((r) => !cachedColumns(r));
     if (missing.length === 0) return;
     const token = ++loadToken2;
     const results = await Promise.allSettled(missing.map(tableColumns));
@@ -4574,6 +4859,11 @@ function mountJoinForm(root2, onChange) {
     });
     render6();
     onChange();
+  }
+  async function loadReferrers() {
+    const unread = namedRefs().filter((r) => !peekReferencedBy(r));
+    const results = await Promise.allSettled(unread.map(fetchReferencedBy));
+    if (results.some((r) => r.status === "fulfilled")) refreshOpenMenu();
   }
   const changed = (fromMenu = false) => {
     const active = document.activeElement;
@@ -4588,27 +4878,36 @@ function mountJoinForm(root2, onChange) {
     if (join && join.table !== "") join.on = [foreignKey(at + 1) ?? emptyPair()];
     changed(true);
   };
-  const tableOptions = (schema) => {
+  const listTables = (schema) => {
+    if (schema === void 0 || schema === state.scope.schema || !state.schemas.includes(schema)) return;
+    tablesIn(schemaRefFor(schema)).then(refreshOpenMenu, refreshOpenMenu);
+  };
+  const tableOptions = (schema, pos) => {
     const tables = cachedTablesIn(schema);
-    if (tables) return tables.map((t) => ({ value: t.name, label: t.name, note: t.count }));
+    if (tables) {
+      const related = relatedAt(pos);
+      return tables.map((t) => ({
+        value: t.name,
+        label: t.name,
+        note: t.count,
+        tag: tagFor(related.get(refKey(refFor({ schema, table: t.name }))))
+      }));
+    }
     if (schema === void 0) return [];
     if (!state.schemas.includes(schema))
       return [{ value: "", label: `${schema} is not a listed schema`, blocked: true }];
     const failure = tablesInFailure(schema);
     if (failure) return [{ value: "", label: "could not list tables", note: failure, blocked: true }];
-    tablesIn(schemaRefFor(schema)).then(
-      () => changed(),
-      () => changed()
-    );
     return [{ value: "", label: "loading\u2026", blocked: true }];
   };
   const tablePicker = (name, t, pos) => {
     const scope2 = state.scope.schema;
     const listed = t.schema === void 0 || state.schemas.includes(t.schema) ? state.schemas : [...state.schemas, t.schema];
     const schema = t.schema ?? scope2;
+    listTables(t.schema);
     const table = createDropdown({
       ariaLabel: `${name} table`,
-      options: tableOptions(t.schema),
+      options: () => tableOptions(t.schema, pos),
       value: t.table,
       display: t.table || void 0,
       placeholder: "choose a table",
@@ -4878,7 +5177,9 @@ function mountJoinForm(root2, onChange) {
     const cards = columnCards();
     if (cards) parts.push(cards);
     root2.replaceChildren(...parts);
+    reattachOpenMenu(root2);
     load();
+    loadReferrers();
   }
   return {
     setDraft(next) {
@@ -5448,160 +5749,6 @@ function mountJoinSql(onChange) {
   };
 }
 
-// src/features/scope-select.ts
-async function loadSources() {
-  let names;
-  let defaultSource;
-  let engines;
-  try {
-    let sources;
-    ({ sources, default: defaultSource } = await api("/sources"));
-    names = sources.map((s) => s.name);
-    engines = Object.fromEntries(sources.map((s) => [s.name, s.engine]));
-    nameStartupDefault("source", defaultSource);
-  } catch (e) {
-    console.warn("ashurbanipal: /sources failed; assuming single-source", e);
-    settleSource(null, false, {});
-    return;
-  }
-  const wanted = state.scope.source;
-  const fallback = names.includes(defaultSource) ? defaultSource : names[0] ?? null;
-  const source = wanted !== null && names.includes(wanted) ? wanted : fallback;
-  settleSource(source, names.length > 1, engines);
-  if (!state.manySources) return;
-  populateSelect($("source-select"), names, source);
-  $("source-select-wrap").hidden = false;
-}
-$("source-select").onchange = () => {
-  supersedeLoads();
-  switchSource($("source-select").value);
-  loadSchemas().then((current2) => current2 ? loadTables() : void 0).catch(reportError);
-};
-var loadSchemasToken = 0;
-async function loadSchemas() {
-  syncGridLock();
-  const token = ++loadSchemasToken;
-  const { source } = state.scope;
-  let schemas;
-  let defaultSchema;
-  try {
-    const listing = await api(`/schemas${sourceQuery()}`);
-    schemas = listing.schemas.map((s) => s.name);
-    defaultSchema = listing.default ?? null;
-    nameStartupDefault("schema", defaultSchema, { source });
-  } catch (e) {
-    if (token !== loadSchemasToken) return false;
-    console.warn("ashurbanipal: /schemas failed; assuming single-schema", e);
-    settleSchema(null, [], false);
-    syncGridLock();
-    $("schema-select-wrap").hidden = true;
-    markTiming("scope-settled");
-    return true;
-  }
-  if (token !== loadSchemasToken) return false;
-  const wanted = state.scope.schema;
-  const schema = wanted !== null && schemas.includes(wanted) ? wanted : defaultSchema ?? schemas[0] ?? null;
-  settleSchema(schema, schemas, defaultSchema === null);
-  syncGridLock();
-  if (schema !== null) populateSelect($("schema-select"), schemas, schema);
-  $("schema-select-wrap").hidden = !manySchemas();
-  markTiming("scope-settled");
-  return true;
-}
-$("schema-select").onchange = () => {
-  supersedeLoads();
-  switchSchema($("schema-select").value);
-  loadTables().catch(reportError);
-};
-
-// src/features/view-history.ts
-function navigateWithSeededFilter(target, clause) {
-  let ast;
-  try {
-    ast = parseFilterDsl(clause);
-  } catch (e) {
-    reportError(e);
-    return;
-  }
-  openTable(target, clause, ast, `${target.table} isn't independently browsable in schema ${target.schema}`);
-}
-function openTableUnfiltered(target) {
-  openTable(target, "", [], `${target.table} isn't a table of schema ${target.schema}`);
-}
-function openTable(target, clause, ast, missing) {
-  const { table, schema } = target;
-  const req = {
-    ...tableRequest(table),
-    sort: null,
-    order: "asc",
-    restoredSort: false,
-    filter: clause,
-    ast
-  };
-  if (schema === null || schema === state.scope.schema) {
-    loadData({ next: req });
-    return;
-  }
-  supersedeLoads();
-  enterTable(table);
-  state.sort = null;
-  state.offset = 0;
-  clearFilter();
-  setSchema(schema);
-  loadTables({ next: req }).then((outcome) => {
-    if (outcome === "fell-back") {
-      reportError(new Error(missing));
-    }
-  }).catch(reportError);
-}
-var written = null;
-function noteStartupSettled() {
-  written ??= location.search;
-}
-function syncUrl(replaceHistory) {
-  const params = viewParams(state.view);
-  params.set("limit", String(state.limit));
-  params.set("offset", String(state.offset));
-  if (state.sort) {
-    params.set("sort", state.sort);
-    params.set("order", state.order);
-  }
-  if (state.filter) params.set("filter", state.filter);
-  const query = params.toString();
-  if (replaceHistory || query === new URLSearchParams(location.search).toString()) {
-    history.replaceState(null, "", `?${query}`);
-  } else {
-    history.pushState(null, "", `?${query}`);
-  }
-  written = location.search;
-}
-window.addEventListener("popstate", () => {
-  if (written === null) {
-    location.reload();
-    return;
-  }
-  if (location.search === written) return;
-  written = location.search;
-  supersedeLoads();
-  const params = new URLSearchParams(location.search);
-  const previousSource = state.scope.source;
-  const previousSchema = state.scope.schema;
-  applyUrlExact(params);
-  $("source-select").value = state.scope.source ?? "";
-  $("schema-select").value = state.scope.schema ?? "";
-  persist();
-  if (state.scope.source === previousSource && scopeSettled()) {
-    const listed = chipsListScopeInView() && !startMissingFrom(state.view, listedTableNames());
-    if (state.scope.schema === previousSchema && listed) {
-      loadData({ replaceHistory: true, reason: "history" });
-      return;
-    }
-    loadTables({ replaceHistory: true, reason: "history" }).catch(reportError);
-    return;
-  }
-  loadSchemas().then((current2) => current2 ? loadTables({ replaceHistory: true, reason: "history" }) : void 0).catch(reportError);
-});
-
 // src/features/join-dialog.ts
 var dialog = $("join-dialog");
 var formTab = $("join-mode-form");
@@ -5856,81 +6003,6 @@ function buildEmptyJoin(onLeft) {
   btn.onclick = onLeft;
   box.append(title, why, btn);
   return box;
-}
-
-// src/features/referenced-by.ts
-var cache3 = createPromiseCache();
-function clearReferencedByCache() {
-  cache3.clear();
-}
-function fetchReferencedBy(ref) {
-  return cache3.get(
-    refKey(ref),
-    () => api(`/tables/referenced-by?${tableParams(ref)}`).then(
-      (d) => d.referenced_by
-    )
-  );
-}
-var renderTokens = /* @__PURE__ */ new Map();
-function msg2(text) {
-  const p = el("p", "refby-empty", text);
-  return p;
-}
-function drillIn(target, entry, row2, dismiss) {
-  const clauses = entry.columns.map((c) => ({ column: c.from, value: row2[c.to] }));
-  dismiss();
-  navigateWithSeededFilter(near(target, entry.schema, entry.table), filterClauses(clauses));
-}
-function renderList(container, target, entries, row2, dismiss) {
-  if (entries.length === 0) {
-    container.replaceChildren(msg2("nothing references this table"));
-    return;
-  }
-  container.replaceChildren(
-    ...entries.map((entry) => {
-      const label2 = fkTarget(entry);
-      const btn = el("button");
-      btn.type = "button";
-      btn.className = "refby-entry";
-      btn.textContent = `\u2192 ${label2} (${entry.columns.map((c) => c.from).join(", ")})`;
-      const nullPair = entry.columns.find((c) => row2[c.to] == null);
-      if (nullPair) {
-        btn.disabled = true;
-        btn.title = nullPair.to in row2 ? `${nullPair.to} is null in this row \u2014 no filter is expressible` : "this table has no primary key \u2014 no filter is expressible";
-      } else {
-        btn.title = `go to ${label2} where ${entry.columns.map((c) => `${c.from} = ${row2[c.to]}`).join(" AND ")}`;
-        btn.onclick = () => drillIn(target, entry, row2, dismiss);
-      }
-      return btn;
-    })
-  );
-}
-function renderReferencedBy(container, row2, dismiss) {
-  const token = (renderTokens.get(container) ?? 0) + 1;
-  renderTokens.set(container, token);
-  const table = tableInView();
-  if (table === null) return;
-  const hit = cache3.peek(refKey(table));
-  if (hit) {
-    renderList(container, table, hit, row2, dismiss);
-    return;
-  }
-  container.replaceChildren(msg2("loading\u2026"));
-  fetchReferencedBy(table).then((entries) => {
-    if (renderTokens.get(container) !== token) return;
-    renderList(container, table, entries, row2, dismiss);
-  }).catch((e) => {
-    if (renderTokens.get(container) !== token) return;
-    container.replaceChildren(msg2(e.message));
-  });
-}
-var refbyAnchor = null;
-function openReferencedByPopover(e, row2) {
-  if (refbyAnchor) refbyAnchor.style.anchorName = "";
-  refbyAnchor = e.currentTarget;
-  refbyAnchor.style.anchorName = "--refby-anchor";
-  $("refby-pop").showPopover();
-  renderReferencedBy($("refby-pop-list"), row2, () => $("refby-pop").hidePopover());
 }
 
 // src/features/table-meta.ts

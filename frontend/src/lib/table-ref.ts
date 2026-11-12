@@ -1,4 +1,4 @@
-import type { SchemaRef, TableRef } from "../core/types.js";
+import type { Column, ReferencedByEntry, SchemaRef, TableRef } from "../core/types.js";
 
 // ==== Table references ====
 // Every name a request, cache or link uses for a table is a TableRef, so the
@@ -43,4 +43,35 @@ export function scopeQuery(scope: SchemaRef): string {
 
 export function tableParams(ref: TableRef, extra: Record<string, string> = {}): URLSearchParams {
   return scopeParams(ref, new URLSearchParams({ table: ref.table, ...extra }));
+}
+
+export interface RelatedSource {
+  table: TableRef;
+  columns: readonly Column[];
+  referrers?: readonly ReferencedByEntry[];
+}
+
+// Tables keyed to or from `earlier`, by refKey, each with its first key as `a.x → b.y` and a count of the rest.
+export function relatedTables(earlier: readonly RelatedSource[]): Map<string, string> {
+  const found = new Map<string, string[]>();
+  const add = (ref: TableRef, text: string): void => {
+    const key = refKey(ref);
+    const texts = found.get(key);
+    if (texts) texts.push(text);
+    else found.set(key, [text]);
+  };
+  for (const e of earlier) {
+    for (const c of e.columns) {
+      const r = c.references;
+      if (r) add(near(e.table, r.schema, r.table), `${e.table.table}.${c.name} → ${r.table}.${r.column}`);
+    }
+    for (const entry of e.referrers ?? []) {
+      const pair = entry.columns[0];
+      if (pair)
+        add(near(e.table, entry.schema, entry.table), `${entry.table}.${pair.from} → ${e.table.table}.${pair.to}`);
+    }
+  }
+  return new Map(
+    [...found].map(([key, texts]) => [key, texts.length > 1 ? `${texts[0]} (+${texts.length - 1} more)` : texts[0]]),
+  );
 }

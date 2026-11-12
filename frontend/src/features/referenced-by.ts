@@ -33,6 +33,10 @@ export function fetchReferencedBy(ref: TableRef): Promise<ReferencedByEntry[]> {
   );
 }
 
+export function peekReferencedBy(ref: TableRef): ReferencedByEntry[] | undefined {
+  return cache.peek(refKey(ref));
+}
+
 // Same staleness guard as cvRequestToken: a second call targeting the same
 // container before the first response lands must not overwrite the list
 // now on screen. Keyed per container, not one module-wide counter — the
@@ -101,7 +105,7 @@ export function renderReferencedBy(container: HTMLElement, row: Row, dismiss: ()
   // Only offered in a table view: a join row has several tables.
   const table = tableInView();
   if (table === null) return;
-  const hit = cache.peek(refKey(table));
+  const hit = peekReferencedBy(table);
   if (hit) {
     renderList(container, table, hit, row, dismiss);
     return;

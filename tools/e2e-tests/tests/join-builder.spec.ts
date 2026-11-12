@@ -426,6 +426,28 @@ test("the table menu narrows by fuzzy search as you type, and Enter picks the be
   await expect(page.getByRole("button", { name: "join 1 table", exact: true })).toHaveText("users ▾");
 });
 
+test("the table menu tags tables with a foreign key to or from the start table", async ({ page }) => {
+  await openJoinOverlay(page);
+  const button = page.getByRole("button", { name: "join 1 table", exact: true });
+  const rows = page.locator("#dd-pop .dd-row");
+  await button.click();
+  // The referencing tables may arrive after the menu opens; it updates in place.
+  await expect(rows.filter({ hasText: "order_extra" }).locator(".dd-tag")).toHaveCount(1);
+  await expect(page.locator('#dd-pop .dd-row[data-value="users"] .dd-tag')).toHaveAttribute(
+    "title",
+    "orders.user_id → users.id",
+  );
+  await expect(page.locator('#dd-pop .dd-row[data-value="order_extra"] .dd-tag')).toHaveAttribute(
+    "title",
+    "order_extra.order_id → orders.id",
+  );
+  await expect(page.locator('#dd-pop .dd-row[data-value="feature_flags"] .dd-tag')).toHaveCount(0);
+
+  await page.locator("#dd-pop-search").fill("users");
+  await expect(rows.first()).toHaveAttribute("data-value", "users");
+  await expect(rows.first().locator(".dd-tag")).toHaveCount(1);
+});
+
 test("in the table menu, arrows wrap through the rows, and ArrowUp or typing on a row returns to the search box", async ({
   page,
 }) => {

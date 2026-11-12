@@ -869,6 +869,8 @@ thead tr.bands + tr th { top: var(--band-h); }
 .dd-row:hover:not(.blocked), .dd-row:focus-visible { background: var(--hover); outline: none; }
 .dd-row[aria-selected="true"] { background: var(--hover); }
 .dd-note { font-family: var(--font-sans, system-ui, sans-serif); font-size: .6875rem; color: var(--text-muted); align-self: center; }
+.dd-tag { margin-left: .25rem; padding: 0 .3rem; border: 1px solid var(--border); border-radius: 4px;
+         font-family: var(--font-sans, system-ui, sans-serif); font-size: .625rem; color: var(--text-muted); }
 .dd-row.blocked { color: var(--text-muted); opacity: .75; cursor: not-allowed; }
 .j-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; }
 .j-card { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .65rem; }

@@ -13,9 +13,16 @@ import {
 } from "../lib/join-draft.js";
 import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
-import { distinctRefs } from "../lib/table-ref.js";
-import { createDropdown, type DropdownOption, lastDropdownLabel } from "./dropdown.js";
+import { distinctRefs, refKey, relatedTables } from "../lib/table-ref.js";
+import {
+  createDropdown,
+  type DropdownOption,
+  lastDropdownLabel,
+  reattachOpenMenu,
+  refreshOpenMenu,
+} from "./dropdown.js";
 import { cachedColumns, cachedTablesIn, tableColumns, tablesIn, tablesInFailure } from "./join-catalog.js";
+import { fetchReferencedBy, peekReferencedBy } from "./referenced-by.js";
 
 // The Form half of the join overlay (board O): edits a Draft in place and tells
 // the dialog when it changed. Menus and buttons re-render the form; typing in an
@@ -53,16 +60,24 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     return leftCol && rightCol ? joinMismatch(leftCol, rightCol) : null;
   };
 
+  const earlierAt = (pos: number): { table: TableRef; columns: Column[] }[] =>
+    Array.from({ length: pos }, (_, p) => ({ table: refAt(p), columns: columnsAt(p) }));
+
   function foreignKey(pos: number): DraftPair | null {
-    const earlier = Array.from({ length: pos }, (_, p) => ({ table: refAt(p), columns: columnsAt(p) }));
-    const fk = findForeignKey(earlier, refAt(pos), columnsAt(pos));
+    const fk = findForeignKey(earlierAt(pos), refAt(pos), columnsAt(pos));
     return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
 
+  const tagFor = (key?: string) => (key === undefined ? undefined : { text: "FK", title: key });
+
+  const relatedAt = (pos: number): Map<string, string> =>
+    relatedTables(earlierAt(pos).map((e) => ({ ...e, referrers: peekReferencedBy(e.table) })));
+
+  const namedRefs = (): TableRef[] => distinctRefs([draft, ...draft.joins].filter((t) => t.table !== "").map(refFor));
+
   // Columns arrive lazily; a table whose lookup fails shows no columns rather than blocking the form.
   async function load(): Promise<void> {
-    const named = [draft, ...draft.joins].filter((t) => t.table !== "");
-    const missing = distinctRefs(named.map(refFor)).filter((r) => !cachedColumns(r));
+    const missing = namedRefs().filter((r) => !cachedColumns(r));
     if (missing.length === 0) return;
     const token = ++loadToken;
     const results = await Promise.allSettled(missing.map(tableColumns));
@@ -76,6 +91,13 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     });
     render();
     onChange();
+  }
+
+  // Referrers only tag the table menu's rows, so they never hold up the columns.
+  async function loadReferrers(): Promise<void> {
+    const unread = namedRefs().filter((r) => !peekReferencedBy(r));
+    const results = await Promise.allSettled(unread.map(fetchReferencedBy));
+    if (results.some((r) => r.status === "fulfilled")) refreshOpenMenu();
   }
 
   const changed = (fromMenu = false): void => {
@@ -94,20 +116,29 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     changed(true);
   };
 
-  // The schema's tables once read; another schema's are asked for the first time its menu is built (board BE).
+  // Another schema's tables are asked for when it is picked (board BE), and an open menu fills in when they arrive.
+  const listTables = (schema: string | undefined): void => {
+    if (schema === undefined || schema === state.scope.schema || !state.schemas.includes(schema)) return;
+    tablesIn(schemaRefFor(schema)).then(refreshOpenMenu, refreshOpenMenu);
+  };
+
   // An absent schema is the scope's, whose tables are the chips.
-  const tableOptions = (schema: string | undefined): DropdownOption[] => {
+  const tableOptions = (schema: string | undefined, pos: number): DropdownOption[] => {
     const tables = cachedTablesIn(schema);
-    if (tables) return tables.map((t) => ({ value: t.name, label: t.name, note: t.count }));
+    if (tables) {
+      const related = relatedAt(pos);
+      return tables.map((t) => ({
+        value: t.name,
+        label: t.name,
+        note: t.count,
+        tag: tagFor(related.get(refKey(refFor({ schema, table: t.name })))),
+      }));
+    }
     if (schema === undefined) return [];
     if (!state.schemas.includes(schema))
       return [{ value: "", label: `${schema} is not a listed schema`, blocked: true }];
     const failure = tablesInFailure(schema);
     if (failure) return [{ value: "", label: "could not list tables", note: failure, blocked: true }];
-    tablesIn(schemaRefFor(schema)).then(
-      () => changed(),
-      () => changed(),
-    );
     return [{ value: "", label: "loading…", blocked: true }];
   };
 
@@ -118,9 +149,10 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     const listed =
       t.schema === undefined || state.schemas.includes(t.schema) ? state.schemas : [...state.schemas, t.schema];
     const schema = t.schema ?? scope;
+    listTables(t.schema);
     const table = createDropdown({
       ariaLabel: `${name} table`,
-      options: tableOptions(t.schema),
+      options: () => tableOptions(t.schema, pos),
       value: t.table,
       display: t.table || undefined,
       placeholder: "choose a table",
@@ -404,7 +436,9 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     const cards = columnCards();
     if (cards) parts.push(cards);
     root.replaceChildren(...parts);
+    reattachOpenMenu(root);
     load();
+    loadReferrers();
   }
 
   return {

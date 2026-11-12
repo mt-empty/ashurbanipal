@@ -10,12 +10,15 @@ export interface DropdownOption {
   label: string;
   // Right-aligned: the type, or the reason a row cannot be picked.
   note?: string;
+  // A small badge after the label.
+  tag?: { text: string; title: string };
   blocked?: boolean;
 }
 
 export interface DropdownOptions {
   ariaLabel: string;
-  options: DropdownOption[];
+  // A function is called whenever the menu opens or refreshes, so it shows what is known by then.
+  options: DropdownOption[] | (() => DropdownOption[]);
   value: string;
   // Shown on the button when nothing is picked.
   placeholder: string;
@@ -41,11 +44,39 @@ function closeMenu(): void {
   if (pop().matches(":popover-open")) pop().hidePopover();
 }
 
+const optionsOf = (opts: DropdownOptions): DropdownOption[] =>
+  typeof opts.options === "function" ? opts.options() : opts.options;
+
+const built = new WeakMap<HTMLButtonElement, DropdownOptions>();
+
+// After the form behind an open menu is redrawn, points the menu at the new button of the same label,
+// so it keeps its place and shows the redrawn options; a control that is gone closes it.
+export function reattachOpenMenu(root: ParentNode): void {
+  if (!current || !pop().matches(":popover-open")) return;
+  const next = root.querySelector<HTMLButtonElement>(`button[aria-label="${CSS.escape(current.ariaLabel)}"]`);
+  const opts = next && built.get(next);
+  if (!next || !opts) {
+    closeMenu();
+    return;
+  }
+  if (anchor) anchor.style.anchorName = "";
+  anchor = next;
+  current = opts;
+  next.style.anchorName = "--dd-anchor";
+  renderRows(opts, search().value);
+}
+
+// Redraws the rows of the menu now open, keeping its place and search text.
+export function refreshOpenMenu(): void {
+  if (current && pop().matches(":popover-open")) renderRows(current, search().value);
+}
+
 const search = (): HTMLInputElement => $<HTMLInputElement>("dd-pop-search");
 
 function renderRows(opts: DropdownOptions, query: string): void {
   const list = $("dd-pop-list");
-  const shown = query.trim() ? fuzzyFilter(query, opts.options, (o) => o.label) : opts.options;
+  const options = optionsOf(opts);
+  const shown = query.trim() ? fuzzyFilter(query, options, (o) => o.label) : options;
   list.replaceChildren(
     ...shown.map((o) => {
       const row = el("button");
@@ -56,6 +87,11 @@ function renderRows(opts: DropdownOptions, query: string): void {
       row.dataset.value = o.value;
       const name = el("span");
       name.textContent = o.label;
+      if (o.tag) {
+        const tag = el("span", "dd-tag", o.tag.text);
+        tag.title = o.tag.title;
+        name.append(" ", tag);
+      }
       row.appendChild(name);
       if (o.note) {
         const note = el("span", "dd-note", o.note);
@@ -106,11 +142,13 @@ export function createDropdown(opts: DropdownOptions): HTMLButtonElement {
   button.className = `dd${opts.mono ? " mono" : ""}${opts.invalid ? " bad" : ""}`;
   button.setAttribute("aria-label", opts.ariaLabel);
   button.setAttribute("aria-haspopup", "listbox");
-  const picked = opts.options.find((o) => o.value === opts.value);
+  // A menu built on demand names its button through `display`.
+  const picked = typeof opts.options === "function" ? undefined : opts.options.find((o) => o.value === opts.value);
   const text = opts.display ?? picked?.label ?? opts.placeholder;
   button.textContent = `${text} ▾`;
   if (!picked && opts.display === undefined) button.classList.add("empty");
   button.onclick = () => open(button, opts);
+  built.set(button, opts);
   return button;
 }
 
