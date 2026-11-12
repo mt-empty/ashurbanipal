@@ -47,10 +47,12 @@ function closeMenu(): void {
 const optionsOf = (opts: DropdownOptions): DropdownOption[] =>
   typeof opts.options === "function" ? opts.options() : opts.options;
 
+// The open menu's options, read once when it opens or is reattached so typing only filters them.
+let rows: DropdownOption[] = [];
 const built = new WeakMap<HTMLButtonElement, DropdownOptions>();
 
-// After the form behind an open menu is redrawn, points the menu at the new button of the same label,
-// so it keeps its place and shows the redrawn options; a control that is gone closes it.
+// Redraws the open menu from its current options, on the button now carrying its label, so it keeps its
+// place and search text when the form behind it is redrawn or its options change; a control that is gone closes it.
 export function reattachOpenMenu(root: ParentNode): void {
   if (!current || !pop().matches(":popover-open")) return;
   const next = root.querySelector<HTMLButtonElement>(`button[aria-label="${CSS.escape(current.ariaLabel)}"]`);
@@ -63,20 +65,16 @@ export function reattachOpenMenu(root: ParentNode): void {
   anchor = next;
   current = opts;
   next.style.anchorName = "--dd-anchor";
-  renderRows(opts, search().value);
-}
-
-// Redraws the rows of the menu now open, keeping its place and search text.
-export function refreshOpenMenu(): void {
-  if (current && pop().matches(":popover-open")) renderRows(current, search().value);
+  rows = optionsOf(opts);
+  renderRows(search().value);
 }
 
 const search = (): HTMLInputElement => $<HTMLInputElement>("dd-pop-search");
 
-function renderRows(opts: DropdownOptions, query: string): void {
+function renderRows(query: string): void {
   const list = $("dd-pop-list");
-  const options = optionsOf(opts);
-  const shown = query.trim() ? fuzzyFilter(query, options, (o) => o.label) : options;
+  const opts = current as DropdownOptions;
+  const shown = query.trim() ? fuzzyFilter(query, rows, (o) => o.label) : rows;
   list.replaceChildren(
     ...shown.map((o) => {
       const row = el("button");
@@ -128,7 +126,8 @@ function open(button: HTMLButtonElement, opts: DropdownOptions): void {
   box.hidden = !opts.searchable;
   box.value = "";
   box.setAttribute("aria-label", `search: ${opts.ariaLabel}`);
-  renderRows(opts, "");
+  rows = optionsOf(opts);
+  renderRows("");
   pop().showPopover();
   const start = list.querySelector<HTMLElement>('[aria-selected="true"]') ?? pickable()[0];
   start?.scrollIntoView({ block: "nearest" });
@@ -153,7 +152,7 @@ export function createDropdown(opts: DropdownOptions): HTMLButtonElement {
 }
 
 search().addEventListener("input", () => {
-  if (current) renderRows(current, search().value);
+  if (current) renderRows(search().value);
 });
 search().addEventListener("keydown", (e: KeyboardEvent) => {
   if (e.key !== "Enter") return;

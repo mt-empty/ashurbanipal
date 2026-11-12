@@ -53,12 +53,12 @@ export interface RelatedSource {
 
 // Tables keyed to or from `earlier`, by refKey, each with its first key as `a.x → b.y` and a count of the rest.
 export function relatedTables(earlier: readonly RelatedSource[]): Map<string, string> {
-  const found = new Map<string, string[]>();
+  const found = new Map<string, { first: string; more: number }>();
   const add = (ref: TableRef, text: string): void => {
     const key = refKey(ref);
-    const texts = found.get(key);
-    if (texts) texts.push(text);
-    else found.set(key, [text]);
+    const hit = found.get(key);
+    if (hit) hit.more++;
+    else found.set(key, { first: text, more: 0 });
   };
   for (const e of earlier) {
     for (const c of e.columns) {
@@ -71,7 +71,5 @@ export function relatedTables(earlier: readonly RelatedSource[]): Map<string, st
         add(near(e.table, entry.schema, entry.table), `${entry.table}.${pair.from} → ${e.table.table}.${pair.to}`);
     }
   }
-  return new Map(
-    [...found].map(([key, texts]) => [key, texts.length > 1 ? `${texts[0]} (+${texts.length - 1} more)` : texts[0]]),
-  );
+  return new Map([...found].map(([key, { first, more }]) => [key, more ? `${first} (+${more} more)` : first]));
 }

@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures";
-import { apiCall, failRequests, gotoApp, urlParam, waitForTable } from "./support/helpers";
+import { apiCall, failRequests, gotoApp, holdRequests, tableList, urlParam, waitForTable } from "./support/helpers";
 import { expandTableChips, joinParam, pick, showResult, storedSavedJoins, writeSql } from "./support/join";
 
 // A join across two schemas of one source (backlog story 44; boards BE and BG).
@@ -33,14 +33,7 @@ test("the table menu of another schema tags the table the start table has a fore
 
 test("a table menu opened while another schema's tables load fills in where it is", async ({ page }) => {
   await openFromShipments(page);
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route(apiCall("/tables", { schema: "public" }), async (route) => {
-    await held;
-    await route.continue();
-  });
+  const release = await holdRequests(page, tableList("public"));
   await pick(page, "join 1 schema", "public");
   await page.getByRole("button", { name: "join 1 table", exact: true }).click();
   const menu = page.locator("#dd-pop");
@@ -57,14 +50,7 @@ test("a table menu opened while another schema's tables load fills in where it i
 test("a column menu opened while the table's columns load fills in under its button", async ({ page }) => {
   await openFromShipments(page);
   await pick(page, "join 1 schema", "public");
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route(apiCall("/tables/data", { schema: "public", table: "orders" }), async (route) => {
-    await held;
-    await route.continue();
-  });
+  const release = await holdRequests(page, apiCall("/tables/data", { schema: "public", table: "orders" }));
   await pick(page, "join 1 table", "orders");
   const button = page.getByRole("button", { name: "join 1: column of orders", exact: true });
   await button.click();

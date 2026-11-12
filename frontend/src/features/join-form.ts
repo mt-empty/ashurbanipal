@@ -14,13 +14,7 @@ import {
 import { JOIN_MAX_PAIRS, JOIN_MAX_TABLES } from "../lib/join-dsl.js";
 import { findForeignKey, joinMismatch, pairNote, truncateType } from "../lib/join-types.js";
 import { distinctRefs, refKey, relatedTables } from "../lib/table-ref.js";
-import {
-  createDropdown,
-  type DropdownOption,
-  lastDropdownLabel,
-  reattachOpenMenu,
-  refreshOpenMenu,
-} from "./dropdown.js";
+import { createDropdown, type DropdownOption, lastDropdownLabel, reattachOpenMenu } from "./dropdown.js";
 import { cachedColumns, cachedTablesIn, tableColumns, tablesIn, tablesInFailure } from "./join-catalog.js";
 import { fetchReferencedBy, peekReferencedBy } from "./referenced-by.js";
 
@@ -68,8 +62,6 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
 
-  const tagFor = (key?: string) => (key === undefined ? undefined : { text: "FK", title: key });
-
   const relatedAt = (pos: number): Map<string, string> =>
     relatedTables(earlierAt(pos).map((e) => ({ ...e, referrers: peekReferencedBy(e.table) })));
 
@@ -94,10 +86,12 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
   }
 
   // Referrers only tag the table menu's rows, so they never hold up the columns.
-  async function loadReferrers(): Promise<void> {
-    const unread = namedRefs().filter((r) => !peekReferencedBy(r));
-    const results = await Promise.allSettled(unread.map(fetchReferencedBy));
-    if (results.some((r) => r.status === "fulfilled")) refreshOpenMenu();
+  function loadReferrers(): void {
+    for (const ref of namedRefs().filter((r) => !peekReferencedBy(r)))
+      fetchReferencedBy(ref).then(
+        () => reattachOpenMenu(root),
+        () => {},
+      );
   }
 
   const changed = (fromMenu = false): void => {
@@ -116,10 +110,12 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     changed(true);
   };
 
-  // Another schema's tables are asked for when it is picked (board BE), and an open menu fills in when they arrive.
+  // Another schema's tables are asked for when it is picked, and an open menu fills in when they arrive.
   const listTables = (schema: string | undefined): void => {
     if (schema === undefined || schema === state.scope.schema || !state.schemas.includes(schema)) return;
-    tablesIn(schemaRefFor(schema)).then(refreshOpenMenu, refreshOpenMenu);
+    if (cachedTablesIn(schema) || tablesInFailure(schema)) return;
+    const refresh = (): void => reattachOpenMenu(root);
+    tablesIn(schemaRefFor(schema)).then(refresh, refresh);
   };
 
   // An absent schema is the scope's, whose tables are the chips.
@@ -127,12 +123,10 @@ export function mountJoinForm(root: HTMLElement, onChange: () => void): JoinForm
     const tables = cachedTablesIn(schema);
     if (tables) {
       const related = relatedAt(pos);
-      return tables.map((t) => ({
-        value: t.name,
-        label: t.name,
-        note: t.count,
-        tag: tagFor(related.get(refKey(refFor({ schema, table: t.name })))),
-      }));
+      return tables.map((t) => {
+        const title = related.get(refKey(refFor({ schema, table: t.name })));
+        return { value: t.name, label: t.name, note: t.count, tag: title ? { text: "FK", title } : undefined };
+      });
     }
     if (schema === undefined) return [];
     if (!state.schemas.includes(schema))

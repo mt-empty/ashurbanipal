@@ -2760,9 +2760,9 @@ function relatedTables(earlier) {
   const found = /* @__PURE__ */ new Map();
   const add = (ref, text) => {
     const key = refKey(ref);
-    const texts = found.get(key);
-    if (texts) texts.push(text);
-    else found.set(key, [text]);
+    const hit = found.get(key);
+    if (hit) hit.more++;
+    else found.set(key, { first: text, more: 0 });
   };
   for (const e of earlier) {
     for (const c of e.columns) {
@@ -2775,9 +2775,7 @@ function relatedTables(earlier) {
         add(near(e.table, entry.schema, entry.table), `${entry.table}.${pair.from} \u2192 ${e.table.table}.${pair.to}`);
     }
   }
-  return new Map(
-    [...found].map(([key, texts]) => [key, texts.length > 1 ? `${texts[0]} (+${texts.length - 1} more)` : texts[0]])
-  );
+  return new Map([...found].map(([key, { first, more }]) => [key, more ? `${first} (+${more} more)` : first]));
 }
 
 // src/core/storage.ts
@@ -4210,6 +4208,7 @@ function closeMenu2() {
   if (pop().matches(":popover-open")) pop().hidePopover();
 }
 var optionsOf = (opts) => typeof opts.options === "function" ? opts.options() : opts.options;
+var rows = [];
 var built = /* @__PURE__ */ new WeakMap();
 function reattachOpenMenu(root2) {
   if (!current || !pop().matches(":popover-open")) return;
@@ -4223,16 +4222,14 @@ function reattachOpenMenu(root2) {
   anchor = next;
   current = opts;
   next.style.anchorName = "--dd-anchor";
-  renderRows(opts, search().value);
-}
-function refreshOpenMenu() {
-  if (current && pop().matches(":popover-open")) renderRows(current, search().value);
+  rows = optionsOf(opts);
+  renderRows(search().value);
 }
 var search = () => $("dd-pop-search");
-function renderRows(opts, query) {
+function renderRows(query) {
   const list = $("dd-pop-list");
-  const options = optionsOf(opts);
-  const shown = query.trim() ? fuzzyFilter(query, options, (o) => o.label) : options;
+  const opts = current;
+  const shown = query.trim() ? fuzzyFilter(query, rows, (o) => o.label) : rows;
   list.replaceChildren(
     ...shown.map((o) => {
       const row2 = el("button");
@@ -4282,7 +4279,8 @@ function open(button, opts) {
   box.hidden = !opts.searchable;
   box.value = "";
   box.setAttribute("aria-label", `search: ${opts.ariaLabel}`);
-  renderRows(opts, "");
+  rows = optionsOf(opts);
+  renderRows("");
   pop().showPopover();
   const start = list.querySelector('[aria-selected="true"]') ?? pickable()[0];
   start?.scrollIntoView({ block: "nearest" });
@@ -4304,7 +4302,7 @@ function createDropdown(opts) {
   return button;
 }
 search().addEventListener("input", () => {
-  if (current) renderRows(current, search().value);
+  if (current) renderRows(search().value);
 });
 search().addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
@@ -4318,16 +4316,16 @@ pop().addEventListener("keydown", (e) => {
     return;
   }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-  const rows = pickable();
-  if (rows.length === 0) return;
+  const rows2 = pickable();
+  if (rows2.length === 0) return;
   e.preventDefault();
-  const at = rows.indexOf(document.activeElement);
+  const at = rows2.indexOf(document.activeElement);
   if (e.key === "ArrowUp" && at === 0 && !box.hidden) {
     box.focus();
     return;
   }
-  const next = e.key === "ArrowDown" ? (at + 1) % rows.length : (at <= 0 ? rows.length : at) - 1;
-  rows[next].focus();
+  const next = e.key === "ArrowDown" ? (at + 1) % rows2.length : (at <= 0 ? rows2.length : at) - 1;
+  rows2[next].focus();
 });
 pop().addEventListener("toggle", (e) => {
   if (e.newState === "closed" && anchor) {
@@ -4404,11 +4402,11 @@ function row(text, detail) {
   }
   return div;
 }
-function section(label2, rows, emptyText) {
+function section(label2, rows2, emptyText) {
   const wrap2 = el("div", "structure-section");
   const heading = el("span", "section-label", label2);
   const list = el("div");
-  list.replaceChildren(...rows.length ? rows : [msg(emptyText)]);
+  list.replaceChildren(...rows2.length ? rows2 : [msg(emptyText)]);
   wrap2.append(heading, list);
   return wrap2;
 }
@@ -5166,7 +5164,6 @@ function mountJoinForm(root2, onChange) {
     const fk = findForeignKey(earlierAt(pos), refAt(pos), columnsAt(pos));
     return fk && { leftJoin: fk.at, leftColumn: fk.leftColumn, rightColumn: fk.rightColumn };
   }
-  const tagFor = (key) => key === void 0 ? void 0 : { text: "FK", title: key };
   const relatedAt = (pos) => relatedTables(earlierAt(pos).map((e) => ({ ...e, referrers: peekReferencedBy(e.table) })));
   const namedRefs = () => distinctRefs([draft, ...draft.joins].filter((t) => t.table !== "").map(refFor));
   async function load() {
@@ -5183,10 +5180,13 @@ function mountJoinForm(root2, onChange) {
     render6();
     onChange();
   }
-  async function loadReferrers() {
-    const unread = namedRefs().filter((r) => !peekReferencedBy(r));
-    const results = await Promise.allSettled(unread.map(fetchReferencedBy));
-    if (results.some((r) => r.status === "fulfilled")) refreshOpenMenu();
+  function loadReferrers() {
+    for (const ref of namedRefs().filter((r) => !peekReferencedBy(r)))
+      fetchReferencedBy(ref).then(
+        () => reattachOpenMenu(root2),
+        () => {
+        }
+      );
   }
   const changed = (fromMenu = false) => {
     const active = document.activeElement;
@@ -5203,18 +5203,18 @@ function mountJoinForm(root2, onChange) {
   };
   const listTables = (schema) => {
     if (schema === void 0 || schema === state.scope.schema || !state.schemas.includes(schema)) return;
-    tablesIn(schemaRefFor(schema)).then(refreshOpenMenu, refreshOpenMenu);
+    if (cachedTablesIn(schema) || tablesInFailure(schema)) return;
+    const refresh2 = () => reattachOpenMenu(root2);
+    tablesIn(schemaRefFor(schema)).then(refresh2, refresh2);
   };
   const tableOptions = (schema, pos) => {
     const tables = cachedTablesIn(schema);
     if (tables) {
       const related = relatedAt(pos);
-      return tables.map((t) => ({
-        value: t.name,
-        label: t.name,
-        note: t.count,
-        tag: tagFor(related.get(refKey(refFor({ schema, table: t.name }))))
-      }));
+      return tables.map((t) => {
+        const title = related.get(refKey(refFor({ schema, table: t.name })));
+        return { value: t.name, label: t.name, note: t.count, tag: title ? { text: "FK", title } : void 0 };
+      });
     }
     if (schema === void 0) return [];
     if (!state.schemas.includes(schema))
@@ -5992,7 +5992,7 @@ function mountJoinSql(onChange) {
     const token = suggest2.token();
     if (field.selectionStart !== field.value.length) return;
     const ctx = joinCompletionAt(field.value);
-    let rows = [];
+    let rows2 = [];
     if (ctx.expect === "table") {
       const schema = ctx.qualifier ?? void 0;
       const listed = cachedTablesIn(schema);
@@ -6014,19 +6014,19 @@ function mountJoinSql(onChange) {
           if (anyRead(results) && token === suggest2.token()) void update2();
         });
       }
-      rows = [...tableRows(ctx, candidates, schema), ...schema === void 0 ? schemaRows(ctx) : []];
+      rows2 = [...tableRows(ctx, candidates, schema), ...schema === void 0 ? schemaRows(ctx) : []];
     } else if (ctx.expect === "qualifier") {
       const starts = startsWith(ctx);
-      rows = ctx.declared.filter((d) => starts(d.name)).map((d) => ({ label: d.name, insert: `${quoteJoinName(d.name)}.`, note: d.name === d.table ? "" : d.table }));
+      rows2 = ctx.declared.filter((d) => starts(d.name)).map((d) => ({ label: d.name, insert: `${quoteJoinName(d.name)}.`, note: d.name === d.table ? "" : d.table }));
     } else if (ctx.expect === "column") {
-      rows = await columnRows(ctx).catch(() => []);
+      rows2 = await columnRows(ctx).catch(() => []);
     } else if (ctx.expect === "keyword") {
-      rows = ctx.keywords.filter((k) => k.startsWith(ctx.partial.toUpperCase())).map((k) => ({ label: k, insert: `${k} ` }));
+      rows2 = ctx.keywords.filter((k) => k.startsWith(ctx.partial.toUpperCase())).map((k) => ({ label: k, insert: `${k} ` }));
     }
-    if (token !== suggest2.token() || document.activeElement !== field || rows.length === 0) return;
-    const only = rows.length === 1 && !rows[0].blocked && rows[0].insert.trim().toLowerCase() === ctx.partial.toLowerCase();
+    if (token !== suggest2.token() || document.activeElement !== field || rows2.length === 0) return;
+    const only = rows2.length === 1 && !rows2[0].blocked && rows2[0].insert.trim().toLowerCase() === ctx.partial.toLowerCase();
     if (only) return;
-    suggest2.show(rows, ctx.head);
+    suggest2.show(rows2, ctx.head);
   }
   function prefetch2() {
     const declared = joinCompletionAt(field.value).declared;
@@ -6522,7 +6522,7 @@ function commonValuesFor(table, column) {
   const key = refKey(table, column);
   let values = commonValueCache.get(key);
   if (!values) {
-    values = fetchCommonValues(table, column).then((rows) => rows.map((v) => v.value)).catch((e) => {
+    values = fetchCommonValues(table, column).then((rows2) => rows2.map((v) => v.value)).catch((e) => {
       console.warn("ashurbanipal: common values for suggestions failed", e);
       return [];
     });
@@ -6582,8 +6582,8 @@ function updateFilterSuggestions() {
     if (source) {
       commonValuesFor(source.table, source.column).then((values) => {
         if (token !== suggest.token() || document.activeElement !== input2) return;
-        const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
-        showFilterSuggestions(ctx, rows);
+        const rows2 = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
+        showFilterSuggestions(ctx, rows2);
       });
     }
   }
@@ -6668,7 +6668,7 @@ function buildSiblingMatrix({ instance, siblings }) {
   if (instance && !names.includes(instance.name)) names.unshift(instance.name);
   const first = firstEntries(labelled);
   const ownCol = instance ? labels.indexOf(instance.label) : -1;
-  const rows = names.map((name) => {
+  const rows2 = names.map((name) => {
     const isInstance = instance?.name === name;
     const cells = labels.map((label2) => {
       if (isInstance && instance?.label === label2) return { kind: "here" };
@@ -6678,7 +6678,7 @@ function buildSiblingMatrix({ instance, siblings }) {
     const nameLink = !isInstance && ownCol >= 0 && cells[ownCol].kind === "link" ? ownCol : null;
     return { name, isInstance, cells, nameLink };
   });
-  return { labels, ownLabel: instance?.label ?? null, rows };
+  return { labels, ownLabel: instance?.label ?? null, rows: rows2 };
 }
 function listedSiblings(siblings) {
   const first = firstEntries(siblings);
@@ -7236,7 +7236,7 @@ function sqlLiteral(col, raw) {
   if (columnTypeClass(col) === "number" && /^-?\d+(\.\d+)?$/.test(raw)) return raw;
   return `'${raw.replace(/'/g, "''")}'`;
 }
-function openRecordView(columns, rows, index, def) {
+function openRecordView(columns, rows2, index, def) {
   const table = tableInView();
   $("record-referenced-by-wrap").hidden = table === null;
   const copyInsertBtn = $("record-copy-insert");
@@ -7254,12 +7254,12 @@ function openRecordView(columns, rows, index, def) {
     }
   };
   const show = (i) => {
-    const row2 = rows[i];
+    const row2 = rows2[i];
     $("record-dl").replaceChildren(...buildRecordEntries(columns, row2, ctx));
-    $("record-pos").textContent = `${i + 1} of ${rows.length}`;
+    $("record-pos").textContent = `${i + 1} of ${rows2.length}`;
     const focused = document.activeElement;
     prev.disabled = i === 0;
-    next.disabled = i === rows.length - 1;
+    next.disabled = i === rows2.length - 1;
     if (focused === next && next.disabled) prev.focus();
     if (focused === prev && prev.disabled) next.focus();
     prev.onclick = () => show(i - 1);
@@ -7562,10 +7562,10 @@ function renderColumnMenu() {
   }
   syncColumnChrome();
 }
-function buildRowActionCell(columns, rows, index) {
+function buildRowActionCell(columns, rows2, index) {
   const td = rowActionTemplate.content.cloneNode(true).firstElementChild;
   const def = viewInGrid?.kind === "join" ? viewInGrid.def : void 0;
-  qs(td, ".record-btn").onclick = () => openRecordView(columns, rows, index, def);
+  qs(td, ".record-btn").onclick = () => openRecordView(columns, rows2, index, def);
   return td;
 }
 function renderRows2(data, newRowKeys, pkNames = []) {
