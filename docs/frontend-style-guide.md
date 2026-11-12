@@ -29,7 +29,7 @@ src/
   index.html   styles.css
   bootstrap/   main, controller, reload, table-focus, boot-prefetch
   features/    grid, column-widths, sticky-header, filter-ui, filter-highlight,
-               scope-select (source/schema selectors), table-chips, view-history, record-view,
+               scope-select (source/schema selectors), table-chips, tables-panel, view-history, record-view,
                referenced-by, structure, table-meta, column-parts, siblings, auto-refresh, load-bar, view-notice,
                api-reference, theme,
                join-dialog / join-form / join-sql / join-view / join-saved /
@@ -78,7 +78,7 @@ src/
 - `lib/` — pure leaves: import only `core/types.ts`, or nothing. Their
   unit tests load them unbundled under `node --test`, where a `.js` import
   of another `lib/` file does not resolve to its `.ts` source.
-- `index.html` — head meta/favicon/pre-paint theme bootstrap script and
+- `index.html` — head meta/favicon/pre-paint display-preference script and
   body structural markup only. No inline `style=` or `onclick=`-style
   attributes — every behavior wire-up happens in a module, so there's
   exactly one place to look for "what does this element do."
