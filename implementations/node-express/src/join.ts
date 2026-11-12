@@ -210,6 +210,97 @@ export interface TableMeta {
   schema?: string;
   name: string;
   columns: ColMeta[];
+  /** Indexes into `columns` that break ties after `sort` (spec/protocol.md §5.4); see tieBreakKeys. */
+  orderKeys: number[];
+}
+
+/**
+ * A unique key a backend's catalog reports for one table. Backends pass a unique
+ * index only when its key columns are plain (no expression), it is not partial,
+ * and every key column is NOT NULL.
+ */
+export interface UniqueKey {
+  name: string;
+  primary: boolean;
+  columns: string[];
+}
+
+/**
+ * The primary key's column indexes in key order, else those of the unique key
+ * with the fewest columns (then the lowest name). A key with a column the role
+ * cannot see is skipped; none left means no tie-break.
+ */
+export function tieBreakKeys(columns: ColMeta[], keys: UniqueKey[]): number[] {
+  const usable = keys
+    .map((k) => ({ k, idx: k.columns.map((name) => columns.findIndex((c) => c.name === name)) }))
+    .filter(({ idx }) => idx.length > 0 && idx.every((i) => i >= 0));
+  usable.sort(
+    (a, b) =>
+      Number(b.k.primary) - Number(a.k.primary) ||
+      a.idx.length - b.idx.length ||
+      (a.k.name < b.k.name ? -1 : a.k.name > b.k.name ? 1 : 0),
+  );
+  return usable[0]?.idx ?? [];
+}
+
+/** One key column of a candidate unique key; `usable` is false when it rules the key out. */
+export interface KeyPart {
+  index: string;
+  primary: boolean;
+  column: string;
+  usable: boolean;
+}
+
+/** Folds parts, ordered by index and then key position, into keys, dropping a key with an unusable part. */
+export function groupUniqueKeys(parts: KeyPart[]): UniqueKey[] {
+  const keys: (UniqueKey & { usable: boolean })[] = [];
+  for (const p of parts) {
+    let last = keys[keys.length - 1];
+    if (!last || last.name !== p.index) {
+      last = { name: p.index, primary: p.primary, columns: [], usable: true };
+      keys.push(last);
+    }
+    last.columns.push(p.column);
+    last.usable &&= p.usable;
+  }
+  return keys.filter((k) => k.usable).map(({ name, primary, columns }) => ({ name, primary, columns }));
+}
+
+/**
+ * A single-table query's order by, every column qualified by the table name so
+ * it never resolves to a text-cast output column.
+ */
+export function tableOrderClause(
+  meta: TableMeta,
+  sort: string | undefined,
+  descending: boolean,
+  quote: (name: string) => string,
+): string {
+  const i = sort === undefined ? -1 : meta.columns.findIndex((c) => c.name === sort);
+  return orderByClause(
+    i < 0 ? undefined : i,
+    meta.orderKeys,
+    descending,
+    (k) => `${quote(meta.name)}.${quote(meta.columns[k].name)}`,
+  );
+}
+
+/**
+ * ` order by <sort>, <keys…>` with a key equal to `sort` left out, every term in
+ * one direction (asc when there is no sort); "" when there is nothing to order
+ * by. `same` compares keys.
+ */
+export function orderByClause<T>(
+  sort: T | undefined,
+  keys: T[],
+  descending: boolean,
+  render: (key: T) => string,
+  same: (a: T, b: T) => boolean = (a, b) => a === b,
+): string {
+  const dir = descending && sort !== undefined ? "desc" : "asc";
+  const lead: T[] = sort === undefined ? [] : [sort];
+  const terms = lead.concat(keys.filter((k) => sort === undefined || !same(k, sort))).map((k) => `${render(k)} ${dir}`);
+  return terms.length === 0 ? "" : ` order by ${terms.join(", ")}`;
 }
 
 export interface JoinOpts {
@@ -422,9 +513,14 @@ export function buildJoinSelect(plan: JoinPlan, d: JoinDialect): { body: string;
     clause += cond.not ? `(NOT (${inner}))` : `(${inner})`;
   });
   if (clause) sql += ` where ${clause}`;
-  if (plan.sort) {
-    sql += ` order by ${alias(plan.sort[0], plan.sort[1])} ${plan.descending ? "desc" : "asc"}`;
-  }
+  const keys = plan.tables.flatMap((t, pos) => t.orderKeys.map((c): [number, number] => [pos, c]));
+  sql += orderByClause(
+    plan.sort,
+    keys,
+    plan.descending,
+    ([p, c]) => alias(p, c),
+    (a, b) => a[0] === b[0] && a[1] === b[1],
+  );
   sql += d.numbered ? " limit $1 offset $2" : " limit ? offset ?";
   return { body: sql, values };
 }

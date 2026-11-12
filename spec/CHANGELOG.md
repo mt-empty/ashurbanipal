@@ -114,3 +114,11 @@ count can exist. A client that ignores the field sees no change, but §7's
 additive rule covers only optional fields, so this required one lands under
 §7's alpha exception, with every port, the conformance runner and the bundled
 UI changed together.
+
+`/api/tables/data` (§5.4) and `/api/tables/join` (§5.11) now break ties
+after `sort` on each table's tie-break key, in the `order` direction: the
+primary key, else the shortest unique index whose columns are all NOT NULL.
+With no `sort`, rows come in that key's order, ascending. Offset paging over
+tied or unsorted rows could repeat or skip a row before; it still can on a
+table with no such key. The order of tied and unsorted rows was
+unspecified, so no caller could rely on it, and v1 stands.

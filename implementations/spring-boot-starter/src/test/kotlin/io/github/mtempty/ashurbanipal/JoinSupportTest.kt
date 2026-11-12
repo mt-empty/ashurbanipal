@@ -22,10 +22,38 @@ class JoinSupportTest {
             col("tags", "ARRAY", ColumnClass.ARRAY),
         ),
         "public",
+        listOf(0),
     )
 
     private fun users() =
-        TableMeta("users", listOf(col("id", "uuid", ColumnClass.UUID), col("email", "text", ColumnClass.TEXT)), "public")
+        TableMeta("users", listOf(col("id", "uuid", ColumnClass.UUID), col("email", "text", ColumnClass.TEXT)), "public", listOf(0))
+
+    @Test
+    fun `tie-break prefers the primary key, then the shortest unique key, then the lowest name`() {
+        val cols = orders().columns
+        val pk = UniqueKey("z_pkey", true, listOf("status", "id"))
+        val short = UniqueKey("b", false, listOf("user_id"))
+        val tied = UniqueKey("a", false, listOf("status"))
+        val hidden = UniqueKey("0", false, listOf("hidden"))
+        assertEquals(listOf(2, 0), tieBreakKeys(cols, listOf(short, pk)))
+        assertEquals(listOf(2), tieBreakKeys(cols, listOf(short, tied, hidden)))
+        assertEquals(emptyList<Int>(), tieBreakKeys(cols, emptyList()))
+    }
+
+    @Test
+    fun `a key with an unusable part is dropped`() {
+        val parts = listOf(KeyPart("a", false, "x", true), KeyPart("a", false, "y", false), KeyPart("b", false, "x", true))
+        assertEquals(listOf(UniqueKey("b", false, listOf("x"))), groupUniqueKeys(parts))
+    }
+
+    @Test
+    fun `order by leaves out a key already used as sort`() {
+        val render = { i: Int -> "c$i" }
+        assertEquals(" order by c1 desc, c0 desc", orderByClause(1, listOf(1, 0), true, render))
+        // order applies only with a sort.
+        assertEquals(" order by c0 asc", orderByClause(null, listOf(0), true, render))
+        assertEquals("", orderByClause(null, emptyList<Int>(), false, render))
+    }
 
     private fun opts(
         sort: String? = null,
@@ -154,7 +182,7 @@ class JoinSupportTest {
         assertTrue(body.startsWith("t0.\"id\"::text as c0, "), body)
         assertTrue(body.contains(" from \"public\".\"orders\" t0 left join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\""), body)
         assertTrue(body.contains(" where (t1.\"email\"::text = ?) OR (NOT (t0.\"status\"::text IS NULL))"), body)
-        assertTrue(body.endsWith(" order by t1.\"email\" asc limit ? offset ?"), body)
+        assertTrue(body.endsWith(" order by t1.\"email\" asc, t0.\"id\" asc, t1.\"id\" asc limit ? offset ?"), body)
         assertEquals(listOf("a@b.c"), values)
     }
 

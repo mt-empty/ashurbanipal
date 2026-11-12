@@ -6,7 +6,8 @@ import { DEMO_SOURCES } from "../sources.js";
 import type { Snapshot, SnapshotSource, SnapshotTable } from "../synthetic/snapshot-types.js";
 
 // Rows per table the synthetic page carries; larger tables are cut to their
-// first rows by primary key, and their counts clamped to match.
+// first rows in the server's unsorted order (the primary key, spec/protocol.md
+// §5.4), and their counts clamped to match.
 const ROW_CAP = 200;
 const TIMEOUT_MS = 60_000;
 
@@ -21,10 +22,9 @@ export async function buildSnapshot(): Promise<Snapshot> {
       const counts = new Map((await src.tableCounts(schema, TIMEOUT_MS)).map((c) => [c.table, c.approx_rows]));
       const tableData: Record<string, SnapshotTable> = {};
       for (const { name: table } of tables) {
-        const opts = { limit: 1, offset: 0, descending: false, filter: [] };
-        const { columns } = await src.queryTable(schema, table, opts, TIMEOUT_MS);
-        const sort = columns.find((c) => c.key === "pk")?.name;
-        const data = await src.queryTable(schema, table, { ...opts, limit: ROW_CAP, sort }, TIMEOUT_MS);
+        const opts = { limit: ROW_CAP, offset: 0, descending: false, filter: [] };
+        const data = await src.queryTable(schema, table, opts, TIMEOUT_MS);
+        const { columns } = data;
         const approx = counts.get(table) ?? -1;
         const commonValues: SnapshotTable["commonValues"] = {};
         for (const { name: column } of columns) {

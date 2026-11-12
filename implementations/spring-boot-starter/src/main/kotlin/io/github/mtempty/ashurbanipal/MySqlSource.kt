@@ -330,24 +330,44 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         ) { rs -> Col(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)) }
         val (pkColumns, fkColumns) = keyMetadata(variant, schema, table)
         val jsonColumns = mariadbJsonColumns(variant, schema, table)
+        val colMetas = columns.map { c ->
+            val isJson = c.name in jsonColumns
+            ColMeta(
+                name = c.name,
+                // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
+                type = if (isJson) "json" else c.columnType,
+                columnClass = if (isJson) ColumnClass.JSON else mysqlColumnClass(c.type, c.columnType),
+                collation = c.collation?.takeIf { it.isNotEmpty() },
+                key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
+                references = fkColumns[c.name],
+                comment = c.comment?.takeIf { it.isNotEmpty() },
+            )
+        }
         return TableMeta(
             schema = schema,
             name = table,
-            columns = columns.map { c ->
-                val isJson = c.name in jsonColumns
-                ColMeta(
-                    name = c.name,
-                    // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
-                    type = if (isJson) "json" else c.columnType,
-                    columnClass = if (isJson) ColumnClass.JSON else mysqlColumnClass(c.type, c.columnType),
-                    collation = c.collation?.takeIf { it.isNotEmpty() },
-                    key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
-                    references = fkColumns[c.name],
-                    comment = c.comment?.takeIf { it.isNotEmpty() },
-                )
-            },
+            columns = colMetas,
+            orderKeys = tieBreakKeys(colMetas, uniqueKeys(variant, schema, table)),
         )
     }
+
+    /** The primary key and every unique index whose key parts are all plain NOT NULL columns. A functional key part has no column_name. */
+    private fun uniqueKeys(variant: Variant, schema: String, table: String): List<UniqueKey> = groupUniqueKeys(
+        query(
+            dataSource,
+            timedSelect(
+                variant,
+                queryTimeoutSecs,
+                "index_name, column_name, nullable from information_schema.statistics " +
+                    "where table_schema = ? and table_name = ? and non_unique = 0 order by index_name, seq_in_index",
+            ),
+            listOf(schema, table),
+        ) { rs ->
+            val index = rs.getString(1)
+            val column: String? = rs.getString(2)
+            KeyPart(index, index == "PRIMARY", column, column != null && rs.getString(3) != "YES")
+        },
+    )
 
     override fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData = inReadOnlyTransaction {
         val variant = variant()
@@ -389,7 +409,8 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val realTable = requireTable(variant, realSchema, table)
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
-        val columns = tableMeta(variant, realSchema, realTable).columns.map { it.columnInfo() }
+        val meta = tableMeta(variant, realSchema, realTable)
+        val columns = meta.columns.map { it.columnInfo() }
         val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
@@ -399,9 +420,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val whereClause = opts.filter?.let { buildWhereClauseMysql(it, columnNames) } ?: WhereClause("", emptyList())
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdentMysql(it.name)} AS CHAR)" }
-        val orderClause = sort?.let {
-            " order by ${quoteIdentMysql(realTable)}.${quoteIdentMysql(it)} ${if (opts.descending) "desc" else "asc"}"
-        } ?: ""
+        val orderClause = tableOrderClause(meta, sort, opts.descending, ::quoteIdentMysql)
         val sql = timedSelect(
             variant,
             queryTimeoutSecs,

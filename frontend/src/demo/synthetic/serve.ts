@@ -136,7 +136,9 @@ function tableData(params: URLSearchParams): ApiResponse {
     }
     const i = table.columns.findIndex((c) => c.name === sort);
     const dir = order === "desc" ? -1 : 1;
-    rows = [...rows].sort((a, b) => dir * typedCompare(table.columns[i], a[i], b[i]));
+    // Snapshot rows are in tie-break order (spec/protocol.md §5.4) and the sort
+    // is stable, so reversing first makes `desc` ties run backwards too.
+    rows = (dir < 0 ? [...rows].reverse() : [...rows]).sort((a, b) => dir * typedCompare(table.columns[i], a[i], b[i]));
   }
   // Absent or non-numeric means the default; an explicit "0" is a real value
   // (offset 0, or a limit clamped up to the minimum).

@@ -44,7 +44,7 @@ class AshurbanipalIntegrationTest : AshurbanipalHttpTestBase() {
         val names = (body["tables"] as Iterable<JsonNode>).map { it["name"].asText() }
         val expected = listOf(
             "_conformance_meta", "audit_log", "events", "feature_flags", "inventory_counts",
-            "inventory_locations", "order_extra", "orders", "payments", "products", "reviews",
+            "inventory_locations", "order_extra", "orders", "page_hits", "payments", "products", "reviews",
             "saved_reports", "sessions", "support_tickets", "users",
         )
         assertEquals(expected, names)

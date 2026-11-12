@@ -219,6 +219,66 @@ async fn left_keeps_unmatched_rows_and_inner_drops_them() {
     );
 }
 
+/// P5.11-TOTAL-ORDER: paging a join sorted by a column with few values
+/// returns every joined row once, and with no `sort` the rows follow the
+/// base table's key.
+#[tokio::test]
+async fn paging_a_join_over_ties_returns_every_row_once() {
+    let srv = TestServer::spawn().await;
+    let join = orders_users("inner");
+    let walk = |extra: Vec<(&'static str, String)>| {
+        let srv = &srv;
+        let join = &join;
+        async move {
+            let mut ids = Vec::new();
+            for page in 0..100 {
+                let mut args = extra.clone();
+                args.push(("limit", "50".into()));
+                args.push(("offset", (page * 50).to_string()));
+                let body = ok_body(srv, join, &args).await;
+                if rows(&body).is_empty() {
+                    return ids;
+                }
+                let id = label(&body, 0, "id");
+                ids.extend(
+                    rows(&body)
+                        .iter()
+                        .map(|r| r[&id].as_str().unwrap().to_string()),
+                );
+            }
+            panic!("join did not run out of rows within 100 pages");
+        }
+    };
+    let by_key = |a: &String, b: &String| match (a.parse::<i64>(), b.parse::<i64>()) {
+        (Ok(x), Ok(y)) => x.cmp(&y),
+        _ => a.cmp(b),
+    };
+
+    let unsorted = walk(vec![]).await;
+    let mut expected = unsorted.clone();
+    expected.sort_by(by_key);
+    assert_exact(
+        unsorted,
+        expected.clone(),
+        "join with no sort, in orders.id order",
+    );
+
+    for order in ["asc", "desc"] {
+        let mut got = walk(vec![
+            ("sort", "is_active".into()),
+            ("sort_join", "1".into()),
+            ("order", order.into()),
+        ])
+        .await;
+        got.sort_by(by_key);
+        assert_exact(
+            got,
+            expected.clone(),
+            &format!("orders ids of a join paged by users.is_active {order}"),
+        );
+    }
+}
+
 /// P5.11-THREE-TABLES: each table's columns appear once, in position order,
 /// and the labels stay unique where column names repeat (`created_at`).
 #[tokio::test]

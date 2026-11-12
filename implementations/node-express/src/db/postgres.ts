@@ -6,6 +6,7 @@ import {
   type ColMeta,
   type ColumnClass,
   columnInfo,
+  groupUniqueKeys,
   type JoinData,
   type JoinDialect,
   type JoinOpts,
@@ -15,7 +16,10 @@ import {
   joinTableRefs,
   planJoin,
   type TableMeta,
+  tableOrderClause,
   tableSchemas,
+  tieBreakKeys,
+  type UniqueKey,
   unknownJoinTable,
 } from "../join.js";
 import {
@@ -356,7 +360,31 @@ export class PostgresSource implements DbSource {
       if (r.comment !== null) col.comment = r.comment;
       return col;
     });
-    return { schema, name: table, columns };
+    const orderKeys = tieBreakKeys(columns, await this.uniqueKeys(client, oid));
+    return { schema, name: table, columns, orderKeys };
+  }
+
+  // The primary key and every unique index that can break ties: plain key
+  // columns (INCLUDE columns left out), not partial, and all NOT NULL.
+  // pg_index has no privilege filter, unlike information_schema, so a role
+  // with only SELECT still sees the key.
+  private async uniqueKeys(client: PoolClient, oid: number): Promise<UniqueKey[]> {
+    const { rows } = await client.query<{ index: string; primary: boolean; column: string }>(
+      `select c.relname as index, i.indisprimary as primary, a.attname as column
+       from pg_index i
+       join pg_class c on c.oid = i.indexrelid
+       cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n)
+       join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum
+       where i.indrelid = $1 and i.indisunique and i.indisvalid
+         and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts
+         and (i.indisprimary or not exists (
+           select 1 from unnest(i.indkey::int2[]) with ordinality m(attnum, n)
+           join pg_attribute b on b.attrelid = i.indrelid and b.attnum = m.attnum
+           where m.n <= i.indnkeyatts and not b.attnotnull))
+       order by c.relname, k.n`,
+      [oid],
+    );
+    return groupUniqueKeys(rows.map((r) => ({ ...r, usable: true })));
   }
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
@@ -402,7 +430,8 @@ export class PostgresSource implements DbSource {
 
       // The join route's lookup, so both routes report the same columns; its
       // names are the live catalog's, so they also serve as the allow-list.
-      const columns: ColumnInfo[] = (await this.tableMeta(client, realSchema, realTable, oid)).columns.map(columnInfo);
+      const meta = await this.tableMeta(client, realSchema, realTable, oid);
+      const columns: ColumnInfo[] = meta.columns.map(columnInfo);
       const columnNames = columns.map((c) => c.name);
 
       let sort: string | undefined;
@@ -428,11 +457,7 @@ export class PostgresSource implements DbSource {
       // FROM itself is schema-qualified): an unqualified `order by "col"`
       // would resolve to the ::text-cast output column in selectList,
       // sorting lexicographically instead of by the real typed value.
-      let orderClause = "";
-      if (sort !== undefined) {
-        const direction = opts.descending ? "desc" : "asc";
-        orderClause = ` order by ${quoteIdent(realTable)}.${quoteIdent(sort)} ${direction}`;
-      }
+      const orderClause = tableOrderClause(meta, sort, opts.descending, quoteIdent);
 
       // Identifiers spliced here are schema-validated (realSchema via
       // resolveSchema, realTable/columns via allowedTables/allowedColumns,

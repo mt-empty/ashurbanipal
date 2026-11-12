@@ -28,9 +28,13 @@ from ..join import (
     JoinOpts,
     JoinSpec,
     TableMeta,
+    UniqueKey,
     build_select,
+    group_unique_keys,
     plan_join,
+    table_order_clause,
     table_schemas,
+    tie_break_keys,
 )
 from . import (
     BadJoin,
@@ -220,19 +224,40 @@ class SqliteSource(DbSource):
         """`table` must already be allow-listed: it is spliced into the pragma call."""
         pk_columns, fk_columns = self._key_metadata(cur, table)
         cur.execute(f"select cid, name, type from pragma_table_info({quote_ident(table)}) order by cid")
+        columns = [
+            ColMeta(
+                name=col,
+                # A declared type can be empty (""); a stable label beats emitting "".
+                type_name=declared or "unknown",
+                column_class=column_class(declared or ""),
+                key=(KeyKind.PK if col in pk_columns else (KeyKind.FK if col in fk_columns else None)),
+                references=fk_columns.get(col),
+            )
+            for _, col, declared in cur.fetchall()
+        ]
         return TableMeta(
-            name=table,
-            columns=[
-                ColMeta(
-                    name=col,
-                    # A declared type can be empty (""); a stable label beats emitting "".
-                    type_name=declared or "unknown",
-                    column_class=column_class(declared or ""),
-                    key=(KeyKind.PK if col in pk_columns else (KeyKind.FK if col in fk_columns else None)),
-                    references=fk_columns.get(col),
-                )
-                for _, col, declared in cur.fetchall()
-            ],
+            name=table, columns=columns, order_keys=tie_break_keys(columns, self._unique_keys(cur, table))
+        )
+
+    def _unique_keys(self, cur: sqlite3.Cursor, table: str) -> list[UniqueKey]:
+        """The primary key (an INTEGER PRIMARY KEY has no index row) and every unique,
+        non-partial index whose key columns are all NOT NULL table columns. An
+        expression key part has no pragma_table_info row. `table` must already be
+        allow-listed."""
+        t = quote_ident(table)
+        cur.execute(
+            f"select '', 1, name, 1, pk from pragma_table_info({t}) where pk > 0 "
+            "union all "
+            'select il.name, 0, ti.name, ti."notnull", ii.seqno '
+            f"from pragma_index_list({t}) il "
+            "join pragma_index_xinfo(il.name) ii "
+            f"left join pragma_table_info({t}) ti on ti.cid = ii.cid "
+            "where il.\"unique\" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1 "
+            "order by 1, 5"
+        )
+        return group_unique_keys(
+            (index, bool(is_pk), column, bool(is_pk) or (column is not None and not_null == 1))
+            for index, is_pk, column, not_null, _ in cur.fetchall()
         )
 
     def _key_metadata(self, cur: sqlite3.Cursor, table: str) -> tuple[list[str], dict[str, ColumnRef]]:
@@ -313,7 +338,8 @@ class SqliteSource(DbSource):
 
                 # The join route's lookup, so both routes report the same columns; its
                 # names are the live catalog's, so they also serve as the allow-list.
-                columns = [c.column_info() for c in self._table_meta(cur, table).columns]
+                meta = self._table_meta(cur, table)
+                columns = [c.column_info() for c in meta.columns]
                 column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
@@ -328,10 +354,7 @@ class SqliteSource(DbSource):
                 self._clear_bound(conn)
 
             select_list = ", ".join(f"CAST({quote_ident(c.name)} AS TEXT)" for c in columns)
-            order_clause = ""
-            if sort is not None:
-                direction = "desc" if opts.descending else "asc"
-                order_clause = f" order by {quoted_table}.{quote_ident(sort)} {direction}"
+            order_clause = table_order_clause(meta, sort, opts.descending, quote_ident)
             sql = f"select {select_list} from {quoted_table}{where_clause}{order_clause} limit ? offset ?"
 
             self._bounded(conn, opts.timeout_secs)

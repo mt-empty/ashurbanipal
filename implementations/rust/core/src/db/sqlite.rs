@@ -12,7 +12,8 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
-    self, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData, JoinOpts, JoinSpec, TableMeta,
+    self, order_by_clause, tie_break_keys, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData,
+    JoinOpts, JoinSpec, TableMeta, UniqueKey,
 };
 
 /// Catalog/metadata queries need a fixed bounded timeout.
@@ -110,16 +111,11 @@ async fn key_metadata_on(
     table: &Ident,
 ) -> Result<(Vec<String>, HashMap<String, ColumnRef>), DbError> {
     let table = quote_ident(table);
-    let cols = sqlx::query_as::<_, (i64, String, i64)>(sqlx::AssertSqlSafe(format!(
-        "select cid, name, pk from pragma_table_info({table}) order by cid"
+    let pk_columns = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+        "select name from pragma_table_info({table}) where pk > 0 order by pk"
     )))
     .fetch_all(&mut *conn)
     .await?;
-    let pk_columns: Vec<String> = cols
-        .into_iter()
-        .filter(|(_, _, pk)| *pk > 0)
-        .map(|(_, name, _)| name)
-        .collect();
 
     // (id, seq, table, from, to) — `id` groups columns belonging to
     // the same constraint (composite FKs share an id). The quoted
@@ -256,34 +252,37 @@ async fn table_meta(
     .fetch_all(&mut *conn)
     .await?;
     let (pk_columns, fk_columns) = key_metadata_on(conn, table).await?;
+    let unique_keys = unique_keys_on(conn, table, &pk_columns).await?;
+    let columns: Vec<ColMeta> = columns
+        .into_iter()
+        .map(|(_, name, declared)| {
+            let (key, references) = if pk_columns.contains(&name) {
+                (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
+            } else if let Some(r) = fk_columns.get(&name) {
+                (Some(KeyKind::Fk), Some(r.clone()))
+            } else {
+                (None, None)
+            };
+            ColMeta {
+                class: column_class(&declared),
+                collation: None,
+                comment: None,
+                key,
+                references,
+                type_name: if declared.is_empty() {
+                    "unknown".to_string()
+                } else {
+                    declared
+                },
+                name: Ident::from_catalog(name),
+            }
+        })
+        .collect();
     Ok(TableMeta {
         schema: None,
         name: table.clone(),
-        columns: columns
-            .into_iter()
-            .map(|(_, name, declared)| {
-                let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                } else if let Some(r) = fk_columns.get(&name) {
-                    (Some(KeyKind::Fk), Some(r.clone()))
-                } else {
-                    (None, None)
-                };
-                ColMeta {
-                    class: column_class(&declared),
-                    collation: None,
-                    comment: None,
-                    key,
-                    references,
-                    type_name: if declared.is_empty() {
-                        "unknown".to_string()
-                    } else {
-                        declared
-                    },
-                    name: Ident::from_catalog(name),
-                }
-            })
-            .collect(),
+        order_keys: tie_break_keys(&columns, &unique_keys),
+        columns,
     })
 }
 
@@ -412,6 +411,7 @@ impl DbSource for SqliteSource {
                 table_meta(conn, &meta_table).await
             })
             .await?;
+        let order_keys = meta.order_keys.clone();
         let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
         let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sort = opts
@@ -430,15 +430,10 @@ impl DbSource for SqliteSource {
             .map(|c| format!("CAST({} AS TEXT)", quote_ident(c)))
             .collect::<Vec<_>>()
             .join(", ");
-        let order_clause = match &sort {
-            Some(col) => format!(
-                " order by {}.{} {}",
-                quote_ident(table),
-                quote_ident(col),
-                if opts.descending { "desc" } else { "asc" }
-            ),
-            None => String::new(),
-        };
+        let sort_index = sort.and_then(|s| column_names.iter().position(|c| c == s));
+        let order_clause = order_by_clause(sort_index, order_keys, opts.descending, |i| {
+            format!("{}.{}", quote_ident(table), quote_ident(&column_names[i]))
+        });
         let quoted_table = quote_ident(table);
         let sql = format!(
             "select {select_list} from {quoted_table}{where_clause}{order_clause} limit ? offset ?"
@@ -740,6 +735,57 @@ impl DbSource for SqliteSource {
         })
         .await
     }
+}
+
+/// The primary key (an INTEGER PRIMARY KEY has no index row), and every
+/// unique, non-partial index whose key columns are all NOT NULL table
+/// columns. An expression key part has no `pragma_table_info` row.
+async fn unique_keys_on(
+    conn: &mut sqlx::SqliteConnection,
+    table: &Ident,
+    pk_in_key_order: &[String],
+) -> Result<Vec<UniqueKey>, DbError> {
+    let table = quote_ident(table);
+    let rows =
+        sqlx::query_as::<_, (String, Option<String>, Option<i64>)>(sqlx::AssertSqlSafe(format!(
+            "select il.name, ti.name, ti.\"notnull\" \
+             from pragma_index_list({table}) il \
+             join pragma_index_xinfo(il.name) ii \
+             left join pragma_table_info({table}) ti on ti.cid = ii.cid \
+             where il.\"unique\" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1 \
+             order by il.name, ii.seqno"
+        )))
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut keys = Vec::new();
+    if !pk_in_key_order.is_empty() {
+        keys.push(UniqueKey {
+            name: String::new(),
+            primary: true,
+            columns: pk_in_key_order.to_vec(),
+        });
+    }
+    let mut current: Option<(UniqueKey, bool)> = None;
+    for (index, column, not_null) in rows {
+        if current.as_ref().is_none_or(|(k, _)| k.name != index) {
+            keys.extend(current.take().filter(|(_, u)| *u).map(|(k, _)| k));
+            current = Some((
+                UniqueKey {
+                    name: index,
+                    primary: false,
+                    columns: Vec::new(),
+                },
+                true,
+            ));
+        }
+        let (key, usable) = current.as_mut().expect("set above");
+        match column {
+            Some(c) if not_null == Some(1) => key.columns.push(c),
+            _ => *usable = false,
+        }
+    }
+    keys.extend(current.filter(|(_, u)| *u).map(|(k, _)| k));
+    Ok(keys)
 }
 
 #[cfg(test)]

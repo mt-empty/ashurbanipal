@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 )
 
@@ -330,6 +331,128 @@ type tableMeta struct {
 	schema  string
 	name    string
 	columns []colMeta
+	// orderKeys index columns that break ties after sort (spec/protocol.md
+	// §5.4); built by tieBreakKeys.
+	orderKeys []int
+}
+
+// uniqueKey is a unique key a backend's catalog reports for one table.
+// Backends pass a unique index only when its key columns are plain (no
+// expression), it is not partial, and every key column is NOT NULL.
+type uniqueKey struct {
+	name    string
+	primary bool
+	columns []string
+}
+
+// tieBreakKeys returns the primary key's column indexes in key order, else
+// those of the unique key with the fewest columns (then the lowest name). A
+// key with a column the role cannot see is skipped; none left means no
+// tie-break.
+func tieBreakKeys(columns []colMeta, keys []uniqueKey) []int {
+	var best []int
+	var bestKey *uniqueKey
+	for k := range keys {
+		key := &keys[k]
+		idx := make([]int, 0, len(key.columns))
+		for _, name := range key.columns {
+			i := slices.IndexFunc(columns, func(c colMeta) bool { return c.name == name })
+			if i < 0 {
+				idx = nil
+				break
+			}
+			idx = append(idx, i)
+		}
+		if len(idx) == 0 {
+			continue
+		}
+		if bestKey == nil || betterKey(key, len(idx), bestKey, len(best)) {
+			best, bestKey = idx, key
+		}
+	}
+	if best == nil {
+		return []int{}
+	}
+	return best
+}
+
+// keyPart is one key column of a candidate unique key; usable is false when
+// the part rules the whole key out (an expression, or a nullable column).
+type keyPart struct {
+	index   string
+	primary bool
+	column  string
+	usable  bool
+}
+
+// groupUniqueKeys folds parts, ordered by index and then key position, into
+// keys, dropping a key with any unusable part.
+func groupUniqueKeys(parts []keyPart) []uniqueKey {
+	var keys []uniqueKey
+	var usable []bool
+	for _, p := range parts {
+		if len(keys) == 0 || keys[len(keys)-1].name != p.index {
+			keys = append(keys, uniqueKey{name: p.index, primary: p.primary})
+			usable = append(usable, true)
+		}
+		last := len(keys) - 1
+		keys[last].columns = append(keys[last].columns, p.column)
+		usable[last] = usable[last] && p.usable
+	}
+	out := keys[:0]
+	for i, k := range keys {
+		if usable[i] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// tableOrderClause renders a single-table query's order by, every column
+// qualified by the table name so it never resolves to a text-cast output column.
+func tableOrderClause(meta tableMeta, sort *string, descending bool, quote func(string) string) string {
+	var sortIndex *int
+	if sort != nil {
+		if i := slices.Index(meta.columnNames(), *sort); i >= 0 {
+			sortIndex = &i
+		}
+	}
+	return orderByClause(sortIndex, meta.orderKeys, descending, func(i int) string {
+		return quote(meta.name) + "." + quote(meta.columns[i].name)
+	})
+}
+
+func betterKey(a *uniqueKey, aLen int, b *uniqueKey, bLen int) bool {
+	if a.primary != b.primary {
+		return a.primary
+	}
+	if aLen != bLen {
+		return aLen < bLen
+	}
+	return a.name < b.name
+}
+
+// orderByClause renders " order by <sort>, <keys…>" with a key equal to sort
+// left out, every term in one direction (asc when there is no sort); "" when
+// there is nothing to order by.
+func orderByClause[T comparable](sort *T, keys []T, descending bool, render func(T) string) string {
+	dir := "asc"
+	if descending && sort != nil {
+		dir = "desc"
+	}
+	var terms []string
+	if sort != nil {
+		terms = append(terms, render(*sort)+" "+dir)
+	}
+	for _, k := range keys {
+		if sort == nil || k != *sort {
+			terms = append(terms, render(k)+" "+dir)
+		}
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+	return " order by " + strings.Join(terms, ", ")
 }
 
 func (t tableMeta) columnNames() []string {
@@ -673,13 +796,13 @@ func buildJoinSelect(p *joinPlan, d joinDialect) (string, []string) {
 	if clause.Len() > 0 {
 		sb.WriteString(" where " + clause.String())
 	}
-	if p.sort != nil {
-		dir := "asc"
-		if p.descending {
-			dir = "desc"
+	var keys [][2]int
+	for pos, t := range p.tables {
+		for _, c := range t.orderKeys {
+			keys = append(keys, [2]int{pos, c})
 		}
-		sb.WriteString(fmt.Sprintf(" order by %s %s", alias(p.sort[0], p.sort[1]), dir))
 	}
+	sb.WriteString(orderByClause(p.sort, keys, p.descending, func(k [2]int) string { return alias(k[0], k[1]) }))
 	if d.numbered {
 		sb.WriteString(" limit $1 offset $2")
 	} else {

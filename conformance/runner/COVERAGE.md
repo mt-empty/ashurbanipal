@@ -84,6 +84,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.4-ORDER-INVALID` | `order` invalid value → 400 | `table_data::invalid_order_value_is_rejected` |
 | `P5.4-LIMIT-CLAMPED` | `limit` clamped to `[1, max_page_size]`, never rejected | `table_data::limit_defaults_to_fifty_and_clamps_to_configured_range`, `table_data::limit_boundary_values_are_not_off_by_one` |
 | `P5.4-SORT-NATIVE-TYPE` | Sort uses native type ordering, not text rendering | `table_data::sort_and_order_are_respected` (basic asc/desc), `table_data::sort_on_a_numeric_column_is_numeric_not_lexicographic` (the native-type edge case) |
+| `P5.4-TOTAL-ORDER` | Ties break on the primary key in key order, else the shortest unique key whose columns are all NOT NULL, in the `order` direction; with no `sort`, key order and `order` ignored | `table_data::paging_over_a_repeated_sort_column_returns_every_row_once`, `table_data::rows_with_no_sort_come_in_primary_key_order`, `table_data::ties_follow_the_primary_key_in_the_order_direction`, `table_data::a_table_without_a_primary_key_orders_by_its_shortest_not_null_unique_key`. A table with no usable key has no tie-break, so nothing is asserted for it |
 
 ### §5.4.1 Column metadata
 
@@ -219,6 +220,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.11-COLUMNS` | `columns` selects and orders the output | `join::columns_selects_and_orders_the_output` |
 | `P5.11-FILTER-JOINED` | A condition's `join` selects the table its column belongs to | `join::filter_on_a_joined_table_column` |
 | `P5.11-SORT` | `sort` + `sort_join` order by the column at that position | `join::sort_applies_to_the_table_at_sort_join` |
+| `P5.11-TOTAL-ORDER` | Row order is total: after `sort`, each joined table's tie-break keys in position order | `join::paging_a_join_over_ties_returns_every_row_once` |
 | `P5.11-HAS-MORE` | `has_more` true with a following row, false on the last page; `limit` clamped | `join::has_more_reports_a_following_row` |
 | `P5.11-SCHEMA-PARAM` | Explicit default `schema` resolves like an absent one; unrecognized `schema` → 400 | `join::source_and_schema_params_resolve_like_the_other_routes` |
 | `P5.11-SOURCE-PARAM` | Unrecognized `source` → 400 | `join::source_and_schema_params_resolve_like_the_other_routes` |
@@ -231,7 +233,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.11-JOIN-STRUCTURE` | Forward/self `on` position, pair count, join type, operator key, empty or duplicate `columns`, more than 4 tables, malformed `join` (including deep nesting and keys in another case) → 400 `invalid_join`; absent `join` → `invalid_parameter` | `join::invalid_join_structures_are_rejected`, `join::malformed_join_values_are_rejected`, `join::join_keys_are_matched_exactly`, `join::missing_join_is_an_invalid_parameter` |
 | `P5.11-JOIN-BOUND` | An oversize `join` is a 400 `invalid_join`, never truncated | `join::oversize_join_is_rejected` |
 | `P5.11-COMPATIBILITY` | A pair across column classes, or a column of class `float`, `json`, `array` or `other`, → 400 `invalid_join` | `join::incompatible_column_pairs_are_rejected` |
-| `P5.4-UNSORTABLE` | A `sort` on a column whose type has no ordering → 400 `unsortable_column`, on both §5.4 and §5.11 | not exercised by the shared suite (the seed has no `json`, `xml` or geometric column): each port's own port-local Postgres tests, `join_postgres::sorting_an_unorderable_column_is_a_client_error` (Rust) and the equivalents in Go, Node, Flask and Spring |
+| `P5.4-UNSORTABLE` | A `sort` on a column whose type has no ordering → 400 `unsortable_column`, on both §5.4 and §5.11 | not exercised by the shared suite (only `page_hits.detail` is `json`, and only on Postgres): each port's own port-local Postgres tests, `join_postgres::sorting_an_unorderable_column_is_a_client_error` (Rust) and the equivalents in Go, Node, Flask and Spring |
 | `P5.11-COLLATION` | Two `text` columns reporting different `collation` values → 400 `invalid_join` | not exercised by the shared suite (the seed has no explicit collations): each port's own port-local tests, `join_postgres::text_columns_with_clashing_collations_do_not_join` (Rust) and the equivalents in Go, Node, Flask and Spring, plus each port's MySQL collation unit test |
 | `P5.11-SAME-CLASS` | Exact numerics of different widths join | `join::same_class_pairs_with_different_types_join` |
 | `P5.11-ENUM-IDENTITY` | Two enum columns join only when they share one enumerated type (Postgres seed) | `join::enum_columns_join_only_to_the_same_enum` |

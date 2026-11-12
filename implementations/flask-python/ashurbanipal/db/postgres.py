@@ -26,10 +26,14 @@ from ..join import (
     JoinOpts,
     JoinSpec,
     TableMeta,
+    UniqueKey,
     build_select,
     enum_class,
+    group_unique_keys,
     plan_join,
+    table_order_clause,
     table_schemas,
+    tie_break_keys,
     unknown_join_table,
 )
 from . import (
@@ -311,7 +315,8 @@ class PgSource(DbSource):
 
                 # The join route's lookup, so both routes report the same columns; its
                 # names are the live catalog's, so they also serve as the allow-list.
-                columns = [c.column_info() for c in self._table_meta(cur, resolved_schema, table, oid).columns]
+                meta = self._table_meta(cur, resolved_schema, table, oid)
+                columns = [c.column_info() for c in meta.columns]
                 column_names = [c.name for c in columns]
                 sort = None
                 if opts.sort is not None:
@@ -322,11 +327,7 @@ class PgSource(DbSource):
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
                 select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
-                order_clause = ""
-                if sort is not None:
-                    # Qualify the source column to avoid ordering the text-cast output.
-                    direction = "desc" if opts.descending else "asc"
-                    order_clause = f" order by {quote_ident(table)}.{quote_ident(sort)} {direction}"
+                order_clause = table_order_clause(meta, sort, opts.descending, quote_ident)
                 query = (
                     f"select {select_list} from {quote_ident(resolved_schema)}.{quote_ident(table)}"
                     f"{where_clause}{order_clause} limit %s offset %s"
@@ -398,22 +399,46 @@ class PgSource(DbSource):
         )
         column_rows = list(cur.fetchall())
         pk_columns, fk_columns = self._key_metadata(cur, schema, table)
+        columns = [
+            ColMeta(
+                name=name,
+                type_name=full_type,
+                column_class=column_class(data_type, udt_schema, udt_name, is_enum),
+                key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
+                references=fk_columns.get(name),
+                collation=collation,
+                comment=comment,
+            )
+            for name, data_type, udt_schema, udt_name, is_enum, full_type, comment, collation in column_rows
+        ]
         return TableMeta(
             schema=schema,
             name=table,
-            columns=[
-                ColMeta(
-                    name=name,
-                    type_name=full_type,
-                    column_class=column_class(data_type, udt_schema, udt_name, is_enum),
-                    key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
-                    references=fk_columns.get(name),
-                    collation=collation,
-                    comment=comment,
-                )
-                for name, data_type, udt_schema, udt_name, is_enum, full_type, comment, collation in column_rows
-            ],
+            columns=columns,
+            order_keys=tie_break_keys(columns, self._unique_keys(cur, oid)),
         )
+
+    def _unique_keys(self, cur: psycopg.Cursor, oid: int) -> list[UniqueKey]:
+        """The primary key and every unique index that can break ties: plain key
+        columns (INCLUDE columns left out), not partial, and all NOT NULL.
+        pg_index has no privilege filter, unlike information_schema, so a role with
+        only SELECT still sees the key."""
+        cur.execute(
+            "select c.relname, i.indisprimary, a.attname "
+            "from pg_index i "
+            "join pg_class c on c.oid = i.indexrelid "
+            "cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n) "
+            "join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum "
+            "where i.indrelid = %s and i.indisunique and i.indisvalid "
+            "  and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts "
+            "  and (i.indisprimary or not exists ( "
+            "    select 1 from unnest(i.indkey::int2[]) with ordinality m(attnum, n) "
+            "    join pg_attribute b on b.attrelid = i.indrelid and b.attnum = m.attnum "
+            "    where m.n <= i.indnkeyatts and not b.attnotnull)) "
+            "order by c.relname, k.n",
+            (oid,),
+        )
+        return group_unique_keys((index, primary, column, True) for index, primary, column in cur.fetchall())
 
     @wrap_driver_errors(psycopg.Error)
     def query_join(self, schema: str | None, spec: JoinSpec, opts: JoinOpts) -> JoinData:

@@ -266,7 +266,7 @@
       }
       const i = table.columns.findIndex((c) => c.name === sort);
       const dir = order === "desc" ? -1 : 1;
-      rows = [...rows].sort((a, b) => dir * typedCompare(table.columns[i], a[i], b[i]));
+      rows = (dir < 0 ? [...rows].reverse() : [...rows]).sort((a, b) => dir * typedCompare(table.columns[i], a[i], b[i]));
     }
     const num = (key, fallback) => {
       const n = Number(params.get(key) ?? Number.NaN);

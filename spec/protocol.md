@@ -237,6 +237,24 @@ Paginated, filtered, sorted rows for a single table.
   serialized values. A column whose type the engine cannot order (Postgres
   `json`, `xml` and the geometric types) → 400 `unsortable_column`, never a
   500; MySQL/MariaDB and SQLite order every type.
+- **Row order follows a key**, so paging over a keyed table never repeats
+  or skips a row. The query MUST order by, in this sequence:
+  1. the `sort` column, if given;
+  2. then the table's **tie-break key**, leaving out a column already used
+     as `sort`. That key is the primary key, in the constraint's key order.
+     With no primary key, it is the unique index with the fewest key
+     columns whose key columns are all plain columns (no expression), all
+     `NOT NULL`, and which is not partial; a tie between such indexes is
+     broken the same way on every request. A key with a column the role
+     cannot read is skipped.
+
+  Every key uses the `order` direction, which applies only when `sort` is
+  given: with no `sort`, rows come in tie-break key order, ascending. A
+  table with no tie-break key gets no step 2, so rows tied on `sort`, or
+  every row when `sort` is absent, come in the engine's order and MAY
+  repeat or be skipped across pages. Where NULLs sort among tied rows is
+  the engine's own rule. `docs/adapter-decisions.md` has each engine's
+  catalog lookup.
 
 Response:
 
@@ -865,8 +883,12 @@ comparison uses the columns' native types, not the text cast of §5.4.2.
   Conditions are combined as §5.4.2 specifies.
 - On §5.4, a condition that carries `join` → 400 `invalid_filter`.
 - `sort` orders by the native type of the column at `sort_join`, as §5.4,
-  including its 400 `unsortable_column`. The column need not be in `columns`. No tie-break is added beyond
-  `sort`; paging over ties is as stable as §5.4's.
+  including its 400 `unsortable_column`. The column need not be in `columns`.
+- Row order follows the keys, as §5.4: after `sort`, the query orders by
+  each joined table's §5.4 tie-break key, table by table in position order,
+  in the `order` direction (ascending with no `sort`). A key equal to
+  `sort` is not repeated. A table with no tie-break key adds nothing, so a
+  join that includes one MAY repeat or skip rows across pages.
 
 #### 5.11.4 Response
 

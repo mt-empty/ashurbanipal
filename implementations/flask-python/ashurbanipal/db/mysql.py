@@ -26,10 +26,14 @@ from ..join import (
     JoinOpts,
     JoinSpec,
     TableMeta,
+    UniqueKey,
     build_select,
     enum_class,
+    group_unique_keys,
     plan_join,
+    table_order_clause,
     table_schemas,
+    tie_break_keys,
 )
 from . import (
     BadJoin,
@@ -389,12 +393,7 @@ class MySqlSource(DbSource):
                 where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
 
                 select_list = ", ".join(f"CAST({_quote_ident(c.name)} AS CHAR)" for c in columns)
-                order_clause = ""
-                if sort is not None:
-                    order_clause = (
-                        f" order by {_quote_ident(table)}.{_quote_ident(sort)} "
-                        f"{'desc' if opts.descending else 'asc'}"
-                    )
+                order_clause = table_order_clause(meta, sort, opts.descending, _quote_ident)
                 sql = _timed_select(
                     variant,
                     timeout,
@@ -458,22 +457,40 @@ class MySqlSource(DbSource):
         column_rows = cur.fetchall()
         pk_columns, fk_columns = self._key_metadata(cur, variant, schema, table, timeout_secs)
         json_columns = self._mariadb_json_columns(cur, variant, schema, table, timeout_secs)
-        return TableMeta(
-            schema=schema,
-            name=table,
-            columns=[
-                ColMeta(
-                    name=name,
-                    # column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
-                    type_name="json" if name in json_columns else column_type,
-                    column_class=JSON if name in json_columns else column_class(data_type, column_type),
-                    collation=collation or None,
-                    key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
-                    references=fk_columns.get(name),
-                    comment=(comment or None),
-                )
-                for name, data_type, comment, collation, column_type in column_rows
-            ],
+        columns = [
+            ColMeta(
+                name=name,
+                # column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
+                type_name="json" if name in json_columns else column_type,
+                column_class=JSON if name in json_columns else column_class(data_type, column_type),
+                collation=collation or None,
+                key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
+                references=fk_columns.get(name),
+                comment=(comment or None),
+            )
+            for name, data_type, comment, collation, column_type in column_rows
+        ]
+        keys = self._unique_keys(cur, variant, schema, table, timeout_secs)
+        return TableMeta(schema=schema, name=table, columns=columns, order_keys=tie_break_keys(columns, keys))
+
+    def _unique_keys(
+        self, cur: Cursor, variant: str, schema: str, table: str, timeout_secs: int
+    ) -> list[UniqueKey]:
+        """The primary key and every unique index whose key parts are all plain NOT
+        NULL columns. A functional key part has no column_name."""
+        cur.execute(
+            _timed_select(
+                variant,
+                timeout_secs,
+                "index_name, column_name, nullable from information_schema.statistics "
+                "where table_schema = %s and table_name = %s and non_unique = 0 "
+                "order by index_name, seq_in_index",
+            ),
+            (schema, table),
+        )
+        return group_unique_keys(
+            (index, index == "PRIMARY", column, column is not None and nullable != "YES")
+            for index, column, nullable in cur.fetchall()
         )
 
     @wrap_driver_errors(pymysql.Error)

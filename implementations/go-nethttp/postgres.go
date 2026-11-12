@@ -337,7 +337,48 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 		col := &meta.columns[i]
 		col.key, col.references = joinKeyOf(col.name, pk, fk)
 	}
+	keys, err := c.uniqueKeys(metaCtx, tx, oid)
+	if err != nil {
+		return tableMeta{}, err
+	}
+	meta.orderKeys = tieBreakKeys(meta.columns, keys)
 	return meta, nil
+}
+
+// uniqueKeys lists the primary key and every unique index that can break
+// ties: plain key columns (INCLUDE columns left out), not partial, and all
+// NOT NULL. pg_index has no privilege filter, unlike information_schema, so a
+// role with only SELECT still sees the key.
+func (c *PostgresSource) uniqueKeys(ctx context.Context, tx queryer, oid int) ([]uniqueKey, error) {
+	rows, err := tx.QueryContext(ctx,
+		`select c.relname, i.indisprimary, a.attname
+		 from pg_index i
+		 join pg_class c on c.oid = i.indexrelid
+		 cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n)
+		 join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum
+		 where i.indrelid = $1 and i.indisunique and i.indisvalid
+		   and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts
+		   and (i.indisprimary or not exists (
+		     select 1 from unnest(i.indkey::int2[]) with ordinality m(attnum, n)
+		     join pg_attribute b on b.attrelid = i.indrelid and b.attnum = m.attnum
+		     where m.n <= i.indnkeyatts and not b.attnotnull))
+		 order by c.relname, k.n`, oid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var parts []keyPart
+	for rows.Next() {
+		p := keyPart{usable: true}
+		if err := rows.Scan(&p.index, &p.primary, &p.column); err != nil {
+			return nil, err
+		}
+		parts = append(parts, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return groupUniqueKeys(parts), nil
 }
 
 // QueryJoin serves GET /api/tables/join (spec/protocol.md §5.11): every
@@ -609,14 +650,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	// FROM itself is schema-qualified): an unqualified `order by "col"`
 	// would resolve to the ::text-cast output column in selectList,
 	// sorting lexicographically instead of by the real typed value.
-	orderClause := ""
-	if sort != nil {
-		direction := "asc"
-		if opts.Descending {
-			direction = "desc"
-		}
-		orderClause = fmt.Sprintf(" order by %s.%s %s", quoteIdent(realTable), quoteIdent(*sort), direction)
-	}
+	orderClause := tableOrderClause(meta, sort, opts.Descending, quoteIdent)
 
 	// Identifiers spliced here are schema-validated (realSchema via
 	// resolveSchema, realTable/columns via allowedTables/allowedColumns,

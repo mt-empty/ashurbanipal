@@ -444,7 +444,41 @@ func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVa
 		col := &meta.columns[i]
 		col.key, col.references = joinKeyOf(col.name, pk, fk)
 	}
+	keys, err := c.uniqueKeys(metaCtx, tx, variant, schema, table)
+	if err != nil {
+		return tableMeta{}, err
+	}
+	meta.orderKeys = tieBreakKeys(meta.columns, keys)
 	return meta, nil
+}
+
+// uniqueKeys lists the primary key and every unique index whose key parts are
+// all plain NOT NULL columns. A functional key part has no column_name.
+func (c *MySQLSource) uniqueKeys(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) ([]uniqueKey, error) {
+	rows, err := tx.QueryContext(ctx, timedSelect(variant, c.timeoutSec,
+		`index_name, column_name, nullable from information_schema.statistics
+		 where table_schema = ? and table_name = ? and non_unique = 0
+		 order by index_name, seq_in_index`), schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var parts []keyPart
+	for rows.Next() {
+		var index, nullable string
+		var column sql.NullString
+		if err := rows.Scan(&index, &column, &nullable); err != nil {
+			return nil, err
+		}
+		parts = append(parts, keyPart{
+			index: index, primary: index == "PRIMARY", column: column.String,
+			usable: column.Valid && nullable != "YES",
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return groupUniqueKeys(parts), nil
 }
 
 // QueryJoin serves GET /api/tables/join (spec/protocol.md §5.11): every
@@ -722,14 +756,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	// unqualified `order by` would resolve to the CAST-output column in
 	// selectList, sorting lexicographically instead of by the real typed
 	// value.
-	orderClause := ""
-	if sort != nil {
-		direction := "asc"
-		if opts.Descending {
-			direction = "desc"
-		}
-		orderClause = fmt.Sprintf(" order by %s.%s %s", quoteIdentMySQL(realTable), quoteIdentMySQL(*sort), direction)
-	}
+	orderClause := tableOrderClause(meta, sort, opts.Descending, quoteIdentMySQL)
 
 	// Identifiers spliced here are schema-validated (realSchema via
 	// resolveSchemaInTx, realTable/columns via allowedTablesInTx/

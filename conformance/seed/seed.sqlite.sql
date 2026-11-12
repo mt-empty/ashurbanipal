@@ -16,6 +16,7 @@
 
 PRAGMA foreign_keys = OFF;
 DROP TABLE IF EXISTS _conformance_meta;
+DROP TABLE IF EXISTS page_hits;
 DROP TABLE IF EXISTS feature_flags;
 DROP TABLE IF EXISTS inventory_counts;
 DROP TABLE IF EXISTS inventory_locations;
@@ -174,6 +175,22 @@ CREATE TABLE feature_flags (
   created_at  TEXT NOT NULL
 );
 
+-- No primary key on purpose: rows tie-break on (path, day), the shortest unique
+-- key whose columns are all NOT NULL (spec/protocol.md §5.4); the shorter
+-- or earlier-named keys are nullable, partial or on an expression. Inserted
+-- out of (path, day) order.
+CREATE TABLE page_hits (
+  path     TEXT NOT NULL,
+  day      TEXT NOT NULL,
+  hits     INTEGER NOT NULL,
+  ref_code TEXT UNIQUE,
+  detail   TEXT,
+  UNIQUE (hits, day, path)
+);
+CREATE UNIQUE INDEX page_hits_path_day ON page_hits (path, day);
+CREATE UNIQUE INDEX page_hits_a_top ON page_hits (hits) WHERE hits > 1000000;
+CREATE UNIQUE INDEX page_hits_a_lower_path ON page_hits (lower(path), day);
+
 CREATE TABLE _conformance_meta (
   seed_version TEXT NOT NULL,
   dialect      TEXT NOT NULL,
@@ -307,14 +324,14 @@ SELECT
 FROM seq;
 
 INSERT INTO inventory_locations (warehouse_code, bin_code, label, capacity) VALUES
-  ('WH1', 'A01', 'Aisle A01 - WH1', 120),
-  ('WH1', 'A02', NULL, 200),
-  ('WH1', 'A03', 'Aisle A03 - WH1', 90),
-  ('WH1', 'A04', NULL, 300),
-  ('WH2', 'A01', 'Aisle A01 - WH2', 150),
-  ('WH2', 'A02', 'Aisle A02 - WH2', 80),
   ('WH2', 'A03', NULL, 260),
-  ('WH2', 'A04', 'Aisle A04 - WH2', 110);
+  ('WH1', 'A01', 'Aisle A01 - WH1', 120),
+  ('WH2', 'A01', 'Aisle A01 - WH2', 150),
+  ('WH1', 'A04', NULL, 300),
+  ('WH1', 'A02', NULL, 200),
+  ('WH2', 'A04', 'Aisle A04 - WH2', 110),
+  ('WH2', 'A02', 'Aisle A02 - WH2', 80),
+  ('WH1', 'A03', 'Aisle A03 - WH1', 90);
 
 INSERT INTO inventory_counts (id, warehouse_code, bin_code, product_id, quantity, counted_at)
 WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 20)
@@ -335,7 +352,17 @@ INSERT INTO feature_flags (key, enabled, rollout_pct, created_at) VALUES
   ('inline_editing',        1, 10,   date('2026-07-19', '-10 days')),
   ('sibling_health_badges', 1, 75,   date('2026-07-19', '-5 days'));
 
+INSERT INTO page_hits (path, day, hits, ref_code, detail) VALUES
+  ('/pricing', '2026-07-03', 41, NULL, '{"ms": 41}'),
+  ('/docs', '2026-07-02', 12, 'b', '{"ms": 12}'),
+  ('/pricing', '2026-07-01', 12, NULL, NULL),
+  ('/docs', '2026-07-03', 30, NULL, '{"ms": 30}'),
+  ('/home', '2026-07-02', 8, 'a', '{"ms": 8}'),
+  ('/docs', '2026-07-01', 12, NULL, NULL),
+  ('/home', '2026-07-01', 30, NULL, '{"ms": 9}'),
+  ('/pricing', '2026-07-02', 27, NULL, '{"ms": 27}');
+
 ANALYZE;
 
 INSERT INTO _conformance_meta (seed_version, dialect, checksum, generated_at)
-VALUES ('6', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');
+VALUES ('7', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');
