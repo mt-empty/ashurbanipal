@@ -42,14 +42,18 @@ jobs:
     permissions:
       contents: write # create/edit the Release
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Create/update the Release from the CHANGELOG section
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUTS_CHANGELOG_PATH: ${{ inputs.changelog-path }}
+          INPUTS_TITLE_PREFIX: ${{ inputs.title-prefix }}
         run: |
           version="${GITHUB_REF_NAME##*v}"
-          changelog='${{ inputs.changelog-path }}'
+          changelog="$INPUTS_CHANGELOG_PATH"
 
           # continue-on-error at the caller keeps a Release failure from wedging
           # the done, irreversible registry publish — but that also greens the
@@ -77,6 +81,6 @@ jobs:
             exit 1
           fi
 
-          title="${{ inputs.title-prefix }}${version}"
+          title="${INPUTS_TITLE_PREFIX}${version}"
           gh release create "$GITHUB_REF_NAME" --notes-file NOTES.md --title "$title" --verify-tag \
             || gh release edit "$GITHUB_REF_NAME" --notes-file NOTES.md --title "$title"

@@ -6,6 +6,7 @@ go = "1.26.11"
 java = "temurin-21"
 uv = "latest"
 "aqua:orhun/git-cliff" = "2"
+"aqua:zizmorcore/zizmor" = "1"
 
 [settings]
 # Pin every tool's exact resolved version + checksum in mise.lock (committed);
@@ -25,7 +26,7 @@ includes = ["mise-tasks"]
 
 [tasks.check]
 description = "everything CI would run, across every implementation: rust, spring, go, node, flask, frontend, conformance, docs, changelog"
-depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance", "docs", "changelog"]
+depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance", "docs", "changelog", "ci"]
 
 [tasks.rust]
 description = "rust implementation checks (default features): fmt-check, lint, test, integration-test"
@@ -68,6 +69,10 @@ depends = ["docs:check-versions", "docs:backlog-index-check"]
 [tasks.changelog]
 description = "changelog checks: each port's CHANGELOG.md top section matches its manifest version"
 depends = ["changelog:check"]
+
+[tasks.ci]
+description = "GitHub Actions checks: zizmor security audit of .github/"
+depends = ["ci:zizmor"]
 
 [tasks.conformance]
 description = "conformance suite: seed sync check + black-box conformance + schema fuzzing"

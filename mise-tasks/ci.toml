@@ -1,0 +1,5 @@
+# ci:* — checks on the GitHub Actions workflows themselves.
+
+["ci:zizmor"]
+description = "zizmor security audit of .github/ (config: .github/zizmor.yml)"
+run = "zizmor --offline .github/"

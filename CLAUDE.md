@@ -105,6 +105,7 @@ mise run frontend                    # frontend lint, cycle + api-reference chec
 mise run conformance                 # seed sync check + conformance:test + conformance:schema-test
 mise run docs                        # readme.md versions vs. the publishing ledger; feature-backlog index vs. entry headers
 mise run changelog                   # each port's CHANGELOG.md top section matches its manifest version
+mise run ci                          # zizmor security audit of .github/ workflows (config: .github/zizmor.yml)
 
 mise run rust:build
 mise run rust:test                       # unit tests, inline #[cfg(test)] modules across core/ and both adapters
