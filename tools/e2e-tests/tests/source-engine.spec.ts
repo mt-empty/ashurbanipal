@@ -34,7 +34,7 @@ test("a SQLite source shows no table counts anywhere", async ({ page }) => {
   await reportEngine(page, "sqlite");
   await openJoinOverlay(page);
 
-  await expect(page.locator('#tables a[data-table="users"] .count')).toBeEmpty();
+  await expect(page.locator('#tables a[data-table="users"] .count')).toHaveCount(0);
   await expect(page.locator("#row-meta")).not.toContainText("rows");
   await expect(page.locator("#row-meta")).toContainText("columns");
 

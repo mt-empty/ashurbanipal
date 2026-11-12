@@ -33,6 +33,15 @@ export async function gotoApp(page: Page, query = "", baseUrl = "") {
   await waitForFirstLoad(page);
 }
 
+/** Shows the table list as chips above the filter instead of the side panel,
+ * for this and later loads; a choice the page stores itself wins. */
+export async function hideTablesPanel(page: Page) {
+  await page.addInitScript(() => {
+    if (localStorage.getItem("ashurbanipal_tables_panel") === null)
+      localStorage.setItem("ashurbanipal_tables_panel", "hidden");
+  });
+}
+
 /** Reloads the page and waits for its start-up as gotoApp does. */
 export async function reloadApp(page: Page) {
   await page.reload();

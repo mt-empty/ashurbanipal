@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "./support/fixtures";
-import { gotoApp, reloadApp, selectTable } from "./support/helpers";
+import { gotoApp, hideTablesPanel, reloadApp, selectTable } from "./support/helpers";
 
 const SEEDED_TABLES = [
   "_conformance_meta",
@@ -51,7 +51,8 @@ test("a long table name truncates instead of pushing the row count out", async (
   await expect(page.locator('#tables [data-table="support_tickets"] .count')).toBeVisible();
 });
 
-// Narrow enough that the seeded tables wrap past three lines.
+// Narrow enough that the seeded tables wrap past three lines, and that the
+// list starts as chips rather than the side panel.
 const NARROW = { width: 360, height: 800 };
 const visibleChips = (page: Page) => page.locator("#tables li:not([hidden]):not(#tables-more-item)");
 
@@ -90,7 +91,7 @@ test("a long table list collapses to three lines behind '+ N more' and expands i
     page.evaluate((only) => {
       const out: Record<string, number[]> = {};
       for (const li of document.querySelectorAll<HTMLElement>("#tables li:not([hidden])")) {
-        const btn = li.querySelector<HTMLElement>("button[data-table]");
+        const btn = li.querySelector<HTMLElement>("[data-table]");
         const name = btn?.dataset.table;
         if (!name || btn?.classList.contains("active") || (only && !only.includes(name))) continue;
         out[name] = [li.offsetTop, li.offsetLeft];
@@ -179,6 +180,7 @@ test("an active chip that ends the third line stays visible when the list collap
 });
 
 test("a wide window shows every seeded table without expanding the list", async ({ page }) => {
+  await hideTablesPanel(page);
   await page.setViewportSize({ width: 1600, height: 800 });
   await gotoApp(page);
   for (const name of SEEDED_TABLES) await expect(page.locator(`#tables [data-table="${name}"]`)).toBeVisible();
