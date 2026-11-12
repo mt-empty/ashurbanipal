@@ -4,7 +4,7 @@
 
 No-bullshit database browser for schemaful databases; self-contained, embeddable, read-only. No separate DB client, no extra credentials, no extra infrastructure, no build step.
 
-![Ashurbanipal demo](tools/e2e-tests/showcase.gif)
+<video src="https://github.com/user-attachments/assets/b30322e4-05ce-4259-adef-cdc6265d05c4" controls muted loop playsinline style="max-width: 100%;"></video>
 
 The library is named after [Ashurbanipal Library](https://en.wikipedia.org/wiki/Library_of_Ashurbanipal).
 
