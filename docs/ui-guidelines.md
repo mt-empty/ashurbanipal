@@ -145,7 +145,7 @@ should block on.
   error are all visible states — not just error. A fetch that outlasts a
   short delay shows a progress bar on the grid's top edge with the old rows
   dimmed, and posts `loading…` to the `#status` live region; `aria-busy` on
-  the table and a spinner on the table's chip cover the rest. `#error`
+  the table and a spinner on the table's entry in the list cover the rest. `#error`
   covers failure. *(Derives from: visibility of system status — heuristic
   #1, given full weight above.)*
 - **R10 — The `refresh` button and its new-row tint are the sanctioned
@@ -191,8 +191,9 @@ should block on.
   mirrored to the URL — a shared link's explicit `?schema=` still wins on
   load; the per-source memory only fills in on an in-app source switch.
   *(Derives from: recognition rather than recall.)*
-- **R13 — A chip that navigates is a real link.** Table chips, and saved-join
-  chips other than the one in view, are `<a href>`s to the view they open.
+- **R13 — A chip that navigates is a real link.** Table entries, and saved-join
+  entries other than the one in view, are `<a href>`s to the view they open,
+  as panel rows and as chips.
   A plain left-click (or Enter) switches in place; middle-click, a modified
   click and the context menu stay the browser's, so "open in new tab" works.
   A chip that runs an action (edit, save, new join) stays a `<button>`.

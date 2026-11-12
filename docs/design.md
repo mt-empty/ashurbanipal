@@ -215,14 +215,18 @@ Two components, same as the original concept:
     (`docs/feature-backlog/09-column-reorder-and-resize.md`).
   - *Sticky table header* — the header row stays pinned while scrolling a
     long result set vertically.
-  - *Table chips* — every table is a chip above the filter. A list that
+  - *Table list* — a side panel left of the filter and grid, one table per
+    row with its count right-aligned, then the saved joins. It scrolls on
+    its own and stays at the left over a table scrolled sideways. A button
+    hides it, and the tables come back as chips above the filter; a narrow
+    window (under 900 px) starts that way. Among the chips, a list that
     wraps past three lines collapses behind a "+ N more" control that
     expands it in place. The control is the last item in the list, right-aligned
     on the last row; when collapsed, chips at the end of row three make room
     for it, so the rows above never move. The active table stays visible when
     collapsed: it is shown right after the last visible chip, with a divider
-    when that moves it out of alphabetical order. The expanded state is
-    remembered across reloads. There is no table search box.
+    when that moves it out of alphabetical order. The panel choice and the
+    expanded state are remembered across reloads. There is no table search box.
 - **UI state persistence**: `localStorage` remembers lightweight UI state
   across visits — currently selected source, schema (remembered per
   source), table, sort column/direction (remembered per table, like
@@ -234,7 +238,8 @@ Two components, same as the original concept:
   always a shareable link for the current view. Properties:
   - The view state is one `localStorage` key, `ashurbanipal_view`, value a
     small JSON object. Saved joins (`ashurbanipal_saved_joins`) and the display
-    preferences — theme (`ashurbanipal_theme`) and the expanded table list
+    preferences — theme (`ashurbanipal_theme`), the table panel shown or
+    hidden (`ashurbanipal_tables_panel`) and the expanded table list
     (`ashurbanipal_tables_expanded`) — each have their own key, outside
     the URL mirror. Nothing sensitive ever goes in any of them — table/column names only,
     no row data, no filters. The *applied* filter is the one exception,

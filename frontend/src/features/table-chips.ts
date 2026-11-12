@@ -23,8 +23,10 @@ import type { CountsResponse, SchemaRef, TableListEntry } from "../core/types.js
 import { APPROX_COUNT_TITLE, formatApproxCount } from "../lib/format.js";
 import { scopeQuery } from "../lib/table-ref.js";
 import { syncGridLock } from "./grid-lock.js";
+import { revealInPanel, tablesPanelOpen } from "./tables-panel.js";
 
-// ---- table chips: transient, session-local state, not part of
+// ---- table list: one set of entries shown as side-panel rows or as chips
+// (tables-panel.ts). Transient, session-local state, not part of
 // `state`/localStorage — resets on reload (except the expanded flag below) ----
 interface TableEntry {
   name: string;
@@ -40,8 +42,12 @@ let joinEntries: TableEntry[] = [];
 let joinScope = "";
 const allEntries = (): TableEntry[] => [...tableEntries, ...joinEntries];
 const tableChipTemplate = $<HTMLTemplateElement>("table-chip-template");
+// Heads the join entries in the panel; CSS hides it among the chips.
+const joinsHeading = el("li");
+joinsHeading.id = "joins-heading";
+const joinsHeadingText = joinsHeading.appendChild(el("h2", "tables-heading"));
 
-// ---- three-line cap: a long table list collapses behind "+ N more", except
+// ---- three-line cap (chips only): a long table list collapses behind "+ N more", except
 // the active table, which stays visible (and is marked `pulled` when a hidden
 // chip sits before it, so it is out of alphabetical order) ----
 const TABLE_CAP_LINES = 3;
@@ -65,6 +71,13 @@ function updateTablesCap(): void {
   for (const e of entries) {
     e.li.hidden = false;
     e.li.classList.remove("pulled");
+  }
+  // One row per line in the panel, which scrolls on its own instead.
+  if (tablesPanelOpen()) {
+    tablesMoreItem.hidden = true;
+    const active = entries.find((e) => e.chip.classList.contains("active"));
+    if (active) revealInPanel(active.chip);
+    return;
   }
   const tops = [...new Set(entries.map((e) => e.li.offsetTop))].sort((a, b) => a - b);
   const lastLineTop = tops[TABLE_CAP_LINES - 1];
@@ -109,7 +122,7 @@ tablesMore.onclick = () => {
   updateTablesCap();
 };
 // A width change only: updateTablesCap itself changes the height, which must
-// not re-trigger it.
+// not re-trigger it. Showing or hiding the side panel changes the width too.
 let tablesWidth = 0;
 new ResizeObserver(([entry]) => {
   if (entry.contentRect.width === tablesWidth) return;
@@ -159,6 +172,9 @@ export async function loadTables({
       countEl.textContent = formatApproxCount(counts.get(t.name));
       chipCounts.set(t.name, countEl.textContent);
       countEl.title = APPROX_COUNT_TITLE;
+    } else {
+      // An engine that never estimates: no count cell, only the spinner's slot.
+      countEl.remove();
     }
     chip.dataset.table = t.name;
     // Always set, not just when commented: long names get CSS-truncated
@@ -171,8 +187,10 @@ export async function loadTables({
     ul.appendChild(li);
     tableEntries.push({ name: t.name, li, chip });
   }
+  $("tables-heading").textContent = `Tables · ${tables.length}`;
   listedScope = scopeIdentity();
   if (joinScope !== scopeIdentity()) joinEntries = [];
+  if (joinEntries.length) ul.appendChild(joinsHeading);
   for (const e of joinEntries) ul.appendChild(e.li);
   ul.appendChild(tablesMoreItem);
   updateTablesCap();
@@ -276,13 +294,16 @@ export function hasJoinChips(): boolean {
 }
 
 // Replaces the chips after the divider; called whenever the join in view or the saved list changes.
-export function setJoinChips(chips: JoinChip[]): void {
+// `savedCount` is the saved joins among them, for the panel's heading.
+export function setJoinChips(chips: JoinChip[], savedCount: number): void {
   const ul = $("tables");
   for (const e of joinEntries) e.li.remove();
+  joinsHeadingText.textContent = savedCount ? `Joins · ${savedCount}` : "Joins";
+  ul.insertBefore(joinsHeading, tablesMoreItem);
   joinEntries = chips.map((c, i) => {
     const li = el("li", `join-chip ${c.className}${i === 0 ? " join-first" : ""}`);
     const chip = c.href ? linkTo(el("a"), c.href, c.run) : actionButton(c.run);
-    chip.textContent = c.label;
+    chip.appendChild(el("span", "chip-name", c.label));
     chip.title = c.title;
     chip.classList.toggle("active", c.active);
     if (c.active) chip.setAttribute("aria-current", "true");

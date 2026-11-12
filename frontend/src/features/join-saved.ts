@@ -127,5 +127,5 @@ export function renderSavedChips(actions: ChipActions): void {
     active: false,
     run: actions.startNew,
   });
-  setJoinChips(chips);
+  setJoinChips(chips, saved.length);
 }

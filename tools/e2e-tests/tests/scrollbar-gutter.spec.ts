@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "./support/fixtures";
-import { gotoApp, selectTable } from "./support/helpers";
+import { gotoApp, hideTablesPanel, selectTable } from "./support/helpers";
 
 // Headless engines give scrollbars no layout width; Chromium does once
 // Playwright's --hide-scrollbars is dropped, so this spec runs on Chromium only.
@@ -12,6 +12,7 @@ const mainBox = (page: Page) =>
   }));
 
 test("the chip list keeps its width between a short table and a tall one", async ({ page }) => {
+  await hideTablesPanel(page);
   await gotoApp(page);
   await selectTable(page, "saved_reports");
   expect((await mainBox(page)).overflows).toBe(false);

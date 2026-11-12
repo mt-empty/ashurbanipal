@@ -1,6 +1,6 @@
 # Table list: a collapsible side panel, and outlined chips
 
-> **Status:** OPEN · **Area:** frontend, docs, e2e · **Ref:** design canvas Rounds 18-19, chosen 2026-11-11
+> **Status:** DONE · **Area:** frontend, docs, e2e · **Ref:** design canvas Rounds 18-19, chosen 2026-11-11; shipped 2026-11-11
 
 Show the table list in a side panel that can be hidden. When it is hidden,
 the chips come back above the filter, in a new outlined style.
@@ -45,7 +45,6 @@ that opens over the page).
 - The active table or join gets today's active colours (`--chip-active-bg`
   / `--chip-active-fg`).
 - The panel scrolls on its own, so a long list never moves the grid.
-- The back and forward arrows move beside the table name in the meta line.
 
 ### 2.2 Hidden: chips on top (BI, BM)
 
@@ -74,9 +73,8 @@ that opens over the page).
   unsaved join in view has a dashed edge with **Save…** after it.
 - **e. Keyboard:** Tab reaches the hide or show button, then each table and
   join in order. The focus ring matches the rest of the app.
-- **f. Narrow window:** the panel starts hidden below a width to settle
-  during the build (about 900 px is a proposal, not a decision), so the
-  grid keeps its room.
+- **f. Narrow window:** the panel starts hidden below 900 px, so the grid
+  keeps its room.
 
 ## 3. Behaviour that must not change
 
@@ -116,7 +114,33 @@ that opens over the page).
 - Every BN case works, including c's no-count case on SQLite.
 - The full three-browser e2e suite passes.
 
-## 7. Out of scope
+## 7. Decisions
+
+Made on 2026-11-11, while building:
+
+- **No in-app back and forward arrows.** Boards BH and BI draw ‹ › beside
+  the table name, but the app has none. The browser's own back and forward
+  already step through views.
+- **Narrow width: 900 px**, checked once at load. The panel never moves
+  while you work, and a stored choice wins at any width. Only the toggle
+  writes `ashurbanipal_tables_panel`.
+- **One list, two looks.** The same `ul#tables` entries are panel rows or
+  chips, switched by `data-tables-panel` on `<html>`. Links, prefetch and
+  the scope guards are untouched, and `[data-table]` selectors still work.
+- **Layout.** The panel sits in a zero-height sticky dock that is a direct
+  child of `main`. It stays at the left over a table scrolled sideways and
+  pins to the top once the top bar scrolls away. Its height is `main`'s
+  visible height less the top bar still in view, so a long list never
+  gives a short table a scrollbar.
+- **The pre-paint lines share the theme's inline `<script>`**, so a host's
+  CSP has no new script to allow.
+- **An active join chip is not bold.** Join labels are not monospace, so a
+  bold one would widen its chip and shift the chips after it. The heavier
+  outline still marks it. Active table chips are bold, as on BI.
+- **"Joins · N"** counts saved joins only. The unsaved join, Save… and
+  + new join are not counted.
+
+## 8. Out of scope
 
 - A table search or filter box (decided 2026-10-15: wait for complaints).
 - The engine field itself: [[53-source-engine-field]].
