@@ -28,6 +28,103 @@ apply — e.g. append the primary key (or the full column tuple for a
 PK-less table) as an implicit final sort key, in every port. Needs a
 conformance case. Adjacent to [[05-multi-column-sort]].
 
+#### B1 plan (2026-11-12)
+
+**Seen on the devcontainer seed.** `support_tickets` (350 rows, 4
+`status` values) sorted by `status` and paged 50 at a time: the 7 pages
+return 66 rows twice and never return 66 others. Ticket 22 is on pages 1,
+2 and 3 (`/api/tables/data?table=support_tickets&sort=status`). Postgres
+breaks ties differently for `limit 50` and `limit 100 offset 50`.
+
+**Decided (2026-11-12):**
+- No `sort` → order by the primary key, ascending. This visibly reorders
+  tables with uuid keys (`users`, `orders`, `sessions`, `order_extra`);
+  bigint-identity tables look the same as today.
+- No primary key → order by every column the engine can sort, in column
+  order. One rule for tables and, later, views ([[25-list-views-and-materialized-views]]).
+- The join route (§5.11) gets the same fix in the same change.
+
+**The rule** (what §5.4 and §5.11 will say):
+
+1. The `sort` column first, if one is given.
+2. Then every primary-key column, in the constraint's key order, not as
+   a set. A PK column already used as `sort` is not repeated.
+3. All keys use the `order` direction. One direction keeps keyset paging
+   (B2) possible later.
+4. No primary key: step 2 uses every sortable column in column order
+   instead (Postgres skips `json`, `xml` and the geometric types, as
+   `unsortable_column` already does). Rows equal in all of those MAY
+   still swap; they look identical, apart from unsortable columns.
+5. Join route: step 2 appends each joined table's key (rule 2 or 4), in
+   join order, qualified by alias.
+
+NULL placement in tie-break keys stays engine-defined (outer-join keys
+can be NULL); each engine is deterministic on its own.
+
+Not a version bump: the order of tied rows and of unsorted rows was
+unspecified, so no caller could rely on it. Record it in
+`spec/CHANGELOG.md` as "v1 stands".
+
+**Steps — one PR across every port.** The new conformance cases fail on
+every port until each is fixed, so splitting by port would leave CI red.
+
+1. **Spec:** `spec/protocol.md` §5.4 (sort semantics) and §5.11,
+   `spec/openapi.yaml` (`sort` descriptions), `spec/CHANGELOG.md`,
+   `docs/adapter-decisions.md` (how each engine reads the ordered key
+   and the sortable-column list).
+2. **Conformance** (`conformance/runner/table_data.rs`, `join.rs`; ids
+   in `conformance/runner/COVERAGE.md`):
+   - Page `support_tickets` sorted by `status` (NOT NULL) to the end. The
+     union of the pages has no repeated or missing id. This is the case
+     that fails today on Postgres.
+   - No `sort` on `orders` (uuid key, stored out of key order) returns
+     rows in id order. This fails today on every engine whose storage
+     order differs from key order.
+   - `status` ties on `orders` come out in id order, for `asc` and `desc`.
+   - Composite key: no `sort` on `inventory_locations`
+     (`warehouse_code, bin_code`) returns rows in that key order.
+   - PK-less: `_conformance_meta` has 1 row, so it cannot show tie order.
+     Add a small PK-less table with repeated values to `tools/seed-gen`
+     and the MySQL/SQLite seeds, then `mise run conformance:seed-gen`.
+   - A join sorted by a repeated column pages without repeats.
+   - The MySQL and SQLite seeds have 25 tickets, and InnoDB stores rows
+     in key order, so some cases pass there even without the fix. That
+     is fine; Postgres and the uuid-key cases carry the check.
+3. **Ports**, one table-data builder per engine plus the join builder in
+   each:
+   - Rust: `core/src/db/postgres.rs` (`query_table`, ~:732),
+     `mysql.rs`, `sqlite.rs` (~:435), `core/src/join.rs`. `query_table`
+     reads PK columns into a `HashSet` (`postgres.rs:535`); the tie-break
+     needs the ordered list the structure query already builds
+     (`postgres.rs:300`, `order by … k.n`).
+   - Go: `postgres.go:618`, `mysql.go:731`, `sqlite.go:480`, `join.go:681`.
+   - Node: `src/db/postgres.ts`, `mysql.ts` (~:544), `sqlite.ts`,
+     `src/join.ts:426`.
+   - Flask: `ashurbanipal/db/` per engine, `join.py:510`.
+   - Spring: `PostgresSource.kt:347`, `MySqlSource.kt:403`,
+     `SqliteSource.kt:262`, `JoinSupport.kt:412`.
+   - Unit tests that pin exact SQL text change too (e.g.
+     `go-nethttp/join_test.go:196`, `rust/core/src/join.rs:982`).
+4. **Demos:** the synthetic backend (`frontend/src/demo/synthetic/serve.ts`)
+   applies the same rule. The snapshot builder sorts by the first PK
+   column only (`frontend/src/demo/build/snapshot.ts`); make it use the whole key (story 57). The PGlite live
+   demo runs the Node port, so it follows automatically.
+5. **e2e:** no frontend code changes. Specs that read a fixed row of a
+   uuid-keyed table with no sort will see a different row. Get the real
+   list by running the suite after the Rust change, then fix those specs
+   before the final three-browser run.
+
+**Cost.** No `sort`: an index scan on the key with `LIMIT`, cheap. With
+`sort`: the engine already sorts every matching row; one more key is
+noise. Postgres 13+ can finish an index on the sort column with an
+incremental sort; InnoDB secondary indexes already end in the PK. The
+PK-less fallback sorts on every column, which costs more on a wide
+table; the statement timeout (§6) still applies.
+
+**Out of scope:** keyset paging (B2), multi-column sort
+([[05-multi-column-sort]]), and showing the implicit key order in the
+grid's header arrows.
+
 ### B2 — Offset-only pagination
 
 `OFFSET n` costs an O(n) scan on Postgres and MySQL. A deep page can trip
