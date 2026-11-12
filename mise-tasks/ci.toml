@@ -1,5 +1,7 @@
 # ci:* — checks on the GitHub Actions workflows themselves.
 
 ["ci:zizmor"]
+# Online audits (impostor commits, pin/comment mismatch, known-vulnerable actions)
+# need GH_TOKEN; without one zizmor falls back to offline mode.
 description = "zizmor security audit of .github/ (config: .github/zizmor.yml)"
-run = "zizmor --offline .github/"
+run = "zizmor .github/"

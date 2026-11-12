@@ -25,7 +25,7 @@ includes = ["mise-tasks"]
 # `<layer>:*` subtasks in mise-tasks/.
 
 [tasks.check]
-description = "everything CI would run, across every implementation: rust, spring, go, node, flask, frontend, conformance, docs, changelog"
+description = "everything CI would run, across every implementation: rust, spring, go, node, flask, frontend, conformance, docs, changelog, ci"
 depends = ["rust", "spring", "go", "node", "flask", "frontend", "conformance", "docs", "changelog", "ci"]
 
 [tasks.rust]

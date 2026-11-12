@@ -80,11 +80,11 @@ jobs:
           sudo apt-get update && sudo apt-get install -y postgresql-client
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
 
+      # The Go release is the tag itself; this job only tests, so its module cache ships nothing.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
+        with: # zizmor: ignore[cache-poisoning]
           go-version-file: implementations/go-nethttp/go.mod
           cache-dependency-path: implementations/go-nethttp/go.sum
-          cache: false
 
       - name: Build
         working-directory: implementations/go-nethttp

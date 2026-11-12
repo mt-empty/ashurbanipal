@@ -37,4 +37,10 @@ jobs:
           version: 2026.7.13
           install: false
 
+      - run: mise install aqua:zizmorcore/zizmor
+
       - run: mise run ci:zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Only zizmor is needed; don't pull the repo's full [tools] set.
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
