@@ -303,10 +303,9 @@ class TableMeta:
 def table_order_clause(meta: TableMeta, sort: str | None, descending: bool, quote: Callable[[str], str]) -> str:
     """A single-table query's order by, every column qualified by the table name so it
     never resolves to a text-cast output column."""
-    names = [c.name for c in meta.columns]
-    sort_index = names.index(sort) if sort in names else None
+    sort_index = None if sort is None else meta.index(sort)
     return order_by_clause(
-        sort_index, meta.order_keys, descending, lambda i: f"{quote(meta.name)}.{quote(names[i])}"
+        sort_index, meta.order_keys, descending, lambda i: f"{quote(meta.name)}.{quote(meta.columns[i].name)}"
     )
 
 

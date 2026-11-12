@@ -12,7 +12,7 @@ use super::{
 };
 use crate::filter::{Condition, Logic};
 use crate::join::{
-    self, order_by_clause, tie_break_keys, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData,
+    self, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData,
     JoinOpts, JoinSpec, TableMeta, UniqueKey,
 };
 
@@ -710,9 +710,7 @@ impl DbSource for PgPoolSource {
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
         let meta = self.table_meta_in_tx(&mut tx, &schema, &found).await?;
-        let order_keys = meta.order_keys.clone();
         let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
-        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sort = opts
             .sort
             .as_deref()
@@ -734,14 +732,8 @@ impl DbSource for PgPoolSource {
         // FROM itself is schema-qualified): an unqualified `order by "col"`
         // would resolve to the `::text`-cast output column in select_list,
         // sorting lexicographically instead of by the real typed value.
-        let sort_index = sort.and_then(|s| column_names.iter().position(|c| c == s));
-        let order_clause = order_by_clause(sort_index, order_keys, opts.descending, |i| {
-            format!(
-                "{}.{}",
-                quote_ident(&found.name),
-                quote_ident(&column_names[i])
-            )
-        });
+        let order_clause = table_order_clause(&meta, sort, opts.descending, quote_ident);
+        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sql = format!(
             "select {select_list} from {}.{}{where_clause}{order_clause} limit $1 offset $2",
             quote_ident(&schema),

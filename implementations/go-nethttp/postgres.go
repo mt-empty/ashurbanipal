@@ -351,17 +351,13 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 // role with only SELECT still sees the key.
 func (c *PostgresSource) uniqueKeys(ctx context.Context, tx queryer, oid int) ([]uniqueKey, error) {
 	rows, err := tx.QueryContext(ctx,
-		`select c.relname, i.indisprimary, a.attname
+		`select c.relname, i.indisprimary, a.attname, a.attnotnull
 		 from pg_index i
 		 join pg_class c on c.oid = i.indexrelid
 		 cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n)
 		 join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum
 		 where i.indrelid = $1 and i.indisunique and i.indisvalid
 		   and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts
-		   and (i.indisprimary or not exists (
-		     select 1 from unnest(i.indkey::int2[]) with ordinality m(attnum, n)
-		     join pg_attribute b on b.attrelid = i.indrelid and b.attnum = m.attnum
-		     where m.n <= i.indnkeyatts and not b.attnotnull))
 		 order by c.relname, k.n`, oid)
 	if err != nil {
 		return nil, err
@@ -369,10 +365,12 @@ func (c *PostgresSource) uniqueKeys(ctx context.Context, tx queryer, oid int) ([
 	defer rows.Close()
 	var parts []keyPart
 	for rows.Next() {
-		p := keyPart{usable: true}
-		if err := rows.Scan(&p.index, &p.primary, &p.column); err != nil {
+		var p keyPart
+		var notNull bool
+		if err := rows.Scan(&p.index, &p.primary, &p.column, &notNull); err != nil {
 			return nil, err
 		}
+		p.usable = p.primary || notNull
 		parts = append(parts, p)
 	}
 	if err := rows.Err(); err != nil {

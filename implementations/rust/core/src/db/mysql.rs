@@ -13,8 +13,8 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
-    self, order_by_clause, tie_break_keys, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData,
-    JoinOpts, JoinSpec, TableMeta, UniqueKey,
+    self, group_unique_keys, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect,
+    IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, UniqueKey,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -591,9 +591,7 @@ impl DbSource for MySqlSource {
         let meta = self
             .table_meta_in_tx(&mut tx, variant, &schema, table, timeout)
             .await?;
-        let order_keys = meta.order_keys.clone();
         let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
-        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sort = opts
             .sort
             .as_deref()
@@ -614,14 +612,8 @@ impl DbSource for MySqlSource {
         // unqualified `order by` would resolve to the CAST-output column in
         // select_list, sorting lexicographically instead of by the real
         // typed value.
-        let sort_index = sort.and_then(|s| column_names.iter().position(|c| c == s));
-        let order_clause = order_by_clause(sort_index, order_keys, opts.descending, |i| {
-            format!(
-                "{}.{}",
-                quote_ident_mysql(table),
-                quote_ident_mysql(&column_names[i])
-            )
-        });
+        let order_clause = table_order_clause(&meta, sort, opts.descending, quote_ident_mysql);
+        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sql = timed_select(
             variant,
             timeout,
@@ -1045,29 +1037,14 @@ async fn unique_keys_in_tx(
         .bind(table)
         .fetch_all(&mut **tx)
         .await?;
-    let mut keys: Vec<(UniqueKey, bool)> = Vec::new();
-    for (index, column, nullable) in rows {
-        if keys.last().is_none_or(|(k, _)| k.name != index) {
-            keys.push((
-                UniqueKey {
-                    primary: index == "PRIMARY",
-                    name: index,
-                    columns: Vec::new(),
-                },
-                true,
-            ));
-        }
-        let (key, usable) = keys.last_mut().expect("pushed above");
-        match column {
-            Some(c) if nullable != "YES" => key.columns.push(c),
-            _ => *usable = false,
-        }
-    }
-    Ok(keys
-        .into_iter()
-        .filter(|(_, u)| *u)
-        .map(|(k, _)| k)
-        .collect())
+    Ok(group_unique_keys(rows.into_iter().map(
+        |(index, column, nullable)| KeyPart {
+            primary: index == "PRIMARY",
+            index,
+            usable: column.is_some() && nullable != "YES",
+            column,
+        },
+    )))
 }
 
 #[cfg(test)]

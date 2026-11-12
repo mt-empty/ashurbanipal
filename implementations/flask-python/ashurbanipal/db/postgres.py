@@ -424,21 +424,19 @@ class PgSource(DbSource):
         pg_index has no privilege filter, unlike information_schema, so a role with
         only SELECT still sees the key."""
         cur.execute(
-            "select c.relname, i.indisprimary, a.attname "
+            "select c.relname, i.indisprimary, a.attname, a.attnotnull "
             "from pg_index i "
             "join pg_class c on c.oid = i.indexrelid "
             "cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n) "
             "join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum "
             "where i.indrelid = %s and i.indisunique and i.indisvalid "
             "  and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts "
-            "  and (i.indisprimary or not exists ( "
-            "    select 1 from unnest(i.indkey::int2[]) with ordinality m(attnum, n) "
-            "    join pg_attribute b on b.attrelid = i.indrelid and b.attnum = m.attnum "
-            "    where m.n <= i.indnkeyatts and not b.attnotnull)) "
             "order by c.relname, k.n",
             (oid,),
         )
-        return group_unique_keys((index, primary, column, True) for index, primary, column in cur.fetchall())
+        return group_unique_keys(
+            (index, primary, column, primary or not_null) for index, primary, column, not_null in cur.fetchall()
+        )
 
     @wrap_driver_errors(psycopg.Error)
     def query_join(self, schema: str | None, spec: JoinSpec, opts: JoinOpts) -> JoinData:

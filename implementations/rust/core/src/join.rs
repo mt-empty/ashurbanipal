@@ -286,8 +286,7 @@ pub struct UniqueKey {
 /// the fewest columns (then the lowest name). A key with a column the role
 /// cannot see is skipped, and none left means no tie-break.
 pub fn tie_break_keys(columns: &[ColMeta], keys: &[UniqueKey]) -> Vec<usize> {
-    let mut usable: Vec<(&UniqueKey, Vec<usize>)> = keys
-        .iter()
+    keys.iter()
         .filter_map(|k| {
             let idx: Option<Vec<usize>> = k
                 .columns
@@ -296,18 +295,65 @@ pub fn tie_break_keys(columns: &[ColMeta], keys: &[UniqueKey]) -> Vec<usize> {
                 .collect();
             idx.filter(|v| !v.is_empty()).map(|v| (k, v))
         })
-        .collect();
-    usable.sort_by(|(a, av), (b, bv)| {
-        b.primary
-            .cmp(&a.primary)
-            .then(av.len().cmp(&bv.len()))
-            .then(a.name.cmp(&b.name))
-    });
-    usable
-        .into_iter()
-        .next()
+        .min_by(|(a, av), (b, bv)| {
+            b.primary
+                .cmp(&a.primary)
+                .then(av.len().cmp(&bv.len()))
+                .then(a.name.cmp(&b.name))
+        })
         .map(|(_, v)| v)
         .unwrap_or_default()
+}
+
+/// One key column of a candidate unique key; `usable` is false when the part
+/// rules the whole key out (an expression, or a nullable column).
+pub struct KeyPart {
+    pub index: String,
+    pub primary: bool,
+    pub column: Option<String>,
+    pub usable: bool,
+}
+
+/// Folds parts, ordered by index and then key position, into keys, dropping
+/// a key with any unusable part.
+pub fn group_unique_keys(parts: impl IntoIterator<Item = KeyPart>) -> Vec<UniqueKey> {
+    let mut keys: Vec<(UniqueKey, bool)> = Vec::new();
+    for p in parts {
+        if keys.last().is_none_or(|(k, _)| k.name != p.index) {
+            keys.push((
+                UniqueKey {
+                    name: p.index,
+                    primary: p.primary,
+                    columns: Vec::new(),
+                },
+                true,
+            ));
+        }
+        let (key, usable) = keys.last_mut().expect("pushed above");
+        key.columns.push(p.column.unwrap_or_default());
+        *usable &= p.usable;
+    }
+    keys.into_iter()
+        .filter(|(_, u)| *u)
+        .map(|(k, _)| k)
+        .collect()
+}
+
+/// A single-table query's order by, every column qualified by the table name
+/// so it never resolves to a text-cast output column in the select list.
+pub fn table_order_clause(
+    meta: &TableMeta,
+    sort: Option<&Ident>,
+    descending: bool,
+    quote: impl Fn(&Ident) -> String,
+) -> String {
+    let sort_index = sort.and_then(|s| meta.columns.iter().position(|c| &c.name == s));
+    order_by_clause(
+        sort_index,
+        meta.order_keys.iter().copied(),
+        descending,
+        |i| format!("{}.{}", quote(&meta.name), quote(&meta.columns[i].name)),
+    )
 }
 
 /// ` order by <sort>, <keys…>` with a key equal to `sort` left out, every
@@ -1020,6 +1066,26 @@ mod tests {
         let short = key("b", false, &["user_id"]);
         assert_eq!(tie_break_keys(&cols, &[short, tied, hidden]), [2]);
         assert!(tie_break_keys(&cols, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_key_with_an_unusable_part_is_dropped() {
+        let part = |index: &str, column: &str, usable| KeyPart {
+            index: index.into(),
+            primary: false,
+            column: Some(column.into()),
+            usable,
+        };
+        let keys = group_unique_keys([
+            part("a", "x", true),
+            part("a", "y", false),
+            part("b", "x", true),
+        ]);
+        assert_eq!(keys.len(), 1);
+        assert_eq!(
+            (keys[0].name.as_str(), keys[0].columns.as_slice()),
+            ("b", ["x".to_string()].as_slice())
+        );
     }
 
     #[test]

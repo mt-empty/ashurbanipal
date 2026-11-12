@@ -12,8 +12,8 @@ use super::{
 };
 use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
-    self, order_by_clause, tie_break_keys, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData,
-    JoinOpts, JoinSpec, TableMeta, UniqueKey,
+    self, group_unique_keys, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect,
+    IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, UniqueKey,
 };
 
 /// Catalog/metadata queries need a fixed bounded timeout.
@@ -411,9 +411,7 @@ impl DbSource for SqliteSource {
                 table_meta(conn, &meta_table).await
             })
             .await?;
-        let order_keys = meta.order_keys.clone();
         let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
-        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let sort = opts
             .sort
             .as_deref()
@@ -430,10 +428,8 @@ impl DbSource for SqliteSource {
             .map(|c| format!("CAST({} AS TEXT)", quote_ident(c)))
             .collect::<Vec<_>>()
             .join(", ");
-        let sort_index = sort.and_then(|s| column_names.iter().position(|c| c == s));
-        let order_clause = order_by_clause(sort_index, order_keys, opts.descending, |i| {
-            format!("{}.{}", quote_ident(table), quote_ident(&column_names[i]))
-        });
+        let order_clause = table_order_clause(&meta, sort, opts.descending, quote_ident);
+        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
         let quoted_table = quote_ident(table);
         let sql = format!(
             "select {select_list} from {quoted_table}{where_clause}{order_clause} limit ? offset ?"
@@ -757,7 +753,12 @@ async fn unique_keys_on(
         )))
         .fetch_all(&mut *conn)
         .await?;
-    let mut keys = Vec::new();
+    let mut keys = group_unique_keys(rows.into_iter().map(|(index, column, not_null)| KeyPart {
+        index,
+        primary: false,
+        usable: column.is_some() && not_null == Some(1),
+        column,
+    }));
     if !pk_in_key_order.is_empty() {
         keys.push(UniqueKey {
             name: String::new(),
@@ -765,26 +766,6 @@ async fn unique_keys_on(
             columns: pk_in_key_order.to_vec(),
         });
     }
-    let mut current: Option<(UniqueKey, bool)> = None;
-    for (index, column, not_null) in rows {
-        if current.as_ref().is_none_or(|(k, _)| k.name != index) {
-            keys.extend(current.take().filter(|(_, u)| *u).map(|(k, _)| k));
-            current = Some((
-                UniqueKey {
-                    name: index,
-                    primary: false,
-                    columns: Vec::new(),
-                },
-                true,
-            ));
-        }
-        let (key, usable) = current.as_mut().expect("set above");
-        match column {
-            Some(c) if not_null == Some(1) => key.columns.push(c),
-            _ => *usable = false,
-        }
-    }
-    keys.extend(current.filter(|(_, u)| *u).map(|(k, _)| k));
     Ok(keys)
 }
 

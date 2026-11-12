@@ -7,7 +7,7 @@
 //! The §6 timeout bound is not provokable over black-box HTTP (see
 //! `COVERAGE.md`); each port covers the `query_timeout` label in its own tests.
 
-use crate::assert::{assert_exact, assert_problem_code, assert_status};
+use crate::assert::{assert_exact, assert_problem_code, assert_status, key_cmp};
 use crate::backend::{Backend, NotJoinableColumns, SchemaModel};
 use crate::common::TestServer;
 use serde_json::{json, Value};
@@ -249,10 +249,7 @@ async fn paging_a_join_over_ties_returns_every_row_once() {
             panic!("join did not run out of rows within 100 pages");
         }
     };
-    let by_key = |a: &String, b: &String| match (a.parse::<i64>(), b.parse::<i64>()) {
-        (Ok(x), Ok(y)) => x.cmp(&y),
-        _ => a.cmp(b),
-    };
+    let by_key = |a: &String, b: &String| key_cmp(a, b);
 
     let unsorted = walk(vec![]).await;
     let mut expected = unsorted.clone();

@@ -370,9 +370,6 @@ func tieBreakKeys(columns []colMeta, keys []uniqueKey) []int {
 			best, bestKey = idx, key
 		}
 	}
-	if best == nil {
-		return []int{}
-	}
 	return best
 }
 
@@ -413,7 +410,7 @@ func groupUniqueKeys(parts []keyPart) []uniqueKey {
 func tableOrderClause(meta tableMeta, sort *string, descending bool, quote func(string) string) string {
 	var sortIndex *int
 	if sort != nil {
-		if i := slices.Index(meta.columnNames(), *sort); i >= 0 {
+		if i := slices.IndexFunc(meta.columns, func(c colMeta) bool { return c.name == *sort }); i >= 0 {
 			sortIndex = &i
 		}
 	}

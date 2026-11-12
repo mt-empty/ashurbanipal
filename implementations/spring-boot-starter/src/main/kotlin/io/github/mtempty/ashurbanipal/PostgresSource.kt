@@ -291,19 +291,15 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
      */
     private fun uniqueKeys(oid: Long): List<UniqueKey> = groupUniqueKeys(
         jdbcTemplate.query(
-            "select c.relname, i.indisprimary, a.attname " +
+            "select c.relname, i.indisprimary, a.attname, a.attnotnull " +
                 "from pg_index i " +
                 "join pg_class c on c.oid = i.indexrelid " +
                 "cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n) " +
                 "join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum " +
                 "where i.indrelid = ? and i.indisunique and i.indisvalid " +
                 "  and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts " +
-                "  and (i.indisprimary or not exists ( " +
-                "    select 1 from unnest(i.indkey::int2[]) with ordinality m(attnum, n) " +
-                "    join pg_attribute b on b.attrelid = i.indrelid and b.attnum = m.attnum " +
-                "    where m.n <= i.indnkeyatts and not b.attnotnull)) " +
                 "order by c.relname, k.n",
-            RowMapper { rs, _ -> KeyPart(rs.getString(1), rs.getBoolean(2), rs.getString(3), true) },
+            RowMapper { rs, _ -> KeyPart(rs.getString(1), rs.getBoolean(2), rs.getString(3), rs.getBoolean(2) || rs.getBoolean(4)) },
             oid,
         ),
     )

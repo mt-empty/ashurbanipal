@@ -369,22 +369,18 @@ export class PostgresSource implements DbSource {
   // pg_index has no privilege filter, unlike information_schema, so a role
   // with only SELECT still sees the key.
   private async uniqueKeys(client: PoolClient, oid: number): Promise<UniqueKey[]> {
-    const { rows } = await client.query<{ index: string; primary: boolean; column: string }>(
-      `select c.relname as index, i.indisprimary as primary, a.attname as column
+    const { rows } = await client.query<{ index: string; primary: boolean; column: string; not_null: boolean }>(
+      `select c.relname as index, i.indisprimary as primary, a.attname as column, a.attnotnull as not_null
        from pg_index i
        join pg_class c on c.oid = i.indexrelid
        cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n)
        join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum
        where i.indrelid = $1 and i.indisunique and i.indisvalid
          and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts
-         and (i.indisprimary or not exists (
-           select 1 from unnest(i.indkey::int2[]) with ordinality m(attnum, n)
-           join pg_attribute b on b.attrelid = i.indrelid and b.attnum = m.attnum
-           where m.n <= i.indnkeyatts and not b.attnotnull))
        order by c.relname, k.n`,
       [oid],
     );
-    return groupUniqueKeys(rows.map((r) => ({ ...r, usable: true })));
+    return groupUniqueKeys(rows.map((r) => ({ ...r, usable: r.primary || r.not_null })));
   }
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {

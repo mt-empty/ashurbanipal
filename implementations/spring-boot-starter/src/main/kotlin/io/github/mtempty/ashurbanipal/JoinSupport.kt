@@ -265,8 +265,7 @@ fun groupUniqueKeys(parts: List<KeyPart>): List<UniqueKey> =
  * it never resolves to a text-cast output column.
  */
 fun tableOrderClause(meta: TableMeta, sort: String?, descending: Boolean, quote: (String) -> String): String {
-    val sortIndex = meta.columns.indexOfFirst { it.name == sort }.takeIf { sort != null && it >= 0 }
-    return orderByClause(sortIndex, meta.orderKeys, descending) { "${quote(meta.name)}.${quote(meta.columns[it].name)}" }
+    return orderByClause(sort?.let(meta::index), meta.orderKeys, descending) { "${quote(meta.name)}.${quote(meta.columns[it].name)}" }
 }
 
 /**

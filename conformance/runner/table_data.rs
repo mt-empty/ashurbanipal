@@ -1,4 +1,6 @@
-use crate::assert::{assert_exact, assert_problem_code, assert_row_estimate, assert_status};
+use crate::assert::{
+    assert_exact, assert_problem_code, assert_row_estimate, assert_status, key_cmp,
+};
 use crate::backend::{Backend, Comments, NotJoinableColumns};
 use crate::common::TestServer;
 use crate::tables::SEEDED_TABLES;
@@ -447,15 +449,6 @@ async fn walk_pages(srv: &TestServer, table: &str, extra: &[(&str, &str)]) -> Ve
     panic!("{table} did not run out of rows within 100 pages");
 }
 
-/// Key values compare as integers where the seed uses integer ids, else as
-/// text (uuid order is its lowercase hex order on every engine).
-fn key_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    match (a.parse::<i64>(), b.parse::<i64>()) {
-        (Ok(x), Ok(y)) => x.cmp(&y),
-        _ => a.cmp(b),
-    }
-}
-
 fn ids(rows: &[Value], column: &str) -> Vec<String> {
     rows.iter()
         .map(|r| r[column].as_str().unwrap().to_string())
@@ -503,7 +496,10 @@ async fn rows_with_no_sort_come_in_primary_key_order() {
     sorted.sort_by(|a, b| key_cmp(a, b));
     assert_exact(got, sorted.clone(), "orders with no sort, in id order");
     assert_exact(
-        ids(&walk_pages(&srv, "orders", &[("order", "desc")]).await, "id"),
+        ids(
+            &walk_pages(&srv, "orders", &[("order", "desc")]).await,
+            "id",
+        ),
         sorted,
         "orders with order=desc and no sort, still in ascending id order",
     );
