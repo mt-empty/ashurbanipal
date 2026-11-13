@@ -115,6 +115,17 @@ pub enum NotJoinableColumns {
     NotSeeded,
 }
 
+/// Whether a value compared typed must fit its column's form
+/// (`spec/protocol.md` §5.4.2).
+#[derive(PartialEq, Eq)]
+pub enum TypedValueCheck {
+    /// Postgres and MySQL/MariaDB: a value that does not fit is a 400.
+    Enforced,
+    /// SQLite: a stored value need not match its declared type, so the
+    /// check is skipped and a bad value simply matches what it matches.
+    Skipped,
+}
+
 impl Backend {
     pub(crate) fn parse(raw: &str) -> Option<Backend> {
         match raw.trim().to_ascii_lowercase().as_str() {
@@ -215,6 +226,13 @@ impl Backend {
         match self {
             Backend::Postgres | Backend::Mysql => NotJoinableColumns::Seeded,
             Backend::Sqlite => NotJoinableColumns::NotSeeded,
+        }
+    }
+
+    pub fn typed_value_check(self) -> TypedValueCheck {
+        match self {
+            Backend::Postgres | Backend::Mysql => TypedValueCheck::Enforced,
+            Backend::Sqlite => TypedValueCheck::Skipped,
         }
     }
 

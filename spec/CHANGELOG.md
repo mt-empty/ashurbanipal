@@ -137,3 +137,15 @@ used to read keys from catalog views that hid foreign keys from any role
 that didn't own the table, and hid every key from a role with only `SELECT`.
 On MariaDB a role with only `SELECT` lost every key. That was a bug, not a
 contract change, and v1 stands.
+
+Filters (§5.4.2, and §5.11.3's join filters) compare a `number`, `float`,
+`temporal` or `time` column in its own type, for every op except
+`LIKE`/`ILIKE`, so `10 > 9` and `1.00 = 1`. Before, every op compared the
+column's text cast. A value that does not fit such a column's class is now
+a 400 `invalid_filter`, as is an engine error about a bad value (SQLite
+skips that check, since it does not enforce column types). Two ops
+are new: `IN`, whose `value` is an array of 1 to 1000 strings, and
+`BETWEEN`, whose `value` is `[lo, hi]`. `IS [NOT] NULL` tests the column
+without a cast. Changing what an existing filter returns is not additive,
+so this lands under §7's alpha exception, with every port, the conformance
+runner and the bundled UI changed together.

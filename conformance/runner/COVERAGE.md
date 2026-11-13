@@ -117,6 +117,11 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.4.2-NOT-WRAPS` | `not: true` wraps in `NOT (...)`, no separate operator table | `filter_dsl::not_negates_a_condition` |
 | `P5.4.2-AND-OR-PRECEDENCE` | `AND` binds tighter than `OR` | `filter_dsl::and_binds_tighter_than_or` |
 | `P5.4.2-CONTRADICTORY-LEGAL` | Contradictory conditions are legal, return zero rows | `filter_dsl::contradictory_conditions_return_zero_rows_not_error` |
+| `P5.4.2-TYPED-COMPARE` | A `number`/`float`/`temporal`/`time` column compares in its own type for every op but `LIKE`/`ILIKE` | `filter_dsl::number_columns_compare_numerically`, `filter_dsl::typed_equality_ignores_scale`, `filter_dsl::temporal_ranges` |
+| `P5.4.2-CELL-ROUND-TRIP` | A typed cell's own text, offset included where the type renders one, passes the form check and filters back to its row | `filter_dsl::a_typed_cells_own_text_filters_back_to_its_row` |
+| `P5.4.2-VALUE-FORM` | A value that does not fit a typed column's form → 400 `invalid_filter`; SQLite skips the check (200) | `filter_dsl::a_value_that_does_not_fit_a_typed_column_is_invalid_filter`, `filter_dsl::builder_fixture_cases_over_http` (`invalid_value`) |
+| `P5.4.2-IN` | `IN` takes 1-1000 strings and matches any; `not` + `IN` also drops NULL rows | `filter_dsl::in_and_not_in`, `filter_dsl::builder_fixture_cases_over_http` (`bad_value`) |
+| `P5.4.2-BETWEEN` | `BETWEEN` takes `[lo, hi]`, inclusive; reversed bounds match nothing | `filter_dsl::between_is_inclusive_and_typed`, `filter_dsl::builder_fixture_cases_over_http` (`bad_value`) |
 
 ### §5.4.3 Value serialization
 
@@ -220,6 +225,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.11-SELF-JOIN` | The same table at two positions returns both sides with distinct labels | `join::self_join_returns_both_sides` |
 | `P5.11-COLUMNS` | `columns` selects and orders the output | `join::columns_selects_and_orders_the_output` |
 | `P5.11-FILTER-JOINED` | A condition's `join` selects the table its column belongs to | `join::filter_on_a_joined_table_column` |
+| `P5.11-FILTER-TYPED` | A joined column compares by its own class, with the §5.4.2 value check | `join::joined_columns_compare_by_their_class` |
 | `P5.11-SORT` | `sort` + `sort_join` order by the column at that position | `join::sort_applies_to_the_table_at_sort_join` |
 | `P5.11-TOTAL-ORDER` | Row order is total: after `sort`, each joined table's tie-break keys in position order | `join::paging_a_join_over_ties_returns_every_row_once` |
 | `P5.11-HAS-MORE` | `has_more` true with a following row, false on the last page; `limit` clamped | `join::has_more_reports_a_following_row` |
