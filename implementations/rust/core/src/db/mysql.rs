@@ -6,15 +6,15 @@ use sqlx::mysql::MySqlRow;
 use sqlx::{MySql, MySqlPool, Row, Transaction};
 
 use super::{
-    group_referenced_by, no_default_schema, op_sql, ColumnInfo, ColumnPair, ColumnRef,
-    ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
-    Engine, Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing,
-    Structure, TableData, TableInfo,
+    group_referenced_by, no_default_schema, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck,
+    ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident,
+    IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
+    TableData, TableInfo,
 };
-use crate::filter::{Condition, FilterOp, Logic};
+use crate::filter::ValueForm;
 use crate::join::{
     self, group_unique_keys, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect,
-    IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, UniqueKey,
+    IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, TypedCompare, UniqueKey,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -46,64 +46,18 @@ fn quote_ident_mysql(ident: &Ident) -> String {
     format!("`{}`", ident.as_str().replace('`', "``"))
 }
 
-/// Builds MySQL filter SQL; map ILIKE through LOWER for collation independence
-/// (`spec/protocol.md` §5.4.2).
-fn build_where_clause(
-    conditions: &[Condition],
-    column_names: &[Ident],
-) -> Result<(String, Vec<String>), DbError> {
-    if conditions.is_empty() {
-        return Ok((String::new(), Vec::new()));
-    }
-
-    let mut values = Vec::new();
-    let mut clause = String::new();
-    for (i, condition) in conditions.iter().enumerate() {
-        let column = Ident::find_in(column_names, &condition.column, NotAllowedKind::Column)?;
-        let cast = format!("CAST({} AS CHAR)", quote_ident_mysql(column));
-
-        let inner = if condition.op == FilterOp::Ilike {
-            let value = condition.value.clone().ok_or_else(|| {
-                DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
-            })?;
-            values.push(value);
-            format!("LOWER({cast}) LIKE LOWER(?)")
-        } else if condition.op.takes_value() {
-            let value = condition.value.clone().ok_or_else(|| {
-                DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
-            })?;
-            values.push(value);
-            format!("{cast} {} ?", op_sql(condition.op))
-        } else {
-            format!("{cast} {}", op_sql(condition.op))
-        };
-        let wrapped = if condition.not {
-            format!("(NOT ({inner}))")
-        } else {
-            format!("({inner})")
-        };
-
-        if i > 0 {
-            let logic = condition
-                .logic
-                .ok_or_else(|| DbError::FilterParse(format!("condition {i} is missing logic")))?;
-            clause.push_str(match logic {
-                Logic::And => " AND ",
-                Logic::Or => " OR ",
-            });
-        }
-        clause.push_str(&wrapped);
-    }
-    Ok((format!(" where {clause}"), values))
-}
-
 fn cast_text(column: &str) -> String {
     format!("CAST({column} AS CHAR)")
 }
 
-const JOIN_DIALECT: Dialect = Dialect {
+fn cast_param(placeholder: &str, target: &str) -> String {
+    format!("CAST({placeholder} AS {target})")
+}
+
+const DIALECT: Dialect = Dialect {
     quote: quote_ident_mysql,
     cast_text,
+    cast_param,
     numbered: false,
     ilike: IlikeStyle::LoweredLike,
 };
@@ -113,6 +67,29 @@ const JOIN_DIALECT: Dialect = Dialect {
 const MARIADB_JSON_COLUMNS_SQL: &str = "constraint_name from information_schema.check_constraints \
      where constraint_schema = ? and table_name = ? \
        and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
+
+/// The typed filter comparison for an `information_schema.COLUMNS.DATA_TYPE`
+/// (`spec/protocol.md` §5.4.2). A bare `DECIMAL` cast is `DECIMAL(10,0)` and
+/// rounds; a temporal value is bound bare because MySQL 8.4 compares a TIME
+/// column unequal to an equal `CAST(? AS TIME)`, and coerces a string to the
+/// column's own temporal type.
+fn typed_compare(data_type: &str) -> Option<TypedCompare> {
+    let (form, cast) = match data_type.to_ascii_lowercase().as_str() {
+        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" | "decimal"
+        | "numeric" => (ValueForm::Number, Some("DECIMAL(65,30)")),
+        "float" => (ValueForm::Float, Some("FLOAT")),
+        "double" => (ValueForm::Float, Some("DOUBLE")),
+        "date" => (ValueForm::Date, None),
+        "datetime" | "timestamp" => (ValueForm::Timestamp, None),
+        "time" => (ValueForm::Time, None),
+        _ => return None,
+    };
+    Some(TypedCompare {
+        form: Some(form),
+        cast,
+        int_cast: None,
+    })
+}
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
 fn column_class(data_type: &str, column_type: &str) -> ColumnClass {
@@ -318,11 +295,11 @@ impl MySqlSource {
             .map(|(name, data_type, comment, collation, column_type)| {
                 // column_type keeps what data_type drops: `tinyint(1)`,
                 // `int unsigned`, an enum's members.
-                let (type_name, class) = if json_columns.contains(&name) {
-                    ("json".to_string(), ColumnClass::Json)
+                let (type_name, class, compare) = if json_columns.contains(&name) {
+                    ("json".to_string(), ColumnClass::Json, None)
                 } else {
                     let class = column_class(&data_type, &column_type);
-                    (column_type, class)
+                    (column_type, class, typed_compare(&data_type))
                 };
                 let (key, references) = if pk_columns.contains(&name) {
                     (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
@@ -333,6 +310,7 @@ impl MySqlSource {
                 };
                 ColMeta {
                     class,
+                    compare,
                     collation,
                     comment: (!comment.is_empty()).then_some(comment),
                     key,
@@ -597,7 +575,7 @@ impl DbSource for MySqlSource {
             .transpose()?;
 
         let (where_clause, filter_values) = match &opts.filter {
-            Some(filter) => build_where_clause(filter, &column_names)?,
+            Some(filter) => join::table_where_clause(filter, &meta.columns, &DIALECT)?,
             None => (String::new(), Vec::new()),
         };
 
@@ -700,7 +678,7 @@ impl DbSource for MySqlSource {
             tables.push(meta.clone());
         }
         let plan = join::plan(spec, tables, &opts)?;
-        let (body, values) = join::build_select(&plan, &JOIN_DIALECT);
+        let (body, values) = join::build_select(&plan, &DIALECT);
 
         // AssertSqlSafe: the statement is built from catalog names and
         // generated aliases only; all values are bound.

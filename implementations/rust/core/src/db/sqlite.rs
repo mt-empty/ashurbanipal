@@ -5,15 +5,14 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
 use super::{
-    group_referenced_by, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef, ConstraintFk,
+    group_referenced_by, quote_ident, ColumnInfo, ColumnPair, ColumnRef, ConstraintFk,
     ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident, IndexInfo,
     KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData,
     TableInfo,
 };
-use crate::filter::{Condition, FilterOp, Logic};
 use crate::join::{
     self, group_unique_keys, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect,
-    IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, UniqueKey,
+    IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, TypedCompare, UniqueKey,
 };
 
 /// Catalog/metadata queries need a fixed bounded timeout.
@@ -200,6 +199,22 @@ fn partial_index_predicate(sql: &str) -> Option<String> {
     None
 }
 
+/// The typed filter comparison for a column class (`spec/protocol.md`
+/// §5.4.2). A stored value need not match its declared type, so values are
+/// not checked; bound bare, the column's affinity compares a value that
+/// reads as a number numerically and anything else as text.
+fn typed_compare(class: &ColumnClass) -> Option<TypedCompare> {
+    matches!(
+        class,
+        ColumnClass::Number | ColumnClass::Float | ColumnClass::Temporal | ColumnClass::Time
+    )
+    .then_some(TypedCompare {
+        form: None,
+        cast: None,
+        int_cast: None,
+    })
+}
+
 /// `spec/protocol.md` §5.11.2: recognised names first, then SQLite's own
 /// affinity rules (`docs/adapter-decisions.md` §5.11).
 fn column_class(declared: &str) -> ColumnClass {
@@ -234,9 +249,14 @@ fn cast_text(column: &str) -> String {
     format!("CAST({column} AS TEXT)")
 }
 
-const JOIN_DIALECT: Dialect = Dialect {
+fn cast_param(placeholder: &str, target: &str) -> String {
+    format!("CAST({placeholder} AS {target})")
+}
+
+const DIALECT: Dialect = Dialect {
     quote: quote_ident,
     cast_text,
+    cast_param,
     numbered: false,
     ilike: IlikeStyle::Like,
 };
@@ -263,8 +283,10 @@ async fn table_meta(
             } else {
                 (None, None)
             };
+            let class = column_class(&declared);
             ColMeta {
-                class: column_class(&declared),
+                compare: typed_compare(&class),
+                class,
                 collation: None,
                 comment: None,
                 key,
@@ -300,61 +322,6 @@ fn row_to_json<'a>(
         map.insert(name.to_string(), value);
     }
     map
-}
-
-/// SQLite equivalent of `postgres::build_where_clause`: `?` placeholders
-/// instead of `$N` (SQLite has no numbered-from-N form usable alongside
-/// `LIMIT ?`/`OFFSET ?`), `CAST(col AS TEXT)` instead of `::text`, and
-/// `ILIKE` mapped to plain `LIKE` since SQLite has no case-insensitive-by-
-/// default keyword distinct from `LIKE` (SQLite's `LIKE` is already ASCII
-/// case-insensitive).
-fn build_where_clause(
-    conditions: &[Condition],
-    column_names: &[Ident],
-) -> Result<(String, Vec<String>), DbError> {
-    if conditions.is_empty() {
-        return Ok((String::new(), Vec::new()));
-    }
-
-    let mut values = Vec::new();
-    let mut clause = String::new();
-    for (i, condition) in conditions.iter().enumerate() {
-        let column = Ident::find_in(column_names, &condition.column, NotAllowedKind::Column)?;
-
-        let keyword = if condition.op == FilterOp::Ilike {
-            "LIKE"
-        } else {
-            op_sql(condition.op)
-        };
-        let quoted_column = quote_ident(column);
-        let inner = if condition.op.takes_value() {
-            let value = condition.value.clone().ok_or_else(|| {
-                DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
-            })?;
-            let frag = format!("CAST({quoted_column} AS TEXT) {keyword} ?");
-            values.push(value);
-            frag
-        } else {
-            format!("CAST({quoted_column} AS TEXT) {keyword}")
-        };
-        let wrapped = if condition.not {
-            format!("(NOT ({inner}))")
-        } else {
-            format!("({inner})")
-        };
-
-        if i > 0 {
-            let logic = condition
-                .logic
-                .ok_or_else(|| DbError::FilterParse(format!("condition {i} is missing logic")))?;
-            clause.push_str(match logic {
-                Logic::And => " AND ",
-                Logic::Or => " OR ",
-            });
-        }
-        clause.push_str(&wrapped);
-    }
-    Ok((format!(" where {clause}"), values))
 }
 
 impl DbSource for SqliteSource {
@@ -419,7 +386,7 @@ impl DbSource for SqliteSource {
             .transpose()?;
 
         let (where_clause, filter_values) = match &opts.filter {
-            Some(filter) => build_where_clause(filter, &column_names)?,
+            Some(filter) => join::table_where_clause(filter, &meta.columns, &DIALECT)?,
             None => (String::new(), Vec::new()),
         };
 
@@ -489,7 +456,7 @@ impl DbSource for SqliteSource {
             }
             let tables = names.iter().map(|n| metas[n].clone()).collect();
             let plan = join::plan(spec, tables, &opts)?;
-            let (body, values) = join::build_select(&plan, &JOIN_DIALECT);
+            let (body, values) = join::build_select(&plan, &DIALECT);
 
             // AssertSqlSafe: the statement is built from catalog names and
             // generated aliases only; all values are bound.

@@ -25,7 +25,7 @@ pub use db::{
     NotAllowedDetail, NotAllowedKind, ProblemDetails, QueryOpts, ReferencedBy, SchemaListing,
     Source, Structure, TableData, TableInfo,
 };
-pub use filter::{Condition, FilterError, FilterOp, Logic};
+pub use filter::{Condition, FilterError, FilterOp, FilterValue, Logic};
 pub use join::{JoinColumnInfo, JoinData, JoinError, JoinOpts, JoinSpec};
 pub use siblings::{SiblingChecker, SiblingStatus, SiblingsResponse};
 

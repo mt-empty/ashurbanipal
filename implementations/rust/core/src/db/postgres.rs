@@ -5,15 +5,15 @@ use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 use super::{
-    group_referenced_by, no_default_schema, op_sql, quote_ident, ColumnInfo, ColumnPair, ColumnRef,
+    group_referenced_by, no_default_schema, quote_ident, ColumnInfo, ColumnPair, ColumnRef,
     ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
     Engine, Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing,
     Structure, TableData, TableInfo,
 };
-use crate::filter::{Condition, Logic};
+use crate::filter::ValueForm;
 use crate::join::{
     self, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData,
-    JoinOpts, JoinSpec, TableMeta, UniqueKey,
+    JoinOpts, JoinSpec, TableMeta, TypedCompare, UniqueKey,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -25,67 +25,44 @@ struct ReadableTable {
     name: Ident,
 }
 
-/// Validates filter columns before SQL interpolation (`spec/protocol.md` §5.4.2).
-fn build_where_clause(
-    conditions: &[Condition],
-    column_names: &[Ident],
-) -> Result<(String, Vec<String>), DbError> {
-    if conditions.is_empty() {
-        return Ok((String::new(), Vec::new()));
-    }
-
-    let mut values = Vec::new();
-    let mut next_param = 3;
-    let mut clause = String::new();
-    for (i, condition) in conditions.iter().enumerate() {
-        let column = Ident::find_in(column_names, &condition.column, NotAllowedKind::Column)?;
-
-        // Defend the SQL boundary if a caller bypasses filter::parse.
-        let inner = if condition.op.takes_value() {
-            let value = condition.value.clone().ok_or_else(|| {
-                DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
-            })?;
-            let frag = format!(
-                "{}::text {} ${next_param}",
-                quote_ident(column),
-                op_sql(condition.op)
-            );
-            values.push(value);
-            next_param += 1;
-            frag
-        } else {
-            format!("{}::text {}", quote_ident(column), op_sql(condition.op))
-        };
-        let wrapped = if condition.not {
-            format!("(NOT ({inner}))")
-        } else {
-            format!("({inner})")
-        };
-
-        if i > 0 {
-            let logic = condition
-                .logic
-                .ok_or_else(|| DbError::FilterParse(format!("condition {i} is missing logic")))?;
-            clause.push_str(match logic {
-                Logic::And => " AND ",
-                Logic::Or => " OR ",
-            });
-        }
-        clause.push_str(&wrapped);
-    }
-    Ok((format!(" where {clause}"), values))
-}
-
 fn cast_text(column: &str) -> String {
     format!("{column}::text")
 }
 
-const JOIN_DIALECT: Dialect = Dialect {
+fn cast_param(placeholder: &str, target: &str) -> String {
+    format!("{placeholder}::{target}")
+}
+
+const DIALECT: Dialect = Dialect {
     quote: quote_ident,
     cast_text,
+    cast_param,
     numbered: true,
     ilike: IlikeStyle::Native,
 };
+
+/// The typed filter comparison for an `information_schema.columns.data_type`
+/// (`spec/protocol.md` §5.4.2); the cast target matches the column's own type
+/// so `real` compares as `real`.
+fn typed_compare(data_type: &str) -> Option<TypedCompare> {
+    let int_cast = matches!(data_type, "smallint" | "integer" | "bigint").then_some("int8");
+    let (form, cast) = match data_type {
+        "smallint" | "integer" | "bigint" | "numeric" => (ValueForm::Number, "numeric"),
+        "real" => (ValueForm::Float, "real"),
+        "double precision" => (ValueForm::Float, "float8"),
+        "date" => (ValueForm::Date, "date"),
+        "timestamp without time zone" => (ValueForm::Timestamp, "timestamp"),
+        "timestamp with time zone" => (ValueForm::TimestampTz, "timestamptz"),
+        "time without time zone" => (ValueForm::Time, "time"),
+        "time with time zone" => (ValueForm::TimeTz, "timetz"),
+        _ => return None,
+    };
+    Some(TypedCompare {
+        form: Some(form),
+        cast: Some(cast),
+        int_cast,
+    })
+}
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
 fn column_class(data_type: &str, udt_schema: &str, udt_name: &str, is_enum: bool) -> ColumnClass {
@@ -476,6 +453,7 @@ impl PgPoolSource {
                         (None, None)
                     };
                     ColMeta {
+                        compare: typed_compare(&data_type),
                         class: column_class(&data_type, &udt_schema, &udt_name, is_enum),
                         collation,
                         comment,
@@ -549,12 +527,13 @@ impl PgPoolSource {
 /// Maps residual SELECT-denied errors to `NotAllowed(NotReadable)`, a
 /// canceled statement (SQLSTATE 57014 — the timeout set by `bounded_tx`
 /// firing) to `QueryTimeout`, and a filter value Postgres's text encoding
-/// rejects (e.g. a NUL byte) to `FilterParse` — all → a defined
+/// or a typed comparison's cast rejects (SQLSTATE class 22, only when values
+/// were bound) to `FilterParse` — all → a defined
 /// `spec/protocol.md` §2 code, never a raw 500 (`docs/adapter-decisions.md`
 /// §5.4.2 has the cross-backend filter-value rationale). When the request
 /// sorts, an "undefined function" error (SQLSTATE 42883) is the sort column's
 /// type having no ordering operator (`json`, `xml`, geometric types).
-fn map_select_denied(e: sqlx::Error, table: &str, sort: Option<&str>) -> DbError {
+fn map_select_denied(e: sqlx::Error, table: &str, sort: Option<&str>, filtered: bool) -> DbError {
     if let sqlx::Error::Database(db) = &e {
         match db.code().as_deref() {
             Some("42501") => {
@@ -569,7 +548,7 @@ fn map_select_denied(e: sqlx::Error, table: &str, sort: Option<&str>) -> DbError
                     return DbError::Unsortable(column.to_string());
                 }
             }
-            Some("22021") | Some("22P05") => {
+            Some(code) if filtered && code.starts_with("22") => {
                 return DbError::FilterParse(format!(
                     "value invalid for this backend: {}",
                     db.message()
@@ -679,7 +658,7 @@ impl DbSource for PgPoolSource {
             .transpose()?;
 
         let (where_clause, filter_values) = match &opts.filter {
-            Some(filter) => build_where_clause(filter, &column_names)?,
+            Some(filter) => join::table_where_clause(filter, &meta.columns, &DIALECT)?,
             None => (String::new(), Vec::new()),
         };
 
@@ -706,13 +685,13 @@ impl DbSource for PgPoolSource {
         let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(opts.limit as i64)
             .bind(opts.offset as i64);
+        let filtered = !filter_values.is_empty();
         for value in filter_values {
             query = query.bind(value);
         }
-        let pg_rows = query
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(|e| map_select_denied(e, found.name.as_str(), opts.sort.as_deref()))?;
+        let pg_rows = query.fetch_all(&mut *tx).await.map_err(|e| {
+            map_select_denied(e, found.name.as_str(), opts.sort.as_deref(), filtered)
+        })?;
         let total_approx =
             sqlx::query_scalar::<_, i64>("select reltuples::bigint from pg_class where oid = $1")
                 .bind(found.oid)
@@ -764,20 +743,21 @@ impl DbSource for PgPoolSource {
             tables.push(meta.clone());
         }
         let plan = join::plan(spec, tables, &opts)?;
-        let (body, values) = join::build_select(&plan, &JOIN_DIALECT);
+        let (body, values) = join::build_select(&plan, &DIALECT);
 
         // AssertSqlSafe: the statement is built from catalog names and
         // generated aliases only; all values are bound.
         let mut query = sqlx::query(sqlx::AssertSqlSafe(format!("select {body}")))
             .bind(opts.limit as i64 + 1)
             .bind(opts.offset as i64);
+        let filtered = !values.is_empty();
         for value in values {
             query = query.bind(value);
         }
         let mut pg_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, &spec.table, opts.sort.as_deref()))?;
+            .map_err(|e| map_select_denied(e, &spec.table, opts.sort.as_deref(), filtered))?;
         tx.commit().await?;
 
         let has_more = pg_rows.len() > opts.limit as usize;
@@ -1045,72 +1025,53 @@ mod tests {
         values: Vec<String>,
     }
 
-    /// Static mirror of the seed schema's columns for the tables the
-    /// fixture references (README: unit runners substitute this for the
-    /// live `information_schema` lookup).
-    fn seed_columns(table: &str) -> Vec<Ident> {
-        let cols: &[&str] = match table {
-            "users" => &[
-                "id",
-                "email",
-                "full_name",
-                "age",
-                "is_active",
-                "login_count",
-                "metadata",
-                "last_login_at",
-                "created_at",
-            ],
-            "orders" => &[
-                "id",
-                "user_id",
-                "status",
-                "total_cents",
-                "discount_pct",
-                "tags",
-                "line_items",
-                "created_at",
-            ],
-            "products" => &[
-                "id",
-                "sku",
-                "name",
-                "category",
-                "price",
-                "weight_kg",
-                "in_stock",
-                "description",
-                "created_on",
-            ],
-            other => panic!("fixture references unmapped table {other:?}"),
-        };
-        cols.iter().map(|c| Ident::for_test(c)).collect()
+    #[derive(serde::Deserialize)]
+    struct FixtureColumn {
+        #[serde(rename = "type")]
+        data_type: String,
     }
 
-    /// Fixture placeholders are numbered from `$1`; this implementation binds
-    /// limit/offset first, so its real clause starts at `$3`.
-    fn shift_placeholders(fragment: &str, by: u32) -> String {
-        let mut out = String::with_capacity(fragment.len());
-        let mut chars = fragment.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c != '$' {
-                out.push(c);
-                continue;
-            }
-            let mut digits = String::new();
-            while let Some(d) = chars.peek().filter(|d| d.is_ascii_digit()) {
-                digits.push(*d);
-                chars.next();
-            }
-            out.push('$');
-            out.push_str(&(digits.parse::<u32>().unwrap() + by).to_string());
+    /// The fixture's `tables` map in place of the live catalog lookup
+    /// (`spec/fixtures/README.md`).
+    fn seed_columns(file: &serde_json::Value, table: &str) -> Vec<ColMeta> {
+        let columns: std::collections::BTreeMap<String, FixtureColumn> =
+            serde_json::from_value(file["tables"][table].clone()).unwrap();
+        columns
+            .into_iter()
+            .map(|(name, c)| ColMeta {
+                name: Ident::for_test(&name),
+                compare: typed_compare(&c.data_type),
+                class: column_class(&c.data_type, "", "", false),
+                type_name: c.data_type,
+                collation: None,
+                key: None,
+                references: None,
+                comment: None,
+            })
+            .collect()
+    }
+
+    /// The fixture numbers placeholders from `$1`; this backend binds limit
+    /// and offset first.
+    fn shift_placeholders(clause: &str, by: usize) -> String {
+        let mut out = String::new();
+        let mut rest = clause;
+        while let Some(i) = rest.find('$') {
+            out.push_str(&rest[..=i]);
+            rest = &rest[i + 1..];
+            let n = rest.bytes().take_while(u8::is_ascii_digit).count();
+            let num: usize = rest[..n].parse().unwrap();
+            out.push_str(&(num + by).to_string());
+            rest = &rest[n..];
         }
+        out.push_str(rest);
         out
     }
 
     #[test]
     fn filter_builder_fixtures() {
         let file: FixtureFile = serde_json::from_str(FIXTURES).unwrap();
+        let raw_file: serde_json::Value = serde_json::from_str(FIXTURES).unwrap();
         assert!(!file.cases.is_empty());
         for case in &file.cases {
             let name = &case.name;
@@ -1120,13 +1081,16 @@ mod tests {
                 (None, None) => panic!("case {name}: neither raw nor conditions"),
             };
             let parsed = filter::parse(&raw);
-            match (&case.expect, &case.expect_error) {
+            let columns = seed_columns(&raw_file, &case.table);
+            let build = |conditions: &[filter::Condition]| {
+                join::table_where_clause(conditions, &columns, &DIALECT)
+            };
+            match (&case.expect, case.expect_error.as_deref()) {
                 (Some(expected), None) => {
                     let conditions =
                         parsed.unwrap_or_else(|e| panic!("case {name}: parse failed: {e}"));
-                    let (where_clause, values) =
-                        build_where_clause(&conditions, &seed_columns(&case.table))
-                            .unwrap_or_else(|e| panic!("case {name}: build failed: {e}"));
+                    let (where_clause, values) = build(&conditions)
+                        .unwrap_or_else(|e| panic!("case {name}: build failed: {e}"));
                     let expected_clause = if expected.where_clause.is_empty() {
                         String::new()
                     } else {
@@ -1135,15 +1099,14 @@ mod tests {
                     assert_eq!(where_clause, expected_clause, "case {name}: WHERE mismatch");
                     assert_eq!(values, expected.values, "case {name}: bind values mismatch");
                 }
-                (None, Some(kind)) if kind == "unknown_column" => {
+                (None, Some(kind @ ("unknown_column" | "invalid_value"))) => {
                     let conditions = parsed.unwrap_or_else(|e| {
                         panic!("case {name}: should parse (rejection is builder-stage): {e}")
                     });
-                    match build_where_clause(&conditions, &seed_columns(&case.table)) {
-                        Err(DbError::NotAllowed(_)) => {}
-                        other => panic!(
-                            "case {name}: expected NotAllowed from the builder, got {other:?}"
-                        ),
+                    match (kind, build(&conditions)) {
+                        ("unknown_column", Err(DbError::NotAllowed(_)))
+                        | ("invalid_value", Err(DbError::FilterParse(_))) => {}
+                        (_, other) => panic!("case {name}: expected {kind}, got {other:?}"),
                     }
                 }
                 (None, Some(kind)) => {

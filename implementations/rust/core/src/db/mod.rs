@@ -464,9 +464,8 @@ pub(crate) fn quote_ident(ident: &Ident) -> String {
 }
 
 /// The hardcoded operator→SQL-keyword table — wire text never becomes an
-/// operator except through this match. Each backend's `build_where_clause`
-/// wraps the keyword in its own cast/placeholder syntax, and skips this
-/// entirely for `Ilike` on SQLite/MySQL, which have no such keyword.
+/// operator except through this match. `join::filter_sql` wraps the keyword
+/// in each engine's cast/placeholder syntax, and spells `Ilike` per engine.
 pub(crate) fn op_sql(op: FilterOp) -> &'static str {
     match op {
         FilterOp::Eq => "=",
@@ -477,6 +476,8 @@ pub(crate) fn op_sql(op: FilterOp) -> &'static str {
         FilterOp::Le => "<=",
         FilterOp::Like => "LIKE",
         FilterOp::Ilike => "ILIKE",
+        FilterOp::In => "IN",
+        FilterOp::Between => "BETWEEN",
         FilterOp::IsNull => "IS NULL",
         FilterOp::IsNotNull => "IS NOT NULL",
     }

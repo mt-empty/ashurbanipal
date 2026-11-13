@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::db::{ColumnInfo, ColumnRef, DbError, Ident, KeyKind, NotAllowedKind};
-use crate::filter::{Condition, FilterOp, Logic};
+use crate::filter::{check_value_shape, Condition, FilterOp, FilterValue, Logic, ValueForm};
 
 pub const MAX_JOIN_BYTES: usize = 8192;
 pub const MAX_TABLES: usize = 4;
@@ -233,12 +233,38 @@ impl Serialize for ColumnClass {
     }
 }
 
+/// How a filter compares a column in its own type (`spec/protocol.md`
+/// §5.4.2): the form a value must have, and the engine's cast target for the
+/// bound value, from a hardcoded per-engine table (`None` binds it bare).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TypedCompare {
+    /// `None` skips the value check: SQLite does not enforce column types.
+    pub form: Option<ValueForm>,
+    pub cast: Option<&'static str>,
+    /// The target for a whole number that fits 64 bits, so an integer
+    /// column keeps its index (Postgres compares `int = numeric` by
+    /// converting the column).
+    pub int_cast: Option<&'static str>,
+}
+
+impl TypedCompare {
+    /// The cast target for one bound value.
+    pub fn cast_for(&self, value: &str) -> Option<&'static str> {
+        match self.int_cast {
+            Some(target) if value.parse::<i64>().is_ok() => Some(target),
+            _ => self.cast,
+        }
+    }
+}
+
 /// One column as the live catalog reports it.
 #[derive(Debug, Clone)]
 pub struct ColMeta {
     pub name: Ident,
     pub type_name: String,
     pub class: ColumnClass,
+    /// `None`: filters compare the column's text cast.
+    pub compare: Option<TypedCompare>,
     /// Set where two text collations can clash (`spec/protocol.md` §5.4.1).
     pub collation: Option<String>,
     pub key: Option<KeyKind>,
@@ -429,7 +455,7 @@ struct ResolvedCondition {
     logic: Option<Logic>,
     not: bool,
     op: FilterOp,
-    value: Option<String>,
+    value: Option<FilterValue>,
     pos: usize,
     col: usize,
 }
@@ -673,24 +699,17 @@ pub fn plan(spec: &JoinSpec, tables: Vec<TableMeta>, opts: &JoinOpts) -> Result<
                 "condition {i}: join position {pos} is not in the join"
             ))
         })?;
-        if c.op.takes_value() != c.value.is_some() {
-            return Err(DbError::FilterParse(format!(
-                "condition {i}: op {:?} {} a value",
-                c.op.as_wire(),
-                if c.op.takes_value() {
-                    "requires"
-                } else {
-                    "takes no"
-                }
-            )));
-        }
+        check_value_shape(c.op, c.value.as_ref())
+            .map_err(|e| DbError::FilterParse(format!("condition {i}: {e}")))?;
+        let col = column_index(table, &c.column)?;
+        check_typed_values(&table.columns[col], c.op, c.value.as_ref())?;
         filter.push(ResolvedCondition {
             logic: c.logic,
             not: c.not,
             op: c.op,
             value: c.value.clone(),
             pos,
-            col: column_index(table, &c.column)?,
+            col,
         });
     }
 
@@ -750,9 +769,148 @@ pub struct Dialect {
     pub quote: fn(&Ident) -> String,
     /// The expression rendering a column as text.
     pub cast_text: fn(&str) -> String,
+    /// Converts a bound placeholder to a [`TypedCompare::cast`] target.
+    pub cast_param: fn(&str, &str) -> String,
     /// `$n` placeholders (Postgres) instead of `?`.
     pub numbered: bool,
     pub ilike: IlikeStyle,
+}
+
+/// The column-typed half of the `spec/protocol.md` §5.4.2 value check.
+fn check_typed_values(
+    col: &ColMeta,
+    op: FilterOp,
+    value: Option<&FilterValue>,
+) -> Result<(), DbError> {
+    let (Some(form), Some(value)) = (col.compare.and_then(|c| c.form), value) else {
+        return Ok(());
+    };
+    if op.is_pattern() {
+        return Ok(());
+    }
+    match value.items().iter().find(|v| !form.accepts(v)) {
+        Some(bad) => Err(DbError::FilterParse(format!(
+            "value {bad:?} for column {:?} must be {}",
+            col.name.as_str(),
+            form.describe()
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// One condition with its column resolved; `expr` is the column as SQL.
+struct FilterTerm<'a> {
+    logic: Option<Logic>,
+    not: bool,
+    op: FilterOp,
+    value: Option<&'a FilterValue>,
+    expr: String,
+    col: &'a ColMeta,
+}
+
+/// The conditions joined by their logic, without `where`. Values are
+/// appended to `values` in placeholder order; numbered placeholders start at
+/// `$3`, after limit and offset.
+fn filter_sql(terms: &[FilterTerm], d: &Dialect, values: &mut Vec<String>) -> String {
+    let mut next_param = 3;
+    let mut clause = String::new();
+    for (i, t) in terms.iter().enumerate() {
+        let typed = t.col.compare.filter(|_| !t.op.is_pattern());
+        let mut placeholder = |value: &str| {
+            let p = if d.numbered {
+                next_param += 1;
+                format!("${}", next_param - 1)
+            } else {
+                "?".to_string()
+            };
+            match typed.and_then(|c| c.cast_for(value)) {
+                Some(target) => (d.cast_param)(&p, target),
+                None => p,
+            }
+        };
+        let lhs = if typed.is_some() {
+            t.expr.clone()
+        } else {
+            (d.cast_text)(&t.expr)
+        };
+        let items = t.value.map(FilterValue::items).unwrap_or_default();
+        let inner = match t.op {
+            FilterOp::IsNull | FilterOp::IsNotNull => {
+                format!("{} {}", t.expr, crate::db::op_sql(t.op))
+            }
+            FilterOp::In => {
+                let list = items.iter().map(|v| placeholder(v)).collect::<Vec<_>>();
+                format!("{lhs} IN ({})", list.join(", "))
+            }
+            FilterOp::Between => {
+                let (lo, hi) = (placeholder(&items[0]), placeholder(&items[1]));
+                format!("{lhs} BETWEEN {lo} AND {hi}")
+            }
+            FilterOp::Ilike => match d.ilike {
+                IlikeStyle::Native => format!("{lhs} ILIKE {}", placeholder(&items[0])),
+                IlikeStyle::Like => format!("{lhs} LIKE {}", placeholder(&items[0])),
+                IlikeStyle::LoweredLike => {
+                    format!("LOWER({lhs}) LIKE LOWER({})", placeholder(&items[0]))
+                }
+            },
+            op => format!("{lhs} {} {}", crate::db::op_sql(op), placeholder(&items[0])),
+        };
+        values.extend(items.iter().cloned());
+        if i > 0 {
+            clause.push_str(match t.logic {
+                Some(Logic::Or) => " OR ",
+                _ => " AND ",
+            });
+        }
+        clause.push_str(&if t.not {
+            format!("(NOT ({inner}))")
+        } else {
+            format!("({inner})")
+        });
+    }
+    clause
+}
+
+/// The data route's ` where …` (empty without conditions) and its values,
+/// with each condition's column checked against `columns`
+/// (`spec/protocol.md` §5.4.2).
+pub(crate) fn table_where_clause(
+    conditions: &[Condition],
+    columns: &[ColMeta],
+    d: &Dialect,
+) -> Result<(String, Vec<String>), DbError> {
+    let mut terms = Vec::with_capacity(conditions.len());
+    for (i, c) in conditions.iter().enumerate() {
+        let col = columns
+            .iter()
+            .find(|m| m.name.as_str() == c.column)
+            .ok_or_else(|| {
+                DbError::not_allowed(NotAllowedKind::Column, format!("column {:?}", c.column))
+            })?;
+        // Defends the SQL boundary when a caller bypasses filter::parse.
+        check_value_shape(c.op, c.value.as_ref())
+            .map_err(|e| DbError::FilterParse(format!("condition {i}: {e}")))?;
+        if i > 0 && c.logic.is_none() {
+            return Err(DbError::FilterParse(format!(
+                "condition {i} is missing logic"
+            )));
+        }
+        check_typed_values(col, c.op, c.value.as_ref())?;
+        terms.push(FilterTerm {
+            logic: c.logic,
+            not: c.not,
+            op: c.op,
+            value: c.value.as_ref(),
+            expr: (d.quote)(&col.name),
+            col,
+        });
+    }
+    let mut values = Vec::new();
+    let clause = filter_sql(&terms, d, &mut values);
+    if clause.is_empty() {
+        return Ok((String::new(), values));
+    }
+    Ok((format!(" where {clause}"), values))
 }
 
 #[derive(Clone, Copy)]
@@ -800,49 +958,20 @@ pub fn build_select(plan: &Plan, d: &Dialect) -> (String, Vec<String>) {
         sql.push_str(&format!(" {} {} on {on}", kind.sql(), from_item(position)));
     }
 
+    let terms: Vec<FilterTerm> = plan
+        .filter
+        .iter()
+        .map(|c| FilterTerm {
+            logic: c.logic,
+            not: c.not,
+            op: c.op,
+            value: c.value.as_ref(),
+            expr: alias(c.pos, c.col),
+            col: &plan.tables[c.pos].columns[c.col],
+        })
+        .collect();
     let mut values = Vec::new();
-    let mut next_param = 3;
-    let mut clause = String::new();
-    for (i, c) in plan.filter.iter().enumerate() {
-        let cast = (d.cast_text)(&alias(c.pos, c.col));
-        let mut placeholder = || {
-            if d.numbered {
-                let p = format!("${next_param}");
-                next_param += 1;
-                p
-            } else {
-                "?".to_string()
-            }
-        };
-        let inner = match (c.op, &c.value) {
-            (op, None) => format!("{cast} {}", crate::db::op_sql(op)),
-            (FilterOp::Ilike, Some(v)) => {
-                values.push(v.clone());
-                match d.ilike {
-                    IlikeStyle::Native => format!("{cast} ILIKE {}", placeholder()),
-                    IlikeStyle::Like => format!("{cast} LIKE {}", placeholder()),
-                    IlikeStyle::LoweredLike => {
-                        format!("LOWER({cast}) LIKE LOWER({})", placeholder())
-                    }
-                }
-            }
-            (op, Some(v)) => {
-                values.push(v.clone());
-                format!("{cast} {} {}", crate::db::op_sql(op), placeholder())
-            }
-        };
-        if i > 0 {
-            clause.push_str(match c.logic {
-                Some(Logic::Or) => " OR ",
-                _ => " AND ",
-            });
-        }
-        clause.push_str(&if c.not {
-            format!("(NOT ({inner}))")
-        } else {
-            format!("({inner})")
-        });
-    }
+    let clause = filter_sql(&terms, d, &mut values);
     if !clause.is_empty() {
         sql.push_str(&format!(" where {clause}"));
     }
@@ -870,6 +999,7 @@ mod tests {
             name: Ident::for_test(name),
             type_name: ty.into(),
             class,
+            compare: None,
             collation: None,
             key: None,
             references: None,
@@ -886,6 +1016,14 @@ mod tests {
                 col("user_id", "uuid", ColumnClass::Uuid),
                 col("status", "text", ColumnClass::Text),
                 col("tags", "ARRAY", ColumnClass::Array),
+                ColMeta {
+                    compare: Some(TypedCompare {
+                        form: Some(ValueForm::Number),
+                        cast: Some("numeric"),
+                        int_cast: Some("int8"),
+                    }),
+                    ..col("total", "integer", ColumnClass::Number)
+                },
             ],
             order_keys: vec![0],
         }
@@ -919,6 +1057,7 @@ mod tests {
         Dialect {
             quote: crate::db::quote_ident,
             cast_text: |c| format!("{c}::text"),
+            cast_param: |p, t| format!("{p}::{t}"),
             numbered: true,
             ilike: IlikeStyle::Native,
         }
@@ -1166,7 +1305,7 @@ mod tests {
             "{sql}"
         );
         assert!(
-            sql.contains(" where (t1.\"email\"::text = $3) OR (NOT (t0.\"status\"::text IS NULL))"),
+            sql.contains(" where (t1.\"email\"::text = $3) OR (NOT (t0.\"status\" IS NULL))"),
             "{sql}"
         );
         assert!(
@@ -1174,6 +1313,54 @@ mod tests {
             "{sql}"
         );
         assert_eq!(values, ["a@b.c"]);
+    }
+
+    fn cond(column: &str, op: FilterOp, value: FilterValue) -> Condition {
+        Condition {
+            logic: None,
+            not: false,
+            column: column.into(),
+            op,
+            value: Some(value),
+            join: None,
+        }
+    }
+
+    #[test]
+    fn typed_columns_compare_in_their_own_type() {
+        let spec = JoinSpec::parse(JOIN).unwrap();
+        let list = |v: &[&str]| FilterValue::List(v.iter().map(|s| s.to_string()).collect());
+        let mut o = opts();
+        o.filter = Some(vec![
+            cond("total", FilterOp::Between, list(&["1", "9.5"])),
+            Condition {
+                logic: Some(Logic::And),
+                not: true,
+                ..cond("status", FilterOp::In, list(&["a", "b"]))
+            },
+            Condition {
+                logic: Some(Logic::Or),
+                ..cond("total", FilterOp::Like, "1%".into())
+            },
+        ]);
+        let p = plan(&spec, vec![orders(), users()], &o).unwrap();
+        let (sql, values) = build_select(&p, &dialect());
+        assert!(
+            sql.contains(
+                " where (t0.\"total\" BETWEEN $3::int8 AND $4::numeric) \
+                 AND (NOT (t0.\"status\"::text IN ($5, $6))) OR (t0.\"total\"::text LIKE $7)"
+            ),
+            "{sql}"
+        );
+        assert_eq!(values, ["1", "9.5", "a", "b", "1%"]);
+
+        let mut o = opts();
+        o.filter = Some(vec![cond("total", FilterOp::In, list(&["1", "x"]))]);
+        let err = plan(&spec, vec![orders(), users()], &o).err().unwrap();
+        assert!(
+            matches!(&err, DbError::FilterParse(m) if m.contains("\"x\"") && m.contains("\"total\"")),
+            "{err:?}"
+        );
     }
 
     #[test]
