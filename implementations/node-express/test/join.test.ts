@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pgColumnClass } from "../src/db/postgres.js";
 import { FilterError, isQueryTimeout, NotAllowedError } from "../src/errors.js";
-import { parseFilter, parseFilterForJoin } from "../src/filter.js";
+import { formAccepts, parseFilter, parseFilterForJoin, type ValueForm } from "../src/filter.js";
 import {
   assignJoinLabels,
   BadJoinError,
@@ -53,6 +53,7 @@ const JOIN = `{"table":"orders","joins":[{"type":"left","table":"users",
 const pg: JoinDialect = {
   quote: (n) => `"${n.replace(/"/g, '""')}"`,
   castText: (e) => `${e}::text`,
+  castParam: (p, t) => `${p}::${t}`,
   numbered: true,
   ilike: "native",
 };
@@ -312,10 +313,84 @@ describe("buildJoinSelect", () => {
     const { body, values } = buildJoinSelect(plan, pg);
     expect(body).toContain('t0."id"::text as c0, ');
     expect(body).toContain(' from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"');
-    expect(body).toContain(' where (t1."email"::text = $3) OR (NOT (t0."status"::text IS NULL))');
+    expect(body).toContain(' where (t1."email"::text = $3) OR (NOT (t0."status" IS NULL))');
     expect(body).toMatch(/ order by t1\."email" asc, t0\."id" asc limit \$1 offset \$2$/);
     expect(values).toEqual(["a@b.c"]);
   });
+
+  it("compares a typed column in its own type and checks its values", () => {
+    const withTotal = orders();
+    withTotal.columns.push({
+      name: "total",
+      type: "integer",
+      class: { kind: "number" },
+      compare: { form: "number", cast: "numeric", intCast: "int8" },
+    });
+    const plan = planJoin(
+      parseJoin(JOIN),
+      [withTotal, users()],
+      opts({
+        filter: [
+          { column: "total", op: "BETWEEN", value: ["1", "9.5"] },
+          { logic: "AND", not: true, column: "status", op: "IN", value: ["a", "b"] },
+          { logic: "OR", column: "total", op: "LIKE", value: "1%" },
+        ],
+      }),
+    );
+    const { body, values } = buildJoinSelect(plan, pg);
+    expect(body).toContain(
+      ' where (t0."total" BETWEEN $3::int8 AND $4::numeric) AND (NOT (t0."status"::text IN ($5, $6)))' +
+        ' OR (t0."total"::text LIKE $7)',
+    );
+    expect(values).toEqual(["1", "9.5", "a", "b", "1%"]);
+    expect(() =>
+      planJoin(
+        parseJoin(JOIN),
+        [withTotal, users()],
+        opts({ filter: [{ column: "total", op: "IN", value: ["1", "x"] }] }),
+      ),
+    ).toThrow(/"x" for column "total"/);
+  });
+});
+
+describe("value forms (spec/protocol.md §5.4.2)", () => {
+  const cases: [ValueForm, string, boolean][] = [
+    ["number", "-12", true],
+    ["number", "+3.25", true],
+    ["number", ".5", false],
+    ["number", "5.", false],
+    ["number", "1e3", false],
+    ["number", "9".repeat(35), true],
+    ["number", "9".repeat(36), false],
+    ["float", "1.5e-3", true],
+    ["float", "NaN", false],
+    ["date", "2016-02-29", true],
+    ["date", "2015-02-29", false],
+    ["date", "0000-01-01", false],
+    ["date", "2016-01-01 10:00", false],
+    ["timestamp", "2016-01-01T10:30:00.123456", true],
+    ["timestamp", "2016-01-01T10:30:00Z", false],
+    ["timestamp", "2016-01-01 ", false],
+    ["time", "23:59:59", true],
+    ["time", "24:00", false],
+    ["time", "9:30", false],
+    ["time", "10:00+02", false],
+    ["timestamptz", "2016-01-01 10:00:00+00", true],
+    ["timestamptz", "2016-01-01T10:00:00.5+05:30", true],
+    ["timestamptz", "1890-01-01 00:00:00+00:53:28", true],
+    ["timestamptz", "2016-01-01 10:00-0300", true],
+    ["timestamptz", "2016-01-01 10:00Z", true],
+    ["timestamptz", "2016-01-01", true],
+    ["timestamptz", "2016-01-01Z", false],
+    ["timestamptz", "2016-01-01 10:00+5", false],
+    ["timestamptz", "2016-01-01 10:00+05:3", false],
+    ["timetz", "10:00:00+02", true],
+    ["timetz", "10:00", true],
+    ["timetz", "10:00+", false],
+  ];
+  for (const [form, v, ok] of cases) {
+    it(`${form} ${JSON.stringify(v)} → ${ok}`, () => expect(formAccepts(form, v)).toBe(ok));
+  }
 });
 
 describe("own schema", () => {

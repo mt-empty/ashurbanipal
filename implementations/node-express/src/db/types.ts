@@ -201,9 +201,8 @@ export function cellToJson(value: unknown): string | null {
 
 // The hardcoded operator -> SQL-keyword table (spec/protocol.md §5.4.2),
 // shared across backends — wire text never becomes an operator except
-// through this match. The *fragment* built around the keyword (cast
-// syntax, placeholder style, ILIKE special-casing) is backend-specific;
-// see each db/*.ts's own buildWhereClause.
+// through this match. join.ts's filterSql wraps the keyword in each engine's
+// cast and placeholder syntax, and spells ILIKE per engine.
 export function opSql(op: string): string {
   switch (op) {
     case "=":
@@ -222,6 +221,10 @@ export function opSql(op: string): string {
       return "LIKE";
     case "ILIKE":
       return "ILIKE";
+    case "IN":
+      return "IN";
+    case "BETWEEN":
+      return "BETWEEN";
     case "IS NULL":
       return "IS NULL";
     case "IS NOT NULL":

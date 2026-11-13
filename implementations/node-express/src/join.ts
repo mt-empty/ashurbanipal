@@ -7,7 +7,16 @@ import {
   opTakesValue,
 } from "./db/types.js";
 import { FilterError, NotAllowedError } from "./errors.js";
-import type { Condition } from "./filter.js";
+import {
+  type Condition,
+  checkValueShape,
+  describeForm,
+  formAccepts,
+  opIsPattern,
+  VALID_OPS,
+  type ValueForm,
+  valueItems,
+} from "./filter.js";
 
 /** Bounds for GET /api/tables/join (spec/protocol.md §5.11.1). */
 export const MAX_JOIN_BYTES = 8192;
@@ -193,11 +202,41 @@ const classKey = (c: ColumnClass): string => `${c.kind}:${c.enumType ?? ""}`;
 
 const NOT_JOINABLE = new Set<ColumnClassName>(["float", "json", "array", "other"]);
 
+/**
+ * How a filter compares a column in its own type (spec/protocol.md §5.4.2):
+ * the form a value must have, and the engine's cast target for the bound
+ * value, from a hardcoded per-engine table (absent binds it bare).
+ */
+export interface TypedCompare {
+  /** Absent skips the value check: SQLite does not enforce column types. */
+  form?: ValueForm;
+  cast?: string;
+  /**
+   * The target for a whole number that fits 64 bits, so an integer column
+   * keeps its index (Postgres compares int = numeric by converting the column).
+   */
+  intCast?: string;
+}
+
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
+/** The cast target for one bound value. */
+function castFor(t: TypedCompare, v: string): string | undefined {
+  if (t.intCast && /^[+-]?[0-9]+$/.test(v)) {
+    const n = BigInt(v);
+    if (n >= INT64_MIN && n <= INT64_MAX) return t.intCast;
+  }
+  return t.cast;
+}
+
 /** One column as the live catalog reports it. */
 export interface ColMeta {
   name: string;
   type: string;
   class: ColumnClass;
+  /** Absent: filters compare the column's text cast. */
+  compare?: TypedCompare;
   /** Set where two text collations can clash (spec/protocol.md §5.4.1). */
   collation?: string;
   key?: KeyKind;
@@ -443,10 +482,10 @@ export function planJoin(spec: JoinSpec, tables: TableMeta[], opts: JoinOpts): J
     if (!Number.isInteger(pos) || pos < 0 || pos >= tables.length) {
       throw new FilterError(`condition ${i}: join position ${pos} is not in the join`);
     }
-    if (opTakesValue(cond.op) !== (cond.value !== undefined)) {
-      throw new FilterError(`condition ${i}: op "${cond.op}" has the wrong value arity`);
-    }
-    return { cond, pos, col: columnIndex(tables[pos], cond.column) };
+    checkValueShape(cond, i);
+    const col = columnIndex(tables[pos], cond.column);
+    checkTypedValues(tables[pos].columns[col], cond);
+    return { cond, pos, col };
   });
 
   let sort: [number, number] | undefined;
@@ -465,9 +504,96 @@ export type IlikeStyle = "native" | "like" | "lowered-like";
 export interface JoinDialect {
   quote(name: string): string;
   castText(expr: string): string;
+  /** Converts a bound placeholder to a {@link TypedCompare} cast target. */
+  castParam(placeholder: string, target: string): string;
   /** `$n` placeholders (Postgres) instead of `?`. */
   numbered: boolean;
   ilike: IlikeStyle;
+}
+
+/** The column-typed half of the spec/protocol.md §5.4.2 value check. */
+function checkTypedValues(col: ColMeta, cond: Condition): void {
+  const form = col.compare?.form;
+  if (!form || opIsPattern(cond.op)) return;
+  const bad = valueItems(cond).find((v) => !formAccepts(form, v));
+  if (bad !== undefined) {
+    throw new FilterError(
+      `value ${JSON.stringify(bad)} for column ${JSON.stringify(col.name)} must be ${describeForm(form)}`,
+    );
+  }
+}
+
+/** One condition with its column resolved; `expr` is the column as SQL. */
+interface FilterTerm {
+  cond: Condition;
+  expr: string;
+  col: ColMeta;
+}
+
+/**
+ * The conditions joined by their logic, without `where`, and the values in
+ * placeholder order. Numbered placeholders start at $3, after limit and offset.
+ */
+function filterSql(terms: FilterTerm[], d: JoinDialect): { clause: string; values: string[] } {
+  const values: string[] = [];
+  let next = 3;
+  let clause = "";
+  terms.forEach(({ cond, expr, col }, i) => {
+    const typed = opIsPattern(cond.op) ? undefined : col.compare;
+    const placeholder = (v: string): string => {
+      const p = d.numbered ? `$${next++}` : "?";
+      const target = typed && castFor(typed, v);
+      return target ? d.castParam(p, target) : p;
+    };
+    const lhs = typed ? expr : d.castText(expr);
+    const items = valueItems(cond);
+    let inner: string;
+    if (!opTakesValue(cond.op)) {
+      inner = `${expr} ${opSql(cond.op)}`;
+    } else if (cond.op === "IN") {
+      inner = `${lhs} IN (${items.map((v) => placeholder(v)).join(", ")})`;
+    } else if (cond.op === "BETWEEN") {
+      const [lo, hi] = items as [string, string];
+      inner = `${lhs} BETWEEN ${placeholder(lo)} AND ${placeholder(hi)}`;
+    } else {
+      const v = items[0] as string;
+      if (cond.op === "ILIKE") {
+        if (d.ilike === "native") inner = `${lhs} ILIKE ${placeholder(v)}`;
+        else if (d.ilike === "like") inner = `${lhs} LIKE ${placeholder(v)}`;
+        else inner = `LOWER(${lhs}) LIKE LOWER(${placeholder(v)})`;
+      } else {
+        inner = `${lhs} ${opSql(cond.op)} ${placeholder(v)}`;
+      }
+    }
+    values.push(...items);
+    if (i > 0) clause += cond.logic === "OR" ? " OR " : " AND ";
+    clause += cond.not ? `(NOT (${inner}))` : `(${inner})`;
+  });
+  return { clause, values };
+}
+
+/**
+ * The data route's ` where …` ("" without conditions) and its values, with
+ * each condition's column checked against the live catalog's columns
+ * (spec/protocol.md §5.4.2).
+ */
+export function tableWhereClause(
+  conditions: Condition[],
+  columns: ColMeta[],
+  d: JoinDialect,
+): { where: string; values: string[] } {
+  const terms = conditions.map((cond, i): FilterTerm => {
+    const col = columns.find((c) => c.name === cond.column);
+    if (!col) throw new NotAllowedError(`column "${cond.column}"`, "column");
+    // Defends the SQL boundary when a caller bypasses parseFilter.
+    if (!VALID_OPS.has(cond.op)) throw new FilterError(`condition ${i} has invalid op "${cond.op}"`);
+    checkValueShape(cond, i);
+    if (i > 0 && cond.logic === undefined) throw new FilterError(`condition ${i} is missing logic`);
+    checkTypedValues(col, cond);
+    return { cond, expr: d.quote(col.name), col };
+  });
+  const { clause, values } = filterSql(terms, d);
+  return { where: clause ? ` where ${clause}` : "", values };
 }
 
 /**
@@ -518,27 +644,10 @@ export function buildJoinSelect(plan: JoinPlan, d: JoinDialect): { body: string;
     sql += ` ${isLeft ? "left join" : "inner join"} ${fromItem(position)} on ${on}`;
   });
 
-  const values: string[] = [];
-  let next = 3;
-  const placeholder = (): string => (d.numbered ? `$${next++}` : "?");
-  let clause = "";
-  plan.filter.forEach(({ cond, pos, col }, i) => {
-    const cast = d.castText(alias(pos, col));
-    let inner: string;
-    if (!opTakesValue(cond.op)) {
-      inner = `${cast} ${opSql(cond.op)}`;
-    } else if (cond.op === "ILIKE") {
-      values.push(cond.value as string);
-      if (d.ilike === "native") inner = `${cast} ILIKE ${placeholder()}`;
-      else if (d.ilike === "like") inner = `${cast} LIKE ${placeholder()}`;
-      else inner = `LOWER(${cast}) LIKE LOWER(${placeholder()})`;
-    } else {
-      values.push(cond.value as string);
-      inner = `${cast} ${opSql(cond.op)} ${placeholder()}`;
-    }
-    if (i > 0) clause += cond.logic === "OR" ? " OR " : " AND ";
-    clause += cond.not ? `(NOT (${inner}))` : `(${inner})`;
-  });
+  const { clause, values } = filterSql(
+    plan.filter.map(({ cond, pos, col }) => ({ cond, expr: alias(pos, col), col: plan.tables[pos].columns[col] })),
+    d,
+  );
   if (clause) sql += ` where ${clause}`;
   sql += orderByClause(
     plan.sort,

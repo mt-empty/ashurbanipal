@@ -1,6 +1,5 @@
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
-import { assertSafeTimeoutMs, FilterError, mapSelectDeniedMysql, NotAllowedError } from "../errors.js";
-import type { Condition } from "../filter.js";
+import { assertSafeTimeoutMs, mapSelectDeniedMysql, NotAllowedError } from "../errors.js";
 import {
   BadJoinError,
   buildJoinSelect,
@@ -17,8 +16,10 @@ import {
   joinTableRefs,
   planJoin,
   type TableMeta,
+  type TypedCompare,
   tableOrderClause,
   tableSchemas,
+  tableWhereClause,
   tieBreakKeys,
   type UniqueKey,
 } from "../join.js";
@@ -32,8 +33,6 @@ import {
   emptyStructure,
   findExact,
   groupReferencedBy,
-  opSql,
-  opTakesValue,
   type QueryOpts,
   type ReferencedByEntry,
   type SchemaListing,
@@ -60,61 +59,47 @@ export function quoteIdentMysql(ident: string): string {
   return `\`${ident.replace(/`/g, "``")}\``;
 }
 
-/** Builds MySQL filter SQL; map ILIKE through LOWER for collation independence (`spec/protocol.md` §5.4.2). */
-export function buildWhereClauseMysql(
-  conditions: Condition[],
-  columnNames: string[],
-): { where: string; values: string[] } {
-  if (conditions.length === 0) {
-    return { where: "", values: [] };
-  }
-
-  const allowed = new Set(columnNames);
-  const values: string[] = [];
-  let clause = "";
-
-  conditions.forEach((cond, i) => {
-    if (!allowed.has(cond.column)) {
-      throw new NotAllowedError(`column "${cond.column}"`, "column");
-    }
-    const cast = `CAST(${quoteIdentMysql(cond.column)} AS CHAR)`;
-
-    let inner: string;
-    if (cond.op === "ILIKE") {
-      if (cond.value === undefined) {
-        throw new FilterError(`op "${cond.op}" requires a value`);
-      }
-      values.push(cond.value);
-      inner = `LOWER(${cast}) LIKE LOWER(?)`;
-    } else if (opTakesValue(cond.op)) {
-      if (cond.value === undefined) {
-        throw new FilterError(`op "${cond.op}" requires a value`);
-      }
-      values.push(cond.value);
-      inner = `${cast} ${opSql(cond.op)} ?`;
-    } else {
-      inner = `${cast} ${opSql(cond.op)}`;
-    }
-
-    const wrapped = cond.not ? `(NOT (${inner}))` : `(${inner})`;
-    if (i > 0) {
-      if (cond.logic === undefined) {
-        throw new FilterError(`condition ${i} is missing logic`);
-      }
-      clause += cond.logic === "OR" ? " OR " : " AND ";
-    }
-    clause += wrapped;
-  });
-
-  return { where: ` where ${clause}`, values };
-}
-
 const JOIN_DIALECT: JoinDialect = {
   quote: quoteIdentMysql,
   castText: (expr) => `CAST(${expr} AS CHAR)`,
+  castParam: (p, target) => `CAST(${p} AS ${target})`,
   numbered: false,
   ilike: "lowered-like",
 };
+
+/**
+ * The typed filter comparison for an information_schema.COLUMNS.DATA_TYPE
+ * (spec/protocol.md §5.4.2). A bare DECIMAL cast is DECIMAL(10,0) and rounds;
+ * a temporal value is bound bare because MySQL 8.4 compares a TIME column
+ * unequal to an equal CAST(? AS TIME), and coerces a string to the column's
+ * own temporal type.
+ */
+export function mysqlTypedCompare(dataType: string): TypedCompare | undefined {
+  switch (dataType.toLowerCase()) {
+    case "tinyint":
+    case "smallint":
+    case "mediumint":
+    case "int":
+    case "integer":
+    case "bigint":
+    case "decimal":
+    case "numeric":
+      return { form: "number", cast: "DECIMAL(65,30)" };
+    case "float":
+      return { form: "float", cast: "FLOAT" };
+    case "double":
+      return { form: "float", cast: "DOUBLE" };
+    case "date":
+      return { form: "date" };
+    case "datetime":
+    case "timestamp":
+      return { form: "timestamp" };
+    case "time":
+      return { form: "time" };
+    default:
+      return undefined;
+  }
+}
 
 // Matches the column check MariaDB adds to every JSON column exactly, so a
 // user's own json_valid check on another column doesn't count.
@@ -464,6 +449,8 @@ export class MySqlSource implements DbSource {
         ? { name, type: "json", class: { kind: "json" } }
         : // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
           { name, type: String(r.column_type), class: mysqlColumnClass(r.data_type as string, String(r.column_type)) };
+      const compare = jsonColumns.has(name) ? undefined : mysqlTypedCompare(r.data_type as string);
+      if (compare) col.compare = compare;
       if (r.collation_name) col.collation = r.collation_name as string;
       if (pkColumns.has(name)) {
         col.key = "pk";
@@ -568,7 +555,7 @@ export class MySqlSource implements DbSource {
         }
       }
 
-      const { where: whereClause, values: filterValues } = buildWhereClauseMysql(opts.filter, columnNames);
+      const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta.columns, JOIN_DIALECT);
 
       // Alias CAST results to the column names expected by cellToJson.
       const selectList = columns

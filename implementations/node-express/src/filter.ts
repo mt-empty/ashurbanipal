@@ -1,4 +1,4 @@
-import { FilterError, NotAllowedError, quoteIdent } from "./errors.js";
+import { FilterError } from "./errors.js";
 
 /** Maximum URL-decoded filter JSON bytes (spec/protocol.md §5.4.2). */
 export const MAX_FILTER_BYTES = 8192;
@@ -6,20 +6,42 @@ export const MAX_FILTER_BYTES = 8192;
 /** Maximum conditions per filter request (spec/protocol.md §5.4.2). */
 export const MAX_CONDITIONS = 10;
 
+/** Maximum items in an IN list (spec/protocol.md §5.4.2). */
+export const MAX_IN_ITEMS = 1000;
+
 // Wire operators must come from this allow-list before reaching SQL (spec/protocol.md §5.4.2).
-const VALID_OPS = new Set(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
+export const VALID_OPS = new Set([
+  "=",
+  "!=",
+  ">",
+  "<",
+  ">=",
+  "<=",
+  "LIKE",
+  "ILIKE",
+  "IN",
+  "BETWEEN",
+  "IS NULL",
+  "IS NOT NULL",
+]);
 
 function opTakesValue(op: string): boolean {
   return op !== "IS NULL" && op !== "IS NOT NULL";
 }
 
-/** Untrusted filter input; buildWhereClause validates `column` before SQL (spec/protocol.md §5.4.2). */
+/** LIKE/ILIKE always compare the text cast, whatever the column's class. */
+export function opIsPattern(op: string): boolean {
+  return op === "LIKE" || op === "ILIKE";
+}
+
+/** Untrusted filter input; tableWhereClause validates `column` before SQL (spec/protocol.md §5.4.2). */
 export interface Condition {
   logic?: "AND" | "OR";
   not?: boolean;
   column: string;
   op: string;
-  value?: string;
+  /** A string for most ops; an array of strings for IN and BETWEEN. */
+  value?: string | string[];
   /** Table position, accepted only by {@link parseFilterForJoin} (spec/protocol.md §5.11.3). */
   join?: number;
 }
@@ -70,13 +92,7 @@ function parseFilterInner(raw: string, allowJoin: boolean): Condition[] {
     if (!VALID_OPS.has(cond.op)) {
       throw new FilterError(`condition ${i} has invalid op "${cond.op}"`);
     }
-    const takesValue = opTakesValue(cond.op);
-    if (takesValue && cond.value === undefined) {
-      throw new FilterError(`op "${cond.op}" requires a value`);
-    }
-    if (!takesValue && cond.value !== undefined) {
-      throw new FilterError(`op "${cond.op}" takes no value`);
-    }
+    checkValueShape(cond, i);
   });
 
   return conditions;
@@ -106,8 +122,12 @@ function validateConditionShape(raw: unknown, index: number, allowJoin: boolean)
   if (obj.not !== undefined && typeof obj.not !== "boolean") {
     throw new FilterError(`condition ${index} has a non-boolean "not"`);
   }
-  if (obj.value !== undefined && typeof obj.value !== "string") {
-    throw new FilterError(`condition ${index} has a non-string "value"`);
+  if (
+    obj.value !== undefined &&
+    typeof obj.value !== "string" &&
+    !(Array.isArray(obj.value) && obj.value.every((v) => typeof v === "string"))
+  ) {
+    throw new FilterError(`condition ${index} has a "value" that is neither a string nor an array of strings`);
   }
   if (obj.join !== undefined && (typeof obj.join !== "number" || !Number.isInteger(obj.join) || obj.join < 0)) {
     throw new FilterError(`condition ${index} has an invalid "join" position`);
@@ -117,100 +137,97 @@ function validateConditionShape(raw: unknown, index: number, allowJoin: boolean)
     not: (obj.not as boolean | undefined) ?? false,
     column: obj.column,
     op: obj.op,
-    value: obj.value as string | undefined,
+    value: obj.value as string | string[] | undefined,
     ...(obj.join !== undefined ? { join: obj.join as number } : {}),
   };
 }
 
-// opSql returns a literal allow-listed SQL fragment, never wire text (spec/protocol.md §5.4.2).
-function opSql(op: string): string {
-  switch (op) {
-    case "=":
-      return "=";
-    case "!=":
-      return "!=";
-    case ">":
-      return ">";
-    case "<":
-      return "<";
-    case ">=":
-      return ">=";
-    case "<=":
-      return "<=";
-    case "LIKE":
-      return "LIKE";
-    case "ILIKE":
-      return "ILIKE";
-    case "IS NULL":
-      return "IS NULL";
-    case "IS NOT NULL":
-      return "IS NOT NULL";
-    default:
-      throw new Error(`opSql called with an op VALID_OPS should have rejected: ${op}`);
+/** Checks a condition's value against its op (spec/protocol.md §5.4.2). */
+export function checkValueShape(cond: Condition, index: number): void {
+  const fail = (why: string): never => {
+    throw new FilterError(`condition ${index}: ${why}`);
+  };
+  const { op, value } = cond;
+  if (!opTakesValue(op)) {
+    if (value !== undefined) fail(`op "${op}" takes no value`);
+    return;
+  }
+  if (value === undefined) fail(`op "${op}" requires a value`);
+  if (op === "IN") {
+    if (!Array.isArray(value) || value.length < 1 || value.length > MAX_IN_ITEMS) {
+      fail(`op "IN" needs an array of 1 to ${MAX_IN_ITEMS} strings`);
+    }
+  } else if (op === "BETWEEN") {
+    if (!Array.isArray(value) || value.length !== 2) fail(`op "BETWEEN" needs an array of two strings, [low, high]`);
+  } else if (Array.isArray(value)) {
+    fail(`op "${op}" needs a string value`);
   }
 }
 
-export interface WhereClause {
-  where: string;
-  values: string[];
+/** A condition's value as a list (one item for a string value). */
+export function valueItems(cond: Condition): string[] {
+  if (cond.value === undefined) return [];
+  return Array.isArray(cond.value) ? cond.value : [cond.value];
 }
 
-/**
- * Renders conditions into a " where ..." SQL fragment with $N placeholders
- * (numbered starting at startParam, since callers reserve earlier $N slots
- * for limit/offset) and the ordered bind values. Every column is matched
- * against columnNames (the live information_schema allow-list) before
- * being spliced in — the same discipline `sort` gets (spec/protocol.md
- * §6). Conditions are joined by their own logic tokens, relying on SQL's
- * native AND-tighter-than-OR precedence; there is no grouping/nesting in
- * the AST.
- */
-export function buildWhereClause(conditions: Condition[], columnNames: string[], startParam: number): WhereClause {
-  if (conditions.length === 0) {
-    return { where: "", values: [] };
+/** The form a value compared in its column's own type must have (spec/protocol.md §5.4.2). */
+export type ValueForm = "number" | "float" | "date" | "timestamp" | "timestamptz" | "time" | "timetz";
+
+const NUMBER_RE = /^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?$/;
+const FLOAT_RE = /^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?$/;
+const TIME_RE = /^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?$/;
+const TIME_TZ_RE =
+  /^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?$/;
+const TIMESTAMP_RE = /^([0-9]{4}-[0-9]{2}-[0-9]{2})(?:[ T](.*))?$/;
+
+/** A YYYY-MM-DD string naming a real day in years 0001-9999. */
+function realDate(s: string): boolean {
+  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(s);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (y < 1 || mo < 1 || mo > 12 || d < 1) return false;
+  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
+  return d <= days;
+}
+
+export function formAccepts(form: ValueForm, v: string): boolean {
+  switch (form) {
+    case "number":
+      return NUMBER_RE.test(v);
+    case "float":
+      return FLOAT_RE.test(v);
+    case "date":
+      return realDate(v);
+    case "timestamp":
+    case "timestamptz": {
+      const m = TIMESTAMP_RE.exec(v);
+      const time = form === "timestamptz" ? TIME_TZ_RE : TIME_RE;
+      return m !== null && realDate(m[1]) && (m[2] === undefined || time.test(m[2]));
+    }
+    case "time":
+      return TIME_RE.test(v);
+    case "timetz":
+      return TIME_TZ_RE.test(v);
   }
+}
 
-  const allowed = new Set(columnNames);
-  const values: string[] = [];
-  let clause = "";
-  let nextParam = startParam;
-
-  conditions.forEach((cond, i) => {
-    if (!allowed.has(cond.column)) {
-      throw new NotAllowedError(`column "${cond.column}"`, "column");
-    }
-    // Defense in depth: buildWhereClause is only ever fed parseFilter's
-    // already-op-validated output in production, but it's an exported
-    // function a future caller (or a test) could feed conditions to
-    // directly — re-checking here is what makes opSql's hardcoded table
-    // load-bearing rather than decorative.
-    if (!VALID_OPS.has(cond.op)) {
-      throw new FilterError(`condition ${i} has invalid op "${cond.op}"`);
-    }
-
-    const quotedColumn = quoteIdent(cond.column);
-    let inner: string;
-    if (opTakesValue(cond.op)) {
-      if (cond.value === undefined) {
-        throw new FilterError(`op "${cond.op}" requires a value`);
-      }
-      inner = `${quotedColumn}::text ${opSql(cond.op)} $${nextParam}`;
-      values.push(cond.value);
-      nextParam++;
-    } else {
-      inner = `${quotedColumn}::text ${opSql(cond.op)}`;
-    }
-
-    const wrapped = cond.not ? `(NOT (${inner}))` : `(${inner})`;
-
-    if (i > 0) {
-      if (cond.logic === undefined) {
-        throw new FilterError(`condition ${i} is missing logic`);
-      }
-      clause += cond.logic === "OR" ? " OR " : " AND ";
-    }
-    clause += wrapped;
-  });
-
-  return { where: ` where ${clause}`, values };
+/** Names the expected form in an error title. */
+export function describeForm(form: ValueForm): string {
+  switch (form) {
+    case "number":
+      return "a decimal number such as -12 or 0.5";
+    case "float":
+      return "a number such as 0.5 or 1.5e-3";
+    case "date":
+      return "a date such as 2016-01-31";
+    case "timestamp":
+      return "a date such as 2016-01-31, optionally with a time such as 10:30:00";
+    case "timestamptz":
+      return "a date such as 2016-01-31, optionally with a time such as 10:30:00 and an offset such as +02:00";
+    case "time":
+      return "a time such as 10:30 or 10:30:00.5";
+    case "timetz":
+      return "a time such as 10:30, optionally with an offset such as +02:00";
+  }
 }

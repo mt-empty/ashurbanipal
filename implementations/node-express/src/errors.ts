@@ -74,19 +74,20 @@ export class UnsortableError extends Error {
  * `permission denied` (SQLSTATE 42501) reaching the row fetch is a
  * residual edge; report it as NotAllowedError (→ 400) rather than letting
  * the raw driver error surface as a 500. Also maps a filter value
- * Postgres's text encoding rejects (SQLSTATE 22021/22P05) to FilterError,
- * also 400, never a raw 500 (docs/adapter-decisions.md §5.4.2 has the
+ * Postgres rejects (SQLSTATE class 22, only when values were bound: a NUL
+ * byte, or a value a typed comparison's cast refuses) to FilterError, also
+ * 400, never a raw 500 (docs/adapter-decisions.md §5.4.2 has the
  * cross-backend rationale). When the request sorts, an "undefined function"
  * error (SQLSTATE 42883) is the sort column's type having no ordering operator
  * (json, xml, geometric types).
  */
-export function mapSelectDenied(err: unknown, table: string, sort?: string): unknown {
+export function mapSelectDenied(err: unknown, table: string, sort: string | undefined, filtered: boolean): unknown {
   const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
   if (code === "42883" && sort !== undefined) return new UnsortableError(sort);
   if (code === "42501") {
     return new NotAllowedError(`table "${table}"`, "not_readable");
   }
-  if (code === "22021" || code === "22P05") {
+  if (filtered && typeof code === "string" && code.startsWith("22")) {
     const message = err instanceof Error ? err.message : String(err);
     return new FilterError(`value invalid for this backend: ${message}`);
   }

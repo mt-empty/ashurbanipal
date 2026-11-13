@@ -1,6 +1,5 @@
 import type { Database } from "sqlite3";
-import { FilterError, NotAllowedError, quoteIdent } from "../errors.js";
-import type { Condition } from "../filter.js";
+import { NotAllowedError, quoteIdent } from "../errors.js";
 import {
   BadJoinError,
   buildJoinSelect,
@@ -17,8 +16,10 @@ import {
   joinTableRefs,
   planJoin,
   type TableMeta,
+  type TypedCompare,
   tableOrderClause,
   tableSchemas,
+  tableWhereClause,
   tieBreakKeys,
   type UniqueKey,
 } from "../join.js";
@@ -32,8 +33,6 @@ import {
   emptyStructure,
   findExact,
   groupReferencedBy,
-  opSql,
-  opTakesValue,
   type QueryOpts,
   type ReferencedByEntry,
   type SchemaListing,
@@ -182,9 +181,20 @@ async function keyMetadata(
 const JOIN_DIALECT: JoinDialect = {
   quote: quoteIdent,
   castText: (expr) => `CAST(${expr} AS TEXT)`,
+  castParam: (p, target) => `CAST(${p} AS ${target})`,
   numbered: false,
   ilike: "like",
 };
+
+/**
+ * The typed filter comparison for a column class (spec/protocol.md §5.4.2).
+ * A stored value need not match its declared type, so values are not
+ * checked; bound bare, the column's affinity compares a value that reads as
+ * a number numerically and anything else as text.
+ */
+export function sqliteTypedCompare(cls: ColumnClass): TypedCompare | undefined {
+  return ["number", "float", "temporal", "time"].includes(cls.kind) ? {} : undefined;
+}
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
 export function sqliteColumnClass(declared: string): ColumnClass {
@@ -203,47 +213,6 @@ export function sqliteColumnClass(declared: string): ColumnClass {
   return { kind: "number" };
 }
 
-/** SQLite filter SQL uses `?`, `CAST(... AS TEXT)`, and `LIKE` for `ILIKE`. */
-function buildWhereClauseSqlite(conditions: Condition[], columnNames: string[]): { where: string; values: string[] } {
-  if (conditions.length === 0) {
-    return { where: "", values: [] };
-  }
-
-  const allowed = new Set(columnNames);
-  const values: string[] = [];
-  let clause = "";
-
-  conditions.forEach((cond, i) => {
-    if (!allowed.has(cond.column)) {
-      throw new NotAllowedError(`column "${cond.column}"`, "column");
-    }
-    const keyword = cond.op === "ILIKE" ? "LIKE" : opSql(cond.op);
-    const cast = `CAST(${quoteIdent(cond.column)} AS TEXT)`;
-
-    let inner: string;
-    if (opTakesValue(cond.op)) {
-      if (cond.value === undefined) {
-        throw new FilterError(`op "${cond.op}" requires a value`);
-      }
-      values.push(cond.value);
-      inner = `${cast} ${keyword} ?`;
-    } else {
-      inner = `${cast} ${keyword}`;
-    }
-
-    const wrapped = cond.not ? `(NOT (${inner}))` : `(${inner})`;
-    if (i > 0) {
-      if (cond.logic === undefined) {
-        throw new FilterError(`condition ${i} is missing logic`);
-      }
-      clause += cond.logic === "OR" ? " OR " : " AND ";
-    }
-    clause += wrapped;
-  });
-
-  return { where: ` where ${clause}`, values };
-}
-
 // `table` must already be allow-listed: it is spliced into the pragma call.
 async function tableMeta(db: Database, table: string): Promise<TableMeta> {
   const declared = await dbAll<{ cid: number; name: string; type: string }>(
@@ -258,6 +227,8 @@ async function tableMeta(db: Database, table: string): Promise<TableMeta> {
       type: ct.type || "unknown",
       class: sqliteColumnClass(ct.type ?? ""),
     };
+    const compare = sqliteTypedCompare(col.class);
+    if (compare) col.compare = compare;
     if (pkColumns.has(ct.name)) {
       col.key = "pk";
       if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
@@ -379,7 +350,7 @@ export class SqliteSource implements DbSource {
       }
     }
 
-    const { where: whereClause, values: filterValues } = buildWhereClauseSqlite(opts.filter, columnNames);
+    const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta.columns, JOIN_DIALECT);
     const quotedTable = quoteIdent(realTable);
 
     // Aliased back to the real column name: an un-aliased CAST(...)
